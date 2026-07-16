@@ -61,6 +61,63 @@ already exists. Two consequences for design:
 See [DISTRIBUTION § Paid Add-ons](DISTRIBUTION.md#paid-add-ons) and
 [ROADMAP Block 9](ROADMAP.md#block-9--ai-integration).
 
+### The three-tier ecosystem
+
+The graph substrate is not one audience — it stratifies naturally into
+three roles that compose over the same entities, so a person (**or an
+AI**) can work at exactly the altitude they're comfortable with and hand
+the result up:
+
+1. **Package authors (experts).** Write the low-level `impls.clj`
+   base-fns and the `fns.edn` that wrap them into an integration — a
+   Telegram binding, a Google-Sheets writer, a Postgres query surface.
+   Their craft is *type design and interface design*: picking narrow
+   types, naming slots so a stranger understands them, and exposing a
+   small, honest public surface for the package. In LEGO terms they
+   mould new brick shapes (and, rarely, new ways bricks connect —
+   discouraged, but possible under real need). This tier is where deep
+   programming skill lives.
+2. **Composers (semi-technical).** Install packages and wire them
+   together by *type-matching*, without reading the impls. "A Telegram
+   message exposes a sender-string; the Sheets package has a fn that
+   accepts a string — connect them, and every bot user lands in a
+   spreadsheet." They know types must line up and that some are stricter
+   than others; they don't need to know more. In LEGO terms they design
+   the sets — finished things built from bricks someone else moulded,
+   copying each other's arrangements. **This is the tier an AI can stand
+   in for** (see below).
+3. **End-user surfaces.** A composer turns a graph's free arguments into
+   a form and embeds it in their own product's frontend — the people who
+   use *that* product never see the graph at all. This tier turns a
+   composition into a shipped feature.
+
+The point of the stratification is to insert intermediaries into the
+usual "programmer → end user" chain: to build a complex discount rule
+you should not also have to solve concurrency, secret storage, and
+hosting. The expert tier solves those once, correctly, inside a package;
+the composer tier reuses the result by shape. This is also the
+monetisation seam — building is free, *keeping a composition running*
+(as a `service`) is the billed layer.
+
+**Why AI fits the graph — and fits tier 2.** Two properties compound:
+
+- A graph is a *better substrate for a model than text*. Structure is
+  the guardrail: a well-typed, effect-annotated graph makes whole
+  classes of malformed output unrepresentable, and the model composes by
+  matching types rather than emitting syntactically-fragile prose.
+- A graph *diff* is easier to read than a text diff. "Added N fn-defs,
+  changed M bindings, deleted K refs" *is* the change, with no
+  whitespace / line-break / re-formatting noise drowning the behaviour.
+  As models write more and humans read less, review ergonomics is where
+  the leverage moves — reviewing a structural diff beats re-reading a
+  wall of regenerated text.
+
+Taken together, an AI can plausibly **be** the composer tier —
+installing packages the expert tier published and wiring them by type —
+while the human stays in the reviewer seat over a legible graph diff.
+Stated as a bet the product now has to test in the market, not a settled
+fact.
+
 ### Trade-off Sovereignty
 
 In any popular system the trade-offs are chosen by someone else —

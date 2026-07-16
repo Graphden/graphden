@@ -49,6 +49,19 @@ effect-annotated **graph diff is easier to review than a text diff** —
 stated plainly as a bet the project now has to test in the market, not a
 proven fact.
 
+**Who it's for — three tiers, and AI as one of them.** The substrate
+stratifies into roles that compose over the same graph: **package
+authors** (experts) write the base-fn impls and typed `fns.edn` that
+wrap an integration — Telegram, Google Sheets, Postgres — designing
+narrow types and a clean public surface; **composers** (semi-technical)
+install those packages and wire them by *type-matching* without reading
+the impls; and **end-user surfaces** turn a graph's free arguments into
+an embeddable form. The composer tier is exactly the task an LLM does
+well — type-guided composition over a constrained, labelled block set —
+so an AI can plausibly stand in for it while a human reviews the
+resulting graph diff. See
+[PHILOSOPHY § The three-tier ecosystem](docs/PHILOSOPHY.md#the-three-tier-ecosystem).
+
 **Why this isn't the visual-programming graveyard:** Scratch and its
 lineage failed trying to render `if`/`for`/`while` as blocks — a forced
 visual metaphor bolted onto a fundamentally textual, imperative structure.

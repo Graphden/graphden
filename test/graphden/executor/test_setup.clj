@@ -375,8 +375,11 @@
      (assoc bootstrap :storage storage :ctx ctx))))
 
 
-(defn bootstrap-crud-graph-from-golden!
-  "Fast bootstrap via the shared golden DB + `CREATE DATABASE …
+(defn bootstrap-crud-graph-from-golden!*
+  "Implementation of `bootstrap-crud-graph-from-golden!` — call the macro
+   instead unless you have a namespace identity to pass explicitly.
+
+   Fast bootstrap via the shared golden DB + `CREATE DATABASE …
    TEMPLATE` clone. ~10× faster than `bootstrap-crud-graph!`: the
    first NS in the JVM pays the ~14 s golden bootstrap, every
    sibling pays only the ~100 ms file-clone + ~1 s ctx rebuild.
@@ -399,11 +402,8 @@
      - The test doesn't `register-base-fn!` outside a
        `with-clean-registry` override (golden's globally-registered
        impls stay reachable through override fallthrough)."
-  ([]
-   (bootstrap-crud-graph-from-golden! (str (ns-name *ns*))
-                                      ["core" "web" "app"]))
   ([ns-ident]
-   (bootstrap-crud-graph-from-golden! ns-ident ["core" "web" "app"]))
+   (bootstrap-crud-graph-from-golden!* ns-ident ["core" "web" "app"]))
   ([ns-ident package-names]
    (let [{:keys [db-config bootstrap]}
          (sb/ensure-ns-database-from-golden! ns-ident package-names)
@@ -412,6 +412,46 @@
          ctx (exec/create-context {:storage versioned})]
      (cr/rebuild! ctx)
      (assoc bootstrap :storage versioned :ctx ctx))))
+
+
+(defmacro bootstrap-crud-graph-from-golden!
+  "Fast bootstrap via the golden DB + TEMPLATE clone — see
+   `bootstrap-crud-graph-from-golden!*`.
+
+   A MACRO, and it has to be, because the namespace identity that names the
+   per-NS database must be captured while the TEST FILE is being compiled.
+
+   The 0-arity used to read `(ns-name *ns*)` at call time, and every call site
+   is inside a `(fn [t] …)` that kaocha invokes on a worker thread. kaocha binds
+   `*ns*` nowhere, so that read returned the thread's root value. Measured:
+
+       at-load        = graphden.scratch.ns-probe-test
+       at-fixture-run = user
+
+   All 26 call sites therefore asked for a database called `user` — and
+   `ensure-ns-database!`'s idempotency guard skipped the CREATE for all but the
+   first, so 26 namespaces silently SHARED ONE DATABASE while believing they
+   each had their own. That is why `:fixture/ns-db-clone` read 1 for the unit
+   suite and 2 for integration (the second being `swept-rich-types-capture`,
+   which passes its identity explicitly and so was never affected).
+
+   Two costs, and the second is the serious one:
+     - performance: sister namespaces dogpiled one cold compile (fixed
+       independently in `compile-eager/compile-all`);
+     - correctness: `registry-test` writes fn rows that `export-test` reads,
+       under 8-way parallelism, in randomised order. A latent race held off
+       only by luck.
+
+   Expanding `*ns*` here fixes every call site without touching one, and makes
+   the trap unrepeatable: there is no longer a run-time `*ns*` read to get wrong.
+   The same trap is documented next door — see `shared-container-fixture` in
+   `graphden.test-infra.shared-container`, which captures at `use-fixtures` time
+   for exactly this reason."
+  ([] `(bootstrap-crud-graph-from-golden!* ~(str (ns-name *ns*))
+                                           ["core" "web" "app"]))
+  ([ns-ident] `(bootstrap-crud-graph-from-golden!* ~ns-ident ["core" "web" "app"]))
+  ([ns-ident package-names]
+   `(bootstrap-crud-graph-from-golden!* ~ns-ident ~package-names)))
 
 
 (defn sync-and-invalidate!

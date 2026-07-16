@@ -285,7 +285,22 @@
    `ensure-golden!` closes its storage before returning."
   ([ns-ident] (ensure-ns-database! ns-ident nil))
   ([ns-ident template-db]
-   (let [db (sanitize-db-name ns-ident)
+   ;; The TEMPLATE is part of the database's identity, not a detail of how it
+   ;; got made. "An empty database for this namespace" and "a clone of this
+   ;; golden for this namespace" are two different databases, and a namespace
+   ;; may legitimately want both: `shared-container-fixture` installs the bare
+   ;; one, and `bootstrap-crud-graph-from-golden!` then asks for the clone.
+   ;;
+   ;; Keyed on ns-ident alone, the second caller lost — the idempotency guard
+   ;; below saw the name already present and skipped the CREATE, handing back a
+   ;; config pointing at the EMPTY database. Every table read then failed with
+   ;; `relation "branch" does not exist`. That never fired only because a second
+   ;; bug hid it: the golden path asked for a database called `user` (see
+   ;; `bootstrap-crud-graph-from-golden!`), so the two names never met. Fixing
+   ;; either bug alone surfaces the other.
+   (let [db (sanitize-db-name (if template-db
+                                (str ns-ident "+" template-db)
+                                ns-ident))
          cluster (base-cluster-config)]
      (when-not (contains? @ns-databases-atom db)
        ;; Counted apart on purpose. A TEMPLATE clone is the ~100 ms fast path; a

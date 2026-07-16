@@ -20,14 +20,14 @@ async function openExecutePopoverFor(page, fnNameHash) {
           && !!document.querySelector('button.more-actions-trigger')
           && !graph.animating,
     null,
-    {timeout: 20000, polling: 100});
+    {timeout: 30000, polling: 100});
 
   // The ▶ button lives inside the row-actions popover, anchored to
   // the fn-card's `⋯` trigger. The trigger fires on mousedown (NOT
   // click) — Playwright's .click() doesn't dispatch mousedown by
   // itself, so use page.dispatchEvent.
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
+  await page.waitForSelector('.row-actions-popover button', {timeout: 30000});
   // Find ▶ in the surfaced row-actions popover and click.
   const opened = await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');

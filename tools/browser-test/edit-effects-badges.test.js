@@ -26,6 +26,19 @@ const {assert, newContext} = require('./edit-test-helpers');
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
+    // The effects strip renders in the overlay pass off the loaded subtree,
+    // after the root card's graphReady gate — poll until web-server's strip
+    // is fully populated (all 8 chips) before reading, else the exact-set
+    // assertion races a partial/empty strip.
+    await page.waitForFunction(
+      () => {
+        const overlay = Array.from(document.querySelectorAll('.node-overlay'))
+          .find(el => (el.textContent || '').trim().startsWith('web-server'));
+        const strip = overlay?.querySelector('.effects-strip');
+        return !!strip && strip.querySelectorAll('.effects-chip').length === 8;
+      },
+      null,
+      {timeout: 15000, polling: 100});
 
     const probe = await page.evaluate(() => {
       const overlay = Array.from(document.querySelectorAll('.node-overlay'))
@@ -71,6 +84,16 @@ const {assert, newContext} = require('./edit-test-helpers');
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
+    // Wait for /health's effects strip (overlay pass) to carry its chip.
+    await page.waitForFunction(
+      () => {
+        const overlay = Array.from(document.querySelectorAll('.node-overlay'))
+          .find(el => (el.textContent || '').trim().startsWith('health'));
+        const strip = overlay?.querySelector('.effects-strip');
+        return !!strip && !!strip.querySelector('.effects-chip');
+      },
+      null,
+      {timeout: 15000, polling: 100});
     const healthProbe = await page.evaluate(() => {
       const overlay = Array.from(document.querySelectorAll('.node-overlay'))
         .find(el => (el.textContent || '').trim().startsWith('health'));
@@ -107,6 +130,19 @@ const {assert, newContext} = require('./edit-test-helpers');
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
+    // Wait for :add's root overlay + its (chip-less) effects strip to render.
+    await page.waitForFunction(
+      () => {
+        const overlay = Array.from(document.querySelectorAll('.node-overlay'))
+          .find(el => {
+            const t = (el.textContent || '').trim();
+            return t.startsWith('add') && t.includes('→')
+                   && !el.classList.contains('placeholder-overlay');
+          });
+        return !!overlay?.querySelector('.effects-strip');
+      },
+      null,
+      {timeout: 15000, polling: 100});
     const pureProbe = await page.evaluate(() => {
       // Anchor on the root fn-card whose text starts with "add" and
       // contains the standard root affordances (→ return-type) so we

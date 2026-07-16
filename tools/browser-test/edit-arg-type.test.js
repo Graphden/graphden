@@ -46,6 +46,10 @@ const TEST_NAME = 'test-arg-type-flip';
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
+    // graphReady fires when the root card paints, but the arg overlays
+    // (carrying the type chip) render in a later async pass off the loaded
+    // subtree — wait for the chip before reading, else the find races it.
+    await page.waitForSelector('.arg-type-chip', {timeout: 15000});
 
     // The arg-overlay carries a `.arg-type-chip` showing the resolved
     // type ("text" inherited from str-len's :string slot). Since the

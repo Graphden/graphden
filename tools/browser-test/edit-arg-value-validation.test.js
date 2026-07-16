@@ -83,6 +83,10 @@ const TEST_NAME = 'test-arg-value-validation';
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
+    // The arg overlays (with their type chip + value) render in a later
+    // async pass off the loaded subtree, after the root card paints — wait
+    // for the chip before reading so the `22` find doesn't race it.
+    await page.waitForSelector('.arg-type-chip', {timeout: 15000});
 
     // Click the port arg-overlay to open the value-edit popover.
     // The chip-row UI consolidation now packs value + chip + provenance

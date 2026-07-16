@@ -195,13 +195,18 @@ async function openBranchPopover(page) {
       row?.click();
     }, probeFnId);
 
-    // Modal should be hidden.
+    // Row-click dismisses the modal AND kicks an async switchToBranch +
+    // hash update. Wait for ALL of it to settle before the single read
+    // below — waiting only on the modal raced the still-pending nav/hash.
     await page.waitForFunction(
-      () => {
+      ({ probe, feat }) => {
         const m = document.querySelector('.branch-diff-modal');
-        return !m || m.classList.contains('hidden');
+        const hidden = !m || m.classList.contains('hidden');
+        return hidden
+          && window.__switchToBranchCalledWith === feat
+          && (location.hash || '').includes(probe);
       },
-      null,
+      { probe: PROBE_FN, feat: FEAT_BRANCH },
       {timeout: 5000});
 
     const navState = await page.evaluate(() => ({

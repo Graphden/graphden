@@ -36,6 +36,16 @@ const {chromium} = require('playwright');
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
+    // The `parts` edge + the second fn-card are produced by the fn-ref's
+    // subtree (ensureSubtreeFor), which loads async AFTER the root card's
+    // graphReady gate — poll until they've rendered before snapshotting,
+    // else the single read races the still-loading subtree.
+    await page.waitForFunction(
+      () => graphReady()
+            && graphView.nodeList().filter(n => n.data.originalFnId).length >= 2
+            && graphView.edgeList().some(e => e.data.argName === 'parts'),
+      null,
+      {timeout: 15000, polling: 100});
 
     const snapshot = await page.evaluate(() => {
       if (!graphReady()) return {error: 'graph not initialised'};

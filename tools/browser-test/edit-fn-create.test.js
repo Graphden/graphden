@@ -157,10 +157,14 @@ async function openCreateMenuForNs(page, nsName) {
     await page.click('.inline-input-row .inline-btn-save');
     await page.waitForFunction(
       (name) => {
-        // initGraph runs after submit → sidebar rebuilds. Wait for
-        // the new fn's sidebar row to appear.
-        return Array.from(document.querySelectorAll('.entity-item'))
-          .some((el) => el.textContent.includes(name));
+        // The create handler's loadGraphData → select → hash chain is
+        // async. Wait for the WHOLE post-create nav to settle: the fn's
+        // row appears AND it's selected AND the URL hash points at it —
+        // else a single read below races the still-pending navigation.
+        const item = Array.from(document.querySelectorAll('.entity-item'))
+          .find((el) => el.textContent.includes(name));
+        return !!item && item.classList.contains('selected')
+          && location.hash.includes(name);
       },
       FN_NAME,
       {timeout: 10000});

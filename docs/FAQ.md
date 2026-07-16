@@ -11,36 +11,56 @@ top of them.
 
 ---
 
-## 1. "One person produced ~100k LOC in a year — how, and is it even understood?"
+## 1. "One person + AI produced ~100k LOC — is that impressive, or is it AI slop you don't understand?"
 
-**Short answer:** The volume is not the achievement and not the worry — the
-*coherence* is the signal. The code was produced by directing AI and
-reviewing the result, not typed by hand. What one person cannot fake that
-way is a codebase that stays architecturally consistent, layered, tested,
-and self-documenting across 100k lines. That consistency is the evidence of
-strong direction, not the line count.
+**Short answer:** Neither. Graphden's own construction is the first instance
+of its own thesis, told honestly across the three tiers it defines
+([PHILOSOPHY § three-tier ecosystem](PHILOSOPHY.md#the-three-tier-ecosystem)).
+The volume proves nothing; the *coherence* proves the human supplied the
+parts AI does not — judgment, architecture, review — and the app layer
+already bootstraps onto the substrate.
 
-**Detail:**
+**Detail — the engine is the text-authoring tax, paid once:**
 
-- Graphden is **dogfooding its own thesis.** The bet is that
-  machine-authored software is better targeted at a typed, structurally
-  constrained substrate than at free-form text. Building Graphden itself
-  primarily through AI direction is the first, largest instance of that
-  workflow — the tool is validating the very method that produced it.
-- "AI wrote it" is *not* offered as a reason the volume is unimpressive.
-  Used carelessly it invites the opposite worry ("do you understand your own
-  code?"). The correct framing: AI amplifies throughput; it does **not**
-  produce a correct ADR rejecting Dolt, a layered storage-protocol seam, or
-  a mutually-recursive type checker that passes 2.2k tests. Judgment,
-  architecture, and review are the human contribution, and they are what the
-  artifact demonstrates.
-- Verifiable hygiene signals of real review, not code-dump: 0 `TODO`/`FIXME`
-  left in `src`, 0 stray `println`, public API funneled through
-  `interface.clj`, conventional-commit history with a rebase (not
-  merge-soup) workflow — 10 merge commits out of ~1.5k.
+- The engine (`executor` / `storage` / `types`) is Clojure *text*, authored
+  by directing AI under heavy human review. That is deliberately the
+  *painful* path: free-form text is the hostile target the project exists to
+  replace, and building the engine on it is how the motivation was earned
+  first-hand. Do not hide this — hiding it invites "so is your engine full of
+  the AI slop you warn about?"
+- The compensating discipline is what answers that: a layered
+  storage-protocol architecture, a mutually-recursive type checker that
+  survives **2,000+ tests** (`test/` holds ~2.2k `deftest`), an ADR for every
+  load-bearing decision, 0 `TODO`/`FIXME` and 0 stray `println` left in
+  `src`, public API funneled through `interface.clj`, and a rebase (not
+  merge-soup) history — ~10 merge commits out of ~1.5k. AI supplies
+  throughput; it does **not** supply a correct build-vs-buy ADR rejecting
+  Dolt. The tax text imposes on machine-authored code was paid once, under
+  review, to build the substrate that removes it for everyone above.
 
-**Strength:** Medium. Strong once reframed onto coherence + dogfooding; weak
-and self-defeating if delivered as "AI did it, so don't be impressed/worried."
+**Detail — the application layer is the bootstrap dividend:**
+
+- Graphden's own application layer already runs as **fn-graphs on Graphden**
+  — tier-2 composition over the base-fns, the exact tier the thesis says an
+  AI can stand in for while a human reviews the graph diff:
+  - The application root — the HTTP server itself — is the `:web-server`
+    fn-def (`:parent :http-server`), not Clojure:
+    [`resources/packages/app/server/fns.edn`](../resources/packages/app/server/fns.edn).
+  - Its HTTP routes are fn-defs (`:health`, `:version`, `:editor`, …):
+    [`resources/packages/app/routes/fns.edn`](../resources/packages/app/routes/fns.edn).
+  - The editor's entire server side is ~540 fn-defs:
+    [`resources/packages/app/editor/fns.edn`](../resources/packages/app/editor/fns.edn).
+  - (Honest boundary: the *engine* below and the editor's *browser* JS are
+    text; the application server composed on top is graph.)
+
+**Framing note (do not deliver as "AI wrote it, be impressed"):** the claim
+is that the engine paid the text tax once under review to earn the substrate,
+and the app layer riding that substrate is the first small evidence it pays
+off one tier up. Coherence is the proof, not line count.
+
+**Strength:** Strong once split by tier (engine = tax paid once; app layer =
+dividend). Self-defeating if flattened to "AI did it," which invites both
+"then it's not impressive" and "then you don't understand it."
 
 ---
 

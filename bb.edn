@@ -260,6 +260,14 @@
   {:doc "Auto-fix markdownlint violations where possible."
    :task (p/shell "npx" "markdownlint-cli2" "--fix")}
 
+  devtour
+  {:doc "Regenerate the developer code-tour docs/devtour/index.html from docs/devtour/tour.edn. Anchors resolve by symbol (ns + defn); the anchored form's real source is baked in. Run after editing tour.edn or a toured form."
+   :task (binding [*command-line-args* ["build"]] (load-file "scripts/devtour.clj"))}
+
+  devtour-check
+  {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
+   :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}
+
   actionlint
   {:doc "Lint GitHub Actions workflows via Docker rhysd/actionlint:1.7.7."
    :task (p/shell "docker" "run" "--rm"

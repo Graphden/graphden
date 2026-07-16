@@ -201,26 +201,64 @@
    :args {:func {:as :fn}}}
 
   ;; ---------------------------------------------------------------------
-  ;; Atom primitives — shared mutable accumulator for journalled-write
-  ;; transactions. Companion to `:try` (core.system): a fn-def that
-  ;; creates an atom is referenced by every phase that mutates it AND by
-  ;; the on-throw cleanup; result-caching ensures all references resolve
-  ;; to the SAME atom instance per top-level invocation.
+  ;; Mutable-state primitives — `clojure.core` atom + swap + deref.
+  ;; Two lifetimes (see impls.clj header):
+  ;;   :atom — fresh per top-level `execute` (result-cache-scoped) —
+  ;;           backs the `:try`-journal idiom (each request its own
+  ;;           independent rollback journal).
+  ;;   :cell — persistent per compiled registry (`:compile-time-value?`,
+  ;;           baked once like a `:const`) — survives across `execute`s,
+  ;;           so `:cell` + `:swap` + `:deref` is a real in-process cache.
+  ;;           Per-instance only (not shared across executor pods — that
+  ;;           needs an external store).
+  ;; `:swap` / `:deref` are lifetime-agnostic; `:swap-conj` is a fn-def
+  ;; over `:swap` (the conj is graph-visible, not a bespoke impl).
   ;; ---------------------------------------------------------------------
 
   {:name :atom
-   :description "Create a fresh `clojure.core/atom` holding `:initial-value`. The same fn-def (referenced multiple times in one composition) hands back the SAME atom instance per top-level call — that's the mechanism that lets every `:try`-body phase share a journal."
+   :description "Create a fresh `clojure.core/atom` holding `:initial-value`. The same fn-def (referenced multiple times in one composition) hands back the SAME atom instance per top-level call — that's the mechanism that lets every `:try`-body phase share a journal. For state that must persist ACROSS calls (a cache), use `:cell`."
    :args {:initial-value {:type :any
                           :description "Value the atom starts holding."}}
    :return-type :any}
 
-  {:name :swap-conj
-   :description "`(swap! :a conj :value)` — append to a vector-holding atom. Returns the new vector. Atomic at the JVM level."
-   :args {:a {:type :any :description "Atom holding a vector."}
-          :value {:type :any :description "Value to conj."}}
+  {:name :cell
+   :description "Create a PERSISTENT `clojure.core/atom` holding `:initial-value`. Unlike `:atom`, the instance is allocated ONCE per compiled registry and baked into the closure (like a `:const` literal), so it survives across `execute`s — `:cell` + `:swap` + `:deref` composes an in-process cache. Scope is the compiling registry (per-JVM for the server handler); NOT shared across executor instances. Re-allocated on recompile = cache reset. Persistence requires `:initial-value` to be a LITERAL (compile-time constant); bound to a fn-ref instead, a `:cell` degrades to per-call `:atom` semantics (a fresh instance each call)."
+   :args {:initial-value {:type :any
+                          :description "Literal value the cell starts holding. A fn-ref works but forfeits persistence (per-call, like `:atom`)."}}
    :return-type :any}
 
+  {:name :swap
+   :description "`(swap! :a :func)` — atomically apply the 1-arg `:func` to the atom's current value and install the result (`clojure.core/swap!`). Returns the new value. `:func` is `:fn`-typed; fold extra data in by closure-capturing it in the callback (see `:swap-conj`). `:func` must be pure so a CAS retry is safe."
+   :args {:a {:type :any :description "Atom (from `:atom` or `:cell`)."}
+          :func {:type [:fn {:current a} a #{}]
+                 :description "Pure 1-arg callable `a → a` — receives the current value, returns the next of the same type. Type var `a` lets the callback narrow the value type (e.g. a map for a keyed cache) without an `:any`-param contravariance clash. Extra inputs are closure-captured."}}
+   :return-type :any
+   :effects #{:state}}
+
+  ;; Closure-capturing callback for `:swap-conj`: the per-call `:current`
+  ;; is the atom's value (the HOF lambda param, matching `:swap`'s
+  ;; `:func` param name); `:value` is captured from the call site and
+  ;; conj'd on. `:coll` widened to `:any` so it unifies with `:swap`'s
+  ;; `:any` lambda-param type. Private — only meaningful under `:swap-conj`.
+  {:name :_conj-into
+   :description "`(conj current value)` as a 1-arg swap callback — `:current` supplied per-swap, `:value` closure-captured."
+   :parent :conj
+   :args {:coll {:as :current :type :any}
+          :item {:as :value}}}
+
+  {:name :swap-conj
+   :description "`(swap! :a conj :value)` — append `:value` to a vector-holding atom. Returns the new vector. Now a fn-def over `:swap` + `:_conj-into` (the conj is graph-visible composition, not a bespoke impl). Atomic at the JVM level."
+   :parent :swap
+   :args {:func :_conj-into}}
+
+  {:name :reset
+   :description "`(reset! :a :v)` — install `:v` as the atom's value, ignoring the current one (`clojure.core/reset!`). Returns `:v`. No read-modify-write, so unlike `:swap` it is NOT atomic against concurrent writers — use only where a lost write is harmless (an idempotent cache). Composes deref → transform → reset without capturing the new value in a `:swap` callback (which a HOF-blind layout walker can't trace)."
+   :args {:a {:type :any :description "Atom (from `:atom` or `:cell`)."}
+          :v {:type :any :description "New value to install."}}
+   :return-type :any
+   :effects #{:state}}
+
   {:name :deref
-   :description "`@:a` — read the current value of an atom (`clojure.core/deref`)."
+   :description "`@:a` — read the current value of an atom (`clojure.core/deref`). Works on both `:atom` and `:cell`."
    :args {:a {:type :any :description "Atom to read."}}
    :return-type :any}]}

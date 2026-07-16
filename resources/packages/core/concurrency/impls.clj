@@ -160,16 +160,33 @@
 
 
 ;; =============================================================================
-;; :atom / :swap-conj / :deref — shared-mutable accumulator for
-;; journalled-write patterns. The atom is meant to be CREATED inside the
-;; same fn-def that consumes it (via `:try`), so a single result-cache
-;; entry per top-level invocation backs every reference to the atom
-;; fn-def → all phases see the same instance.
+;; Mutable-state primitives — `clojure.core` atom + swap + deref, exposed
+;; as atomic base-fns so ANY keyed-accumulator or cache pattern is
+;; composable at the fn-def layer instead of a bespoke impl. Two lifetimes:
+;;
+;;   :atom — a FRESH atom per top-level `execute` (result-cache-scoped).
+;;           Every ref to one `:atom` fn-def in a single call resolves to
+;;           the SAME instance → that's what backs the `:try`-journal idiom
+;;           (each request its own independent rollback journal).
+;;
+;;   :cell — a PERSISTENT atom, allocated ONCE per compiled registry and
+;;           baked into the closure like a `:const` literal (see the
+;;           `:compile-time-value?` marker below + compile_eager). It
+;;           survives across `execute`s, so a `:cell` + `:swap` + `:deref`
+;;           graph is a real in-process cache. Scope is the compiling
+;;           registry (per-JVM for the server handler; per-branch-ctx
+;;           elsewhere) — NOT shared across executor instances (that needs
+;;           an external store; see docs). Re-allocated on recompile =
+;;           cache reset, exactly like `defonce` on namespace reload.
+;;
+;; `:swap` / `:deref` are lifetime-agnostic — they work on either.
+;; `:swap-conj` is now a fn-def (`(swap a conj)`) over `:swap`, not a
+;; base-fn: the conj is graph-visible composition, not hidden here.
 ;; =============================================================================
 
 (defbase atom-fn
   "Create a fresh `clojure.core/atom` holding `initial-value`. Returns
-   the atom instance for use with `:swap-conj` / `:deref`. The result
+   the atom instance for use with `:swap` / `:deref`. The result
    is cached per top-level invocation, so every fn-def referencing this
    atom fn-def derefs to the SAME instance — that's what makes the
    journal-shared-across-phases idiom work."
@@ -177,13 +194,41 @@
   (atom initial-value))
 
 
-(defbase swap-conj-fn
-  "`(swap! a conj value)` — append `value` to a vector-holding atom.
-   Returns the new vector. The conj is atomic at the JVM level; concurrent
-   appends from a single-threaded executor (the common case) are linearised
-   trivially by the underlying `swap!`."
-  [a value]
-  (swap! a conj value))
+(defbase cell-fn
+  "Create a `clojure.core/atom` holding `initial-value`. Registered
+   `:compile-time-value?` so compile_eager evaluates this ONCE at
+   compile time and bakes `(constantly <the-atom>)` into the closure —
+   the instance therefore persists across every `execute` served by
+   that compiled registry (a real in-process cache), and is shared by
+   every fn-def referencing this cell. Re-allocated on recompile.
+   Impl body is IDENTICAL to `:atom`; the lifetime difference is purely
+   the compile-time-bake marker, not the allocation."
+  [initial-value]
+  (atom initial-value))
+
+
+(defbase swap-fn
+  "`(swap! a func)` — atomically apply the 1-arg `func` to the atom's
+   current value and install the result (`clojure.core/swap!`). Returns
+   the new value. `func` is `:fn`-typed, so any extra data it folds in
+   (a value to conj, a key/value to assoc) is closure-captured at the
+   call site — exactly Clojure's `(swap! a #(f % captured))`. Records
+   `:state`; `func` must be pure so a CAS retry is safe."
+  [a func]
+  (cr/record-effect! :state)
+  (swap! a func))
+
+
+(defbase reset-fn
+  "`(reset! a v)` — install `v` as the atom's value regardless of the
+   current one (`clojure.core/reset!`). Returns `v`. Unlike `:swap` it
+   takes no function and does NOT read-modify-write atomically, so use
+   it only where a lost concurrent write is harmless (an idempotent
+   cache: the same key always maps to the same value, so a dropped
+   store just recomputes next time). Records `:state`."
+  [a v]
+  (cr/record-effect! :state)
+  (reset! a v))
 
 
 (defbase deref-fn
@@ -202,5 +247,7 @@
    :cron-parse cron-parse-fn
    :cron-fire-after cron-fire-after-fn
    :atom atom-fn
-   :swap-conj swap-conj-fn
+   :cell {:impl cell-fn :compile-time-value? true}
+   :swap swap-fn
+   :reset reset-fn
    :deref deref-fn})

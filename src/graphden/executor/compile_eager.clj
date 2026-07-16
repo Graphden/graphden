@@ -335,6 +335,46 @@
                                       ctx)))))))
 
 
+(def ^:private rich-type-of-fn
+  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of)))
+
+
+(defn- compile-time-value-root?
+  "True iff `fn-id`'s root base-fn is registered `:compile-time-value?`
+   — the marker (from the impls.clj registry, threaded through
+   `record-rich-types!`) that says: evaluate this fn ONCE at compile
+   time and bake `(constantly result)`. Backs `:cell`'s registry-
+   persistent atom."
+  [fn-id {:keys [fn-map] :as lookups}]
+  (boolean (some-> (l/root-fn fn-id fn-map lookups) :name keyword
+                   (@rich-type-of-fn) :compile-time-value?)))
+
+
+(defn- compile-time-value-closure
+  "Decide how to compile a fn whose root base-fn is
+   `:compile-time-value?` (e.g. anything parenting `:cell`), given its
+   classified `enriched` bindings and its assembled runtime closure
+   `run`:
+
+   - EVERY binding a literal (`:value`) → the value is a compile-time
+     constant: evaluate `run` ONCE now and bake `(fn [_ _] result)` so
+     every invocation, across every `execute` this compiled registry
+     serves, hands back the SAME instance (that's `:cell`'s persistent
+     atom). Empty `fa` + bare `ctx`: `:value` builders are
+     `(constantly v)` and the impl is effect-free by contract.
+   - Otherwise (a `:ref` / `:seq` / `:free` binding — a runtime or
+     unbound value) → there is no compile-time constant to bake, so
+     compile NORMALLY; the fn then behaves like a per-call `:atom`
+     (a fresh instance each `execute`). Persistence requires a pinned
+     literal — degrade gracefully rather than throw, since a single
+     non-literal `:cell` must not fail the whole-registry compile-all."
+  [_fn-id enriched run]
+  (if (and (seq enriched) (every? #(= :value (:kind %)) enriched))
+    (let [baked (run {} {})]
+      (fn [_fa _ctx] baked))
+    run))
+
+
 (def ^:private vault-get-secret
   (delay (requiring-resolve 'graphden.clients.vault/get-secret)))
 
@@ -592,42 +632,49 @@
          ;; caller-supplied rename value back to the deep name so
          ;; the lookup succeeds. Empty aliases (fns without own
          ;; rename slots — the common case) short-circuit at apply.
-         rename-aliases (r/compute-rename-aliases fn-id lookups)]
-     ;; Top-level entry: install a fresh per-execute call-cache in
-     ;; ctx if none is in scope yet. Nested closure calls inherit
-     ;; the outer cache through ctx, so all siblings memoise on
-     ;; `(ref-id × fa)`. `HashMap` (not `clojure.lang.PersistentMap`)
-     ;; — one-cache-per-call, single-threaded read/write inside one
-     ;; top-level closure.
-     (fn [fa ctx]
-       (let [ctx (if (::call-cache ctx)
-                   ctx
-                   (assoc ctx ::call-cache (java.util.HashMap.)))
-             fa (r/apply-rename-aliases fa rename-aliases)
-             ;; The `fa-ref` volatile ONLY exists so env-binding delays can
-             ;; read the post-merge map at force time (forward references
-             ;; between env-bindings). Fns with no env-bindings — the common
-             ;; case — never read it, so skip the per-call allocation entirely.
-             fa' (if (zero? env-n)
-                   fa
-                   (let [fa-ref (volatile! fa)
-                         merged (loop [m fa, i 0]
-                                  (if (< i env-n)
-                                    (recur (assoc m (nth env-names i)
-                                                  ((nth env-builders i) fa-ref ctx))
-                                           (inc i))
-                                    m))]
-                     (vreset! fa-ref merged)
-                     merged))]
-         (impl (persistent!
-                 (loop [acc (transient {}), i 0]
-                   (if (< i n)
-                     (recur (assoc! acc
-                                    (nth keys-vec i)
-                                    ((nth builders i) fa' ctx))
-                            (inc i))
-                     acc)))
-               ctx))))))
+         rename-aliases (r/compute-rename-aliases fn-id lookups)
+         ;; Top-level entry: install a fresh per-execute call-cache in
+         ;; ctx if none is in scope yet. Nested closure calls inherit
+         ;; the outer cache through ctx, so all siblings memoise on
+         ;; `(ref-id × fa)`. `HashMap` (not `clojure.lang.PersistentMap`)
+         ;; — one-cache-per-call, single-threaded read/write inside one
+         ;; top-level closure.
+         run
+         (fn [fa ctx]
+           (let [ctx (if (::call-cache ctx)
+                       ctx
+                       (assoc ctx ::call-cache (java.util.HashMap.)))
+                 fa (r/apply-rename-aliases fa rename-aliases)
+                 ;; The `fa-ref` volatile ONLY exists so env-binding delays can
+                 ;; read the post-merge map at force time (forward references
+                 ;; between env-bindings). Fns with no env-bindings — the common
+                 ;; case — never read it, so skip the per-call allocation entirely.
+                 fa' (if (zero? env-n)
+                       fa
+                       (let [fa-ref (volatile! fa)
+                             merged (loop [m fa, i 0]
+                                      (if (< i env-n)
+                                        (recur (assoc m (nth env-names i)
+                                                      ((nth env-builders i) fa-ref ctx))
+                                               (inc i))
+                                        m))]
+                         (vreset! fa-ref merged)
+                         merged))]
+             (impl (persistent!
+                     (loop [acc (transient {}), i 0]
+                       (if (< i n)
+                         (recur (assoc! acc
+                                        (nth keys-vec i)
+                                        ((nth builders i) fa' ctx))
+                                (inc i))
+                         acc)))
+                   ctx)))]
+     ;; `:cell` (and any `:compile-time-value?` base-fn): evaluate once
+     ;; here and bake `(constantly result)`, so the atom persists across
+     ;; every `execute` this compiled registry serves.
+     (if (compile-time-value-root? fn-id lookups)
+       (compile-time-value-closure fn-id enriched run)
+       run))))
 
 
 ;; =============================================================================

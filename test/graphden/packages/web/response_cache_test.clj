@@ -1,0 +1,85 @@
+(ns ^:integration graphden.packages.web.response-cache-test
+  "End-to-end tests for the immutable-response cache now that it is
+   composed from the generic state primitives (`:cell` / `:swap` /
+   `:deref`) instead of a bespoke atom + `cache-put` impl.
+
+   `:response-cache-get` and `:response-cache-put-if!` are golden
+   fn-defs (web/http), so we execute them BY NAME and assert the same
+   contract the old base-fns had:
+
+   - `put-if!` with `:when? true` stores; a later `get` hits.
+   - `put-if!` with `:when? false` is a no-op but still returns `:value`.
+   - the cell PERSISTS across separate `execute` calls (store in one,
+     read in another).
+   - the flush-all-at-64 capacity eviction keeps the map bounded.
+
+   Each test uses its own key namespace so the shared cell can't cross-
+   talk between deftests."
+  (:require
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.test-setup :as setup]
+    [graphden.storage.protocol.core :as sp]))
+
+
+(def ^:dynamic *context* nil)
+(def ^:dynamic *storage* nil)
+
+
+(use-fixtures :once
+  (setup/create-container-fixture)
+  (fn [t]
+    (exec/with-clean-registry
+      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
+         (try
+           (binding [*context* (:ctx graph)
+                     *storage* (:storage graph)]
+             (t))
+           (finally (sp/close (:storage graph))))))))
+
+
+(defn- fn-id
+  [nm]
+  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+
+
+(def ^:private a-response
+  {:status 200 :headers {"Content-Type" "application/javascript"} :body "cached-bytes"})
+
+
+(deftest put-then-get-roundtrips-across-executes
+  (testing "store under a key, then a SEPARATE execute reads it back (cell persists)"
+    (let [put (fn-id "response-cache-put-if!")
+          get (fn-id "response-cache-get")
+          k   ["/rc-roundtrip" "get" ""]]
+      (is (nil? (exec/execute *context* get {:key k}))
+          "miss before anything is stored")
+      (is (= a-response
+             (exec/execute *context* put {:key k :value a-response :when? true}))
+          "put-if! returns the value it stored")
+      (is (= a-response (exec/execute *context* get {:key k}))
+          "a later execute hits the persisted cell"))))
+
+
+(deftest put-if-false-does-not-store-but-returns-value
+  (testing "`:when? false` is a no-op but still passes the value through"
+    (let [put (fn-id "response-cache-put-if!")
+          get (fn-id "response-cache-get")
+          k   ["/rc-noop" "get" ""]]
+      (is (= a-response
+             (exec/execute *context* put {:key k :value a-response :when? false}))
+          "returns value even when not storing")
+      (is (nil? (exec/execute *context* get {:key k}))
+          "nothing was stored → miss"))))
+
+
+(deftest capacity-eviction-keeps-the-cell-bounded
+  (testing "flush-all-at-64 keeps the cache map from growing without bound"
+    (let [put     (fn-id "response-cache-put-if!")
+          current (fn-id "_response-cache-current")]
+      (dotimes [i 70]
+        (exec/execute *context* put {:key [(str "/rc-evict-" i)]
+                                     :value a-response
+                                     :when? true}))
+      (is (<= (count (exec/execute *context* current {})) 64)
+          "the map never exceeds capacity — graph-visible eviction fired"))))

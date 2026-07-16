@@ -26,6 +26,7 @@
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.core :as sys]
     [graphden.test-infra.shared-bootstrap :as sb]
+    [graphden.test-infra.shared-container :as sc]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -71,7 +72,8 @@
 (defn create-test-storage
   []
   (pth/clean-database-fast! *container*)
-  (let [storage (pg/create-storage (pth/get-container-config *container*))
+  (let [storage (sc/register-storage!
+                  (pg/create-storage (pth/get-container-config *container*)))
         ;; The FULL prod schema (graph + versioned + executions + services +
         ;; packages), not graph-only — so every entity's table exists and
         ;; tenancy scoping tests can exercise any scoped entity
@@ -110,7 +112,8 @@
    tests should stay on `create-test-storage` (lighter)."
   []
   (pth/clean-database-fast! *container*)
-  (let [storage (pg/create-storage (pth/get-container-config *container*))]
+  (let [storage (sc/register-storage!
+                  (pg/create-storage (pth/get-container-config *container*)))]
     (sp/initialize storage (full-schema))
     (sp/upsert-entities storage :fn
                         (mapv #(dissoc % :kind) (records/boot-primitive-records)))
@@ -404,7 +407,7 @@
   ([ns-ident package-names]
    (let [{:keys [db-config bootstrap]}
          (sb/ensure-ns-database-from-golden! ns-ident package-names)
-         storage (pg/create-storage db-config)
+         storage (sc/register-storage! (pg/create-storage db-config))
          versioned (vs/wrap-with-versioning storage "main")
          ctx (exec/create-context {:storage versioned})]
      (cr/rebuild! ctx)

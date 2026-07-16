@@ -219,7 +219,5 @@ build, not the graph. Two practical notes:
 
 ## Next
 
-You've reached the end of the current tutorial sequence. From
-here, follow the cross-references inside each lesson to the
-reference docs in [docs/](..), and read the shipping packages
-(`core`, `web`, `app`) as worked examples.
+Lesson 15 — [State: cells, swap, and a graph-native cache](15-state-cells-and-caches.md):
+holding mutable state in the graph that survives across calls.

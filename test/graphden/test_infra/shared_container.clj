@@ -29,6 +29,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.storage.protocol.core :as sp]
     [next.jdbc :as jdbc])
   (:import
     (java.sql
@@ -129,6 +130,41 @@
               (let [container (create-container)]
                 (reset! container-atom container)
                 container))))))
+
+
+(def ^:private created-storages
+  "Every per-NS test storage the bootstrap helpers hand out, tracked so
+   the post-run hook can close any a namespace forgot to. An unclosed
+   storage keeps its HikariCP pool alive for the whole JVM — but at the
+   test pool-size of 2 that is only ~few-MB total across the suite (a
+   before/after measurement put it inside GC noise), NOT the ~177 MB of
+   `finding H`, which is the fixed working set of a fully-loaded test JVM
+   (compiled packages + registries + golden bootstrap), not a leak. This
+   backstop is cheap insurance so the footprint can't grow if the pool
+   size is raised or many leaking namespaces are added later; most `:once`
+   fixtures already close their own storage in a `finally`."
+  (atom #{}))
+
+
+(defn register-storage!
+  "Record `storage` for suite-end close. Returns `storage` so it can wrap
+   a create call inline. Idempotent (set semantics)."
+  [storage]
+  (swap! created-storages conj storage)
+  storage)
+
+
+(defn close-all-storages!
+  "Close every registered storage, then forget them. Defensive: HikariCP
+   close is idempotent, so a namespace that already closed its own storage
+   (the normal path) just makes this a no-op for that handle."
+  []
+  (let [handles @created-storages]
+    (when (seq handles)
+      (log/info "Closing" (count handles) "tracked test storages"))
+    (doseq [s handles]
+      (try (sp/close s) (catch Exception e (log/debug e "close-all-storages!")))))
+  (reset! created-storages #{}))
 
 
 (defn stop-container!

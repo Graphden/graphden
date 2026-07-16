@@ -36,6 +36,7 @@
 | 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written |
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
+| 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written |
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

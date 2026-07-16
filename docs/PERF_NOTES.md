@@ -164,6 +164,36 @@ DB + DRY memo + rich-types snapshot fix brought walls to
 900 s. The `bb test-parallel 4` worker-isolation workaround
 is no longer needed.
 
+### Finding H — test-JVM live-set growth is NOT a leak (2026-07-15)
+
+A prior handoff flagged "~177 MB of live-set growth over a
+suite run (95 → 272 MB after a full GC), unexplained." It is
+**not a leak** — it is the fixed working set of a fully-loaded
+test JVM. A run boots the whole graph (252 base-fns + 2728
+fn-defs compiled), builds the process-global registries
+(base-fns, rich-types, compile-all closures) and the golden
+bootstrap; that footprint loads early and **plateaus** — it
+does not grow proportionally to the test count. Measured
+end-of-`:unit`-suite live-set: **257 MB**, stable across
+identical runs. Mirrors the demo-instance note in the JVM
+flags ("live set 125 MB after a full GC … not a leak").
+
+The one real per-NS leak — test namespaces that create a
+storage and never `sp/close` it, so its HikariCP pool outlives
+the NS — was measured and is **within GC noise** at the test
+pool-size of 2: closing every tracked storage moved the
+end-state 260.7 → 257.0 MB (~3.7 MB). An earlier ad-hoc probe
+overstated it 5× by using the default pool-size (10). A
+suite-end backstop now closes every tracked storage
+(`shared-container/register-storage!` + `close-all-storages!`
+in the plugin `post-run`) — cheap insurance against the
+footprint growing if the pool size is raised or many leaking
+NSes are added, not a fix for H.
+
+**Do not re-investigate H as a leak.** Re-measure before/after
+with the real pool-size (2), not an ad-hoc probe, if the
+question resurfaces.
+
 ## Phase 5 HOF translation — below noise floor
 
 `build-hof-translation` + `apply-hof-translation` shipped on

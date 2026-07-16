@@ -34,10 +34,13 @@
 
   ;; Called after the entire test run completes
   (post-run [result]
-            ;; Drop per-NS DBs first (their template ref must be
-            ;; gone before the template DB itself drops), then the
-            ;; golden templates, then shut the container down. Order
-            ;; matters — DROP needs a live cluster.
+            ;; Close any per-NS storage a namespace forgot to (finding H
+            ;; backstop) FIRST — releasing its pool's connections before
+            ;; we DROP its database. Then drop per-NS DBs (their template
+            ;; ref must be gone before the template DB itself drops), the
+            ;; golden templates, and finally shut the container down.
+            ;; Order matters — DROP needs a live cluster.
+            (sc/close-all-storages!)
             (sc/drop-all-ns-databases!)
             (sb/drop-all-golden-databases!)
             (sc/stop-container!)

@@ -15,7 +15,10 @@ variants + rich-type registry), the visual graph editor, the REST API
 (`/api/graph/*`, `/api/entities/*`, `/api/sequence/*`, `/api/execute*`), branch
 versioning, the tenancy addon (orgs / users / grants / RLS / effect-gate / FaaS
 — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md)), the package registry
-(`app/registry`), and `:fix` recursion ([RECURSION.md](RECURSION.md)).
+(`app/registry`), the storage-swap path (storage base-fns `:pg-query` /
+`:pg-execute` / `:pg-tx`; API routes are graph fn-defs; the storage protocol is
+injected at the web-server via a `:storage-query` free arg — former Block 1),
+and `:fix` recursion ([RECURSION.md](RECURSION.md)).
 
 Unbuilt primitives that never made it into a block below: a **file-I/O**
 base-fn set and **WebSocket** live-updates.
@@ -30,7 +33,7 @@ below; those entries remain for historical context and as
 deeper-design references.
 
 **Path to MVP launch with external users**: the remaining critical path is
-Blocks 1 → 4 → 9-Launch, with Blocks 3 / 6 parallelizable. (Blocks 2 and 5 are
+Blocks 4 → 9-Launch, with Blocks 3 / 6 parallelizable. (Blocks 1, 2 and 5 are
 done — see § Implemented; they're dropped from the list below.)
 
 The AI-launch piece (Block 9.1–9.3) is on the critical path because
@@ -44,20 +47,6 @@ graph-diffs not text-diffs" is part of the launch story; growth-piece
   for now; UI integration is a later decision
 - One new lesson added per feature block as that block ships
 - **Initial scope**: ~1 week; **ongoing**: ~0.5 week per block
-
-### Block 1 — Foundation (start immediately)
-
-Implements PHILOSOPHY § Self-Describing System "storage swap path"
-(S1+S2+S3 in the protocols staging).
-
-1. **Storage base-fns** — `:pg-query`, `:pg-execute`, `:pg-tx`, plus
-   HoneySQL helpers — ~1.5 weeks
-2. **API routes migrated** from direct Clojure storage to graph
-   fn-defs — ~2 weeks
-3. **Type-row `:Storage`** + `:postgres-storage-impl` + free-arg
-   injection at the web-server level — ~3-4 days
-
-Block total: **~4 weeks**
 
 ### Block 3 — Personal QoL
 

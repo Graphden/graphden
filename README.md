@@ -42,15 +42,29 @@ substrate instead of surrounding machinery:
 **Why now:** free-form text is a poor target for *machine-authored*
 software — a model easily emits structurally- or semantically-invalid
 code. A typed, effect-annotated, structurally-constrained graph is a
-better target, because the structure itself is the guardrail. That is the
-wedge earlier visual-programming attempts didn't have.
+better target, because the structure itself is the guardrail. And as
+models write more code while humans read less of it, *reviewing* a change
+starts to matter more than writing it. The wager: a typed,
+effect-annotated **graph diff is easier to review than a text diff** —
+stated plainly as a bet the project now has to test in the market, not a
+proven fact.
+
+**Why this isn't the visual-programming graveyard:** Scratch and its
+lineage failed trying to render `if`/`for`/`while` as blocks — a forced
+visual metaphor bolted onto a fundamentally textual, imperative structure.
+Graphden instead visualizes a **homoiconic, composition-first substrate —
+Lisp, which is already close to an AST** — so the graph *is* the natural
+shape of the program, not a costume on top of it. And unlike read-only
+"see your code as a graph" viewers, the graph here is the thing you
+**edit, diff, and merge**: authorship and review share one surface.
 
 **What this is not:** a claim that visual programming beats text for all
 work. It's a bet on a specific niche — internal tools, low-ops backends,
 and multi-tenant SaaS where branch-per-tenant, hot-reload, and
 effect-gating *are* the product. It's an experimental platform, not a
 finished one; see [ROADMAP.md](docs/ROADMAP.md) for what's shipped vs
-planned.
+planned, and [FAQ.md](docs/FAQ.md) for the sharp objections and their
+honest answers.
 
 ---
 

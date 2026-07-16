@@ -46,7 +46,34 @@
    - `{:as :name}` rename-only bindings defer (they keep the slot
      free under a new name; the next caller is what gets type-checked).
    - Refinement-on-refinement subtype comparison is constraint
-     equality only — no SMT-style narrowing reasoning."
+     equality only — no SMT-style narrowing reasoning.
+
+   ## Why this namespace is large — do not re-litigate the split
+
+   At ~2.3k lines this is the biggest file in `src`, and splitting it
+   was attempted and rejected on structural grounds, not neglect. The
+   semantic core is one mutually-recursive strongly-connected component:
+
+       effective-binding-type ↔ effective-ref-return
+                              ↔ effective-ref-return-uncached
+       effective-binding-type → base-fn-type-rule
+                              → bindings-info-for-rule
+                              → effective-binding-type   (closes the loop)
+
+   That cycle is why `base-fn-type-rule` / `effective-ref-return` are
+   forward-`declare`d below. A ref's declared return type can only be
+   resolved by re-firing its root base-fn's `:return-type-rule`, and a
+   rule can only fire once its args' types are resolved — the two are
+   inherently co-recursive. In Clojure a mutually-recursive SCC cannot
+   be spread across namespaces without inserting a var/registry
+   indirection seam purely to break the compile cycle, which trades a
+   long-but-linear read for a scattered, harder-to-follow one. The hard
+   part to understand *is* this core; extracting the leaf helpers (shape
+   predicates, message formatting, MI-conflict checks) would shave a few
+   hundred lines while leaving the difficult component whole and forcing
+   its shared vocabulary across files. Net cognitive win: negative. It
+   stays one namespace on purpose. Leaf-only extraction (`check.literals`
+   is already such a split) is the only move that pays off."
   (:require
     [clojure.set :as set]
     [clojure.tools.logging :as log]

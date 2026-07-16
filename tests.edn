@@ -56,6 +56,10 @@
   ;; Kept out of :unit / :integration so a budget change sends you to `bb perf`
   ;; rather than reading as a broken test, and so the suites stay about
   ;; behaviour. `clojure -M:dev:test -m kaocha.runner :perf`.
+  ;; Runs with `--no-randomize`, and that is load-bearing — see the `test-perf`
+  ;; task in bb.edn, which owns the flag. (The `:kaocha/randomize? false` config
+  ;; key was tried here first and measurably did NOT take effect; the flag does.
+  ;; Hence the flag, and hence no dead key sitting here claiming otherwise.)
   {:id :perf
    :test-paths ["test"]
    :focus-meta [:perf]}]

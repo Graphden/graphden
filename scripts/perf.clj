@@ -89,6 +89,18 @@
   :trend)
 
 
+(def ^:private optional-key
+  "Not a suite either. Suites listed here are graded WHEN their report exists and
+   skipped, loudly, when it does not.
+
+   The exemption is declared rather than inferred, because inferring it is the
+   bug: a budget silently skipped for want of a report reads as a pass. Only
+   `:frontend` qualifies today — it needs a built, running editor, which
+   `bb wt up` and the landing gate have and GitHub Actions does not. Anything
+   that CAN be measured everywhere must NOT be listed here."
+  :optional-suites)
+
+
 (defn- read-edn
   [path]
   (when (fs/exists? path)
@@ -206,9 +218,11 @@
   [& args]
   (let [update? (some #{"--update"} args)
         budgets (or (read-edn budgets-path) {})
-        ;; `:trend` sits in the same file for one-reference-set tidiness but is
-        ;; NOT a suite: nothing may demand a report for it or fail on it.
-        suites (dissoc budgets trend-key)
+        ;; `:trend` and `:optional-suites` sit in the same file for
+        ;; one-reference-set tidiness but are NOT suites: nothing may demand a
+        ;; report for them or fail on them.
+        suites (dissoc budgets trend-key optional-key)
+        optional (set (get budgets optional-key))
         raw (into {} (for [p (run-paths)
                            :let [r (read-edn p)]
                            :when r]
@@ -239,8 +253,8 @@
       ;; gate for a suite it did not read. A budget with no measurement behind it
       ;; is the one outcome worse than a failing one, because it looks like
       ;; success. `bb perf` after `bb lint` is the obvious way to hit this.
-      (seq (remove (set (keys reports)) (keys suites)))
-      (let [missing (remove (set (keys reports)) (keys suites))]
+      (seq (remove (some-fn (set (keys reports)) optional) (keys suites)))
+      (let [missing (remove (some-fn (set (keys reports)) optional) (keys suites))]
         (println (str red "✗ no run report for budgeted suite(s): "
                       (str/join ", " (map name missing)) reset))
         (doseq [s missing]
@@ -256,9 +270,18 @@
       (let [results (doall
                       (for [[suite budget] (sort-by key suites)
                             :let [counters (get reports suite)]]
-                        (let [checked (check-suite suite budget counters)]
-                          (print-suite! checked counters)
-                          checked)))
+                        (if (nil? counters)
+                          ;; Only reachable for a declared-optional suite. Say so
+                          ;; out loud: an unmeasured budget must never read as a
+                          ;; quiet tick in a list of ticks.
+                          (do (println (str "\n" bold (name suite) reset " "
+                                            yellow "SKIPPED — no report" reset
+                                            dim " (needs a running editor: bb wt up"
+                                            " + bb perf-frontend)" reset))
+                              {:suite suite :rows []})
+                          (let [checked (check-suite suite budget counters)]
+                            (print-suite! checked counters)
+                            checked))))
             _ (print-trend! (get budgets trend-key) gauges)
             failures (mapcat #(remove :ok? (:rows %)) results)]
         (if (seq failures)

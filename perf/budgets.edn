@@ -41,24 +41,47 @@
    "A caller named its changed fn-ids and STILL paid for a full graph recompile: delta-recompile! hit a cold reverse-deps index and silently called rebuild!. Nothing in the return value says so and no timing distinguishes it from a cold cache — this counter is the only evidence. It is the exact failure 9d66adc0 and 0b74f1dc were about; measured at 4137 fns, the rebuild it hides costs 49.8 s."}},
  :perf
  #:sql{:graph-entities-tree
-       {:max 3,
+       {:max 1,
         :why
-        "The sidebar's first paint. 3 round trips, steady-state. This endpoint was 95 ms / 4.5 MB before it was scoped down to ?scope=tree; if this climbs, the scoping has sprung a leak and the sidebar is reading rows it does not paint."},
+        "The sidebar's first paint. 1 round trip, steady-state (the compile is paid by whichever scenario runs first — see bb.edn's test-perf note on --no-randomize). This endpoint was 95 ms / 4.5 MB before it was scoped down to ?scope=tree; if this climbs, the scoping has sprung a leak and the sidebar is reading rows it does not paint."},
        :create-fn
-       {:max 18,
+       {:max 20,
         :why
-        "Creating one :fn costs 18 round trips, steady-state. A jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."}}
-
- ;; ADVISORY — normalised wall-clock, reported by `bb perf`, never failing it.
- ;; :units is "how many empty DB round trips would take this long", measured in
- ;; the same run against the same pool (graphden.perf.calibrate), so a slow box
- ;; slows the reference too. :band is the factor outside which the run says
- ;; something; inside it, the number means nothing.
+        "Creating one :fn costs 20 round trips, steady-state — it runs first, so it pays the compile reads for the suite. A jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."}},
  :trend
- {:trend/graph-entities-tree
-  {:units 22.48 :band 2.0
-   :why "The sidebar's first paint got materially slower relative to a round trip. Note this endpoint issues only 3 queries, so a jump here is compile/serialisation work, not the database."}
-
-  :trend/create-fn
-  {:units 4064.56 :band 2.0
-   :why "Creating one :fn costs ~4000 round trips' worth of time against only 18 actual queries — the time is in the compile, not the SQL, exactly as PERF_NOTES describes (477 ms of 918 ms re-reading the graph). A jump here means the compile path regressed."}}}
+ #:trend{:graph-entities-tree
+         {:units 20.54,
+          :band 2.0,
+          :why
+          "The sidebar's first paint got materially slower relative to a round trip. It issues only ONE query, so anything here is compile/serialisation work, not the database."},
+         :create-fn
+         {:units 3434.09,
+          :band 2.0,
+          :why
+          "Creating one :fn costs thousands of round trips' worth of time against only 20 actual queries — the time is in the compile, not the SQL, exactly as PERF_NOTES describes (477 ms of 918 ms re-reading the graph). A jump here means the compile path regressed."}},
+ :optional-suites #{:frontend},
+ :frontend
+ #:frontend{:load-web-server-requests
+            {:max 7,
+             :why
+             "The first paint started making more API calls. Two of these seven are already duplicates (scope=search and /api/graph/layout each fire twice) — if this grows, check for a third."},
+            :load-web-server-kb
+            {:max 5334,
+             :why
+             "The first paint's payload grew. Nearly all of it is one ?scope=subtree read, which PERF_NOTES sizes at up to 4.2 MB for a root like web-server. A jump means the subtree scoping is leaking rows the editor does not paint."},
+            :load-web-server-dom-nodes
+            {:max 718,
+             :why
+             "The editor is building more DOM than the graph needs. Overlays are one div per card per strip; a jump usually means something renders per-fn that should render per-view."},
+            :sidebar-expand-namespace-requests
+            {:max 9,
+             :why
+             "Expanding one namespace costs exactly 2 requests beyond the 7 of first paint — that IS the lazy fn-index. If this collapses toward 7, the tree went back to shipping every fn up front and the load payload will follow it up."},
+            :sidebar-expand-namespace-kb
+            {:max 5338,
+             :why
+             "See load-web-server-kb. Expanding a leaf namespace should add ~4 KB, not a graph."},
+            :sidebar-expand-namespace-dom-nodes
+            {:max 1072,
+             :why
+             "Expanding core.arithmetic adds ~350 rows. A large jump means the expand painted more of the tree than the namespace it was asked for."}}}

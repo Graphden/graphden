@@ -95,20 +95,75 @@ It also counts the right thing: statements are **normalised** before counting, s
 an N+1 arrives pre-diagnosed as one row reading `calls=200` — you get the
 offending statement text, not 200 lines to read.
 
-Two properties of `graphden.perf.sql` are load-bearing:
+Three properties are load-bearing, and all three were found by watching a count
+flip rather than by reasoning:
 
 - **The dbid filter.** `pg_stat_statements` is cluster-wide and the suite runs
   namespaces in parallel with a database each. A bare `pg_stat_statements_reset()`
   would erase a sibling's in-flight measurement.
 - **The warm-up.** `measure` runs the scenario once, discards it, then measures
-  the second call. Without it the count is not reproducible — measured here,
-  `scope=tree` read 3 queries in one run and 1 in the next, purely because kaocha
-  randomises test order and a scenario that ran second found the caches warm. A
-  budget on an irreproducible count is a flake with a rationale.
+  the second call. Cold-cache cost is paid once per process; the number that says
+  whether an endpoint is expensive is what it costs on the millionth request.
+- **`--no-randomize`** on the `:perf` suite (owned by the `bb test-perf` task).
+  The scenarios share one `:once` graph, so a write scenario leaves the compiled
+  registry different from how it found it and the next read either pays for the
+  recompile or doesn't. Under kaocha's default randomisation this measured
+  `create-fn=18 / tree=3` on one run and `20 / 1` on the next — the same total
+  work (21), redistributed by whoever went first. Warm-up cannot fix that: it
+  absorbs a scenario's own cold start, not its neighbour's edit.
+
+  Note the `:kaocha/randomize? false` **config key does not take effect here** —
+  it was tried, and the counts kept flipping. The CLI flag does. That is why the
+  flag lives in the bb task and no dead key sits in `tests.edn` claiming
+  otherwise.
+
+A budget on an irreproducible count is a flake with a rationale, so nothing gets
+gated until it has been measured identical twice in a row.
 
 A scenario must also **assert that its operation succeeded**. One that quietly
 400s does no work, measures zero queries, and sails under any budget — a perf
 suite reporting "free" for a broken endpoint is worse than none.
+
+## The frontend
+
+```bash
+bb wt up                                            # isolated stack, prints a port
+GRAPHDEN_URL=http://localhost:<port> bb perf-frontend
+```
+
+Same argument, browser side: what the editor **asks for**, not how long the paint
+took. "The first paint makes 7 API calls and pulls 5.3 MB" is 7 and 5.3 MB on any
+machine. And counts are what regressed — `/api/graph/entities` was 4.5 MB before
+it was scoped, and the entire lazy-fn-index work exists because the editor used
+to mirror every fn in the graph. A request count and a byte count would have
+caught both on the day.
+
+Nothing is instrumented in the app: Playwright sees every request by
+construction, which is the browser-side equivalent of reading
+`pg_stat_statements` instead of wrapping the JDBC calls.
+
+Current reading:
+
+| Scenario | API calls | KB | DOM nodes |
+|----------|-----------|-----|-----------|
+| `load-web-server` | 7 | 5334 | 718 |
+| `sidebar-expand-namespace` | 9 | 5338 | 1072 |
+
+Expanding one namespace costs exactly **two** extra `?scope=namespace` requests
+and ~4 KB. That difference *is* the lazy fn-index. If the tree ever goes back to
+shipping every fn up front, the expand count collapses toward the load count and
+the load payload follows it up — a regression no other check in this repo would
+notice.
+
+The first paint also fires `?scope=search` **twice** and `/api/graph/layout`
+**twice**. Recorded, not fixed: the budget of 7 is what it costs today, and the
+duplicate is now a visible number rather than a thing nobody had counted.
+
+**This one is not in GitHub Actions**, for the same reason `bb visual` isn't: it
+needs a built, running editor. It is declared in `:optional-suites`, so `bb perf`
+grades it when its report exists and **says out loud** when it skips — a budget
+silently skipped for want of a report reads as a pass, and that is the failure
+mode this whole file exists to avoid.
 
 ## The trend — wall-clock that survives leaving the machine
 

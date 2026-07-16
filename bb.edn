@@ -468,8 +468,20 @@
 
   test-perf
   {:doc "Perf scenarios (focus ^:perf) — what each API-level operation costs in SQL round trips, written to perf/runs/perf.edn for `bb perf` to gate. ~1 min, nearly all of it the shared fixture. In-JVM + testcontainers only: no built image, so unlike the e2e suite this runs anywhere, CI included."
+   ;; `--no-randomize` is load-bearing, not tidiness. The scenarios share one
+   ;; `:once` graph, so a write scenario leaves the compiled registry in a
+   ;; different state than it found it and the next read either pays for the
+   ;; recompile or doesn't. Under kaocha's default randomisation that measured as
+   ;; create-fn=18/tree=3 on one run and 20/1 on the next — the same total work
+   ;; (21), redistributed by whichever went first. Per-scenario warm-up cannot fix
+   ;; it: warm-up absorbs a scenario's own cold start, not its neighbour's edit.
+   ;; With the flag: 20/1, twice, reproducibly. A budget on an irreproducible
+   ;; count is a flake with a rationale.
+   ;;
+   ;; The flag lives here because the `:kaocha/randomize? false` config key in
+   ;; tests.edn was tried and measurably did not take effect.
    :task (clojure {:extra-env {"GRAPHDEN_PERF_REPORT" "perf/runs/perf.edn"}}
-                  "-M:dev:test -m kaocha.runner :perf")}
+                  "-M:dev:test -m kaocha.runner :perf --no-randomize")}
 
   test-integration
   {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~10-12 min."
@@ -613,6 +625,10 @@
   ;;   group:       bb lint   = every linter (no unit tests) — fast pre-gate check
   ;;   group^2:     bb ci     = lint (fail-fast) -> unit tests
   ;;   the gate calls `bb ci`, so a stage runs at most once.
+  perf-frontend
+  {:doc "Measure what the editor's first paint asks the server for — API calls, KB, DOM nodes — into perf/runs/frontend.edn. Needs a RUNNING editor: `bb wt up` (isolated), then GRAPHDEN_URL=http://localhost:<your-port> bb perf-frontend. Human-invoked like `bb visual`, and for the same reason: it needs a built, running instance, which GitHub Actions does not have."
+   :task (p/shell {:dir "tools/browser-test"} "node" "perf-frontend.js")}
+
   perf
   {:doc "Compare this run's structural counters against perf/budgets.edn. Reads perf/runs/*.edn, which the suites write themselves — so run `bb test-unit` first. Counts, not timings: it cannot fail because the box was busy."
    :task (load-file "scripts/perf.clj")}

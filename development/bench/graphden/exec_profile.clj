@@ -1,13 +1,26 @@
 (ns graphden.exec-profile
-  "Ad-hoc executor hot-path profiler + micro-benchmark.
+  "Ad-hoc executor hot-path micro-benchmark.
 
    Bootstraps a `[core]` graph against a throwaway PG container, syncs a
-   `:map`-over-`:range` workload whose callback is a small composed chain
-   (so ONE execute fires thousands of graph-node closures), then:
-     - alloc-profiles the workload (collapsed flame → /tmp file path printed)
-     - criterium quick-benches a fixed-size execute
+   `:map`-over-`:range` workload whose callback is a small composed chain (so ONE
+   execute fires thousands of graph-node closures), then criterium quick-benches
+   a fixed-size execute.
 
-   Usage:  clj -M:dev:bench:profile -m graphden.exec-profile"
+   Usage:  clj -M:dev:bench -m graphden.exec-profile
+
+   Two claims were removed from this docstring rather than implemented: it named
+   a `:profile` alias that does not exist in deps.edn (tools.deps ignores unknown
+   aliases silently, so it ran anyway, just without whatever was intended), and
+   it advertised alloc-profiling with a collapsed flame graph — there is no
+   clj-async-profiler dependency in this project and no code here that profiles
+   anything. A tool that documents an output it never produces sends whoever
+   reads it looking for a file that was never written.
+
+   Manual by design: prints, exits, stores nothing, compares against nothing. For
+   the measurements that ARE kept and compared across runs see
+   `docs/PERF_BUDGETS.md` — noting that the executor hot path is deliberately not
+   instrumented there, because PERF_NOTES is explicit that this suite is
+   CRUD/compile/HTTP-bound rather than execute-bound."
   (:require
     [criterium.core :as crit]
     [graphden.executor.compile-runtime :as cr]

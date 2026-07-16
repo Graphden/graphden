@@ -24,6 +24,26 @@ set -u
 cd "$(dirname "$0")" || exit 1
 
 # Resolve the test list once so adding new files only takes a glob.
+#
+# The `edit-` prefix is load-bearing, not decoration: widening this glob turns
+# the suite red. Two other groups of *.test.js live in this directory and
+# neither can run here.
+#
+#   regression-*.test.js     drive fn-defs from `examples` — an EXTERNAL,
+#                            dev/test-only package wired in via an :extra-paths
+#                            entry on the :dev/:test aliases (deps.edn), and
+#                            deliberately off the prod resources path. This
+#                            suite boots `graphden-executor:latest`, which does
+#                            not carry it. Measured against a live stack:
+#                            /api/graph/entities?q=ex-regression returns
+#                            {"fns":[]}, and both tests time out waiting for a
+#                            graph that cannot exist there.
+#
+#   type-system-ui-*.test.js need a chromium but no server — they eval editor
+#                            modules in a page and assert pure functions.
+#                            Running them here would pay for a whole stack to
+#                            use none of it. They have their own runner now:
+#                            `bb test-js`, ~15 s, wired into scripts/checks.edn.
 FILES=$(ls edit-*.test.js 2>/dev/null)
 if [ -z "$FILES" ]; then
   echo "no edit-*.test.js files found" >&2

@@ -26,45 +26,24 @@
    pattern (or otherwise drops these tags), this test fails
    immediately rather than waiting for a browser smoke."
   (:require
-    [cheshire.core]
-    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.postgres-test-helpers :as pth])
-  (:import
-    (java.io
-      File)))
+    [graphden.storage.protocol.postgres-test-helpers :as pth]))
 
 
 (def ^:dynamic *container* nil)
 (def ^:dynamic *bootstrap* nil)
 
 
-(defn- ensure-build-hashes-fixture
-  "`graphden-build-hashes.json` is gitignored — fresh checkouts +
-   CI nodes start without it. The `:build-hash-frontend-short`
-   fn-def does `(subs hash 0 12)`, which throws when the hash is
-   absent or shorter than 12 chars. Write a placeholder file
-   covering the test's needs; this only writes when missing so a
-   real `clojure -T:build` run during dev doesn't get clobbered.
-
-   Path: `resources/graphden-build-hashes.json` at the project
-   root — same place build.clj would write."
-  []
-  (let [target (io/file "resources/graphden-build-hashes.json")
-        hash64 (str/join (repeat 64 \0))]
-    (when-not (File/.exists target)
-      (spit target
-            (cheshire.core/generate-string
-              {"frontend" hash64
-               "packages" hash64
-               "backend"  hash64})))))
-
-
 (use-fixtures :once
-  (fn [f] (ensure-build-hashes-fixture) (f))
+  ;; Moved to `setup/ensure-build-hashes-fixture`. It was a private helper here,
+  ;; and `packages.app.page-test` was quietly living off the file it left on
+  ;; disk — so page-test passed or failed on whether THIS namespace had run
+  ;; first, which kaocha randomises. A shared precondition belongs in the shared
+  ;; place, stated by every namespace that needs it.
+  setup/ensure-build-hashes-fixture
   (pth/create-container-fixture #'*container*)
   exec/with-clean-registry
   (fn [f]

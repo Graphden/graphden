@@ -14,6 +14,12 @@
 
 
 (use-fixtures :once
+  ;; This NS asserts on hash-busted URLs, so it needs the build-hashes resource.
+  ;; It used to read whatever `inline-script-sibling-drop-test`'s fixture had
+  ;; left on disk — passing or failing on whether that unrelated namespace
+  ;; happened to run first, which kaocha randomises. A test states its own
+  ;; preconditions.
+  setup/ensure-build-hashes-fixture
   (pth/create-container-fixture #'*container*)
   exec/with-clean-registry
   (fn [f]

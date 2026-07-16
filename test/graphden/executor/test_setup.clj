@@ -5,6 +5,9 @@
    rows directly via the storage protocol. Higher-level helpers like
    `setup-add-function!` synthesise a small example graph end-to-end."
   (:require
+    [cheshire.core :as cheshire]
+    [clojure.java.io :as io]
+    [clojure.string :as str]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.context :as exec-ctx]
@@ -27,7 +30,10 @@
     [graphden.system.core :as sys]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.test-infra.shared-container :as sc]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs])
+  (:import
+    (java.io
+      File)))
 
 
 ;; ============================================================================
@@ -412,6 +418,38 @@
          ctx (exec/create-context {:storage versioned})]
      (cr/rebuild! ctx)
      (assoc bootstrap :storage versioned :ctx ctx))))
+
+
+(defn ensure-build-hashes-fixture
+  "`:once` fixture: guarantee `resources/graphden-build-hashes.json` exists.
+
+   Any namespace that renders a page through `:build-hashes` needs it. It is
+   gitignored — a fresh checkout and every CI node start without it — and only
+   `clojure -T:build` writes the real one, so a test run has to provide a
+   placeholder.
+
+   It lives here because it is a PRECONDITION, and a precondition every test
+   that needs it must state for itself. It used to be a private helper in
+   `regressions.inline-script-sibling-drop-test`, and `packages.app.page-test`
+   read the file that fixture happened to leave behind — so page-test passed or
+   failed on whether an unrelated namespace had run first. kaocha randomises, so
+   that was a coin flip, and it came up tails in a landing gate:
+
+     ERROR in graphden.packages.app.page-test/…-stylesheet-link-test
+     Exception: Resource not found: graphden-build-hashes.json
+
+   Reproduced exactly by deleting the file and running page-test alone.
+
+   Only writes when missing, so a real `clojure -T:build` during dev is never
+   clobbered."
+  [f]
+  (let [target (io/file "resources/graphden-build-hashes.json")
+        hash64 (str/join (repeat 64 \0))]
+    (when-not (File/.exists target)
+      (spit target (cheshire/generate-string {"frontend" hash64
+                                              "packages" hash64
+                                              "backend" hash64}))))
+  (f))
 
 
 (defmacro bootstrap-crud-graph-from-golden!

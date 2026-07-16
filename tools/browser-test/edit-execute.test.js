@@ -40,15 +40,6 @@ async function openExecutePopoverFor(page, fnNameHash) {
   });
   if (!opened) throw new Error('▶ button not surfaced in row-actions');
   // Forms load via /api/value-form — wait for the form input to mount.
-  //
-  // 30s, matching the two waits above. This is one helper doing three steps of
-  // the same kind — mount the card, surface the row-actions, mount the form —
-  // each a network round trip plus a render, under identical load. Only this
-  // one sat at 10s, and that inconsistency is what failed a gate run: the first
-  // attempt timed out here before a single assertion ran, and the retry then
-  // passed all twelve. Nothing here asserts speed — the test asserts that the
-  // form mounts. How long it takes is `bb perf`'s question, and it answers it
-  // in round trips rather than in seconds on a loaded box.
   await page.waitForFunction(
     () => {
       const p = document.querySelector('.execute-popover.visible');
@@ -56,7 +47,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
                    || !!p.querySelector('input[data-form-field]'));
     },
     null,
-    {timeout: 30000, polling: 100});
+    {timeout: 10000, polling: 100});
 }
 
 

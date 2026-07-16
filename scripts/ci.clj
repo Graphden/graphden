@@ -214,9 +214,17 @@
   (let [check-name (:name c)
         cmd (:cmd c)
         timeout-ms (:timeout c)
+        started (System/nanoTime)
         proc (p/process {:cmd cmd :out :string :err :string})
         _ (swap! live-procs conj proc)
-        result (deref proc timeout-ms ::timeout)]
+        result (deref proc timeout-ms ::timeout)
+        ;; Wall time of THIS check, recorded whatever the outcome. The run used
+        ;; to report one number — total elapsed — which cannot answer "which
+        ;; check got slower", and the per-check `:timeout` ceilings in
+        ;; `checks.edn` were set from numbers nobody kept. A timed-out check
+        ;; still gets a duration: it is the ceiling, and seeing it sit at the
+        ;; ceiling is the point.
+        duration-ms (quot (- (System/nanoTime) started) 1000000)]
     (swap! live-procs disj proc)
     (cond
       (= result ::timeout)
@@ -225,7 +233,8 @@
                  {:exit -1
                   :output (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
                                "Command: " (pr-str cmd))
-                  :warnings false})
+                  :warnings false
+                  :duration-ms duration-ms})
           (swap! status assoc check-name :timeout)
           (reset! failed true))
 
@@ -234,7 +243,8 @@
             exit (:exit result)
             warnings? (has-warnings? check-name output)]
         (swap! results assoc check-name
-               {:exit exit :output output :warnings warnings?})
+               {:exit exit :output output :warnings warnings?
+                :duration-ms duration-ms})
         ;; `:info` checks (e.g. `outdated` — a dependency has an upgrade
         ;; available) are advisory: they surface a status but NEVER fail the run
         ;; or gate the unit suite. Everything else is blocking.
@@ -380,7 +390,14 @@
         (doseq [c checks]
           (let [check-name (:name c)
                 r (get @results check-name)
-                s (get @status check-name)]
+                s (get @status check-name)
+                ms (:duration-ms r)
+                ;; A check that runs at 80%+ of its ceiling is not passing, it is
+                ;; about to start timing out — on a busier host, or after the next
+                ;; change. That is the moment to say so, not the run after it flips
+                ;; red. `checks.edn` calls its timeouts "measured on an idle box";
+                ;; this is what tells you when a box stopped being idle enough.
+                near-ceiling? (and ms (:timeout c) (>= ms (* 0.8 (:timeout c))))]
             (println (str (status-char s) " " bold check-name reset
                           (case s
                             :passed (str " " green "PASSED" reset)
@@ -388,7 +405,11 @@
                             :timeout (str " " red "TIMED OUT" reset)
                             :warning (str " " yellow "WARNINGS" reset)
                             :skipped (str " " yellow "SKIPPED" reset " (lint failed first)")
-                            "")))
+                            "")
+                          (when ms (format "  %.1fs" (/ ms 1000.0)))
+                          (when near-ceiling?
+                            (str " " yellow "(" (format "%.0f%%" (* 100.0 (/ ms (double (:timeout c)))))
+                                 " of its " (format "%.0fs" (/ (:timeout c) 1000.0)) " ceiling)" reset))))
 
             ;; Show output for failures/warnings/timeouts
             (when (#{:failed :warning :timeout} s)

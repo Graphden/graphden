@@ -71,6 +71,11 @@ tools/browser-test/scratch/
 tools/visual-tests/test-results/
 tools/visual-tests/playwright-report/
 
+# Perf artifacts — the same split as the visual baselines above.
+# perf/budgets.edn IS committed (it's the reference set `bb perf` gates
+# against); each run's raw readings are this-host, this-moment throwaway.
+perf/runs/
+
 # Playwright screenshot artifacts (browser-test verification, not for repo)
 /editor-*.png
 /.playwright-mcp/

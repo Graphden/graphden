@@ -30,6 +30,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.protocol.core :as sp]
+    [graphden.util.counters :as counters]
     [next.jdbc :as jdbc])
   (:import
     (java.sql
@@ -102,6 +103,11 @@
    Configured for high concurrency (500 connections) to support parallel tests."
   []
   (log/info "Starting shared PostgreSQL test container...")
+  ;; The whole point of this namespace is that this happens ONCE, replacing the
+  ;; old per-NS pattern's 38+ startups. "Once" is a claim the suite could not
+  ;; check until now — and a second boot costs ~3 s and, worse, means some
+  ;; caller bypassed `get-container`'s double-checked lock.
+  (counters/count! :fixture/container-boot)
   (let [start-time (System/currentTimeMillis)
         container (doto (PostgreSQLContainer. ^String default-postgres-image)
                     (PostgreSQLContainer/.withStartupAttempts 3)
@@ -272,6 +278,14 @@
    (let [db (sanitize-db-name ns-ident)
          cluster (base-cluster-config)]
      (when-not (contains? @ns-databases-atom db)
+       ;; Counted apart on purpose. A TEMPLATE clone is the ~100 ms fast path; a
+       ;; bare CREATE means this NS reached the cluster WITHOUT a golden, and
+       ;; will therefore pay the ~14 s bootstrap itself. The two are one `if`
+       ;; apart in the code and ~140× apart in cost, and no wall-clock report
+       ;; distinguishes them from a slow host.
+       (counters/count! (if template-db
+                          :fixture/ns-db-clone
+                          :fixture/ns-db-create-bare))
        (with-open [conn (jdbc/get-connection {:jdbcUrl (:jdbc-url cluster)
                                               :user (:username cluster)
                                               :password (:password cluster)})]

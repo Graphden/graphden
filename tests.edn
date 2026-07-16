@@ -49,9 +49,14 @@
  ;; Plugins:
  ;; - profiling: shows slowest tests
  ;; - shared-container: singleton PG container + per-NS logical-DB lifecycle
+ ;; - perf: persists what the run cost — the per-NS fixture-vs-assertion split
+ ;;   plus the structural counters — to perf/runs/*.edn. It measures nothing
+ ;;   itself: it reads profiling's per-testable durations, so it MUST stay
+ ;;   listed after profiling.
  :plugins [:kaocha.plugin/profiling
            :kaocha.plugin/parallel
-           :kaocha.plugin/shared-container]
+           :kaocha.plugin/shared-container
+           :kaocha.plugin/perf]
 
  ;; Show the slowest 25, not the default 3. The integration suite takes ~12
  ;; minutes and the default report says only which THREE namespaces were worst —

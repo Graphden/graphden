@@ -45,6 +45,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.core :as sys]
     [graphden.test-infra.shared-container :as sc]
+    [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc])
   (:import
@@ -112,6 +113,12 @@
   [packages golden-db-name]
   (log/info "Bootstrapping golden test DB"
             {:db golden-db-name :packages packages})
+  ;; ~14 s, once per JVM × package-set. `ensure-golden!` only reaches here on a
+  ;; cache miss, so this counter IS the miss count — and a miss count is the
+  ;; only honest way to ask "did the fixture boot once, or once per namespace?".
+  ;; The suite has no other signal: kaocha's profiling reports per-NS wall time,
+  ;; in which an extra bootstrap is indistinguishable from a slow host.
+  (counters/count! :fixture/golden-bootstrap)
   (let [config (update (sc/base-cluster-config)
                        :jdbc-url sc/jdbc-url-with-database golden-db-name)
         storage (pg/create-storage config)]
@@ -194,6 +201,11 @@
               (let [{:keys [db-config]} (ensure-ns-database-from-golden!
                                           "swept-rich-types-capture" packages)
                     storage (pg/create-storage db-config)]
+                ;; The single most expensive fixture step in the suite (~40 s).
+                ;; 6840f542 landed precisely because this ran once per namespace
+                ;; instead of once per JVM — a regression that costs minutes and
+                ;; reads, in a wall-clock report, as "the box was busy".
+                (counters/count! :fixture/type-check-sweep)
                 (try
                   (let [versioned (vs/wrap-with-versioning storage "main")
                         captured (binding [registry-core/*rich-types-override*

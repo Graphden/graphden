@@ -12,7 +12,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api} = require('./edit-test-helpers');
+const {assert, newContext, api, waitFor} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -199,9 +199,16 @@ async function openBranchPopover(page) {
       TEST_BRANCH,
       {timeout: 30000});
 
-    const branchList = await api(page, 'GET', '/api/branches');
-    assert(!(branchList.branches || []).some((b) => b.name === TEST_BRANCH),
-           'feat branch gone from API after × delete');
+    // Re-check node-side too, but POLL it: the browser waitForFunction
+    // above and this node call are separate HTTP clients hitting the
+    // versioned `:branches` read, which can momentarily disagree under
+    // load (the resolver walks the chain). A single check raced that lag.
+    let branchList;
+    const gone = await waitFor(async () => {
+      branchList = await api(page, 'GET', '/api/branches');
+      return !(branchList.branches || []).some((b) => b.name === TEST_BRANCH);
+    }, 10000);
+    assert(gone, 'feat branch gone from API after × delete');
 
     // ===================================================================
     // Phase E: Escape dismisses the popover.

@@ -13,7 +13,11 @@
    ;; `:container-e2e` (the two-executor fleet test) needs the locally-built
    ;; `graphden-executor:latest` image + ~4 min of container boots — skip it in
    ;; the fast unit run; it has its own suite below.
-   :skip-meta [:integration :container-e2e]
+   ;;
+   ;; `:perf` records SQL-round-trip costs rather than asserting behaviour, and
+   ;; it counts into the same process-global counters this run reports — leaving
+   ;; it in would both slow the suite and inflate its own numbers.
+   :skip-meta [:integration :container-e2e :perf]
    :kaocha/parallelism 8}
 
   ;; Integration tests — run against the shared PG container. Each NS
@@ -44,7 +48,17 @@
   ;; :container-e2e`.
   {:id :container-e2e
    :test-paths ["test"]
-   :focus-meta [:container-e2e]}]
+   :focus-meta [:container-e2e]}
+
+  ;; Perf scenarios — what each API-level operation COSTS in SQL round trips,
+  ;; recorded via `graphden.perf.sql` into perf/runs/perf.edn for `bb perf` to
+  ;; gate. Not correctness: the same handlers are asserted by the unit suite.
+  ;; Kept out of :unit / :integration so a budget change sends you to `bb perf`
+  ;; rather than reading as a broken test, and so the suites stay about
+  ;; behaviour. `clojure -M:dev:test -m kaocha.runner :perf`.
+  {:id :perf
+   :test-paths ["test"]
+   :focus-meta [:perf]}]
 
  ;; Plugins:
  ;; - profiling: shows slowest tests

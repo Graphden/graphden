@@ -132,8 +132,15 @@
     ;; post-summary, not post-run: profiling stamps the root's duration in its
     ;; own post-run, and plugin hooks of the same name run in `tests.edn` order.
     ;; Reading the root duration from a later phase is immune to that ordering.
+    ;; The default is deliberately NOT a name any budget claims. A report is only
+    ;; meaningful for the suite that produced it, and `bb test` runs unit AND
+    ;; integration in ONE kaocha invocation — so a default of "unit.edn" would
+    ;; file both suites' counters under the unit budget and quietly change what
+    ;; that budget means depending on which task ran. Budgeted reports get their
+    ;; name from the task that scopes them (`bb test-unit`, `bb test-perf`);
+    ;; everything else lands here and is trend data.
     (let [report (collect result)
-          path (or (System/getenv "GRAPHDEN_PERF_REPORT") "perf/runs/unit.edn")]
+          path (or (System/getenv "GRAPHDEN_PERF_REPORT") "perf/runs/last.edn")]
       (try
         (write-report! report path)
         (print-summary! report)

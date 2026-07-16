@@ -362,17 +362,33 @@
                                 (print-status)
                                 (Thread/sleep 200)))]
 
-        ;; Two waves, fail-fast: the lint/commit/info checks run in parallel
+        ;; Three waves, fail-fast: the lint/commit/info checks run in parallel
         ;; first (~1 min); the unit suite (:test, ~3 min) runs ONLY if they all
         ;; pass. A formatting slip should not cost the unit suite — the exact
         ;; waste that prompted this. When `--groups` selects no :test check (e.g.
-        ;; `bb lint`), wave 2 is empty and this is just a one-wave lint run.
+        ;; `bb lint`), the later waves are empty and this is just a lint run.
+        ;;
+        ;; `:post-test` is a third wave because it READS what the test wave
+        ;; wrote: `bb perf` compares perf/runs/*.edn, which the suites emit as
+        ;; they run. In the test wave it would race them and grade the previous
+        ;; run's numbers — passing on a regression it never saw.
         (let [wave (fn [cs] (doseq [f (mapv (fn [c] (future (run-check c status results failed))) cs)] @f))
-              {test-checks true pre-checks false} (group-by #(= :test (:group %)) checks)]
+              by-group (group-by :group checks)
+              test-checks (:test by-group)
+              post-checks (:post-test by-group)
+              pre-checks (remove #(#{:test :post-test} (:group %)) checks)]
           (wave pre-checks)
           (if @failed
-            (doseq [c test-checks] (swap! status assoc (:name c) :skipped))
-            (wave test-checks))
+            (doseq [c (concat test-checks post-checks)]
+              (swap! status assoc (:name c) :skipped))
+            (do
+              (wave test-checks)
+              ;; A red suite makes the perf report meaningless — half the
+              ;; scenarios may not have run, so every count reads low and every
+              ;; budget passes. Skip rather than report a reassuring lie.
+              (if @failed
+                (doseq [c post-checks] (swap! status assoc (:name c) :skipped))
+                (wave post-checks))))
 
           ;; Stop progress display
           (reset! progress-running false)

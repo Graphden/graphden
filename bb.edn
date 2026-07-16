@@ -438,8 +438,38 @@
    :task (clojure "-M:dev:test -m kaocha.runner")}
 
   test-unit
-  {:doc "Unit tests only (skips ^:integration). ~1.5 min."
-   :task (clojure "-M:dev:test -m kaocha.runner :unit")}
+  {:doc "Unit tests only (skips ^:integration). ~1.5 min. Emits perf/runs/unit.edn — the report `bb perf` gates the suite-wide structural invariants against."
+   :task (clojure {:extra-env {"GRAPHDEN_PERF_REPORT" "perf/runs/unit.edn"}}
+                  "-M:dev:test -m kaocha.runner :unit")}
+
+  test-js
+  {:doc "JS tests that need NO graphden stack — ~15s. The type-system UI helpers (tools/browser-test/type-system-ui-*.test.js: a headless chromium, but no server — they eval editor modules and assert pure functions + DOM building) and the shared client runtime (tools/runtime-test/*.test.js: node's vm, no browser at all). Nothing ran these before: `bb test-e2e`'s runner globs `edit-*.test.js`, which they deliberately don't match, so CLAUDE.md documented invoking them by hand and CI never did."
+   :task (let [;; dir → glob. Same contract as run-edit-tests.sh: adding a file
+               ;; takes a glob, never an edit here.
+               groups {"tools/browser-test" "type-system-ui-*.test.js"
+                       "tools/runtime-test" "*.test.js"}
+               failed (atom [])]
+           (doseq [[dir pattern] groups
+                   f (sort-by str (fs/glob dir pattern))
+                   :let [file (str (fs/file-name f))
+                         ;; `:dir` matters — each script resolves its imports
+                         ;; relative to its own directory.
+                         {:keys [exit]} (p/shell {:dir dir :continue true}
+                                                 "node" file)]]
+             (when-not (zero? exit)
+               (swap! failed conj (str dir "/" file))))
+           ;; `(deref failed)`, not `@failed` — bb.edn is read as EDN, where the
+           ;; deref reader macro is not a thing.
+           (if (seq (deref failed))
+             (do (println (str red "✗ test-js: " (count (deref failed)) " failed" reset))
+                 (doseq [f (deref failed)] (println (str "    " f)))
+                 (System/exit 1))
+             (println (str green "✓ test-js" reset))))}
+
+  test-perf
+  {:doc "Perf scenarios (focus ^:perf) — what each API-level operation costs in SQL round trips, written to perf/runs/perf.edn for `bb perf` to gate. ~1 min, nearly all of it the shared fixture. In-JVM + testcontainers only: no built image, so unlike the e2e suite this runs anywhere, CI included."
+   :task (clojure {:extra-env {"GRAPHDEN_PERF_REPORT" "perf/runs/perf.edn"}}
+                  "-M:dev:test -m kaocha.runner :perf")}
 
   test-integration
   {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~10-12 min."
@@ -583,6 +613,15 @@
   ;;   group:       bb lint   = every linter (no unit tests) — fast pre-gate check
   ;;   group^2:     bb ci     = lint (fail-fast) -> unit tests
   ;;   the gate calls `bb ci`, so a stage runs at most once.
+  perf
+  {:doc "Compare this run's structural counters against perf/budgets.edn. Reads perf/runs/*.edn, which the suites write themselves — so run `bb test-unit` first. Counts, not timings: it cannot fail because the box was busy."
+   :task (load-file "scripts/perf.clj")}
+
+  perf-update
+  {:doc "Rewrite perf/budgets.edn from the current perf/runs/*.edn readings, then commit the diff (same loop as `bb visual-update`). Says loudly which budgets it RAISES — a raise is a regression being accepted."
+   :task (binding [*command-line-args* ["--update"]]
+           (load-file "scripts/perf.clj"))}
+
   ci
   {:doc "Full CI: lint (fail-fast) then unit tests, over scripts/checks.edn. ~4 min."
    :task (load-file "scripts/ci.clj")}

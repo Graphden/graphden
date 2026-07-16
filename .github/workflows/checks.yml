@@ -259,6 +259,80 @@ jobs:
       - name: Run stylelint
         run: npx stylelint 'resources/packages/app/editor/**/*.css'
 
+  # Structural performance budgets — see perf/budgets.edn.
+  #
+  # This gate reads COUNTS, never durations: SQL round trips per operation,
+  # fixture bootstraps per run, deltas that silently became full rebuilds. That
+  # is what makes it safe to run unattended on a shared runner — a count is the
+  # same number on a busy box as on an idle one, so this job cannot flake on its
+  # neighbours the way a wall-clock assertion would.
+  #
+  # It re-runs the unit suite rather than reusing the `test` job's: budgets are
+  # scoped to the suite that produced their report, and `test` runs `bb test`
+  # (unit AND integration in one invocation), whose counters are a different
+  # population. Jobs run in parallel, so this costs compute minutes, not wall
+  # time.
+  perf:
+    name: perf (structural budgets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          cli: latest
+          bb: latest
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.m2
+          key: deps-${{ hashFiles('deps.edn') }}
+          restore-keys: deps-
+
+      - name: Unit suite → perf/runs/unit.edn
+        run: bb test-unit
+
+      - name: Perf scenarios → perf/runs/perf.edn
+        run: bb test-perf
+
+      - name: Compare against perf/budgets.edn
+        run: bb perf
+
+  # The JS tests that need no graphden stack. They existed and ran nowhere:
+  # `bb test-e2e`'s runner globs `edit-*.test.js` and these deliberately don't
+  # match, so the only thing that ever invoked them was a human following
+  # CLAUDE.md. Chromium is needed (the type-system-ui tests eval editor modules
+  # inside a page); a server is not.
+  tests-js:
+    name: tests-js (no-stack JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: Install browser-test deps
+        working-directory: tools/browser-test
+        run: npm ci
+
+      - name: Install chromium
+        working-directory: tools/browser-test
+        run: npx playwright install --with-deps chromium
+
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          bb: latest
+
+      - name: Run no-stack JS tests
+        run: bb test-js
+
   shellcheck:
     name: shellcheck (.sh)
     runs-on: ubuntu-latest

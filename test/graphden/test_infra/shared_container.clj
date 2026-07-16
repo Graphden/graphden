@@ -111,7 +111,17 @@
   (let [start-time (System/currentTimeMillis)
         container (doto (PostgreSQLContainer. ^String default-postgres-image)
                     (PostgreSQLContainer/.withStartupAttempts 3)
-                    (PostgreSQLContainer/.withCommand "postgres -c max_connections=500")
+                    ;; `pg_stat_statements` is how a scenario counts its own SQL
+                    ;; without a line of instrumentation in the storage layer —
+                    ;; and it counts NORMALISED statements, so an N+1 surfaces as
+                    ;; one row reading calls=200 rather than 200 rows to eyeball.
+                    ;; It takes shared memory, so it must be preloaded at startup
+                    ;; and cannot be switched on per-scenario. Its cost lands on
+                    ;; query planning (~1%), against `graphden.perf.sql`'s ability
+                    ;; to gate an exact query count on any machine at any load.
+                    (PostgreSQLContainer/.withCommand
+                      (str "postgres -c max_connections=500"
+                           " -c shared_preload_libraries=pg_stat_statements"))
                     (PostgreSQLContainer/.start))]
     (when-not (PostgreSQLContainer/.isRunning container)
       (throw (ex-info "Failed to start shared PostgreSQL test container"

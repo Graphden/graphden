@@ -10,11 +10,14 @@
 ;; Groups drive the command hierarchy:
 ;;   :clj :web :infra :docs :sec   — domain lint sub-groups (`bb lint-clj`, …)
 ;;   :commit                       — commit-message lint (part of full lint)
-;;   :test                         — the unit suite; runs AFTER lint passes
+;;   :test                         — the suites; run AFTER lint passes
+;;   :post-test                    — reads what the test wave WROTE (`bb perf`
+;;                                   grades perf/runs/*.edn), so it cannot share
+;;                                   a wave with the runs it grades
 ;;   :info                         — non-blocking (a warning never fails the run)
 ;;
 ;; `bb lint`  = every lint/commit group.
-;; `bb ci`    = lint (fail-fast) -> test  (+ :info alongside).
+;; `bb ci`    = lint (fail-fast) -> test -> post-test  (+ :info alongside).
 ;; Order in this vector is the display order.
 [{:name "clj-kondo"     :bb "kondo"         :timeout 120000 :group :clj}
  {:name "splint"        :bb "splint"        :timeout 120000 :group :clj}
@@ -32,5 +35,8 @@
  {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec}
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec}
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
+ {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test}
  {:name "tests-unit"    :bb "test-unit"     :timeout 600000 :group :test}
+ {:name "tests-perf"    :bb "test-perf"     :timeout 300000 :group :test}
+ {:name "perf"          :bb "perf"          :timeout  60000 :group :post-test}
  {:name "outdated"      :bb "outdated"      :timeout 120000 :group :info}]

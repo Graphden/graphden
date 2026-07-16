@@ -18,7 +18,8 @@
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
     [graphden.storage.protocol.core :as sp]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.util.counters :as counters]))
 
 
 ;; =============================================================================
@@ -389,6 +390,10 @@
    read-graph → compute → prime-multi-atom sequence stays atomic
    relative to concurrent `invalidate-graph-cache!` callers."
   [ctx]
+  ;; The expensive outcome, counted where it actually happens rather than at the
+  ;; call site — a caller can ask for a delta and still land here (see
+  ;; `delta-recompile!`'s fallback). Measured at 4137 fns: 49.8 s.
+  (counters/count! :registry/rebuild)
   (call-with-invalidation-lock
     ctx
     (fn []
@@ -452,10 +457,18 @@
         reverse-deps (:reverse-deps deps-state)]
     (cond
       (or (nil? holder) (nil? @holder) (nil? reverse-deps) (empty? changed-fn-ids))
-      (rebuild! ctx)
+      ;; Counted apart from `:registry/rebuild` because this is a delta that
+      ;; WASN'T one. The caller named its changed fns and still paid for the
+      ;; whole graph; nothing in the return value says so, and no timing can
+      ;; distinguish it from a cold cache. Without this counter, a budget on
+      ;; "deltas stay deltas" would be satisfied by the fallback silently.
+      (do
+        (counters/count! :registry/delta-fell-back-to-rebuild)
+        (rebuild! ctx))
 
       :else
-      (let [storage (compile-storage ctx)
+      (let [_ (counters/count! :registry/delta-recompile)
+            storage (compile-storage ctx)
             ;; The graph we need is, in the common case, already in hand:
             ;; `invalidate-graph-cache!` splices `:graph-cache` immediately before
             ;; calling us, and that cache holds exactly this shape

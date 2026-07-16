@@ -4,7 +4,8 @@
     [graphden.crud.fn-execution.free-arg-cache :as free-arg-cache]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry :as registry]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.util.counters :as counters]))
 
 
 ;; === ExecutionContext Record ===
@@ -200,6 +201,13 @@
 
                   :else
                   (do
+                    ;; The write said nothing about what it changed, so the whole
+                    ;; registry goes. The rebuild is NOT counted here — it lands
+                    ;; later, lazily, on whichever request reads next
+                    ;; (`compile-runtime/registry`). Two full-clears before one
+                    ;; read cost one rebuild, so these two counters answer
+                    ;; different questions and must not be compared to each other.
+                    (counters/count! :registry/invalidate-full)
                     (reset! (:compiled-registry ctx) nil)
                     (cr/refresh-type-registries-from-storage! ctx))))]
      ;; An EMPTY (but non-nil) seed set is an ANSWER, not a shrug: the caller
@@ -213,7 +221,14 @@
      ;; Measured at 4137 fns: create one slot, and the next request took 49.8 s;
      ;; one namespace, 49.6 s. Reads either side of it, 14 ms. Both of those
      ;; writes used to land here, and every type-editing test creates slots.
-     (when-not (and (some? changed-fn-ids) (empty? changed-fn-ids))
+     (if (and (some? changed-fn-ids) (empty? changed-fn-ids))
+       ;; This counter IS the regression test for 0b74f1dc. The branch it guards
+       ;; is invisible from outside — the write succeeds either way, and the only
+       ;; evidence it went wrong is 49.8 s appearing on some LATER request, on a
+       ;; box that will be blamed for being busy. A count of skips that drops to
+       ;; zero says the `#{}` answer stopped being honoured, immediately and on
+       ;; any hardware.
+       (counters/count! :registry/invalidate-skipped)
        (cr/call-with-invalidation-lock ctx body)))))
 
 

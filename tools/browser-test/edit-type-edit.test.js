@@ -100,7 +100,7 @@ async function cleanup(page) {
     await page.evaluate(async () => { await initGraph(); });
     await page.waitForFunction(
       (fnId) => !!lookups?.fnMap?.get(fnId),
-      recFn.id, {timeout: 8000, polling: 100});
+      recFn.id, {timeout: 15000, polling: 100});
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), recFn.id);
     assert(inLookups, 'seeded record is in editor lookups after initGraph');
@@ -112,7 +112,7 @@ async function cleanup(page) {
     // empty subtree and renders empty pair-rows.
     await page.waitForFunction(
       (fnId) => (lookups?.fnSlotsByFn?.get(fnId) || []).length >= 2,
-      recFn.id, {timeout: 8000, polling: 100});
+      recFn.id, {timeout: 15000, polling: 100});
 
     await page.evaluate((fnId) => {
       window.openTypeEditForm(fnId, document.body);

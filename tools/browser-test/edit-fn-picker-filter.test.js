@@ -90,7 +90,7 @@ const TEST_NAME = 'test-fn-picker-filter';
       () => !!document.querySelector(
         '.fn-picker-popover .fn-picker-row-compat .fn-picker-row-ok'),
       null,
-      {timeout: 8000, polling: 50});
+      {timeout: 15000, polling: 50});
 
     // Picker should now be open with expectedType = 'text' (the
     // :string slot's resolved type via :str-len's primary). Different

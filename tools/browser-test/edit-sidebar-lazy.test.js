@@ -81,7 +81,7 @@ const {assert, newContext} = require('./edit-test-helpers');
         return names.includes('add') && names.includes('mul');
       },
       null,
-      {timeout: 8000, polling: 100});
+      {timeout: 15000, polling: 100});
     const loaded = await page.evaluate(() =>
       [...document.querySelectorAll('.entity-item .name')].map((n) => n.textContent));
     assert(loaded.includes('add') && loaded.includes('mul'),

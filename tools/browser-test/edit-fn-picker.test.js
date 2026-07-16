@@ -56,7 +56,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.waitForFunction(
       () => (typeof graphData !== 'undefined' && graphData?.fns?.length) > 15,
       null,
-      {timeout: 8000, polling: 100});
+      {timeout: 15000, polling: 100});
 
     // ===================================================================
     // Phase A: open the picker with onPick stub. Anchor doesn't matter

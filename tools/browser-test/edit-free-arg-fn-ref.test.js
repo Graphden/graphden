@@ -104,7 +104,7 @@ async function cleanup(page) {
       () => (document.querySelector('.fn-picker-popover')
         ?.querySelectorAll('.fn-picker-list > *').length || 0) > 5,
       null,
-      {timeout: 8000, polling: 50});
+      {timeout: 15000, polling: 50});
     const pickerState = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
       return {

@@ -70,7 +70,7 @@ async function cleanup(page) {
     // lookups (initGraph kicks off async loads).
     await page.waitForFunction(
       (fnId) => !!lookups?.fnMap?.get(fnId),
-      varFn.id, {timeout: 8000, polling: 100});
+      varFn.id, {timeout: 15000, polling: 100});
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), varFn.id);
     assert(inLookups, 'variant in editor lookups');

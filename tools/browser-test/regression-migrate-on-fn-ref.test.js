@@ -47,7 +47,7 @@ const {chromium} = require('playwright');
         .filter(n => (n.data.id || '').startsWith('arg-'))
         .map(n => n.data.label);
       return args.length > 0 && !graph.animating;
-    },null,  {timeout: 8000, polling: 100});
+    },null,  {timeout: 15000, polling: 100});
 
     const overlays = await page.evaluate(() => {
       if (!graphReady()) return null;

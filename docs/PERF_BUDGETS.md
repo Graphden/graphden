@@ -152,31 +152,49 @@ Nothing is instrumented in the app: Playwright sees every request by
 construction, which is the browser-side equivalent of reading
 `pg_stat_statements` instead of wrapping the JDBC calls.
 
-Current reading:
+Current reading (one stack; see the caveat below):
 
-| Scenario | API calls | KB | DOM nodes |
-|----------|-----------|-----|-----------|
-| `load-web-server` | 10 | 7809 | 718 |
-| `sidebar-expand-namespace` | 12 | 7813 | 1072 |
+| Scenario | API calls | KB on the wire | KB decoded | DOM nodes |
+|----------|-----------|-----|-----|-----------|
+| `load-web-server` | 11 | 903 | 7809 | 711 |
+| `sidebar-expand-namespace` | 13 | 904 | 7817 | 1065 |
 
-Expanding one namespace costs exactly **two** extra `?scope=namespace` requests
-and ~4 KB. That difference *is* the lazy fn-index. If the tree ever goes back to
-shipping every fn up front, the expand count collapses toward the load count and
-the load payload follows it up — a regression no other check in this repo would
-notice.
+Expanding one namespace costs exactly **two** extra `?scope=namespace` requests.
+That difference *is* the lazy fn-index. If the tree ever goes back to shipping
+every fn up front, the expand count collapses toward the load count and the
+payload follows it up.
 
-Where the 7.6 MB goes — two responses carry all of it:
+**Wire and decoded are different numbers and only one of them is traffic.** The
+server gzips and every browser asks it to, so `/api/types` is 388 KB on the wire
+and 2454 KB after decoding — 6x apart. An earlier version of this table quoted
+only the decoded figure and called it what the first paint "pulls", which
+overstated the network cost by ~8x. Both are kept now because both are real
+costs: the wire number is what the network carries, the decoded number is what
+the JS engine parses and holds.
+
+Where it goes, decoded:
 
 | Response | KB |
 |----------|-----|
 | `?scope=subtree&root-id=<web-server>` | 5325 |
 | **`/api/types`** | **2454** |
-| the other eight, together | ~30 |
+| the other nine, together | ~30 |
 
-The subtree read is known and roughly expected — PERF_NOTES sizes it at up to
-4.2 MB for a root like `web-server`. **`/api/types` returning 2.4 MB on every
-page load is not**: it appears in no PERF_NOTES table, and nothing has ever
-measured it. That is a lead, not a fix.
+`/api/types` is a **full snapshot of the rich-type registry** — every fn-def's
+`:return` and `:args`, ~2700 of them — and the editor holds all of it in one
+global (`richTypes`). That is precisely the full mirror the lazy-fn-index work
+removed for `graphData.fns`; this endpoint was missed. At 388 KB gzipped it is
+not a network crisis, but it is 2.4 MB parsed and retained to render type chips
+for the handful of fns actually on screen. Scoping it the way
+`/api/graph/entities` was scoped is real work and has not been done — recorded as
+a lead, not a fix.
+
+**These counts are NOT gated**, and cannot be as they stand: they are exact and
+stable within a stack (three runs, identical) but their input is not pinned. The
+same scenario read 10 requests on one stack and 11 on another — the extra an
+`/api/secrets` fetch that exists only where secrets are seeded, because each
+worktree has its own DB volume with its own seed. `bb perf-frontend` prints them;
+`perf/budgets.edn` deliberately has no `:frontend` suite.
 
 > **A caution, learned here.** This scenario first reported *7* calls with
 > `?scope=search` and `/api/graph/layout` duplicated, and that duplicate was

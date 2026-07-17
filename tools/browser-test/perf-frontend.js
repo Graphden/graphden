@@ -50,15 +50,25 @@ async function measure(name, drive) {
   // harness's, and the budget built on it was a budget on an artefact.
   await page.goto('about:blank');
   const apiCalls = [];
-  let bytes = 0;
+  let wireBytes = 0;
+  let decodedBytes = 0;
 
   page.on('response', async (res) => {
     const url = res.url();
     if (!url.includes('/api/')) return;
     apiCalls.push(url.replace(BASE, ''));
     try {
-      const body = await res.body();
-      bytes += body.length;
+      // BOTH, because they answer different questions and only one of them is
+      // "how much did the network carry". `res.body()` DECOMPRESSES: it read
+      // /api/types at 2454 KB when the wire carried 388 KB — the server gzips
+      // and every browser asks it to. A budget quoting the decoded number as if
+      // it were traffic is off by 6x, and this one was.
+      //
+      // The decoded number is still worth keeping: it is what the JS engine
+      // parses and holds, which is why /api/types is a memory problem in the
+      // editor even at 388 KB on the wire. Two costs, two numbers, named.
+      wireBytes += (await res.request().sizes()).responseBodySize || 0;
+      decodedBytes += (await res.body()).length;
     } catch (_) {
       // A response whose body is gone (redirect, cancelled nav) still counts as
       // a round trip; only its size is unknown. Losing the count would be worse
@@ -69,7 +79,8 @@ async function measure(name, drive) {
   try {
     await drive(page);
     const domNodes = await page.evaluate(() => document.querySelectorAll('*').length);
-    return { name, requests: apiCalls.length, kb: kb(bytes), domNodes, urls: apiCalls };
+    return { name, requests: apiCalls.length, kb: kb(wireBytes),
+             decodedKb: kb(decodedBytes), domNodes, urls: apiCalls };
   } finally {
     await browser.close();
   }
@@ -135,6 +146,7 @@ async function main() {
   const counters = results.flatMap((r) => [
     `  :frontend/${r.name}-requests ${r.requests}`,
     `  :frontend/${r.name}-kb ${r.kb}`,
+    `  :frontend/${r.name}-decoded-kb ${r.decodedKb}`,
     `  :frontend/${r.name}-dom-nodes ${r.domNodes}`,
   ]).join('\n');
 
@@ -142,7 +154,8 @@ async function main() {
   fs.writeFileSync(OUT, `{:counters\n {\n${counters}}\n :gauges {}\n :namespaces []}\n`);
 
   for (const r of results) {
-    console.log(`${r.name}: ${r.requests} API calls, ${r.kb} KB, ${r.domNodes} DOM nodes`);
+    console.log(`${r.name}: ${r.requests} API calls, ${r.kb} KB on the wire `
+                + `(${r.decodedKb} KB decoded), ${r.domNodes} DOM nodes`);
     for (const u of r.urls) console.log(`    ${u}`);
   }
   console.log(`\nperf: report written to ${OUT}`);

@@ -265,6 +265,33 @@ integration suite on the same box, while the clean run had the machine to itself
 That is one observation, not a finding. It is recorded so the next person starts
 from the three already eliminated instead of re-running them.
 
+## The one measurable win
+
+`--focus` on a single 33 ms pure-logic unit test cost **8.5 s**, with
+`:fixture/container-boot` = 1 and `:fixture/golden-bootstrap` = 1 — a PostgreSQL
+container and a ~14 s golden bootstrap, for a test that touches no database.
+`:kaocha.plugin/shared-container`'s `pre-run` did both unconditionally, on every
+kaocha invocation.
+
+The eager work is right for the full suite: it keeps the sync off the parallel
+critical path. It cannot help a single-namespace run — there is no such path to
+keep it off, and a namespace that genuinely needs the container or the golden
+pays the identical cost lazily (`get-container` and `ensure-golden!` are both
+lazy and JVM-wide idempotent). So `pre-run` — which receives the **test-plan**,
+and therefore knows — now skips both when the plan holds one namespace.
+
+```text
+kaocha wall, --focus one 33 ms test:   8510 ms  ->  116 ms   (73x)
+full unit suite:  1539 tests green, container-boot 1, golden-bootstrap 1,
+                  229 s fixture — unchanged, inside the band
+```
+
+That is the only unambiguous, large, reproducible win in this whole effort, and
+the reason is worth keeping: it changes **only the case where the optimisation
+cannot possibly help**, and leaves the case it was written for untouched. Every
+other plausible fix attempted here — memoising a hot fn, coalescing the compile
+dogpile, growing the compile cache — measured as noise or worse.
+
 ## The trend — wall-clock that survives leaving the machine
 
 `bb perf` also prints a `trend` section, and it **never fails the run**.

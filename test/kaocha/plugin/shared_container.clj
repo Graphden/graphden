@@ -11,26 +11,50 @@
   (:require
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.test-infra.shared-container :as sc]
-    [kaocha.plugin :refer [defplugin]]))
+    [kaocha.plugin :refer [defplugin]]
+    [kaocha.testable :as testable]))
+
+
+(defn- parallel-run?
+  "Will this run put more than one namespace on the pool?
+
+   `pre-run` receives the TEST-PLAN, so the answer is knowable before anything
+   boots. Both eager steps below exist purely to keep their cost off the
+   parallel critical path — with one namespace there is no such path, and if
+   that namespace needs the container or the golden it pays exactly the same
+   either way (`get-container` and `ensure-golden!` are both lazy and JVM-wide
+   idempotent). So the eager work can only lose here, never win."
+  [test-plan]
+  (< 1 (count (filter #(= :kaocha.type/ns (:kaocha.testable/type %))
+                      (testable/test-seq test-plan)))))
 
 
 (defplugin kaocha.plugin/shared-container
   "Manages shared PostgreSQL container lifecycle for tests."
 
-  ;; Called before the entire test run starts
-  (pre-run [config]
-           ;; Start container eagerly before any tests run
-           ;; This ensures container is ready when parallel namespaces start
-           (sc/get-container)
-           ;; Eagerly bootstrap the golden DB for the default
-           ;; `["core" "web" "app"]` bundle off the test threads.
-           ;; Sibling tests then only pay the ~100 ms template
-           ;; clone + ~1 s ctx rebuild — the ~14 s sync stays
-           ;; outside the parallel critical path. `ensure-golden!`
-           ;; is JVM-wide idempotent, so the first per-NS call
-           ;; that lands during a test still hits the cache.
-           (sb/ensure-golden! ["core" "web" "app"])
-           config)
+  ;; Called before the entire test run starts — with the TEST-PLAN, so we know
+  ;; how much of a run this is before paying for it.
+  (pre-run [test-plan]
+           (when (parallel-run? test-plan)
+             ;; Start the container eagerly so it is ready when the parallel
+             ;; namespaces start.
+             (sc/get-container)
+             ;; Eagerly bootstrap the golden DB for the default
+             ;; `["core" "web" "app"]` bundle, off the test threads. Siblings
+             ;; then pay only the ~100 ms template clone + ~1 s ctx rebuild —
+             ;; the ~14 s sync stays outside the parallel critical path.
+             ;; `ensure-golden!` is JVM-wide idempotent, so the first per-NS
+             ;; call landing during a test still hits the cache.
+             (sb/ensure-golden! ["core" "web" "app"]))
+           ;; Skipped for a single-namespace run, which is every `--focus`. Both
+           ;; steps are optimisations for the parallel case and neither can help
+           ;; here: with one namespace there is no critical path to keep them
+           ;; off, and a namespace that genuinely needs them pays the identical
+           ;; cost lazily. Measured: `--focus` on one 33 ms pure-logic test cost
+           ;; 8.5 s wall, all of it a container boot and a golden bootstrap it
+           ;; never touched. That is the inner loop for anyone iterating on a
+           ;; unit test.
+           test-plan)
 
   ;; Called after the entire test run completes
   (post-run [result]

@@ -111,6 +111,40 @@ async function newContext(chromium) {
     console.log('  [requestfailed]', req.method(), req.url(),
                 '—', (failure && failure.errorText) || 'unknown');
   });
+  // Two blind spots kept this suite's flake undiagnosed for weeks. Both are
+  // filled below; together they turned "a wait timed out" into "the package
+  // update took 21 s under a full heap", the observation that led to the G1
+  // Full-GC root cause.
+  //
+  // 1. The page's console.error was invisible. Editor code reports every failed
+  //    fetch there ("… fetch threw TypeError: Failed to fetch"), so the one line
+  //    naming the failing REQUEST went unprinted, and the test surfaced only the
+  //    downstream symptom — a wait that never completed.
+  page.on('console', (msg) => {
+    const t = msg.type();
+    if (t === 'error' || t === 'warning') {
+      console.log('  [console.' + t + ']', msg.text().slice(0, 300));
+    }
+  });
+  // 2. Mutating ops were untimed. HTMX drives them as XHR (not fetch), so a
+  //    fetch-wrap would miss them; page.on('response') sees both. These are the
+  //    ops whose long waits flake, so print how long each actually took and what
+  //    it returned — the difference between "the server took 60 s" (it did, a GC
+  //    stall) and "it answered in 2 s and the DOM never updated" (it didn't).
+  const started = new Map();
+  page.on('request', (req) => {
+    if (/\/api\/(packages|branches|entities)/.test(req.url())
+        && req.method() !== 'GET') started.set(req, Date.now());
+  });
+  page.on('response', (res) => {
+    const req = res.request();
+    const t0 = started.get(req);
+    if (t0 === undefined) return;
+    started.delete(req);
+    console.log('  [op] ' + req.method() + ' '
+                + res.url().replace(/^https?:\/\/[^/]+/, '')
+                + ' → ' + res.status() + ' in ' + (Date.now() - t0) + 'ms');
+  });
   // Block until /health is 200 BEFORE the initial goto. Without
   // this, a test that starts during a JVM OOM-restart window has
   // its initial page.goto fire editor's initGraph against a dead

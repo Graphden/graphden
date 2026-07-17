@@ -260,10 +260,44 @@ Two other suspects die cheaply, from logs that already existed:
   runs. That class was found and closed already, and its comment in
   `run-edit-tests.sh` is worth reading — it describes this exact trap.
 
-What is left is host load: the gate runs e2e immediately after a 17-minute
-integration suite on the same box, while the clean run had the machine to itself.
-That is one observation, not a finding. It is recorded so the next person starts
-from the three already eliminated instead of re-running them.
+What is left is host load — and that was chased to a root cause, 2026-07-17.
+
+**The flake is a G1 compaction Full-GC pause.** A SIGQUIT thread dump taken
+during a slow op shows NO thread executing graphden code — every request handler
+is suspended, because the JVM is in a stop-the-world Full GC. A wait that outlives
+the pause times out; the retry, landing outside a pause, passes. That is exactly
+"a random file flakes, green on retry".
+
+**What fills the heap.** The executor's live set is only ~250 MB, but it runs at
+~1.2 GB median, because the large API responses — `/api/types` **2.4 MB** (the
+same over-fetch this doc records under finding K), `?scope=subtree` up to 4.5 MB,
+`?scope=index` 1.6 MB — are G1 **humongous** objects (larger than half a 1 MB
+region). 756 humongous allocations at idle alone, from the reconciler's periodic
+graph reads. They fragment the heap into compaction Full GCs. **The e2e flake and
+finding K are the same bug** seen from two ends: a response too big to serve
+cheaply, and a response too big to allocate cheaply.
+
+**Measured, so nobody re-tries them as the fix:**
+
+| tried | result |
+|-------|--------|
+| 2 GB → 3 GB heap | flake unchanged — it is allocation-rate, not heap size |
+| `G1HeapRegionSize=16m` | idle humongous 756 → 0, flake ~11 → ~5 on a loaded box, but 5–7 persist at the gate's 3 GB config — partial, not an elimination |
+| `InitiatingHeapOccupancyPercent=30` | no heap-median drop |
+| (already in the Dockerfile) more heap, `G1PeriodicGCInterval`, ZGC | all rejected there for the footprint problem; none touch this |
+
+`-Xlog:gc` now ships in the Dockerfile — the whole diagnosis took a session
+because there was zero GC observability, and now it is one `docker logs` grep.
+The **complete** fix is to stop returning multi-MB responses (finding K); until
+then, `run-edit-tests.sh`'s retry masks it, and the gate counts the masked flake
+as a failure.
+
+Eight hypotheses were ruled out by measurement getting here (registry full-clear,
+restarts, OOM, entity leaks, http-kit thread starvation — it uses virtual threads,
+there is no 4-worker pool — CPU saturation, connection-pool exhaustion, and heap
+size). The instrument that finally cracked it: `console.error` + per-op timing in
+`edit-test-helpers.js`, which turned "a wait timed out" into "the update took 21 s
+under a full heap".
 
 ## The one measurable win
 

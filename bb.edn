@@ -402,12 +402,25 @@
   ;; Test target matrix
   ;; -------------------------------------------------------------------
   ;; Tests split into THREE groups by what they exercise:
-  ;;   - unit:        pure logic + light fixtures, in-JVM, ~1.5 min
+  ;;   - unit:        pure logic + light fixtures, in-JVM, ~4 min
   ;;   - integration: real PostgreSQL via testcontainers + full Ring
-  ;;                  chain, in-JVM, ~10-12 min
+  ;;                  chain, in-JVM, ~14-17 min — the most expensive
+  ;;                  thing the gate does, twice the cost of e2e
   ;;   - e2e:         Playwright browsers against a running graphden
-  ;;                  deployment (Node, separate process), ~15-25 min
+  ;;                  deployment (Node, separate process), ~11 min
   ;;                  — requires `bb rebuild` first + AUTH_TOKEN env
+  ;;
+  ;; Those are measurements, taken from three consecutive landing gates:
+  ;;   integration  841 / 928 / 998 s
+  ;;   e2e          656 / 663 / 672 s  (the suite itself is 533-550 s of that;
+  ;;                                    the rest is the isolated stack booting)
+  ;;   unit         246 s as a process, 205 s of kaocha's own wall
+  ;;
+  ;; They replace ~1.5 / ~10-12 / ~15-25 min, which had drifted in BOTH
+  ;; directions — integration was 40% dearer than advertised, e2e less than
+  ;; half. `bb wt log <name>` prints this same per-phase breakdown for any gate
+  ;; run, so the numbers are checkable rather than folklore, which is what the
+  ;; old ones had quietly become.
   ;;
   ;; Group runners (single group):
   ;;   bb test-unit         — kaocha :unit suite
@@ -434,11 +447,11 @@
   ;; cloverage on).
 
   test
-  {:doc "Run unit + integration in one kaocha invocation. ~14 min. For e2e too see `bb test-all`. For fast unit-only feedback see `bb test-unit`."
+  {:doc "Run unit + integration in one kaocha invocation. ~19 min (measured: unit ~4 + integration ~15). For e2e too see `bb test-all`. For fast unit-only feedback see `bb test-unit`."
    :task (clojure "-M:dev:test -m kaocha.runner")}
 
   test-unit
-  {:doc "Unit tests only (skips ^:integration). ~1.5 min. Emits perf/runs/unit.edn — the report `bb perf` gates the suite-wide structural invariants against."
+  {:doc "Unit tests only (skips ^:integration). ~4 min (measured: 246 s as a process, 205 s of kaocha wall; the old ~1.5 min was stale). Emits perf/runs/unit.edn — the report `bb perf` gates the suite-wide structural invariants against."
    :task (clojure {:extra-env {"GRAPHDEN_PERF_REPORT" "perf/runs/unit.edn"}}
                   "-M:dev:test -m kaocha.runner :unit")}
 
@@ -497,12 +510,12 @@
                   "-M:dev:test -m kaocha.runner :perf --no-randomize")}
 
   test-integration
-  {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~10-12 min."
+  {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~14-17 min — measured 841/928/998 s across three landing gates, and the single most expensive thing the gate does (twice e2e). The old ~10-12 min was 40% optimistic."
    :task (do (assert-gate-only! "bb test-integration")
              (clojure "-M:dev:test -m kaocha.runner :integration"))}
 
   test-e2e
-  {:doc "Playwright browser-test suite against an ISOLATED ephemeral stack via Testcontainers (postgres + user-postgres + openbao + `graphden-executor:latest`, dynamic host ports, Ryuk reaps everything on JVM exit). Demo on :9002 stays untouched. Requires `bb rebuild` (or `bb deploy`) first so `graphden-executor:latest` is present. ~30-60s for the stack to come healthy + ~15-25 min for the suite itself. See `graphden.dev.e2e-stack`."
+  {:doc "Playwright browser-test suite against an ISOLATED ephemeral stack via Testcontainers (postgres + user-postgres + openbao + `graphden-executor:latest`, dynamic host ports, Ryuk reaps everything on JVM exit). Demo on :9002 stays untouched. Requires `bb rebuild` (or `bb deploy`) first so `graphden-executor:latest` is present. ~11 min end to end, measured 656/663/672 s across three landing gates: ~2 min for the stack to come healthy + ~9 min for the suite itself (533-550 s over 56 files). The old ~15-25 min figure for the suite was measured against the DEMO on :9002, where SWEEP_DELAY defaults to 2 s and the container bounces mid-sweep; this stack does neither. See `graphden.dev.e2e-stack`."
    :task (do (assert-gate-only! "bb test-e2e")
              (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
                       "tools/browser-test/run-edit-tests.sh"))}
@@ -513,7 +526,7 @@
              (clojure "-M:dev:test -m kaocha.runner :container-e2e"))}
 
   test-all
-  {:doc "Run ALL tests (unit + integration + e2e), sequential. ~30-35 min wall. e2e requires `bb rebuild` first + AUTH_TOKEN."
+  {:doc "Run ALL tests (unit + integration + e2e), sequential. ~30 min wall — the sum of three measured legs: ~4 (unit) + ~15 (integration) + ~11 (e2e). e2e requires `bb rebuild` first + AUTH_TOKEN."
    :task (do (p/shell "bb" "test-unit")
              (p/shell "bb" "test-integration")
              (p/shell "bb" "test-e2e"))}
@@ -524,7 +537,7 @@
              (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit"))}
 
   test-all-coverage
-  {:doc "Unit-with-coverage + integration + e2e. ~30-35 min. Coverage covers unit only; integration / e2e run un-instrumented (see `bb coverage` docstring for why instrumenting integration adds zero useful per-NS signal). e2e runs in a separate Node process so cloverage can't reach it anyway."
+  {:doc "Unit-with-coverage + integration + e2e. ~41-45 min — DERIVED, not measured: ~15-19 (unit-with-coverage, itself an unverified figure from `bb coverage`'s docstring) + ~15 (integration, measured) + ~11 (e2e, measured). Coverage covers unit only; integration / e2e run un-instrumented (see `bb coverage` docstring for why instrumenting integration adds zero useful per-NS signal). e2e runs in a separate Node process so cloverage can't reach it anyway."
    :task (do (p/shell "bb" "test-unit-coverage")
              (p/shell "bb" "test-integration")
              (p/shell "bb" "test-e2e"))}

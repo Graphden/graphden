@@ -70,7 +70,7 @@ wait_for_server() {
 }
 
 # --- instrumentation --------------------------------------------------------
-# This suite takes ~46 minutes for 55 files and nobody could say why, because
+# This suite ONCE took ~46 minutes for 55 files and nobody could say why, because
 # the runner reported pass/fail and nothing else. Worse, the retry below carries
 # a note that "suite-tail tests flake under JVM GC pressure when heap passes
 # ~85%" — a diagnosis nobody ever measured, only worked around with a retry.
@@ -79,6 +79,17 @@ wait_for_server() {
 # it. "Time is spread evenly" and "three files eat ten minutes" are different
 # problems. "Heap is flat" and "heap climbs to the cap by test 30" are different
 # problems. We were guessing between them.
+#
+# It is now ~9 minutes for 56 files — 533 / 534 / 550 s across three landing
+# gates (`bb test-e2e` reads ~11 min end to end; the extra is the isolated stack
+# booting). The ~46 was measured against the DEMO on :9002, where SWEEP_DELAY
+# defaults to 2 s and the container's restart policy bounces it mid-sweep; the
+# gate's isolated stack sets SWEEP_DELAY=0 and does neither.
+#
+# That stale figure outlived its own fix by weeks — inside the very comment
+# written to stop numbers turning into folklore. Which argues FOR the
+# instrument, not against it: a printed measurement can be re-read and
+# corrected, a remembered one just gets repeated.
 executor_mem() {
   local id
   id="$(docker ps --filter "ancestor=${GD_IMAGE:-graphden-executor:latest}" \

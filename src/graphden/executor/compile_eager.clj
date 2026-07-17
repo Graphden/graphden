@@ -771,11 +771,38 @@
 ;; rather than across windows. Dropping to 2 cuts heap pressure
 ;; without losing the dominant hit case (current branch + base
 ;; branch).
+;;
+;; 2 was re-tested against 4 on the unit suite once the hit/miss counters
+;; existed, because a 7% hit rate looked like a cache that had been sized into
+;; uselessness. It hadn't:
+;;
+;;              misses   hits   suite fixture   the 3 golden NSes
+;;   size 2       101     10        239 s        78.8 / 77.3 s
+;;   size 4       100     11        214 s        69.3 / 68.9 s
+;;
+;; One fewer miss, and both totals inside the run-to-run band (237/245/258/231
+;; across four baseline runs). Size is not what those namespaces are waiting on:
+;; a ~2600-fn compile takes ~55-60 s, `compile-all`'s delay already coalesces
+;; the three of them onto ONE of those, and the other two simply BLOCK on it —
+;; which is why each still reads ~70 s (14 s golden bootstrap + ~60 s compile)
+;; while only one compile is actually running. A bigger cache cannot help a
+;; queue for work that has to happen once. Making the compile itself cheaper
+;; could; nothing here does.
 (def ^:private compile-all-cache-max-size 2)
 
 
 (def ^:private compile-all-cache
-  "Bounded LRU `[[key compiled] ...]` — head is freshest, tail is oldest."
+  "Bounded FIFO `[[key compiled] ...]` — oldest first, newest last.
+
+   FIFO, not LRU: a hit reads the entry and leaves it where it is, so two
+   compiles of unrelated graphs evict a third that is being hit constantly.
+   This said \"LRU\" for its whole life and never promoted anything.
+
+   Left as a FIFO deliberately. Proper LRU is a few lines, but the measurement
+   above says eviction is not costing this suite anything — so it would be a
+   behaviour change with no evidence behind it, which is how the last three
+   plausible fixes in this area went. The name is what was wrong; the name is
+   what is fixed."
   (atom []))
 
 

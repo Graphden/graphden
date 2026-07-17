@@ -358,12 +358,34 @@ afterwards, and suite fixture totals across four runs went 237 / 245 / 258 /
 and the convergence was suggestive, not evidence.**
 
 What the instrument did find, by counting the work instead of the ask:
-`:compile/all-miss` **103** against `:compile/all-hit` **8** — a 7% hit rate on
-a cache whose whole job is to be hit. `compile-all-cache-max-size` is **2**,
-against 8 parallel threads compiling different graphs. That, not the dogpile,
-is the next thing to look at — and note it is only visible because the counter
-sits on the compile rather than on `rebuild!`, whose 107 reads identically
-before and after every change described here.
+`:compile/all-miss` **101** against `:compile/all-hit` **10** — a 7% hit rate on
+a cache whose whole job is to be hit, with `compile-all-cache-max-size` at **2**
+against 8 parallel threads. That looked like a cache sized into uselessness.
+
+**It was tested, and it is not.** Size 4 versus size 2 over the unit suite:
+
+| | misses | hits | suite fixture | the 3 golden NSes |
+|---|---|---|---|---|
+| size 2 | 101 | 10 | 239 s | 78.8 / 77.3 s |
+| size 4 | 100 | 11 | 214 s | 69.3 / 68.9 s |
+
+One fewer miss, both totals inside the run-to-run band. Eviction is not what
+those namespaces wait on. The arithmetic that does fit: a ~2600-fn compile costs
+~55-60 s, `compile-all`'s delay already coalesces all three onto ONE of them, and
+the other two **block** on it — so each still reads ~70 s (14 s golden bootstrap +
+~60 s compile) while only one compile runs. A bigger cache cannot shorten a queue
+for work that has to happen once.
+
+So the cache is exonerated, and the honest remaining target is the compile
+itself: ~60 s for ~2600 fns, needed by three namespaces. Nothing here makes that
+cheaper. Two things were corrected on the way out: the cache called itself an
+LRU and has always been a FIFO (a hit never promotes), and that is now what it
+says — the behaviour was left alone precisely because the measurement gives no
+reason to change it.
+
+Note none of this was visible until a counter sat on the **compile** rather than
+on `rebuild!`, whose 107 reads identically before and after every change
+described here.
 
 ## Adding a scenario
 

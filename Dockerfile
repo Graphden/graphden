@@ -97,31 +97,35 @@ CMD ["java", \
      "-XX:+ExitOnOutOfMemoryError", \
      "-XX:+HeapDumpOnOutOfMemoryError", \
      "-XX:HeapDumpPath=/tmp/heap-dump.hprof", \
+     "-XX:G1HeapRegionSize=16m", \
      "-Xlog:gc:stdout:time,level,tags", \
      "-jar", "/app/executor-server.jar"]
-# `-Xlog:gc` is here because the systemic e2e flake (a different innocent test
-# each gate run, always green on retry, ~8 of 14 runs) was untraceable for weeks
-# for one reason: no GC observability. With it, the cause is one `docker logs`
-# grep away. Measured, root-caused 2026-07-17:
+# These last two flags come from root-causing the systemic e2e flake (a
+# different innocent test each gate run, always green on retry, ~8 of 14 runs),
+# untraceable for weeks for one reason: no GC observability. Measured 2026-07-17.
 #
-#   - The flake is a G1 COMPACTION Full-GC pause (stop-the-world, ~seconds on a
-#     1.5-2.3 GB heap). While it runs, every request handler is suspended — a
-#     SIGQUIT thread dump during a "slow" op shows NO thread executing graphden
-#     code, all parked. A wait that outlives the pause times out; the retry,
-#     landing outside a pause, passes. Hence "flakes on a random file, green on
-#     retry".
-#   - What fills the heap: the executor's live set is only ~250 MB, but it runs
-#     at ~1.2 GB median because large API responses (`/api/types` 2.4 MB, an
+#   - The flake is a G1 GC pause: a COMPACTION Full GC at the 2 GB heap, a
+#     humongous-allocation concurrent-start pause at the gate's 3 GB heap. Either
+#     way stop-the-world — a SIGQUIT thread dump during a "slow" op shows NO
+#     thread executing graphden code, all parked in GC. A wait that outlives the
+#     pause times out; the retry, outside a pause, passes. Hence "random file,
+#     green on retry".
+#   - What fills the heap: the live set is only ~250 MB, but the heap runs at
+#     ~1.2 GB median because large API responses (`/api/types` 2.4 MB, an
 #     `?scope=subtree` up to 4.5 MB, `?scope=index` 1.6 MB) are G1 HUMONGOUS
 #     objects (> half a 1 MB region). 756 humongous allocations at idle alone,
-#     from the reconciler's periodic graph reads. They fragment the heap into
-#     compaction Full GCs.
-#   - What did NOT help, measured (do not re-try as "the fix"): more heap
-#     (2 GB->3 GB: flake unchanged, so it is allocation-rate, not heap-size);
-#     `-XX:G1HeapRegionSize=16m` (drops idle humongous 756->0 and flakes ~11->~5
-#     on a loaded box, but 5-7 persist at the gate's 3 GB config — a real but
-#     partial mitigation, not an elimination, so it is deliberately NOT shipped
-#     here to avoid reading as a fix); `-XX:InitiatingHeapOccupancyPercent=30`
-#     (no heap-median drop). The complete fix is to stop returning multi-MB
-#     responses — the SAME over-fetch as `/api/types` in docs/PERF_BUDGETS.md.
-#     Until then the retry masks it.
+#     from the reconciler's periodic graph reads.
+#
+# `-XX:G1HeapRegionSize=16m` is a PARTIAL MITIGATION, not a fix — say this out
+# loud so it is never mistaken for one. It makes objects up to 8 MB non-humongous
+# (idle humongous 756 -> 0) and measured the flake ~11 -> ~5 on a loaded 2 GB
+# box; but 5-7 still flaked at the gate's 3 GB config, because the allocation
+# RATE still fills the heap. Shipped only to reduce the flake enough to keep the
+# suite landable. The COMPLETE fix is to stop returning multi-MB responses — the
+# SAME over-fetch as `/api/types` in docs/PERF_BUDGETS.md (finding K), tracked as
+# separate work. Until then, `run-edit-tests.sh`'s retry masks the residual.
+#
+#   - Measured NOT to help, do not re-try: more heap (2 GB->3 GB — flake
+#     unchanged, so it is allocation-rate, not heap-size);
+#     `-XX:InitiatingHeapOccupancyPercent=30` (no heap-median drop). And in the
+#     GC-footprint comment above: `G1PeriodicGCInterval` and ZGC, both rejected.

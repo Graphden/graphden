@@ -282,15 +282,16 @@ cheaply, and a response too big to allocate cheaply.
 | tried | result |
 |-------|--------|
 | 2 GB → 3 GB heap | flake unchanged — it is allocation-rate, not heap size |
-| `G1HeapRegionSize=16m` | idle humongous 756 → 0, flake ~11 → ~5 on a loaded box, but 5–7 persist at the gate's 3 GB config — partial, not an elimination |
-| `InitiatingHeapOccupancyPercent=30` | no heap-median drop |
+| `G1HeapRegionSize=16m` | idle humongous 756 → 0, flake ~11 → ~5 on a loaded box; 5–7 still flaked at the gate's 3 GB config. **Shipped as a partial mitigation** — enough to keep the suite landable, not an elimination |
+| `InitiatingHeapOccupancyPercent=30` | no heap-median drop — not shipped |
 | (already in the Dockerfile) more heap, `G1PeriodicGCInterval`, ZGC | all rejected there for the footprint problem; none touch this |
 
-`-Xlog:gc` now ships in the Dockerfile — the whole diagnosis took a session
-because there was zero GC observability, and now it is one `docker logs` grep.
-The **complete** fix is to stop returning multi-MB responses (finding K); until
-then, `run-edit-tests.sh`'s retry masks it, and the gate counts the masked flake
-as a failure.
+Two flags ship in the Dockerfile: `-Xlog:gc` (the whole diagnosis took a session
+because there was zero GC observability — now it is one `docker logs` grep) and
+`-XX:G1HeapRegionSize=16m` (the partial mitigation above, labelled as such so it
+is never read as the fix). The **complete** fix is to stop returning multi-MB
+responses (finding K); until then, `run-edit-tests.sh`'s retry masks the
+residual, and the gate counts the masked flake as a failure.
 
 Eight hypotheses were ruled out by measurement getting here (registry full-clear,
 restarts, OOM, entity leaks, http-kit thread starvation — it uses virtual threads,

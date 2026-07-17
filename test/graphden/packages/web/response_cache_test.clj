@@ -14,7 +14,17 @@
    - the flush-all-at-64 capacity eviction keeps the map bounded.
 
    Each test uses its own key namespace so the shared cell can't cross-
-   talk between deftests."
+   talk between deftests.
+
+   BLIND SPOT (measured 2026-07-17): these execute `put-if!` and `get`
+   BY NAME, so both resolve to compile-all's SINGLE shared bake of
+   `:response-cache-cell` and the roundtrip always works. They do NOT
+   compile the composed handler wrap (`:_app-cached` = cache→encode→
+   realize→handler), where the store and lookup are separate SUBTREES of
+   one compiled fn — and a structural change there can make the `:cell`
+   bake TWO atoms (store one, read the other), silently killing every
+   immutable-asset cache hit while these tests stay green. See the
+   `DO NOT \"dedup\" the encode` note in `app/server/fns.edn`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]

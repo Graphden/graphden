@@ -133,6 +133,30 @@
   ;;   so control-plane admin HTML / unknown-branch 400 / tenant
   ;;   app-router responses — which bypass :router-ring-response — still
   ;;   ship the security headers. Idempotent for the normal path.
+  ;;
+  ;; DO NOT "dedup" the encode. This chain looks like it double-encodes:
+  ;; `:_app-encoded` runs `:encode-stringify-wrap`, and `:response-cache-
+  ;; wrap`'s own `:_fresh-response` is ALSO an `:encode-stringify-wrap`
+  ;; over the base-handler — so on a cache MISS `process-response` fires
+  ;; twice (the 2nd compression is a no-op via the `Content-Encoding`
+  ;; guard). It is tempting to remove `:_app-encoded` (point the cache at
+  ;; `:_app-realized`) or to stop the cache re-encoding. BOTH silently
+  ;; BREAK the immutable-response cache: they change the wrap structure
+  ;; enough that `:response-cache-cell` (a `:cell`, compile-time-value-
+  ;; baked) compiles to TWO atoms — the store subtree resets one, the
+  ;; lookup subtree derefs the other — so the cache never hits and every
+  ;; asset re-encodes on every request. Measured 2026-07-17: original
+  ;; 2→0→0 process-response across three identical asset requests (miss
+  ;; then hit then hit); both "dedup" variants 1→1→1 (miss every time).
+  ;; The redundant encode is the price of keeping the cell atom shared
+  ;; under the current compiler; the split is a latent compile_eager
+  ;; fragility, not a semantic requirement. NOTE: no test catches this —
+  ;; `web.response-cache-test` exercises the cache PRIMITIVES by name
+  ;; (store and read resolve to compile-all's single shared bake), so it
+  ;; passes even when the composed wrap splits the atom. A faithful guard
+  ;; would execute this composed chain and assert a 2nd identical request
+  ;; is a hit (inner handler runs once); until it exists, this comment is
+  ;; the guard.
 
   {:name :_app-secured
    :description "Branch-routed handler with default security headers stamped onto every response (incl. the dispatch-layer responses that bypass :router-ring-response)."

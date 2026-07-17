@@ -44,6 +44,17 @@
     (DriverManager/getConnection ^String jdbc-url props)))
 
 
+(defn- wait-for
+  "Poll `pred` until truthy or `ms` elapses; returns the truthy value or
+   nil on timeout. Used where the condition becomes true ASYNCHRONOUSLY
+   (Postgres reaping an orphaned backend) so the assert doesn't race the
+   server-side cleanup under host load."
+  [ms pred]
+  (let [deadline (+ (System/currentTimeMillis) ms)]
+    (loop [] (or (pred) (when (< (System/currentTimeMillis) deadline)
+                          (Thread/sleep 25) (recur))))))
+
+
 (deftest two-pods-only-one-wins-test
   (testing "first try-lock! wins, second sees false (same service-id)"
     (let [pg-opts (pg-opts-from-fixture)
@@ -135,10 +146,15 @@
       (try
         (is (true? (pg-lock/try-lock! (pg-lock/holder-conn holder) svc-id))
             "pod holds the lock")
-        ;; Drop the pod's lock connection — Postgres releases its lock.
+        ;; Drop the pod's lock connection — Postgres releases its lock
+        ;; when it reaps the orphaned backend. That reap is ASYNCHRONOUS:
+        ;; closing the client socket does not synchronously free the
+        ;; session lock, so poll until the sibling can take it rather
+        ;; than racing the server-side cleanup (a fixed immediate assert
+        ;; flakes under host load, when the reap lags behind it).
         (Connection/.close (pg-lock/holder-conn holder))
-        (is (true? (pg-lock/try-lock! sibling svc-id))
-            "with the pod disconnected, a sibling CAN take the lock — this is ")
+        (is (true? (wait-for 10000 #(pg-lock/try-lock! sibling svc-id)))
+            "with the pod disconnected, a sibling CAN take the lock once PG reaps the dead backend")
         ;; Sibling releases; pod reconnects and re-acquires successfully
         ;; (nobody holds it now).
         (is (true? (pg-lock/release-lock! sibling svc-id)))

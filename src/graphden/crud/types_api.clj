@@ -588,6 +588,46 @@
 (defn all-rich-types
   "Body of the `all-rich-types` base-fn. Snapshot of the in-memory
    rich-type registry, augmented with structural definitions for
-   storage-only type-rows."
+   storage-only type-rows.
+
+   FULL — every per-entry field. This is the internal single-source-of-
+   truth `/api/types/candidates` inherits (`:_types-candidates-snapshot`);
+   the HTTP wire-shaping (lean bulk / per-fn) lives in `api-rich-types`."
   [ctx]
   (rich-types-with-type-rows ctx))
+
+
+(def bulk-omitted-fields
+  "Per-entry fields dropped from the BULK `/api/types` payload. Either NO
+   editor code reads them off the type registry (`:source-file` /
+   `:source-line` / `:tags` / `:arg-effects` / `:call-time-effects` /
+   `:description` — the editor sources descriptions from graph rows, not
+   from here), OR the sole reader is a click-driven popover that now
+   backfills them per-fn via `?fn=<name>` (`:resolved-bindings`, read by
+   the return-type-rule provenance popover). Measured 2026-07-16: these
+   were ~57% of the 2.4 MB decoded payload, re-fetched on every mutation,
+   to paint chips for the handful of fns on screen. Kept in bulk:
+   `:return` / `:args` / `:effects` / `:primary-parent` / `:slot-types` /
+   `:nav-types` / `:type-row?` + the rule-presence flags — the fields the
+   bulk chip/strip paint reads for every rendered fn. See
+   docs/PERF_BUDGETS.md finding K."
+  [:resolved-bindings :description :source-file :source-line :tags
+   :arg-effects :call-time-effects])
+
+
+(defn api-rich-types
+  "Body of the `api-rich-types` base-fn — the wire-shaping layer over
+   `all-rich-types` for `GET /api/types`.
+
+   - `fn-name` nil/blank → the full augmented snapshot with
+     `bulk-omitted-fields` stripped from every entry (the lean bulk
+     payload the editor loads at boot + after each mutation).
+   - `fn-name` set → the single FULL entry for that fn, keyed by name
+     (`{name entry}`), so the client can `Object.assign` it back into its
+     `richTypes` cache and backfill the omitted fields on demand."
+  [ctx fn-name]
+  (let [all (rich-types-with-type-rows ctx)]
+    (if (and fn-name (seq (str fn-name)))
+      (let [k (keyword (str fn-name))]
+        (if-let [e (get all k)] {k e} {}))
+      (update-vals all #(apply dissoc % bulk-omitted-fields)))))

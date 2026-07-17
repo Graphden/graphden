@@ -241,8 +241,15 @@
    :effects #{:db}}
 
   {:name :all-rich-types
-   :description "Snapshot of the in-memory rich-type registry. Returns `{fn-name {:return type :args {arg-name type}}}` for every base-fn AND composed fn-def the type-checker has processed. Powers `/api/types` — editor and external tools use this to know what each slot accepts."
+   :description "Snapshot of the in-memory rich-type registry. Returns `{fn-name {:return type :args {arg-name type}}}` for every base-fn AND composed fn-def the type-checker has processed. FULL — every per-entry field. Internal single-source-of-truth for `/api/types/candidates` (`:_types-candidates-snapshot`); the HTTP wire-shaping (lean bulk / per-fn) lives in `:api-rich-types`."
    :args {}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :api-rich-types
+   :description "Wire-shaping snapshot behind `GET /api/types`. With `fn-name` nil → the full rich-type snapshot minus the heavy on-demand/unused per-entry fields (`:resolved-bindings` / `:description` / `:source-file` / `:source-line` / `:tags` / `:arg-effects` / `:call-time-effects`) — ~57% smaller (docs/PERF_BUDGETS.md finding K). With `fn-name` set → the single FULL entry `{name entry}` for that fn, the `?fn=<name>` backfill the return-type-rule provenance popover fetches for `:resolved-bindings`."
+   :args {:fn-name {:type :nullable-text
+                    :description "Optional fn name. When set, return only that fn's FULL entry (all fields); when nil, the lean full snapshot."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -4228,6 +4235,12 @@
    :args {:request {:as :request}
           :param-name {:value "q"}}}
 
+  {:name :_api-types-fn-name
+   :description "Pull the `fn` query param off the Ring request — names the single fn whose FULL rich-type entry `/api/types?fn=<name>` returns. `nil` when absent → the lean bulk snapshot."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "fn"}}}
+
   {:name :all-entities-handler
    :description "Ring handler that returns the graph dump as JSON. `?scope=tree` → `{:namespaces :counts}` (sidebar init). `?scope=namespace&namespace-id=X` → one namespace's light fns (lazy expand). `?scope=search&q=…` → capped name matches (filter / pickers). `?scope=index` → `{:fns :namespaces}` full pull. `?scope=subtree&root-id=X` → subgraph reachable from X. Bound by `app.routes.api-entities`."
    :parent :json-handler
@@ -4238,9 +4251,10 @@
                         :q :_all-entities-q}}}}
 
   {:name :all-rich-types-handler
-   :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON. Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."
+   :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON. `?fn=<name>` → that fn's FULL entry; otherwise the lean bulk snapshot (heavy on-demand/unused fields omitted, docs/PERF_BUDGETS.md finding K). Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."
    :parent :json-handler
-   :args {:data :all-rich-types}}
+   :args {:data {:parent :api-rich-types
+                 :args {:fn-name :_api-types-fn-name}}}}
 
   {:name :value-kinds-handler
    :description "Ring handler for `GET /api/value-kinds` — returns the `value_kind` schema enum as a JSON array of primitive type-tag strings."

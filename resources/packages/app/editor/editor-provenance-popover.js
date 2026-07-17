@@ -410,11 +410,45 @@ function arithRetNarrator(op, b, ret) {
 // :name :int to map's record shape"), and lists the inputs that fed
 // into it.
 //
+// Backfill one fn's FULL rich-type entry (the fields the bulk
+// `/api/types` payload omits — `:resolved-bindings` etc., finding K)
+// via `GET /api/types?fn=<name>`, merging it into the `richTypes`
+// cache so the enriched entry is reused on later opens. Best-effort:
+// on any failure returns whatever the lean entry already had. The
+// per-fn response is `{name: fullEntry}`, so `Object.assign` backfills
+// in place.
+async function ensureRichTypeFullEntry(name) {
+  if (!name || typeof richTypes !== 'object' || !richTypes) return null;
+  const cur = richTypes[name];
+  if (cur && 'resolved-bindings' in cur) return cur; // already full
+  try {
+    const r = await authFetch(API.api_types + '?fn=' + encodeURIComponent(name));
+    if (r.ok) {
+      const data = await r.json();
+      if (data && typeof data === 'object') Object.assign(richTypes, data);
+    }
+  } catch (_) {
+    // best-effort — fall through to the lean entry
+  }
+  return richTypes[name] || cur || null;
+}
+
+
 // Reuses the same singleton DOM element and dismiss handler as the
 // slot-narrowing popover above — only one provenance popover is open
 // at a time.
-function showReturnTypeRulePopover(fnEntry, parentName, parentFnId, anchorEl) {
+async function showReturnTypeRulePopover(fnEntry, parentName, parentFnId, anchorEl, fnName) {
   if (!fnEntry || !parentName || !anchorEl) return;
+  // The bulk `/api/types` payload omits `:resolved-bindings` (it is
+  // ~36% of the snapshot and only THIS popover reads it — finding K).
+  // Backfill the one fn's full entry on open, then read from the
+  // enriched entry. `'resolved-bindings' in fnEntry` is the "already
+  // full" flag: present (even `{}`) means the per-fn fetch ran or the
+  // field was never omitted.
+  if (fnName && !('resolved-bindings' in fnEntry)) {
+    const full = await ensureRichTypeFullEntry(fnName);
+    if (full) fnEntry = full;
+  }
   const el = ensureProvenancePopoverEl();
   el.textContent = '';
 

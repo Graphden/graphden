@@ -274,7 +274,7 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
             if (f.name === ruleOwner) { ruleOwnerFnId = f.id; break; }
           }
         }
-        showReturnTypeRulePopover(entry, ruleOwner, ruleOwnerFnId, provBtn);
+        showReturnTypeRulePopover(entry, ruleOwner, ruleOwnerFnId, provBtn, cardFnEntity.name);
       });
       strip.appendChild(provBtn);
     }

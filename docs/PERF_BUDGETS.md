@@ -184,10 +184,21 @@ Where it goes, decoded:
 `:return` and `:args`, ~2700 of them — and the editor holds all of it in one
 global (`richTypes`). That is precisely the full mirror the lazy-fn-index work
 removed for `graphData.fns`; this endpoint was missed. At 388 KB gzipped it is
-not a network crisis, but it is 2.4 MB parsed and retained to render type chips
-for the handful of fns actually on screen. Scoping it the way
-`/api/graph/entities` was scoped is real work and has not been done — recorded as
-a lead, not a fix.
+not a network crisis, but it was 2.4 MB parsed and retained to render type chips
+for the handful of fns actually on screen.
+
+**Scoped (finding K), the way `/api/graph/entities` was.** The bulk payload now
+drops the per-entry fields nothing paints from: `:resolved-bindings` (~36 %, read
+only by the click-driven return-type-rule provenance popover, which backfills the
+one fn via `GET /api/types?fn=<name>`), `:description` (~12 %, the editor sources
+descriptions from graph rows, not the type registry), and `:source-file` /
+`:source-line` / `:tags` / `:arg-effects` / `:call-time-effects` (zero editor
+reads). Measured on a live stack: **2454 KB → 1047 KB decoded (−57 %), 388 KB →
+119 KB gzipped (−69 %)**, with `:return` / `:args` / `:effects` / `:primary-parent`
+/ `:slot-types` / `:nav-types` kept for the bulk chip/strip paint. `all-rich-types`
+stays FULL (the internal `/api/types/candidates` source-of-truth); the lean-bulk /
+per-fn split lives in `api-rich-types`. This is a payload/network/parse win — it is
+**not** the e2e-flake fix (see "What fills the heap" below).
 
 **These counts are NOT gated**, and cannot be as they stand: they are exact and
 stable within a stack (three runs, identical) but their input is not pinned. The
@@ -269,13 +280,33 @@ the pause times out; the retry, landing outside a pause, passes. That is exactly
 "a random file flakes, green on retry".
 
 **What fills the heap.** The executor's live set is only ~250 MB, but it runs at
-~1.2 GB median, because the large API responses — `/api/types` **2.4 MB** (the
-same over-fetch this doc records under finding K), `?scope=subtree` up to 4.5 MB,
-`?scope=index` 1.6 MB — are G1 **humongous** objects (larger than half a 1 MB
-region). 756 humongous allocations at idle alone, from the reconciler's periodic
-graph reads. They fragment the heap into compaction Full GCs. **The e2e flake and
-finding K are the same bug** seen from two ends: a response too big to serve
-cheaply, and a response too big to allocate cheaply.
+~1.2 GB median. The large API responses — `?scope=subtree` up to 4.5 MB,
+`?scope=index` 1.6 MB, `/api/types` 2.4 MB — are G1 **humongous** objects (larger
+than half a 1 MB region); 756 humongous allocations at idle alone, from the
+reconciler's periodic graph reads. They fragment the heap into compaction Full
+GCs. The pressure is **aggregate** — the sum of many normal-sized-but-humongous
+responses across the suite — not one dominant endpoint.
+
+**The flake is NOT a single-endpoint over-fetch (measured 2026-07-16).** An
+earlier version of this section claimed "the e2e flake and finding K are the same
+bug" and pointed at `/api/types`. Direct measurement refuted it, so nobody
+re-attempts scoping `/api/types` as the flake fix:
+
+- `/api/types` is **~0.1 %** of bytes served during an editor load — scoping it
+  removes 0.1 % of heap pressure, not the flake.
+- The "441 K wrap calls / 463 GB" figure that made it look dominant was a **probe
+  artifact**: `process-response` is invoked **52–126× per single HTTP request**
+  (the encode-wrap graph re-enters per composed step), and the probe summed bytes
+  once per invocation. A page load is **5** browser requests, not thousands.
+- Those 52–126 re-invocations are cheap **call-cache hits**, not real work:
+  `?scope=index` returns in 0.21 s, far under the ~1.7 s that 57× full
+  re-evaluation would cost. So no single response's allocation dominates, and
+  there is no clean "scope this one endpoint" flake fix — the 16 MB region flag
+  below is the mitigation that actually moves the needle.
+
+The wrap-chain multi-invocation is real but cheap; whether it is worth
+restructuring is tracked separately (it is an efficiency question on the hot
+path, not the flake driver).
 
 **Measured, so nobody re-tries them as the fix:**
 
@@ -289,9 +320,12 @@ cheaply, and a response too big to allocate cheaply.
 Two flags ship in the Dockerfile: `-Xlog:gc` (the whole diagnosis took a session
 because there was zero GC observability — now it is one `docker logs` grep) and
 `-XX:G1HeapRegionSize=16m` (the partial mitigation above, labelled as such so it
-is never read as the fix). The **complete** fix is to stop returning multi-MB
-responses (finding K); until then, `run-edit-tests.sh`'s retry masks the
-residual, and the gate counts the masked flake as a failure.
+is never read as the fix). A **complete** fix would cut the aggregate humongous-
+allocation rate — no single endpoint carries it, so it is broad allocation
+reduction, not one response to scope. Until then, `run-edit-tests.sh`'s retry
+masks the residual, and the gate counts the masked flake as a failure. (Finding K
+— `/api/types` over-fetch — is a real payload/network win worth doing on its own
+merits, but it is **not** this flake's fix; see the measurement above.)
 
 Eight hypotheses were ruled out by measurement getting here (registry full-clear,
 restarts, OOM, entity leaks, http-kit thread starvation — it uses virtual threads,

@@ -362,6 +362,51 @@
 
 
 ;; ============================================================================
+;; api-rich-types — the HTTP wire-shaping layer over all-rich-types
+;; (lean bulk / per-fn ?fn=). Finding K: docs/PERF_BUDGETS.md.
+;; ============================================================================
+
+(deftest api-rich-types-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      ;; A record type-row carrying a :description — :description is one
+      ;; of the fields the lean bulk omits, so it is a deterministic
+      ;; probe for the projection without needing a resolved-bindings
+      ;; fixture.
+      (let [rec  (sp/create-entity storage :fn
+                                   {:name "arttr-rec" :parent-ids []
+                                    :description "a described row"})
+            s1   (setup/create-slot! storage "title" :text)
+            s2   (setup/create-slot! storage "count" :int)
+            _    (setup/attach-slot! storage (:id rec) (:id s1) 0)
+            _    (setup/attach-slot! storage (:id rec) (:id s2) 1)
+            full (ta/all-rich-types c)
+            lean (ta/api-rich-types c nil)]
+        (testing "lean bulk keeps every fn (same key set as the full snapshot)"
+          (is (= (set (keys full)) (set (keys lean)))))
+        (testing "lean bulk strips every omitted field from every entry"
+          (is (every? (fn [e] (not-any? #(contains? e %) ta/bulk-omitted-fields))
+                      (vals lean))))
+        (testing "lean bulk retains the fields the chip/strip paint reads"
+          (let [e (get lean :arttr-rec)]
+            (is (some? e))
+            (is (contains? e :return))
+            ;; :description IS omitted from the lean entry …
+            (is (not (contains? e :description)))))
+        (testing "?fn=<name> returns that one fn's FULL entry, keyed by name"
+          (let [one (ta/api-rich-types c "arttr-rec")]
+            (is (= [:arttr-rec] (keys one)))
+            ;; … but present again in the per-fn backfill.
+            (is (= "a described row" (:description (get one :arttr-rec))))))
+        (testing "?fn= for an unknown fn is an empty map, not an error"
+          (is (= {} (ta/api-rich-types c "no-such-fn-xyzzy"))))
+        (testing "a blank fn-name behaves like nil (bulk, not per-fn)"
+          (is (= (set (keys lean)) (set (keys (ta/api-rich-types c "")))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
 ;; types-candidates
 ;; ============================================================================
 

@@ -244,6 +244,18 @@
   (types-api/all-rich-types ctx))
 
 
+(defbase api-rich-types
+  [fn-name]
+  ;; Wire-shaping layer over `all-rich-types` for `GET /api/types`: strips
+  ;; the heavy on-demand/unused per-entry fields from the bulk payload, or
+  ;; returns one full entry when `fn-name` is set (the `?fn=<name>`
+  ;; backfill the return-type-rule provenance popover fetches for
+  ;; `:resolved-bindings`). Same `:db` read as `all-rich-types`. See
+  ;; docs/PERF_BUDGETS.md finding K.
+  (cr/record-effect! :db)
+  (types-api/api-rich-types ctx fn-name))
+
+
 (defbase fn-names-with-tag
   "Set of fn-NAMES (as text/strings) declared with the given `tag` in
    their `:tags`. Single library call over
@@ -613,6 +625,7 @@
    :service-blocking-free-args service-blocking-free-args
    :list-all-graph-entities list-all-graph-entities
    :all-rich-types all-rich-types
+   :api-rich-types api-rich-types
    :fn-names-with-tag fn-names-with-tag
    :query-ref-many-owners query-ref-many-owners
    :json-to-type json-to-type-fn

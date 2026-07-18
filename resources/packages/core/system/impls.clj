@@ -10,6 +10,7 @@
     [cheshire.core :as json]
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.types.core :as types]
@@ -131,6 +132,15 @@
 (defbase counters-snapshot []
   (cr/record-effect! :io)
   (counters/snapshot))
+
+
+(defbase log-warn-fn
+  "One library call — `clojure.tools.logging/warn`. The graph's
+   observability primitive for best-effort failure paths (a graph
+   `:try` whose `:on-throw` must stay visible to operators)."
+  [message data]
+  (cr/record-effect! :io)
+  (log/warn message data))
 
 
 (defbase current-time-ms []
@@ -297,6 +307,7 @@
    :os-processors os-processors-fn
    :os-load-average os-load-average-fn
    :counters-snapshot counters-snapshot
+   :log-warn log-warn-fn
    :current-time-ms current-time-ms
    :env env-fn
    :ex-info {:impl ex-info-fn :return-type-rule (types/wrap-with-taint nil)}

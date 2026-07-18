@@ -89,12 +89,20 @@
    :description "Type-row exposing the `:ns-id :nullable-uuid` input slot of `:fn-ns-path`."
    :type {:ns-id :nullable-uuid}}
 
+  ;; `:fix` returns `:any`; the `:const` wrapper carries the author
+  ;; `:type :text` assertion (the step's terminal is always a
+  ;; `:str-join`), keeping the public return-type callers see.
   {:name :fn-ns-path
    :description "Walk the `:ns` parent-id chain from `ns-id` to root, joining each name with `.`. `:_<core.refinements ns-id>` → `\"core.refinements\"`. Empty string when `ns-id` is nil. Depth-capped at 20. Pure graph composition over `:fix` + `:get-entity`."
+   :parent :const
+   :args {:value {:ref :_nsp-run :type :text}}
+   :return-type :text}
+
+  {:name :_nsp-run
+   :description "The `:fix` walk itself — see `:fn-ns-path`."
    :parents [:fix :FnNsPathInput]
    :args {:step :_nsp-step
-          :input :_nsp-initial}
-   :return-type :text}
+          :input :_nsp-initial}}
 
   {:name :_nsp-initial
    :description "Initial walk state — empty name accumulator, cursor at the starting ns, depth 0."

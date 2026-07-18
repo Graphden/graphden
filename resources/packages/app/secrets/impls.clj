@@ -53,30 +53,13 @@
 
 
 ;; --- delete-secret ---
-
-
-
-(defbase _delete-secret-vault-cleanup
-  "Best-effort vault delete. Suppresses failures internally — graph
-   doesn't need a separate :try wrapper."
-  [path]
-  (cr/record-effect! :network)
-  (secrets/delete-secret-vault-cleanup! path ctx))
-
-
-(defbase _delete-secret-storage-cleanup
-  "Delete the path-binding (if present) and the fn-row through
-   `crud-entities/delete-entity` so the graph cache invalidates on
-   each. Atomic helper (multi-row delete contract)."
-  [parsed]
-  (cr/record-effect! :db)
-  (secrets/delete-secret-storage-cleanup! parsed ctx))
+;; `:_delete-secret-vault-cleanup` (:try over :vault-delete + :log-warn)
+;; and `:_delete-secret-storage-cleanup` (:do over two :delete-entity)
+;; are pure graph compositions in fns.edn — no impls here.
 
 
 (def impls
   {:_apply-create-secret-body     _apply-create-secret-body
-   :_delete-secret-vault-cleanup  _delete-secret-vault-cleanup
-   :_delete-secret-storage-cleanup _delete-secret-storage-cleanup
    :_apply-inline-bind-body       _apply-inline-bind-body
    :_apply-secret-rollback        _apply-secret-rollback
    :_rotate-secret-not-owned?     _rotate-secret-not-owned?})

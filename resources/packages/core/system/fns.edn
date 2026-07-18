@@ -230,6 +230,14 @@
    :parent :assoc
    :args {:map :_memory-section :key "threads" :value :thread-count}}
 
+  {:name :log-warn
+   :description "Log a WARN line (`clojure.tools.logging/warn`) with a message + structured data map. Returns nil. The observability primitive for best-effort failure paths — a graph `:try` whose `:on-throw` swallows the error must still leave a trace for operators (e.g. vault drift during secret delete)."
+   :args {:message {:type :text :description "Human-readable warning."}
+          :data {:type :jsonb :value {} :required false
+                 :description "Structured context map logged alongside the message."}}
+   :return-type :null
+   :effects #{:io}}
+
   {:name :current-time-ms
    :description "Wall-clock milliseconds since Unix epoch."
    :args {}

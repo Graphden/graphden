@@ -108,26 +108,27 @@
 
 
 ;; =============================================================================
-;; app/registry — :publish-package records BOTH :db and :time
+;; app/registry — :publish-package-apply records BOTH :db and :time
 ;;
 ;; The fns.edn declaration is `:effects #{:db :time}`. The impl records
 ;; both at the top of the body (before `require-storage`), so a nil ctx
 ;; explodes on storage AFTER both effects have fired. Guards against the
 ;; declaration and the runtime instrumentation drifting apart — the
 ;; :time effect exists because the impl stamps `Instant/now` on the row.
+;; (`:publish-package` itself is a graph `:if` over this core now.)
 ;; =============================================================================
 
-(deftest publish-package-records-db-and-time-effects-test
-  (let [impl (unwrap registry-ns 'publish-package)
+(deftest publish-package-apply-records-db-and-time-effects-test
+  (let [impl (unwrap registry-ns 'publish-package-apply)
         trace (atom #{})]
-    (is (some? impl) "publish-package impl loaded")
+    (is (some? impl) "publish-package-apply impl loaded")
     (binding [cr/*effect-trace* trace]
-      (try (impl {:pkg-name "x" :pkg-version "1.0.0" :bundle {}} nil)
+      (try (impl {:pkg-name "x" :pkg-version "1.0.0" :bundle {:fns [{:name :x}]}} nil)
            (catch Exception _)))
     (is (contains? @trace :db)
-        ":db recorded on publish-package call")
+        ":db recorded on publish-package-apply call")
     (is (contains? @trace :time)
-        ":time recorded on publish-package call (matches fns.edn :effects)")))
+        ":time recorded on publish-package-apply call (matches fns.edn :effects)")))
 
 
 (deftest pure-impls-do-not-record-effects-test

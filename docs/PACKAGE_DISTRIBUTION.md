@@ -295,8 +295,12 @@ as `:namespace` on each fn-def, reconstructed on install).
   `:package-version` (name+version) that owns them — into a new
   `:package-dependencies` field on the row (`{:name :version}` list;
   platform-only packages get `[]`). `install-package` then pulls those
-  packages FIRST, depth-first with a `[name version]` cycle guard
-  (`install-recursive!` → `install-one!`), so a package's cross-package refs
+  packages FIRST, depth-first with a `[name version]` cycle guard — since the
+  graph decomposition it is a `:fix` worklist loop of graph fn-defs (the
+  `:_inst-*` chain in `app/registry/fns.edn`) over the base-fn primitives
+  (`:resolve-package-version` / `:missing-package-dependencies` /
+  `:package-version-materialized?` / `:materialize-package-fns` /
+  `:package-upsert-pin`) — so a package's cross-package refs
   resolve without manual ordering. Best-effort on ns-root sharing: if several
   packages publish the same `(ns-root, version)`, the first registry match is
   recorded (they materialise the same rows). The name-based

@@ -36,31 +36,24 @@
   (export/read-graph (request/require-storage ctx)))
 
 
-;; Atomic publish: reject if `(pkg-name, pkg-version)` already exists,
-;; else hash + insert. Invariant-bearing (immutability) algorithm — a
-;; legitimate base-fn (packages-quality §3) and race-safer than spreading
-;; check-then-insert across graph nodes. The app-level existence check is
-;; the Phase-1 guard; a DB-level UNIQUE(name, version) is the hardening
-;; follow-up noted in the schema. Returns a tagged `{:ok …}` result so the
-;; route serialises success and conflict the same way (no throw/`:try`).
-(defbase publish-package
+;; Atomic publish core: reject if `(pkg-name, pkg-version)` already
+;; exists, else hash + insert. The existence check stays ADJACENT to the
+;; insert (one base-fn) to keep the check-then-insert race window
+;; minimal until the DB-level UNIQUE(name, version) hardening noted in
+;; the schema ships. The empty-bundle rejection is a pure input
+;; predicate with no race relevance, so it lives in the graph
+;; (`:publish-package` is now an `:if` fn-def over this core). Returns a
+;; tagged `{:ok …}` result so the route serialises success and conflict
+;; the same way (no throw/`:try`).
+(defbase publish-package-apply
   [pkg-name pkg-version bundle]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)
         fns (:fns bundle)]
-    (cond
-      ;; Reject an empty bundle up front — a typo'd / non-existent `:ns-root`
-      ;; exports zero fns, and without this the panel's publish form would
-      ;; write a 0-fn garbage row into the registry.
-      (empty? fns)
-      {:ok false :reason "empty-bundle" :name pkg-name :version pkg-version}
-
-      (seq (sp/query-entities storage :package-version
-                              {:name pkg-name :version pkg-version}))
+    (if (seq (sp/query-entities storage :package-version
+                                {:name pkg-name :version pkg-version}))
       {:ok false :reason "version-exists" :name pkg-name :version pkg-version}
-
-      :else
       (let [content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
             row (sp/create-entity storage :package-version
                                   {:name pkg-name
@@ -92,19 +85,6 @@
 ;; detail across a few base-fns is ordinary Clojure reuse.
 ;; ---------------------------------------------------------------------------
 
-(defn- missing-dependencies
-  "Single source for the batched dependency-existence predicate —
-   shared by the `:missing-package-dependencies` base-fn and the
-   recursive install core."
-  [storage dependencies]
-  (let [dep-names (mapv name dependencies)
-        present (into #{}
-                      (map :name)
-                      (when (seq dep-names)
-                        (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))]
-    (mapv keyword (distinct (remove present dep-names)))))
-
-
 (defbase missing-package-dependencies
   "The declared dependency names (a :package-version row's
    `:dependencies`) NOT present as fns in storage — the shared
@@ -114,7 +94,13 @@
    (empty = all satisfied)."
   [dependencies]
   (cr/record-effect! :db)
-  (missing-dependencies (request/require-storage ctx) dependencies))
+  (let [storage (request/require-storage ctx)
+        dep-names (mapv name dependencies)
+        present (into #{}
+                      (map :name)
+                      (when (seq dep-names)
+                        (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))]
+    (mapv keyword (distinct (remove present dep-names)))))
 
 
 ;; Rewrite one bundle fn's namespace so version V of the package rooted at
@@ -152,7 +138,8 @@
 ;; True if the version's first fn already exists under its version-qualified
 ;; namespace — idempotency guard + cloud public-org skip: OrgScoped read
 ;; returns own+public, so a tenant sees a platform-materialized version and
-;; does NOT re-materialize it into its own org.
+;; does NOT re-materialize it into its own org. Shared by the
+;; `:package-version-materialized?` base-fn and the update core.
 (defn- already-materialized?
   [storage ns-root version fns]
   (boolean
@@ -162,10 +149,25 @@
                                  (:name f))))))
 
 
+(defbase package-version-materialized?
+  "True iff `version` of the package rooted at `ns-root` is already
+   visible under its version-qualified namespace — the idempotency
+   guard of reference-install, exposed so the graph install flow can
+   skip the materialize step (and its invalidation) when the version
+   is already there. Under a cloud OrgScoped read a platform-
+   materialized version is visible to the tenant, so the tenant does
+   NOT re-materialize it into its own org. §3.1 single storage read
+   (probes the first fn's deterministic id)."
+  [ns-root version fns]
+  (cr/record-effect! :db)
+  (already-materialized? (request/require-storage ctx) ns-root version fns))
+
+
 ;; Upsert the single pin for `(current-branch, pkg-name)` → version. One pin
 ;; per (branch, package). Returns the branch-id. Branch comes from the
 ;; request-scoped VersionedStorage, so it records on the request's branch
-;; (staging). Shared by :set-package-pin and reference :install-package.
+;; (staging). Shared by the `:package-upsert-pin` base-fn (which the
+;; graph install flow + :set-package-pin bind) and the update core.
 (defn- upsert-pin!
   [storage pkg-name version]
   (let [branch-id (vs/current-branch-id storage)
@@ -183,36 +185,24 @@
     branch-id))
 
 
-;; Pick the highest published version of `pkg-name` satisfying `spec` — a
-;; semver constraint (exact `"1.2.0"`, `">=1.1"`, `"~>1.2"`, …); nil / "" /
-;; "latest" mean "any" (the newest). Returns the concrete version string, or
-;; nil when nothing matches. Lets install / fork / materialize accept a
-;; constraint or "latest", not just an exact pin. Versions sort by parsed
-;; `[major minor patch]`.
-(defn- resolve-version
-  "Single source for semver-constraint resolution — shared by the
-   `:resolve-package-version` base-fn and the recursive install core
-   (a base-fn must not call another base-fn)."
-  [storage pkg-name spec]
-  (let [constraint (if (contains? #{nil "" "latest"} spec) "*" spec)
-        matching (into []
-                       (comp (map :version)
-                             (filter #(semver/satisfies-constraint? % constraint)))
-                       (sp/query-entities storage :package-version {:name pkg-name}))]
-    (last (sort-by semver/parse-version matching))))
-
-
 (defbase resolve-package-version
   "Pick the highest published version of `pkg-name` satisfying `spec` —
    a semver constraint (exact `\"1.2.0\"`, `\">=1.1\"`, `\"~>1.2\"`, …);
    nil / \"\" / \"latest\" mean \"any\" (the newest). Returns the concrete
-   version string, or nil when nothing matches. Self-contained
-   constraint-resolution algorithm over one query — same carve-out
-   class as `:pick-encoding`'s RFC negotiation; the DECISIONS around
-   it (guards, envelopes, apply) live in the graph."
+   version string, or nil when nothing matches. Versions sort by parsed
+   `[major minor patch]`. Self-contained constraint-resolution
+   algorithm over one query — same carve-out class as
+   `:pick-encoding`'s RFC negotiation; the DECISIONS around it
+   (guards, envelopes, apply) live in the graph."
   [pkg-name spec]
   (cr/record-effect! :db)
-  (resolve-version (request/require-storage ctx) pkg-name spec))
+  (let [constraint (if (contains? #{nil "" "latest"} spec) "*" spec)
+        matching (into []
+                       (comp (map :version)
+                             (filter #(semver/satisfies-constraint? % constraint)))
+                       (sp/query-entities (request/require-storage ctx)
+                                          :package-version {:name pkg-name}))]
+    (last (sort-by semver/parse-version matching))))
 
 
 ;; Repoint a project's OWN references from version OLD to version NEW of the
@@ -300,75 +290,15 @@
   (version-qualified-ns ns-root version fn-ns))
 
 
-;; Reference-install a SINGLE resolved version: materialize its fns under
-;; `<ns-root>@<version>` (idempotent) + pin. `visited` guards recursion cycles.
-;; Assumes any package dependencies are already installed by the caller.
-(defn- install-one!
-  [ctx storage pkg-name resolved row]
-  (let [ns-root (:ns-root row)
-        fns (:fns row)
-        missing (missing-dependencies storage (:dependencies row))]
-    (if (seq missing)
-      {:ok false :reason "missing-dependencies" :name pkg-name :missing missing}
-      (let [mat-ids (when-not (already-materialized? storage ns-root resolved fns)
-                      (materialize-fns! storage ns-root resolved fns))]
-        (upsert-pin! storage pkg-name resolved)
-        ;; Delta-invalidate only the newly materialized fns. Nil when the
-        ;; version was already visible (idempotent re-install) — nothing to
-        ;; recompile, so skip invalidation entirely.
-        (when (seq mat-ids)
-          (exec-ctx/invalidate-graph-cache! ctx mat-ids))
-        {:ok true :name pkg-name :version resolved
-         :namespace (version-qualified-ns ns-root resolved ns-root)}))))
-
-
-;; Install `pkg-name`@`spec`, pulling its `:package-dependencies` FIRST
-;; (depth-first, post-order) so the target's cross-package refs resolve. Each
-;; dep is a `{:name :version}` recorded at publish (see export/package-deps).
-;; `visited` (a set of `[name version]`) guards cycles. Short-circuits to the
-;; first failing dep result.
-(defn- install-recursive!
-  [ctx storage pkg-name spec visited]
-  (let [resolved (resolve-version storage pkg-name spec)
-        row (when resolved
-              (first (sp/query-entities storage :package-version
-                                        {:name pkg-name :version resolved})))]
-    (cond
-      (nil? row)
-      {:ok false :reason "not-found" :name pkg-name :requested spec}
-
-      ;; already being installed higher in the stack — a cycle; the pin/
-      ;; materialise from the outer frame covers it, so treat as satisfied.
-      (contains? visited [pkg-name resolved])
-      {:ok true :name pkg-name :version resolved :already-visiting true}
-
-      :else
-      (let [visited' (conj visited [pkg-name resolved])
-            dep-fail (reduce (fn [_ dep]
-                               (let [r (install-recursive! ctx storage
-                                                           (:name dep) (:version dep)
-                                                           visited')]
-                                 (when-not (:ok r) (reduced r))))
-                             nil
-                             (:package-dependencies row))]
-        (if dep-fail
-          {:ok false :reason "dependency-install-failed"
-           :name pkg-name :dependency dep-fail}
-          (install-one! ctx storage pkg-name resolved row))))))
-
-
-;; Install a published version by REFERENCE: recursively install its package
-;; dependencies (depth-first), then ensure it is materialized under
-;; `<ns-root>@<version>` (idempotent; skipped when already visible) + pin
-;; (current-branch, package) → version. Does NOT copy rows into the caller's
-;; project — the pin plus the visible materialized rows ARE the install.
-;; Update = install a newer version (repins). Rejects on absent fn-deps /
-;; unknown version / a dependency package that won't install.
-(defbase install-package
-  [pkg-name pkg-version]
-  (cr/record-effect! :db)
-  (cr/record-effect! :time)
-  (install-recursive! ctx (request/require-storage ctx) pkg-name pkg-version #{}))
+;; `:install-package` is now a GRAPH fn-def — a `:fix` worklist loop
+;; over resolve/install ops (see the `:_inst-*` chain in fns.edn). Its
+;; primitives are the base-fns this file already exposes:
+;; `:resolve-package-version`, `:missing-package-dependencies`,
+;; `:package-version-materialized?`, `:materialize-package-fns`,
+;; `:package-upsert-pin`. The former Clojure `install-recursive!` /
+;; `install-one!` orchestration (guards, depth-first dep order,
+;; short-circuit) lives in the graph where it is visible and per-step
+;; composable.
 
 
 ;; Update/rollback apply-core: materialize the target version (if
@@ -422,12 +352,12 @@
   {:export-namespace export-namespace
    :export-graph export-graph
    :graph-rows graph-rows
-   :publish-package publish-package
+   :publish-package-apply publish-package-apply
    :resolve-package-version resolve-package-version
    :missing-package-dependencies missing-package-dependencies
+   :package-version-materialized? package-version-materialized?
    :version-qualified-ns version-qualified-ns-fn
    :fork-package-fns fork-package-fns
    :materialize-package-fns materialize-package-fns
-   :install-package install-package
    :update-package-apply update-package-apply
    :package-upsert-pin package-upsert-pin})

@@ -61,13 +61,48 @@
    :return-type :graph-rows-shape
    :effects #{:db}}
 
-  {:name :publish-package
-   :description "Atomically publish a bundle as a :package-version row — reject if `(:pkg-name, :pkg-version)` already exists (immutable), else hash + insert. Returns a tagged `{:ok …}` result (success or `:reason \"version-exists\"`)."
+  {:name :publish-package-apply
+   :description "Atomic publish core — reject if `(:pkg-name, :pkg-version)` already exists (immutable registry), else hash + insert. The existence check stays adjacent to the insert to keep the race window minimal until the DB-level UNIQUE(name, version) hardening ships. Returns a tagged `{:ok …}` result."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
           :pkg-version {:type :text :description "Semver version string, e.g. \"1.2.0\"."}
           :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}}
    :return-type :keyword-map
    :effects #{:db :time}}
+
+  ;; Publish = a graph guard over the atomic core. The empty-bundle
+  ;; rejection is a pure input predicate (a typo'd / non-existent
+  ;; `:ns-root` exports zero fns and would write a 0-fn garbage row
+  ;; into the registry) — no race relevance, so it lives HERE where
+  ;; admins can see and extend it; only the race-sensitive existence
+  ;; check + insert stay in Clojure (`:publish-package-apply`).
+  {:name :_pub-fns
+   :parent :get
+   :args {:coll {:as :bundle :type :package-bundle-shape}
+          :key {:value :fns}
+          :default {:value []}}}
+
+  {:name :_pub-fns-empty?
+   :parent :empty?
+   :args {:coll {:ref :_pub-fns :type [:list :any]}}}
+
+  {:name :_pub-err-empty
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]
+          :vals [{:value false} {:value "empty-bundle"} {:as :pkg-name} {:as :pkg-version}]}}
+
+  {:name :_pub-apply
+   :parent :publish-package-apply
+   :args {:pkg-name {:as :pkg-name}
+          :pkg-version {:as :pkg-version}
+          :bundle {:as :bundle}}}
+
+  {:name :publish-package
+   :description "Publish a bundle as an immutable :package-version row. Graph `:if` — rejects an empty bundle up front (`:reason \"empty-bundle\"`), else delegates to the atomic `:publish-package-apply` core (existence check + hash + insert → `:ok` or `:reason \"version-exists\"`)."
+   :parent :if
+   :args {:test :_pub-fns-empty?
+          :then :_pub-err-empty
+          :else :_pub-apply}
+   :return-type :keyword-map}
 
   ;; ---------------------------------------------------------------------
   ;; Registry primitives — the base-fn cores the fork / materialize /
@@ -338,12 +373,307 @@
   ;; (branch-scoped) target graph. Body `{:name :version}`.
   ;; ---------------------------------------------------------------------
 
+  {:name :package-version-materialized?
+   :description "True iff the version is already visible under its version-qualified namespace — the reference-install idempotency guard (a platform-materialized version seen through an OrgScoped read counts, so a tenant never re-materializes it). One storage read probing the first fn's deterministic id."
+   :args {:ns-root {:type :text :description "Package ns-root."}
+          :version {:type :text :description "Concrete version."}
+          :fns {:type [:list :jsonb] :description "The bundle's fn-defs (the first one is probed)."}}
+   :return-type :bool
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :install-package — reference-install as GRAPH recursion.
+  ;;
+  ;; The former Clojure `install-recursive!` walked the dependency tree
+  ;; call-recursively (depth-first post-order, `visited` cycle guard,
+  ;; short-circuit on the first failing dep) — the whole orchestration
+  ;; was invisible in the graph. It now expresses as ONE `:fix` loop
+  ;; over an explicit WORKLIST, because the graph's HOF slots (`:map` /
+  ;; `:some` / `:reduce`) are pure-by-contract and cannot run effectful
+  ;; per-dep installs: the RECURSION carries the effects, pure HOFs only
+  ;; build data.
+  ;;
+  ;; State: `{:pending [op …] :visited {…}}`.
+  ;;   op       — `{:op :resolve :name N :spec S :parents [ancestors]}`
+  ;;              or `{:op :install :name N :resolved V :parents […]}`.
+  ;;   :pending — depth-first post-order: expanding a package pushes its
+  ;;              dep `:resolve` ops FIRST, then its own `:install` op,
+  ;;              so every dep installs before its dependent and the
+  ;;              ROOT's `:install` op is always last (its success
+  ;;              envelope is the loop's return value).
+  ;;   :visited — `{[name resolved] true}`, marks EXPANDED packages: a
+  ;;              repeat (diamond dep or cycle) is skipped instead of
+  ;;              re-expanded. (The Clojure version kept only the call-
+  ;;              stack path, so a diamond dep re-installed idempotently;
+  ;;              skipping reaches the same end state with fewer writes.)
+  ;;
+  ;; Short-circuit: a failing guard RETURNS its envelope instead of
+  ;; recursing — later pending ops never run, matching the Clojure
+  ;; `reduced` short-circuit. Failure attribution rebuilds the nested
+  ;; `{:reason "dependency-install-failed" :name <ancestor> :dependency …}`
+  ;; chain via a pure `:reduce` over the op's ancestor path
+  ;; (`:_inst-wrap-failure`).
+  ;;
+  ;; `:resolved` rides in the `:install` op so the version picked at
+  ;; resolve time is pinned (no re-resolution TOCTOU if someone publishes
+  ;; a newer match mid-install); the row itself is re-read by exact
+  ;; (name, resolved) — package-version rows are immutable, so the repeat
+  ;; SELECT is safe (and cheap). Depth bound: `*max-recursion-depth*`
+  ;; (1000) ≈ 500 packages per install — far above any real closure.
+  ;; ---------------------------------------------------------------------
+
+  ;; Type-row exposing the input slots at a stable owner (same idiom as
+  ;; `:BranchChainInput` — NOT propagated frees through the `:fix` step).
+  {:name :InstallPackageInput
+   :description "Type-row exposing the `:pkg-name` / `:pkg-version` input slots of `:install-package`."
+   :type {:pkg-name :text
+          :pkg-version :text}}
+
   {:name :install-package
-   :description "Install published `(:pkg-name, :pkg-version)` by REFERENCE: ensure it is materialized under `<ns-root>@<version>` (idempotent, skipped when already visible), then pin (current-branch, package) → version. Does NOT copy rows into the caller's project. Rejects on not-found / missing-dependencies. Writes to the request's branch (staging)."
-   :args {:pkg-name {:type :text :description "Package name to install."}
-          :pkg-version {:type :text :description "Exact version, a semver constraint (`>=1.1`, `~>1.2`, `*`), or `latest` — the highest published match is resolved and pinned."}}
-   :return-type :keyword-map
-   :effects #{:db :time}}
+   :description "Install published `(:pkg-name, :pkg-version)` by REFERENCE: depth-first install its `:package-dependencies`, then ensure it is materialized under `<ns-root>@<version>` (idempotent, skipped when already visible) and pin (current-branch, package) → version. Does NOT copy rows into the caller's project. Rejects on not-found / missing-dependencies / a failing dependency. Writes to the request's branch (staging). Pure graph recursion — a `:fix` worklist loop over `:resolve` / `:install` ops."
+   :parents [:fix :InstallPackageInput]
+   :args {:step :_inst-step
+          :input :_inst-initial-state}
+   :return-type :keyword-map}
+
+  ;; --- initial state: resolve the root package; nothing visited yet ---
+  {:name :_inst-root-op
+   :parent :zipmap
+   :args {:keys [{:value :op} {:value :name} {:value :spec} {:value :parents}]
+          :vals [{:value :resolve} {:as :pkg-name} {:as :pkg-version} {:value []}]}}
+
+  {:name :_inst-initial-pending
+   :parent :list
+   :args {:items [:_inst-root-op]}}
+
+  {:name :_inst-initial-state
+   :parent :zipmap
+   :args {:keys [{:value :pending} {:value :visited}]
+          :vals [:_inst-initial-pending {:value {}}]}}
+
+  ;; --- state / op accessors (pure) ---
+  {:name :_inst-pending
+   :parent :get :args {:coll {:as :input} :key {:value :pending}}}
+  {:name :_inst-visited
+   :parent :get :args {:coll {:as :input} :key {:value :visited}}}
+  {:name :_inst-op
+   :parent :first :args {:coll {:ref :_inst-pending :type [:list :any]}}}
+  {:name :_inst-rest
+   :parent :rest :args {:coll {:ref :_inst-pending :type [:list :any]}}}
+  {:name :_inst-op-kind
+   :parent :get :args {:coll :_inst-op :key {:value :op}}}
+  {:name :_inst-op-name
+   :parent :get :args {:coll :_inst-op :key {:value :name}}}
+  {:name :_inst-op-spec
+   :parent :get :args {:coll :_inst-op :key {:value :spec} :default nil}}
+  {:name :_inst-op-parents
+   :parent :get :args {:coll :_inst-op :key {:value :parents} :default {:value []}}}
+  {:name :_inst-resolve-op?
+   :parent :equal?
+   :args {:a :_inst-op-kind :b {:value :resolve}}}
+
+  ;; --- one worklist iteration: dispatch on the head op's kind ---
+  {:name :_inst-step
+   :parent :if
+   :args {:test :_inst-resolve-op?
+          :then :_inst-do-resolve
+          :else :_inst-do-install}}
+
+  ;; --- failure attribution: fold the ancestor path (nearest first)
+  ;;     around the base envelope — one `dependency-install-failed`
+  ;;     layer per ancestor, exactly the nesting the call-recursive
+  ;;     Clojure version produced frame by frame. Root failures have
+  ;;     an empty path and come back unwrapped. ---
+  {:name :_inst-wrap-acc
+   :parent :get :args {:coll {:as :pair} :key {:value 0}}}
+  {:name :_inst-wrap-ancestor
+   :parent :get :args {:coll {:as :pair} :key {:value 1}}}
+  {:name :_inst-wrapped-one
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :dependency}]
+          :vals [{:value false} {:value "dependency-install-failed"}
+                 :_inst-wrap-ancestor :_inst-wrap-acc]}}
+  {:name :_inst-parents-rev
+   :parent :reverse
+   :args {:coll {:ref :_inst-op-parents :type [:list :any]}}}
+  {:name :_inst-wrap-failure
+   :parent :reduce
+   :args {:func :_inst-wrapped-one
+          :init {:as :base-env}
+          :coll {:ref :_inst-parents-rev :type [:list :any]}}}
+
+  ;; --- :resolve op: reject unknown, skip already-expanded, else mark
+  ;;     visited and push dep resolves + own install (post-order) ---
+  {:name :_inst-resolved
+   :parent :resolve-package-version
+   :args {:pkg-name {:ref :_inst-op-name :type :text}
+          :spec {:ref :_inst-op-spec :type :nullable-text}}}
+  {:name :_inst-row
+   :parent :package-version-row
+   :args {:pkg-name {:ref :_inst-op-name :type :text}
+          :resolved :_inst-resolved}}
+  {:name :_inst-row-nil?
+   :parent :nil? :args {:value :_inst-row}}
+
+  {:name :_inst-err-not-found
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
+          :vals [{:value false} {:value "not-found"} :_inst-op-name :_inst-op-spec]}}
+  {:name :_inst-fail-not-found
+   :parent :_inst-wrap-failure
+   :args {:base-env :_inst-err-not-found}}
+
+  {:name :_inst-visit-key
+   :parent :list
+   :args {:items [:_inst-op-name :_inst-resolved]}}
+  {:name :_inst-visiting?
+   :parent :contains?
+   :args {:coll {:ref :_inst-visited :type [:map :any :any]}
+          :key :_inst-visit-key}}
+  {:name :_inst-skip-state
+   :parent :zipmap
+   :args {:keys [{:value :pending} {:value :visited}]
+          :vals [:_inst-rest :_inst-visited]}}
+  {:name :_inst-skip-recurse
+   :parent :invoke
+   :args {:func {:as :self} :arg :_inst-skip-state}}
+
+  {:name :_inst-visited-marked
+   :parent :assoc
+   :args {:map {:ref :_inst-visited :type [:map :any :any]}
+          :key :_inst-visit-key
+          :value {:value true}}}
+  {:name :_inst-child-parents
+   :parent :conj
+   :args {:coll {:ref :_inst-op-parents :type [:list :any]}
+          :item :_inst-op-name}}
+  ;; one dep `{:name N :version V}` → its `:resolve` op (pure — `:map`able)
+  {:name :_inst-dep-op
+   :parent :zipmap
+   :args {:keys [{:value :op} {:value :name} {:value :spec} {:value :parents}]
+          :vals [{:value :resolve}
+                 {:parent :get :args {:coll {:as :item} :key {:value :name}}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :version}}}
+                 :_inst-child-parents]}}
+  {:name :_inst-deps
+   :parent :get
+   :args {:coll :_inst-row :key {:value :package-dependencies} :default {:value []}}}
+  {:name :_inst-dep-ops
+   :parent :map
+   :args {:func :_inst-dep-op
+          :coll {:ref :_inst-deps :type [:list :any]}}}
+  {:name :_inst-install-op
+   :parent :zipmap
+   :args {:keys [{:value :op} {:value :name} {:value :resolved} {:value :parents}]
+          :vals [{:value :install} :_inst-op-name :_inst-resolved :_inst-op-parents]}}
+  {:name :_inst-install-op-list
+   :parent :list
+   :args {:items [:_inst-install-op]}}
+  {:name :_inst-pending-expanded
+   :parent :concat
+   :args {:colls [:_inst-dep-ops :_inst-install-op-list :_inst-rest]}}
+  {:name :_inst-expand-state
+   :parent :zipmap
+   :args {:keys [{:value :pending} {:value :visited}]
+          :vals [:_inst-pending-expanded :_inst-visited-marked]}}
+  {:name :_inst-expand-recurse
+   :parent :invoke
+   :args {:func {:as :self} :arg :_inst-expand-state}}
+
+  {:name :_inst-do-resolve
+   :parent :cond
+   :args {:clauses [:_inst-row-nil?  :_inst-fail-not-found
+                    :_inst-visiting? :_inst-skip-recurse
+                    {:value true}    :_inst-expand-recurse]}}
+
+  ;; --- :install op: guard fn-level deps, materialize (unless already
+  ;;     visible), pin, then continue — or return the root envelope ---
+  {:name :_inst-i-resolved
+   :parent :get :args {:coll :_inst-op :key {:value :resolved}}}
+  {:name :_inst-i-row
+   :parent :package-version-row
+   :args {:pkg-name {:ref :_inst-op-name :type :text}
+          :resolved {:ref :_inst-i-resolved :type :nullable-text}}}
+  {:name :_inst-i-fn-deps
+   :parent :get
+   :args {:coll :_inst-i-row :key {:value :dependencies} :default {:value []}}}
+  {:name :_inst-i-missing
+   :parent :missing-package-dependencies
+   :args {:dependencies {:ref :_inst-i-fn-deps :type [:list :jsonb]}}}
+  {:name :_inst-i-missing-empty?
+   :parent :empty?
+   :args {:coll {:ref :_inst-i-missing :type [:list :keyword]}}}
+  {:name :_inst-i-missing-any?
+   :parent :not :args {:value :_inst-i-missing-empty?}}
+  {:name :_inst-err-missing
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :missing}]
+          :vals [{:value false} {:value "missing-dependencies"}
+                 :_inst-op-name :_inst-i-missing]}}
+  {:name :_inst-fail-missing
+   :parent :_inst-wrap-failure
+   :args {:base-env :_inst-err-missing}}
+
+  {:name :_inst-i-ns-root
+   :parent :get :args {:coll :_inst-i-row :key {:value :ns-root} :default nil}}
+  {:name :_inst-i-fns
+   :parent :get :args {:coll :_inst-i-row :key {:value :fns} :default {:value []}}}
+  {:name :_inst-i-materialized?
+   :parent :package-version-materialized?
+   :args {:ns-root {:ref :_inst-i-ns-root :type :text}
+          :version {:ref :_inst-i-resolved :type :text}
+          :fns {:ref :_inst-i-fns :type [:list :jsonb]}}}
+  {:name :_inst-i-mat-count
+   :parent :materialize-package-fns
+   :args {:ns-root {:ref :_inst-i-ns-root :type :text}
+          :version {:ref :_inst-i-resolved :type :text}
+          :fns {:ref :_inst-i-fns :type [:list :jsonb]}}}
+  ;; idempotency: a version already visible (incl. platform-materialized
+  ;; under an OrgScoped read) is NOT re-synced and nothing is invalidated
+  ;; — same skip the Clojure core performed.
+  {:name :_inst-i-mat-maybe
+   :parent :if
+   :args {:test :_inst-i-materialized?
+          :then {:value nil}
+          :else :_inst-i-mat-count}}
+  {:name :_inst-i-pin
+   :parent :package-upsert-pin
+   :args {:pkg-name {:ref :_inst-op-name :type :text}
+          :pkg-version {:ref :_inst-i-resolved :type :text}}}
+  {:name :_inst-i-vq-ns
+   :parent :version-qualified-ns
+   :args {:ns-root {:ref :_inst-i-ns-root :type :text}
+          :version {:ref :_inst-i-resolved :type :text}
+          :fn-ns {:ref :_inst-i-ns-root :type :text}}}
+  {:name :_inst-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :namespace}]
+          :vals [{:value true} :_inst-op-name :_inst-i-resolved :_inst-i-vq-ns]}}
+  {:name :_inst-rest-empty?
+   :parent :empty?
+   :args {:coll {:ref :_inst-rest :type [:list :any]}}}
+  {:name :_inst-continue-state
+   :parent :zipmap
+   :args {:keys [{:value :pending} {:value :visited}]
+          :vals [:_inst-rest :_inst-visited]}}
+  {:name :_inst-continue
+   :parent :invoke
+   :args {:func {:as :self} :arg :_inst-continue-state}}
+  ;; post-order guarantees the LAST op is the root's install — its
+  ;; success envelope is the loop's return value.
+  {:name :_inst-after-write
+   :parent :if
+   :args {:test :_inst-rest-empty?
+          :then :_inst-ok
+          :else :_inst-continue}}
+  {:name :_inst-write-then-continue
+   :parent :do
+   :args {:steps [:_inst-i-mat-maybe :_inst-i-pin :_inst-after-write]}}
+  {:name :_inst-do-install
+   :parent :if
+   :args {:test :_inst-i-missing-any?
+          :then :_inst-fail-missing
+          :else :_inst-write-then-continue}}
 
   {:name :_install-body
    :description "Parsed JSON body of POST /api/packages/install — `{:name :version}`."

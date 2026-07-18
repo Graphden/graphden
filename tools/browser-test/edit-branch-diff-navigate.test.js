@@ -14,7 +14,8 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api} = require('./edit-test-helpers');
+const {assert, newContext, api, openBranchPopover} =
+  require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -44,22 +45,6 @@ async function cleanup(page) {
     await api(page, 'DELETE',
               '/api/branches/' + encodeURIComponent(FEAT_BRANCH));
   } catch (_) {}
-}
-
-
-async function openBranchPopover(page) {
-  await page.click('#branch-chip-btn');
-  try {
-    await page.waitForFunction(
-      () => {
-        const p = document.getElementById('branch-popover');
-        return p && !p.classList.contains('hidden')
-               && p.querySelector('.branch-popover-list');
-      },
-      null,
-      {timeout: 5000});
-    return true;
-  } catch (_) { return false; }
 }
 
 

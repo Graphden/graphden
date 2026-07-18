@@ -330,6 +330,36 @@ async function waitFor(predicate, timeoutMs) {
   return false;
 }
 
+// Open the branch popover (top-bar chip) and wait for its list to render.
+//
+// A single click + short wait is flaky under gate load, two ways:
+//  • the chip click un-hides the popover synchronously but the list only
+//    appears after `/partials/branch-popover` resolves — a versioned
+//    `:branches` read that can lag 5-15s under bulk-sweep load (same lag
+//    the branch-lifecycle delete poll already tolerates), so a 5s window
+//    times out with the popover stuck on "Loading branches…";
+//  • a preceding Escape-close can itself lag, so a blind chip click lands
+//    on a still-open popover and toggles it SHUT instead of opening it.
+// So poll the actual DOM state: closed → click; loading → just wait;
+// error pane → click to close so the next iteration reopens + refetches;
+// list present → done.
+async function openBranchPopover(page, timeoutMs = 30000) {
+  return waitFor(async () => {
+    const state = await page.evaluate(() => {
+      const p = document.getElementById('branch-popover');
+      if (!p || p.classList.contains('hidden')) return 'closed';
+      if (p.querySelector('.branch-popover-list')) return 'ready';
+      if (p.querySelector('.branch-popover-error')) return 'error';
+      return 'loading';
+    });
+    if (state === 'ready') return true;
+    if (state === 'closed' || state === 'error') {
+      await page.click('#branch-chip-btn');
+    }
+    return false;
+  }, timeoutMs);
+}
+
 // Cleanup any leftover entities created by a test (idempotent).
 //
 // New slot/binding model: a test fn carries `bindings` (and possibly
@@ -599,6 +629,6 @@ async function deleteOrThrow(path, name) {
 
 
 module.exports = { assert, deepEqual, newContext, api, getEntities,
-                   nodeApi, nodeApiJson,
+                   nodeApi, nodeApiJson, openBranchPopover,
                    synthArgs, waitFor, waitForServerHealthy,
                    deleteFnByName, AUTH, BASE };

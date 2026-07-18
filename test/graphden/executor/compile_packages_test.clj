@@ -98,7 +98,7 @@
     (is (= 4 (run "ex-count-prepended")))
     (is (= 113 (run "ex-sum-mixed")))
     (is (= {"version" "1.0" "status" "ok"} (run "ex-status-map"))))
-  (testing ":pairs->map (recomposed as :into {} over :map :vec) folds pairs"
+  (testing ":pairs->map folds pairs (behavioural contract — decomposition attempted + reverted, see fns.edn blocker note)"
     (is (= {"a" 1 "b" 2} (run "pairs->map" {:entries [["a" 1] ["b" 2]]})))
     ;; lazy-seq pairs (what :list-built pairs look like) get vec-coerced
     (is (= {"k" "v"} (run "pairs->map" {:entries [(map identity ["k" "v"])]})))

@@ -30,9 +30,9 @@
 (defn- do-http-get*
   "Shared get-impl shape — `headers` is the FINAL header map (already
    merged + stringified). Returns the record-shape response."
-  [url headers]
+  [url headers timeout-ms]
   (let [resp @(http/get url {:headers (or headers {})
-                             :timeout 10000
+                             :timeout (or timeout-ms 10000)
                              :as :text})
         resp-status (:status resp)
         resp-headers (:headers resp)
@@ -49,7 +49,7 @@
 
 
 (defbase http-get
-  [url headers]
+  [url headers timeout-ms]
   (cr/record-effect! :network)
   ;; Destructured names DO NOT shadow defbase arg-syms (the AST
   ;; walker rewrites bare arg-syms anywhere they appear, including
@@ -57,7 +57,7 @@
   ;; key locally to `resp-headers` to avoid colliding with the
   ;; `headers` arg-sym. Same precaution for any future status/body
   ;; arg names that might be added.
-  (do-http-get* url (stringify-header-keys headers)))
+  (do-http-get* url (stringify-header-keys headers) timeout-ms))
 
 
 (defbase http-get-with-authorization
@@ -75,11 +75,11 @@
    graph fn-defs that prepend the scheme keyword to a secret value
    via `:str` (which propagates `[:secret :text]`) and bind the
    resulting full auth-value here."
-  [url auth-value extra-headers]
+  [url auth-value extra-headers timeout-ms]
   (cr/record-effect! :network)
   (let [extra (or (stringify-header-keys extra-headers) {})
         headers (assoc extra "Authorization" auth-value)]
-    (do-http-get* url headers)))
+    (do-http-get* url headers timeout-ms)))
 
 
 (def impls

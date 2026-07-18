@@ -21,12 +21,15 @@
           :body :text}}
 
   {:name :http-get
-   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. 10s connect+read timeout. Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `:text-map` so it REFUSES secret-typed values structurally — use `:http-get-with-bearer` for any auth flow that pulls a token from `:vault-get`."
+   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. Connect+read timeout via `:timeout-ms` (default 10s). Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `:text-map` so it REFUSES secret-typed values structurally — use `:http-get-with-bearer` for any auth flow that pulls a token from `:vault-get`."
    :args {:url {:type :text
                 :description "Absolute URL, e.g. `https://httpbin.org/bearer`."}
           :headers {:type :text-map
                     :value {}
-                    :description "Header map. Keys + values are strings, e.g. `{\"Authorization\" \"bearer …\"}`. Defaults to empty. Plain `:text` values only — secret-typed values are rejected at sync-time."}}
+                    :description "Header map. Keys + values are strings, e.g. `{\"Authorization\" \"bearer …\"}`. Defaults to empty. Plain `:text` values only — secret-typed values are rejected at sync-time."}
+          :timeout-ms {:type :positive-int
+                       :value 10000
+                       :description "Connect+read timeout in milliseconds. Defaults to 10s."}}
    :return-type :http-response-shape
    :effects #{:network}}
 
@@ -58,6 +61,9 @@
                        :description "Full Authorization header value — scheme keyword (`Bearer`/`Token`/`Basic`/…) included. Slot is `[:secret :text]`, so a secret-typed value (`:vault-get` ref, any `:str`-composed secret) is accepted structurally."}
           :extra-headers {:type :text-map
                           :value {}
-                          :description "Additional headers merged BEFORE the Authorization header (auth always wins on key collision). Plain text only — secrets here would leak through the generic `:map` shape."}}
+                          :description "Additional headers merged BEFORE the Authorization header (auth always wins on key collision). Plain text only — secrets here would leak through the generic `:map` shape."}
+          :timeout-ms {:type :positive-int
+                       :value 10000
+                       :description "Connect+read timeout in milliseconds. Defaults to 10s."}}
    :return-type :http-response-shape
    :effects #{:network}}]}

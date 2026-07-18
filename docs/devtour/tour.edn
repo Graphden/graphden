@@ -286,7 +286,10 @@
      :say "The list-item position-collision guard. A cross-branch base index on
            `(binding-id, position)` would wrongly block divergence, so per-branch
            uniqueness is enforced here in the resolved view instead — a subtle
-           invariant the write path defends with an advisory lock."}
+           invariant the write path defends with an advisory lock. Fn names
+           follow the same doctrine: `check-fn-name-collision!` just below
+           replaced the raw `UNIQUE (namespace_id, name)`, whose soft-deleted
+           identities blocked their names forever."}
     {:ns graphden.versioning.storage.merge :defn diff-branches
      :say "The branch-symmetric resolved-view diff: gather every entity touched
            on either side's visibility set, resolve both, and report

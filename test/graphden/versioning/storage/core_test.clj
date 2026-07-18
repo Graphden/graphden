@@ -938,6 +938,163 @@
       (finally (sp/close base)))))
 
 
+;; ============================================================================
+;; fn (namespace-id, name) collision check — replaces the retired base-table
+;; `UNIQUE (namespace_id, name)` index. Same doctrine as list-item positions:
+;; uniqueness is a per-branch resolved-view property. The raw index kept
+;; soft-deleted identities in the key forever (delete a fn in a namespace →
+;; that (ns, name) pair bounced every future create/move), and never covered
+;; NULL namespace-id (root fns) at all.
+;; ============================================================================
+
+(deftest fn-name-ghost-frees-the-name-test
+  ;; THE regression that motivated the retirement: create a fn inside a
+  ;; namespace, tombstone-delete it, then create a same-named fn at root and
+  ;; move it into that namespace. Pre-fix the dead identity's base row still
+  ;; occupied the unique key and the move bounced with a unique-violation.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [ns-row (sp/create-entity v :ns {:name "ghost-ns"})
+            dead (sp/create-entity v :fn {:name "ghost-fn" :parent-ids []
+                                          :namespace-id (:id ns-row)
+                                          :description "h"})
+            _ (binding [vs/*tombstone-delete?* true]
+                (sp/delete-entity v :fn (:id dead)))
+            fresh (sp/create-entity v :fn {:name "ghost-fn" :parent-ids []
+                                           :description "h2"})]
+        (testing "re-creating the name at root works while the ghost persists"
+          (is (some? (:id fresh))))
+        (testing "moving the fresh fn into the ghost's namespace works"
+          (let [moved (sp/update-entity v :fn (:id fresh)
+                                        {:namespace-id (:id ns-row)})]
+            (is (= (:id ns-row) (:namespace-id moved))))
+          (is (= (:id ns-row)
+                 (:namespace-id (sp/read-entity v :fn (:id fresh)))))))
+      (finally (sp/close base)))))
+
+
+(deftest fn-name-same-branch-collision-test
+  ;; Two LIVE fns with the same (ns, name) on one branch must be rejected —
+  ;; including at root (nil namespace-id), which the old btree never covered
+  ;; because NULLs don't collide.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [_ (sp/create-entity v :fn {:name "dup-fn" :parent-ids []
+                                       :description "h"})
+            ex (try (sp/create-entity v :fn {:name "dup-fn" :parent-ids []
+                                             :description "h2"})
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (testing "second live create of the same root name is rejected"
+          (is (= :constraint-violation/fn-name-collision
+                 (:type (ex-data ex))))))
+      (finally (sp/close base)))))
+
+
+(deftest fn-name-rename-collision-test
+  ;; A rename landing on an occupied live name is the update-side of the
+  ;; same rule.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [_ (sp/create-entity v :fn {:name "rn-a" :parent-ids []
+                                       :description "h"})
+            b (sp/create-entity v :fn {:name "rn-b" :parent-ids []
+                                       :description "h"})
+            ex (try (sp/update-entity v :fn (:id b) {:name "rn-a"})
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (testing "rename onto a live name is rejected"
+          (is (= :constraint-violation/fn-name-collision
+                 (:type (ex-data ex)))))
+        (testing "a rename to a FREE name still works"
+          (is (= "rn-c" (:name (sp/update-entity v :fn (:id b)
+                                                 {:name "rn-c"}))))))
+      (finally (sp/close base)))))
+
+
+(deftest fn-name-cross-branch-divergence-legal-test
+  ;; Sibling branches may each hold their own live fn with the same
+  ;; (ns, name) — per-branch views never see both. The old base-table
+  ;; index wrongly blocked exactly this divergence for non-null
+  ;; namespaces.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [ns-row (sp/create-entity v :ns {:name "sib-ns"})
+            branch-a (vs/create-branch! v "fn-name-sib-a")
+            branch-b (vs/create-branch! v "fn-name-sib-b")
+            va (vs/switch-branch v (:id branch-a))
+            vb (vs/switch-branch v (:id branch-b))
+            fa (sp/create-entity va :fn {:name "sib-fn" :parent-ids []
+                                         :namespace-id (:id ns-row)
+                                         :description "a"})
+            fb (sp/create-entity vb :fn {:name "sib-fn" :parent-ids []
+                                         :namespace-id (:id ns-row)
+                                         :description "b"})]
+        (testing "both siblings created their own identity"
+          (is (not= (:id fa) (:id fb))))
+        (testing "each branch resolves exactly its own fn"
+          (is (= "a" (:description (sp/read-entity va :fn (:id fa)))))
+          (is (= "b" (:description (sp/read-entity vb :fn (:id fb)))))
+          (is (nil? (sp/read-entity va :fn (:id fb))))
+          (is (nil? (sp/read-entity vb :fn (:id fa))))))
+      (finally (sp/close base)))))
+
+
+(deftest fn-name-ns-move-collision-test
+  ;; Moving a fn into a namespace already holding a LIVE same-named fn on
+  ;; this branch must be rejected — the identity-level namespace-id write
+  ;; goes through the same live-view check as create/rename.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [ns-row (sp/create-entity v :ns {:name "mv-ns"})
+            _ (sp/create-entity v :fn {:name "mv-fn" :parent-ids []
+                                       :namespace-id (:id ns-row)
+                                       :description "resident"})
+            newcomer (sp/create-entity v :fn {:name "mv-fn" :parent-ids []
+                                              :description "newcomer"})
+            ex (try (sp/update-entity v :fn (:id newcomer)
+                                      {:namespace-id (:id ns-row)})
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (testing "root twin can coexist, but the move into the occupied ns is rejected"
+          (is (= :constraint-violation/fn-name-collision
+                 (:type (ex-data ex))))
+          (is (nil? (:namespace-id (sp/read-entity v :fn (:id newcomer)))))))
+      (finally (sp/close base)))))
+
+
+(deftest fn-name-concurrent-create-serialized-test
+  ;; The (branch, ns, name) advisory lock serializes racing creates of the
+  ;; same name — exactly one lands, every loser hits the collision check.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [n 8
+            results (->> (repeatedly n
+                                     (fn []
+                                       (future
+                                         (try
+                                           (sp/create-entity v :fn
+                                                             {:name "race-fn"
+                                                              :parent-ids []
+                                                              :description "r"})
+                                           :ok
+                                           (catch clojure.lang.ExceptionInfo e
+                                             (:type (ex-data e)))))))
+                         doall
+                         (mapv deref))
+            live (sp/query-entities v :fn {:name "race-fn"})]
+        (testing "exactly one concurrent create landed"
+          (is (= 1 (count (filter #{:ok} results))))
+          (is (= 1 (count live))))
+        (testing "every loser hit the fn-name collision check"
+          (is (every? #{:constraint-violation/fn-name-collision}
+                      (remove #{:ok} results)))))
+      (finally (sp/close base)))))
+
+
 (deftest list-item-concurrent-same-position-serialized-test
   ;; The per-binding advisory lock serializes concurrent appends to the SAME
   ;; binding, so racing inserts that computed the same position can't both land

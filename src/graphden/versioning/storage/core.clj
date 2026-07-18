@@ -166,6 +166,64 @@
   (check-list-item-position-collisions! base-storage branch-id entity-name [new-data]))
 
 
+(defn- check-fn-name-collision!
+  "Per-branch resolved-view uniqueness for a live fn's `(namespace-id, name)`.
+
+   The raw `UNIQUE (namespace_id, name)` index was retired (NOTE in
+   schema/graph/schema.clj): soft-deleted identity rows persist by design
+   and kept the key occupied forever — delete a fn inside a namespace and
+   every later create/move of a same-named fn there bounced with a
+   unique-violation — while NULL `namespace_id` (root fns) was never
+   covered by the btree at all. Like list-item positions above, uniqueness
+   is a property of the LIVE per-branch view, so enforce it against
+   resolved rows.
+
+   Candidates come from ONE indexed query on `fn-version.name` — every
+   version row carries the fn's then-current name, so this covers creation
+   names AND renames; identities with no version row at all can't resolve
+   on any branch and can't collide. Each candidate then goes through
+   `res/resolve-entity`, which already yields nil for off-branch and
+   tombstoned fns, so cross-branch name divergence stays legal."
+  [base-storage branch-id entity-name merged]
+  (when (and (= :fn entity-name) (:name merged))
+    (let [nm (:name merged)
+          target-ns (:namespace-id merged)
+          self-id (:id merged)
+          version-matches (sp/query-entities base-storage :fn-version {:name nm})
+          cand-ids (-> #{}
+                       (into (map :fn-id) version-matches)
+                       (disj self-id))
+          colliding (into []
+                          (comp (map #(res/resolve-entity base-storage :fn % branch-id))
+                                (filter #(and (some? %)
+                                              (= nm (:name %))
+                                              (= target-ns (:namespace-id %))))
+                                (map :id))
+                          cand-ids)]
+      (when (seq colliding)
+        (let [human (str "fn " (pr-str nm) " already exists"
+                         (when target-ns " in this namespace")
+                         " — pick a different name")]
+          (throw (ex-info human
+                          {:type :constraint-violation/fn-name-collision
+                           :entity-name :fn
+                           :name nm
+                           :namespace-id target-ns
+                           :branch-id branch-id
+                           :colliding-fn-ids colliding
+                           :reason human})))))))
+
+
+(defn- fn-name-lock-key
+  "Advisory-lock key serializing all name-writes that could collide on the
+   same `(branch, namespace, name)` triple — concurrent create/rename/move
+   otherwise both pass `check-fn-name-collision!` and both commit. nil when
+   the write can't collide (not a :fn, or anonymous)."
+  [branch-id entity-name merged]
+  (when (and (= :fn entity-name) (:name merged))
+    (str "fn-name|" branch-id "|" (:namespace-id merged) "|" (:name merged))))
+
+
 ;; === VersionedStorage Record ===
 
 (defrecord VersionedStorage
@@ -240,6 +298,7 @@
             do-create!
             (fn [st]
               (check-list-item-position-collision! st branch-id entity-name normalized)
+              (check-fn-name-collision! st branch-id entity-name normalized)
               (let [existing (sp/read-entity st entity-name id)]
                 (when-not existing
                   (sp/create-entity st entity-name normalized))
@@ -256,22 +315,27 @@
                       new-data (select-keys normalized version-data-fields)]
                   (when (or (nil? current-version) (not= current-data new-data))
                     (create-version-record! st entity-name id branch-id normalized))))
-              normalized)]
-        ;; A `:binding-list-item` append's collision check + version insert must
-        ;; be atomic w.r.t. concurrent appends to the SAME binding — otherwise
-        ;; two appends read the same used-positions, compute the same next
-        ;; position, and both insert there, corrupting the per-branch sequence
-        ;; order. (The `(binding,position)` UNIQUE index was dropped because
-        ;; uniqueness is a per-branch RESOLVED-VIEW property, not a base-table
-        ;; one.) Serialize on a per-binding `pg_advisory_xact_lock` (auto-released
-        ;; at commit/rollback): the loser then sees the committed position and
-        ;; its collision check fires loudly instead of silently double-inserting.
-        (if (and (= entity-name :binding-list-item)
-                 (:binding-id normalized)
-                 (:pool base-storage))
+              normalized)
+            ;; A `:binding-list-item` append's collision check + version insert
+            ;; must be atomic w.r.t. concurrent appends to the SAME binding —
+            ;; otherwise two appends read the same used-positions, compute the
+            ;; same next position, and both insert there, corrupting the
+            ;; per-branch sequence order. (The `(binding,position)` UNIQUE index
+            ;; was dropped because uniqueness is a per-branch RESOLVED-VIEW
+            ;; property, not a base-table one.) Serialize on a per-binding
+            ;; `pg_advisory_xact_lock` (auto-released at commit/rollback): the
+            ;; loser then sees the committed position and its collision check
+            ;; fires loudly instead of silently double-inserting. Named-:fn
+            ;; creates ride the same mechanism keyed on (branch, ns, name) —
+            ;; their retired UNIQUE moved to check-fn-name-collision! too.
+            lock-key (or (when (and (= entity-name :binding-list-item)
+                                    (:binding-id normalized))
+                           (str (:binding-id normalized)))
+                         (fn-name-lock-key branch-id entity-name normalized))]
+        (if (and lock-key (:pool base-storage))
           (jdbc/with-transaction [tx (:pool base-storage)]
                                  (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                    (str (:binding-id normalized))])
+                                                    lock-key])
                                  (do-create! (assoc base-storage :pool tx)))
           (do-create! base-storage)))))
 
@@ -309,16 +373,38 @@
               ;; PUTs that change ONLY non-versioned fields are silent
               ;; no-ops because version-data-fields-only diffing returns
               ;; equal and create-version-record! is skipped.
-              non-versioned-data (apply dissoc data version-data-fields)]
-          ;; Skip creating new version if data unchanged
-          (when (not= current-data merged-data)
-            (create-version-record! base-storage entity-name id branch-id merged))
-          ;; Apply non-versioned fields directly. base-storage's
-          ;; update-entity handles columnar identity columns AND
-          ;; ref-many junction replacement.
-          (when (seq non-versioned-data)
-            (sp/update-entity base-storage entity-name id non-versioned-data))
-          merged))))
+              non-versioned-data (apply dissoc data version-data-fields)
+              ;; A rename / namespace-move can land on an occupied
+              ;; (ns, name) — same live-view rule as create. Only those two
+              ;; keys can introduce a collision, so other updates (the
+              ;; common case: description, effects, …) skip the check and
+              ;; its lock entirely.
+              name-write? (and (= :fn entity-name)
+                               (:name merged)
+                               (or (contains? data :name)
+                                   (contains? data :namespace-id)))
+              do-update!
+              (fn [st]
+                (when name-write?
+                  (check-fn-name-collision! st branch-id entity-name
+                                            (assoc merged :id id)))
+                ;; Skip creating new version if data unchanged
+                (when (not= current-data merged-data)
+                  (create-version-record! st entity-name id branch-id merged))
+                ;; Apply non-versioned fields directly. base-storage's
+                ;; update-entity handles columnar identity columns AND
+                ;; ref-many junction replacement.
+                (when (seq non-versioned-data)
+                  (sp/update-entity st entity-name id non-versioned-data))
+                merged)
+              lock-key (when name-write?
+                         (fn-name-lock-key branch-id entity-name merged))]
+          (if (and lock-key (:pool base-storage))
+            (jdbc/with-transaction [tx (:pool base-storage)]
+                                   (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
+                                                      lock-key])
+                                   (do-update! (assoc base-storage :pool tx)))
+            (do-update! base-storage))))))
 
 
   (delete-entity

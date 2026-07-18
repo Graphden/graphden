@@ -1297,10 +1297,16 @@
    legacy behaviour."
   [{:keys [entity-type type-str id-uuid form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
+        error-msg (volatile! nil)
         updated (try (sp/update-entity storage entity-type id-uuid entity-data)
                      (catch Exception e
                        (log/error e "update-entity failed for"
                                   entity-type id-uuid entity-data)
+                       ;; Surface a write-rejection reason when the storage
+                       ;; layer provides one (e.g. the fn-name collision
+                       ;; check) — a bare "Failed to update entity" hides
+                       ;; exactly the message the user can act on.
+                       (vreset! error-msg (some-> (ex-data e) :reason))
                        nil))]
     (when (and updated (= type-str "binding") id-uuid
                (contains? form-data :rename-to))
@@ -1315,7 +1321,7 @@
           (log/error e "ensure-rename-slot! failed"))))
     (if updated
       {:updated id-uuid}
-      {:error "Failed to update entity"})))
+      {:error (or @error-msg "Failed to update entity")})))
 
 
 ;; === Re-exports from sub-namespaces ==========================================

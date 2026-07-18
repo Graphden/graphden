@@ -450,10 +450,8 @@
                              :nullable? true
                              ;; Indexed: name lookups (`query-fn-by-name`,
                              ;; ref-by-name, constraint-type resolution) hit
-                             ;; the largest table. The composite unique
-                             ;; `(namespace-id, name)` can't serve a bare
-                             ;; `WHERE name = ?` (leading column unconstrained),
-                             ;; so a standalone index keeps those O(log n).
+                             ;; the largest table; a standalone index keeps
+                             ;; those O(log n).
                              :indexed? true}
                       :namespace-id {:uuid fn-namespace-id-field-uuid
                                      :type :ref
@@ -503,7 +501,17 @@
                       :org-id {:uuid fn-org-id-field-uuid
                                :type :text
                                :nullable? true}})
-      (ds/add-constraint :fn {:type :unique :fields [:namespace-id :name]})
+      ;; NOTE — the `UNIQUE (namespace-id, name)` constraint was retired.
+      ;; Like `binding-list-item (binding-id, position)` before it, name
+      ;; uniqueness is a per-branch RESOLVED-VIEW property, not a base-table
+      ;; one: soft-deleted identity rows persist by design and kept the
+      ;; `(ns, name)` key occupied forever (delete a fn inside a namespace →
+      ;; every future create/move of a same-named fn there bounced with a
+      ;; unique-violation), while NULL `namespace-id` (root fns) was never
+      ;; covered by the btree at all. VersionedStorage now enforces it
+      ;; against the live branch view (`check-fn-name-collision!`), advisory-
+      ;; lock-serialized; the raw index is dropped via `retired-indexes` in
+      ;; storage/postgres/migration.clj.
       (ds/add-constraint :fn {:type :unique :fields [:anonymous-hash]})
 
       ;; -----------------------------------------------------------------

@@ -194,7 +194,11 @@
    idempotently on every migration pass so cross-version dev DBs stay
    clean. See the matching `NOTE — … was retired` comment in the
    schema file for each entry."
-  ["idx_binding_list_item_binding_id_position_unique"])
+  ["idx_binding_list_item_binding_id_position_unique"
+   ;; Retired 2026-07: soft-deleted fn identities occupied (ns, name)
+   ;; forever; per-branch live-view uniqueness moved to VersionedStorage's
+   ;; check-fn-name-collision!. See the NOTE in schema/graph/schema.clj.
+   "idx_fn_namespace_id_name_unique"])
 
 
 (defn- drop-retired-indexes!

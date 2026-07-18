@@ -526,13 +526,14 @@ Enforced at write time:
    graph-level recursion is structurally impossible today
    (`docs/ARCHITECTURE.md § Part 3` for the empirical demo + planned
    `:fix`-based path forward).
-2. **Schema-level uniqueness** — `UNIQUE` keys on `fn.name` (NULL allowed),
-   `fn-slot(fn-id, slot-id)`, and `binding(fn-id, slot-id)`. The
-   `binding-list-item(binding-id, position)` UNIQUE was retired — the base
-   identity row is cross-branch, so different branches may legitimately
-   hold different items at the same `(binding-id, position)`; per-branch
-   position uniqueness is enforced by `VersionedStorage`
-   (`check-list-item-position-collision!`).
+2. **Schema-level uniqueness** — `UNIQUE` keys on `fn-slot(fn-id, slot-id)`
+   and `binding(fn-id, slot-id)`. Two former keys were retired because the
+   base identity row is cross-branch and soft-deleted identities persist,
+   so uniqueness is a per-branch RESOLVED-VIEW property enforced by
+   `VersionedStorage` instead: `binding-list-item(binding-id, position)`
+   (`check-list-item-position-collision!`) and `fn(namespace-id, name)`
+   (`check-fn-name-collision!` — a dead fn no longer blocks its name, and
+   root fns, NULL namespace, are covered too; both advisory-lock-serialized).
 
 These constraints are implemented in `storage-protocol` and enforced by storage implementations.
 

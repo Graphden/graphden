@@ -378,8 +378,13 @@
                               :type :ref :ref-entity :fn}
                       :branch-id {:uuid fn-version-branch-id-field-uuid
                                   :type :ref :ref-entity :branch}
+                      ;; :indexed? — check-fn-name-collision! finds its
+                      ;; candidate set by name here (every version row
+                      ;; carries the fn's then-current name, so this covers
+                      ;; creation names AND renames); without the index each
+                      ;; named fn write would seq-scan the version table.
                       :name {:uuid fn-version-name-field-uuid
-                             :type :text :nullable? true}
+                             :type :text :nullable? true :indexed? true}
                       :description {:uuid fn-version-description-field-uuid
                                     :type :text :nullable? true}
                       :constraint {:uuid fn-version-constraint-field-uuid

@@ -97,6 +97,33 @@ would create a dependency cycle through fn references.
 - `:target-fn-id` - Target function being referenced via ref-fn-id
 - `:cycle-path` - Path showing the cycle
 
+### `:constraint-violation/fn-name-collision`
+
+**Component:** versioning (VersionedStorage)
+**Description:** A create / rename / namespace-move would leave two LIVE
+fns with the same `(namespace-id, name)` on the current branch. Replaces
+the retired base-table `UNIQUE (namespace_id, name)` — dead (soft-deleted)
+identities no longer block the name, and root fns (NULL namespace) are now
+covered too.
+**Ex-data keys:**
+
+- `:name` - The colliding fn name
+- `:namespace-id` - Target namespace (nil = root)
+- `:branch-id` - Branch whose live view collides
+- `:colliding-fn-ids` - IDs of the live fns already holding the name
+
+### `:constraint-violation/position-collision`
+
+**Component:** versioning (VersionedStorage)
+**Description:** A binding-list-item write would leave two items at the
+same `(binding-id, position)` in the current branch's resolved view.
+**Ex-data keys:**
+
+- `:binding-id` - Owning binding
+- `:position` - The contested position
+- `:branch-id` - Branch whose live view collides
+- `:colliding-item-ids` - IDs of the items already at that position
+
 ### `:constraint-violation/main-branch-undeletable`
 
 **Component:** versioning (VersionedStorage)

@@ -45,7 +45,7 @@ async function cleanup(page) {
       + '&constraint=' + encodeURIComponent(
           JSON.stringify(['variant', 'ok', 'int', 'err', 'text'])));
 
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, VAR_FN);
     const varFn = ents.fns.find((f) => f.name === VAR_FN);
     assert(varFn, 'variant resolves: id=' + varFn?.id);
     assert(Array.isArray(varFn.constraint)
@@ -56,21 +56,22 @@ async function cleanup(page) {
     // ===================================================================
     // Navigate + force re-fetch.
     // ===================================================================
+    // `about:blank` first forces the next goto to be a FULL document load
+    // (not a same-document fragment nav), so the editor's boot `initGraph`
+    // runs exactly ONCE at `#VAR_FN` and loads it via the hash. Calling
+    // `initGraph()` manually on top of a hash-navigated page raced that
+    // boot init (two concurrent `initGraph`s clobber `lookups`, leaving
+    // `fnMap` intermittently empty — the source of this test's flake).
+    await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + VAR_FN,
                     {waitUntil: 'networkidle'});
+    // Boot init loads the hashed fn's subtree into fnMap. Wait for THAT
+    // fn specifically (not just `fnMap.size > 0`) — no manual re-init.
     await page.waitForFunction(
-      () => typeof openTypeEditForm === 'function'
-            && typeof initGraph === 'function'
-            && typeof lookups === 'object'
-            && lookups?.fnMap?.size > 0,
-      null,
-      {timeout: 30000});
-    await page.evaluate(async () => { await initGraph(); });
-    // Poll until the variant lands in the editor's in-memory
-    // lookups (initGraph kicks off async loads).
-    await page.waitForFunction(
-      (fnId) => !!lookups?.fnMap?.get(fnId),
-      varFn.id, {timeout: 15000, polling: 100});
+      (fnId) => typeof openTypeEditForm === 'function'
+                && typeof lookups === 'object'
+                && !!lookups?.fnMap?.get(fnId),
+      varFn.id, {timeout: 30000, polling: 100});
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), varFn.id);
     assert(inLookups, 'variant in editor lookups');
@@ -145,7 +146,7 @@ async function cleanup(page) {
       {timeout: 15000});
     // Poll storage until the constraint has 3 branches (length 7).
     const settled = await waitFor(async () => {
-      const e = await getEntities(page);
+      const e = await getEntities(page, varFn.id);
       const f = e.fns.find((f) => f.id === varFn.id);
       return f && Array.isArray(f.constraint) && f.constraint.length === 7;
     }, 5000);
@@ -154,7 +155,7 @@ async function cleanup(page) {
     // ===================================================================
     // Phase C: storage — constraint has 3 branches now.
     // ===================================================================
-    const ents2 = await getEntities(page);
+    const ents2 = await getEntities(page, varFn.id);
     const varFn2 = ents2.fns.find((f) => f.id === varFn.id);
     assert(varFn2 && Array.isArray(varFn2.constraint),
            'fn still has constraint after edit');

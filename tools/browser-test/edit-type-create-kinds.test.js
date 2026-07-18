@@ -147,7 +147,7 @@ async function submit(page) {
       RECORD_NAME,
       {timeout: 15000});
 
-    const recordEnts = await getEntities(page);
+    const recordEnts = await getEntities(page, RECORD_NAME);
     const recordFn = recordEnts.fns.find((f) => f.name === RECORD_NAME);
     assert(recordFn, 'record fn-row in storage');
     // Record kind has fn-slot junctions for each field.
@@ -185,7 +185,7 @@ async function submit(page) {
       UNION_NAME,
       {timeout: 15000});
 
-    const unionEnts = await getEntities(page);
+    const unionEnts = await getEntities(page, UNION_NAME);
     const unionFn = unionEnts.fns.find((f) => f.name === UNION_NAME);
     assert(unionFn, 'union fn-row in storage');
     // Union encodes branches into the `:constraint` field. The form

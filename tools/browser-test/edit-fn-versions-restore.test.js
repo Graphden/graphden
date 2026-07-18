@@ -61,13 +61,13 @@ async function putDescription(page, fnId, desc) {
     // ===================================================================
     // Seed: fn on main + 3 description mutations (v1 → v2 → v3).
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'identity');
     const identity = ents.fns.find((f) => f.name === 'identity');
     assert(identity, ':identity parent resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + FN_NAME + '&parent-ids=' + identity.id
               + '&description=v1-seed');
-    const fn = (await getEntities(page)).fns.find((f) => f.name === FN_NAME);
+    const fn = (await getEntities(page, FN_NAME)).fns.find((f) => f.name === FN_NAME);
     assert(fn, 'probe fn-def created with description=v1-seed');
 
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
@@ -79,7 +79,7 @@ async function putDescription(page, fnId, desc) {
     assert(put.status === 200, 'PUT v3-latest');
 
     // Sanity — storage reports latest description.
-    let current = (await getEntities(page)).fns.find((f) => f.id === fn.id);
+    let current = (await getEntities(page, fn.id)).fns.find((f) => f.id === fn.id);
     assert(current?.description === 'v3-latest',
            'pre-restore fn.description = "v3-latest": '
            + JSON.stringify(current?.description));

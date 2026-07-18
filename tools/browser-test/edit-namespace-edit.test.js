@@ -23,6 +23,8 @@ const RENAMED = 'ns-edit-renamed' + RUN_ID;
 
 
 async function findNsId(page, name) {
+  // full-dump: enumerates ALL namespaces to find one by name — no fn root
+  // to scope by (a namespace is not a fn's subtree).
   const ents = await getEntities(page);
   return (ents.namespaces || []).find((n) => n.name === name)?.id || null;
 }
@@ -133,6 +135,8 @@ async function cleanup(page) {
         .some((h) => h.querySelector('.ns-label')?.textContent.trim() === name),
       RENAMED,
       {timeout: 25000});
+    // full-dump: checks a namespace's ABSENCE after delete by scanning the
+    // full namespace list — no surviving fn root to scope by.
     const apiCheck = await getEntities(page);
     const stillThere = (apiCheck.namespaces || []).find(
       (n) => n.name === RENAMED);

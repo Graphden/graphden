@@ -22,14 +22,14 @@ const TEST_NAME = 'test-fn-picker-filter';
     // arg (no value, no ref-id) so it renders as a free-arg
     // placeholder. :str-len's :string slot is :text-typed — that's
     // what drives the picker's expectedType filter.
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'str-len');
     const strLen = ents.fns.find(f => f.name === 'str-len');
     const stringArg = synthArgs(ents).find(
       a => a['fn-id'] === strLen.id && a.name === 'string' && !a['source-id']);
     assert(strLen && stringArg, ':str-len.string baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + strLen.id);
-    const fn = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
+    const fn = (await getEntities(page, TEST_NAME)).fns.find(f => f.name === TEST_NAME);
     assert(fn, 'test fn created');
     // In the slot/binding model the inherited :string slot shows up
     // automatically as a free placeholder (no own binding needed —

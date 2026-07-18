@@ -48,6 +48,8 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: probe parented :identity (:value slot is :any, non-seq).
     // ===================================================================
+    // full-dump: reads two unrelated baseline fns (:identity +
+    // :current-time-ms); neither is in the other's subtree closure.
     const ents = await getEntities(page);
     const identity = ents.fns.find((f) => f.name === 'identity');
     const ctmFn = ents.fns.find((f) => f.name === 'current-time-ms');
@@ -55,7 +57,7 @@ async function cleanup(page) {
            ':identity + :current-time-ms baselines resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + identity.id);
-    const probe = (await getEntities(page)).fns.find(
+    const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created (no bindings)');
 
@@ -155,7 +157,7 @@ async function cleanup(page) {
     // flake.
     let probeBindings;
     const bound = await waitFor(async () => {
-      const finalEnts = await getEntities(page);
+      const finalEnts = await getEntities(page, probe.id);
       probeBindings = (finalEnts.bindings || [])
         .filter((b) => b['fn-id'] === probe.id);
       return probeBindings.length === 1;

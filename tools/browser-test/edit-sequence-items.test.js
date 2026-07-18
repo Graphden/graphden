@@ -60,13 +60,13 @@ async function postSequenceAppend(page, fnId, body) {
     // ===================================================================
     // Seed: probe parented from :do.
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'do');
     const doFn = ents.fns.find(
       (f) => f.name === 'do' && (f['parent-ids'] || []).length === 0);
     assert(doFn, ':do baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + doFn.id);
-    const probe = (await getEntities(page)).fns.find(
+    const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
 
@@ -194,7 +194,7 @@ async function postSequenceAppend(page, fnId, body) {
     // ===================================================================
     // Phase E: verify storage — 2 binding-list-items left, in order.
     // ===================================================================
-    const finalEnts = await getEntities(page);
+    const finalEnts = await getEntities(page, probe.id);
     const probeBindings = (finalEnts.bindings || [])
       .filter((b) => b['fn-id'] === probe.id);
     const bindingIds = new Set(probeBindings.map((b) => b.id));

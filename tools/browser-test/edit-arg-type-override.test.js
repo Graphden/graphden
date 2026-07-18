@@ -50,7 +50,7 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: probe parented :identity (:value slot is :any-typed).
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page); // full-dump: two unrelated baselines (identity + int, no shared closure, probe not yet created)
     const identity = ents.fns.find((f) => f.name === 'identity');
     const intFn = ents.fns.find(
       (f) => f.name === 'int' && (f['parent-ids'] || []).length === 0
@@ -59,7 +59,7 @@ async function cleanup(page) {
            ':identity + :int baselines resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + identity.id);
-    const probe = (await getEntities(page)).fns.find(
+    const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
 
@@ -217,7 +217,7 @@ async function cleanup(page) {
       const deadline = Date.now() + 15000;
       let landed = false;
       while (Date.now() < deadline) {
-        const ents = await getEntities(page);
+        const ents = await getEntities(page, probe.id);
         const b = (ents.bindings || []).find((x) => x['fn-id'] === probe.id);
         if (b && b['type-override-fn-id']) { landed = true; break; }
         await new Promise((r) => setTimeout(r, 200));
@@ -229,7 +229,7 @@ async function cleanup(page) {
     // Phase D: storage — probe's binding row has :type-override-fn-id
     // pointing at the :int type-row.
     // ===================================================================
-    const finalEnts = await getEntities(page);
+    const finalEnts = await getEntities(page, probe.id);
     const probeBindings = (finalEnts.bindings || [])
       .filter((b) => b['fn-id'] === probe.id);
     assert(probeBindings.length === 1,

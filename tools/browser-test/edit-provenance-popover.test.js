@@ -45,6 +45,9 @@ async function cleanup(page) {
     // is what triggers `getTypeNarrowingInfo` → `kind: 'override'`,
     // which is what renders the `↳` provenance badge.
     // ===================================================================
+    // full-dump: needs both :http-server and the unrelated :user-port
+    // refinement type-row (not in :http-server's subtree — the override is
+    // wired onto the probe, not http-server) plus http-server's port slot.
     const ents = await getEntities(page);
     const httpServer = ents.fns.find(
       (f) => f.name === 'http-server' && (f['parent-ids'] || []).length === 0);
@@ -63,7 +66,7 @@ async function cleanup(page) {
 
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + httpServer.id);
-    const probe = (await getEntities(page)).fns.find(
+    const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
 

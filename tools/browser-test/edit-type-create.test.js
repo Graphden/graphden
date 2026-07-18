@@ -227,7 +227,7 @@ async function openTypeCreate(page, nsName) {
     // ===================================================================
     // Phase D: verify storage carries a refinement fn-row.
     // ===================================================================
-    const finalEnts = await getEntities(page);
+    const finalEnts = await getEntities(page, TYPE_NAME);
     const typeFn = finalEnts.fns.find((f) => f.name === TYPE_NAME);
     assert(typeFn, 'fn-row in storage');
     assert(typeFn['base-fn-id'],

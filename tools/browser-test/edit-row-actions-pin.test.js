@@ -51,7 +51,7 @@ async function popoverVisible(page) {
   try {
     await cleanup(page);
 
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'identity');
     // `identity` may have a parent-ids chain in the test e2e baseline;
     // just pick whichever entry matches by name.
     const identity = ents.fns.find((f) => f.name === 'identity');

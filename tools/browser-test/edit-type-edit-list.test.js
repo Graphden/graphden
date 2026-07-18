@@ -49,6 +49,9 @@ async function cleanup(page) {
     assert(seedResp.ok && seedResp.id,
            'list type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 
+    // full-dump: also resolves the `text` base fn, which the list does NOT
+    // reference at seed time (element is :int), so `text` is not in the
+    // list's subtree closure — a scoped read would miss it.
     const ents = await getEntities(page);
     const listFn = ents.fns.find((f) => f.name === LIST_FN);
     const intFn = ents.fns.find(
@@ -137,7 +140,7 @@ async function cleanup(page) {
       {timeout: 15000});
     // Poll storage until element-fn-id flips to :text.
     const settled = await waitFor(async () => {
-      const e = await getEntities(page);
+      const e = await getEntities(page, listFn.id);
       return e.fns.find((f) => f.id === listFn.id)?.['element-fn-id']
              === textFn.id;
     }, 5000);
@@ -146,7 +149,7 @@ async function cleanup(page) {
     // ===================================================================
     // Phase C: storage — element-fn-id now points at :text.
     // ===================================================================
-    const ents2 = await getEntities(page);
+    const ents2 = await getEntities(page, listFn.id);
     const listFn2 = ents2.fns.find((f) => f.id === listFn.id);
     assert(listFn2['element-fn-id'] === textFn.id,
            'element-fn-id now points at :text: '

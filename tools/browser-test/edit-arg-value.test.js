@@ -48,13 +48,13 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: const-parented fn with :value 42 bound.
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'const');
     const constFn = ents.fns.find(
       (f) => f.name === 'const' && (f['parent-ids'] || []).length === 0);
     assert(constFn, ':const baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + constFn.id);
-    const probeEnts = await getEntities(page);
+    const probeEnts = await getEntities(page, PROBE_FN);
     const probe = probeEnts.fns.find((f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
     const constSlots = probeEnts['fn-slots']
@@ -173,7 +173,7 @@ async function cleanup(page) {
     // ===================================================================
     // Phase D: verify the binding row carries the new value.
     // ===================================================================
-    const finalEnts = await getEntities(page);
+    const finalEnts = await getEntities(page, probe.id);
     const probeBinding = (finalEnts.bindings || []).find(
       (b) => b['fn-id'] === probe.id);
     assert(probeBinding && probeBinding.value === 99,

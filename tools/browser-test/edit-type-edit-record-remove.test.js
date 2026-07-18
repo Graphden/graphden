@@ -57,7 +57,7 @@ async function cleanup(page) {
     assert(seedResp.ok && seedResp.id,
            'record created: ' + JSON.stringify(seedResp).slice(0, 120));
 
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, REC_FN);
     const recFn = ents.fns.find((f) => f.name === REC_FN);
     const slotsById = Object.fromEntries(ents.slots.map((s) => [s.id, s]));
     const seedSlots = ents['fn-slots']
@@ -146,7 +146,7 @@ async function cleanup(page) {
       {timeout: 15000});
     // Poll storage until the record has exactly 2 fn-slots (b removed).
     const settled = await waitFor(async () => {
-      const e = await getEntities(page);
+      const e = await getEntities(page, recFn.id);
       const fnSlots = e['fn-slots'].filter((fs) => fs['fn-id'] === recFn.id);
       return fnSlots.length === 2;
     }, 5000);
@@ -155,7 +155,7 @@ async function cleanup(page) {
     // ===================================================================
     // Phase C: storage — only "a" and "c" remain.
     // ===================================================================
-    const ents2 = await getEntities(page);
+    const ents2 = await getEntities(page, recFn.id);
     const slotsById2 = Object.fromEntries(ents2.slots.map((s) => [s.id, s]));
     const finalSlots = ents2['fn-slots']
       .filter((fs) => fs['fn-id'] === recFn.id)

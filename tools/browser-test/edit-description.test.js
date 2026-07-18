@@ -54,7 +54,7 @@ async function cleanup(page) {
     // pseudo-group and would stay invisible until the user expanded
     // it — masks the badge we want to click).
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page); // full-dump: needs the unrelated `app` namespace row (not in :identity's subtree closure), and the probe doesn't exist yet
     const identity = ents.fns.find((f) => f.name === 'identity');
     assert(identity, ':identity parent resolved');
     const appNs = (ents.namespaces || []).find((n) => n.name === 'app');
@@ -63,7 +63,7 @@ async function cleanup(page) {
               'name=' + FN_NAME + '&parent-ids=' + identity.id
               + '&namespace-id=' + appNs.id
               + '&description=' + encodeURIComponent(SEED_DESC));
-    const fn = (await getEntities(page)).fns.find((f) => f.name === FN_NAME);
+    const fn = (await getEntities(page, FN_NAME)).fns.find((f) => f.name === FN_NAME);
     assert(fn, 'probe fn-def created');
 
     // ===================================================================
@@ -205,7 +205,7 @@ async function cleanup(page) {
     // ===================================================================
     // Phase D: storage carries the new description.
     // ===================================================================
-    const finalEnts = await getEntities(page);
+    const finalEnts = await getEntities(page, fn.id);
     const updated = finalEnts.fns.find((f) => f.id === fn.id);
     assert(updated?.description === NEW_DESC,
            'fn row in storage has new description: '

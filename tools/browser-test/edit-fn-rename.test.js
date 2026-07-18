@@ -22,12 +22,12 @@ const NEW = 'test-fn-rename-new';
     await deleteFnByName(page, NEW);
 
     // Seed: a tiny fn-def parented to `:add` (something stable).
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'add');
     const add = ents.fns.find(f => f.name === 'add');
     assert(add, 'baseline :add resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + ORIG + '&parent-ids=' + add.id);
-    const fn = (await getEntities(page)).fns.find(f => f.name === ORIG);
+    const fn = (await getEntities(page, ORIG)).fns.find(f => f.name === ORIG);
     assert(fn, 'test fn created');
 
     await page.goto('about:blank');
@@ -80,12 +80,15 @@ const NEW = 'test-fn-rename-new';
     });
     // Poll storage until rename propagates (cold-start can be slow).
     const renamePropagated = await waitFor(async () => {
-      const e = await getEntities(page);
+      const e = await getEntities(page, fn.id);
       return e.fns.find(f => f.id === fn.id)?.name === NEW;
     }, 8000);
     assert(renamePropagated, 'rename did not propagate to storage in 8s');
 
     // Assert: storage now has the new name, original gone.
+    // full-dump: line below asserts the ORIG name is absent graph-wide,
+    // which a subtree scope (which would only ever contain the renamed
+    // fn) cannot honestly verify.
     const after = await getEntities(page);
     const renamed = after.fns.find(f => f.id === fn.id);
     assert(renamed && renamed.name === NEW,

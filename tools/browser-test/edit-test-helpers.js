@@ -180,8 +180,31 @@ async function api(_page, method, path, body) {
 // happen during the OOM/restart window. Throws on HTTP error
 // (the call site usually expects a populated map and shouldn't
 // have to disambiguate `{status, body}` from a graph result).
-async function getEntities(_page) {
-  return nodeApiJson('GET', '/api/graph/entities');
+// Scoped by default to keep the response small. The unscoped full dump is
+// ~5.5 MB and serialises into G1 *humongous* allocations that fragment the
+// shared e2e executor's heap (measured 2026-07-18: full dump → humongous,
+// scope=subtree / scope=index → none). Across the ~34 edit specs that churn
+// killed the heap enough for the heavy tests' `waitForFunction`s to time out.
+// Pass `root` — a fn NAME or id — to fetch only that fn's subtree closure
+// (same shape: {fns, slots, fn-slots, bindings, list-items, namespaces},
+// just the reachable set, so `synthArgs` works unchanged). Omit `root` ONLY
+// when a test genuinely needs EVERY fn (that path still full-dumps).
+async function getEntities(_page, root) {
+  if (!root) return nodeApiJson('GET', '/api/graph/entities');
+  const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i.test(root);
+  let rootId = root;
+  if (!isId) {
+    const s = await nodeApiJson(
+      'GET', '/api/graph/entities?scope=search&q=' + encodeURIComponent(root));
+    const f = (s.fns || []).find((x) => x.name === root);
+    if (!f) {
+      return { fns: [], slots: [], 'fn-slots': [], bindings: [],
+               'list-items': [], namespaces: (s.namespaces || []) };
+    }
+    rootId = f.id;
+  }
+  return nodeApiJson(
+    'GET', '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(rootId));
 }
 
 // Test-side flattened view of `(fn × slot × binding × item)`. Mirrors
@@ -500,9 +523,18 @@ async function deleteFnByName(_page, name) {
   // their finally BEFORE calling cleanup. Not enforced here
   // because the helper has no way to know if this is a pre- or
   // post-test call.
-  const ents = await nodeApiJson('GET', '/api/graph/entities');
-  const matches = ents.fns.filter(f => f.name === name);
-  const secretLeaf = ents.fns.find(f => f.name === 'secret-leaf');
+  // Scoped, NOT a full dump: this runs in every test's setup + teardown, so
+  // the old unscoped `/api/graph/entities` (~5.5 MB → G1 humongous, measured
+  // 2026-07-18) was the single biggest heap-churn source in the edit suite.
+  // A name search finds the target(s) + `secret-leaf`; each match's own
+  // bindings / fn-slots / slots / items come from ITS subtree closure.
+  const found = await nodeApiJson(
+    'GET', '/api/graph/entities?scope=search&q=' + encodeURIComponent(name));
+  const matches = (found.fns || []).filter(f => f.name === name);
+  if (!matches.length) return;
+  const slRes = await nodeApiJson(
+    'GET', '/api/graph/entities?scope=search&q=secret-leaf');
+  const secretLeaf = (slRes.fns || []).find(f => f.name === 'secret-leaf');
   for (const fn of matches) {
     // A secret fn-def can ONLY be removed through the secrets endpoint, which
     // also cleans up its OpenBao entry. The generic CRUD route answers 409 and
@@ -515,6 +547,8 @@ async function deleteFnByName(_page, name) {
       continue;
     }
 
+    const ents = await nodeApiJson(
+      'GET', '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(fn.id));
     const bindings = (ents.bindings || []).filter(b => b['fn-id'] === fn.id);
     const bindingIds = new Set(bindings.map(b => b.id));
     const items = (ents['list-items'] || []).filter(i => bindingIds.has(i['binding-id']));

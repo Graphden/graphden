@@ -17,7 +17,7 @@ const TEST_NAME = 'test-edit-phase5';
   try {
     await deleteFnByName(page, TEST_NAME);
 
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'add');
     const add = ents.fns.find(f => f.name === 'add');
     const addNums = synthArgs(ents).find(a => a['fn-id'] === add.id && !a['source-id']);
     assert(add && addNums, 'baseline ids resolved');
@@ -27,7 +27,7 @@ const TEST_NAME = 'test-edit-phase5';
     //    layout because no own binding overrides it yet.
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + add.id);
-    const created = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
+    const created = (await getEntities(page, TEST_NAME)).fns.find(f => f.name === TEST_NAME);
     assert(created, 'test fn created');
 
     await page.goto('about:blank');
@@ -96,7 +96,7 @@ const TEST_NAME = 'test-edit-phase5';
       const deadline = Date.now() + 15000;
       let appeared = false;
       while (Date.now() < deadline) {
-        const ents = await getEntities(page);
+        const ents = await getEntities(page, created.id);
         const fnBindings = (ents.bindings || []).filter((b) => b['fn-id'] === created.id);
         const ids = new Set(fnBindings.map((b) => b.id));
         const items = (ents['list-items'] || [])
@@ -115,7 +115,7 @@ const TEST_NAME = 'test-edit-phase5';
               .sort((a, b) => (a.position || 0) - (b.position || 0))
               .map(it => it.value);
     }
-    let chain = chainOf(await getEntities(page));
+    let chain = chainOf(await getEntities(page, created.id));
     assert(JSON.stringify(chain) === '[1]', 'first item appended as value=1');
 
     // 4. Append a second item via the tail `+` button.
@@ -151,13 +151,13 @@ const TEST_NAME = 'test-edit-phase5';
       const deadline = Date.now() + 15000;
       let grew = false;
       while (Date.now() < deadline) {
-        if (chainOf(await getEntities(page)).length >= 2) { grew = true; break; }
+        if (chainOf(await getEntities(page, created.id)).length >= 2) { grew = true; break; }
         await new Promise((r) => setTimeout(r, 200));
       }
       if (!grew) throw new Error('chain never reached 2 items');
     }
 
-    chain = chainOf(await getEntities(page)).slice().sort();
+    chain = chainOf(await getEntities(page, created.id)).slice().sort();
     assert(JSON.stringify(chain) === '[1,2]', 'tail-append added value=2');
 
     // 5. Remove one item via `×`. Either 1 or 2 may go (DOM order is
@@ -170,13 +170,13 @@ const TEST_NAME = 'test-edit-phase5';
       const deadline = Date.now() + 15000;
       let shrunk = false;
       while (Date.now() < deadline) {
-        if (chainOf(await getEntities(page)).length === 1) { shrunk = true; break; }
+        if (chainOf(await getEntities(page, created.id)).length === 1) { shrunk = true; break; }
         await new Promise((r) => setTimeout(r, 200));
       }
       if (!shrunk) throw new Error('chain never shrunk to 1 item');
     }
 
-    chain = chainOf(await getEntities(page));
+    chain = chainOf(await getEntities(page, created.id));
     assert(chain.length === 1, '× button removed exactly one item');
 
     // 6. namespace-move smoke. The bottom "ns:" strip moved into the
@@ -206,7 +206,7 @@ const TEST_NAME = 'test-edit-phase5';
       const deadline = Date.now() + 15000;
       let moved = false;
       while (Date.now() < deadline) {
-        const ns = (await getEntities(page)).fns
+        const ns = (await getEntities(page, created.id)).fns
           .find((f) => f.id === created.id)?.['namespace-id'];
         if (ns === firstNsId) { moved = true; break; }
         await new Promise((r) => setTimeout(r, 200));
@@ -214,7 +214,7 @@ const TEST_NAME = 'test-edit-phase5';
       if (!moved) throw new Error('ns-move never settled to ' + firstNsId);
     }
 
-    const movedNs = (await getEntities(page)).fns.find(f => f.id === created.id)['namespace-id'];
+    const movedNs = (await getEntities(page, created.id)).fns.find(f => f.id === created.id)['namespace-id'];
     assert(movedNs === firstNsId, 'fn now has the picked namespace-id');
 
     await page.evaluate((fnId) => new Promise(resolve => {
@@ -231,7 +231,7 @@ const TEST_NAME = 'test-edit-phase5';
       const deadline = Date.now() + 15000;
       let cleared = false;
       while (Date.now() < deadline) {
-        const ns = (await getEntities(page)).fns
+        const ns = (await getEntities(page, created.id)).fns
           .find((f) => f.id === created.id)?.['namespace-id'];
         if (ns === null || ns === undefined) { cleared = true; break; }
         await new Promise((r) => setTimeout(r, 200));
@@ -239,7 +239,7 @@ const TEST_NAME = 'test-edit-phase5';
       if (!cleared) throw new Error('ns never cleared back to root');
     }
 
-    const backToRoot = (await getEntities(page)).fns.find(f => f.id === created.id)['namespace-id'];
+    const backToRoot = (await getEntities(page, created.id)).fns.find(f => f.id === created.id)['namespace-id'];
     assert(backToRoot === null || backToRoot === undefined, 'ns cleared back to root');
   } finally {
     await deleteFnByName(page, TEST_NAME).catch(() => {});

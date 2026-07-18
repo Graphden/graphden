@@ -23,7 +23,7 @@ const TEST_NAME = 'test-arg-value-validation';
     // Build a tiny test fn: parent = http-server (which has a
     // :port :int slot — refined to [:and [:>= 1] [:<= 65535]]).
     // Bind :port to 8080 (valid) so we have an arg-id to PUT to.
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'http-server');
     const httpServer = ents.fns.find(f => f.name === 'http-server');
     const portArg = synthArgs(ents).find(
       a => a['fn-id'] === httpServer.id && a.name === 'port' && !a['source-id']);
@@ -31,13 +31,13 @@ const TEST_NAME = 'test-arg-value-validation';
 
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + httpServer.id);
-    const fn = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
+    const fn = (await getEntities(page, TEST_NAME)).fns.find(f => f.name === TEST_NAME);
     assert(fn, 'test fn created');
 
     await api(page, 'POST', '/api/entities/binding',
               'fn-id=' + fn.id + '&slot-id=' + portArg['slot-id'] +
               '&value=' + encodeURIComponent('8080'));
-    const port = synthArgs(await getEntities(page))
+    const port = synthArgs(await getEntities(page, fn.id))
                    .find(a => a['fn-id'] === fn.id && a['slot-id'] === portArg['slot-id']);
     assert(port && port.value === 8080, 'port=8080 seeded');
 
@@ -69,7 +69,7 @@ const TEST_NAME = 'test-arg-value-validation';
 
     // After all the failed PUTs, the value should still be the last
     // VALID write (22), not whatever the failed PUTs tried.
-    const afterBad = (await getEntities(page)).bindings.find(b => b.id === port['binding-id']);
+    const afterBad = (await getEntities(page, fn.id)).bindings.find(b => b.id === port['binding-id']);
     assert(afterBad.value === 22,
            'rejected writes left value at last valid (22)');
 

@@ -66,7 +66,7 @@ async function cleanup(page) {
     assert(seedResp.ok && seedResp.id,
            'record type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, REC_FN);
     const recFn = ents.fns.find((f) => f.name === REC_FN);
     assert(recFn, 'record fn-row resolves: id=' + recFn.id);
     const slotsById = Object.fromEntries(ents.slots.map((s) => [s.id, s]));
@@ -208,7 +208,7 @@ async function cleanup(page) {
       {timeout: 15000});
     // Poll storage until the record grows to 3 fn-slots (b add).
     const settled = await waitFor(async () => {
-      const e = await getEntities(page);
+      const e = await getEntities(page, recFn.id);
       return e['fn-slots'].filter((fs) => fs['fn-id'] === recFn.id)
                           .length === 3;
     }, 5000);
@@ -217,7 +217,7 @@ async function cleanup(page) {
     // ===================================================================
     // Phase C: storage reflects the new field.
     // ===================================================================
-    const ents2 = await getEntities(page);
+    const ents2 = await getEntities(page, recFn.id);
     const slotsById2 = Object.fromEntries(ents2.slots.map((s) => [s.id, s]));
     const fnSlots1 = ents2['fn-slots']
       .filter((fs) => fs['fn-id'] === recFn.id)

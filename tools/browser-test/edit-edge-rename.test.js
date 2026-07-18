@@ -47,13 +47,13 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: probe parented `:add`. Inherits a `:nums` slot.
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'add');
     const addFn = ents.fns.find(
       (f) => f.name === 'add' && (f['parent-ids'] || []).length === 0);
     assert(addFn, ':add baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + addFn.id);
-    const probe = (await getEntities(page)).fns.find(
+    const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
 
@@ -151,7 +151,7 @@ async function cleanup(page) {
     // slot. Verify both: the new slot exists with the chosen name,
     // and it's wired to the probe via a fn-slot junction.
     // ===================================================================
-    const finalEnts = await getEntities(page);
+    const finalEnts = await getEntities(page, probe.id);
     // Slot identity is a UUIDv5 derived from (fn-id, slot-name) —
     // multiple `:items` slots can exist across the graph; only the
     // one owned by the probe matters here. Filter via the

@@ -111,6 +111,8 @@ async function cleanupAll(page) {
     await cleanupAll(page);
     console.log('  (cleanup done)');
 
+    // full-dump: resolves two unrelated baseline fns (:str-len + :add) and
+    // synthArgs over both; neither is in the other's subtree closure.
     const ents = await getEntities(page);
     const strLen = ents.fns.find(f => f.name === 'str-len');
     const add = ents.fns.find(f => f.name === 'add');
@@ -127,7 +129,7 @@ async function cleanupAll(page) {
       // Parent: str-len + :string="parent-val"
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + A_PARENT + '&parent-ids=' + strLen.id);
-      const parent = (await getEntities(page)).fns.find(f => f.name === A_PARENT);
+      const parent = (await getEntities(page, A_PARENT)).fns.find(f => f.name === A_PARENT);
       await api(page, 'POST', '/api/entities/binding',
                 'fn-id=' + parent.id + '&slot-id=' + stringSlot['slot-id'] +
                 '&value=' + encodeURIComponent('"parent-val"'));
@@ -135,7 +137,7 @@ async function cleanupAll(page) {
       // Child inherits from parent.
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + A_CHILD + '&parent-ids=' + parent.id);
-      const child = (await getEntities(page)).fns.find(f => f.name === A_CHILD);
+      const child = (await getEntities(page, A_CHILD)).fns.find(f => f.name === A_CHILD);
 
       // Parent's OWN layout exposes the :string slot inline as an
       // arg node — `parent-val` is the bound literal that shows up
@@ -153,7 +155,9 @@ async function cleanupAll(page) {
       // at render time, so verifying storage state pins the
       // inheritance contract without depending on layout API
       // staying frozen.
-      const ents2 = await getEntities(page);
+      // child's subtree closure walks parent-ids, so it carries the parent's
+      // bindings too — enough to check the child has no OWN binding.
+      const ents2 = await getEntities(page, child.id);
       const childOwnBinding = (ents2.bindings || []).find(
         b => b['fn-id'] === child.id && b['slot-id'] === stringSlot['slot-id']);
       assert(!childOwnBinding,
@@ -188,21 +192,23 @@ async function cleanupAll(page) {
       // Parent: add + :nums = [1, 2].
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + B_PARENT + '&parent-ids=' + add.id);
-      const parent = (await getEntities(page)).fns.find(f => f.name === B_PARENT);
+      const parent = (await getEntities(page, B_PARENT)).fns.find(f => f.name === B_PARENT);
       await api(page, 'POST', '/api/sequence/append/' + parent.id, {value: 1});
       await api(page, 'POST', '/api/sequence/append/' + parent.id, {value: 2});
 
       // Child inherits parent's sequence — no own list-append.
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + B_CHILD + '&parent-ids=' + parent.id);
-      const child = (await getEntities(page)).fns.find(f => f.name === B_CHILD);
+      const child = (await getEntities(page, B_CHILD)).fns.find(f => f.name === B_CHILD);
 
       // Storage-layer inheritance: child has no own list-items,
       // but parent's list-items ARE there. The fn-card overlay
       // walks the parent-ids closure at render time, so the
       // inheritance contract is pinned at the storage state
       // (durable across layout API revisions).
-      const ents2 = await getEntities(page);
+      // child's subtree closure includes its parent (via parent-ids), so the
+      // parent's binding + list-items come along with the child's own rows.
+      const ents2 = await getEntities(page, child.id);
       const parentBinding = (ents2.bindings || []).find(
         b => b['fn-id'] === parent.id && b['slot-id'] === numsSlot['slot-id']);
       const parentItems = (ents2['list-items'] || []).filter(
@@ -237,7 +243,7 @@ async function cleanupAll(page) {
     await tryStep('(c) child binding overrides parent', async () => {
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + C_PARENT + '&parent-ids=' + strLen.id);
-      const parent = (await getEntities(page)).fns.find(f => f.name === C_PARENT);
+      const parent = (await getEntities(page, C_PARENT)).fns.find(f => f.name === C_PARENT);
       await api(page, 'POST', '/api/entities/binding',
                 'fn-id=' + parent.id + '&slot-id=' + stringSlot['slot-id'] +
                 '&value=' + encodeURIComponent('"parent-val"'));
@@ -253,7 +259,7 @@ async function cleanupAll(page) {
       // unchanged after the rejected POST.
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + C_CHILD + '&parent-ids=' + parent.id);
-      const child = (await getEntities(page)).fns.find(f => f.name === C_CHILD);
+      const child = (await getEntities(page, C_CHILD)).fns.find(f => f.name === C_CHILD);
       const overrideResp = await api(page, 'POST', '/api/entities/binding',
                 'fn-id=' + child.id + '&slot-id=' + stringSlot['slot-id'] +
                 '&value=' + encodeURIComponent('"child-val"'));
@@ -263,7 +269,9 @@ async function cleanupAll(page) {
       assert(/inheritance|ancestor|final|implicitly/i.test(overrideResp.body || ''),
              'rejection body explains the inheritance final-value rule');
 
-      const ents2 = await getEntities(page);
+      // child's subtree closure walks parent-ids, so the parent's binding is
+      // carried alongside the (absent) child binding.
+      const ents2 = await getEntities(page, child.id);
       const parentBinding = (ents2.bindings || []).find(
         b => b['fn-id'] === parent.id && b['slot-id'] === stringSlot['slot-id']);
       const childBinding = (ents2.bindings || []).find(
@@ -282,14 +290,14 @@ async function cleanupAll(page) {
       // Parent: add + items [1, 2]
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + D_PARENT + '&parent-ids=' + add.id);
-      const parent = (await getEntities(page)).fns.find(f => f.name === D_PARENT);
+      const parent = (await getEntities(page, D_PARENT)).fns.find(f => f.name === D_PARENT);
       await api(page, 'POST', '/api/sequence/append/' + parent.id, {value: 1});
       await api(page, 'POST', '/api/sequence/append/' + parent.id, {value: 2});
 
       // Child appends item 3 via its own list-append binding.
       await api(page, 'POST', '/api/entities/fn',
                 'name=' + D_CHILD + '&parent-ids=' + parent.id);
-      const child = (await getEntities(page)).fns.find(f => f.name === D_CHILD);
+      const child = (await getEntities(page, D_CHILD)).fns.find(f => f.name === D_CHILD);
       await api(page, 'POST', '/api/sequence/append/' + child.id, {value: 3});
 
       // Storage-layer list-append: child has its own binding +
@@ -297,7 +305,9 @@ async function cleanupAll(page) {
       // contract lives in the storage layer (the child's binding
       // carries `list-append? = true`); the runtime executor
       // concatenates parent + child at compile time.
-      const ents2 = await getEntities(page);
+      // child's subtree closure includes its parent (via parent-ids), so both
+      // parent + child bindings and their list-items are present.
+      const ents2 = await getEntities(page, child.id);
       const parentBinding = (ents2.bindings || []).find(
         b => b['fn-id'] === parent.id && b['slot-id'] === numsSlot['slot-id']);
       const childBinding = (ents2.bindings || []).find(

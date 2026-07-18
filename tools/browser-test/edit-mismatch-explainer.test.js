@@ -57,13 +57,13 @@ async function cleanup(page) {
     // by mutating `lookups.bindingMap` so the value the editor sees
     // is "hello" (text) while the slot is still typed `:int`.
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'sleep');
     const sleepFn = ents.fns.find(
       (f) => f.name === 'sleep' && (f['parent-ids'] || []).length === 0);
     assert(sleepFn, ':sleep baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + sleepFn.id);
-    const probeEnts = await getEntities(page);
+    const probeEnts = await getEntities(page, PROBE_FN);
     const probe = probeEnts.fns.find((f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
     const slotsById = Object.fromEntries(

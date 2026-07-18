@@ -51,6 +51,8 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: fn under :app.
     // ===================================================================
+    // full-dump: needs the :app and :core namespace rows, which are not in
+    // :identity's subtree closure — no single fn root covers all three.
     const ents = await getEntities(page);
     const identity = ents.fns.find((f) => f.name === 'identity');
     const fromNs = (ents.namespaces || []).find((n) => n.name === FROM_NS);
@@ -60,7 +62,7 @@ async function cleanup(page) {
     await api(page, 'POST', '/api/entities/fn',
               'name=' + FN_NAME + '&parent-ids=' + identity.id
               + '&namespace-id=' + fromNs.id);
-    const fn = (await getEntities(page)).fns.find(
+    const fn = (await getEntities(page, FN_NAME)).fns.find(
       (f) => f.name === FN_NAME);
     assert(fn && fn['namespace-id'] === fromNs.id,
            'probe created under :' + FROM_NS);
@@ -156,14 +158,14 @@ async function cleanup(page) {
       const deadline = Date.now() + 15000;
       let moved = false;
       while (Date.now() < deadline) {
-        const ents = await getEntities(page);
+        const ents = await getEntities(page, fn.id);
         const f = (ents.fns || []).find((x) => x.id === fn.id);
         if (f && f['namespace-id'] === toNs.id) { moved = true; break; }
         await new Promise((r) => setTimeout(r, 250));
       }
       if (!moved) throw new Error('ns-move never settled in storage');
     }
-    const finalEnts = await getEntities(page);
+    const finalEnts = await getEntities(page, fn.id);
     const moved = finalEnts.fns.find((f) => f.id === fn.id);
     assert(moved['namespace-id'] === toNs.id,
            'fn.namespace-id now points at :' + TO_NS

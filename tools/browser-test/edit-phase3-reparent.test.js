@@ -19,6 +19,8 @@ const TEST_NAME = 'test-edit-phase3';
   try {
     await deleteFnByName(page, TEST_NAME);
 
+    // full-dump: needs two unrelated base-fns (add + mul) plus synthArgs
+    // over both — no single fn root covers both parents.
     const ents = await getEntities(page);
     const add = ents.fns.find(f => f.name === 'add');
     const mul = ents.fns.find(f => f.name === 'mul');
@@ -31,9 +33,9 @@ const TEST_NAME = 'test-edit-phase3';
     //    automatically — no explicit "POST inheriting arg" step.
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + add.id);
-    const created = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
+    const created = (await getEntities(page, TEST_NAME)).fns.find(f => f.name === TEST_NAME);
     assert(created, 'test fn created');
-    const seeded = synthArgs(await getEntities(page))
+    const seeded = synthArgs(await getEntities(page, created.id))
                      .filter(a => a['fn-id'] === created.id);
     assert(seeded.length === 1 && seeded[0]['slot-id'] === addNums['slot-id'],
            'inheriting arg points at add.nums');
@@ -78,7 +80,7 @@ const TEST_NAME = 'test-edit-phase3';
     }, { fnId: created.id, parentId: add.id });
 
     const droppedParents = await waitFor(async () => {
-      const e = await getEntities(page);
+      const e = await getEntities(page, created.id);
       const f = e.fns.find(x => x.id === created.id);
       return f && (!f['parent-ids'] || f['parent-ids'].length === 0);
     }, 5000);
@@ -94,14 +96,14 @@ const TEST_NAME = 'test-edit-phase3';
     }, { fnId: created.id, newParentId: mul.id });
 
     const reparented = await waitFor(async () => {
-      const e = await getEntities(page);
+      const e = await getEntities(page, created.id);
       const f = e.fns.find(x => x.id === created.id);
       return f && JSON.stringify(f['parent-ids']) === JSON.stringify([mul.id]);
     }, 5000);
     assert(reparented, 'parent-ids replaced with [mul]');
 
     // 5. Verify cascade outcome — synth arg now derives from mul.nums.
-    const after = await getEntities(page);
+    const after = await getEntities(page, created.id);
     const argsAfter = synthArgs(after).filter(a => a['fn-id'] === created.id);
     assert(argsAfter.length === 1, 'exactly one arg after cascade');
     assert(argsAfter[0]['slot-id'] === mulNums['slot-id'],

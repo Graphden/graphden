@@ -18,13 +18,13 @@ const {assert, newContext, api, getEntities} = require('./edit-test-helpers');
   const {browser, page} = await newContext(chromium);
   console.log('form-js-source — :js-source slot renders <textarea>');
   try {
-    // Scope=index (default getEntities) gives fns+namespaces but NOT
-    // slots — for the slot row, refetch with scope=subtree rooted at
-    // the dispatch-custom fn. The subtree includes every slot the
-    // root or its ancestors reference; the :body slot lives among
-    // them (its owning fn-slot link is elided from subtree's
-    // fn-slots list, so look up by name within the subtree's slots).
-    const ents = await getEntities(page);
+    // Resolve :dispatch-custom to its id (scoped getEntities returns
+    // its subtree). For the :body slot row, fetch scope=subtree rooted
+    // at the fn: the subtree includes every slot the root or its
+    // ancestors reference; the :body slot lives among them (its owning
+    // fn-slot link is elided from subtree's fn-slots list, so look up
+    // by name within the subtree's slots).
+    const ents = await getEntities(page, 'dispatch-custom');
     const dc = ents.fns.find(f => f.name === 'dispatch-custom');
     assert(dc, ':dispatch-custom baseline resolved');
     const subtree = await api(

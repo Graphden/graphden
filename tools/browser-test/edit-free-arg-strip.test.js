@@ -47,13 +47,13 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: probe parented :add, no bindings.
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'add');
     const addFn = ents.fns.find(
       (f) => f.name === 'add' && (f['parent-ids'] || []).length === 0);
     assert(addFn, ':add baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + addFn.id);
-    const probe = (await getEntities(page)).fns.find(
+    const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created (no bindings)');
 

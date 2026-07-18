@@ -51,6 +51,8 @@ async function cleanup(page) {
     // ===================================================================
     // Seed both probes.
     // ===================================================================
+    // full-dump: resolves two unrelated baseline fns (:env + :identity)
+    // plus :env's own slots/fn-slots — not a single fn's closure.
     const ents = await getEntities(page);
     const envFn = ents.fns.find(
       (f) => f.name === 'env' && (f['parent-ids'] || []).length === 0);
@@ -63,7 +65,7 @@ async function cleanup(page) {
     await api(page, 'POST', '/api/entities/fn',
               'name=' + DRIFT_FN + '&parent-ids=' + envFn.id
               + '&expects-effects=' + encodeURIComponent('[]'));
-    const driftProbe = (await getEntities(page)).fns.find(
+    const driftProbe = (await getEntities(page, DRIFT_FN)).fns.find(
       (f) => f.name === DRIFT_FN);
     assert(driftProbe, 'drift probe created');
     // Bind :name slot so the fn has zero free args (clean render).
@@ -82,7 +84,7 @@ async function cleanup(page) {
     await api(page, 'POST', '/api/entities/fn',
               'name=' + GHOST_FN + '&parent-ids=' + identity.id
               + '&expects-effects=' + encodeURIComponent('network'));
-    const ghostProbe = (await getEntities(page)).fns.find(
+    const ghostProbe = (await getEntities(page, GHOST_FN)).fns.find(
       (f) => f.name === GHOST_FN);
     assert(ghostProbe, 'ghost probe created');
 

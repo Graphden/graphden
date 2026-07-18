@@ -90,14 +90,14 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     // ===================================================================
     // Phase A: seed a fn on main with description="seed".
     // ===================================================================
-    const mainEnts = await getEntities(page);
+    const mainEnts = await getEntities(page, 'identity');
     const identity = mainEnts.fns.find((f) => f.name === 'identity');
     assert(identity, ':identity parent resolved');
 
     await api(page, 'POST', '/api/entities/fn',
               'name=' + FN_NAME + '&parent-ids=' + identity.id
               + '&description=seed');
-    const created = (await getEntities(page)).fns.find(
+    const created = (await getEntities(page, FN_NAME)).fns.find(
       (f) => f.name === FN_NAME);
     assert(created, 'seed fn created on main: ' + created?.id);
     const fnId = created.id;

@@ -50,7 +50,7 @@ async function cleanup(page) {
     // ===================================================================
     // Seed: probe with [:identity, :add] parents.
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page); // full-dump: resolves two unrelated baselines (:identity + :add), probe not yet created
     const identity = ents.fns.find((f) => f.name === 'identity');
     const addFn = ents.fns.find(
       (f) => f.name === 'add' && (f['parent-ids'] || []).length === 0);
@@ -58,7 +58,7 @@ async function cleanup(page) {
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids='
               + identity.id + ',' + addFn.id);
-    const probe = (await getEntities(page)).fns.find(
+    const probe = (await getEntities(page, PROBE_FN)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created with both parents');
     assert((probe['parent-ids'] || []).length === 2,

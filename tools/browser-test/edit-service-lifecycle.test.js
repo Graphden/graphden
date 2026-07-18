@@ -130,7 +130,7 @@ async function openServicePopover(page) {
     // a subtype of :body's [:fn {} :any] slot). Zero free args + :process
     // effect transitively from :future → service-eligible.
     // ===================================================================
-    const ents = await getEntities(page);
+    const ents = await getEntities(page); // full-dump: resolves two unrelated baselines (:future + :const), probe not yet created
     const future = ents.fns.find((f) => f.name === 'future');
     const constFn = ents.fns.find(
       (f) => f.name === 'const' && (f['parent-ids'] || []).length === 0);
@@ -138,7 +138,7 @@ async function openServicePopover(page) {
 
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TICK_FN + '&parent-ids=' + constFn.id);
-    const tickEnts = await getEntities(page);
+    const tickEnts = await getEntities(page, TICK_FN); // ancestor :const's fn-slots/slots are in TICK_FN's subtree closure
     const tick = tickEnts.fns.find((f) => f.name === TICK_FN);
     assert(tick, 'thunk fn-def created');
     const constSlots = tickEnts['fn-slots'].filter(
@@ -157,7 +157,7 @@ async function openServicePopover(page) {
 
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + future.id);
-    const probeEnts = await getEntities(page);
+    const probeEnts = await getEntities(page, PROBE_FN); // ancestor :future's fn-slots/slots are in PROBE_FN's subtree closure
     const probe = probeEnts.fns.find((f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
     const futureFnSlots = probeEnts['fn-slots'].filter(

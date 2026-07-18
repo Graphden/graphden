@@ -20,14 +20,14 @@ const TEST_NAME = 'test-free-arg-literal';
     // Same setup as fn-picker-filter: fn parented to :str-len with an
     // inheriting :string free arg (no value, no ref → renders as
     // a clickable placeholder).
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'str-len');
     const strLen = ents.fns.find(f => f.name === 'str-len');
     const stringArg = synthArgs(ents).find(
       a => a['fn-id'] === strLen.id && a.name === 'string' && !a['source-id']);
     assert(strLen && stringArg, ':str-len.string baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + strLen.id);
-    const fn = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
+    const fn = (await getEntities(page, TEST_NAME)).fns.find(f => f.name === TEST_NAME);
     // No explicit "POST inheriting arg" step — slot/binding model
     // exposes the inherited :string slot automatically.
 
@@ -128,7 +128,7 @@ const TEST_NAME = 'test-free-arg-literal';
     // cache.
     let ownBinding;
     const bound = await waitFor(async () => {
-      const after = await getEntities(page);
+      const after = await getEntities(page, fn.id);
       ownBinding = (after.bindings || []).find(
         b => b['fn-id'] === fn.id && b['slot-id'] === stringArg['slot-id']);
       return ownBinding && ownBinding.value === 'hello';

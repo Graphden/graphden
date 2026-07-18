@@ -23,18 +23,18 @@ const TEST_NAME = 'test-arg-type-flip';
 
     // Seed: fn parented to :str-len with a bound :string="hello".
     // Type chip renders only on overlay'd args, not unset placeholders.
-    const ents = await getEntities(page);
+    const ents = await getEntities(page, 'str-len');
     const strLen = ents.fns.find(f => f.name === 'str-len');
     const stringArg = synthArgs(ents).find(
       a => a['fn-id'] === strLen.id && a.name === 'string' && !a['source-id']);
     assert(strLen && stringArg, ':str-len.string baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + strLen.id);
-    const fn = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
+    const fn = (await getEntities(page, TEST_NAME)).fns.find(f => f.name === TEST_NAME);
     await api(page, 'POST', '/api/entities/binding',
               'fn-id=' + fn.id + '&slot-id=' + stringArg['slot-id'] +
               '&value=' + encodeURIComponent('"hello"'));
-    const arg = synthArgs(await getEntities(page)).find(
+    const arg = synthArgs(await getEntities(page, fn.id)).find(
       a => a['fn-id'] === fn.id && a['slot-id'] === stringArg['slot-id']);
     assert(arg && arg.value === 'hello', ':string="hello" seeded');
 
@@ -165,7 +165,7 @@ const TEST_NAME = 'test-arg-type-flip';
            'PUT /api/entities/binding/:id returned 200 (got '
            + putResp.status() + ')');
 
-    const postSaveEnts = await getEntities(page);
+    const postSaveEnts = await getEntities(page); // full-dump: asserts `non-blank-text` type-row exists as an independent precondition — scoping to fn would make that presence depend on the flip-under-test persisting, misreporting a save bug as a missing precondition
     const refineFn = postSaveEnts.fns.find(
       f => f.name === 'non-blank-text' && (!f['parent-ids'] || f['parent-ids'].length === 0));
     assert(refineFn,

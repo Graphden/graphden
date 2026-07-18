@@ -115,11 +115,56 @@
                  {:parent :system-property :args {:name {:value "java.version"}}}
                  :jvm-uptime-ms]}}
 
-  {:name :heap-memory
-   :description "JVM heap usage snapshot — `{:heap-used :heap-max :heap-committed :free :total :max}` in bytes."
+  ;; Heap / process-memory primitives — one MXBean/Runtime call each,
+  ;; same standard as :jvm-uptime-ms: admins compose their own memory
+  ;; shape via :zipmap instead of getting an opaque all-in-one impl.
+
+  {:name :heap-used
+   :description "Bytes of heap currently used (`MemoryMXBean.getHeapMemoryUsage().getUsed()`)."
    :args {}
-   :return-type :heap-memory-shape
+   :return-type :int
    :effects #{:io}}                 ; live runtime state — varies per call
+
+  {:name :heap-max
+   :description "Max heap bytes (`MemoryMXBean.getHeapMemoryUsage().getMax()`); -1 when undefined."
+   :args {}
+   :return-type :int
+   :effects #{:io}}                 ; live runtime state — varies per call
+
+  {:name :heap-committed
+   :description "Bytes of heap committed by the OS (`MemoryMXBean.getHeapMemoryUsage().getCommitted()`)."
+   :args {}
+   :return-type :int
+   :effects #{:io}}                 ; live runtime state — varies per call
+
+  {:name :free-memory
+   :description "Free bytes within the JVM's currently allocated memory (`Runtime.freeMemory()`)."
+   :args {}
+   :return-type :int
+   :effects #{:io}}                 ; live runtime state — varies per call
+
+  {:name :total-memory
+   :description "Total bytes currently allocated to the JVM (`Runtime.totalMemory()`)."
+   :args {}
+   :return-type :int
+   :effects #{:io}}                 ; live runtime state — varies per call
+
+  {:name :max-memory
+   :description "Max bytes the JVM will attempt to use (`Runtime.maxMemory()`)."
+   :args {}
+   :return-type :int
+   :effects #{:io}}                 ; live runtime state — varies per call
+
+  ;; :heap-memory is a graph composition of the six primitives above —
+  ;; admins can drop fields, add `:jvm-uptime-ms`, etc. without Clojure.
+  {:name :heap-memory
+   :description "JVM heap usage snapshot — `{:heap-used :heap-max :heap-committed :free :total :max}` in bytes. Composed via `:zipmap` from the six single-call memory primitives; keys are wrapped in `{:value …}` because the value names double as fn names."
+   :parent :zipmap
+   :args {:keys [{:value :heap-used} {:value :heap-max} {:value :heap-committed}
+                 {:value :free} {:value :total} {:value :max}]
+          :vals [:heap-used :heap-max :heap-committed
+                 :free-memory :total-memory :max-memory]}
+   :return-type :heap-memory-shape}
 
   {:name :thread-count
    :description "Live thread count from the JVM ThreadMXBean."
@@ -127,11 +172,39 @@
    :return-type :int
    :effects #{:io}}                 ; live runtime state — varies per call
 
-  {:name :os-info
-   :description "Host operating-system info — name, arch, processors, load-average."
+  ;; OS primitives — one OperatingSystemMXBean call each.
+
+  {:name :os-name
+   :description "Operating-system name (`OperatingSystemMXBean.getName()`)."
    :args {}
-   :return-type :os-info-shape
+   :return-type :text
    :effects #{:io}}                 ; system-property read
+
+  {:name :os-arch
+   :description "OS architecture (`OperatingSystemMXBean.getArch()`)."
+   :args {}
+   :return-type :text
+   :effects #{:io}}                 ; system-property read
+
+  {:name :os-processors
+   :description "Number of processors available to the JVM (`OperatingSystemMXBean.getAvailableProcessors()`)."
+   :args {}
+   :return-type :int
+   :effects #{:io}}                 ; live runtime state — varies per call
+
+  {:name :os-load-average
+   :description "System load average for the last minute (`OperatingSystemMXBean.getSystemLoadAverage()`); -1.0 when unavailable."
+   :args {}
+   :return-type :numeric
+   :effects #{:io}}                 ; live runtime state — varies per call
+
+  ;; :os-info is a graph composition of the four primitives above.
+  {:name :os-info
+   :description "Host operating-system info — `{:name :arch :processors :load-average}`. Composed via `:zipmap` from the four single-call OS primitives; keys wrapped in `{:value …}` to stay literal keywords."
+   :parent :zipmap
+   :args {:keys [{:value :name} {:value :arch} {:value :processors} {:value :load-average}]
+          :vals [:os-name :os-arch :os-processors :os-load-average]}
+   :return-type :os-info-shape}
 
   {:name :counters-snapshot
    :description "Process-global structural counters (`graphden.util.counters`) — compiled-registry full-clears, delta-recompiles, compiles. Counts of RARE structural events, not per-request metrics. Surfaced on /metrics so a running executor can be asked what it just did, instead of having it inferred from a stack trace minutes after the fact."

@@ -100,6 +100,26 @@
 
 
 ;; ============================================================================
+;; core.system — :heap-memory / :os-info recomposed via :zipmap
+;; ============================================================================
+
+(deftest system-info-composition-test
+  ;; :heap-memory / :os-info were opaque all-in-one base-fns; they are
+  ;; now :zipmap compositions over single-bean-call primitives. Assert
+  ;; the recomposed maps keep the original key sets and value kinds.
+  (testing ":heap-memory recomposes the six memory primitives"
+    (let [m (run "heap-memory")]
+      (is (= #{:heap-used :heap-max :heap-committed :free :total :max}
+             (set (keys m))))
+      (is (every? int? (vals m)))))
+  (testing ":os-info recomposes the four OS primitives"
+    (let [m (run "os-info")]
+      (is (= #{:name :arch :processors :load-average} (set (keys m))))
+      (is (string? (:name m)))
+      (is (int? (:processors m))))))
+
+
+;; ============================================================================
 ;; examples.free-args — propagation + `{:as}` rename, shared free args
 ;; ============================================================================
 

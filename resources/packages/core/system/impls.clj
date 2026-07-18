@@ -60,16 +60,44 @@
   (RuntimeMXBean/.getUptime (ManagementFactory/getRuntimeMXBean)))
 
 
-(defbase heap-memory []
+;; Heap / process-memory readings — one bean call each, so admins can
+;; build their own memory shape via `:zipmap` (same standard as
+;; `:jvm-uptime-ms`). `:heap-memory` (fns.edn) recomposes the original
+;; 6-field map in the graph.
+
+(defn- heap-usage
+  ^MemoryUsage []
+  (MemoryMXBean/.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean)))
+
+
+(defbase heap-used-fn []
   (cr/record-effect! :io)
-  (let [runtime (Runtime/getRuntime)
-        heap (MemoryMXBean/.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))]
-    {:heap-used (MemoryUsage/.getUsed heap)
-     :heap-max (MemoryUsage/.getMax heap)
-     :heap-committed (MemoryUsage/.getCommitted heap)
-     :free (Runtime/.freeMemory runtime)
-     :total (Runtime/.totalMemory runtime)
-     :max (Runtime/.maxMemory runtime)}))
+  (MemoryUsage/.getUsed (heap-usage)))
+
+
+(defbase heap-max-fn []
+  (cr/record-effect! :io)
+  (MemoryUsage/.getMax (heap-usage)))
+
+
+(defbase heap-committed-fn []
+  (cr/record-effect! :io)
+  (MemoryUsage/.getCommitted (heap-usage)))
+
+
+(defbase free-memory-fn []
+  (cr/record-effect! :io)
+  (Runtime/.freeMemory (Runtime/getRuntime)))
+
+
+(defbase total-memory-fn []
+  (cr/record-effect! :io)
+  (Runtime/.totalMemory (Runtime/getRuntime)))
+
+
+(defbase max-memory-fn []
+  (cr/record-effect! :io)
+  (Runtime/.maxMemory (Runtime/getRuntime)))
 
 
 (defbase thread-count []
@@ -77,13 +105,27 @@
   (Thread/activeCount))
 
 
-(defbase os-info []
+;; OS readings — one bean call each; `:os-info` (fns.edn) recomposes
+;; the original 4-field map in the graph.
+
+(defbase os-name-fn []
   (cr/record-effect! :io)
-  (let [os-bean (ManagementFactory/getOperatingSystemMXBean)]
-    {:name (OperatingSystemMXBean/.getName os-bean)
-     :arch (OperatingSystemMXBean/.getArch os-bean)
-     :processors (OperatingSystemMXBean/.getAvailableProcessors os-bean)
-     :load-average (OperatingSystemMXBean/.getSystemLoadAverage os-bean)}))
+  (OperatingSystemMXBean/.getName (ManagementFactory/getOperatingSystemMXBean)))
+
+
+(defbase os-arch-fn []
+  (cr/record-effect! :io)
+  (OperatingSystemMXBean/.getArch (ManagementFactory/getOperatingSystemMXBean)))
+
+
+(defbase os-processors-fn []
+  (cr/record-effect! :io)
+  (OperatingSystemMXBean/.getAvailableProcessors (ManagementFactory/getOperatingSystemMXBean)))
+
+
+(defbase os-load-average-fn []
+  (cr/record-effect! :io)
+  (OperatingSystemMXBean/.getSystemLoadAverage (ManagementFactory/getOperatingSystemMXBean)))
 
 
 (defbase counters-snapshot []
@@ -233,7 +275,7 @@
 ;; `:slurp`, `:ex-info`, `:throw`, `:invoke`, `:call`, `:call-noargs`)
 ;; potentially expose a secret in their result and must propagate;
 ;; pure environment readers (`:system-property`, `:jvm-uptime-ms`,
-;; `:heap-memory`, `:thread-count`, `:os-info`, `:current-time-ms`,
+;; the heap/os bean readers, `:thread-count`, `:current-time-ms`,
 ;; `:env`, `:read-resource-or-nil`) take no user input so taint can't
 ;; enter through them — left bare. `:sha256-hex` deserves special note:
 ;; even a HASH of a secret leaks the value (rainbow tables, length
@@ -243,9 +285,17 @@
    :parse-json {:impl parse-json :return-type-rule (types/wrap-with-taint nil)}
    :system-property system-property-fn
    :jvm-uptime-ms jvm-uptime-ms-fn
-   :heap-memory heap-memory
+   :heap-used heap-used-fn
+   :heap-max heap-max-fn
+   :heap-committed heap-committed-fn
+   :free-memory free-memory-fn
+   :total-memory total-memory-fn
+   :max-memory max-memory-fn
    :thread-count thread-count
-   :os-info os-info
+   :os-name os-name-fn
+   :os-arch os-arch-fn
+   :os-processors os-processors-fn
+   :os-load-average os-load-average-fn
    :counters-snapshot counters-snapshot
    :current-time-ms current-time-ms
    :env env-fn

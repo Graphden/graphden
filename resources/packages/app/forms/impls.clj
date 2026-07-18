@@ -12,16 +12,15 @@
     [graphden.executor.defbase :refer [defbase]]))
 
 
-(defbase resolve-slot-effective-type
+(defbase _slot-effective-type-raw
   "Resolve the effective type of the slot identified by `parsed`
-   (binding-id or fn-id+slot-id). Returns the type keyword/vector,
-   falling back to `:any` when the slot can't be located. §3.1
-   library boundary."
+   (binding-id or fn-id+slot-id). nil when the slot can't be located
+   — the public `:resolve-slot-effective-type` fn-def coalesces the
+   nil to `:any` in the graph. §3.1 library boundary."
   [parsed]
   (cr/record-effect! :db)
-  (or (value-form/resolve-slot-effective-type
-        (request/require-storage ctx) parsed)
-      :any))
+  (value-form/resolve-slot-effective-type
+    (request/require-storage ctx) parsed))
 
 
 (defbase current-slot-value
@@ -33,17 +32,25 @@
   (value-form/current-value (request/require-storage ctx) parsed))
 
 
-(defbase build-value-form
-  "§3.3 type-aware form-renderer. Returns a hiccup vector describing
-   the form control(s) for `eff-type`, seeded with `current-value`.
-   The dispatch is recursive over `:union`/`:variant`/`:list`/
-   `:record`/`[:refine base …]` etc., each branch carrying its own
-   per-field shape — splitting across graph nodes would scatter the
-   per-type renderer for no admin-extensibility win."
-  [eff-type current-value]
+(defbase resolve-form-fn
+  "Classify a structural type into a form-descriptor tree
+   (`value-form/resolve-form`) — pure, one interface call. The
+   type→descriptor classification is the seam a custom form pipeline
+   composes against."
+  [type-expr]
+  (value-form/resolve-form type-expr))
+
+
+(defbase build-form-fn
+  "§3.3 type-aware form-renderer over a `resolve-form` descriptor.
+   Returns a hiccup vector for the form control(s), seeded with
+   `current-value`. The dispatch is recursive over the descriptor
+   tree (`:record`/`:union`/`:list`/`:leaf`), each branch carrying
+   its own per-field shape — splitting across graph nodes would
+   scatter the per-type renderer for no admin-extensibility win."
+  [form current-value]
   (cr/record-effect! :db)
-  (value-form/build-form ctx (value-form/resolve-form eff-type)
-                         "" nil current-value))
+  (value-form/build-form ctx form "" nil current-value))
 
 
 (defbase slot-type-provenance
@@ -61,7 +68,8 @@
 ;; The package loader pairs each base-fn declared in `fns.edn` with its
 ;; impl by looking up this `impls` map (keyword name -> impl fn).
 (def impls
-  {:resolve-slot-effective-type resolve-slot-effective-type
+  {:_slot-effective-type-raw _slot-effective-type-raw
    :current-slot-value current-slot-value
-   :build-value-form build-value-form
+   :resolve-form resolve-form-fn
+   :build-form build-form-fn
    :slot-type-provenance slot-type-provenance})

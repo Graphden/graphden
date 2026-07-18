@@ -219,11 +219,24 @@
   ;; pre-read, and response shape are graph composition. Admin who
   ;; wants a different per-row attr set or response envelope reparents
   ;; `:_value-form-root` or `:_value-form-apply` itself.
-  {:name :resolve-slot-effective-type
-   :description "Resolve the slot's effective type from the parsed shape."
+  {:name :_slot-effective-type-raw
+   :description "Resolve the slot's effective type from the parsed shape — nil when the slot can't be located."
    :args {:parsed {:type :_value-form-parsed-shape}}
-   :return-type :type-expression
+   :return-type [:union :null :type-expression]
    :effects #{:db}}
+
+  {:name :_slot-effective-type-resolved
+   :parent :_slot-effective-type-raw
+   :args {:parsed {:as :parsed :type :_value-form-parsed-shape}}}
+
+  ;; The `:any` fallback for an unlocatable slot is a graph-visible
+  ;; `:coalesce` default, not a literal buried in Clojure.
+  {:name :resolve-slot-effective-type
+   :description "Resolve the slot's effective type from the parsed shape, falling back to `:any` when the slot can't be located (`:coalesce` default — graph-visible)."
+   :parent :coalesce
+   :args {:value :_slot-effective-type-resolved
+          :default {:value :any}}
+   :return-type :type-expression}
 
   {:name :current-slot-value
    :description "Pre-read the slot's currently-bound value (used to seed the form)."
@@ -231,14 +244,33 @@
    :return-type :any
    :effects #{:db}}
 
-  {:name :build-value-form
-   :description "§3.3 type-aware form-renderer — returns a hiccup vector describing the form control(s)."
-   :args {:eff-type {:type :type-expression
-                     :description "Effective type of the slot — atomic kw (`:int`, `:text`), legacy text alias, vector compound (`[:list T]`), or record (`{...}`)."}
+  {:name :resolve-form
+   :description "Classify a structural type into a form-descriptor tree — `{:kind :record/:list/:union/:leaf …}`. Pure classification; the descriptor is what `:build-form` renders. The seam a custom form pipeline composes against."
+   :args {:type-expr {:type :type-expression
+                      :description "Type to classify — atomic kw (`:int`), legacy text alias, vector compound (`[:list T]`), or record (`{...}`)."}}
+   :return-type :keyword-map}
+
+  {:name :build-form
+   :description "§3.3 type-aware form-renderer over a `:resolve-form` descriptor — returns a hiccup vector for the form control(s), seeded with `:current-value`. Recursive over the descriptor tree; the per-type renderer stays one impl."
+   :args {:form {:type :keyword-map
+                 :description "Form-descriptor tree from `:resolve-form`."}
           :current-value {:type :any
                           :description "Slot's currently-bound value, used to seed the form. Polymorphic by design."}}
    :return-type :hiccup-node
    :effects #{:db}}
+
+  {:name :_build-value-form-descriptor
+   :parent :resolve-form
+   :args {:type-expr {:as :eff-type :type :type-expression}}}
+
+  ;; The old opaque base-fn did resolve-form THEN build-form in one
+  ;; body — the two stages are now separate primitives glued here.
+  {:name :build-value-form
+   :description "Type-aware form-renderer — classify `:eff-type` into a descriptor (`:resolve-form`) and render it (`:build-form`). Pure graph composition; free args `:eff-type`, `:current-value`."
+   :parent :build-form
+   :args {:form :_build-value-form-descriptor
+          :current-value {:as :current-value :type :any}}
+   :return-type :hiccup-node}
 
   {:name :slot-type-provenance
    :description "4-tier resolution chain + inheritance chain for the type at a `(fn-id, slot-id, binding-id)` edit site — mirrors the editor's JS `slotTypeProvenance`. Returns `{:winner :tiers [{:key :label :type :source}] :inheritance-chain [{:fn-id :fn-name :override-fn-id}]}` or nil (list-item rows / unresolved). Used by the mismatch-explainer popover."

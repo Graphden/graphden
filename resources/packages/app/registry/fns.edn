@@ -81,9 +81,13 @@
           :key {:value :fns}
           :default {:value []}}}
 
+  ;; NO `:type` override on the ref — `:_pub-fns`' computed return is
+  ;; the narrower [:list :keyword-map] (get-return-rule over the
+  ;; record-typed bundle), and an override may only NARROW
+  ;; (`:bindings/type-override-widens`).
   {:name :_pub-fns-empty?
    :parent :empty?
-   :args {:coll {:ref :_pub-fns :type [:list :any]}}}
+   :args {:coll :_pub-fns}}
 
   {:name :_pub-err-empty
    :parent :zipmap
@@ -488,11 +492,16 @@
    :parent :get :args {:coll {:as :pair} :key {:value 0}}}
   {:name :_inst-wrap-ancestor
    :parent :get :args {:coll {:as :pair} :key {:value 1}}}
+  ;; Declared :keyword-map (not the computed literal record): `:reduce`'s
+  ;; type-var `a` pins init = func-return = fold-return to ONE type, and
+  ;; the accumulator genuinely alternates between the base envelope and
+  ;; the wrapped shape — :keyword-map is the honest common contract.
   {:name :_inst-wrapped-one
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :dependency}]
           :vals [{:value false} {:value "dependency-install-failed"}
-                 :_inst-wrap-ancestor :_inst-wrap-acc]}}
+                 :_inst-wrap-ancestor :_inst-wrap-acc]}
+   :return-type :keyword-map}
   {:name :_inst-parents-rev
    :parent :reverse
    :args {:coll {:ref :_inst-op-parents :type [:list :any]}}}
@@ -500,7 +509,8 @@
    :parent :reduce
    :args {:func :_inst-wrapped-one
           :init {:as :base-env}
-          :coll {:ref :_inst-parents-rev :type [:list :any]}}}
+          :coll {:ref :_inst-parents-rev :type [:list :any]}}
+   :return-type :keyword-map}
 
   ;; --- :resolve op: reject unknown, skip already-expanded, else mark
   ;;     visited and push dep resolves + own install (post-order) ---

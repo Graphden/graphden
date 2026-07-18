@@ -72,15 +72,108 @@
   ;; NAMESPACE PATH WALKER — joins ns chain into a dotted path
   ;; =============================================================================
   ;;
-  ;; Implemented as a base-fn (loop in impls.clj) because graphden's
-  ;; `:fix`-style recursion isn't built yet (docs/RECURSION.md is
-  ;; still roadmap). Once `:fix` lands, this can be rewritten as a
-  ;; pure fn-def composition; the call-site contract stays the
-  ;; same (free arg `:ns-id`, returns `:text`).
+  ;; Pure `:fix` graph composition (the promised rewrite of the old
+  ;; base-fn loop — `:fix` shipped in core/recursion; pattern mirrors
+  ;; `storage.branches/:branch-chain`). State is
+  ;; `{:acc [names…] :cur ns-id :depth n}`; each step reads the cur
+  ;; ns row via `:get-entity`, appends its name and recurses to the
+  ;; parent. The 20-level depth cap of the old loop is preserved
+  ;; graph-visibly (`:_nsp-depth-capped?`) — a corrupt/cyclic chain
+  ;; terminates with a partial path, same graceful behaviour as
+  ;; before, instead of hitting `:fix`'s 1000-depth throw.
+
+  ;; Type-row exposing `:ns-id` as a declared slot — same reason as
+  ;; `:BranchChainInput`: a free arg that only exists inside the
+  ;; `:input` composition can't be resolved on the inheritance walk.
+  {:name :FnNsPathInput
+   :description "Type-row exposing the `:ns-id :nullable-uuid` input slot of `:fn-ns-path`."
+   :type {:ns-id :nullable-uuid}}
 
   {:name :fn-ns-path
-   :description "Walk the `:ns` parent-id chain from `ns-id` to root, joining each name with `.`. `:_<core.refinements ns-id>` → `\"core.refinements\"`. Empty string when `ns-id` is nil. Depth-capped at 20."
-   :args {:ns-id {:type :nullable-uuid
-                  :description "Starting namespace id. `nil` (or unknown) → empty string return."}}
-   :return-type :text
-   :effects #{:db}}]}
+   :description "Walk the `:ns` parent-id chain from `ns-id` to root, joining each name with `.`. `:_<core.refinements ns-id>` → `\"core.refinements\"`. Empty string when `ns-id` is nil. Depth-capped at 20. Pure graph composition over `:fix` + `:get-entity`."
+   :parents [:fix :FnNsPathInput]
+   :args {:step :_nsp-step
+          :input :_nsp-initial}
+   :return-type :text}
+
+  {:name :_nsp-initial
+   :description "Initial walk state — empty name accumulator, cursor at the starting ns, depth 0."
+   :parent :zipmap
+   :args {:keys [{:value :acc} {:value :cur} {:value :depth}]
+          :vals [{:value []} {:as :ns-id} {:value 0}]}}
+
+  {:name :_nsp-step
+   :parent :if
+   :args {:test :_nsp-done?
+          :then :_nsp-result
+          :else :_nsp-recurse}}
+
+  {:name :_nsp-cur
+   :parent :get
+   :args {:coll {:as :input} :key {:value :cur}}}
+
+  {:name :_nsp-acc
+   :parent :get
+   :args {:coll {:as :input} :key {:value :acc}}}
+
+  {:name :_nsp-depth
+   :parent :get
+   :args {:coll {:as :input} :key {:value :depth}}}
+
+  {:name :_nsp-depth-capped?
+   :description "Defence in depth: storage constraints forbid ns cycles, but a corrupt chain must terminate (with a partial path) rather than run away. 20 ≫ any real hierarchy (3-4 levels)."
+   :parent :gte
+   :args {:nums [:_nsp-depth {:value 20}]}}
+
+  {:name :_nsp-cur-nil?
+   :parent :nil?
+   :args {:value :_nsp-cur}}
+
+  ;; Only forced when the cursor is non-nil — `:or` short-circuits, so
+  ;; the row read never sees a nil id.
+  {:name :_nsp-row
+   :parent :get-entity
+   :args {:entity-type {:value "ns"} :id {:ref :_nsp-cur :type :uuid}}}
+
+  {:name :_nsp-row-nil?
+   :parent :nil?
+   :args {:value :_nsp-row}}
+
+  {:name :_nsp-done?
+   :parent :or
+   :args {:values [:_nsp-depth-capped? :_nsp-cur-nil? :_nsp-row-nil?]}}
+
+  ;; The accumulator is appended leaf→root; reverse for the root-first
+  ;; dotted path.
+  {:name :_nsp-acc-root-first
+   :parent :reverse
+   :args {:coll :_nsp-acc}}
+
+  {:name :_nsp-result
+   :parent :str-join
+   :args {:coll :_nsp-acc-root-first :separator {:value "."}}}
+
+  {:name :_nsp-row-name
+   :parent :get
+   :args {:coll :_nsp-row :key {:value :name}}}
+
+  {:name :_nsp-parent-id
+   :parent :get
+   :args {:coll :_nsp-row :key {:value :parent-id}}}
+
+  {:name :_nsp-acc-extended
+   :parent :conj
+   :args {:coll :_nsp-acc :item :_nsp-row-name}}
+
+  {:name :_nsp-depth-inc
+   :parent :add
+   :args {:nums [:_nsp-depth {:value 1}]}}
+
+  {:name :_nsp-next
+   :parent :zipmap
+   :args {:keys [{:value :acc} {:value :cur} {:value :depth}]
+          :vals [:_nsp-acc-extended :_nsp-parent-id :_nsp-depth-inc]}}
+
+  {:name :_nsp-recurse
+   :parent :invoke
+   :args {:func {:as :self} :arg :_nsp-next}}]}

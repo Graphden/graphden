@@ -30,11 +30,12 @@
   (when http-impls-ns @(ns-resolve http-impls-ns 'realize-body)))
 
 
-(def ^:private pick-encoding
-  ;; `:pick-encoding` is a defbase now — generated signature is
-  ;; `(fn [__args ctx])` with args resolved by keyword name.
-  (let [base (when http-impls-ns @(ns-resolve http-impls-ns 'pick-encoding-fn))]
-    (fn [headers] (base {:headers headers} nil))))
+;; `:pick-encoding` is a defbase now — generated signature is
+;; `(fn [__args ctx])` with args resolved by keyword name.
+(let [base (when http-impls-ns @(ns-resolve http-impls-ns 'pick-encoding-fn))]
+  (defn- pick-encoding
+    [headers]
+    (base {:headers headers} nil)))
 
 
 (deftest pick-encoding-is-case-insensitive-test

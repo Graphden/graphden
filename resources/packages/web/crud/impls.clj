@@ -40,6 +40,24 @@
   (entities/delete-entity entity-type id ctx))
 
 
+(defbase query-entities-fn
+  [entity-type where]
+  (cr/record-effect! :db)
+  (entities/list-entities entity-type where ctx))
+
+
+(defbase create-entity-fn
+  [entity-type data]
+  (cr/record-effect! :db)
+  (entities/create-entity entity-type data ctx))
+
+
+(defbase update-entity-fn
+  [entity-type id data]
+  (cr/record-effect! :db)
+  (entities/update-entity entity-type id data ctx))
+
+
 (defbase free-arg-slot-map
   "`{arg-name → slot-id}` for `fn-id`'s free args, BFS'd across the
    inheritance chain + transitive captured-args of referenced fn-graphs.
@@ -621,6 +639,9 @@
 (def impls
   {:get-entity get-entity
    :delete-entity delete-entity
+   :query-entities query-entities-fn
+   :create-entity create-entity-fn
+   :update-entity update-entity-fn
    :free-arg-slot-map free-arg-slot-map
    :service-blocking-free-args service-blocking-free-args
    :list-all-graph-entities list-all-graph-entities

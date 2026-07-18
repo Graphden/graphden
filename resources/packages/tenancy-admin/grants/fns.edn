@@ -7,33 +7,112 @@
 ;; package isn't loaded, the singleton stays nil, and the wrap is a
 ;; transparent pass-through.
 ;;
-;; The base-fns (`:list-grants`, `:create-grant`) are thin storage shims
-;; over the addon's `:grant` entity; they read `(:storage ctx)` (the
-;; org-scoped storage) so the panel only ever shows the current org's
-;; grants. The query runs under the request-scope's `*current-org*`
-;; binding established by `:tenancy-routing-wrap`'s enclosing layer.
+;; `:list-grants` / `:create-grant` are pure graph compositions over the
+;; generic CRUD primitives; they run against the org-scoped storage, so
+;; the panel only ever shows the current org's grants. The query runs
+;; under the request-scope's `*current-org*` binding established by
+;; `:tenancy-routing-wrap`'s enclosing layer.
 
 {:namespace "tenancy-admin.grants"
  :description "Org-admin grants panel + create route, served via the tenancy route-collection seam."
  :fns
- [;; Base-fn: every :grant row, for the org-admin grants panel (§6).
-  ;; Reads the addon's :grant entity, so it throws when the addon isn't
-  ;; active — but this package only loads WITH the addon, so the :try
-  ;; below is belt-and-suspenders.
+ [;; Every :grant row, for the org-admin grants panel (§6). Pure graph
+  ;; composition over :query-entities; the org-scoped storage means the
+  ;; panel only ever sees the current org's grants. Throws when the addon
+  ;; isn't active (no :grant table) — callers guard with :try.
   {:name :list-grants
-   :description "All :grant rows as decoded entity maps (:subject :capability :namespace :id). Reads the tenancy addon's :grant entity via the storage protocol; throws if :grant isn't in the schema (addon inactive), so callers guard with :try."
-   :args {}
-   :return-type [:list :keyword-map]
-   :effects #{:db}}
+   :description "All :grant rows as decoded entity maps (:subject :capability :namespace :id). Pure graph composition over `:query-entities`; throws if :grant isn't in the schema (addon inactive), so callers guard with :try."
+   :parent :query-entities
+   :args {:entity-type {:value "grant"} :where {:value {}}}
+   :return-type [:list :keyword-map]}
 
-  ;; Base-fn: create a :grant from three text fields.
+  {:name :grant-capability-set
+   :description "The closed capability vocabulary (graphden.tenancy.grant/capabilities) as a `{name-string true}` map — membership via `:contains?`, name list via `:keys`."
+   :args {}
+   :return-type [:map :text :bool]}
+
+  ;; --- :create-grant — validate → resolve → write, all graph-visible. ---
+
+  ;; Reject an unknown capability at write. It's a fixed closed vocabulary;
+  ;; an out-of-set value (a typo like "notacap") round-trips through storage
+  ;; but never matches cap-implies?, so it would authorize nothing while
+  ;; raising no error — a silently-dead grant. Fail loud instead. (The admin
+  ;; form's <select> already prevents this; this guards direct API callers.)
+  {:name :_grant-cap-known?
+   :parent :contains?
+   :args {:coll :grant-capability-set
+          :key {:as :capability :type :text}}}
+
+  {:name :_grant-cap-names
+   :parent :keys
+   :args {:map :grant-capability-set}}
+
+  {:name :_grant-cap-names-sorted
+   :parent :sort
+   :args {:coll :_grant-cap-names}}
+
+  {:name :_grant-cap-valid-list
+   :parent :str-join
+   :args {:coll :_grant-cap-names-sorted :separator {:value ", "}}}
+
+  {:name :_grant-invalid-msg
+   :parent :str
+   :args {:parts [{:value "Unknown capability "} {:as :capability :type :text}
+                  {:value " (valid: "} :_grant-cap-valid-list {:value ")"}]}}
+
+  ;; :type :grant/invalid-capability is load-bearing — the addon's
+  ;; error-mapping middleware turns it into a 400 (tenancy.addon;
+  ;; asserted in addon-test).
+  {:name :_grant-invalid-data
+   :parent :assoc
+   :args {:map {:value {:type :grant/invalid-capability}}
+          :key {:value :capability}
+          :value {:as :capability :type :text}}}
+
+  {:name :_grant-invalid-error
+   :parent :ex-info
+   :args {:message :_grant-invalid-msg :data :_grant-invalid-data}}
+
+  {:name :_grant-invalid-throw
+   :parent :throw
+   :args {:exception :_grant-invalid-error}}
+
+  ;; Resolve the authored username to the user's STABLE id and store BOTH:
+  ;; `:subject-id` is what enforcement matches on (survives a username
+  ;; edit / delete-recreate); `:subject` (username) is kept for display +
+  ;; the personal-namespace path. nil id (no such user yet) → a dead
+  ;; grant, same as a typo'd capability but non-throwing.
+  {:name :_grant-subject-id
+   :parent :user-id-by-username
+   :args {:username {:as :subject :type :text}}}
+
+  {:name :_grant-data-w-subject
+   :parent :assoc-empty
+   :args {:key {:value :subject} :value {:as :subject :type :text}}}
+
+  {:name :_grant-data-w-sid
+   :parent :assoc
+   :args {:map :_grant-data-w-subject :key {:value :subject-id} :value :_grant-subject-id}}
+
+  {:name :_grant-data-w-cap
+   :parent :assoc
+   :args {:map :_grant-data-w-sid :key {:value :capability} :value {:as :capability :type :text}}}
+
+  {:name :_grant-data
+   :parent :assoc
+   :args {:map :_grant-data-w-cap :key {:value :namespace} :value {:as :namespace :type :text}}}
+
+  {:name :_grant-created
+   :parent :create-entity
+   :args {:entity-type {:value "grant"} :data :_grant-data}}
+
   {:name :create-grant
-   :description "Create a :grant entity from subject/capability/namespace text. Reads the tenancy addon's :grant entity; throws if absent (addon inactive)."
-   :args {:subject {:type :text :description "Principal the grant is for."}
-          :capability {:type :text :description "One of the closed capability vocabulary: read / write / execute / admin / bind-args / append-list (graphden.tenancy.grant/capabilities). Rejected at write if out-of-set."}
-          :namespace {:type :text :description "Dot-path namespace the capability applies to."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Create a :grant from subject/capability/namespace text. Pure graph composition: capability validated against the closed vocabulary (throws :grant/invalid-capability → 400), username resolved to its stable id, row written via `:create-entity`. Throws if the addon is inactive."
+   :parent :if
+   :args {:test :_grant-cap-known?
+          :then :_grant-created
+          :else :_grant-invalid-throw}
+   :return-type :keyword-map}
 
   ;; ---------------------------------------------------------------------
   ;; GRANTS-ADMIN PARTIAL — GET /partials/grants-admin. A table of every

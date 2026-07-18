@@ -105,7 +105,18 @@
     ;; fn-graph invalidation.
     :service #{}
 
-    nil))
+    ;; Everything else — :execution rows, package pins, tenancy addon
+    ;; entities (:org / :token / :domain / :grant / :user), any future
+    ;; addon schema — cannot move a compiled closure: the compiler reads
+    ;; ONLY the fn-graph entity types enumerated above. These used to hit
+    ;; a `nil` fallthrough ("unknown shape" → full registry clear), which
+    ;; made every such write pay a whole-graph recompile on the next
+    ;; request — the same cliff the :ns / :slot / :service arms above
+    ;; were pulled out of, one entity type at a time. If a new entity
+    ;; type ever DOES participate in compilation, it must be added to
+    ;; `fn-graph-entity-types` + given an arm here — the compiler would
+    ;; have to be taught about it anyway.
+    #{}))
 
 
 (defn invalidate!

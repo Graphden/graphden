@@ -14,6 +14,7 @@
    whole executor minus the HTTP server."
   (:require
     [cheshire.core]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime]
     [graphden.executor.interface :as exec]
@@ -131,7 +132,7 @@
 ;; ============================================================================
 
 (deftest process-response-composition-test
-  (let [big-body (apply str (repeat 2000 "x"))
+  (let [big-body (str/join (repeat 2000 "x"))
         resp {:status 200
               :headers {:Content-Type "application/json"}
               :body big-body}]

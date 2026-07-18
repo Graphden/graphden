@@ -96,6 +96,15 @@
             (is (= #{(:id f)}
                    (entities/affected-fn-ids storage :slot {:id (:id slot)}))
                 "an in-place slot edit is seeded, not silently skipped"))))
+
+      (testing "non-graph entities (executions, package pins, tenancy addon rows) → #{}"
+        ;; The compiler reads only the fn-graph entity types, so no other
+        ;; write can move a compiled closure. These used to hit the nil
+        ;; fallthrough → full registry clear per grant / org / token write.
+        (doseq [et [:execution :package-install :package-version
+                    :org :token :domain :grant :user]]
+          (is (= #{} (entities/affected-fn-ids storage et {:id (random-uuid)}))
+              (str et " write must not full-clear the compiled registry"))))
       (finally (sp/close storage)))))
 
 

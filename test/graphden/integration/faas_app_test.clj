@@ -300,6 +300,54 @@
       (is (= {:authenticated? false} (auth/authenticate provider {:headers {}}))))))
 
 
+(deftest create-grant-fn-def-validates-and-writes
+  ;; :create-grant is a graph composition (grants/fns.edn): capability
+  ;; validated against the closed vocabulary, username resolved to its
+  ;; stable id, row written via :create-entity.
+  (let [storage (:storage *ctx*)
+        run! (fn [nm args] (cr/execute *ctx* (fn-id-of storage nm) args))]
+    (testing "a valid capability writes the grant with the resolved stable subject-id"
+      (let [user (sp/create-entity storage :user {:username "grants-carol"
+                                                  :password-hash "x" :org "acme"})]
+        (run! "create-grant" {:subject "grants-carol" :capability "admin" :namespace "ops"})
+        (let [row (first (sp/query-entities storage :grant {:subject "grants-carol"}))]
+          (is (some? row))
+          (is (= "admin" (:capability row)))
+          (is (= (str (:id user)) (:subject-id row))
+              "enforcement keys on the stable id, not the mutable username"))))
+    (testing "an unknown capability throws — no silently-dead grant row"
+      (is (thrown? Exception
+            (run! "create-grant" {:subject "eve" :capability "notacap" :namespace "acme"})))
+      (is (empty? (sp/query-entities storage :grant {:subject "eve"}))))))
+
+
+(deftest registration-fn-defs-drive-provisioning
+  ;; create-org / set-org-handler / set-org-execution-mode are pure graph
+  ;; compositions (tenancy-admin/registration/fns.edn) — drive them through
+  ;; the executor and verify the rows they write / the memo they drop.
+  (let [storage (:storage *ctx*)
+        run! (fn [nm args] (cr/execute *ctx* (fn-id-of storage nm) args))
+        org-row #(first (sp/query-entities storage :org {:name %}))]
+    (testing ":create-org registers an org row by slug"
+      (run! "create-org" {:name "prov-org"})
+      (is (some? (org-row "prov-org"))))
+    (testing ":set-org-handler resolves the org and parses the string fn-id to a UUID"
+      (let [fid (:env *fn-id*)]
+        (run! "set-org-handler" {:name "prov-org" :handler-fn-id (str fid)})
+        (is (= fid (:handler-fn-id (org-row "prov-org"))))))
+    (testing ":set-org-handler → nil (no write) for a missing org"
+      (is (nil? (run! "set-org-handler"
+                      {:name "ghost-org" :handler-fn-id (str (random-uuid))}))))
+    (testing ":set-org-execution-mode flips the mode and drops the byo memo"
+      (run! "set-org-execution-mode" {:name "prov-org" :execution-mode "byo"})
+      (is (= "byo" (:execution-mode (org-row "prov-org"))))
+      (is (true? (tc/byo-org? storage "prov-org"))
+          "the flip is visible immediately — the memo was dropped"))
+    (testing ":set-org-execution-mode throws for a bad slug"
+      (is (thrown? Exception
+            (run! "set-org-execution-mode" {:name "ghost-org" :execution-mode "byo"}))))))
+
+
 (deftest tenant-cannot-mint-tokens
   (testing "a tenant writing :token directly is denied (no self-escalation)"
     (let [ex (try (tc/with-org "evil-org"

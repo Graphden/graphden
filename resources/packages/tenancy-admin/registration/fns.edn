@@ -14,11 +14,52 @@
   ;; only the operator (public org) registers orgs. The org `name` IS the
   ;; subdomain (identity resolver), so registration = creating the row.
   ;; ---------------------------------------------------------------------
+  ;; --- shared: username → stable user id (used by :create-token here and
+  ;; :create-grant in the grants module). Authz keys on the id, not the
+  ;; mutable username; nil (no such user) → a token/grant that matches no
+  ;; user, same non-throwing semantics as before. ---
+
+  {:name :_uid-where
+   :parent :assoc-empty
+   :args {:key {:value :username} :value {:as :username :type :text}}}
+
+  {:name :_uid-rows
+   :parent :query-entities
+   :args {:entity-type {:value "user"} :where :_uid-where}}
+
+  {:name :_uid-row
+   :parent :first
+   :args {:coll :_uid-rows}}
+
+  {:name :_uid-row-nil?
+   :parent :nil?
+   :args {:value :_uid-row}}
+
+  {:name :_uid-id
+   :parent :get
+   :args {:coll :_uid-row :key {:value :id}}}
+
+  {:name :_uid-id-text
+   :parent :to-str
+   :args {:value :_uid-id}}
+
+  {:name :user-id-by-username
+   :description "Resolve a username to the user's STABLE id as text — nil when no such user exists. Enforcement matches on the id (survives a username edit / delete-recreate)."
+   :parent :if
+   :args {:test :_uid-row-nil?
+          :then {:value nil}
+          :else :_uid-id-text}
+   :return-type :nullable-text}
+
+  {:name :_org-create-row
+   :parent :assoc-empty
+   :args {:key {:value :name} :value {:as :name :type :text}}}
+
   {:name :create-org
-   :description "Register an :org by name (= slug = subdomain). Reads the tenancy addon's :org entity; throws if absent (addon inactive)."
-   :args {:name {:type :text :description "Org slug — becomes the subdomain and the *current-org* value."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Register an :org by name (= slug = subdomain). Pure graph composition over `:create-entity`; writes the tenancy addon's :org entity — throws if absent (addon inactive)."
+   :parent :create-entity
+   :args {:entity-type {:value "org"} :data :_org-create-row}
+   :return-type :keyword-map}
 
   {:name :_org-create-form-data
    :parent :parse-form-body-kw}
@@ -55,13 +96,39 @@
   ;; hash. Platform-only (`:token` is tenant-forbidden → a tenant POST is
   ;; denied by OrgScoped). This is what makes onboarding a row insert.
   ;; ---------------------------------------------------------------------
+  ;; The stored hash MUST equal `graphden.tenancy.auth/token-hash` (the
+  ;; storage-token-provider hashes the same way at read time) — both are
+  ;; the same SHA-256-hex derivation; the round-trip is tested in
+  ;; `faas-app-test` (route-minted token authenticates via the provider).
+  {:name :_token-hash
+   :parent :sha256-hex
+   :args {:s {:as :token :type :text}}}
+
+  {:name :_token-user-id
+   :parent :user-id-by-username
+   :args {:username {:as :user :type :text}}}
+
+  {:name :_token-row-w-hash
+   :parent :assoc-empty
+   :args {:key {:value :token-hash} :value :_token-hash}}
+
+  {:name :_token-row-w-user
+   :parent :assoc
+   :args {:map :_token-row-w-hash :key {:value :user} :value {:as :user :type :text}}}
+
+  {:name :_token-row-w-uid
+   :parent :assoc
+   :args {:map :_token-row-w-user :key {:value :user-id} :value :_token-user-id}}
+
+  {:name :_token-row
+   :parent :assoc
+   :args {:map :_token-row-w-uid :key {:value :org} :value {:as :org :type :text}}}
+
   {:name :create-token
-   :description "Mint a storage-backed auth token — hashes the bearer (SHA-256) and stores {token-hash, user, org}. Reads the tenancy addon's :token entity; throws if absent (addon inactive)."
-   :args {:token {:type :text :description "The raw bearer token — only its SHA-256 hash is stored."}
-          :user {:type :text :description "Principal user id."}
-          :org {:type :text :description "Principal org — becomes *current-org* for that bearer."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Mint a storage-backed auth token — hashes the bearer (`:sha256-hex`, same derivation as `tenancy.auth/token-hash`), resolves the username to its stable id, stores {token-hash, user, user-id, org}. The raw bearer is never persisted. Pure graph composition; writes the tenancy addon's :token entity — throws if absent (addon inactive)."
+   :parent :create-entity
+   :args {:entity-type {:value "token"} :data :_token-row}
+   :return-type :keyword-map}
 
   {:name :_token-create-form-data
    :parent :parse-form-body-kw}
@@ -108,12 +175,28 @@
   ;; (generic CRUD update) after the graphden-verify=<org> DNS-TXT check.
   ;; Platform-only (`:domain` is tenant-forbidden → tenant POST denied).
   ;; ---------------------------------------------------------------------
+  ;; `:verified? false` is the register-unverified policy: only verified
+  ;; rows route, and verification is a separate operator action (flip via
+  ;; generic CRUD update after the DNS-TXT check). Graph-visible so the
+  ;; policy is readable; a tenant still can't touch :domain at all
+  ;; (entity guard), so exposing it loses no protection.
+  {:name :_domain-row-w-host
+   :parent :assoc-empty
+   :args {:key {:value :hostname} :value {:as :hostname :type :text}}}
+
+  {:name :_domain-row-w-org
+   :parent :assoc
+   :args {:map :_domain-row-w-host :key {:value :org} :value {:as :org :type :text}}}
+
+  {:name :_domain-row
+   :parent :assoc
+   :args {:map :_domain-row-w-org :key {:value :verified?} :value {:value false}}}
+
   {:name :create-domain
-   :description "Register a custom domain (UNVERIFIED) → maps hostname to org once verified. Reads the tenancy addon's :domain entity; throws if absent (addon inactive)."
-   :args {:hostname {:type :text :description "Full custom host, e.g. app.acme.com."}
-          :org {:type :text :description "Org the host serves once verified."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Register a custom domain (UNVERIFIED — `:verified? false` policy is graph-visible) → maps hostname to org once verified. Pure graph composition over `:create-entity`; writes the tenancy addon's :domain entity — throws if absent (addon inactive)."
+   :parent :create-entity
+   :args {:entity-type {:value "domain"} :data :_domain-row}
+   :return-type :keyword-map}
 
   {:name :_domain-create-form-data
    :parent :parse-form-body-kw}
@@ -156,12 +239,65 @@
   ;; self-serve (a tenant setting its OWN handler via a validated seam) is
   ;; step 4b on top of this mutation.
   ;; ---------------------------------------------------------------------
+  ;; --- shared: org row by (unique) name — nil when absent. Used by both
+  ;; :set-org-handler and :set-org-execution-mode. ---
+
+  {:name :_org-where
+   :parent :assoc-empty
+   :args {:key {:value :name} :value {:as :name :type :text}}}
+
+  {:name :_org-rows-by-name
+   :parent :query-entities
+   :args {:entity-type {:value "org"} :where :_org-where}}
+
+  {:name :org-by-name
+   :description "First :org row matching the (unique) `:name` — nil when no such org."
+   :parent :first
+   :args {:coll :_org-rows-by-name}
+   :return-type :nullable-keyword-map}
+
+  {:name :_org-row-nil?
+   :parent :nil?
+   :args {:value :org-by-name}}
+
+  {:name :_org-row-id
+   :parent :get
+   :args {:coll :org-by-name :key {:value :id}}}
+
+  ;; handler-fn-id may arrive as a string (form body) or an already-parsed
+  ;; UUID (direct graph caller) — parse only the string case, pass UUIDs
+  ;; through, exactly the old `(cond-> v (string? v) parse-uuid)`.
+  {:name :_org-handler-fnid-text?
+   :parent :is-a?
+   :args {:value {:as :handler-fn-id} :type {:value :text}}}
+
+  {:name :_org-handler-fnid-parsed
+   :parent :parse-uuid
+   :args {:string {:as :handler-fn-id}}}
+
+  {:name :_org-handler-fnid-uuid
+   :parent :if
+   :args {:test :_org-handler-fnid-text?
+          :then :_org-handler-fnid-parsed
+          :else {:as :handler-fn-id}}}
+
+  {:name :_org-handler-data
+   :parent :assoc-empty
+   :args {:key {:value :handler-fn-id} :value :_org-handler-fnid-uuid}}
+
+  {:name :_org-handler-updated
+   :parent :update-entity
+   :args {:entity-type {:value "org"}
+          :id {:ref :_org-row-id :type :uuid}
+          :data :_org-handler-data}}
+
   {:name :set-org-handler
-   :description "Set an :org's :handler-fn-id (the app-router executes it for that org's subdomain). Reads the tenancy addon's :org entity; throws if absent."
-   :args {:name {:type :text :description "Org slug."}
-          :handler-fn-id {:type :text :description "Fn-id of the org's app handler — arrives as a string from the form body and is parsed to a UUID at write time (already-UUID values pass through)."}}
-   :return-type :nullable-keyword-map
-   :effects #{:db}}
+   :description "Set an :org's :handler-fn-id (the app-router executes it for that org's subdomain). Pure graph composition: `:org-by-name` lookup → nil when the org doesn't exist, else `:update-entity`. Writes the tenancy addon's :org entity — throws if absent."
+   :parent :if
+   :args {:test :_org-row-nil?
+          :then {:value nil}
+          :else :_org-handler-updated}
+   :return-type :nullable-keyword-map}
 
   {:name :_org-handler-form-data
    :parent :parse-form-body-kw}
@@ -198,12 +334,57 @@
   ;; executor). Platform-only (`:org` is tenant-forbidden). Provisioning a
   ;; BYO customer is: create the org, mint its executor token, flip it byo.
   ;; ---------------------------------------------------------------------
+  {:name :invalidate-byo-cache
+   :description "Drop the byo execution-mode memo for org `:name` so a mode flip takes effect at once instead of within the ~5s TTL. One `tenancy.context` interface call."
+   :args {:name {:type :text :description "Org slug."}}
+   :return-type :null}
+
+  {:name :_org-mode-data
+   :parent :assoc-empty
+   :args {:key {:value :execution-mode} :value {:as :execution-mode :type :text}}}
+
+  {:name :_org-mode-updated
+   :parent :update-entity
+   :args {:entity-type {:value "org"}
+          :id {:ref :_org-row-id :type :uuid}
+          :data :_org-mode-data}}
+
+  {:name :_org-mode-cache-dropped
+   :parent :invalidate-byo-cache
+   :args {:name {:as :name :type :text}}}
+
+  ;; update → drop the byo memo → return the updated row. The third step
+  ;; re-references the update node; the per-execution result cache returns
+  ;; the already-computed row rather than writing twice.
+  {:name :_org-mode-applied
+   :parent :do
+   :args {:steps [:_org-mode-updated :_org-mode-cache-dropped :_org-mode-updated]}}
+
+  {:name :_org-mode-nf-message
+   :parent :str
+   :args {:parts [{:value "No org named "} {:as :name :type :text}]}}
+
+  {:name :_org-mode-nf-data
+   :parent :assoc
+   :args {:map {:value {:type :org/not-found}}
+          :key {:value :name}
+          :value {:as :name :type :text}}}
+
+  {:name :_org-mode-nf-error
+   :parent :ex-info
+   :args {:message :_org-mode-nf-message :data :_org-mode-nf-data}}
+
+  {:name :_org-mode-throw
+   :parent :throw
+   :args {:exception :_org-mode-nf-error}}
+
   {:name :set-org-execution-mode
-   :description "Set an :org's :execution-mode (\"hosted\" / \"byo\"). Drops the byo memo so the flip is effective immediately. Reads the tenancy addon's :org entity; throws if absent."
-   :args {:name {:type :text :description "Org slug."}
-          :execution-mode {:type :text :description "\"hosted\" or \"byo\"."}}
-   :return-type :nullable-keyword-map
-   :effects #{:db}}
+   :description "Set an :org's :execution-mode (\"hosted\" / \"byo\") and drop the byo memo so the flip is effective immediately. Pure graph composition: `:org-by-name` lookup → throw :org/not-found when absent, else `:update-entity` + `:invalidate-byo-cache`."
+   :parent :if
+   :args {:test :_org-row-nil?
+          :then :_org-mode-throw
+          :else :_org-mode-applied}
+   :return-type :nullable-keyword-map}
 
   {:name :_org-mode-form-data
    :parent :parse-form-body-kw}

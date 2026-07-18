@@ -188,6 +188,29 @@
    :return-type :bool
    :effects #{:db}}
 
+  {:name :query-entities
+   :description "Every entity of `:entity-type` matching the `:where` filter, as decoded entity maps. One `crud.entities/list-entities` protocol call. The `:where {:value {}}` default is load-bearing — an unbound optional map slot would leak caller context into the filter."
+   :args {:entity-type {:type :text :description "Entity-name keyword as string."}
+          :where {:type :_storage-where-map :value {}
+                  :description "Column-match filter — `{column-keyword value}`. Defaults to `{}` (all rows)."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :create-entity
+   :description "Create an entity through the full CRUD write unit (`crud.entities/create-entity`): write-time validation, graph-cache delta invalidation, cross-pod NOTIFY. Sibling of `:get-entity` / `:delete-entity`."
+   :args {:entity-type {:type :text :description "Entity-name keyword as string."}
+          :data {:type :keyword-map :description "Entity row data (keyword keys)."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :update-entity
+   :description "Update an entity by id through the full CRUD write unit (`crud.entities/update-entity`): validation, delta invalidation, NOTIFY."
+   :args {:entity-type {:type :text :description "Entity-name keyword as string."}
+          :id {:type :uuid :description "Entity UUID."}
+          :data {:type :keyword-map :description "Fields to set (keyword keys)."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   ;; --- :free-arg-slot-map — atomic graph-lookup primitive. Returns
   ;; `{arg-name → slot-id}` for the fn's free args, BFS'd over the
   ;; inheritance chain + transitive captured-args of referenced

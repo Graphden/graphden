@@ -137,15 +137,25 @@
 
 
 (defn- collect-test-roots
-  "Walk `test/` for `:name :the-fn-def-name` shapes — `protocol_test`
-   and friends iterate fn-defs by-name to assert pattern-exemplars
-   (`:postgres-storage-impl` IS-A `:Storage` etc.). Those fn-defs
-   are reachable through the test contract even though the static
-   graph walk doesn't see them. Without this, every documented-
-   pattern exemplar shows up as a false-positive unreachable."
+  "Walk `test/` for ANY keyword token that names a fn-def — those are
+   reachable through the test contract even though the static graph
+   walk doesn't see them. Two real shapes the old `:name :x`-only
+   pattern missed:
+
+   - `(get all-name->id :materialize-package-version)` — the
+     programmatic-API fn-defs `registry_test` drives through the
+     executor by name (no HTTP route exists on purpose);
+   - `(= :postgres-storage-impl (:name %))` — the pattern-exemplar
+     asserts with the keyword BEFORE `(:name %)`, so the anchored
+     form never matched its own motivating example.
+
+   Matching every keyword ∩ fn-def-names is deliberately broad: a
+   fn-def name mentioned in a test is a test contract either way,
+   and the intersection filter keeps incidental keywords (`:ok`,
+   `:status`, …) out unless they genuinely name a fn-def."
   [fn-defs-by-name]
   (let [names (set (keys fn-defs-by-name))
-        pattern #":name\s+:([a-zA-Z_][a-zA-Z0-9_-]*[a-zA-Z0-9_?!])"]
+        pattern #":([a-zA-Z_][a-zA-Z0-9_-]*[a-zA-Z0-9_?!])"]
     (into #{}
           (mapcat (fn [f]
                     (let [src (slurp f)]

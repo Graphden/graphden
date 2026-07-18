@@ -94,8 +94,13 @@
      races our response).
    - For pure fast fns with `:persist? false`, finalise without ever
      writing a row."
-  [ctx parsed]
-  (let [storage (request/require-storage ctx)
+  ([ctx parsed]
+   ;; Non-graph callers (tests, BYO) — resolve the row here; the graph
+   ;; path passes the validation stage's already-resolved `:_execute-fn-row`
+   ;; through the 3-arity, so the request does ONE resolve, not two.
+   (apply-execute ctx parsed (lookup/resolve-fn (request/require-storage ctx) parsed)))
+  ([ctx parsed fn-row]
+   (let [storage (request/require-storage ctx)
         ;; A tenant's SUBMITTED fn is untrusted graph code, so it runs
         ;; effect-restricted: carry the cloud allow-list on the ctx and the
         ;; executor gates it via `record-effect!` (compile-runtime honours
@@ -107,10 +112,6 @@
         exec-ctx (cond-> ctx
                    (not= (tc/current-org) tc/public-org)
                    (assoc :allowed-effects cr/default-cloud-allowed-effects))
-        ;; Single round-trip for both `:id` and `:name`; the older
-        ;; flow did `resolve-fn-id` + a separate `read-entity` to pull
-        ;; the name.
-        fn-row (lookup/resolve-fn storage parsed)
         fn-id (:id fn-row)
         fn-name (:name fn-row)
         fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
@@ -212,7 +213,7 @@
                 {:status :succeeded :result result}
                 {:storage storage :row row :fn-name fn-name
                  :declared-effects declared-eff :runtime-effects (runtime-eff)})
-              (assoc :declared-effects declared-eff)))))))
+              (assoc :declared-effects declared-eff))))))))
 
 
 ;; =============================================================================

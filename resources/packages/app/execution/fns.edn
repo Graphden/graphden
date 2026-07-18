@@ -593,10 +593,17 @@
           :parsed :_execute-parsed}}
 
   {:name :_execute-apply
-   :description "Stage 3 — submit future, deref with timeout. Returns inline `{:status :succeeded :result …}` for fast pure fns, or `{:status :pending :execution-id}` when timeout/effects/persist? forced async."
-   :args {:parsed {:type :_execute-parsed-shape}}
+   :description "Stage 3 — submit future, deref with timeout. Returns inline `{:status :succeeded :result …}` for fast pure fns, or `{:status :pending :execution-id}` when timeout/effects/persist? forced async. Takes the validation stage's already-resolved `:fn-row` — one resolve per request, graph-visible."
+   :args {:parsed {:type :_execute-parsed-shape}
+          :fn-row {:type :nullable-fn-row-shape
+                   :description "The resolved :fn row from `:_execute-fn-row` (validation guaranteed non-nil on this branch)."}}
    :return-type :keyword-map
    :effects #{:db}}
+
+  {:name :_execute-apply-bound
+   :description "The apply core wired to the shared resolve — `:_execute-fn-row` is result-cached, so validation and apply see one lookup."
+   :parent :_execute-apply
+   :args {:parsed {:as :parsed} :fn-row :_execute-fn-row}}
 
   {:name :_execute-rejected?
    :description "True when `:_execute-validation` produced a rejection."
@@ -612,7 +619,7 @@
    :parent :if
    :args {:test :_execute-rejected?
           :then :_execute-validation
-          :else :_execute-apply
+          :else :_execute-apply-bound
           :validation :_execute-validation
           :parsed :_execute-parsed}}
 

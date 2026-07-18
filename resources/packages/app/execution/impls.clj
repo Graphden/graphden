@@ -48,9 +48,14 @@
 
 
 (defbase _execute-apply
-  [parsed]
+  ;; `fn-row` arrives from the validation stage's `:_execute-fn-row`
+  ;; (result-cached per request) — the apply core no longer re-resolves
+  ;; it. What stays inside is the §3.3 concurrency core (slot acquire →
+  ;; future → deref-with-timeout → 4-way outcome + ownership release)
+  ;; plus its perf-critical cached lookups (free-arg-slot-map-cached).
+  [parsed fn-row]
   (cr/record-effect! :db)
-  (fn-exec/apply-execute ctx parsed))
+  (fn-exec/apply-execute ctx parsed fn-row))
 
 
 (defbase get-execution

@@ -31,7 +31,10 @@
 
 
 (def ^:private pick-encoding
-  (when http-impls-ns @(ns-resolve http-impls-ns 'pick-encoding)))
+  ;; `:pick-encoding` is a defbase now — generated signature is
+  ;; `(fn [__args ctx])` with args resolved by keyword name.
+  (let [base (when http-impls-ns @(ns-resolve http-impls-ns 'pick-encoding-fn))]
+    (fn [headers] (base {:headers headers} nil))))
 
 
 (deftest pick-encoding-is-case-insensitive-test
@@ -39,14 +42,14 @@
   ;; uppercase `BR`/`GZIP` from a non-standard client must still compress,
   ;; not silently fall back to identity.
   (testing "uppercase / mixed-case tokens match"
-    (is (= :br   (pick-encoding {"accept-encoding" "BR"})))
-    (is (= :br   (pick-encoding {"accept-encoding" "Br; q=1.0"})))
-    (is (= :gzip (pick-encoding {"accept-encoding" "GZIP, deflate"}))))
-  (testing "lowercase still matches; absent / identity → :identity"
-    (is (= :br       (pick-encoding {"accept-encoding" "br"})))
-    (is (= :gzip     (pick-encoding {"accept-encoding" "gzip"})))
-    (is (= :identity (pick-encoding {"accept-encoding" "identity"})))
-    (is (= :identity (pick-encoding {})))))
+    (is (= "br"   (pick-encoding {"accept-encoding" "BR"})))
+    (is (= "br"   (pick-encoding {"accept-encoding" "Br; q=1.0"})))
+    (is (= "gzip" (pick-encoding {"accept-encoding" "GZIP, deflate"}))))
+  (testing "lowercase still matches; absent / identity → \"identity\""
+    (is (= "br"       (pick-encoding {"accept-encoding" "br"})))
+    (is (= "gzip"     (pick-encoding {"accept-encoding" "gzip"})))
+    (is (= "identity" (pick-encoding {"accept-encoding" "identity"})))
+    (is (= "identity" (pick-encoding {})))))
 
 
 (defn- stream-of

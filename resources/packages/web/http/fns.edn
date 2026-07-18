@@ -48,12 +48,293 @@
                     :description "Inbound Ring request."}}
    :return-type :ring-request-shape}
 
+  {:name :stringify-response-headers
+   :description "Boundary coercion — keyword header keys → strings (the shape http-kit's writer expects). Pass-through when `:headers` isn't a map."
+   :args {:response {:type :ring-response-shape
+                     :description "Response whose header keys may be keywords."}}
+   :return-type :ring-response-shape}
+
+  {:name :header-get
+   :description "Case-insensitive-ish header lookup — tries the lower-cased name (Ring convention) first, then the exact spelling. nil when absent."
+   :args {:headers {:type [:union :null :text-map]
+                    :description "Header map (string keys)."}
+          :header-name {:type :text
+                        :description "Header name, e.g. `Content-Type`."}}
+   :return-type :nullable-text}
+
+  {:name :pick-encoding
+   :description "Content negotiation over `Accept-Encoding` (RFC 7231 §5.3): returns `br` when brotli is acceptable (non-zero q), else `gzip`, else `identity`. Self-contained RFC parse — the DECISION to encode (and its thresholds) is composed in the graph (`:encode-response`)."
+   :args {:headers {:type [:union :null :text-map]
+                    :description "Request header map."}}
+   :return-type :text}
+
+  {:name :utf8-bytes
+   :description "String → UTF-8 byte[] (byte[] passes through; anything else → nil). The graph has no bytes type — the value flows through `:any` slots into the compressors."
+   :args {:value {:type :any :required false
+                  :description "Response body — String or byte[]."}}
+   :return-type :any}
+
+  {:name :byte-count
+   :description "Length of a byte[] — nil-safe."
+   :args {:bytes {:type :any :required false
+                  :description "byte[] (from `:utf8-bytes` / a compressor), or nil."}}
+   :return-type :nullable-int}
+
+  {:name :gzip-bytes
+   :description "gzip-compress a byte[] (java.util.zip.GZIPOutputStream)."
+   :args {:raw {:type :any :description "byte[] to compress."}}
+   :return-type :any}
+
+  {:name :brotli-bytes
+   :description "brotli-compress a byte[] (brotli4j). `:quality` 0-11 — higher is smaller/slower."
+   :args {:raw {:type :any :description "byte[] to compress."}
+          :quality {:type :int :value 6
+                    :description "Brotli quality 0-11. Default 6 — the speed/ratio sweet spot for on-the-fly encoding."}}
+   :return-type :any}
+
+  ;; =============================================================================
+  ;; RESPONSE POST-PROCESSING — composed in the graph.
+  ;;
+  ;;   :process-response = encode ∘ connection-close ∘ stringify-headers
+  ;;
+  ;; Both the close POLICY and the encode TRIGGERS (compressible
+  ;; content-type pattern, minimum body size, brotli quality) are
+  ;; graph-visible: a deployment wanting a smarter policy (e.g. close
+  ;; only after heavy endpoints, different compression thresholds)
+  ;; composes its own variant from the same pieces — no Clojure change.
+  ;; =============================================================================
+
+  {:name :_resp-headers-stringified
+   :description "Step 1 — response with keyword header keys stringified."
+   :parent :stringify-response-headers
+   :args {:response {:as :response :type :ring-response-shape}}}
+
+  ;; `Connection: close` on every response. http-kit honours this —
+  ;; flushes the body, then closes the channel and releases its
+  ;; write-queue byte[] buffers. WITHOUT this, default HTTP/1.1
+  ;; keep-alive leaves the channel + buffers in the server's tracking
+  ;; HashMap until idle-timeout. Heap dump 2026-06-21 showed 27,955
+  ;; byte[] (1.7 GB) across ~969 long-lived channels — 90.83% of heap.
+  ;; Tradeoff: per-request TCP handshake. A smarter policy (close only
+  ;; after heavy endpoints) is now a graph edit: swap this node in a
+  ;; custom process-response chain.
+  {:name :_resp-connection-closed
+   :description "Step 2 — the blanket `Connection: close` policy (heap-leak guard; see comment). Graph-visible so a deployment can compose a chain without it."
+   :parent :assoc-in
+   :args {:m :_resp-headers-stringified
+          :path {:value [:headers "Connection"]}
+          :v {:value "close"}}}
+
   {:name :process-response
-   :description "Stringify keyword header keys + maybe-encode the body. Encoding picks `br` over `gzip` from `Accept-Encoding`; skips when body is not compressible (Content-Type), already encoded, or under 1 KB. Library-adapter helper for the encode-stringify wrap."
-   :args {:request  {:type :ring-request-shape
-                     :description "Inbound request — `Accept-Encoding` header drives the encoder choice."}
-          :response {:type :ring-response-shape
-                     :description "Raw response from the inner handler — keyword header keys, String body."}}
+   :description "Full response post-process: stringify keyword header keys → inject the `Connection: close` policy → content-negotiated encoding (`:encode-response`). Pure graph composition; free args `:request`, `:response`."
+   :parent :encode-response
+   :args {:unencoded-response :_resp-connection-closed}
+   :return-type :ring-response-shape}
+
+  ;; --- :encode-response — the encode decision + application ---
+
+  {:name :_enc-resp-headers
+   :description "Header map of the response under consideration."
+   :parent :get
+   :args {:coll {:as :unencoded-response :type :ring-response-shape}
+          :key {:value :headers}}}
+
+  {:name :_enc-prior-encoding
+   :description "`Content-Encoding` already present on the response (nil when none)."
+   :parent :header-get
+   :args {:headers :_enc-resp-headers
+          :header-name {:value "Content-Encoding"}}}
+
+  {:name :_enc-content-type
+   :description "Response `Content-Type`, defaulted to \"\" for the regex test."
+   :parent :coalesce
+   :args {:value :_enc-content-type-raw
+          :default {:value ""}}}
+
+  {:name :_enc-content-type-raw
+   :parent :header-get
+   :args {:headers :_enc-resp-headers
+          :header-name {:value "Content-Type"}}}
+
+  {:name :_enc-encoding
+   :description "Negotiated coding for this request — `br` / `gzip` / `identity`."
+   :parent :pick-encoding
+   :args {:headers :ring-headers}}
+
+  {:name :_enc-wanted?
+   :description "Client accepts a real coding (not `identity`)."
+   :parent :not
+   :args {:value :_enc-identity?}}
+
+  {:name :_enc-identity?
+   :parent :equal?
+   :args {:a :_enc-encoding
+          :b {:value "identity"}}}
+
+  {:name :_enc-not-already-encoded?
+   :parent :nil?
+   :args {:value :_enc-prior-encoding}}
+
+  {:name :_enc-compressible?
+   :description "Content-Type matches the compressible pattern. The pattern is a graph-visible slot (`:compressible-pattern`) with the platform default."
+   :parent :re-find?
+   :args {:string :_enc-content-type
+          :pattern {:as :compressible-pattern :type :text}}}
+
+  {:name :_enc-raw
+   :description "Response body as UTF-8 bytes (nil for non-string/bytes bodies)."
+   :parent :utf8-bytes
+   :args {:value :_enc-body}}
+
+  {:name :_enc-body
+   :parent :get
+   :args {:coll {:as :unencoded-response :type :ring-response-shape}
+          :key {:value :body}}}
+
+  {:name :_enc-raw-some?
+   :parent :some?
+   :args {:value :_enc-raw}}
+
+  {:name :_enc-raw-size
+   :parent :byte-count
+   :args {:bytes :_enc-raw}}
+
+  {:name :_enc-raw-size-nz
+   :description "Byte count with the nil case (non-string/bytes body) collapsed to 0 — `:gte` wants `:numeric`, and 0 is always under the threshold."
+   :parent :coalesce
+   :args {:value :_enc-raw-size
+          :default {:value 0}}}
+
+  {:name :_enc-min-size
+   :description "The `:min-encode-size` threshold surfaced as a scalar `:const` node — an `{:as …}` rename inside a sequence literal doesn't register as a closure-capture seed."
+   :parent :const
+   :args {:value {:as :min-encode-size :type :int}}}
+
+  {:name :_enc-size-ok?
+   :description "Body at least `:min-encode-size` bytes — smaller payloads aren't worth the CPU + header overhead."
+   :parent :gte
+   :args {:nums [:_enc-raw-size-nz :_enc-min-size]}}
+
+  ;; Order matters: `:and` short-circuits, so `:_enc-size-ok?` (which
+  ;; compares against a possibly-nil byte count) is only forced after
+  ;; `:_enc-raw-some?` has proven the bytes exist.
+  {:name :_enc-should?
+   :description "The encode decision — wanted ∧ not-already-encoded ∧ compressible ∧ body-is-bytes ∧ over-threshold."
+   :parent :and
+   :args {:values [:_enc-wanted? :_enc-not-already-encoded? :_enc-compressible?
+                   :_enc-raw-some? :_enc-size-ok?]}}
+
+  {:name :_enc-br?
+   :parent :equal?
+   :args {:a :_enc-encoding
+          :b {:value "br"}}}
+
+  {:name :_enc-brotli
+   :parent :brotli-bytes
+   :args {:raw :_enc-raw
+          :quality {:as :brotli-quality :type :int}}}
+
+  {:name :_enc-gzip
+   :parent :gzip-bytes
+   :args {:raw :_enc-raw}}
+
+  {:name :_enc-compressed
+   :description "Compressed body bytes — brotli when negotiated, else gzip (`:_enc-should?` already guaranteed a real coding)."
+   :parent :if
+   :args {:test :_enc-br?
+          :then :_enc-brotli
+          :else :_enc-gzip}}
+
+  {:name :_enc-compressed-size-text
+   :parent :to-str
+   :args {:value :_enc-compressed-size}}
+
+  {:name :_enc-compressed-size
+   :parent :byte-count
+   :args {:bytes :_enc-compressed}}
+
+  ;; Vary handling: append `Accept-Encoding` to an existing Vary
+  ;; header, else set it — proxies must key their cache on the
+  ;; request coding once the body is negotiated.
+  {:name :_enc-vary-existing
+   :parent :get
+   :args {:coll :_enc-resp-headers
+          :key {:value "Vary"}}}
+
+  {:name :_enc-vary-present?
+   :parent :some?
+   :args {:value :_enc-vary-existing}}
+
+  {:name :_enc-vary-appended
+   :parent :str
+   :args {:parts [:_enc-vary-existing {:value ", Accept-Encoding"}]}}
+
+  {:name :_enc-vary-value
+   :parent :if
+   :args {:test :_enc-vary-present?
+          :then :_enc-vary-appended
+          :else {:value "Accept-Encoding"}}}
+
+  {:name :_enc-headers-with-ce
+   :parent :assoc
+   :args {:map :_enc-resp-headers
+          :key {:value "Content-Encoding"}
+          :value :_enc-encoding}}
+
+  {:name :_enc-headers-with-len
+   :parent :assoc
+   :args {:map :_enc-headers-with-ce
+          :key {:value "Content-Length"}
+          :value :_enc-compressed-size-text}}
+
+  {:name :_enc-headers-encoded
+   :parent :assoc
+   :args {:map :_enc-headers-with-len
+          :key {:value "Vary"}
+          :value :_enc-vary-value}}
+
+  ;; The encode decision is applied FIELD-WISE (`:if` per field, same
+  ;; `:_enc-should?` test — result-cached, evaluated once) rather than
+  ;; as a whole-response branch: a passthrough branch binding the
+  ;; `:response` free arg directly would shadow-collide with the raw
+  ;; `:response` of the stringify chain when `:process-response` binds
+  ;; one into the other.
+  {:name :_enc-final-body
+   :parent :if
+   :args {:test :_enc-should?
+          :then :_enc-compressed
+          :else :_enc-body}}
+
+  {:name :_enc-final-headers
+   :parent :if
+   :args {:test :_enc-should?
+          :then :_enc-headers-encoded
+          :else :_enc-resp-headers}}
+
+  {:name :_enc-with-body
+   :parent :assoc
+   :args {:map {:as :unencoded-response :type :ring-response-shape}
+          :key {:value :body}
+          :value :_enc-final-body}}
+
+  {:name :_enc-final
+   :description "The response with the (maybe-)encoded body + headers written back."
+   :parent :assoc
+   :args {:map :_enc-with-body
+          :key {:value :headers}
+          :value :_enc-final-headers}}
+
+  ;; The compressed `:body` is a byte[] (`:any` — the graph has no
+  ;; bytes type): a valid http-kit body but not provably `:text`, so
+  ;; the computed record isn't a provable subtype of the response
+  ;; shape. The author `:type` assertion states it still satisfies it.
+  {:name :encode-response
+   :description "Content-negotiated response encoding: compress `:body` with the coding the request advertises (`br` > `gzip` > identity) when the response is compressible (`:compressible-pattern`), not already encoded, and at least `:min-encode-size` bytes. The triggers are bound slots — a deployment tunes them by composing a variant, no Clojure change. Free args: `:request`, `:unencoded-response` (named distinctly from `:process-response`'s raw `:response` so binding one into the other can't shadow-collide)."
+   :parent :const
+   :args {:value {:ref :_enc-final :type :ring-response-shape}
+          :compressible-pattern {:value "(?i)\\b(?:json|text|javascript|xml|svg|html)\\b"}
+          :min-encode-size {:value 1024}
+          :brotli-quality {:value 6}}
    :return-type :ring-response-shape}
 
   ;; =============================================================================

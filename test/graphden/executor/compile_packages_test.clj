@@ -126,6 +126,67 @@
 
 
 ;; ============================================================================
+;; web.http — :process-response recomposed in the graph
+;; (stringify-headers → Connection: close policy → negotiated encoding)
+;; ============================================================================
+
+(deftest process-response-composition-test
+  (let [big-body (apply str (repeat 2000 "x"))
+        resp {:status 200
+              :headers {:Content-Type "application/json"}
+              :body big-body}]
+    (testing "gzip path — compressible, accepted, over threshold"
+      (let [out (run "process-response"
+                     {:request {:headers {"accept-encoding" "gzip"}}
+                      :response resp})
+            headers (:headers out)]
+        (is (= "gzip" (get headers "Content-Encoding")))
+        (is (= "close" (get headers "Connection")) "close policy applied")
+        (is (= "application/json" (get headers "Content-Type"))
+            "keyword header keys stringified")
+        (is (= "Accept-Encoding" (get headers "Vary")))
+        (is (bytes? (:body out)))
+        (is (= (str (alength ^bytes (:body out))) (get headers "Content-Length")))
+        (is (= big-body
+               (with-open [in (java.util.zip.GZIPInputStream.
+                                (java.io.ByteArrayInputStream. (:body out)))]
+                 (slurp in)))
+            "gzip round-trips to the original body")))
+    (testing "brotli preferred over gzip when both accepted"
+      (let [out (run "process-response"
+                     {:request {:headers {"accept-encoding" "br, gzip"}}
+                      :response resp})]
+        (is (= "br" (get-in out [:headers "Content-Encoding"])))))
+    (testing "identity path — no acceptable coding → body untouched, close still applied"
+      (let [out (run "process-response" {:request {:headers {}} :response resp})]
+        (is (= big-body (:body out)))
+        (is (= "close" (get-in out [:headers "Connection"])))
+        (is (nil? (get-in out [:headers "Content-Encoding"])))))
+    (testing "under-threshold body not compressed"
+      (let [out (run "process-response"
+                     {:request {:headers {"accept-encoding" "gzip"}}
+                      :response {:status 200
+                                 :headers {"Content-Type" "text/html"}
+                                 :body "tiny"}})]
+        (is (= "tiny" (:body out)))))
+    (testing "non-compressible content-type not compressed"
+      (let [out (run "process-response"
+                     {:request {:headers {"accept-encoding" "gzip"}}
+                      :response {:status 200
+                                 :headers {"Content-Type" "image/png"}
+                                 :body big-body}})]
+        (is (= big-body (:body out)))))
+    (testing "already-encoded response passes through"
+      (let [out (run "process-response"
+                     {:request {:headers {"accept-encoding" "gzip"}}
+                      :response {:status 200
+                                 :headers {"Content-Type" "application/json"
+                                           "Content-Encoding" "br"}
+                                 :body big-body}})]
+        (is (= big-body (:body out)))))))
+
+
+;; ============================================================================
 ;; examples.free-args — propagation + `{:as}` rename, shared free args
 ;; ============================================================================
 

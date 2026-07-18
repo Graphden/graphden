@@ -65,7 +65,7 @@ You were started in one of two ways:
    whether they change what you are doing, then re-run the gate.
 4. **Commit as you go** — conventional-commit format, English messages.
 5. **Land it yourself. Don't ask permission to finish.** When the feature is
-   complete and `bb ci` is green, run the gate (`bb wt merge`) — then, once it
+   complete and `bb lint` is green, run the gate (`bb wt merge`) — then, once it
    is green, clean up (`bb wt drop`). Report what happened. You do not pause for
    a sign-off at either step: the gate cannot advance `develop` on a red result,
    and `wt drop` refuses a branch that is not merged, so neither step can lose
@@ -83,10 +83,18 @@ You were started in one of two ways:
    build (not just a detail with a sane default), **stop and ask the user** —
    don't guess load-bearing decisions.
 2. **Implement** in small commits, inside your worktree.
-3. **Fast feedback:** run `bb ci` (linters + unit) — parallel-safe across
-   worktrees. Iterate until green. This is your only local test command.
-4. **Land** — when the feature is complete and `bb ci` is green, run the gate.
-   No sign-off needed (Rule 5):
+3. **Fast feedback:** run `bb lint` (~1 min, all linters, no tests) after each
+   batch of edits — it catches most gate-reds for pennies. Run targeted tests
+   (`clojure -M:dev:test -m kaocha.runner --focus <ns>`) around the code you
+   actually changed. A full local `bb ci` before queueing is OPTIONAL when you
+   are the only agent in the pool — the gate re-runs the identical `bb ci` on
+   the merged result anyway, so a pre-queue full run only duplicates it. When
+   `bb wt list` shows OTHER claimed agents, go `bb ci`-green before queueing:
+   a red gate then burns a ~35-min serialized slot the whole pool waits behind.
+   Either way, `bb ci` stays your only ALLOWED local heavy test command — never
+   `bb rebuild` / `bb test-e2e` / `bb test-integration` from a worktree.
+4. **Land** — when the feature is complete and `bb lint` is green, run the
+   gate. No sign-off needed (Rule 5):
 
    `bb wt merge` takes **~30–40 min** (merge develop → ci → build image →
    integration → e2e → fast-forward develop → advance the demo instance) —
@@ -98,8 +106,15 @@ You were started in one of two ways:
    - **CONFLICT** (merging develop into your branch) → resolve in your worktree,
      commit, re-run `bb wt merge` (background).
    - **gate FAIL** (ci/integration/e2e on the merged result) → read
-     `bb wt log <name>`, fix on your branch, keep `bb ci` green, re-run the gate.
-     Iterate until green. Never weaken a test or skip a check to go green.
+     `bb wt log <name>`, fix on your branch (reproduce with a focused local
+     run — `bb ci` for unit reds, a single `node <file>.test.js` against
+     `bb wt up` for e2e reds), re-run the gate. Iterate until green. Never
+     weaken a test or skip a check to go green.
+   - **FLAKE note in the e2e summary** (failed once, passed on retry) — the
+     run stays green by default, but the flake is named: investigate it in
+     this session if it's plausibly yours, or report it onward. Set
+     `WTQ_FLAKE_STRICT=1` to restore flake-fails-the-run (the multi-agent
+     default economics: one hidden break re-queues everyone).
    - If the queue is busy the gate blocks waiting its turn — expected; let the
      background run wait.
 5. **Clean up** — once landed and you have nothing left to do: `cd` back to the

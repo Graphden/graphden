@@ -268,12 +268,16 @@
 
 (defbase api-rich-types
   [fn-name]
-  ;; Wire-shaping layer over `all-rich-types` for `GET /api/types`: strips
-  ;; the heavy on-demand/unused per-entry fields from the bulk payload, or
-  ;; returns one full entry when `fn-name` is set (the `?fn=<name>`
-  ;; backfill the return-type-rule provenance popover fetches for
-  ;; `:resolved-bindings`). Same `:db` read as `all-rich-types`. See
-  ;; docs/PERF_BUDGETS.md finding K.
+  ;; Wire-shaping layer over the same src helper `all-rich-types` wraps
+  ;; (`rich-types-with-type-rows` — shared PRIVATE helper, not a hidden
+  ;; base-fn→base-fn edge): strips the heavy per-entry fields from the
+  ;; bulk payload, or returns one full entry when `fn-name` is set (the
+  ;; `?fn=<name>` backfill). Kept as one base-fn deliberately: this is
+  ;; the measured hot path of finding K (docs/PERF_BUDGETS.md) —
+  ;; re-fetched after every mutation; a per-entry graph HOF strip over
+  ;; ~4000 entries would re-add tens of ms per editor round-trip to a
+  ;; path that was fought down 57%. The omitted-field list is the
+  ;; editor wire contract, not per-user tuning surface.
   (cr/record-effect! :db)
   (types-api/api-rich-types ctx fn-name))
 
@@ -400,17 +404,14 @@
   (types-lit/fn-type-bound-effects expected))
 
 
-(defbase rich-return-of-fn
-  "Rich-types registry view of the named fn's `:return` field. Takes
-   a fn-id, reads the fn-row to get the name, looks up the registry
-   entry. nil for anonymous fns / not-yet-registered / unknown."
-  [fn-id]
-  (cr/record-effect! :db)
-  (when fn-id
-    (let [storage (request/require-storage ctx)
-          fn-row  (sp/read-entity storage :fn fn-id)]
-      (when (:name fn-row)
-        (:return (registry/rich-type-of (keyword (:name fn-row))))))))
+(defbase rich-type-of-name
+  "One registry lookup — the full rich-type entry for the named fn
+   (nil-safe: nil / unknown names → nil). `:rich-return-of-fn`
+   (fns.edn) composes this with `:get-entity` + `:get` to go
+   fn-id → row → name → entry → `:return`."
+  [fn-name]
+  (when fn-name
+    (registry/rich-type-of (keyword fn-name))))
 
 
 (defbase _types-usages-apply
@@ -546,9 +547,12 @@
    write failure. Rename-slot failure is logged but never escalated
    (the binding row is still useful without the renamed view).
 
-   Unlike create, update has no post-write type-check + rollback —
-   so this is §3.1 (single library boundary + one conditional side
-   effect), not §3.3."
+   This IS the `_apply` stage of the already-decomposed
+   parse→validate→apply update flow (C2-C4): the write, its
+   error-envelope, and the write-dependent rename-slot side effect
+   are one coupled unit — the same class as the other `_apply` cores
+   this file keeps. Unlike create it has no post-write type-check +
+   rollback journal, so no `:try`-journal graph shape applies."
   [entity-type id-uuid entity-data type-str form-data]
   (cr/record-effect! :db)
   (entities/apply-update-core {:entity-type (keyword entity-type)
@@ -663,7 +667,7 @@
    :diff-value-against-type diff-value-against-type
    :closed-enum-of closed-enum-of
    :fn-type-bound-effects fn-type-bound-effects
-   :rich-return-of-fn rich-return-of-fn
+   :rich-type-of-name rich-type-of-name
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

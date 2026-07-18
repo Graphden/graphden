@@ -430,11 +430,52 @@
                      :description "Type expression to test for the fn-type shape with a bound effect set."}}
    :return-type [:union :null [:list :text]]}
 
+  {:name :rich-type-of-name
+   :description "Full rich-types registry entry for the named fn — one registry lookup; nil for nil / unknown names."
+   :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
+   :return-type :nullable-keyword-map}
+
+  ;; fn-id → row → name → registry entry → :return, all graph-visible.
+  {:name :_rrof-fn-id-nil?
+   :parent :nil?
+   :args {:value {:as :fn-id}}}
+
+  ;; Runs only in the non-nil branch of the `:if` below; `:assert-some`
+  ;; narrows the nullable free arg to `:uuid` for `:get-entity`.
+  {:name :_rrof-id-narrowed
+   :parent :assert-some
+   :args {:value {:as :fn-id :type :nullable-uuid}}}
+
+  {:name :_rrof-row
+   :parent :get-entity
+   :args {:entity-type {:value "fn"} :id {:ref :_rrof-id-narrowed :type :uuid}}}
+
+  {:name :_rrof-name
+   :parent :get
+   :args {:coll :_rrof-row :key {:value :name} :default nil}}
+
+  {:name :_rrof-entry
+   :parent :rich-type-of-name
+   :args {:fn-name {:ref :_rrof-name :type :nullable-text}}}
+
+  {:name :_rrof-return
+   :parent :get
+   :args {:coll :_rrof-entry :key {:value :return} :default nil}}
+
+  {:name :_rrof-resolved
+   :parent :if
+   :args {:test :_rrof-fn-id-nil?
+          :then {:value nil}
+          :else :_rrof-return}}
+
+  ;; `:const` wrapper carries the author `:type` assertion — the
+  ;; declared contract of the old base-fn (nil flows through consumers
+  ;; that already handled it).
   {:name :rich-return-of-fn
-   :description "Rich-types registry view of the named fn's `:return` field. Reads the fn-row by id, looks up the registered rich-type entry, returns its `:return`. nil for anonymous / unregistered / unknown fns. Used by the fn-picker incompat-explainer partial to surface the candidate's return type."
-   :args {:fn-id {:type :nullable-uuid :required false :description "Target fn's id."}}
-   :return-type :type-expression
-   :effects #{:db}}
+   :description "Rich-types registry view of the named fn's `:return` field. Pure graph composition: `:get-entity` fn-row → `:get :name` → `:rich-type-of-name` → `:get :return`. nil for nil fn-id / anonymous / unregistered / unknown fns. Used by the fn-picker incompat-explainer partial."
+   :parent :const
+   :args {:value {:ref :_rrof-resolved :type :type-expression}}
+   :return-type :type-expression}
 
   ;; --- :_types-compatible-apply — pure graph composition over
   ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.

@@ -40,10 +40,20 @@
 
   ;; Converts a list of 2-element pairs into a map. :entries is a sequence-arg
   ;; where each item is either a :pair fn-def result or a literal [k v] vector.
+  ;; Pure graph composition: `into {}` needs each entry to be a vector /
+  ;; map-entry, and a pair built via `:list` is a lazy-seq — so each entry
+  ;; is vec-coerced first (the `:map :func :vec` step below).
   {:name :pairs->map
-   :description "Build a map from a sequence of `[key value]` pairs (or `:pair` results). Later pairs override earlier ones with the same key."
-   :args {:entries {:type [:list :any] :description "Sequence of two-element pairs."}}
+   :description "Build a map from a sequence of `[key value]` pairs (or `:pair` results). Later pairs override earlier ones with the same key. Composed as `:into {}` over `:map :vec` — each pair is vec-coerced so lazy `:list`-built pairs satisfy `into {}`'s map-entry contract."
+   :parent :into
+   :args {:to {:value {}}
+          :from :_pairs-vec-coerced}
    :return-type [:map :any :any]}
+
+  {:name :_pairs-vec-coerced
+   :parent :map
+   :args {:func :vec
+          :coll {:as :entries :type [:list :any]}}}
 
   {:name :conj
    :description "Append/prepend an item depending on collection type (Clojure's `conj`). Vectors append; lists/seqs prepend; maps add a `[k v]` entry."

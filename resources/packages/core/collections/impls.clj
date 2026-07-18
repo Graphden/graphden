@@ -219,12 +219,6 @@
   (vec coll))
 
 
-(defbase pairs->map-fn [entries]
-  ;; `into {}` needs each entry to be a vector / map-entry; a pair
-  ;; built via `:list` is now a lazy-seq, so coerce each with `vec`.
-  (into {} (map vec) entries))
-
-
 (defn vec-return-rule
   "When the input is a known `[:list T]`, preserve the element type;
    otherwise fall back to the declared `[:list :any]`. Coercing a
@@ -1036,5 +1030,4 @@
                :nav-types-rule update-in-nav-rule}
    :list {:impl list-fn :return-type-rule (types/wrap-with-taint list-return-rule)}
    :vec {:impl vec-fn :return-type-rule (types/wrap-with-taint vec-return-rule)}
-   :pairs->map {:impl pairs->map-fn :return-type-rule (types/wrap-with-taint nil)}
    :position-in {:impl position-in-fn :return-type-rule (types/wrap-with-taint nil)}})

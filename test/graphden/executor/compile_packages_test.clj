@@ -96,7 +96,13 @@
     (is (= [0 1 3 5] (vec (run "ex-prepended"))))
     (is (= 4 (run "ex-count-prepended")))
     (is (= 113 (run "ex-sum-mixed")))
-    (is (= {"version" "1.0" "status" "ok"} (run "ex-status-map")))))
+    (is (= {"version" "1.0" "status" "ok"} (run "ex-status-map"))))
+  (testing ":pairs->map (recomposed as :into {} over :map :vec) folds pairs"
+    (is (= {"a" 1 "b" 2} (run "pairs->map" {:entries [["a" 1] ["b" 2]]})))
+    ;; lazy-seq pairs (what :list-built pairs look like) get vec-coerced
+    (is (= {"k" "v"} (run "pairs->map" {:entries [(map identity ["k" "v"])]})))
+    (is (= {"a" 2} (run "pairs->map" {:entries [["a" 1] ["a" 2]]}))
+        "later pairs override earlier ones")))
 
 
 ;; ============================================================================

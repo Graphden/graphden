@@ -59,7 +59,7 @@ const TEST_NAME = 'test-free-arg-literal';
     await waitFor(
       () => page.evaluate(
         () => !!document.querySelector('.free-arg-bind-chooser')),
-      2000);
+      10000);
 
     // Pick "Bind literal" from the chooser.
     const litClicked = await page.evaluate(() => {
@@ -76,9 +76,11 @@ const TEST_NAME = 'test-free-arg-literal';
     // synchronously (`.value-form-host` + `.value-form-loading`
     // visible immediately) but `.arg-value-edit-input` appears only
     // after the fetch resolves.
+    // 15s: /api/value-form is a server round trip — 3s was routinely
+    // exceeded on a long-lived stack.
     const formReady = await waitFor(
       () => page.evaluate(() => !!document.querySelector('.arg-value-edit-input')),
-      3000);
+      15000);
     assert(formReady, 'value-edit input rendered');
 
     const hintProbe = await page.evaluate(() => {
@@ -108,7 +110,7 @@ const TEST_NAME = 'test-free-arg-literal';
         const s = document.querySelector('.arg-value-edit-status');
         return s && s.classList.contains('ok');
       }),
-      2000);
+      10000);
     const okStatus = await page.evaluate(() => {
       const s = document.querySelector('.arg-value-edit-status');
       return {text: s && s.textContent, ok: s && s.classList.contains('ok')};
@@ -125,14 +127,17 @@ const TEST_NAME = 'test-free-arg-literal';
     // instead of a fixed 2s wait — under load (full e2e parallel
     // pressure on docker), the save+refetch chain can exceed 2s and
     // the original `waitForTimeout(2000)` produced a flake on cold
-    // cache.
+    // cache. 30s, not 5s: on a long-lived stack (big accumulated
+    // graph) the POST + delta-recompile alone can exceed 5s — same
+    // trace as edit-free-arg-fn-ref, the write lands AFTER a short
+    // poll has already given up.
     let ownBinding;
     const bound = await waitFor(async () => {
       const after = await getEntities(page, fn.id);
       ownBinding = (after.bindings || []).find(
         b => b['fn-id'] === fn.id && b['slot-id'] === stringArg['slot-id']);
       return ownBinding && ownBinding.value === 'hello';
-    }, 5000);
+    }, 30000);
     assert(bound,
            'binding.value === "hello" after save: ' + JSON.stringify(ownBinding));
   } finally {

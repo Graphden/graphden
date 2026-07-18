@@ -605,11 +605,14 @@
      :say "Serializes the assembled hiccup tree into an HTML string, with a
            taint-propagation rule so rendered secrets stay redacted. The point
            where a graph-composed page turns into the response body."}
-    {:file "resources/packages/web/http/impls.clj" :defn process-response
-     :say "The outbound finalizer: stringify headers, force connection close, and
-           gzip / brotli-encode the body based on the request's Accept-Encoding.
-           The last stop as the rendered page leaves the web layer back through
-           http-kit."}]}
+    {:file "resources/packages/web/http/impls.clj" :defn pick-encoding-fn
+     :say "The outbound finalizer is a graph composition now — `:process-response`
+           in web/http/fns.edn stringifies headers, applies the `Connection: close`
+           policy, and encodes the body, all as fn-defs over single-call
+           primitives. This RFC 7231 Accept-Encoding negotiation is the one
+           self-contained parse the pipeline keeps in Clojure; the DECISION to
+           encode (thresholds, compressible pattern) lives in the graph. The last
+           stop as the rendered page leaves the web layer back through http-kit."}]}
 
   {:id :services
    :title "Services & the fleet"

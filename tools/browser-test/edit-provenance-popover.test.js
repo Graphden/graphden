@@ -14,7 +14,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, api, getEntities, newContext, deleteFnByName} =
+const {assert, api, getEntities, newContext, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -118,12 +118,15 @@ async function cleanup(page) {
     // ===================================================================
     // Phase B: click the badge → provenance popover opens.
     // ===================================================================
-    await page.evaluate(() => {
-      const badge = document.querySelector('.arg-type-provenance');
-      badge.click();
-    });
-    await page.waitForSelector('.provenance-popover.visible',
-                               {timeout: 5000});
+    // Poll instead of a blind click + wait: the badge can be momentarily
+    // absent during an overlay re-render (see edit-type-chip-expand for
+    // the same pattern) — click only while the popover isn't up yet.
+    const provOpened = await waitFor(() => page.evaluate(() => {
+      if (document.querySelector('.provenance-popover.visible')) return true;
+      document.querySelector('.arg-type-provenance')?.click();
+      return false;
+    }), 30000);
+    assert(provOpened, 'provenance popover opened from the ↳ badge');
 
     const popoverState = await page.evaluate(() => {
       const pop = document.querySelector('.provenance-popover.visible');

@@ -190,20 +190,39 @@ const TEST_NAME = 'test-edit-phase5';
     });
     assert(firstNsId, 'at least one namespace exists in graphData');
 
-    await page.evaluate(({ fnId, nsId }) => new Promise(resolve => {
+    // The × remove in step 5 kicked off an async `loadGraphData()` rebuild
+    // of `lookups` — the storage poll above outruns it, and an ns-move
+    // dispatched against a mid-rebuild (empty) fnMap silently no-ops
+    // inside `enterNamespaceMoveEditMode(undefined)`. Wait for the fn to
+    // be back in the map before driving the move.
+    await page.waitForFunction(
+      (fnId) => typeof lookups !== 'undefined' && !!lookups?.fnMap?.get(fnId),
+      created.id,
+      {timeout: 30000, polling: 100});
+    // NOTE: fire-and-return — do NOT hold the evaluate open on a promise
+    // that resolves only after onPick's PUT completes. Under a loaded
+    // executor that PUT can take 20s+, and a page.evaluate promise held
+    // open that long dies with a phantom "Execution context was destroyed,
+    // most likely because of a navigation" even though CDP shows no
+    // navigation, no context-destroyed and no crash (reproduced 3/8 under
+    // load, 2026-07-18). The storage poll below is the real confirmation
+    // anyway, so the evaluate only needs to *dispatch* the pick.
+    const setDispatched = await page.evaluate(({ fnId, nsId }) => {
       const fn = lookups.fnMap.get(fnId);
+      if (!fn) return false;
       const origOpen = openNamespacePicker;
       // Stub the picker so we don't depend on popover anchoring.
       openNamespacePicker = (opts) => {
-        opts.onPick({ id: nsId }).then(resolve);
+        origOpen && (openNamespacePicker = origOpen);
+        opts.onPick({ id: nsId });
       };
       enterNamespaceMoveEditMode(fn, document.body);
-      // Restore eventually.
-      setTimeout(() => { openNamespacePicker = origOpen; }, 100);
-    }), { fnId: created.id, nsId: firstNsId });
+      return true;
+    }, { fnId: created.id, nsId: firstNsId });
+    assert(setDispatched, 'ns-move (set) dispatched with fn present in lookups');
     // Wait until the fn's namespace-id flips to the picked ns.
     {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 30000;
       let moved = false;
       while (Date.now() < deadline) {
         const ns = (await getEntities(page, created.id)).fns
@@ -217,18 +236,27 @@ const TEST_NAME = 'test-edit-phase5';
     const movedNs = (await getEntities(page, created.id)).fns.find(f => f.id === created.id)['namespace-id'];
     assert(movedNs === firstNsId, 'fn now has the picked namespace-id');
 
-    await page.evaluate((fnId) => new Promise(resolve => {
+    // Same fire-and-return shape as the set-direction above — including the
+    // fnMap wait: onPick's success path fired another `initGraph()` rebuild.
+    await page.waitForFunction(
+      (fnId) => typeof lookups !== 'undefined' && !!lookups?.fnMap?.get(fnId),
+      created.id,
+      {timeout: 30000, polling: 100});
+    const clearDispatched = await page.evaluate((fnId) => {
       const fn = lookups.fnMap.get(fnId);
+      if (!fn) return false;
       const origOpen = openNamespacePicker;
       openNamespacePicker = (opts) => {
-        opts.onPick({ id: null }).then(resolve);
+        origOpen && (openNamespacePicker = origOpen);
+        opts.onPick({ id: null });
       };
       enterNamespaceMoveEditMode(fn, document.body);
-      setTimeout(() => { openNamespacePicker = origOpen; }, 100);
-    }), created.id);
+      return true;
+    }, created.id);
+    assert(clearDispatched, 'ns-move (clear) dispatched with fn present in lookups');
     // Wait for the ns to clear back to root (null / undefined).
     {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 30000;
       let cleared = false;
       while (Date.now() < deadline) {
         const ns = (await getEntities(page, created.id)).fns

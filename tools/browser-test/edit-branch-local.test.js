@@ -193,31 +193,46 @@ async function openServicePopover(page, fnHash) {
     // about the new fn — diff renders the row only if `fnMap` can be
     // walked to detect branch-local. `loadGraphData` rebuilds the
     // module-scope `lookups` from /api/graph/entities.
-    await page.evaluate(async ({name}) => {
-      if (typeof loadGraphData === 'function') await loadGraphData();
-      // Confirm the new fn surfaced in the in-page lookups; without
-      // this poll the next diff-render races the async cache rebuild.
-      await new Promise((res) => {
-        const deadline = Date.now() + 5000;
-        (function tick() {
-          const ok = typeof lookups !== 'undefined'
-                  && lookups?.fnMap
-                  && Array.from(lookups.fnMap.values()).some((f) => f.name === name);
-          if (ok || Date.now() > deadline) res();
-          else setTimeout(tick, 50);
-        })();
-      });
-    }, { name: PROBE_FN_NAME });
+    // Fire-and-return + poll from the node side: holding a page.evaluate
+    // open across the slow network op dies with a phantom "Execution
+    // context was destroyed" under load (see edit-phase5-sequence.test.js
+    // for the full account). waitForFunction re-issues short evaluates
+    // instead, which is immune.
+    await page.evaluate(() => {
+      if (typeof loadGraphData === 'function') loadGraphData();
+    });
+    // BEST-EFFORT settle: the probe fn lives on the FEAT branch while the
+    // page browses main, so main's branch-scoped `lookups.fnMap` may never
+    // contain it — the historical inline poll always gave up silently after
+    // its deadline and the diff still rendered from the server partial.
+    // Keep the same semantics: bounded wait, swallow the timeout.
+    await page.waitForFunction(
+      (name) => typeof lookups !== 'undefined'
+                && lookups?.fnMap
+                && Array.from(lookups.fnMap.values()).some((f) => f.name === name),
+      PROBE_FN_NAME,
+      {timeout: 5000, polling: 100}).catch(() => {});
 
     // Drive the modal directly — UI flow goes through the branch-popover
     // Δ button; calling the public window helper exercises the same
     // renderer with fewer click-fragile steps.
-    await page.evaluate(async ({target, source}) => {
+    // Fire-and-return for the same reason as above. The modal shell mounts
+    // instantly in a "Loading diff…" state and fills in after the fetch, so
+    // the real confirmation is the loading class clearing, not the modal
+    // appearing.
+    await page.evaluate(({target, source}) => {
       if (typeof showBranchDiff === 'function') {
-        await showBranchDiff(target, source);
+        showBranchDiff(target, source);
       }
     }, { target: 'main', source: FEAT_BRANCH });
-    await page.waitForSelector('.branch-diff-modal', {timeout: 10000});
+    await page.waitForFunction(
+      () => {
+        const m = document.querySelector('.branch-diff-modal');
+        return m && !m.classList.contains('hidden')
+               && !m.querySelector('.branch-diff-loading');
+      },
+      null,
+      {timeout: 30000, polling: 100});
 
     const modalState = await page.evaluate((probeName) => {
       const modal = document.querySelector('.branch-diff-modal');

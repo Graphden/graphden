@@ -18,7 +18,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -161,9 +161,17 @@ async function cleanup(page) {
     // passed against the un-fixed build until this wait was added.)
     await page.waitForFunction(() => (lookups?.slotMap?.size ?? 1) === 0,
                                null, {timeout: 20000, polling: 20});
-    await page.evaluate(() => document.querySelector('.arg-type-chip')?.click());
-    await page.waitForSelector('.arg-value-edit-popover select.arg-value-edit-input',
-                               {timeout: 10000});
+    // Poll instead of a blind chip click + wait: the chip can be
+    // momentarily absent during the in-flight re-render this phase
+    // deliberately provokes. Click only while no popover is up.
+    assert(await waitFor(() => page.evaluate(() => {
+      if (document.querySelector(
+        '.arg-value-edit-popover select.arg-value-edit-input')) return true;
+      if (!document.querySelector('.arg-value-edit-popover')) {
+        document.querySelector('.arg-type-chip')?.click();
+      }
+      return false;
+    }), 30000), 'type picker opened mid-refresh');
     await page.waitForFunction(
       () => {
         const sel = document.querySelector(
@@ -179,9 +187,16 @@ async function cleanup(page) {
     await page.evaluate(() => document.querySelector('.arg-value-edit-popover')?.remove());
     await page.waitForFunction(() => (lookups?.slotMap?.size ?? 0) > 0,
                                null, {timeout: 20000});
-    await page.evaluate(() => document.querySelector('.arg-type-chip')?.click());
-    await page.waitForSelector('.arg-value-edit-popover select.arg-value-edit-input',
-                               {timeout: 10000});
+    // Same click-poll as above — the settled graph can still re-render
+    // overlays under the cursor while the chip is being clicked.
+    assert(await waitFor(() => page.evaluate(() => {
+      if (document.querySelector(
+        '.arg-value-edit-popover select.arg-value-edit-input')) return true;
+      if (!document.querySelector('.arg-value-edit-popover')) {
+        document.querySelector('.arg-type-chip')?.click();
+      }
+      return false;
+    }), 30000), 'type picker opened on the settled graph');
     await page.waitForFunction(
       () => {
         const sel = document.querySelector(

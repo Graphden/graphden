@@ -19,7 +19,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext} = require('./edit-test-helpers');
+const {assert, newContext, waitFor} = require('./edit-test-helpers');
 
 
 const TARGET_FN = 'assoc-fn';
@@ -128,11 +128,17 @@ const TARGET_FN = 'assoc-fn';
 
     // ===================================================================
     // Phase D: click the ↳ provenance badge → provenance popover renders.
+    // A single blind `?.click()` races overlay re-renders — the badge can
+    // be momentarily absent right after Phase C's toggle, the optional
+    // chaining swallows the miss, and the popover never appears. Poll:
+    // click only while the popover is absent AND the badge is present.
     // ===================================================================
-    await page.evaluate(() => {
+    const provOpened = await waitFor(() => page.evaluate(() => {
+      if (document.querySelector('.provenance-popover')) return true;
       document.querySelector('.arg-type-provenance')?.click();
-    });
-    await page.waitForSelector('.provenance-popover', {timeout: 5000});
+      return false;
+    }), 30000);
+    assert(provOpened, 'provenance popover opened from the ↳ badge');
     const provState = await page.evaluate(() => {
       const pop = document.querySelector('.provenance-popover');
       const trigger = document.querySelector(

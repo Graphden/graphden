@@ -154,14 +154,16 @@ async function cleanup(page) {
     // + initGraph re-fetch. Poll for the binding instead of a fixed
     // 800 ms wait — under e2e suite load the chain regularly takes
     // longer than 1 s, which produced the "probe has 1 binding row: 0"
-    // flake.
+    // flake. 30s, not 5s: on a long-lived stack (big accumulated graph)
+    // the POST + delta-recompile round trip alone can exceed 5s — traced
+    // 2026-07-18: the write returned 200 AFTER the old poll had given up.
     let probeBindings;
     const bound = await waitFor(async () => {
       const finalEnts = await getEntities(page, probe.id);
       probeBindings = (finalEnts.bindings || [])
         .filter((b) => b['fn-id'] === probe.id);
       return probeBindings.length === 1;
-    }, 5000);
+    }, 30000);
     assert(bound,
            'probe has 1 binding row: '
            + (probeBindings ? probeBindings.length : 'undefined'));

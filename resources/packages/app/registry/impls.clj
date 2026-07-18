@@ -80,32 +80,9 @@
          :dependencies (:dependencies bundle)}))))
 
 
-;; Registry index — all published versions, metadata only (omits the
-;; heavy `:fns` bundle). `sp/query-entities` decodes the jsonb columns,
-;; so the result is plain Clojure data; `:id` / `:published-at` are
-;; stringified for clean JSON.
-(defbase list-package-versions
-  []
-  (cr/record-effect! :db)
-  (->> (sp/query-entities (request/require-storage ctx) :package-version {})
-       (mapv (fn [r]
-               {:id (str (:id r))
-                :name (:name r)
-                :version (:version r)
-                :ns-root (:ns-root r)
-                :content-hash (:content-hash r)
-                :published-at (str (:published-at r))
-                :fn-count (count (:fns r))
-                :dependencies (:dependencies r)}))))
-
-
-;; The full published bundle for one (name, version), or nil if absent.
-(defbase fetch-package-version
-  [pkg-name pkg-version]
-  (cr/record-effect! :db)
-  (when-let [r (first (sp/query-entities (request/require-storage ctx) :package-version
-                                         {:name pkg-name :version pkg-version}))]
-    (assoc r :id (str (:id r)) :published-at (str (:published-at r)))))
+;; `:list-package-versions` / `:fetch-package-version` are pure graph
+;; compositions in fns.edn over `:query-entities` — the per-row JSON
+;; reshape (stringified ids/timestamps, `:fn-count`) is graph-visible.
 
 
 ;; ---------------------------------------------------------------------------
@@ -115,11 +92,10 @@
 ;; detail across a few base-fns is ordinary Clojure reuse.
 ;; ---------------------------------------------------------------------------
 
-;; The declared dependency names (from a :package-version row's :dependencies)
-;; NOT present as fns in `storage` — the shared install/fork/materialize
-;; precondition. Returns a vector of keyword names (empty = all satisfied).
-;; One storage read + a set diff; no graph composition.
 (defn- missing-dependencies
+  "Single source for the batched dependency-existence predicate —
+   shared by the `:missing-package-dependencies` base-fn and the
+   recursive install core."
   [storage dependencies]
   (let [dep-names (mapv name dependencies)
         present (into #{}
@@ -127,6 +103,18 @@
                       (when (seq dep-names)
                         (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))]
     (mapv keyword (distinct (remove present dep-names)))))
+
+
+(defbase missing-package-dependencies
+  "The declared dependency names (a :package-version row's
+   `:dependencies`) NOT present as fns in storage — the shared
+   install / fork / materialize precondition. ONE batched IN-query +
+   set diff; the batch shape (no N+1) is the point of keeping it a
+   single storage predicate. Returns a vector of keyword names
+   (empty = all satisfied)."
+  [dependencies]
+  (cr/record-effect! :db)
+  (missing-dependencies (request/require-storage ctx) dependencies))
 
 
 ;; Rewrite one bundle fn's namespace so version V of the package rooted at
@@ -202,6 +190,9 @@
 ;; constraint or "latest", not just an exact pin. Versions sort by parsed
 ;; `[major minor patch]`.
 (defn- resolve-version
+  "Single source for semver-constraint resolution — shared by the
+   `:resolve-package-version` base-fn and the recursive install core
+   (a base-fn must not call another base-fn)."
   [storage pkg-name spec]
   (let [constraint (if (contains? #{nil "" "latest"} spec) "*" spec)
         matching (into []
@@ -209,6 +200,19 @@
                              (filter #(semver/satisfies-constraint? % constraint)))
                        (sp/query-entities storage :package-version {:name pkg-name}))]
     (last (sort-by semver/parse-version matching))))
+
+
+(defbase resolve-package-version
+  "Pick the highest published version of `pkg-name` satisfying `spec` —
+   a semver constraint (exact `\"1.2.0\"`, `\">=1.1\"`, `\"~>1.2\"`, …);
+   nil / \"\" / \"latest\" mean \"any\" (the newest). Returns the concrete
+   version string, or nil when nothing matches. Self-contained
+   constraint-resolution algorithm over one query — same carve-out
+   class as `:pick-encoding`'s RFC negotiation; the DECISIONS around
+   it (guards, envelopes, apply) live in the graph."
+  [pkg-name spec]
+  (cr/record-effect! :db)
+  (resolve-version (request/require-storage ctx) pkg-name spec))
 
 
 ;; Repoint a project's OWN references from version OLD to version NEW of the
@@ -256,60 +260,44 @@
 ;; Install (reference), fork (copy-on-write), materialize.
 ;; ---------------------------------------------------------------------------
 
-;; Fork a published version: sync its fns into the graph AT THEIR ORIGINAL
-;; namespace, DUPLICATING the rows into the caller's project so they can be
-;; modified (a deliberate fork — PACKAGE_DISTRIBUTION §4.5). This is the
-;; copy-on-write path; reference :install (below) does NOT copy. Rejects on
-;; absent deps / unknown version. Branch-staged via the request storage.
-(defbase fork-package
-  [pkg-name pkg-version]
+;; Fork apply-core (PACKAGE_DISTRIBUTION §4.5): sync a bundle's fns into
+;; the graph AT THEIR ORIGINAL namespace (copy-on-write duplicate into the
+;; caller's project) + delta-invalidate — the write and its invalidation
+;; are a coupled pair (§3.3), everything around them (resolve, guards,
+;; envelopes) is graph composition in fns.edn (`:fork-package`).
+(defbase fork-package-fns
+  [fns]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
-        resolved (resolve-version storage pkg-name pkg-version)
-        row (when resolved
-              (first (sp/query-entities storage :package-version
-                                        {:name pkg-name :version resolved})))]
-    (if (nil? row)
-      {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
-      (let [fns (:fns row)
-            missing (missing-dependencies storage (:dependencies row))]
-        (if (seq missing)
-          {:ok false :reason "missing-dependencies" :missing missing}
-          (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))
-                forked-ids (mapv #(ids/fn-id (:namespace %) (:name %)) fns)]
-            (composition/sync-fns-to-storage! storage fns ns-id-map)
-            ;; Delta-invalidate: the forked fns (+ dependents) recompile, not the
-            ;; whole registry — a full clear here froze constrained instances.
-            (exec-ctx/invalidate-graph-cache! ctx forked-ids)
-            {:ok true :name pkg-name :version resolved :forked (count fns)}))))))
+        ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))
+        forked-ids (mapv #(ids/fn-id (:namespace %) (:name %)) fns)]
+    (composition/sync-fns-to-storage! storage fns ns-id-map)
+    ;; Delta-invalidate: the forked fns (+ dependents) recompile, not the
+    ;; whole registry — a full clear here froze constrained instances.
+    (exec-ctx/invalidate-graph-cache! ctx forked-ids)
+    (count fns)))
 
 
-;; Materialize a published version's fns ONCE under a version-qualified
-;; namespace so multiple versions coexist and callers REFERENCE them rather
-;; than copy rows (PACKAGE_DISTRIBUTION §4.2). Org-neutral: syncs into ctx's
-;; current scope (self-hosted → the one graph; cloud → public-org when a
-;; platform admin runs it in public scope). Rejects on absent deps.
-(defbase materialize-package-version
-  [pkg-name pkg-version]
+;; Materialize apply-core (PACKAGE_DISTRIBUTION §4.2): sync a bundle's
+;; fns ONCE under `<ns-root>@<version>` + delta-invalidate — coupled
+;; write+invalidation pair (§3.3). Resolve / guards / envelopes are graph
+;; composition in fns.edn (`:materialize-package-version`).
+(defbase materialize-package-fns
+  [ns-root version fns]
   (cr/record-effect! :db)
-  (let [storage (request/require-storage ctx)
-        resolved (resolve-version storage pkg-name pkg-version)
-        row (when resolved
-              (first (sp/query-entities storage :package-version
-                                        {:name pkg-name :version resolved})))]
-    (if (nil? row)
-      {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
-      (let [ns-root (:ns-root row)
-            missing (missing-dependencies storage (:dependencies row))]
-        (if (seq missing)
-          {:ok false :reason "missing-dependencies" :missing missing}
-          (let [mat-ids (materialize-fns! storage ns-root resolved (:fns row))]
-            (exec-ctx/invalidate-graph-cache! ctx mat-ids)
-            {:ok true
-             :name pkg-name
-             :version resolved
-             :namespace (version-qualified-ns ns-root resolved ns-root)
-             :materialized (count mat-ids)}))))))
+  (let [mat-ids (materialize-fns! (request/require-storage ctx) ns-root version fns)]
+    (exec-ctx/invalidate-graph-cache! ctx mat-ids)
+    (count mat-ids)))
+
+
+(defbase version-qualified-ns-fn
+  "Pure boundary string-shaping: `web.components.foo` @ `1.3.0` under
+   ns-root `web.components` → `web.components@1-3-0.foo`. Exposed as a
+   base-fn (delegating to the same helper the §3.3 cores use) so graph
+   envelopes can cite the version-qualified namespace without
+   duplicating the naming contract."
+  [ns-root version fn-ns]
+  (version-qualified-ns ns-root version fn-ns))
 
 
 ;; Reference-install a SINGLE resolved version: materialize its fns under
@@ -383,51 +371,28 @@
   (install-recursive! ctx (request/require-storage ctx) pkg-name pkg-version #{}))
 
 
-;; Update (or roll back) an installed package to a different version:
-;; materialize the target version (if needed), REWRITE the project's own refs
-;; from the currently-pinned version to the target (variant B — package-
-;; internal refs untouched), then repoint the pin. Symmetric — passing an
-;; OLDER version is a rollback. Rejects if the package isn't installed, the
-;; target version is unknown, or its deps are absent. Same-version is a no-op.
-(defbase update-package-version
-  [pkg-name pkg-version]
+;; Update/rollback apply-core: materialize the target version (if
+;; needed), REWRITE the project's own refs old→new (variant B —
+;; package-internal refs untouched; `rewrite-refs-to-version!`'s shared
+;; remap is the §3.3 invariant), repoint the pin, delta-invalidate the
+;; materialized fns + rewritten owners — the four writes and their
+;; invalidation are one coupled unit. Pin lookup / resolve / guards /
+;; envelopes are graph composition in fns.edn (`:update-package-version`).
+(defbase update-package-apply
+  [pkg-name old-version new-version ns-root fns]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)
-        branch-id (vs/current-branch-id storage)
-        pin (first (sp/query-entities storage :package-install
-                                      {:branch-id branch-id :package-name pkg-name}))]
-    (if (nil? pin)
-      {:ok false :reason "not-installed" :name pkg-name}
-      (let [old-version (:version pin)
-            resolved (resolve-version storage pkg-name pkg-version)
-            row (when resolved
-                  (first (sp/query-entities storage :package-version
-                                            {:name pkg-name :version resolved})))]
-        (cond
-          (nil? row)
-          {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
-
-          (= resolved old-version)
-          {:ok true :name pkg-name :from old-version :to resolved :rewritten-refs 0}
-
-          :else
-          (let [ns-root (:ns-root row)
-                fns (:fns row)
-                missing (missing-dependencies storage (:dependencies row))]
-            (if (seq missing)
-              {:ok false :reason "missing-dependencies" :missing missing}
-              (let [mat-ids (when-not (already-materialized? storage ns-root resolved fns)
-                              (materialize-fns! storage ns-root resolved fns))
-                    {rewritten :count :keys [owners]}
-                    (rewrite-refs-to-version! storage ns-root old-version resolved fns)]
-                (upsert-pin! storage pkg-name resolved)
-                ;; Delta-invalidate the newly materialized fns + the project fns
-                ;; whose refs were rewritten (owners) — not the whole registry.
-                ;; A full clear here recompiled ~3600 fns and froze the server.
-                (exec-ctx/invalidate-graph-cache! ctx (into (set mat-ids) owners))
-                {:ok true :name pkg-name :from old-version :to resolved
-                 :rewritten-refs rewritten}))))))))
+        mat-ids (when-not (already-materialized? storage ns-root new-version fns)
+                  (materialize-fns! storage ns-root new-version fns))
+        {rewritten :count :keys [owners]}
+        (rewrite-refs-to-version! storage ns-root old-version new-version fns)]
+    (upsert-pin! storage pkg-name new-version)
+    ;; Delta-invalidate the newly materialized fns + the project fns
+    ;; whose refs were rewritten (owners) — not the whole registry.
+    ;; A full clear here recompiled ~3600 fns and froze the server.
+    (exec-ctx/invalidate-graph-cache! ctx (into (set mat-ids) owners))
+    rewritten))
 
 
 ;; ---------------------------------------------------------------------------
@@ -436,46 +401,21 @@
 ;; list. Reference-install writes a pin instead of copying rows.
 ;; ---------------------------------------------------------------------------
 
-;; Directly set a pin (current-branch, pkg-name) → version, without touching
-;; materialization — the manual counterpart to :install-package.
-(defbase set-package-pin
+;; Single-row pin upsert (current-branch, pkg-name) → version — a
+;; check-then-write pair on one desired-state row, shared with the
+;; install / update cores via `upsert-pin!`. Returns the branch-id as
+;; text; the `{:ok …}` envelope is graph composition
+;; (`:set-package-pin` in fns.edn).
+(defbase package-upsert-pin
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (let [branch-id (upsert-pin! (request/require-storage ctx) pkg-name pkg-version)]
-    {:ok true
-     :package-name pkg-name
-     :version pkg-version
-     :branch-id (str branch-id)}))
+  (str (upsert-pin! (request/require-storage ctx) pkg-name pkg-version)))
 
 
-;; The current branch's pins — what's installed here. `sp/query-entities`
-;; decodes the row; ids/timestamps stringified for clean JSON.
-(defbase list-installed-packages
-  []
-  (cr/record-effect! :db)
-  (let [storage (request/require-storage ctx)
-        branch-id (vs/current-branch-id storage)]
-    (->> (sp/query-entities storage :package-install {:branch-id branch-id})
-         (mapv (fn [r]
-                 {:package-name (:package-name r)
-                  :version (:version r)
-                  :branch-id (str (:branch-id r))
-                  :installed-at (str (:installed-at r))})))))
-
-
-;; Drop the pin for `(current-branch, pkg-name)` — uninstall. Returns a tagged
-;; result; `:removed false` when nothing was pinned (idempotent).
-(defbase remove-package-pin
-  [pkg-name]
-  (cr/record-effect! :db)
-  (let [storage (request/require-storage ctx)
-        branch-id (vs/current-branch-id storage)
-        existing (first (sp/query-entities storage :package-install
-                                           {:branch-id branch-id :package-name pkg-name}))]
-    (when existing
-      (sp/delete-entity storage :package-install (:id existing)))
-    {:ok true :package-name pkg-name :removed (some? existing)}))
+;; `:list-installed-packages` / `:remove-package-pin` are pure graph
+;; compositions in fns.edn over `:query-entities` / `:delete-entity` +
+;; `:current-branch-id`.
 
 
 (def impls
@@ -483,12 +423,11 @@
    :export-graph export-graph
    :graph-rows graph-rows
    :publish-package publish-package
-   :list-package-versions list-package-versions
-   :fetch-package-version fetch-package-version
-   :fork-package fork-package
-   :materialize-package-version materialize-package-version
+   :resolve-package-version resolve-package-version
+   :missing-package-dependencies missing-package-dependencies
+   :version-qualified-ns version-qualified-ns-fn
+   :fork-package-fns fork-package-fns
+   :materialize-package-fns materialize-package-fns
    :install-package install-package
-   :update-package-version update-package-version
-   :set-package-pin set-package-pin
-   :list-installed-packages list-installed-packages
-   :remove-package-pin remove-package-pin})
+   :update-package-apply update-package-apply
+   :package-upsert-pin package-upsert-pin})

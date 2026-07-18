@@ -70,6 +70,48 @@
    :effects #{:db :time}}
 
   ;; ---------------------------------------------------------------------
+  ;; Registry primitives — the base-fn cores the fork / materialize /
+  ;; update / pin graph compositions build on.
+  ;; ---------------------------------------------------------------------
+
+  {:name :resolve-package-version
+   :description "Highest published version of `:pkg-name` satisfying `:spec` (exact / semver constraint / `latest`). nil when nothing matches. Self-contained constraint-resolution algorithm (same carve-out class as `:pick-encoding`) — the guards and envelopes around it are graph."
+   :args {:pkg-name {:type :text :description "Package name."}
+          :spec {:type :nullable-text :description "Exact version, a semver constraint (`>=1.1`, `~>1.2`), `latest`, or nil (any)."}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
+  {:name :missing-package-dependencies
+   :description "The declared dependency names NOT present as fns in storage — ONE batched IN-query + set diff (the batch shape, no N+1, is why this stays a single storage predicate). Empty vector = all satisfied."
+   :args {:dependencies {:type [:list :jsonb] :description "A :package-version row's `:dependencies`."}}
+   :return-type [:list :keyword]
+   :effects #{:db}}
+
+  {:name :fork-package-fns
+   :description "Fork apply-core: sync a bundle's fns into the graph AT THEIR ORIGINAL namespace (copy-on-write) + delta-invalidate — a coupled write+invalidation pair. Returns the forked fn count."
+   :args {:fns {:type [:list :jsonb] :description "The bundle's fn-defs."}}
+   :return-type :int
+   :effects #{:db}}
+
+  {:name :materialize-package-fns
+   :description "Materialize apply-core: sync a bundle's fns ONCE under `<ns-root>@<version>` (idempotent) + delta-invalidate — a coupled write+invalidation pair. Returns the materialized fn count."
+   :args {:ns-root {:type :text :description "Package ns-root."}
+          :version {:type :text :description "Concrete version."}
+          :fns {:type [:list :jsonb] :description "The bundle's fn-defs."}}
+   :return-type :int
+   :effects #{:db}}
+
+  {:name :update-package-apply
+   :description "Update/rollback apply-core: materialize the target (if needed) → rewrite the project's own refs old→new (shared-remap invariant) → repoint the pin → delta-invalidate — one coupled unit. Returns the rewritten-ref count."
+   :args {:pkg-name {:type :text :description "Package name."}
+          :old-version {:type :text :description "Currently pinned version."}
+          :new-version {:type :text :description "Target version (already resolved)."}
+          :ns-root {:type :text :description "Package ns-root."}
+          :fns {:type [:list :jsonb] :description "The TARGET version's fn-defs."}}
+   :return-type :int
+   :effects #{:db :time}}
+
+  ;; ---------------------------------------------------------------------
   ;; POST /api/packages/publish — graph-composed handler.
   ;; Body `{:name :version :ns-root}` → export subtree → publish row.
   ;; ---------------------------------------------------------------------
@@ -121,10 +163,55 @@
   ;; GET /api/packages — registry index (metadata only).
   ;; ---------------------------------------------------------------------
 
+  ;; Registry index — pure graph composition: query every
+  ;; :package-version row, reshape per-row via a HOF :map (stringified
+  ;; id / published-at, :fn-count instead of the heavy :fns bundle).
+  {:name :_pkg-index-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-version"} :where {:value {}}}}
+
+  {:name :_pie-id
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}}}
+
+  {:name :_pie-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+
+  {:name :_pie-version
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default nil}}
+
+  {:name :_pie-ns-root
+   :parent :get :args {:coll {:as :item} :key {:value :ns-root} :default nil}}
+
+  {:name :_pie-content-hash
+   :parent :get :args {:coll {:as :item} :key {:value :content-hash} :default nil}}
+
+  {:name :_pie-published-at
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :published-at} :default nil}}}}
+
+  {:name :_pie-fn-count
+   :parent :count
+   :args {:coll {:parent :get :args {:coll {:as :item} :key {:value :fns} :default nil}}}}
+
+  {:name :_pie-dependencies
+   :parent :get :args {:coll {:as :item} :key {:value :dependencies} :default nil}}
+
+  {:name :_pkg-index-entry
+   :description "One registry-index entry — the JSON reshape of a :package-version row."
+   :parent :zipmap
+   :args {:keys [{:value :id} {:value :name} {:value :version} {:value :ns-root}
+                 {:value :content-hash} {:value :published-at} {:value :fn-count}
+                 {:value :dependencies}]
+          :vals [:_pie-id :_pie-name :_pie-version :_pie-ns-root
+                 :_pie-content-hash :_pie-published-at :_pie-fn-count
+                 :_pie-dependencies]}}
+
   {:name :list-package-versions
-   :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle."
-   :return-type [:list :keyword-map]
-   :effects #{:db}}
+   :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle. Pure graph composition over `:query-entities` + a HOF reshape."
+   :parent :map
+   :args {:func :_pkg-index-entry :coll :_pkg-index-rows}
+   :return-type [:list :keyword-map]}
 
   {:name :_list-packages-result
    :parent :list-package-versions}
@@ -143,12 +230,51 @@
   ;; GET /api/packages/:name/:version — full published bundle.
   ;; ---------------------------------------------------------------------
 
+  ;; Full bundle fetch — pure graph composition: exact (name, version)
+  ;; query + id / published-at stringified for clean JSON.
+  {:name :_fpv-where-name
+   :parent :assoc-empty
+   :args {:key {:value :name} :value {:as :pkg-name :type :text}}}
+
+  {:name :_fpv-where
+   :parent :assoc
+   :args {:map :_fpv-where-name :key {:value :version} :value {:as :pkg-version :type :text}}}
+
+  {:name :_fpv-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-version"} :where :_fpv-where}}
+
+  {:name :_fpv-row
+   :parent :first
+   :args {:coll :_fpv-rows}}
+
+  {:name :_fpv-row-nil?
+   :parent :nil?
+   :args {:value :_fpv-row}}
+
+  {:name :_fpv-id-str
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll :_fpv-row :key {:value :id} :default nil}}}}
+
+  {:name :_fpv-at-str
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll :_fpv-row :key {:value :published-at} :default nil}}}}
+
+  {:name :_fpv-w-id
+   :parent :assoc
+   :args {:map :_fpv-row :key {:value :id} :value :_fpv-id-str}}
+
+  {:name :_fpv-decorated
+   :parent :assoc
+   :args {:map :_fpv-w-id :key {:value :published-at} :value :_fpv-at-str}}
+
   {:name :fetch-package-version
-   :description "The full published bundle for `(:pkg-name, :pkg-version)`, or nil if not found."
-   :args {:pkg-name {:type :text :description "Package name."}
-          :pkg-version {:type :text :description "Semver version string."}}
-   :return-type :nullable-keyword-map
-   :effects #{:db}}
+   :description "The full published bundle for `(:pkg-name, :pkg-version)`, or nil if not found. Pure graph composition; id / published-at stringified."
+   :parent :if
+   :args {:test :_fpv-row-nil?
+          :then {:value nil}
+          :else :_fpv-decorated}
+   :return-type :nullable-keyword-map}
 
   {:name :_fetch-pkg-name
    :description "`:name` path-param from /api/packages/:name/:version (reitit-enriched)."
@@ -247,12 +373,144 @@
    :parent :post
    :args {:path "/packages/install" :handler :install-package-handler}}
 
+  ;; --- shared: published version row by (name, resolved-version). ---
+  {:name :_pvr-where-name
+   :parent :assoc-empty
+   :args {:key {:value :name} :value {:as :pkg-name :type :text}}}
+
+  {:name :_pvr-where
+   :parent :assoc
+   :args {:map :_pvr-where-name :key {:value :version} :value {:as :resolved :type :nullable-text}}}
+
+  {:name :_pvr-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-version"} :where :_pvr-where}}
+
+  {:name :_pvr-first
+   :parent :first
+   :args {:coll :_pvr-rows}}
+
+  {:name :_pvr-resolved-nil?
+   :parent :nil?
+   :args {:value {:as :resolved}}}
+
+  {:name :package-version-row
+   :description "Published :package-version row for (`:pkg-name`, `:resolved`) — nil when `:resolved` is nil (no version matched the constraint) or no such row exists. Shared by the fork / materialize / update guard chains."
+   :parent :if
+   :args {:test :_pvr-resolved-nil?
+          :then {:value nil}
+          :else :_pvr-first}
+   :return-type :nullable-keyword-map}
+
+  ;; --- :update-package-version — pin lookup → guards → apply, all graph. ---
+
+  {:name :_upd-pin-where-b
+   :parent :assoc-empty
+   :args {:key {:value :branch-id} :value :current-branch-id}}
+
+  {:name :_upd-pin-where
+   :parent :assoc
+   :args {:map :_upd-pin-where-b :key {:value :package-name} :value {:as :pkg-name :type :text}}}
+
+  {:name :_upd-pin-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-install"} :where :_upd-pin-where}}
+
+  {:name :_upd-pin
+   :parent :first
+   :args {:coll :_upd-pin-rows}}
+
+  {:name :_upd-pin-nil?
+   :parent :nil?
+   :args {:value :_upd-pin}}
+
+  {:name :_upd-old
+   :parent :get
+   :args {:coll :_upd-pin :key {:value :version} :default nil}}
+
+  {:name :_upd-resolved
+   :parent :resolve-package-version
+   :args {:pkg-name {:as :pkg-name} :spec {:as :pkg-version}}}
+
+  {:name :_upd-row
+   :parent :package-version-row
+   :args {:resolved :_upd-resolved}}
+
+  {:name :_upd-row-nil?
+   :parent :nil?
+   :args {:value :_upd-row}}
+
+  {:name :_upd-same?
+   :description "Target resolves to the already-pinned version — a no-op."
+   :parent :equal?
+   :args {:a :_upd-resolved :b {:ref :_upd-old :type :nullable-text}}}
+
+  {:name :_upd-deps
+   :parent :get
+   :args {:coll :_upd-row :key {:value :dependencies} :default {:value []}}}
+
+  {:name :_upd-missing
+   :parent :missing-package-dependencies
+   :args {:dependencies {:ref :_upd-deps :type [:list :jsonb]}}}
+
+  {:name :_upd-missing-empty?
+   :parent :empty?
+   :args {:coll :_upd-missing}}
+
+  {:name :_upd-missing-any?
+   :parent :not
+   :args {:value :_upd-missing-empty?}}
+
+  {:name :_upd-ns-root
+   :parent :get
+   :args {:coll :_upd-row :key {:value :ns-root} :default nil}}
+
+  {:name :_upd-fns
+   :parent :get
+   :args {:coll :_upd-row :key {:value :fns} :default {:value []}}}
+
+  {:name :_upd-rewritten
+   :parent :update-package-apply
+   :args {:pkg-name {:as :pkg-name}
+          :old-version {:ref :_upd-old :type :text}
+          :new-version {:ref :_upd-resolved :type :text}
+          :ns-root {:ref :_upd-ns-root :type :text}
+          :fns {:ref :_upd-fns :type [:list :jsonb]}}}
+
+  {:name :_upd-err-not-installed
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name}]
+          :vals [{:value false} {:value "not-installed"} {:as :pkg-name}]}}
+
+  {:name :_upd-err-not-found
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
+          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
+
+  {:name :_upd-noop
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}]
+          :vals [{:value true} {:as :pkg-name} :_upd-old :_upd-resolved {:value 0}]}}
+
+  {:name :_upd-err-missing
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :missing}]
+          :vals [{:value false} {:value "missing-dependencies"} :_upd-missing]}}
+
+  {:name :_upd-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}]
+          :vals [{:value true} {:as :pkg-name} :_upd-old :_upd-resolved :_upd-rewritten]}}
+
   {:name :update-package-version
-   :description "Update (or roll back) an installed package to a different version: materialize the target, REWRITE the project's own refs from the pinned version to the target (package-internal refs untouched), repoint the pin. Symmetric (older version = rollback). Rejects on not-installed / not-found / missing-dependencies; same-version is a no-op."
-   :args {:pkg-name {:type :text :description "Installed package name to update."}
-          :pkg-version {:type :text :description "Target version — exact, a semver constraint, or `latest`."}}
-   :return-type :keyword-map
-   :effects #{:db :time}}
+   :description "Update (or roll back) an installed package to a different version: materialize the target, REWRITE the project's own refs from the pinned version to the target (package-internal refs untouched), repoint the pin. Symmetric (older version = rollback). Pure graph :cond — rejects on not-installed / not-found / missing-dependencies; same-version is a no-op; the apply core (`:update-package-apply`) is the coupled write+invalidate unit."
+   :parent :cond
+   :args {:clauses [:_upd-pin-nil?      :_upd-err-not-installed
+                    :_upd-row-nil?      :_upd-err-not-found
+                    :_upd-same?         :_upd-noop
+                    :_upd-missing-any?  :_upd-err-missing
+                    {:value true}       :_upd-ok]}
+   :return-type :keyword-map}
 
   {:name :_update-body
    :description "Parsed JSON body of POST /api/packages/update — `{:name :version}`."
@@ -288,12 +546,64 @@
   ;; `{:name :version}`.
   ;; ---------------------------------------------------------------------
 
+  {:name :_fork-do-resolved
+   :parent :resolve-package-version
+   :args {:pkg-name {:as :pkg-name} :spec {:as :pkg-version}}}
+
+  {:name :_fork-do-row
+   :parent :package-version-row
+   :args {:resolved :_fork-do-resolved}}
+
+  {:name :_fork-do-row-nil?
+   :parent :nil?
+   :args {:value :_fork-do-row}}
+
+  {:name :_fork-do-deps
+   :parent :get
+   :args {:coll :_fork-do-row :key {:value :dependencies} :default {:value []}}}
+
+  {:name :_fork-do-missing
+   :parent :missing-package-dependencies
+   :args {:dependencies {:ref :_fork-do-deps :type [:list :jsonb]}}}
+
+  {:name :_fork-do-missing-empty?
+   :parent :empty?
+   :args {:coll :_fork-do-missing}}
+
+  {:name :_fork-do-missing-any?
+   :parent :not
+   :args {:value :_fork-do-missing-empty?}}
+
+  {:name :_fork-do-fns
+   :parent :get
+   :args {:coll :_fork-do-row :key {:value :fns} :default {:value []}}}
+
+  {:name :_fork-do-count
+   :parent :fork-package-fns
+   :args {:fns {:ref :_fork-do-fns :type [:list :jsonb]}}}
+
+  {:name :_fork-do-err-not-found
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
+          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
+
+  {:name :_fork-do-err-missing
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :missing}]
+          :vals [{:value false} {:value "missing-dependencies"} :_fork-do-missing]}}
+
+  {:name :_fork-do-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :forked}]
+          :vals [{:value true} {:as :pkg-name} :_fork-do-resolved :_fork-do-count]}}
+
   {:name :fork-package
-   :description "Fork published `(:pkg-name, :pkg-version)`: sync its fns into the graph at their ORIGINAL namespace, DUPLICATING rows so the caller can modify them (copy-on-write). Unlike reference install, this copies. Rejects on not-found / missing-dependencies."
-   :args {:pkg-name {:type :text :description "Package name to fork."}
-          :pkg-version {:type :text :description "Exact version, a semver constraint, or `latest` — highest published match is resolved."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Fork published `(:pkg-name, :pkg-version)`: sync its fns into the graph at their ORIGINAL namespace, DUPLICATING rows so the caller can modify them (copy-on-write). Unlike reference install, this copies. Pure graph :cond over resolve / guards / envelopes; the apply core (`:fork-package-fns`) is the coupled sync+invalidate unit."
+   :parent :cond
+   :args {:clauses [:_fork-do-row-nil?     :_fork-do-err-not-found
+                    :_fork-do-missing-any? :_fork-do-err-missing
+                    {:value true}          :_fork-do-ok]}
+   :return-type :keyword-map}
 
   {:name :_fork-body
    :description "Parsed JSON body of POST /api/packages/fork — `{:name :version}`."
@@ -323,35 +633,188 @@
    :parent :post
    :args {:path "/packages/fork" :handler :fork-package-handler}}
 
+  {:name :version-qualified-ns
+   :description "Pure boundary string-shaping — `web.components.foo` @ `1.3.0` under ns-root `web.components` → `web.components@1-3-0.foo`. Delegates to the same helper the apply cores use so the naming contract has one source."
+   :args {:ns-root {:type :text :description "Package ns-root."}
+          :version {:type :text :description "Semver version — dots sanitized to dashes."}
+          :fn-ns {:type :text :description "The fn's namespace; left as-is when not under ns-root."}}
+   :return-type :text}
+
+  {:name :_mat-resolved
+   :parent :resolve-package-version
+   :args {:pkg-name {:as :pkg-name} :spec {:as :pkg-version}}}
+
+  {:name :_mat-row
+   :parent :package-version-row
+   :args {:resolved :_mat-resolved}}
+
+  {:name :_mat-row-nil?
+   :parent :nil?
+   :args {:value :_mat-row}}
+
+  {:name :_mat-deps
+   :parent :get
+   :args {:coll :_mat-row :key {:value :dependencies} :default {:value []}}}
+
+  {:name :_mat-missing
+   :parent :missing-package-dependencies
+   :args {:dependencies {:ref :_mat-deps :type [:list :jsonb]}}}
+
+  {:name :_mat-missing-empty?
+   :parent :empty?
+   :args {:coll :_mat-missing}}
+
+  {:name :_mat-missing-any?
+   :parent :not
+   :args {:value :_mat-missing-empty?}}
+
+  {:name :_mat-ns-root
+   :parent :get
+   :args {:coll :_mat-row :key {:value :ns-root} :default nil}}
+
+  {:name :_mat-fns
+   :parent :get
+   :args {:coll :_mat-row :key {:value :fns} :default {:value []}}}
+
+  {:name :_mat-count
+   :parent :materialize-package-fns
+   :args {:ns-root {:ref :_mat-ns-root :type :text}
+          :version {:ref :_mat-resolved :type :text}
+          :fns {:ref :_mat-fns :type [:list :jsonb]}}}
+
+  {:name :_mat-vq-ns
+   :parent :version-qualified-ns
+   :args {:ns-root {:ref :_mat-ns-root :type :text}
+          :version {:ref :_mat-resolved :type :text}
+          :fn-ns {:ref :_mat-ns-root :type :text}}}
+
+  {:name :_mat-err-not-found
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
+          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
+
+  {:name :_mat-err-missing
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :missing}]
+          :vals [{:value false} {:value "missing-dependencies"} :_mat-missing]}}
+
+  {:name :_mat-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :namespace} {:value :materialized}]
+          :vals [{:value true} {:as :pkg-name} :_mat-resolved :_mat-vq-ns :_mat-count]}}
+
   {:name :materialize-package-version
-   :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Rejects on `:reason \"not-found\"` / `\"missing-dependencies\"`."
-   :args {:pkg-name {:type :text :description "Package name to materialize."}
-          :pkg-version {:type :text :description "Exact version, a semver constraint, or `latest` — highest published match is resolved."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Pure graph :cond; the apply core (`:materialize-package-fns`) is the coupled sync+invalidate unit."
+   :parent :cond
+   :args {:clauses [:_mat-row-nil?     :_mat-err-not-found
+                    :_mat-missing-any? :_mat-err-missing
+                    {:value true}      :_mat-ok]}
+   :return-type :keyword-map}
 
   ;; ---------------------------------------------------------------------
   ;; Package pins — per-branch desired-state "this branch uses P at V".
   ;; Base-fns backing reference-install + the editor's installed list.
   ;; ---------------------------------------------------------------------
 
-  {:name :set-package-pin
-   :description "Upsert the pin for `(current-branch, :pkg-name)` to `:pkg-version` — one pin per (branch, package). Returns a tagged `{:ok true …}`. Writes to the request's branch (staging)."
+  {:name :package-upsert-pin
+   :description "Upsert the single pin row for `(current-branch, :pkg-name)` → `:pkg-version`. Returns the branch-id as text. Shared with the install / update apply cores."
    :args {:pkg-name {:type :text :description "Package name to pin."}
           :pkg-version {:type :text :description "Version to pin the package at."}}
-   :return-type :keyword-map
+   :return-type :text
    :effects #{:db :time}}
 
+  {:name :_pin-branch-text
+   :parent :package-upsert-pin
+   :args {:pkg-name {:as :pkg-name :type :text} :pkg-version {:as :pkg-version :type :text}}}
+
+  {:name :set-package-pin
+   :description "Upsert the pin for `(current-branch, :pkg-name)` to `:pkg-version` — one pin per (branch, package). Returns a tagged `{:ok true …}` (envelope is graph composition). Writes to the request's branch (staging)."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :package-name} {:value :version} {:value :branch-id}]
+          :vals [{:value true} {:as :pkg-name} {:as :pkg-version} :_pin-branch-text]}
+   :return-type :keyword-map}
+
+  ;; Installed list — pure graph composition: this branch's pins,
+  ;; reshaped per-row for clean JSON.
+  {:name :_inst-where
+   :parent :assoc-empty
+   :args {:key {:value :branch-id} :value :current-branch-id}}
+
+  {:name :_inst-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-install"} :where :_inst-where}}
+
+  {:name :_inst-entry-name
+   :parent :get :args {:coll {:as :item} :key {:value :package-name} :default nil}}
+
+  {:name :_inst-entry-version
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default nil}}
+
+  {:name :_inst-entry-branch
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :branch-id} :default nil}}}}
+
+  {:name :_inst-entry-at
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :installed-at} :default nil}}}}
+
+  {:name :_inst-entry
+   :parent :zipmap
+   :args {:keys [{:value :package-name} {:value :version} {:value :branch-id} {:value :installed-at}]
+          :vals [:_inst-entry-name :_inst-entry-version :_inst-entry-branch :_inst-entry-at]}}
+
   {:name :list-installed-packages
-   :description "Every package pinned on the current branch — `[{:package-name :version :branch-id :installed-at} …]`. Powers GET /api/packages/installed and the editor's installed list."
-   :return-type [:list :keyword-map]
-   :effects #{:db}}
+   :description "Every package pinned on the current branch — `[{:package-name :version :branch-id :installed-at} …]`. Powers GET /api/packages/installed and the editor's installed list. Pure graph composition."
+   :parent :map
+   :args {:func :_inst-entry :coll :_inst-rows}
+   :return-type [:list :keyword-map]}
+
+  ;; Uninstall — pure graph composition: find the pin, delete it when
+  ;; present, return the idempotent envelope.
+  {:name :_unpin-where-b
+   :parent :assoc-empty
+   :args {:key {:value :branch-id} :value :current-branch-id}}
+
+  {:name :_unpin-where
+   :parent :assoc
+   :args {:map :_unpin-where-b :key {:value :package-name} :value {:as :pkg-name :type :text}}}
+
+  {:name :_unpin-rows
+   :parent :query-entities
+   :args {:entity-type {:value "package-install"} :where :_unpin-where}}
+
+  {:name :_unpin-existing
+   :parent :first
+   :args {:coll :_unpin-rows}}
+
+  {:name :_unpin-present?
+   :parent :some?
+   :args {:value :_unpin-existing}}
+
+  {:name :_unpin-id
+   :parent :get
+   :args {:coll :_unpin-existing :key {:value :id} :default nil}}
+
+  {:name :_unpin-delete
+   :parent :delete-entity
+   :args {:entity-type {:value "package-install"} :id {:ref :_unpin-id :type :uuid}}}
+
+  {:name :_unpin-maybe
+   :parent :if
+   :args {:test :_unpin-present?
+          :then :_unpin-delete
+          :else {:value nil}}}
+
+  {:name :_unpin-envelope
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :package-name} {:value :removed}]
+          :vals [{:value true} {:as :pkg-name} :_unpin-present?]}}
 
   {:name :remove-package-pin
-   :description "Drop the pin for `(current-branch, :pkg-name)` — uninstall. Idempotent; `:removed false` when nothing was pinned."
-   :args {:pkg-name {:type :text :description "Package name to unpin."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Drop the pin for `(current-branch, :pkg-name)` — uninstall. Idempotent; `:removed false` when nothing was pinned. Pure graph composition (`:do` forces the delete before the envelope)."
+   :parent :do
+   :args {:steps [:_unpin-maybe :_unpin-envelope]}
+   :return-type :keyword-map}
 
   ;; ---------------------------------------------------------------------
   ;; GET /api/packages/installed — this branch's pins.

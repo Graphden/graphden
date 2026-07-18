@@ -212,10 +212,14 @@
    as JSON, returns the raw string unchanged (parse failure is
    swallowed).
 
-   Single-library boundary; the recursive re-keyword walk is a
-   string-level parse detail, not a meaningful graph unit. The
-   walk's keyword-detection regex is the editor-side contract and
-   shouldn't vary per user."
+   Kept as ONE base-fn deliberately — NOT for lack of recursion
+   (`:fix` shipped; the walk WOULD express as a graph): this is a
+   self-contained wire-format parser (JSON string → typed constraint
+   vector), the same carve-out class as `:pick-encoding`'s RFC
+   negotiation. The keyword-detection regex is the editor-side wire
+   contract and must not vary per user — splitting it across graph
+   nodes would hand out exactly the tuning surface the contract
+   forbids."
   [raw]
   (when-not (str/blank? raw)
     (let [parsed (try (json/parse-string raw)
@@ -420,17 +424,18 @@
    §3.3 algorithm — the constraint-uses category requires
    `constraint-contains-type-ref?` which is a RECURSIVE walk into
    nested `[:union …]` / `[:variant …]` / `[:fn args ret]` /
-   `[:refine base [:and …]]` constraint vectors. Graphden has no
-   recursion primitive yet (`:fix` is on the recursion-design
-   roadmap — see `docs/RECURSION.md`), so the walk has to live in
-   Clojure with cycle-tracking shared state. Decomposing the 5
+   `[:refine base [:and …]]` constraint vectors — a cycle-tracking
+   shared-state walk, the §3.3 carve-out proper (unchanged by `:fix`
+   shipping: `:fix` gives structural recursion, not shared
+   cycle-state across mutually-recursive walks). Decomposing the 5
    non-recursive categories independently would split the response
    shape across Clojure + graph and double the round-trip cost
    (each category needs the cached-graph snapshot) without giving
    admins meaningful tuning surface for the recursive one.
 
-   The sibling `parse-constraint` defbase is documented the same way —
-   both wait on graph-level recursion."
+   The sibling `parse-constraint` defbase stays one unit for a
+   different reason — it is a self-contained wire-format parse
+   contract (see its docstring)."
   [parsed]
   (cr/record-effect! :db)
   (types-api/apply-types-usages parsed ctx))

@@ -38,7 +38,7 @@ or-equivalent recursion concern got sidestepped — see 0b.
 |---|---|---|---|
 | `:fn-row-by-id` | commit `08c77e7a` | Pure fn-def: `:storage-query-call` → `:first` → `:decode-row` | Read one fn entity by id. Used by every row-actions partial to look up name / description / namespace-id. |
 | `:request-authed?` | commit `08c77e7a` | Thin alias of `:_bearer-equals-env?` | Conditional rendering of edit affordances. |
-| `:fn-ns-path` | commit `fa990ca9` | `defbase` with depth-capped loop (no `:fix` needed — base-fn iteration carve-out) | Produce `"core.refinements"` string from a `:namespace-id`. |
+| `:fn-ns-path` | commit `fa990ca9`; rewritten as a `:fix` graph composition once `:fix` shipped | Pure fn-def: `:fix` walk over `:get-entity`, 20-level depth cap graph-visible | Produce `"core.refinements"` string from a `:namespace-id`. |
 | `:fn-usage-count` | ⏳ deferred to Phase A4 | Multi-table count: `binding.ref-fn-id` + `binding-list-item.ref-fn-id` + `fn.parent-ids` membership | Only the root-row buttons need editability gating (✎ rename, ✕ delete). Col-header / MI-cell / use-site contexts gate editability CLIENT-SIDE in the dispatcher — server emits the button always, client re-checks `isFnEditable(fnId)` from `lookups` at click time. This keeps Phase A1-A3 unblocked. |
 | `:fn-is-editable?` | ⏳ with 0c | `(zero? :fn-usage-count)` | Same as above. |
 

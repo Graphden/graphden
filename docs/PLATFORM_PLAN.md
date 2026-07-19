@@ -172,13 +172,12 @@ tenancy-аддона, фиксируется этим документом.
   экспортёр выдаёт `fns.edn` (или набор с папками для вложенных ns) → пользователь
   кладёт в свой git. Реестр — опционален.
 
-### 2.6. Round-trip экспортёр `граф → fns.edn` (отсутствует, нужен)
+### 2.6. Round-trip экспортёр `граф → fns.edn` — ПОСТРОЕНО
 
-Сегодня (проверено): сериализации графа обратно в EDN **нет вообще** — система
-односторонняя (EDN → строки). И publish, и export требуют этого. Это
-**фундаментальная подзадача фазы 1**: обратный проход к парсеру `records`
-(`fn/slot/fn-slot/binding/binding-list-item` → `fns.edn`-формы). Хорошо
-ограничена по объёму.
+Реализовано в фазе 1: `packages/export` (export-namespace для publish,
+`GET /api/export/graph` для целого графа — см. R3 и
+PACKAGE_DISTRIBUTION § 12). Исторический текст этого пункта («сериализации
+нет вообще») снят как устаревший.
 
 ### 2.7. Пакеты ↔ неймспейсы (с учётом реальной схемы)
 
@@ -355,8 +354,10 @@ unrestricted. Механизм гейта уже готов и проверен 
     host только запрещает). `verify-domain-ownership` (DNS-TXT
     `graphden-verify=<token>`, injectable lookup + JNDI default) — проверка
     владения. Доказано (3 теста, вкл. verify + member→org + foreign→403 +
-    anon→public). *Остаётся:* storage-backed `hostname → org` + provisioning-
-    флоу (добавить домен → выдать токен → verify → записать строку).
+    anon→public). **Достроено позже:** storage-backed `hostname → org`
+    (`tenancy.domain` — HostResolver над `:domain`-сущностью, provisionable
+    без redeploy) + provisioning-флоу (verify-domain через
+    `tenancy.deploy`: добавить домен → токен → DNS-TXT verify → строка).
 - **Важно (R10):** проверка DNS — это сетевой **эффект**, который облачным
   пользователям запрещён. Значит fn проверки домена — **привилегированная
   платформенная fn**, а не пользовательская композиция. «Через граф, но не

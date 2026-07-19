@@ -32,14 +32,23 @@ context. The plan supersedes the per-item entries in § Future Work
 below; those entries remain for historical context and as
 deeper-design references.
 
-**Path to MVP launch with external users**: the remaining critical path is
-Blocks 4 → 9-Launch, with Blocks 3 / 6 parallelizable. (Blocks 1, 2 and 5 are
-done — see § Implemented; they're dropped from the list below.)
+**Path to MVP launch with external users**: launch STAGING (weeks,
+go-to-market, monetization, legal) lives in
+[LAUNCH_PLAN.md](LAUNCH_PLAN.md) — the primary launch plan; this doc
+stays the authority on feature blocks and their sizes. The remaining
+critical path is Blocks 4 → 9-Launch, with Blocks 3 / 6 parallelizable.
+(Blocks 1, 2 and 5 are done — see § Implemented.)
 
-The AI-launch piece (Block 9.1–9.3) is on the critical path because
-"co-edit your graph with the AI of your choice, review proposals as
-graph-diffs not text-diffs" is part of the launch story; growth-piece
-(Block 9.4–9.6) is deliberately deferred to post-MVP.
+Launch-order refinements agreed in LAUNCH_PLAN (2026-07-20):
+
+- The AI-launch piece is **MCP-first**: 9.1 + 9.3 are on the critical
+  path (users co-edit through their EXISTING subscription clients —
+  Claude Code / Cursor — at zero token cost to us); **9.2 "Ask AI"
+  (BYOM API key) moves to immediately-post-launch**. Growth pieces
+  (9.4–9.6) stay post-MVP.
+- **Block 4.1 (sidecar `:python-call`/`:go-call`) is deferred to the
+  future reserve** — the launch integration packages (4.2) are pure
+  HTTP and don't need it.
 
 ### Block 0 — Tutorial framework (continuous)
 

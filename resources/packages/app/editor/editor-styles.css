@@ -2463,6 +2463,47 @@ textarea.arg-value-edit-input {
   background: color-mix(in srgb, var(--fg) 6%, var(--card-bg));
 }
 
+/* Fn-card ancestor rows — statics for the overlay renderers
+   (editor-overlay-fn.js / editor-overlay-fn-rows.js). JS keeps only
+   the dynamic bits: border-bottom variant, cursor, paint-machine
+   colours. */
+.fn-ancestor-line {
+  touch-action: none;
+  user-select: none;
+}
+.fn-ancestor-more {
+  padding: 2px 8px;
+  color: var(--light-fg);
+  font-size: 10px;
+}
+
+/* Use-site header row of a named non-root card — an empty
+   root-coloured marker row; bg comes from the paint machine. */
+.fn-use-site-header {
+  position: relative;
+  color: var(--card-header-fg);
+  border-bottom: none;
+  touch-action: none;
+  user-select: none;
+}
+
+/* Column-below-MI text overlay — floats over the per-parent column
+   divs; the 8px/24px insets match the `colLeftInset`/`colRightInset`
+   constants in editor-overlay-fn-rows.js (right inset clears the
+   pinned ⋯ trigger slot). */
+.mi-col-text {
+  position: absolute;
+  left: 8px;
+  right: 24px;
+  top: 4px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* Branch-local strip — informational marker that this fn (or an
    ancestor) is sticky-local: version rows do not propagate across
    branches on merge. No edit affordance — once an ancestor sets the

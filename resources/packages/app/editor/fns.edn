@@ -47,6 +47,9 @@
                   ;; SVG edge layer — needs `taxiBendX` from editor-layout.js.
                   "packages/app/editor/editor-edges-svg.js"
                   "packages/app/editor/editor-literal-types.js"
+                  ;; Presentation half of the type helpers — split out of
+                  ;; editor-literal-types.js.
+                  "packages/app/editor/editor-type-format.js"
                   "packages/web/runtime/graphden-forms.js"
                   "packages/app/editor/editor-value-form.js"
                   "packages/app/editor/editor-widget-rating.js"
@@ -79,6 +82,7 @@
                   "packages/app/editor/editor-provenance-popover.js"
                   "packages/app/editor/editor-overlay-arg.js"
                   "packages/app/editor/editor-overlay-edge-label.js"
+                  "packages/app/editor/editor-overlay-fn-rows.js"
                   "packages/app/editor/editor-overlay-fn.js"
                   "packages/app/editor/editor-overlay-strips.js"
                   "packages/app/editor/editor-overlay-manager.js"

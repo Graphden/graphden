@@ -705,13 +705,9 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
 // Populate `select` with every type-name T such that
 // `T ⊆ expectedSlotType(arg)` per the server's alias-aware `subtype?`,
 // so the dropdown only lists types the slot can legally narrow to —
-// an fn-type slot like `:handler` never offers `:int`.
-//
-// Candidates: the 14 primitive value-kinds plus every named type-row
-// in the rich-types snapshot (refinements, lists, unions, variants,
-// fn-types, records). The filter runs once per popover open via
-// parallel `/api/types/compatible` calls — typically <50 fetches,
-// which finish in well under a second on the local dev box.
+// an fn-type slot like `:handler` never offers `:int`. One
+// server-rendered option list (`/partials/compatible-type-options`,
+// primitives included) — the per-name fan-out is gone.
 async function populateCompatibleTypes(arg, select, cur, loadingOpt) {
   if (typeof expectedSlotType !== 'function') return;
   let expected = expectedSlotType(arg);
@@ -742,43 +738,9 @@ async function populateCompatibleTypes(arg, select, cur, loadingOpt) {
     if (loadingOpt) loadingOpt.remove();
     return;
   }
-  const primitives = ['null', 'uuid', 'text', 'int', 'bool', 'numeric',
-                      'timestamptz', 'jsonb', 'bytes', 'any', 'fn',
-                      'sequence', 'keyword', 'float'];
-  const richEntries = (typeof richTypes !== 'undefined' && richTypes)
-                      ? richTypes : {};
-  // Type-row entries are flagged with the keyword `:type-row?` on
-  // the backend; cheshire serialises that as the string key
-  // `"type-row?"`. Anonymous fn-shape rows have no name so they don't
-  // appear here — only USER-FACING names land in the picker.
-  const aliases = Object.keys(richEntries)
-    .filter(k => richEntries[k] && richEntries[k]['type-row?'] === true);
-  const allNames = Array.from(new Set([...primitives, ...aliases]));
-  // typesCompatible (editor-literal-types.js) memoises the result per
-  // (expected, candidate) pair across the session — repeat opens of
-  // the type-select popover skip the backend entirely.
-  const results = await Promise.all(allNames.map(async name => {
-    const ok = await typesCompatible(expected, name);
-    return { name, ok };
-  }));
-  const valid = results
-    .filter(r => r.ok && r.name !== cur)
-    .map(r => r.name)
-    .sort();
+  await loadCompatibleTypeOptions(select, expected,
+                                  { current: cur, includePrimitives: true });
   if (loadingOpt) loadingOpt.remove();
-  for (const name of valid) {
-    const o = document.createElement('option');
-    o.value = name;
-    o.textContent = name;
-    select.appendChild(o);
-  }
-  if (!cur && valid.length === 0) {
-    const empty = document.createElement('option');
-    empty.value = '';
-    empty.textContent = '(no compatible types)';
-    empty.disabled = true;
-    select.appendChild(empty);
-  }
 }
 
 

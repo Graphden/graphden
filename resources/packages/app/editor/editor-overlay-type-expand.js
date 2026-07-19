@@ -61,26 +61,11 @@ async function populateNarrowerOptions(select, currentType) {
   curOpt.textContent = curLabel;
   curOpt.selected = true;
   select.appendChild(curOpt);
-  if (typeof richTypes !== 'object' || !richTypes) return;
-  // Candidates: every type-row entry. Filter via /api/types/
-  // compatible. Same approach as the main type-edit picker.
-  const aliases = Object.keys(richTypes)
-    .filter(k => richTypes[k] && richTypes[k]['type-row?'] === true);
-  if (aliases.length === 0) return;
-  try {
-    const results = await Promise.all(aliases.map(async name => {
-      const ok = await typesCompatible(currentType, name);
-      return { name, ok };
-    }));
-    for (const r of results) {
-      if (r.ok && r.name !== curVal) {
-        const o = document.createElement('option');
-        o.value = r.name;
-        o.textContent = r.name;
-        select.appendChild(o);
-      }
-    }
-  } catch (_) { /* leave just the current option */ }
+  // Named type-rows only (no primitives) — one server-rendered
+  // option list; same partial as the main type-edit picker.
+  if (typeof loadCompatibleTypeOptions === 'function') {
+    await loadCompatibleTypeOptions(select, currentType, { current: curVal });
+  }
 }
 
 async function promptRenameFnTypeArg(fnId, currentFnType, oldArgName) {

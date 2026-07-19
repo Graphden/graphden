@@ -2678,6 +2678,109 @@
    :args {:body :_tnd-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; compatible-type <option> list —
+  ;; `GET /partials/compatible-type-options?expected={json}[&current=X][&primitives=true]`.
+  ;; One server-side alias-aware `subtype?` sweep replaces the editor's
+  ;; former per-name `/api/types/compatible` fan-out (~50 parallel
+  ;; POSTs per type-picker open, in TWO places: the arg-type select and
+  ;; the inline-panel narrower select). JS moves the returned <option>
+  ;; nodes into its live <select>; `current` is excluded server-side
+  ;; (the caller seeds it synchronously for instant render).
+
+  {:name :_cto-expected-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "expected"}}}
+
+  {:name :_cto-expected
+   :description "Expected slot type — URL-encoded JSON wire shape decoded to the type AST (same contract as `/partials/fn-picker-incompat`). Missing param is a programmer error worth a 500."
+   :parent :json-to-type
+   :args {:json {:parent :parse-json
+                 :args {:string {:parent :assert-some
+                                 :args {:value :_cto-expected-raw}}}}}}
+
+  {:name :_cto-current
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "current"}}}
+
+  {:name :_cto-include-prims?
+   :parent :equal?
+   :args {:a {:parent :query-param
+              :args {:request {:as :request} :param-name {:value "primitives"}}}
+          :b {:value "true"}}}
+
+  {:name :_cto-rows
+   :parent :compatible-type-names
+   :args {:expected :_cto-expected}}
+
+  {:name :_cto-not-prim?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get
+                             :args {:coll {:as :item} :key {:value :kind} :default nil}}
+                         :b {:value "primitive"}}}}}
+
+  {:name :_cto-rows-filtered
+   :description "Rows minus the primitives when `primitives=true` wasn't asked for — the inline narrower select lists named type-rows only."
+   :parent :if
+   :args {:test :_cto-include-prims?
+          :then :_cto-rows
+          :else {:parent :filter
+                 :args {:pred :_cto-not-prim? :coll :_cto-rows}}}}
+
+  {:name :_cto-row-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :name} :default ""}}
+
+  {:name :_cto-not-current?
+   :parent :not
+   :args {:value {:parent :equal? :args {:a {:as :item} :b :_cto-current}}}}
+
+  {:name :_cto-names
+   :parent :filter
+   :args {:pred :_cto-not-current?
+          :coll {:parent :map
+                 :args {:func :_cto-row-name :coll :_cto-rows-filtered}}}}
+
+  {:name :_cto-option
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :value}]
+                         :vals [{:as :item}]}}
+          :children [{:as :item}]}}
+
+  {:name :_cto-options
+   :parent :map
+   :args {:func :_cto-option :coll :_cto-names}}
+
+  ;; "(no compatible types)" placeholder — only when the list is empty
+  ;; AND no current type exists to fall back on (mirrors the old JS).
+  {:name :_cto-empty-state
+   :parent :if
+   :args {:test {:parent :and
+                 :args {:values [{:parent :empty? :args {:coll :_cto-names}}
+                                 {:parent :nil? :args {:value :_cto-current}}]}}
+          :then {:value [:option {:value "" :disabled "disabled"}
+                         "(no compatible types)"]}
+          :else {:value [:span {:hidden "1"}]}}}
+
+  {:name :_cto-fragment
+   :description "Wrapper div — JS lifts the <option> nodes out of it into the live <select>."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {}}
+          :children [:_cto-options :_cto-empty-state]}}
+
+  {:name :_cto-html
+   :parent :render-hiccup
+   :args {:hiccup :_cto-fragment}}
+
+  {:name :_partial-cto-handler
+   :description "Ring handler for `GET /partials/compatible-type-options` — the compatible-type <option> list as `text/html`."
+   :parent :html-ok-response
+   :args {:body :_cto-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-picker incompat-explainer. The fn-picker popover surfaces
   ;; functions whose return type doesn't satisfy the slot's expected
   ;; type under a separate "Other" section; clicking such a candidate

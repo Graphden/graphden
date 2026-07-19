@@ -434,6 +434,15 @@
   (types-api/type-name-kinds ctx))
 
 
+(defbase compatible-type-names
+  "`type-name-kinds` rows filtered to the names that can legally
+   narrow `expected` — one alias-aware `subtype?` sweep server-side.
+   Single library call into `types-api/compatible-type-names`."
+  [expected]
+  (cr/record-effect! :db)
+  (types-api/compatible-type-names ctx expected))
+
+
 (defbase _types-usages-apply
   "Stage 3 of types-usages — walk the graph for every reference to the
    target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}`
@@ -690,6 +699,7 @@
    :rich-type-of-name rich-type-of-name
    :rule-owner-of-name rule-owner-of-name
    :type-name-kinds type-name-kinds
+   :compatible-type-names compatible-type-names
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

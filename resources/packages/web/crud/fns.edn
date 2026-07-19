@@ -446,6 +446,12 @@
    :return-type [:list {:name :text :kind :text}]
    :effects #{:db}}
 
+  {:name :compatible-type-names
+   :description "`type-name-kinds` rows filtered to the names that can legally narrow `expected` — one alias-aware `subtype?` sweep. Backs `/partials/compatible-type-options` (replaces the editor's per-name /api/types/compatible fan-out)."
+   :args {:expected {:type :type-expression :description "Type expression candidates must be subtypes of."}}
+   :return-type [:list {:name :text :kind :text}]
+   :effects #{:db}}
+
   ;; fn-id → row → name → registry entry → :return, all graph-visible.
   {:name :_rrof-fn-id-nil?
    :parent :nil?

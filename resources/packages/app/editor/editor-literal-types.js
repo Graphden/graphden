@@ -7,52 +7,36 @@
 // editor-main.js after fetching /api/types). Loaded into the
 // concatenated bundle BEFORE editor-tooltips.js.
 
-// === Session-level cache for /api/types/compatible ============================
+// === Compatible-type options loader ==========================================
 //
-// Compatibility is determined by the type registry, which only changes
-// when a fn-def is added/renamed/retyped (rare during an editing
-// session). populateCompatibleTypes() in editor-edit-modes.js fans out
-// ~50 parallel fetches every time a type-select popover opens; the
-// fn-picker and mismatch explainer call it too. Without a cache the
-// same (expected, candidate) pair re-hits the backend on every popover
-// open in the same session. The cache stores the bare boolean — the
-// network savings are 5–15 ms per cached pair (median).
-//
-// Invalidated via `clearTypesCompatibleCache()` whenever the type registry
-// (re)loads — `editor-main.js` calls it after re-fetching `/api/types` in both
-// `initGraph` (fn-rename path) and `loadGraphData` (post-mutation refresh), so
-// a create / rename / retype drops the stale `(expected, candidate)` verdicts.
-const _typesCompatibleCache = new Map();
-
-function _typesCompatibleKey(expected, candidate) {
-  // Expected may be a structural array (e.g. `[":refine", ":int",
-  // [":>=", 1]]`); candidate is usually a bare string. JSON-stringify
-  // both for deterministic keying.
-  return JSON.stringify(expected) + '\x00' + JSON.stringify(candidate);
-}
-
-async function typesCompatible(expected, candidate) {
-  const key = _typesCompatibleKey(expected, candidate);
-  if (_typesCompatibleCache.has(key)) {
-    return _typesCompatibleCache.get(key);
-  }
-  let ok = false;
+// One `GET /partials/compatible-type-options` returns the full
+// <option> list of type names that can legally narrow `expected` —
+// a single server-side alias-aware `subtype?` sweep. This replaced
+// the per-name `/api/types/compatible` fan-out (~50 parallel POSTs
+// per type-picker open) plus its session cache. The caller seeds the
+// CURRENT type synchronously for instant render; the server excludes
+// `opts.current` and appends the "(no compatible types)" placeholder
+// when the list is empty and no current type exists.
+async function loadCompatibleTypeOptions(select, expected, opts) {
+  opts = opts || {};
+  const params = new URLSearchParams({ expected: JSON.stringify(expected) });
+  if (opts.current) params.set('current', opts.current);
+  if (opts.includePrimitives) params.set('primitives', 'true');
+  let html;
   try {
-    const r = await fetch(API.api_types_compatible, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expected, candidate }),
-    }).then((r) => r.json());
-    ok = !!r.ok;
+    const r = await authFetch('/partials/compatible-type-options?'
+                              + params.toString());
+    if (!r.ok) return false;
+    html = await r.text();
   } catch (_) {
-    ok = false;
+    return false;
   }
-  _typesCompatibleCache.set(key, ok);
-  return ok;
-}
-
-function clearTypesCompatibleCache() {
-  _typesCompatibleCache.clear();
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  for (const o of tpl.content.querySelectorAll('option')) {
+    select.appendChild(o);
+  }
+  return true;
 }
 
 // The rich (structural) declared type of `arg`'s slot, recovered from

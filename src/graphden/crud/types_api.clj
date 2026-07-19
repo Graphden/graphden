@@ -101,6 +101,17 @@
          (vec))))
 
 
+(defn compatible-type-names
+  "`type-name-kinds` rows filtered to the names that can legally
+   narrow `expected` — `(subtype? (keyword name) expected)`, the same
+   alias-aware predicate `/api/types/compatible` answers per pair.
+   One call replaces the editor's former per-name fan-out (~50
+   parallel POSTs per type-picker open)."
+  [ctx expected]
+  (filterv #(types/subtype? (keyword (:name %)) expected)
+           (type-name-kinds ctx)))
+
+
 (defn project-rich-type-entry
   "Strip the backend-only per-base-fn type-rule fns from a single
    registry entry and replace each with a JSON-safe boolean flag.

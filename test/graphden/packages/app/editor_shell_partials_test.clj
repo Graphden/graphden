@@ -106,6 +106,32 @@
         (is (not (str/includes? body "make a service")))))))
 
 
+(deftest compatible-type-options-partial
+  ;; One server-side subtype? sweep replaces the editor's per-name
+  ;; /api/types/compatible fan-out. expected=:int → primitives mode
+  ;; includes :int itself; type-row mode lists only named narrowings
+  ;; (e.g. :positive-int, :port); `current` is excluded server-side.
+  (let [{:keys [ctx storage]} *bootstrap*
+        handler-id (get (:all-name->id *bootstrap*) :_partial-cto-handler)
+        render (fn [params]
+                 (:body (setup/exec-with-storage
+                          ctx storage handler-id
+                          {:request {:query-params params}})))]
+    (testing "primitives included on demand"
+      (let [body (render {"expected" "\"int\"" "primitives" "true"})]
+        (is (str/includes? body "value=\"int\""))
+        (is (str/includes? body "value=\"positive-int\""))
+        (is (not (str/includes? body "value=\"text\"")))))
+    (testing "type-rows only by default + current excluded"
+      (let [body (render {"expected" "\"int\"" "current" "positive-int"})]
+        (is (not (str/includes? body "value=\"int\"")))
+        (is (not (str/includes? body "value=\"positive-int\"")))
+        (is (str/includes? body "value=\"port\""))))
+    (testing "no compatible types and no current → placeholder"
+      (let [body (render {"expected" "\"never\""})]
+        (is (str/includes? body "no compatible types"))))))
+
+
 (deftest static-scaffold-parts
   (let [body (render-shell :add)]
     (doseq [marker ["execute-popover-header" "execute-history-toggle"

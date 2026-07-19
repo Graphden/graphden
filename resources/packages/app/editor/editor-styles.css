@@ -2136,7 +2136,6 @@ textarea.arg-value-edit-input {
   text-align: left;
   transform-origin: top left;
   user-select: none;
-  -webkit-user-select: none;
 }
 .type-inline-row {
   display: block;

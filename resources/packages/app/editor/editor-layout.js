@@ -150,6 +150,9 @@ function metadataStripsHeight(nodeData) {
     const pids = fn['parent-ids'] || [];
     if (pids.length === 0) total += METADATA_STRIP_HEIGHT;
   }
+  // Branch-local strip — the layout response says exactly whether it
+  // renders (server-computed strip fact), so this one isn't a guess.
+  if (nodeData.branchLocal) total += METADATA_STRIP_HEIGHT;
   return total;
 }
 

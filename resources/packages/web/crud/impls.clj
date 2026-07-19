@@ -414,6 +414,17 @@
     (registry/rich-type-of (keyword fn-name))))
 
 
+(defbase rule-owner-of-name
+  "Atomic library boundary over `registry/rule-owner-of` — the name of
+   the base-fn whose `:return-type-rule` computed the named fn's
+   return type; nil when the fn is unknown, is itself a base-fn, or
+   its root ancestor carries no rule. The walk itself lives next to
+   `registry/root-base-fn-name` (single source of truth); the layout
+   strip-facts pass calls the same fn."
+  [fn-name]
+  (registry/rule-owner-of fn-name))
+
+
 (defbase _types-usages-apply
   "Stage 3 of types-usages — walk the graph for every reference to the
    target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}`
@@ -668,6 +679,7 @@
    :closed-enum-of closed-enum-of
    :fn-type-bound-effects fn-type-bound-effects
    :rich-type-of-name rich-type-of-name
+   :rule-owner-of-name rule-owner-of-name
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

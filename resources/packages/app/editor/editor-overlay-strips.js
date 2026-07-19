@@ -27,17 +27,7 @@ function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
     return { name: e.name, slotId: e['slot-id'] || e.slotId };
   });
   const strip = document.createElement('div');
-  Object.assign(strip.style, {
-    padding: '2px 8px',
-    color: 'var(--light-fg)',
-    fontSize: '10px',
-    fontStyle: 'italic',
-    borderTop: '1px dashed var(--input-border)',
-    background: 'var(--sidebar-bg)',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  });
+  strip.className = 'optional-args-strip';   // static looks in editor-styles.css
   strip.title = 'Optional args (unset, using defaults): '
               + entries.map((e) => e.name).join(', ');
   const fnName = originalFnId && lookups?.fnMap?.get(originalFnId)?.name;
@@ -65,9 +55,16 @@ function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
 // effects (with drift visualisation), edit-parents, namespace. All four
 // share `cardFnEntity` and the `rtEditable` predicate, so they live in
 // one helper instead of four call-site copies of the same gate.
-function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
+//
+// `stripFacts` carries the server-computed facts the layout response
+// attaches to each fn-node (`graphden.layout.strip-facts`):
+// `returnTypeAlias` / `ruleOwner` / `branchLocal`. The inheritance /
+// registry / branch-local walks that used to live here re-derived
+// server-owned reasoning and are gone.
+function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   const cardFnEntity = lookups?.fnMap?.get(originalFnId);
   if (!cardFnEntity) return;
+  stripFacts = stripFacts || {};
   const rt = cardFnEntity['return-type'];
   const rtEditable = isNavRoot
                   && (typeof isFnEditable === 'function' && isFnEditable(originalFnId))
@@ -98,42 +95,11 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
   // "this fn takes no args, returns null" (wrong) or "returns a
   // 0-arg callable returning null" (right but takes thought). The
   // alias name "http-server-handle" carries the same information
-  // more compactly, so when the (possibly inherited)
-  // `return-type-fn-id` resolves to a type-row with a real name we
-  // use that instead. Falls back to the structural form when no
-  // named alias exists (e.g. inline `[:fn …]` declarations).
-  //
-  // Walks the parent chain because composed fn-defs INHERIT
-  // `:return-type` from their parent — `web-server`'s row carries
-  // null, the value lives on `:http-server`'s row.
-  if (lookups?.fnMap) {
-    const PRIMITIVES = new Set(['null', 'uuid', 'text', 'int', 'bool',
-                                 'numeric', 'timestamptz', 'jsonb',
-                                 'bytes', 'any', 'fn', 'sequence',
-                                 'keyword', 'float']);
-    const visited = new Set();
-    const queue = [cardFnEntity];
-    let inheritedRtFnId = null;
-    while (queue.length && !inheritedRtFnId) {
-      const f = queue.shift();
-      if (!f || visited.has(f.id)) continue;
-      visited.add(f.id);
-      if (f['return-type-fn-id']) {
-        inheritedRtFnId = f['return-type-fn-id'];
-        break;
-      }
-      for (const pid of (f['parent-ids'] || [])) {
-        const pf = lookups.fnMap.get(pid);
-        if (pf) queue.push(pf);
-      }
-    }
-    if (inheritedRtFnId) {
-      const rtFn = lookups.fnMap.get(inheritedRtFnId);
-      if (rtFn?.name && typeof rtFn.name === 'string'
-          && !PRIMITIVES.has(rtFn.name)) {
-        displayRich = ':' + rtFn.name;
-      }
-    }
+  // more compactly. The parent-chain walk that resolves the
+  // (possibly inherited) `return-type-fn-id` to a non-primitive
+  // type-row name runs SERVER-side now (layout strip-facts).
+  if (stripFacts.returnTypeAlias) {
+    displayRich = ':' + stripFacts.returnTypeAlias;
   }
 
   if (rt || rtEditable || displayRich) {
@@ -224,31 +190,11 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
     // or simple unification — it was COMPUTED. Surface a small `↳`
     // button so the user can answer "where did this return type come
     // from?" without reading the parent base-fn's source. The popover
-    // names the rule's source and lists the resolved bindings that fed
-    // into it.
-    //
-    // The rule lives on a BASE-FN (the leaf of the primary-parent
-    // chain), but the immediate primary-parent is often itself a fn-def
-    // (`:assoc-timestamp → :assoc`, `:json-ok-response → … → :assoc`).
-    // Walk the chain until we either hit a base-fn carrying the flag or
-    // exhaust it. Cycle-guard via a Set + a hop cap so a misshapen
-    // registry can't lock the renderer.
-    const entry = (cardFnEntity.name && typeof richTypes === 'object' && richTypes)
-                  ? richTypes[cardFnEntity.name] : null;
-    let ruleOwner = null;
-    if (entry && typeof richTypes === 'object' && richTypes) {
-      const seen = new Set();
-      let cur = entry['primary-parent'];
-      let hops = 0;
-      while (cur && !seen.has(cur) && hops < 32) {
-        seen.add(cur);
-        const cand = richTypes[cur];
-        if (!cand) break;
-        if (cand['has-return-type-rule?']) { ruleOwner = cur; break; }
-        cur = cand['primary-parent'];
-        hops += 1;
-      }
-    }
+    // (server-rendered, /partials/return-type-rule) names the rule's
+    // source and lists the resolved bindings that fed into it. The
+    // rule-owner walk itself runs SERVER-side (layout strip-facts →
+    // `registry/rule-owner-of`).
+    const ruleOwner = stripFacts.ruleOwner || null;
     if (ruleOwner && typeof showReturnTypeRulePopover === 'function') {
       const provBtn = document.createElement('button');
       provBtn.type = 'button';
@@ -279,6 +225,14 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
   // effect). Reads richTypes[name].effects when available. Pure fns
   // get no row at all (no clutter for the 80% case). Each badge is
   // colour-coded and carries a hover-title with the full category name.
+  //
+  // graph-first-exception: the drift/over-declared set arithmetic
+  // stays CLIENT-side deliberately — `:expects-effects` is editable
+  // in-page (✎ below) without a layout refetch, so the client's live
+  // DB value is fresher than anything the server could have baked
+  // into the layout response; the arithmetic is presentation of
+  // client-fresh state, not a re-derivation of server reasoning
+  // (sync-time drift-checking REJECTS, it doesn't render).
   //
   // When the fn-def also declares `:expects-effects`, the strip
   // shows declared/computed drift visually:
@@ -442,55 +396,34 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
   // noisy stack of labels.)
 
   // --- branch-local strip ---
-  // Walk parent-ids transitively (mirror of
-  // `graphden.versioning.branch-local/effective-branch-local?`); any
-  // ancestor with the flag makes this fn sticky-local. The strip is a
-  // visual cue + an explainer tooltip — "this fn does not propagate
-  // across branches on merge". No edit affordance: descendants
-  // CAN'T widen back to non-local (sync-time guard rejects the write),
-  // so showing a toggle here would be a footgun. Admin opt-in lives
-  // in the fns.edn declaration of the root local ancestor.
-  if (lookups?.fnMap) {
-    const visited = new Set();
-    const queue = [cardFnEntity];
-    let local = false;
-    let localAncestor = null;
-    while (queue.length && !local) {
-      const f = queue.shift();
-      if (!f || visited.has(f.id)) continue;
-      visited.add(f.id);
-      if (f['branch-local?'] === true) {
-        local = true;
-        localAncestor = f;
-        break;
-      }
-      for (const pid of (f['parent-ids'] || [])) {
-        const pf = lookups.fnMap.get(pid);
-        if (pf) queue.push(pf);
-      }
-    }
-    if (local) {
-      const strip = document.createElement('div');
-      strip.className = 'branch-local-strip';
-      const glyph = document.createElement('span');
-      glyph.className = 'branch-local-strip-glyph';
-      glyph.textContent = '📍';
-      glyph.setAttribute('aria-hidden', 'true');
-      const label = document.createElement('span');
-      label.className = 'branch-local-strip-label';
-      label.textContent = 'branch-local';
-      strip.appendChild(glyph);
-      strip.appendChild(label);
-      // Tooltip explains the policy + names the ancestor that carries
-      // the seed so the user can trace where it came from. When
-      // self-marked, ancestor === cardFnEntity.
-      const ownTrue = cardFnEntity['branch-local?'] === true;
-      strip.title = ownTrue
-        ? 'This fn is sticky-local: version rows do not propagate across branches on merge.'
-        : ('This fn inherits branch-local from `:' + (localAncestor.name || '<anon>')
-           + '`. Version rows do not propagate across branches on merge.');
-      overlay.appendChild(strip);
-    }
+  // The transitive parent-ids walk runs SERVER-side now (layout
+  // strip-facts → `branch-local/branch-local-seed`, the same module
+  // that owns merge-time semantics). The strip is a visual cue + an
+  // explainer tooltip — "this fn does not propagate across branches
+  // on merge". No edit affordance: descendants CAN'T widen back to
+  // non-local (sync-time guard rejects the write), so showing a
+  // toggle here would be a footgun. Admin opt-in lives in the
+  // fns.edn declaration of the root local ancestor.
+  const branchLocal = stripFacts.branchLocal;
+  if (branchLocal) {
+    const strip = document.createElement('div');
+    strip.className = 'branch-local-strip';
+    const glyph = document.createElement('span');
+    glyph.className = 'branch-local-strip-glyph';
+    glyph.textContent = '📍';
+    glyph.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.className = 'branch-local-strip-label';
+    label.textContent = 'branch-local';
+    strip.appendChild(glyph);
+    strip.appendChild(label);
+    // Tooltip explains the policy + names the ancestor that carries
+    // the seed so the user can trace where it came from.
+    strip.title = branchLocal.own
+      ? 'This fn is sticky-local: version rows do not propagate across branches on merge.'
+      : ('This fn inherits branch-local from `:' + (branchLocal.seed || '<anon>')
+         + '`. Version rows do not propagate across branches on merge.');
+    overlay.appendChild(strip);
   }
 }
 
@@ -547,17 +480,7 @@ function appendFnActionToolbar(overlay, originalFnId, isNavRoot) {
 function appendHofCapturedArgsStrip(overlay, hofCapturedArgs) {
   if (!Array.isArray(hofCapturedArgs) || !hofCapturedArgs.length) return;
   const strip = document.createElement('div');
-  Object.assign(strip.style, {
-    padding: '2px 8px',
-    color: 'var(--hof-fg)',
-    fontSize: '10px',
-    fontStyle: 'italic',
-    borderTop: '1px dashed var(--hof-border)',
-    background: 'var(--hof-bg)',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  });
+  strip.className = 'hof-args-strip';   // static looks in editor-styles.css
   strip.title = 'Args supplied by the enclosing HOF invocation: ' + hofCapturedArgs.join(', ');
   strip.textContent = hofCapturedArgs.map(n => 'λ' + n).join(' ');
   overlay.appendChild(strip);
@@ -580,17 +503,7 @@ function appendHofCapturedArgsStrip(overlay, hofCapturedArgs) {
 function appendDeepFreeArgsStrip(overlay, deepFreeArgs) {
   if (!Array.isArray(deepFreeArgs) || !deepFreeArgs.length) return;
   const strip = document.createElement('div');
-  Object.assign(strip.style, {
-    padding: '2px 8px',
-    color: 'var(--hof-fg)',
-    fontSize: '10px',
-    fontStyle: 'italic',
-    borderTop: '1px dashed var(--hof-border)',
-    background: 'var(--hof-bg)',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  });
+  strip.className = 'hof-args-strip';   // same look as the λ strip; static looks in editor-styles.css
   strip.title = 'Free args this fn accepts from the caller and threads into its sub-tree: '
                 + deepFreeArgs.join(', ');
   strip.textContent = deepFreeArgs.map(n => '⇣' + n).join(' ');

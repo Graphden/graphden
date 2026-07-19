@@ -78,6 +78,12 @@
    :args {:elements {:type :_layout-elements-shape}}
    :return-type :_layout-response-shape}
 
+  {:name :_layout-strip-facts-apply
+   :description "Single library call — annotate fn-nodes with the strip facts (`:returnTypeAlias` / `:ruleOwner` / `:branchLocal`) the editor's bottom-of-card strips render. See `graphden.layout.strip-facts` for the fact semantics."
+   :args {:elements {:type :_layout-elements-shape}
+          :graph {:type :_graph-snapshot-shape}}
+   :return-type :_layout-elements-shape}
+
   ;; =============================================================================
   ;; FN-DEFS: error-shape templates + pass-through guards
   ;; =============================================================================
@@ -177,6 +183,25 @@
           :b {:value false}}}
 
   ;; =============================================================================
+  ;; FN-DEFS: :_layout-strip-facts — :if pass-through
+  ;; =============================================================================
+
+  {:name :_layout-strip-facts
+   :description "Stage A.5 — pass an upstream `{:ok false}` through, otherwise annotate fn-nodes with the strip facts. Shares the `{:ok false}` test with `:_layout-place` (same `:elements` free-arg name, values unify)."
+   :parent :if
+   :args {:test :_layout-place-failed?
+          :then {:as :elements}
+          :else :_layout-strip-facts-apply
+          :elements {:as :elements}
+          :graph {:as :graph}}}
+
+  ;; build → strip-facts. `:graph` propagates by name into BOTH the
+  ;; build stage and the annotate stage.
+  {:name :_layout-elements-with-strips
+   :parent :_layout-strip-facts
+   :args {:elements :_layout-build-elements}}
+
+  ;; =============================================================================
   ;; FN-DEFS: :_layout-place — :if pass-through
   ;; =============================================================================
 
@@ -201,12 +226,12 @@
   ;; FN-DEFS: layout pipeline composition
   ;; =============================================================================
 
-  ;; build → place. Free args `graph` + `parsed` propagate up from
-  ;; `_layout-build-elements`.
+  ;; build → strip-facts → place. Free args `graph` + `parsed`
+  ;; propagate up from the inner stages.
   {:name :_compute-layout
-   :description "Run the build → place layout pipeline for one parsed request. Composition of `:_layout-build-elements` → `:_layout-place`. Owns `:graph` as an explicit free pin — value flows down to `:_layout-build-elements :graph` by name match."
+   :description "Run the build → strip-facts → place layout pipeline for one parsed request. Composition of `:_layout-build-elements` → `:_layout-strip-facts` → `:_layout-place`. Owns `:graph` as an explicit free pin — value flows down to the build + annotate stages by name match."
    :parent :_layout-place
-   :args {:elements :_layout-build-elements
+   :args {:elements :_layout-elements-with-strips
           :graph {:type :_graph-snapshot-shape
                   :description "Full entity graph snapshot — typically supplied by `:_load-graph-cached`."}}}
 

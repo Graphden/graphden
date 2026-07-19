@@ -2090,139 +2090,18 @@
    :parent :rich-type-of-name
    :args {:fn-name :_rtr-fn-name}}
 
-  ;; --- `:primary-parent` reader, shared by seed + walk ------------------
-  ;; Registry entries store `:primary-parent` as a KEYWORD fn-name;
-  ;; the walk state keeps the cursor as TEXT so it feeds
-  ;; `:rich-type-of-name`'s `:nullable-text` slot honestly. Free arg:
-  ;; `:entry` — the registry entry to read from.
-
-  {:name :_rtr-pp-kw
-   :parent :get
-   :args {:coll {:as :entry} :key {:value :primary-parent} :default nil}}
-
-  {:name :_rtr-pp-some?
-   :parent :some?
-   :args {:value :_rtr-pp-kw}}
-
-  {:name :_rtr-pp-text
-   :parent :keyword-to-str
-   :args {:keyword {:ref :_rtr-pp-kw :type :keyword}}}
-
-  {:name :_rtr-pp-of
-   :description "Text name of `entry`'s `:primary-parent`; nil when absent (base-fns / unknown entries)."
-   :parent :if
-   :args {:test :_rtr-pp-some?
-          :then :_rtr-pp-text
-          :else {:value nil}}}
-
-  ;; --- rule-owner walk --------------------------------------------------
-  ;; The rule lives on a BASE-FN at the leaf of the primary-parent
+  ;; --- rule owner -------------------------------------------------------
+  ;; The rule lives on a BASE-FN at the root of the primary-parent
   ;; chain; the queried fn-def's immediate parent is often itself a
-  ;; fn-def (`:assoc-timestamp → :assoc`). Walk `:primary-parent`
-  ;; links until an entry carries `:return-type-rule` or the chain
-  ;; ends. Depth-capped at 32 (the old JS hop cap) so a misshapen
-  ;; registry can't lock the renderer. Pattern mirrors
-  ;; `app.lookups/:fn-ns-path`.
+  ;; fn-def (`:assoc-timestamp → :assoc`). `:rule-owner-of-name`
+  ;; (web/crud) is the atomic boundary over the registry's canonical
+  ;; `root-base-fn-name` walk — nil for base-fn cards (no primary
+  ;; parent) and rule-less chains, which collapses the body to the
+  ;; hidden span below.
 
-  {:name :RtrOwnerInput
-   :description "Type-row exposing the `:start-name` input slot of `:_rtr-owner-run`."
-   :type {:start-name :nullable-text}}
-
-  {:name :_rtr-owner-run
-   :description "The `:fix` walk itself — returns the rule-owner's text name or nil."
-   :parents [:fix :RtrOwnerInput]
-   :args {:step :_rtr-owner-step
-          :input :_rtr-owner-initial}}
-
-  {:name :_rtr-owner-initial
-   :parent :zipmap
-   :args {:keys [{:value :cur} {:value :depth}]
-          :vals [{:as :start-name} {:value 0}]}}
-
-  {:name :_rtr-owner-cur
-   :parent :get
-   :args {:coll {:as :input} :key {:value :cur}}}
-
-  {:name :_rtr-owner-depth
-   :parent :get
-   :args {:coll {:as :input} :key {:value :depth}}}
-
-  {:name :_rtr-owner-depth-capped?
-   :parent :gte
-   :args {:nums [:_rtr-owner-depth {:value 32}]}}
-
-  {:name :_rtr-owner-cur-nil?
-   :parent :nil?
-   :args {:value :_rtr-owner-cur}}
-
-  ;; Only forced past the nil-guard (`:or` short-circuits), so the
-  ;; registry lookup never sees a nil name.
-  {:name :_rtr-owner-cur-entry
-   :parent :rich-type-of-name
-   :args {:fn-name {:ref :_rtr-owner-cur :type :nullable-text}}}
-
-  {:name :_rtr-owner-entry-nil?
-   :parent :nil?
-   :args {:value :_rtr-owner-cur-entry}}
-
-  {:name :_rtr-owner-dead-end?
-   :parent :or
-   :args {:values [:_rtr-owner-cur-nil?
-                   :_rtr-owner-depth-capped?
-                   :_rtr-owner-entry-nil?]}}
-
-  {:name :_rtr-owner-rule?
-   :description "True when the cursor's RAW registry entry carries a `:return-type-rule` (the rule value itself is a Clojure fn — only its presence matters here)."
-   :parent :some?
-   :args {:value {:parent :get
-                  :args {:coll :_rtr-owner-cur-entry
-                         :key {:value :return-type-rule}
-                         :default nil}}}}
-
-  {:name :_rtr-owner-step
-   :parent :if
-   :args {:test :_rtr-owner-dead-end?
-          :then {:value nil}
-          :else :_rtr-owner-check}}
-
-  {:name :_rtr-owner-check
-   :parent :if
-   :args {:test :_rtr-owner-rule?
-          :then :_rtr-owner-cur
-          :else :_rtr-owner-recurse}}
-
-  {:name :_rtr-owner-next-cur
-   :parent :_rtr-pp-of
-   :args {:entry :_rtr-owner-cur-entry}}
-
-  {:name :_rtr-owner-depth-inc
-   :parent :add
-   :args {:nums [:_rtr-owner-depth {:value 1}]}}
-
-  {:name :_rtr-owner-next
-   :parent :zipmap
-   :args {:keys [{:value :cur} {:value :depth}]
-          :vals [:_rtr-owner-next-cur :_rtr-owner-depth-inc]}}
-
-  {:name :_rtr-owner-recurse
-   :parent :invoke
-   :args {:func {:as :self} :arg :_rtr-owner-next}}
-
-  ;; Seed = the QUERIED entry's own primary parent (a base-fn card has
-  ;; none → no owner → hidden body, matching the old JS behaviour).
-  {:name :_rtr-start
-   :parent :_rtr-pp-of
-   :args {:entry :_rtr-entry}}
-
-  {:name :_rtr-owner-run-here
-   :parent :_rtr-owner-run
-   :args {:start-name :_rtr-start}}
-
-  ;; `:fix` returns `:any`; the `:const` wrapper carries the author
-  ;; `:type` assertion (the walk's terminals are text names or nil).
   {:name :_rtr-owner-name
-   :parent :const
-   :args {:value {:ref :_rtr-owner-run-here :type :nullable-text}}}
+   :parent :rule-owner-of-name
+   :args {:fn-name :_rtr-fn-name}}
 
   {:name :_rtr-owner-some?
    :parent :some?

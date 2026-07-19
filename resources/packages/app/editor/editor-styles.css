@@ -2470,6 +2470,36 @@ textarea.arg-value-edit-input {
   letter-spacing: 0.02em;
 }
 
+/* Optional-args strip — `?name` list of optional-but-unbound args
+   (defaults in effect). Rendered by appendOptionalArgsStrip. */
+.optional-args-strip {
+  padding: 2px 8px;
+  color: var(--light-fg);
+  font-size: 10px;
+  font-style: italic;
+  border-top: 1px dashed var(--input-border);
+  background: var(--sidebar-bg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* HOF-context strips — `λname` (args the enclosing HOF supplies at
+   runtime) and `⇣name` (free args threaded into the sub-tree). Same
+   look for both; rendered by appendHofCapturedArgsStrip /
+   appendDeepFreeArgsStrip. */
+.hof-args-strip {
+  padding: 2px 8px;
+  color: var(--hof-fg);
+  font-size: 10px;
+  font-style: italic;
+  border-top: 1px dashed var(--hof-border);
+  background: var(--hof-bg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Description tooltip — singleton bubble managed by
    editor-tooltips.js. JS owns only the dynamic bits (display,
    left/top placement); everything static lives here. `pointer-events`

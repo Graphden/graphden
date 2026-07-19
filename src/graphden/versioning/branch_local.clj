@@ -98,6 +98,27 @@
           result)))))
 
 
+(defn branch-local-seed
+  "First row in `fn-id`'s `:parent-ids` closure (BFS, self included)
+   with `:branch-local? true`, resolved against an in-memory
+   `{fn-id → fn-row}` map; nil when the closure carries no seed. The
+   map-based sibling of `effective-branch-local?` for callers that
+   already batch-loaded the fn graph (the layout strip-facts pass,
+   which also needs the seed's NAME for the editor tooltip, not just
+   the boolean)."
+  [fns-by-id fn-id]
+  (loop [queue [fn-id]
+         visited #{}]
+    (when-let [cur (first queue)]
+      (if (contains? visited cur)
+        (recur (rest queue) visited)
+        (let [row (get fns-by-id cur)]
+          (if (true? (:branch-local? row))
+            row
+            (recur (concat (rest queue) (:parent-ids row))
+                   (conj visited cur))))))))
+
+
 (defn build-branch-local-set
   "Pre-compute the set of effective-branch-local fn-ids from a map
    `{fn-id → fn-row}` (loaded in batch). Used by the batch-resolution

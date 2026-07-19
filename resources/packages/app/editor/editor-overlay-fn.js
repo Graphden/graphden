@@ -890,7 +890,11 @@ function createFnOverlay(node, container) {
 
   appendOptionalArgsStrip(overlay, node.data('optionalArgs'), originalFnId);
 
-  appendFnMetadataStrips(overlay, originalFnId, isNavRoot);
+  appendFnMetadataStrips(overlay, originalFnId, isNavRoot, {
+    returnTypeAlias: node.data('returnTypeAlias') || null,
+    ruleOwner: node.data('ruleOwner') || null,
+    branchLocal: node.data('branchLocal') || null,
+  });
 
   appendHofCapturedArgsStrip(overlay, node.data('hofCapturedArgs'));
 

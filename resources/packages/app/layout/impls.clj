@@ -26,7 +26,8 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.layout.core :as layout]
-    [graphden.layout.graph :as lgraph]))
+    [graphden.layout.graph :as lgraph]
+    [graphden.layout.strip-facts :as strip-facts]))
 
 
 (defn- load-graph-entities
@@ -84,10 +85,20 @@
   (layout/place-elements elements))
 
 
+(defbase _layout-strip-facts-apply
+  "Single library call — annotate every fn-node's `:data` with the
+   strip facts (`:returnTypeAlias` / `:ruleOwner` / `:branchLocal`)
+   the editor's bottom-of-card strips render. See
+   `graphden.layout.strip-facts`."
+  [elements graph]
+  (strip-facts/annotate elements graph))
+
+
 ;; === Registry ===
 
 (def impls
   {:_load-graph-cached _load-graph-cached
    :_parse-layout-body _parse-layout-body
    :_layout-build-apply _layout-build-apply
-   :_layout-place-apply _layout-place-apply})
+   :_layout-place-apply _layout-place-apply
+   :_layout-strip-facts-apply _layout-strip-facts-apply})

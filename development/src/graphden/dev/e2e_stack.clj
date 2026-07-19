@@ -249,7 +249,6 @@
   [^Network network auth-token host-port]
   (doto (GenericContainer. ^String executor-image)
     (GenericContainer/.withEnv "PORT" "8080")
-    (GenericContainer/.withEnv "STORAGE_TYPE" "postgres")
     (GenericContainer/.withEnv "JDBC_URL"
                                "jdbc:postgresql://postgres:5432/graphden")
     (GenericContainer/.withEnv "DB_USERNAME" "graphden")

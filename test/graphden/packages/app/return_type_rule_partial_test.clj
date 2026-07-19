@@ -25,10 +25,10 @@
 
 
 (deftest rule-owner-found
-  ;; `:_fn-row-by-id-hsql` (app/lookups) has `:parent :assoc` — its
+  ;; `:_fibn-where` (app/lookups) has `:parent :assoc` — its
   ;; primary-parent chain reaches `:assoc`'s :return-type-rule in one
   ;; hop, so the popover attributes the computed return type to it.
-  (let [body (render-partial "_fn-row-by-id-hsql")]
+  (let [body (render-partial "_fibn-where")]
     (testing "header + intro"
       (is (str/includes? body "Type rule"))
       (is (str/includes? body "provenance-popover-intro"))

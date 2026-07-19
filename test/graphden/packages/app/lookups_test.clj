@@ -14,6 +14,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]))
 
 
@@ -62,6 +63,21 @@
           "row's :id round-trips the input fn-id")
       (is (keyword? (first (keys row)))
           ":decode-row converts string column keys to keywords"))))
+
+
+(deftest fn-row-by-id-is-version-resolved
+  (testing "post-update field values are visible (protocol read, not raw base-row HSQL)"
+    ;; Regression: the original implementation read the base :fn table
+    ;; via raw HSQL and returned CREATE-TIME values — an updated
+    ;; description (or declared-effects contract) never showed up in
+    ;; any partial built on this reader.
+    (let [{:keys [storage]} *bootstrap*
+          add-id (fn-id-of :add)
+          _ (sp/update-entity storage :fn add-id
+                              {:description "updated-by-lookups-test"})
+          row (exec-name :fn-row-by-id {:fn-id add-id})]
+      (is (= "updated-by-lookups-test" (:description row))
+          "reader sees the version row, not the create-time base row"))))
 
 
 (deftest fn-row-by-id-returns-nil-for-unknown-id

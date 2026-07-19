@@ -35,8 +35,8 @@
 
 
 (deftest rule-owner-fact
-  ;; `:_fn-row-by-id-hsql` has `:parent :assoc` — the `↳` badge gate.
-  (let [node (layout-for :_fn-row-by-id-hsql)]
+  ;; `:_fibn-where` has `:parent :assoc` — the `↳` badge gate.
+  (let [node (layout-for :_fibn-where)]
     (is (some? node))
     (is (= "assoc" (get-in node [:data :ruleOwner])))))
 

@@ -2,11 +2,10 @@
 ;; HTMX migration plan (docs/EDITOR_HTMX_MIGRATION_PLAN.md).
 ;;
 ;; Each fn-def here reads a single piece of graph state and is the
-;; canonical primitive for partials that need it. They're built on
-;; top of the existing `:storage-query-call` / `:decode-row` chain
-;; that other modules use directly today; centralising them avoids
-;; duplicating the `:assoc` + `:vec` HSQL boilerplate at every
-;; call site.
+;; canonical primitive for partials that need it. Reads go through
+;; the storage PROTOCOL (`:get-entity` / `:query-entities`) so they
+;; are version-resolved — a raw HSQL read against the base tables
+;; returns create-time values and silently misses every later edit.
 ;;
 ;; Naming convention: public (no `_`) primitives are intended for
 ;; cross-module reuse. `_`-private fn-defs are scaffolding for the
@@ -32,41 +31,39 @@
    :parent :request-authenticated?}
 
   ;; =============================================================================
-  ;; FN ROW READER — single fn entity by id
+  ;; FN ROW READER — single fn entity by id (VERSION-RESOLVED)
   ;; =============================================================================
   ;;
-  ;; HSQL → storage-query-call → first → decode-row. Returns nil
-  ;; when no row matches the id, matching the JS-side `lookups?.fnMap?.get(id)`
-  ;; semantics (also returns undefined for unknown ids). Callers
-  ;; that need to fail-loud should `:assert-some` the result.
+  ;; Protocol `read-entity` through VersionedStorage (`:get-entity`),
+  ;; so post-update values (rename, description edits, declared
+  ;; effects, …) are included. The original implementation ran a raw
+  ;; `:storage-query-call` HSQL read against the base `:fn` table and
+  ;; silently returned CREATE-TIME values for every field edited
+  ;; afterwards — caught when the declared-effects form re-opened
+  ;; with a stale contract. Nil-guarded like `:_rrof-*` (web/crud):
+  ;; nil id → nil row, matching `lookups?.fnMap?.get(id)` semantics.
 
-  {:name :_fn-row-by-id-where
-   :description "Build `[:= :id <fn-id>]` HSQL where clause from the free arg `:fn-id`."
-   :parent :vec
-   :args {:coll [{:value :=} {:value :id} {:as :fn-id}]}}
+  {:name :_frbi-id-nil?
+   :parent :nil?
+   :args {:value {:as :fn-id}}}
 
-  {:name :_fn-row-by-id-hsql
-   :description "Full HSQL bundle: `{:select [:*] :from :fn :where [:= :id <fn-id>]}`."
-   :parent :assoc
-   :args {:map {:value {:select [:*] :from :fn}}
-          :key {:value :where}
-          :value :_fn-row-by-id-where}}
+  ;; Runs only in the non-nil branch of the `:if` below; `:assert-some`
+  ;; narrows the nullable free arg to `:uuid` for `:get-entity`.
+  {:name :_frbi-id-narrowed
+   :parent :assert-some
+   :args {:value {:as :fn-id :type :nullable-uuid}}}
 
-  {:name :_fn-row-by-id-raw
-   :description "Raw row vector (length 0 or 1) from `:storage-query-call`. Undecoded — string column keys, undecoded enum strings, jsonb PGobjects."
-   :parent :storage-query-call
-   :args {:arg :_fn-row-by-id-hsql}}
-
-  {:name :_fn-row-by-id-first
-   :description "First (and only) raw row, or nil when no fn matches the id."
-   :parent :first
-   :args {:coll :_fn-row-by-id-raw}}
+  {:name :_frbi-row
+   :parent :get-entity
+   :args {:entity-type {:value "fn"}
+          :id {:ref :_frbi-id-narrowed :type :uuid}}}
 
   {:name :fn-row-by-id
-   :description "Decoded fn entity row by id; nil when not found. Free arg: `:fn-id` (uuid). Returns `:nullable-keyword-map` matching `:decode-row`'s shape (kebab-case kw keys, decoded enums/jsonb)."
-   :parent :decode-row
-   :args {:row :_fn-row-by-id-first
-          :entity-type {:value "fn"}}}
+   :description "Version-resolved decoded fn entity row by id; nil when id is nil or unknown. Free arg: `:fn-id` (:nullable-uuid). Returns `:nullable-keyword-map` (kebab-case kw keys, decoded enums/jsonb)."
+   :parent :if
+   :args {:test :_frbi-id-nil?
+          :then {:value nil}
+          :else :_frbi-row}}
 
   ;; =============================================================================
   ;; FN-ID QUERY-PARAM READER — request → ?fn-id= → nullable uuid

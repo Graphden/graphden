@@ -190,13 +190,19 @@ function enterExpectsEffectsEditMode(fn, anchorEl) {
         // string field: "" (clear → nil), "[]" (explicit empty),
         // or a comma-separated list. parse-fn-from-form does the
         // round-trip.
-        const wireValue =
-          value == null       ? '' :
-          value.length === 0  ? '[]' :
-                                value.join(',');
+        // `authMutate`'s field-map form strips empty-string values
+        // (same gotcha the namespace-move clear hit), so the
+        // clear-contract case must ship a PRE-ENCODED body — a
+        // stripped-empty PUT 400s and the UI could never clear a
+        // contract. "[]" (pinned purity) and the csv survive the map
+        // form fine.
+        const body =
+          value == null       ? 'expects-effects=' :
+          value.length === 0  ? { 'expects-effects': '[]' } :
+                                { 'expects-effects': value.join(',') };
         const r = await authMutate('PUT',
           API.api_entities_type_id('fn', fn.id),
-          { 'expects-effects': wireValue });
+          body);
         if (r?.ok) {
           patchFnFieldInState(fn.id, 'expects-effects', value);
           return true;

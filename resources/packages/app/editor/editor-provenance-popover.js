@@ -34,6 +34,35 @@ function provenancePopoverVisible() {
          && provenancePopoverEl.classList.contains('visible');
 }
 
+// Re-locate a provenance trigger in the CURRENT DOM by its stable
+// identifiers. Overlay rebuilds replace badge nodes wholesale, so any
+// aria write must target the live node, not the one we captured.
+function locateLiveProvenanceAnchor(anchorEl) {
+  if (anchorEl && document.body.contains(anchorEl)) return anchorEl;
+  const bid = anchorEl?.getAttribute?.('data-binding-id');
+  const iid = anchorEl?.getAttribute?.('data-item-id');
+  if (!bid) return anchorEl;
+  const sel = iid
+    ? `.arg-type-provenance[data-binding-id="${bid}"][data-item-id="${iid}"]`
+    : `.arg-type-provenance[data-binding-id="${bid}"]:not([data-item-id])`;
+  return document.querySelector(sel) || anchorEl;
+}
+
+// Badge factories (editor-overlay-arg.js, edge-label) call this when
+// (re)creating a trigger: an overlay rebuild AFTER the popover opened
+// replaces the badge with a fresh node whose factory default is
+// aria-expanded="false" — the popover is still open, so the fresh node
+// must be born "true" or the disclosure state silently desyncs (caught
+// by edit-type-chip-expand.test.js under host load, where the rebuild
+// reliably lands inside the open window).
+function isProvenanceOpenFor(bindingId, itemId) {
+  if (!provenancePopoverVisible() || !provenancePopoverAnchor) return false;
+  const bid = provenancePopoverAnchor.getAttribute?.('data-binding-id');
+  if (!bid || String(bindingId) !== bid) return false;
+  const iid = provenancePopoverAnchor.getAttribute?.('data-item-id') || null;
+  return (itemId ? String(itemId) : null) === iid;
+}
+
 function hideProvenancePopover() {
   if (!provenancePopoverEl) return;
   provenancePopoverEl.classList.remove('visible');
@@ -42,10 +71,13 @@ function hideProvenancePopover() {
   // screen readers see the disclosure flip back to closed. Both
   // provenance triggers (arg-type-provenance, return-type-strip-
   // provenance) start at "false" when rendered and we set "true"
-  // when opening from them — undo that here.
+  // when opening from them — undo that here. Re-locate first: the
+  // overlay may have rebuilt since open, and flipping the attribute
+  // on a detached node would leave the LIVE badge claiming "open".
   if (provenancePopoverAnchor) {
+    const live = locateLiveProvenanceAnchor(provenancePopoverAnchor);
     try {
-      provenancePopoverAnchor.setAttribute('aria-expanded', 'false');
+      live.setAttribute('aria-expanded', 'false');
     } catch (_) {}
   }
   provenancePopoverAnchor = null;
@@ -67,16 +99,7 @@ function hideProvenancePopover() {
 // binding identifier. Setting the attribute on the detached badge is
 // a no-op; finding the live one keeps the disclosure state correct.
 function attachAndShow(anchorEl) {
-  const liveAnchor = (() => {
-    if (anchorEl && document.body.contains(anchorEl)) return anchorEl;
-    const bid = anchorEl?.getAttribute?.('data-binding-id');
-    const iid = anchorEl?.getAttribute?.('data-item-id');
-    if (!bid) return anchorEl;
-    const sel = iid
-      ? `.arg-type-provenance[data-binding-id="${bid}"][data-item-id="${iid}"]`
-      : `.arg-type-provenance[data-binding-id="${bid}"]:not([data-item-id])`;
-    return document.querySelector(sel) || anchorEl;
-  })();
+  const liveAnchor = locateLiveProvenanceAnchor(anchorEl);
   if (provenancePopoverAnchor && provenancePopoverAnchor !== liveAnchor) {
     try {
       provenancePopoverAnchor.setAttribute('aria-expanded', 'false');

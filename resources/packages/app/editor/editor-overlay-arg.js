@@ -381,10 +381,15 @@ function createProvenanceBadge(narrowingInfo, arg) {
               + ' — click for full chain';
   badge.setAttribute('aria-label', badge.title);
   // Disclosure button — the provenance popover is anchored to and
-  // controlled by this trigger. Starts closed; flipped to "true" by
-  // `attachAndShow` in editor-provenance-popover.js when the popover
-  // becomes visible, back to "false" by `hideProvenancePopover`.
-  badge.setAttribute('aria-expanded', 'false');
+  // controlled by this trigger. Normally born closed and flipped by
+  // editor-provenance-popover.js — but an overlay rebuild can recreate
+  // this badge WHILE its popover is open, so ask the singleton: a
+  // fresh node for an open popover must be born "true" or the
+  // disclosure state desyncs until the next toggle.
+  const bornOpen = typeof isProvenanceOpenFor === 'function'
+    && arg?.['binding-id']
+    && isProvenanceOpenFor(arg['binding-id'], arg['item-id'] || null);
+  badge.setAttribute('aria-expanded', bornOpen ? 'true' : 'false');
   badge.setAttribute('aria-haspopup', 'dialog');
   // Stable identifier so `attachAndShow` can re-locate the current DOM
   // badge after the async fetch — overlays can rebuild during the

@@ -473,7 +473,14 @@
                        ;; (rebuild) must reach the org-agnostic global; their
                        ;; type-checks are filtered narrowly in crud.type-check.
                        :else
-                       (binding [cr/*allowed-effects* cr/cloud-request-allowed-effects]
+                       ;; Same tenant scope also turns on the error envelope:
+                       ;; internal failures (no whitelisted :type) surface as
+                       ;; "Internal error, ref: <uuid>" — full detail stays in
+                       ;; the server log under the ref. The binding conveys
+                       ;; into apply-execute's futures, so the async-persisted
+                       ;; row the history panel reads is scrubbed too.
+                       (binding [cr/*allowed-effects* cr/cloud-request-allowed-effects
+                                 cr/*scrub-internal-errors?* true]
                          (if (= :read (grant/request->capability request))
                            (typecheck/with-org-alias-view* run)
                            (run)))))))))

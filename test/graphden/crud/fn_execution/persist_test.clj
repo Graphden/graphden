@@ -19,6 +19,7 @@
     [clojure.test :refer [deftest is testing]]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.persist :as persist]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]))
 
@@ -426,3 +427,40 @@
     (is (nil? (#'persist/arm-deadline! nil cancel-flag fut)) "nil deadline → no watchdog")
     (is (nil? (#'persist/arm-deadline! 0 cancel-flag fut)) "zero deadline → no watchdog")
     (future-cancel fut)))
+
+
+(deftest scrub-outcome-tenant-envelope
+  (testing "off by default — full error passes through"
+    (let [o {:status :failed :error "FATAL: password authentication failed"
+             :error-data {:sql "SELECT secret"}}]
+      (is (= o (persist/scrub-outcome :my-fn o)))))
+  (testing "tenant scope: internal error gets the ref-envelope"
+    (binding [cr/*scrub-internal-errors?* true]
+      (let [o (persist/scrub-outcome :my-fn
+                                     {:status :failed
+                                      :error "FATAL: password authentication failed"
+                                      :error-data {:sql "SELECT secret"}})]
+        (is (re-matches #"Internal error, ref: [0-9a-f-]{36}" (:error o)))
+        (is (= :internal (get-in o [:error-data :reason])))
+        (is (string? (get-in o [:error-data :ref])))
+        (is (not (re-find #"password" (:error o)))))))
+  (testing "tenant scope: whitelisted user-level type passes verbatim"
+    (binding [cr/*scrub-internal-errors?* true]
+      (let [o {:status :failed :error "type mismatch: expected :int"
+               :error-data {:type :validation-error/type-mismatch}}]
+        (is (= o (persist/scrub-outcome :my-fn o))))))
+  (testing "tenant scope: exception WITHOUT :type is scrubbed"
+    (binding [cr/*scrub-internal-errors?* true]
+      (let [o (persist/scrub-outcome :my-fn {:status :failed :error "NPE at Foo.java:42"
+                                             :error-data nil})]
+        (is (re-find #"Internal error, ref:" (:error o))))))
+  (testing "tainted outcomes short-circuit (already redacted)"
+    (binding [cr/*scrub-internal-errors?* true]
+      (let [o {:status :failed :tainted? true
+               :error "Result hidden: fn return-type carries :secret marker."
+               :error-data {:reason :tainted}}]
+        (is (= o (persist/scrub-outcome :my-fn o))))))
+  (testing "succeeded outcomes untouched"
+    (binding [cr/*scrub-internal-errors?* true]
+      (let [o {:status :succeeded :result 42}]
+        (is (= o (persist/scrub-outcome :my-fn o)))))))

@@ -68,7 +68,8 @@
   (let [outcome (->> (cond-> base-outcome
                        runtime-effects (assoc :runtime-effects runtime-effects))
                      (persist/stamp-touched-secret fn-name)
-                     (persist/redact-outcome fn-name))]
+                     (persist/redact-outcome fn-name)
+                     (persist/scrub-outcome fn-name))]
     (persist/log-effect-drift! (some-> row :id) declared-effects runtime-effects)
     (when row
       ;; Unregister even if the terminal write throws (DB error) — else

@@ -361,6 +361,43 @@
     outcome))
 
 
+(def tenant-visible-error-type-namespaces
+  "Error `:type` namespaces a tenant may see verbatim — errors the tenant's
+   own graph/input CAUSED and can act on (docs/ERROR_CODES.md). Everything
+   else — `:config-error/*` (infra) and any exception WITHOUT a `:type`
+   (raw JDBC/IO/runtime, whose messages can carry SQL text, connection
+   strings, file paths) — is internal and gets the ref-envelope instead."
+  #{"constraint-violation" "execution" "execution-error" "validation-error"
+    "recursion-error" "parse-error" "refinement" "authz" "type-check"
+    "domain" "graph-error"})
+
+
+(defn scrub-outcome
+  "Tenant error envelope (LAUNCH_PLAN stage 1.3). When
+   `cr/*scrub-internal-errors?*` is bound true and the outcome is a
+   failure whose `:error-data :type` is NOT tenant-visible, replace
+   `:error`/`:error-data` with an opaque reference and log the full
+   outcome server-side under it. Runs AFTER `redact-outcome` — a
+   `:secret`-tainted failure is already generic and short-circuits."
+  [fn-name outcome]
+  (if (and cr/*scrub-internal-errors?*
+           (= :failed (:status outcome))
+           (not (:tainted? outcome)))
+    (let [t (:type (:error-data outcome))]
+      (if (and (keyword? t)
+               (contains? tenant-visible-error-type-namespaces (namespace t)))
+        outcome
+        (let [ref (str (random-uuid))]
+          (log/error "Scrubbed tenant-facing execution error"
+                     {:ref ref :fn fn-name
+                      :error (:error outcome)
+                      :error-data (:error-data outcome)})
+          (assoc outcome
+                 :error (str "Internal error, ref: " ref)
+                 :error-data {:reason :internal :ref ref}))))
+    outcome))
+
+
 (defn write-finished!
   "Update an existing row with the future's outcome.
    `outcome` is one of:
@@ -626,7 +663,8 @@
                          (->> (cond-> {:status :succeeded :result result}
                                 runtime-eff (assoc :runtime-effects runtime-eff))
                               (stamp-touched-secret fn-name)
-                              (redact-outcome fn-name))))
+                              (redact-outcome fn-name)
+                              (scrub-outcome fn-name))))
       (catch java.util.concurrent.ExecutionException ee
         (let [cause (java.util.concurrent.ExecutionException/.getCause ee)
               runtime-eff (snapshot-runtime-effects trace-atom)]
@@ -642,7 +680,8 @@
                                                          (ex-data cause))}
                                     runtime-eff (assoc :runtime-effects runtime-eff))
                                   (stamp-touched-secret fn-name)
-                                  (redact-outcome fn-name))))))
+                                  (redact-outcome fn-name)
+                                  (scrub-outcome fn-name))))))
       (catch java.util.concurrent.CancellationException _
         (write-finished! storage execution-id {:status :cancelled}))
       (catch Exception e

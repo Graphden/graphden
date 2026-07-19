@@ -878,6 +878,20 @@
   (conj default-cloud-allowed-effects :raw-sql))
 
 
+(def ^:dynamic *scrub-internal-errors?*
+  "When true (bound by `tenancy.addon` for org≠public requests, alongside
+   `*allowed-effects*`), failed-execution outcomes surfaced to the client —
+   AND persisted into the org-scoped `:fn-execution` row the history panel
+   reads — are scrubbed by `persist/scrub-outcome`: only whitelisted
+   user-level error types pass verbatim; everything else (raw JDBC/IO
+   messages can carry SQL text, paths, class names) is replaced by
+   an opaque `Internal error, ref: <uuid>` with the full detail logged server-side
+   under that ref. Default false: single-tenant / platform keeps full
+   errors. Conveyed into the async record-completion future by the
+   binding (futures carry dynamic bindings)."
+  false)
+
+
 (defn run-with-timeout
   "Run `thunk` in a future bounded by `timeout-ms`. Returns its value, or
    `::timeout` (cancelling the future) when it overruns, or `::error` when it

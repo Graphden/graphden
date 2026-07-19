@@ -44,6 +44,10 @@
 #   wt status              show queue lock holder + recent gate logs
 #   wt drop <name> [-f]    remove a worktree + its branch (must be merged; -f overrides)
 #   wt log <name>          tail the most recent gate log for a feature
+#   wt watch <name>        follow a running gate: 60s status ticks (log tail +
+#                          host load) until a fresh RESULT lands, then print it —
+#                          the poll loop AGENT.md mandates, so agents stop
+#                          hand-rolling it
 #
 # Env overrides:
 #   WTQ_TARGET   integration branch (default: develop)
@@ -685,6 +689,38 @@ cmd_log() {
 }
 
 # =====================================================================
+# watch — the poll loop AGENT.md mandates ("the gate is YOURS to watch")
+# =====================================================================
+cmd_watch() {
+  local name="${1:-}"; [ -n "$name" ] || die "usage: wt watch <name>"
+  local res="$RESULT_DIR/$name"
+
+  # A RESULT is FINAL when no gate log is newer than it — a stale file from a
+  # previous landing doesn't end the watch while a fresh gate is still writing.
+  res_final() {
+    [ -f "$res" ] || return 1
+    local f; f="$(newest_logs 1 "$name")"
+    [ -z "$f" ] && return 0
+    [ "$(stat -c %Y "$res")" -ge "$(stat -c %Y "$f")" ]
+  }
+
+  if res_final; then ok "RESULT: $(cat "$res")"; return 0; fi
+  info "watching gate for '$name' — tick every 60s; Ctrl-C stops WATCHING, not the gate"
+  while :; do
+    if res_final; then ok "RESULT: $(cat "$res")"; return 0; fi
+    local f now load; now="$(date +%H:%M:%S)"; load="$(cut -d' ' -f1-3 /proc/loadavg)"
+    f="$(newest_logs 1 "$name")"
+    if [ -n "$f" ]; then
+      echo "--- $now  load $load  $(basename "$f")"
+      tail -n 3 "$f"
+    else
+      echo "--- $now  load $load  no gate log yet (queued, or the gate was never started)"
+    fi
+    sleep 60
+  done
+}
+
+# =====================================================================
 # drop
 # =====================================================================
 cmd_drop() {
@@ -1000,6 +1036,19 @@ cmd_merge() {
   [ "$wt" != "$MAIN_WT" ]    || die "run 'wt merge' from a feature worktree, not the main checkout."
   bootstrap_node_modules "$wt"     # the gate runs bb ci in here — it needs the deps
 
+  # The per-check timeouts are ceilings measured on an idle box; starting the
+  # gate into an oversubscribed host doesn't run slower, it gets KILLED or
+  # times out spuriously (observed: load 14-21 from leftover load generators).
+  # Wait for headroom instead of burning a serialized queue slot on a doomed
+  # run. Override the threshold with WTQ_LOAD_MAX (integer load1, default 8).
+  local max_load="${WTQ_LOAD_MAX:-8}" load1
+  while :; do
+    load1="$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)"
+    [ "$load1" -lt "$max_load" ] && break
+    warn "host load $(cut -d' ' -f1-3 /proc/loadavg) >= $max_load — waiting for headroom before starting the gate ..."
+    sleep 120
+  done
+
   exec 9>"$LOCK"
   if ! flock -n -x 9; then
     warn "Queue busy — held by: $(cat "$HOLDER" 2>/dev/null || echo '?')"
@@ -1013,8 +1062,15 @@ cmd_merge() {
   : > "$HOLDER"
   flock -u 9 || true      # release for the next in line
 
-  local nm verdict; nm="$(basename "$wt")"
-  case "$rc" in 0) verdict=GREEN ;; 2) verdict=CONFLICT ;; 3) verdict=PRECOND ;; *) verdict=FAIL ;; esac
+  # One rc→outcome mapping for BOTH the RESULT file and the console message —
+  # the two used to be parallel case statements that could drift apart.
+  local nm verdict msg; nm="$(basename "$wt")"
+  case "$rc" in
+    0) verdict=GREEN;    msg="✓ landed. You can now:  bb wt drop $nm" ;;
+    2) verdict=CONFLICT; msg="↩ merge conflict — resolve, commit, re-run 'bb wt merge'." ;;
+    3) verdict=PRECOND;  msg="↩ precondition failed (dirty tree / unacknowledged rule change) — see log above." ;;
+    *) verdict=FAIL;     msg="✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
+  esac
   printf '%s\t%s\t%s\n' "$verdict" "$rc" "$branch" > "$RESULT_DIR/$nm"   # agents/`wt status` read this
 
   echo
@@ -1022,12 +1078,7 @@ cmd_merge() {
   # PRECOND (dirty tree, stale governance) used to return 0 to the caller, so
   # anything scripting the gate — an agent that launches it in the background and
   # reads its exit code — was told "landed" when develop had not moved an inch.
-  case "$rc" in
-    0) ok   "✓ landed. You can now:  bb wt drop $nm" ;;
-    2) warn "↩ merge conflict — resolve, commit, re-run 'bb wt merge'." ;;
-    3) warn "↩ precondition failed (dirty tree / unacknowledged rule change) — see log above." ;;
-    *) warn "✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
-  esac
+  if [ "$rc" = 0 ]; then ok "$msg"; else warn "$msg"; fi
   return "$rc"
 }
 
@@ -1051,6 +1102,7 @@ main() {
     ack)    cmd_ack    "$@" ;;
     status) cmd_status "$@" ;;
     log)    cmd_log    "$@" ;;
+    watch)  cmd_watch  "$@" ;;
     drop|rm) cmd_drop  "$@" ;;
     ""|help|-h|--help)
       awk 'NR>1 && /^#/{sub(/^# ?/,""); print; next} NR>1{exit}' "$SELF" ;;

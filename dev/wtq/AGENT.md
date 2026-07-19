@@ -121,14 +121,16 @@ You were started in one of two ways:
      background run wait.
 
    **The gate is YOURS to watch.** Launching it is not the end of your job:
-   poll its progress about once a minute (tail the newest `bb wt log <name>`,
-   or check `.git/wtq/results/<name>` for the RESULT line) until it lands.
+   poll its progress about once a minute until it lands — `bb wt watch <name>`
+   does exactly this (60s ticks: log tail + host load, then the fresh RESULT).
    Concretely:
    - **No output / not starting** (no log growth for a couple of minutes, no
      RESULT, not visibly waiting on the queue lock) → tell the user what you
      observe NOW — a silently stalled gate wastes a serialized slot the whole
      pool waits behind. Check the obvious causes first: host load (a killed
-     gate leaves no RESULT file), a stale queue holder, Docker down.
+     gate leaves no RESULT file — `bb wt merge` is idempotent, re-run it;
+     it now waits for load headroom by itself, threshold `WTQ_LOAD_MAX`),
+     a stale queue holder, Docker down.
    - **RED / FAIL in the log** → start fixing IMMEDIATELY, before being asked:
      read the failing check's output in the gate log, reproduce with a focused
      local run, fix on your branch, re-run the gate. Report what broke and

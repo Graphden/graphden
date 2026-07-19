@@ -2594,6 +2594,49 @@
    :args {:body :_xp-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; type-name datalist — `GET /partials/type-name-datalist`. The
+  ;; create-type popover's name-autocomplete list: one <option> per
+  ;; named type-row (kind label from the server's `compute-fn-role`)
+  ;; plus the canonical primitives. The form itself stays client-built
+  ;; (kind-tab state carry + prefill + the interactive constraint
+  ;; builders — see the graph-first-exception in
+  ;; editor-create-type.js); only this pure data projection moved.
+
+  {:name :_tnd-option
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :value} {:value :label}]
+                         :vals [{:parent :get
+                                 :args {:coll {:as :item}
+                                        :key {:value :name}
+                                        :default ""}}
+                                {:parent :get
+                                 :args {:coll {:as :item}
+                                        :key {:value :kind}
+                                        :default ""}}]}}
+          :children {:value []}}}
+
+  {:name :_tnd-options
+   :parent :map
+   :args {:func :_tnd-option :coll :type-name-kinds}}
+
+  {:name :_tnd-fragment
+   :parent :hiccup
+   :args {:tag {:value "datalist"}
+          :attrs {:value {:id "type-create-typename-list"}}
+          :children [:_tnd-options]}}
+
+  {:name :_tnd-html
+   :parent :render-hiccup
+   :args {:hiccup :_tnd-fragment}}
+
+  {:name :_partial-tnd-handler
+   :description "Ring handler for `GET /partials/type-name-datalist` — the create-type popover's name-autocomplete <datalist> as `text/html`."
+   :parent :html-ok-response
+   :args {:body :_tnd-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-picker incompat-explainer. The fn-picker popover surfaces
   ;; functions whose return type doesn't satisfy the slot's expected
   ;; type under a separate "Other" section; clicking such a candidate

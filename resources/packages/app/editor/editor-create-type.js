@@ -84,65 +84,39 @@ function openTypeCreatePicker(parentNsId, parentNsPath, anchorEl) {
   showTypeCreateForm('refinement');
 }
 
-// Resolve a type-row's kind annotation (refinement / record / etc.)
-// by name, via lookups.fnMap. Primitives (no role row) get
-// "primitive". Unknown / unnamed → null.
-function fnKindAnnotationByName(name) {
-  if (!name) return null;
-  const primitives = new Set(['int', 'numeric', 'text', 'bool', 'keyword',
-                               'null', 'jsonb', 'any', 'fn', 'sequence',
-                               'uuid', 'bytes', 'timestamptz', 'float']);
-  if (primitives.has(name)) return 'primitive';
-  if (typeof lookups !== 'object' || !lookups?.fnMap) return null;
-  for (const fn of lookups.fnMap.values()) {
-    if (fn.name === name) {
-      // Backend ships role as `"refinement"` / `:refinement` depending
-      // on encoding; tolerate both.
-      const r = fn.role;
-      return r ? String(r).replace(/^:/, '') : null;
-    }
-  }
-  return null;
-}
-
+// Server-rendered type-name datalist — names + kind labels come from
+// `GET /partials/type-name-datalist` (named type-rows classified by
+// the server's `compute-fn-role` + the canonical primitives set; the
+// hand-copied primitive lists and the per-name fnMap kind scan are
+// gone). Refetched every popover open so freshly created / deleted
+// type-rows show up. Returns the id synchronously — an `<input
+// list=…>` may reference the id before the node lands; the browser
+// starts autocompleting once it mounts (~one round-trip later).
 function buildTypeNameDatalist() {
   const id = 'type-create-typename-list';
-  // Rebuild every call — the user may have created or deleted
-  // type-rows since the last form open and the previous datalist
-  // entries would be stale. Cheap (1 DOM rebuild per popover open).
-  const prev = document.getElementById(id);
-  if (prev) prev.remove();
-  const dl = document.createElement('datalist');
-  dl.id = id;
-
-  const names = (typeof richTypes === 'object' && richTypes)
-    ? Object.keys(richTypes).filter(n => richTypes[n]?.['type-row?']).sort()
-    : [];
-  const primitives = ['int', 'numeric', 'text', 'bool', 'keyword',
-                      'null', 'jsonb', 'any', 'fn', 'sequence', 'uuid',
-                      'bytes', 'timestamptz', 'float'];
-  for (const p of primitives) names.push(p);
-  for (const n of [...new Set(names)].sort()) {
-    const o = document.createElement('option');
-    o.value = n;
-    // `label` shows on the right of the option in the dropdown,
-    // disambiguating refinements / records / unions / etc. at a
-    // glance without forcing the user to remember which name is
-    // which kind.
-    const kind = fnKindAnnotationByName(n);
-    if (kind && kind !== 'composed') o.label = kind;
-    dl.appendChild(o);
-  }
-  document.body.appendChild(dl);
+  authFetch('/partials/type-name-datalist')
+    .then((r) => (r.ok ? r.text() : null))
+    .then((html) => {
+      if (!html) return;
+      const prev = document.getElementById(id);
+      if (prev) prev.remove();
+      const probe = document.createElement('div');
+      probe.innerHTML = html;
+      const dl = probe.querySelector('datalist');
+      if (dl) document.body.appendChild(dl);
+    })
+    .catch(() => {});
   return id;
 }
 
-// graph-first-exception: the per-kind form is built client-side because (a)
-// the type-name field autocompletes from the in-memory `richTypes` cache as
-// the user types (same instant-datalist argument as the fn-picker /
-// namespace-picker), and (b) switching kind tabs carries the in-progress
-// name+description across without a round-trip. A GET /partials/* form would
-// lose both. The submit itself POSTs to the graph (/api/entities/fn etc.).
+// graph-first-exception: the per-kind form is built client-side because
+// (a) switching kind tabs carries the in-progress name+description across
+// without a round-trip, (b) edit-mode prefill reshapes client-cached
+// structure live, and (c) the interactive constraint builders
+// (drag-reorder rows, base-aware op dropdowns) are keystroke-speed
+// client machinery. The DATA the form autocompletes from is server-fed
+// (`/partials/type-name-datalist`); the submit POSTs to the graph
+// (/api/entities/fn etc.).
 function showTypeCreateForm(kind) {
   const el = typeCreatePopoverEl;
   if (!el) return;

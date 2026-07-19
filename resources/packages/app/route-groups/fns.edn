@@ -33,6 +33,7 @@
                   :partial-return-type-rule
                   :partial-fn-picker-incompat
                   :partial-execute-popover
+                  :partial-type-name-datalist
                   :partial-execute-result
                   :partial-execute-result-inline
                   :partial-branch-popover

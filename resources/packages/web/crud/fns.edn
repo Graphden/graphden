@@ -440,6 +440,12 @@
    :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
    :return-type :nullable-text}
 
+  {:name :type-name-kinds
+   :description "Sorted `{:name :kind}` rows for the editor's type-name datalist — named type-rows classified via `compute-fn-role` plus the bare primitives. Backs `/partials/type-name-datalist`."
+   :args {}
+   :return-type [:list {:name :text :kind :text}]
+   :effects #{:db}}
+
   ;; fn-id → row → name → registry entry → :return, all graph-visible.
   {:name :_rrof-fn-id-nil?
    :parent :nil?

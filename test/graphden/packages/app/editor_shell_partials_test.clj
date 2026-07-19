@@ -1,8 +1,11 @@
-(ns ^:integration graphden.packages.app.execute-popover-partial-test
-  "Executes the `/partials/execute-popover` graph chain end-to-end —
-   `:_partial-xp-handler` against a golden-DB bootstrap. The shell's
-   free-arg scaffold comes from the backend's own
-   `:free-arg-slot-map`, replacing the JS `freeArgsOf` re-derivation."
+(ns ^:integration graphden.packages.app.editor-shell-partials-test
+  "Executes the editor's shell partials end-to-end against a golden-DB
+   bootstrap: `/partials/execute-popover` (`:_partial-xp-handler` —
+   free-arg scaffold from the backend's own `:free-arg-slot-map`,
+   replacing the JS `freeArgsOf` re-derivation) and
+   `/partials/type-name-datalist` (`:_partial-tnd-handler` — the
+   create-type name autocomplete, replacing the client-assembled
+   datalist + hand-copied primitives)."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
@@ -62,6 +65,21 @@
     (is (str/includes? body "execute-confirm-checkbox"))
     (is (str/includes? body "disabled"))
     (is (str/includes? body "execute-option-label-locked"))))
+
+
+(deftest type-name-datalist
+  (let [{:keys [ctx storage]} *bootstrap*
+        handler-id (get (:all-name->id *bootstrap*) :_partial-tnd-handler)
+        resp (setup/exec-with-storage ctx storage handler-id {:request {}})
+        body (:body resp)]
+    (is (= 200 (:status resp)))
+    (is (str/includes? body "id=\"type-create-typename-list\""))
+    (testing "primitives present with the primitive label"
+      (is (str/includes? body "value=\"int\""))
+      (is (str/includes? body "label=\"primitive\"")))
+    (testing "a named refinement type-row present with its kind"
+      (is (str/includes? body "value=\"positive-int\""))
+      (is (str/includes? body "label=\"refinement\"")))))
 
 
 (deftest static-scaffold-parts

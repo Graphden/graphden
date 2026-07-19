@@ -75,6 +75,32 @@
       :else                                      :primitive)))
 
 
+(defn type-name-kinds
+  "Sorted vec of `{:name :kind}` rows for the editor's type-name
+   datalist: every NAMED type-row (kind via `compute-fn-role`) plus
+   the bare primitives. Single source for the list the editor used to
+   assemble client-side from `richTypes` keys + a hand-copied
+   primitives set + a per-name `fnMap` scan."
+  [ctx]
+  (let [{:keys [fns fn-slots]} (cached-or-load-graph ctx)
+        slotted (into #{} (map :fn-id) fn-slots)
+        rich-snapshot (registry/rich-types-snapshot)
+        type-row-roles #{:refinement :list :union :variant :record :fn-type}
+        rows (keep (fn [f]
+                     (when (:name f)
+                       (let [role (compute-fn-role f
+                                                   (contains? slotted (:id f))
+                                                   rich-snapshot)]
+                         (when (type-row-roles role)
+                           {:name (:name f) :kind (name role)}))))
+                   fns)
+        prims (map (fn [p] {:name (name p) :kind "primitive"})
+                   types/primitives)]
+    (->> (concat rows prims)
+         (sort-by :name)
+         (vec))))
+
+
 (defn project-rich-type-entry
   "Strip the backend-only per-base-fn type-rule fns from a single
    registry entry and replace each with a JSON-safe boolean flag.

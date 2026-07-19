@@ -425,6 +425,15 @@
   (registry/rule-owner-of fn-name))
 
 
+(defbase type-name-kinds
+  "Sorted `{:name :kind}` rows for the editor's type-name datalist —
+   named type-rows classified via `compute-fn-role` plus the bare
+   primitives. Single library call into `types-api/type-name-kinds`."
+  []
+  (cr/record-effect! :db)
+  (types-api/type-name-kinds ctx))
+
+
 (defbase _types-usages-apply
   "Stage 3 of types-usages — walk the graph for every reference to the
    target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}`
@@ -680,6 +689,7 @@
    :fn-type-bound-effects fn-type-bound-effects
    :rich-type-of-name rich-type-of-name
    :rule-owner-of-name rule-owner-of-name
+   :type-name-kinds type-name-kinds
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

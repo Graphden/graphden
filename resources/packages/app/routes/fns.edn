@@ -159,6 +159,11 @@
    :parent :get-auth-required
    :args {:path "/partials/execute-popover" :handler :_partial-xp-handler}}
 
+  {:name :partial-type-name-datalist
+   :description "GET /partials/type-name-datalist — the create-type popover's name-autocomplete <datalist> (named type-rows with kind labels + primitives). AUTH-REQUIRED — only the authed create/edit-type flow mounts it."
+   :parent :get-auth-required
+   :args {:path "/partials/type-name-datalist" :handler :_partial-tnd-handler}}
+
   {:name :partial-execute-result
    :description "GET /partials/execute-result?id={uuid} — execution body hiccup (scalar / list / record / tainted / large-JSON / 5MB-truncated / error). Consumed by `editor-execute-history.js` row-expand + `editor-execute.js` orchestrator after Run."
    :parent :get-auth-required

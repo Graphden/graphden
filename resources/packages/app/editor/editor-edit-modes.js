@@ -23,6 +23,10 @@
 // `openInlineEditPopover` builds the skeleton; the four `enter*EditMode`
 // functions just feed it a control factory + save handler.
 
+// graph-first-exception: inline edit popovers are keystroke-latency
+// surfaces (live validation while typing, literal-vs-ref chooser) — the
+// server sees the SUBMITTED value, not the editing state (secret mode
+// must not stream keystrokes); server-owned forms mount via /api/value-form.
 let inlineEditEl = null;
 let inlineEditOutsideHandler = null;
 

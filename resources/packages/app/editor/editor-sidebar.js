@@ -14,6 +14,11 @@
 
 // Expanded namespace state (persisted across updateEntityList calls).
 // By default all namespaces are collapsed; only explicitly opened ones are expanded.
+// graph-first-exception: same rationale as editor-namespace-picker — the
+// tree/leaf/search DATA is server-fed (?scope=tree/namespace/search) and
+// only walked + rendered here; the render is interactive (lazy expand,
+// debounced search, per-row action gating) and re-paints on client-only
+// state, so a server-rendered partial would refetch on every toggle.
 const expandedNamespaces = new Set();
 
 // Current search/filter text (raw; server search is case-insensitive).

@@ -7,6 +7,9 @@
 // enterArgValueEditMode, enterArgTypeEditMode, createOverlay,
 // createDragHandle, truncateLabel.
 
+// graph-first-exception: canvas overlay — in-place edit click target,
+// type chip and mismatch ring live in graph coordinates and re-anchor
+// per frame; data (types, provenance) is server-fed, DOM is client.
 /**
  * Create overlay for arg value node
  */

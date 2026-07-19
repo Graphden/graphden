@@ -11,6 +11,9 @@
 // before the browser's tooltip delay fires. We render our own tooltip
 // element on mouseenter/leave instead.
 
+// graph-first-exception: hover-latency singletons (description tooltip,
+// full-name popover) — content is already client-resident graph data; a
+// round-trip per hover would lag the pointer.
 let descriptionTooltipEl = null;
 // Last-shown tooltip content — kept around so the Edit button (which
 // only appears in sticky mode) can read entityType/entityId without

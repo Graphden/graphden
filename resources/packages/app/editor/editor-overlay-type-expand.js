@@ -16,6 +16,10 @@
 // user's expanded selections survive overlay rebuilds and preview
 // redraws. Hosts are keyed by the same path in `inlineHostsByPath`.
 
+// graph-first-exception: host lifecycle of the inline expand panel —
+// position:fixed hosts re-anchored on every pan/zoom frame, persisted
+// expandedTypePaths, effect-tightening widgets bound to editor state; the
+// row RENDERING rationale lives in editor-type-expand-render.js.
 const expandedTypePaths = new Set();
 const inlineHostsByPath = new Map();
 

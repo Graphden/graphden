@@ -10,6 +10,9 @@
 // editor-literal-types.js helpers. Loaded immediately BEFORE
 // editor-create-type.js in `_editor-script-paths`.
 
+// graph-first-exception: split out of editor-create-type.js — the covering
+// rationale lives there (per-kind form built client-side: tab state-carry,
+// prefill parsing, drag-reorderable pair rows are all client-only state).
 function buildKindFields(kind, datalistId, prefill) {
   if (kind === 'refinement') return buildRefinementFields(datalistId, prefill);
   if (kind === 'list')       return buildListFields(datalistId, prefill);

@@ -24,6 +24,10 @@
 // (matches the rest of the write-actions). The POST itself goes
 // through `authFetch` so a stale session also surfaces a 401.
 
+// graph-first-exception: the popover SHELL is server-rendered
+// (/partials/execute-popover) and mounted here; this file owns the
+// client-only run/poll/cancel state machine + /api/value-form widget
+// mounts, which have no server-side representation between requests.
 let executePopoverEl = null;
 let executePopoverAnchor = null;
 

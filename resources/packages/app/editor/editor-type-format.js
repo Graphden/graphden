@@ -17,6 +17,11 @@
 // Heuristics over a curated lookup — common refinements get
 // dedicated phrases (`positive integer`, `non-empty text`); the
 // long tail falls back to "X where CONSTRAINT".
+// graph-first-exception: presentation half of the keystroke/canvas type
+// path (chips, hints, inline validation feedback) — must stay sub-100ms
+// local; the server keeps its own authoritative formatter in graphden.types,
+// these functions are the CLIENT presentation, not a reimplementation of
+// server reasoning (resolution DATA arrives via /api/types + layout facts).
 function formatTypeHumanReadable(t) {
   if (t == null) return '';
   if (typeof t === 'string') return primitiveHuman(t);

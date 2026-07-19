@@ -11,6 +11,11 @@
 // Loaded immediately BEFORE editor-overlay-type-expand.js in
 // `_editor-script-paths`.
 
+// graph-first-exception: the type-grammar readers here (typeKindLabel /
+// refinementChain / constraintToString) are the SAME ones the always-visible
+// canvas chips use on the sub-100ms path — rendering the expand rows
+// server-side would ADD a second (server) type formatter while these JS
+// readers stay for the chips, i.e. one more mirror, not one less.
 function compactTypeAsValue(t) {
   if (typeof t === 'string') return t.replace(/^:/, '');
   return JSON.stringify(t);  // structural — Edit by typing isn't supported

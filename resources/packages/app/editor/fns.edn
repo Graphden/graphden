@@ -37,6 +37,10 @@
                   "packages/app/editor/editor-branches.js"
                   "packages/app/editor/editor-branch-diff.js"
                   "packages/app/editor/editor-create.js"
+                  ;; Per-kind field builders + prefill parsers — split out of
+                  ;; editor-create-type.js; loaded first so the popover shell
+                  ;; can call buildKindFields at open time.
+                  "packages/app/editor/editor-create-type-fields.js"
                   "packages/app/editor/editor-create-type.js"
                   "packages/app/editor/editor-data.js"
                   "packages/app/editor/editor-layout.js"
@@ -64,6 +68,9 @@
                   "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
+                  ;; Structural type-interpretation half of the inline
+                  ;; `▸/▾` panel — split out of editor-overlay-type-expand.js.
+                  "packages/app/editor/editor-type-expand-render.js"
                   "packages/app/editor/editor-overlay-type-expand.js"
                   "packages/app/editor/editor-provenance-popover.js"
                   "packages/app/editor/editor-overlay-arg.js"

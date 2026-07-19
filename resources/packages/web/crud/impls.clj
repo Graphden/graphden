@@ -20,9 +20,9 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
-    [graphden.types.check :as tcheck]
     [graphden.schema.graph.schema :as graph-schema]
     [graphden.storage.protocol.core :as sp]
+    [graphden.types.check :as tcheck]
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
 

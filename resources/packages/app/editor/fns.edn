@@ -2439,9 +2439,13 @@
    :parent :parse-uuid
    :args {:string :_xp-fn-id-str}}
 
+  ;; `:nullable-uuid` honestly — `parse-uuid` yields nil for a
+  ;; missing/malformed param; the shell then degrades to the
+  ;; "(anonymous)" header (see the missing-fn-id test) instead of
+  ;; pretending the value can't be nil.
   {:name :_xp-row
    :parent :fn-row-by-id
-   :args {:fn-id {:ref :_xp-fn-id :type :uuid}}}
+   :args {:fn-id {:ref :_xp-fn-id :type :nullable-uuid}}}
 
   {:name :_xp-name
    :parent :get

@@ -34,7 +34,13 @@
    (`web-server`'s row carries nil; the value lives on
    `:http-server`'s). nil when the closure has none, or when it
    resolves to a bare primitive / unnamed row (the structural form
-   is then at least as informative as the alias)."
+   is then at least as informative as the alias).
+
+   MI edge (documented, not handled): the walk stops at the FIRST
+   `:return-type-fn-id` in BFS order — a fn whose primary parent
+   declares a primitive return while a secondary parent carries a
+   named alias shows no alias. Matches the old client behaviour;
+   revisit only if MI return-type aliasing becomes a real case."
   [fns-by-id fn-id]
   (loop [queue [fn-id]
          visited #{}]

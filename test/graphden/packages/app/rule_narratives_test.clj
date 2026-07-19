@@ -4,12 +4,15 @@
    the graph-resident successor of the JS `ruleNarrators` map that
    used to live in `editor-provenance-popover.js`.
 
-   The roster below mirrors the FULL set of return-type rules with a
-   user-facing narrative (collections / system / logic / arithmetic).
-   A future rule added without a narrative trips the coverage
-   assertion — same guarantee the deleted
-   `tools/browser-test/type-system-ui-narrators.test.js` gave, minus
-   the browser. Pure EDN comparison, no HTTP roundtrip."
+   The roster below is HAND-MAINTAINED (inherited from the retired
+   browser test): it guards prose drift and keeps roster == map-keys
+   in both directions, but it can NOT detect a brand-new rule
+   registered elsewhere — mechanical derivation isn't possible
+   because `wrap-with-taint` gives every base-fn an opaque rule fn,
+   so \"has a narrative-worthy rule\" is not observable from the
+   registry. When adding a `:return-type-rule` with user-visible
+   semantics, add its narrative to `:_rtr-narratives` AND its key
+   here. Pure EDN comparison, no HTTP roundtrip."
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
@@ -38,8 +41,8 @@
 
 
 (def ^:private narrative-roster
-  "Every return-type rule that carries a narrative. Mirrors the
-   coverage roster of the retired JS test."
+  "Every return-type rule that carries a narrative. Hand-maintained —
+   see the ns docstring for why it can't be registry-derived."
   #{:assoc :dissoc :get :get-in :assoc-in :update-in
     :conj :first :rest :cons :list :merge :into
     :range :repeat :keys :vals

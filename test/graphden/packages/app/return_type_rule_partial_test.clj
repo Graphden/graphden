@@ -9,39 +9,17 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.interface :as exec]
-    [graphden.executor.registry.core :as registry-core]
-    [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.test-infra.shared-bootstrap :as sb]))
+    [graphden.test-infra.golden-app :as ga]))
 
 
-(def ^:dynamic *container* nil)
-(def ^:dynamic *bootstrap* nil)
-
-
-(use-fixtures :once
-  (pth/create-container-fixture #'*container*)
-  exec/with-clean-registry
-  ;; The rule-owner walk reads COMPOSED fn-defs' registry entries
-  ;; (`:primary-parent` chains); the plain golden bootstrap seeds only
-  ;; base-fn entries. Overlay the cached full type-check sweep so the
-  ;; runtime registry looks like production's.
-  exec/with-isolated-rich-types
-  (fn [f]
-    (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
-      (reset! registry-core/*rich-types-override*
-              (sb/ensure-swept-rich-types! ["core" "web" "app"]))
-      (f))))
+(use-fixtures :once (ga/fixture (ns-name *ns*)))
 
 
 (defn- render-partial
   "Run the handler with `?fn=<name>` and return the response body."
   [fn-name]
-  (let [{:keys [ctx storage]} *bootstrap*
-        handler-id (get (:all-name->id *bootstrap*) :_partial-rtr-handler)
-        resp (setup/exec-with-storage ctx storage handler-id
-                                      {:request {:query-params {"fn" fn-name}}})]
+  (let [resp (ga/exec-handler :_partial-rtr-handler
+                              {:query-params {"fn" fn-name}})]
     (is (= 200 (:status resp)) "handler responds 200")
     (:body resp)))
 

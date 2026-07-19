@@ -8,41 +8,18 @@
   (:require
     [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.interface :as exec]
-    [graphden.executor.registry.core :as registry-core]
-    [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.test-infra.shared-bootstrap :as sb]))
+    [graphden.test-infra.golden-app :as ga]))
 
 
-(def ^:dynamic *container* nil)
-(def ^:dynamic *bootstrap* nil)
-
-
-(use-fixtures :once
-  (pth/create-container-fixture #'*container*)
-  exec/with-clean-registry
-  ;; `rule-owner-of` reads composed fn-defs' registry entries; the
-  ;; plain golden bootstrap seeds only base-fn entries. Overlay the
-  ;; cached full type-check sweep so the registry looks like
-  ;; production's.
-  exec/with-isolated-rich-types
-  (fn [f]
-    (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
-      (reset! registry-core/*rich-types-override*
-              (sb/ensure-swept-rich-types! ["core" "web" "app"]))
-      (f))))
+(use-fixtures :once (ga/fixture (ns-name *ns*)))
 
 
 (defn- layout-response
   "Run `:get-layout-data` for the named root fn."
   [root-name]
-  (let [{:keys [ctx storage]} *bootstrap*
-        root-id (get (:all-name->id *bootstrap*) root-name)
-        handler-id (get (:all-name->id *bootstrap*) :get-layout-data)
+  (let [root-id (ga/fn-id root-name)
         body (json/generate-string {:root-id (str root-id) :expansions {}})
-        resp (setup/exec-with-storage ctx storage handler-id
-                                      {:request {:body body}})]
+        resp (ga/exec-handler :get-layout-data {:body body})]
     (is (vector? (:nodes resp)) "layout returns a node vector")
     (assoc resp ::root-id root-id)))
 

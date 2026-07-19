@@ -264,7 +264,7 @@ function slotTypeProvenance(arg) {
                           : null;
   // Each tier's source carries both fnName (display) and fnId (so the
   // popover can navigate to the source fn on click). The renderer
-  // (appendResolutionSection in editor-overlay-type-expand.js) treats
+  // (appendResolutionSection in editor-type-format.js) treats
   // fnId as optional — plain text falls back gracefully.
   const tiers = [
     { key: 'override', label: 'Binding type-override',

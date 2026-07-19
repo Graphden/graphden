@@ -377,10 +377,6 @@ async function loadRowActionsContent(host, fnId, context, opts) {
             + (opts.editBlockReason
                 ? '&edit-block-reason='
                   + encodeURIComponent(opts.editBlockReason)
-                : '')
-            + (opts.serviceBlockedReason
-                ? '&service-blocked-reason='
-                  + encodeURIComponent(opts.serviceBlockedReason)
                 : '');
   return loadPartial(host, url, {
     loadingClass: 'row-actions-loading',

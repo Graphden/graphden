@@ -798,11 +798,45 @@
    :args {:values [{:parent :not :args {:value :_partial-row-actions-editable?}}
                    {:parent :some? :args {:value :_partial-row-actions-edit-block-reason-str}}]}}
 
+  ;; ⚙ service-block reason — computed SERVER-side from the same
+  ;; predicate the create-service guard uses
+  ;; (`:service-blocking-free-args`, which drops per-invocation
+  ;; callback subtrees). It used to arrive as a query param the
+  ;; client computed from its full `freeArgsOf` mirror — that both
+  ;; over-blocked listener fns (full set vs the service projection)
+  ;; and died silently when the mirror was deleted.
+
+  {:name :_partial-row-actions-svc-blocking-names
+   :description "Sorted free-arg names that would block STARTING this fn as a service; empty vec when startable."
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :keys
+                               :args {:map {:parent :service-blocking-free-args
+                                            :args {:fn-id :_partial-row-actions-fn-id}}}}}}}}
+
+  {:name :_partial-row-actions-svc-name-text
+   :parent :str-join
+   :args {:coll [{:value ":"}
+                 {:parent :keyword-to-str :args {:keyword {:as :item}}}]
+          :separator {:value ""}}}
+
+  {:name :_partial-row-actions-svc-names-text
+   :parent :str-join
+   :args {:coll {:parent :map
+                 :args {:func :_partial-row-actions-svc-name-text
+                        :coll :_partial-row-actions-svc-blocking-names}}
+          :separator {:value " "}}}
+
   {:name :_partial-row-actions-service-blocked-reason-str
-   :description "Optional `service-blocked-reason` — text JS computes from `freeArgsOf(fnEntity)` (something like `\"Can't make a service — fn has free args: :a :b\"`). Empty / absent → ⚙ renders enabled."
-   :parent :query-param
-   :args {:request {:as :request}
-          :param-name {:value "service-blocked-reason"}}}
+   :description "`\"Can't make a service — fn has free args: :a :b. …\"` when `:service-blocking-free-args` is non-empty, nil when the fn is startable. Forced only on the root-row branch (lazy executor), so col-header / cell fetches don't pay the graph walk."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-row-actions-svc-blocking-names}}
+          :then {:value nil}
+          :else {:parent :str-join
+                 :args {:coll [{:value "Can't make a service — fn has free args: "}
+                               :_partial-row-actions-svc-names-text
+                               {:value ". Bind them in a derived fn-def first."}]
+                        :separator {:value ""}}}}}
 
   {:name :_partial-row-actions-service-blocked?
    :parent :some?

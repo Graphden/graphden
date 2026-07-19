@@ -595,25 +595,18 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       return;
     }
     // HTMX migration Phase A4: root-row context (▶⌛⚙✎+✕ plus the
-    // shared ns/i/↗ head). Client computes the gating strings the
-    // server uses to render disabled-with-reason states:
-    //   - `editable` (overall ✎/+/✕ enabled/disabled)
-    //   - `editBlockReason` (text for ✎/+/✕ title when disabled)
-    //   - `serviceBlockedReason` (text for ⚙ when fn has free args)
+    // shared ns/i/↗ head). Client computes the edit-gating strings
+    // the server uses to render disabled-with-reason states
+    // (`editable` + `editBlockReason` for ✎/+/✕); the ⚙ service
+    // block-reason is computed SERVER-side inside the partial from
+    // `:service-blocking-free-args` — the same predicate the
+    // create-service guard uses.
     if (rootAffordancesVisible && lineFnEntity) {
       if (typeof loadRowActionsContent !== 'function') return;
-      const serviceFreeArgs = (typeof freeArgsOf === 'function')
-                            ? freeArgsOf(lineFnEntity) : [];
-      const serviceBlockedReason = (serviceFreeArgs.length > 0)
-        ? ("Can't make a service — fn has free args: "
-           + serviceFreeArgs.map((a) => ':' + a.name).join(' ')
-           + '. Bind them in a derived fn-def first.')
-        : null;
       loadRowActionsContent(host, lineFn.fnId, 'root-row', {
         showOpen: !!lineShowOpen,
         editable: !!lineEditable,
-        editBlockReason: lineEditBlockReason,
-        serviceBlockedReason: serviceBlockedReason
+        editBlockReason: lineEditBlockReason
       });
       return;
     }

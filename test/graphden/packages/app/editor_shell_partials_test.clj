@@ -82,6 +82,30 @@
       (is (str/includes? body "label=\"refinement\"")))))
 
 
+(deftest row-actions-service-block-reason-server-computed
+  ;; The root-row context's ⚙ disabled-with-reason state comes from
+  ;; `:service-blocking-free-args` INSIDE the partial now — no
+  ;; `service-blocked-reason` query param. Regression guard for the
+  ;; window where the client's deleted `freeArgsOf` mirror left the
+  ;; reason permanently null.
+  (let [{:keys [ctx storage]} *bootstrap*
+        handler-id (get (:all-name->id *bootstrap*) :_partial-row-actions-handler)
+        render (fn [fn-name]
+                 (:body (setup/exec-with-storage
+                          ctx storage handler-id
+                          {:request {:query-params
+                                     {"fn-id" (str (get (:all-name->id *bootstrap*) fn-name))
+                                      "context" "root-row"}}})))]
+    ;; hiccup escapes the apostrophe (`Can&apos;t`) — match past it.
+    (testing "fn with service-blocking free args → disabled + reason"
+      (let [body (render :add)]
+        (is (str/includes? body "make a service — fn has free args: :nums"))
+        (is (str/includes? body "action-icon-disabled"))))
+    (testing "startable fn → enabled, no reason"
+      (let [body (render :web-server)]
+        (is (not (str/includes? body "make a service")))))))
+
+
 (deftest static-scaffold-parts
   (let [body (render-shell :add)]
     (doseq [marker ["execute-popover-header" "execute-history-toggle"

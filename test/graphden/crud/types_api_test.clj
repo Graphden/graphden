@@ -94,32 +94,19 @@
 (deftest project-rich-type-entry-test
   (testing "pure entry with no rule keys passes through unchanged"
     (let [entry {:return :int :args {:a :int} :effects [] :description "add"}]
-      (is (= entry (ta/project-rich-type-entry entry)))
-      (is (not (contains? (ta/project-rich-type-entry entry)
-                          :has-return-type-rule?)))))
+      (is (= entry (ta/project-rich-type-entry entry)))))
 
-  (testing ":return-type-rule replaced with :has-return-type-rule? true"
-    (let [rule (fn [_ _] :int)
-          projected (ta/project-rich-type-entry
-                      {:return :any :return-type-rule rule})]
-      (is (true? (:has-return-type-rule? projected))
-          "flag is set")
-      (is (not (contains? projected :return-type-rule))
-          "rule fn is stripped — never leaks to JSON")))
-
-  (testing ":slot-types-rule and :nav-types-rule project independently"
+  (testing "rule fns are stripped — never leak to JSON"
     (let [rule (fn [_ _] :int)
           projected (ta/project-rich-type-entry
                       {:return :any
                        :return-type-rule rule
                        :slot-types-rule rule
                        :nav-types-rule rule})]
-      (is (true? (:has-return-type-rule? projected)))
-      (is (true? (:has-slot-types-rule? projected)))
-      (is (true? (:has-nav-types-rule? projected)))
-      (is (not (contains? projected :return-type-rule)))
-      (is (not (contains? projected :slot-types-rule)))
-      (is (not (contains? projected :nav-types-rule)))))
+      (is (= {:return :any} projected)
+          "all three rule keys dropped, no replacement flags — the
+           rule-owner fact ships via layout strip facts / the
+           return-type-rule partial, not the /api/types wire")))
 
   (testing "every value in the projected entry is JSON-encodable"
     ;; A future contributor adding a non-encodable side-channel will
@@ -134,18 +121,7 @@
       (doseq [v (vals projected)]
         (is (not (fn? v))
             (str "projected entry should not carry a Clojure fn, got: "
-                 (type v))))))
-
-  (testing "partial rule presence — only the present rules get flagged"
-    (let [rule (fn [_ _] :int)]
-      (is (= {:return :any :has-slot-types-rule? true}
-             (ta/project-rich-type-entry
-               {:return :any :slot-types-rule rule}))
-          "only :slot-types-rule present → only :has-slot-types-rule? flag")
-      (is (= {:return :any :has-nav-types-rule? true}
-             (ta/project-rich-type-entry
-               {:return :any :nav-types-rule rule}))
-          "only :nav-types-rule present → only :has-nav-types-rule? flag"))))
+                 (type v)))))))
 
 
 ;; ============================================================================
@@ -363,7 +339,8 @@
 
 ;; ============================================================================
 ;; api-rich-types — the HTTP wire-shaping layer over all-rich-types
-;; (lean bulk / per-fn ?fn=). Finding K: docs/PERF_BUDGETS.md.
+;; (lean bulk only; the per-fn ?fn= branch died with its one consumer).
+;; Finding K: docs/PERF_BUDGETS.md.
 ;; ============================================================================
 
 (deftest api-rich-types-test
@@ -382,7 +359,7 @@
             _    (setup/attach-slot! storage (:id rec) (:id s1) 0)
             _    (setup/attach-slot! storage (:id rec) (:id s2) 1)
             full (ta/all-rich-types c)
-            lean (ta/api-rich-types c nil)]
+            lean (ta/api-rich-types c)]
         (testing "lean bulk keeps every fn (same key set as the full snapshot)"
           (is (= (set (keys full)) (set (keys lean)))))
         (testing "lean bulk strips every omitted field from every entry"
@@ -392,17 +369,7 @@
           (let [e (get lean :arttr-rec)]
             (is (some? e))
             (is (contains? e :return))
-            ;; :description IS omitted from the lean entry …
-            (is (not (contains? e :description)))))
-        (testing "?fn=<name> returns that one fn's FULL entry, keyed by name"
-          (let [one (ta/api-rich-types c "arttr-rec")]
-            (is (= [:arttr-rec] (keys one)))
-            ;; … but present again in the per-fn backfill.
-            (is (= "a described row" (:description (get one :arttr-rec))))))
-        (testing "?fn= for an unknown fn is an empty map, not an error"
-          (is (= {} (ta/api-rich-types c "no-such-fn-xyzzy"))))
-        (testing "a blank fn-name behaves like nil (bulk, not per-fn)"
-          (is (= (set (keys lean)) (set (keys (ta/api-rich-types c "")))))))
+            (is (not (contains? e :description))))))
       (finally (sp/close storage)))))
 
 

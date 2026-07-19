@@ -297,7 +297,6 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   });
   line.appendChild(textOverlay);
   const colClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-  const colFnEntity = lookups?.fnMap?.get(colFn.fnId) || null;
   // Per-row affordances (ns / i / ↗) move into the row-actions
   // popover anchored to the more-actions trigger. The trigger sits
   // on top of the column divs so the user can hit it across the full
@@ -408,7 +407,6 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     span.style.position = 'relative';
     bindFullNameHover(span, span, f.name);
     const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-    const cellFnEntity = lookups?.fnMap?.get(f.fnId) || null;
     const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
     const miEditable = levelInfo.depth === 1
       && typeof isAuthenticated === 'function' && isAuthenticated()

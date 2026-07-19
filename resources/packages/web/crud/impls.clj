@@ -267,19 +267,18 @@
 
 
 (defbase api-rich-types
-  [fn-name]
+  []
   ;; Wire-shaping layer over the same src helper `all-rich-types` wraps
   ;; (`rich-types-with-type-rows` — shared PRIVATE helper, not a hidden
   ;; base-fn→base-fn edge): strips the heavy per-entry fields from the
-  ;; bulk payload, or returns one full entry when `fn-name` is set (the
-  ;; `?fn=<name>` backfill). Kept as one base-fn deliberately: this is
-  ;; the measured hot path of finding K (docs/PERF_BUDGETS.md) —
-  ;; re-fetched after every mutation; a per-entry graph HOF strip over
-  ;; ~4000 entries would re-add tens of ms per editor round-trip to a
-  ;; path that was fought down 57%. The omitted-field list is the
-  ;; editor wire contract, not per-user tuning surface.
+  ;; bulk payload. Kept as one base-fn deliberately: this is the
+  ;; measured hot path of finding K (docs/PERF_BUDGETS.md) — re-fetched
+  ;; after every mutation; a per-entry graph HOF strip over ~4000
+  ;; entries would re-add tens of ms per editor round-trip to a path
+  ;; that was fought down 57%. The omitted-field list is the
+  ;; documented contract (`bulk-omitted-fields`).
   (cr/record-effect! :db)
-  (types-api/api-rich-types ctx fn-name))
+  (types-api/api-rich-types ctx))
 
 
 (defbase fn-names-with-tag

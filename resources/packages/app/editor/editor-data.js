@@ -231,12 +231,6 @@ function buildLookups(data) {
 // Replace `arg.X` accessors / `lookups.argMap` walks with these so
 // editor JS can migrate off the synth-arg shape one callsite at a time.
 
-// Get the binding row for (fn-id, slot-id) — the one that overrides
-// the slot's value/ref/rename at this fn level. nil if no override.
-function getBindingForFnSlot(fnId, slotId) {
-  if (!lookups?.bindingByFnSlot) return null;
-  return lookups.bindingByFnSlot.get(fnId + '|' + slotId) || null;
-}
 
 // Effective name of a slot at a particular fn — walks the
 // inheritance chain (closest-first) looking for an own renamed-view

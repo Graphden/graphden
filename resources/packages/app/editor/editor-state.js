@@ -28,7 +28,7 @@ window.BUILD_HASH = BUILD_HASH;
 let selectedFnId = null;          // Currently selected function ID
 let graphData = null;             // Raw graph data from API
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
-let richTypes = {};               // {fn-name → {return, args, effects, …}} from /api/types (lean bulk; per-fn ?fn= backfills :resolved-bindings etc. on demand — finding K)
+let richTypes = {};               // {fn-name → {return, args, effects, …}} from /api/types (lean bulk — finding K; on-demand detail comes from server partials, not per-fn backfills)
 let VALUE_KINDS = [];             // value_kind schema enum, from /api/value-kinds
 
 // Set of fn-ids reachable from `selectedFnId` via ref-id only — i.e.

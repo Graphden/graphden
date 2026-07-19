@@ -189,15 +189,18 @@ for the handful of fns actually on screen.
 
 **Scoped (finding K), the way `/api/graph/entities` was.** The bulk payload now
 drops the per-entry fields nothing paints from: `:resolved-bindings` (~36 %, read
-only by the click-driven return-type-rule provenance popover, which backfills the
-one fn via `GET /api/types?fn=<name>`), `:description` (~12 %, the editor sources
-descriptions from graph rows, not the type registry), and `:source-file` /
-`:source-line` / `:tags` / `:arg-effects` / `:call-time-effects` (zero editor
-reads). Measured on a live stack: **2454 KB → 1047 KB decoded (−57 %), 388 KB →
-119 KB gzipped (−69 %)**, with `:return` / `:args` / `:effects` / `:primary-parent`
-/ `:slot-types` / `:nav-types` kept for the bulk chip/strip paint. `all-rich-types`
-stays FULL (the internal `/api/types/candidates` source-of-truth); the lean-bulk /
-per-fn split lives in `api-rich-types`. This is a payload/network/parse win — it is
+only server-side now — the return-type-rule popover became a server partial, so
+the former `GET /api/types?fn=<name>` per-fn backfill branch was REMOVED with its
+one consumer), `:description` (~12 %, the editor sources descriptions from graph
+rows, not the type registry), `:primary-parent` (its one client reader, the
+strips' rule-owner walk, moved server-side into the layout strip facts), and
+`:source-file` / `:source-line` / `:tags` / `:arg-effects` / `:call-time-effects`
+(zero editor reads). Measured on a live stack at the time of the original cut:
+**2454 KB → 1047 KB decoded (−57 %), 388 KB → 119 KB gzipped (−69 %)**, with
+`:return` / `:args` / `:effects` / `:slot-types` / `:nav-types` kept for the bulk
+chip/strip paint. `all-rich-types` stays FULL (the internal
+`/api/types/candidates` source-of-truth); the lean-bulk shaping lives in
+`api-rich-types`. This is a payload/network/parse win — it is
 **not** the e2e-flake fix (see "What fills the heap" below).
 
 **These counts are NOT gated**, and cannot be as they stand: they are exact and

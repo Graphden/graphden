@@ -114,25 +114,17 @@
 
 (defn project-rich-type-entry
   "Strip the backend-only per-base-fn type-rule fns from a single
-   registry entry and replace each with a JSON-safe boolean flag.
-
-   Why: the rule values themselves are Clojure functions (not JSON-
-   encodable) and the editor never needs them; it reads only
-   :return / :args / :effects / :description. The flag preserves the
-   *fact* of a rule's presence so the editor's return-type provenance
-   popover can attribute computed return-types to the originating
-   base-fn without round-tripping the (non-serializable) impl.
+   registry entry — the rule values are Clojure functions and must
+   never leak to JSON. The `:has-*-rule?` boolean flags that used to
+   replace them are gone: their one reader (the editor's client-side
+   rule-owner walk) was replaced by the server-computed layout strip
+   facts + `/partials/return-type-rule`, which read the RAW registry
+   via `registry/rule-owner-of`.
 
    Exposed for tests — the wire shape of `/api/types` depends on this
    projector being applied to every entry."
   [entry]
-  (cond-> entry
-    (:return-type-rule entry)
-    (-> (dissoc :return-type-rule) (assoc :has-return-type-rule? true))
-    (:slot-types-rule entry)
-    (-> (dissoc :slot-types-rule) (assoc :has-slot-types-rule? true))
-    (:nav-types-rule entry)
-    (-> (dissoc :nav-types-rule) (assoc :has-nav-types-rule? true))))
+  (dissoc entry :return-type-rule :slot-types-rule :nav-types-rule))
 
 
 (defonce ^:private rich-types-with-type-rows-cache
@@ -644,27 +636,22 @@
    the return-type-rule provenance popover). Measured 2026-07-16: these
    were ~57% of the 2.4 MB decoded payload, re-fetched on every mutation,
    to paint chips for the handful of fns on screen. Kept in bulk:
-   `:return` / `:args` / `:effects` / `:primary-parent` / `:slot-types` /
-   `:nav-types` / `:type-row?` + the rule-presence flags — the fields the
-   bulk chip/strip paint reads for every rendered fn. See
-   docs/PERF_BUDGETS.md finding K."
+   `:return` / `:args` / `:effects` / `:slot-types` / `:nav-types` /
+   `:type-row?` — the fields the bulk chip/strip paint reads for every
+   rendered fn. `:primary-parent` joined the omitted set when the
+   client rule-owner walk that read it moved server-side (layout
+   strip facts). See docs/PERF_BUDGETS.md finding K."
   [:resolved-bindings :description :source-file :source-line :tags
-   :arg-effects :call-time-effects])
+   :arg-effects :call-time-effects :primary-parent])
 
 
 (defn api-rich-types
   "Body of the `api-rich-types` base-fn — the wire-shaping layer over
-   `all-rich-types` for `GET /api/types`.
-
-   - `fn-name` nil/blank → the full augmented snapshot with
-     `bulk-omitted-fields` stripped from every entry (the lean bulk
-     payload the editor loads at boot + after each mutation).
-   - `fn-name` set → the single FULL entry for that fn, keyed by name
-     (`{name entry}`), so the client can `Object.assign` it back into its
-     `richTypes` cache and backfill the omitted fields on demand."
-  [ctx fn-name]
-  (let [all (rich-types-with-type-rows ctx)]
-    (if (and fn-name (seq (str fn-name)))
-      (let [k (keyword (str fn-name))]
-        (if-let [e (get all k)] {k e} {}))
-      (update-vals all #(apply dissoc % bulk-omitted-fields)))))
+   the augmented snapshot: the lean BULK payload the editor loads at
+   boot + after each mutation, with `bulk-omitted-fields` stripped
+   from every entry. The former `?fn=<name>` per-fn FULL-entry branch
+   is gone with its one consumer (the deleted `ensureRichTypeFullEntry`
+   backfill — the return-type-rule popover is a server partial now)."
+  [ctx]
+  (update-vals (rich-types-with-type-rows ctx)
+               #(apply dissoc % bulk-omitted-fields)))

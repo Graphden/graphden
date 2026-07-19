@@ -82,8 +82,11 @@
 
              Bootstrap is dominated by compiled-registry build (~21s) + fn-entities
              create (~40s) + integrant init (~10s) — ~70-80s wall in practice. The
-             90 × 2s = 180s ceiling leaves margin for a cold-cache JVM warmup
-             without flaking on a slow host."
+             180 × 2s = 360s ceiling leaves margin for a cold-cache JVM warmup
+             without flaking on a slow host. The demo's compiled-registry boot
+             (~4.7k fns) measured 186s on 2026-07-20 — the old 180s ceiling
+             failed a gate whose instance came up healthy seconds later; the
+             ceiling must track the demo DB's growth, not race it."
             []
             (loop [attempts 0]
               (Thread/sleep 2000)
@@ -97,11 +100,11 @@
                         (let [{:keys [exit]} (p/shell {:continue true} "bb" check gd-url)]
                           (when-not (zero? exit) (System/exit exit)))))
 
-                  (< attempts 90)
+                  (< attempts 180)
                   (do (print ".") (flush) (recur (inc attempts)))
 
                   :else
-                  (do (println (str red "✗ Server failed to start (180s timeout — check `docker logs "
+                  (do (println (str red "✗ Server failed to start (360s timeout — check `docker logs "
                                     gd-executor "`)" reset))
                       (System/exit 1))))))
 

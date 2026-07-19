@@ -405,27 +405,44 @@ catches `:s` vs `:string` mistakes at sync time with the
 
 ---
 
-## File map (current migrations)
+## File map (all shipped partials)
 
-```
-resources/packages/app/editor/fns.edn
-  ;; HTMX PARTIALS section:
-  effect-explainer    — :_effect-descriptions, :_partial-effect-{name,name-kw,description,structural-text,header,description-div,structural-div,fragment,html,handler}
-  fn-versions         — :_partial-fn-versions-{fn-id-str,fn-id,current-branch,data,rows,count,empty?},
-                        :_partial-fnv-row-{branch-name,version-id,created-at,ts-short,on-current?,branch-class,branch-span,ts-span,description-text,meta-div,restore-{attrs,btn},switch-{title-prefix,attrs-base,attrs,btn-shown,btn-hidden,btn},execs-url,top-{attrs-base,attrs-with-get,attrs},top,execs-mount,attrs,row},
-                        :_partial-fnv-{rendered-rows,list,header-title,count-text,header-text,header,empty-msg,body,fragment,html},
-                        :_partial-fn-versions-handler
-  fn-version-executions — :_partial-fnv-execs-{rows,count,empty?},
-                          :_partial-fnv-exec-{status,started-at,ts-short,status-class,status-attrs,status-span,ts-span,row,rendered-rows,list,empty-msg,body,html,handler}
+The full registry lives in `resources/packages/app/routes/fns.edn`
+(every `:partial-*` route) with the hiccup chains in
+`app/editor/fns.edn` (`;; HTMX PARTIALS` and the sections after it),
+`app/execution/fns.edn` (execute-result / service-popover /
+execute-history) and `app/{branches,secrets,registry}` for their
+panels. 23 partials as of 2026-07-19, by consumer surface:
 
-resources/packages/app/routes/fns.edn
-  :partial-effect                     — GET /partials/effect
-  :partial-fn-versions                — GET /partials/fn-versions (auth)
-  :partial-fn-version-executions      — GET /partials/fn-version-executions (auth)
+| Partial (route name)                | Path (+key params)                                        | JS consumer |
+|-------------------------------------|-----------------------------------------------------------|-------------|
+| `:partial-effect`                    | GET /partials/effect?effect=                              | editor-effect-explainer.js |
+| `:partial-auth-form`                 | GET /partials/auth-form (public — IS the login form)      | editor-auth.js |
+| `:partial-fn-versions`               | GET /partials/fn-versions?fn-id= (auth)                   | editor-fn-versions.js |
+| `:partial-fn-version-executions`     | GET /partials/fn-version-executions?fn-version-id= (auth) | per-row htmx load |
+| `:partial-execute-history`           | GET /partials/execute-history?fn-id= (auth)               | editor-execute-history.js |
+| `:partial-execute-result`            | GET /partials/execute-result?id= (auth)                   | execute orchestrator + history |
+| `:partial-execute-result-inline`     | POST /partials/execute-result-inline (auth)               | non-persisted inline Run |
+| `:partial-execute-result-effects`    | GET /partials/execute-result-effects?runtime=&declared=   | editor-execute.js |
+| `:partial-execute-popover`           | GET /partials/execute-popover?fn-id= (auth)               | editor-execute.js (Run-popover shell) |
+| `:partial-branch-popover`            | GET /partials/branch-popover                              | editor-branches.js |
+| `:partial-branch-diff`               | GET /partials/branch-diff?target=&source=                 | editor-branch-diff.js |
+| `:partial-merge-conflicts`           | POST /partials/merge-conflicts                            | editor-branches.js (conflict modal) |
+| `:partial-mismatch-explainer`        | GET /partials/mismatch-explainer?binding-id= + optional item-id   | editor-mismatch-explainer.js |
+| `:partial-provenance`                | GET /partials/provenance?binding-id= + optional item-id (public)  | editor-provenance-popover.js |
+| `:partial-return-type-rule`          | GET /partials/return-type-rule?fn= (public)               | editor-provenance-popover.js (Type-rule popover) |
+| `:partial-fn-picker-incompat`        | GET /partials/fn-picker-incompat?expected=&candidate-fn-id= (auth) | editor-fn-picker.js |
+| `:partial-type-name-datalist`        | GET /partials/type-name-datalist (auth)                   | editor-create-type.js (name autocomplete) |
+| `:partial-compatible-type-options`   | GET /partials/compatible-type-options?expected= + optional current / primitives=true (auth) | editor-edit-modes-type.js + editor-overlay-type-expand.js |
+| `:partial-expects-effects-form`      | GET /partials/expects-effects-form?fn-id= (auth)          | editor-edit-modes-fn.js (✎ effects) |
+| `:partial-service-popover`           | GET /partials/service-popover?fn-id= (auth)               | editor-service-popover.js |
+| `:partial-secret-create-form`        | GET /partials/secret-create-form (auth)                   | editor-secrets.js |
+| `:partial-secret-rotate-form`        | GET /partials/secret-rotate-form?fn-id= (auth)            | editor-secrets.js |
+| `:partial-row-actions`               | GET /partials/row-actions?fn-id=&context= (public; edit affordances re-gated client-side) | editor-row-actions.js |
 
-resources/packages/app/editor/editor-effect-explainer.js  (86 LOC — was 132)
-resources/packages/app/editor/editor-fn-versions.js       (201 LOC — was 369)
-```
+Sidebar admin/packages panels (`/partials/grants-admin`,
+`/partials/users-admin`, `/partials/packages-panel`) are registered
+by their addon/route groups rather than `app.routes` — same pattern.
 
 ---
 

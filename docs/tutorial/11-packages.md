@@ -191,7 +191,7 @@ them when graphden's integrant lifecycle starts.
    ```
 
 3. Run `bb rebuild`. After the JVM restarts, the editor's
-   sidebar shows `mycorp.hello.greet`. Click `▶`. Supply
+   sidebar shows `mycorp.hello.greet`. Open `⋯` → `▶ Run`. Supply
    `:name = "world"`. Get `"Hello, world!"` back.
 
    No `impls.clj` needed here — `:greet` is a pure fn-def

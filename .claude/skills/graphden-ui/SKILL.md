@@ -5,7 +5,7 @@ description: Frontend changes to the Graphden editor (resources/packages/app/edi
 
 # graphden-ui — UI work that actually gets verified
 
-Frontend = ~7K lines of vanilla JS + one CSS file with `:root` / `body.theme-dark` design tokens. No build step, no module system, no React. Files load in the order declared in `app/editor/fns.edn :_editor-script-paths`.
+Frontend = ~18.6K lines of vanilla JS (editor modules + the shared `web/runtime` bundle) + one CSS file with `:root` / `body.theme-dark` design tokens. No build step, no module system, no React. Files load in the order declared in `app/editor/fns.edn :_editor-script-paths`.
 
 The recurring failure mode this skill prevents: **claiming "the UI is done" without ever opening a browser or reading a console log.** `bb rebuild` ships the jar; that's not the same as the feature working.
 
@@ -106,7 +106,7 @@ If any of these fail, **fix before reporting**. Don't ship "the build is green" 
 
 Add a new file when the new responsibility is genuinely orthogonal (a new overlay type, a new picker, a new edit mode). Extend an existing file when it's a feature of an existing concern. The file map in `CLAUDE.md` "Frontend Module Structure" is the source of truth — keep it updated.
 
-Hard cap: a file > 800 lines is a code smell. The largest editor modules today (`editor-literal-types.js` ~1327 lines, `editor-edit-modes.js` ~1184, `editor-overlay-type-expand.js` ~1164) are the split candidates; avoid piling onto them.
+Hard cap: a file > 800 lines is a code smell. As of 2026-07-19 every editor module is under the cap (the former three >1100-line files each split along a natural seam: literal-types → type-format, edit-modes → -fn/-type, overlay-type-expand → type-expand-render; overlay-fn → -rows likewise). Keep it that way — split along a concern boundary before a file crosses 800.
 
 ---
 

@@ -950,13 +950,16 @@ Snapshot of the in-memory rich-type registry as JSON. One entry per
 fn (base-fn or fn-def) the type-checker has processed:
 
 ```jsonc
+// Lean BULK shape — the heavy per-entry fields (:description,
+// :source-file/-line, :tags, :arg-effects, :call-time-effects,
+// :resolved-bindings, :primary-parent) are stripped from the wire;
+// see docs/PERF_BUDGETS.md finding K. The full-field snapshot backs
+// /api/types/candidates server-side only.
 {
   "bearer-token": {
     "return": ["union", "null", "text"],
     "args":   { "coll": "jsonb", "default": "any" },
-    "effects": ["env"],
-    "source-file": "packages/web/ring-adapter/fns.edn",
-    "source-line": 188
+    "effects": ["env"]
   },
   "health": {
     "return": "fn",
@@ -997,7 +1000,8 @@ across the UI.
 
 **2. Provenance popover** (↳ badge click, OR ↳ link from inline
 panel): the canonical answer to "where did this type come from?".
-Four stacked sections, all sourced from `/api/types`:
+Four stacked sections, SERVER-RENDERED (`GET /partials/provenance`
+— JS only mounts + anchors; see docs/PARTIALS.md):
 
 | Section           | When it appears                                                          | What it shows |
 |-------------------|--------------------------------------------------------------------------|----------------|
@@ -1007,10 +1011,13 @@ Four stacked sections, all sourced from `/api/types`:
 | Slot effect bound | Slot's effective type is `[:fn args ret eff]` with a concrete eff set    | `eff: pure` (empty set) or one chip per allowed category. |
 
 The `↳` glyph on a fn-card's return-type strip opens the type-rule
-variant of the same popover: same header surface plus a per-rule
-narrative line — e.g. for `:assoc`: "Literal key `"jvm"`, value
-typed record — added field `"jvm": record` to map's record shape."
-Inputs table follows for raw `:resolved-bindings`.
+variant (`GET /partials/return-type-rule?fn=<name>`, also fully
+server-rendered): rule-owner attribution as a clickable link, a
+static per-rule narrative from the graph-resident `:_rtr-narratives`
+map — e.g. for `:assoc`: "Literal key + typed value add that field
+to the map's record shape; a computed key widens the result to
+:jsonb." — and an Inputs table over the registry's raw
+`:resolved-bindings`.
 
 **3. On-chip narrowing hints** — visible without any click:
 

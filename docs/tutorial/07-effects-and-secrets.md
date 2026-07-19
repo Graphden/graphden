@@ -221,7 +221,7 @@ The graphden DB never holds the secret value. Only the path.
 
    `:env` has `:effects #{:env}`. You declared `#{}`. Save —
    the chip strip shows a RED `:env` chip (drift: undeclared).
-   The hover-title says "drift (undeclared)".
+   The hover-title says "Drift (undeclared)".
 
 3. Find any `:secret-leaf`-parented fn-def. Try ref'ing it
    from a slot typed `:text`:

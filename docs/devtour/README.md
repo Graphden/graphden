@@ -21,7 +21,7 @@ docs/devtour/index.html
 Blocks are listed left, roughly in reading order; each block's `after:` line
 names what it assumes you have already seen. Start with the **Executor** (the
 spine everything else hangs off), then follow the dependency order: Storage,
-Branches, Types, CRUD, Packages, Web, Services, Multi-tenancy.
+Branches, Types, CRUD, Packages, Web, Layout, Services, Multi-tenancy.
 
 ## How it works
 

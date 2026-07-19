@@ -206,7 +206,8 @@ in your base-fn impl and the dispatch picks the right behavior.
             :coll [1 2 3]}}
    ```
 
-   The card now shows a free arg `:factor`. Click ▶ Run — the
+   The card now shows a free arg `:factor`. Open the row's `⋯`
+   popover, click ▶ Run — the
    editor asks you to supply `:factor`, then runs.
 
 ## What we glossed over

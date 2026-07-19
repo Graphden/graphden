@@ -44,8 +44,9 @@ Now compose:
 `:greet-len` BINDS `:string` to a ref `:greeting`. Now the
 caller of `:greet-len` doesn't need to supply `:string` —
 graphden invokes `:greeting` at runtime and feeds the result
-to `:str-len`. So `:greet-len` has ZERO free args. You click
-`▶` and it just runs.
+to `:str-len`. So `:greet-len` has ZERO free args. `▶ Run`
+opens the run popover saying *"No free arguments — click Run
+to invoke"* — no form to fill, one confirming click.
 
 ## Free args bubble up
 
@@ -111,13 +112,15 @@ strip showing the free args:
 free args: ?path  ?handler
 ```
 
-Each `?name` is one free arg. Click ▶ on the card → the
-execute popover form has exactly these fields. The strip is
+Each `?name` is one free arg. Open the row's `⋯` popover and
+click ▶ Run → the execute popover form has exactly these
+fields. The strip is
 read-only; it's surfaced from the storage chain, not
 configurable per-card.
 
 If you see `(none)` instead — every slot is bound, the fn is
-"complete", ▶ runs immediately without a form.
+"complete"; the run popover shows *"No free arguments — click
+Run to invoke"* instead of a form.
 
 ## Free args + HOF
 

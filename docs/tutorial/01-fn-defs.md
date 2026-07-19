@@ -90,7 +90,8 @@ In the running editor, in a namespace of your choice (or create
 2. Set its parent to `:const`. The editor will show one free arg
    `:x`.
 3. Click `:x` and bind a literal map: `{:status 200 :body "Hello!"}`.
-4. Click the ▶ Run button — you should see the map come back.
+4. Open the row's `⋯` actions popover and click ▶ Run — you
+   should see the map come back.
 
 ## What we glossed over
 

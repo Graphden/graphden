@@ -78,7 +78,7 @@ supplied per-swap.
 
 `:swap`'s `:func` slot is `[:fn {:current a} a]` — a 1-arg callable
 `a → a`. `:_bump-one` fits: it reads `:current` and returns a number
-of the same type. Now `▶` on `:count-a-hit` (lesson 09) returns `1`,
+of the same type. Now `▶ Run` (via `⋯`) on `:count-a-hit` (lesson 09) returns `1`,
 then `2`, then `3` — it remembers.
 
 Swap `:cell` for `:atom` in `:hit-count` and it returns `1` every

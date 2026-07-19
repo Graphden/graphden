@@ -17,8 +17,8 @@
   (left). Read them roughly top-to-bottom: each block's `after:` line names
   what it assumes you have already seen. Start with the **Executor** — it is
   the spine everything else hangs off — then follow the dependency order:
-  Storage, then Branches, Types, CRUD, Packages, Web, Services, and
-  Multi-tenancy.
+  Storage, then Branches, Types, CRUD, Packages, Web, Layout,
+  Services, and Multi-tenancy.
 
   Every step shows you the **actual source** of one function, pulled straight
   from the file it lives in. When a step points you at code in another block,
@@ -594,7 +594,9 @@
            page runtime. User-composed pages are fn-defs (`:html-page`,
            components) that emit hiccup through this primitive — including the
            `data-action` attrs that the editor's JavaScript runtime
-           (`resources/packages/app/editor/*.js`) binds on click. Where a user's
+           (`resources/packages/app/editor/*.js`) binds on click — alongside the `hx-*`
+           attrs whose server-rendered `/partials/*` fragments now carry
+           logic that once lived in that JS. Where a user's
            page becomes a concrete hiccup tree."}
     {:file "resources/packages/web/html/impls.clj" :defn h-raw
      :say "Wraps a string in a hiccup `RawString` so inline script / style bodies
@@ -612,7 +614,65 @@
            primitives. This RFC 7231 Accept-Encoding negotiation is the one
            self-contained parse the pipeline keeps in Clojure; the DECISION to
            encode (thresholds, compressible pattern) lives in the graph. The last
-           stop as the rendered page leaves the web layer back through http-kit."}]}
+           stop as the rendered page leaves the web layer back through http-kit."}
+    {:ns graphden.crud.types-api :defn compatible-type-names
+     :say "The server-side type-picker sweep behind
+           `/partials/compatible-type-options`. It filters the
+           `type-name-kinds` roster to the names that can legally narrow
+           `expected` in ONE alias-aware `subtype?` pass — replacing the
+           editor's former per-name fan-out of ~50 parallel
+           `POST /api/types/compatible` requests per picker open. The
+           graph-first migration's clearest case: a client loop collapses
+           into one server render."}
+    {:ns graphden.crud.types-api :defn api-rich-types
+     :say "The `/api/types` wire-shaping layer the editor loads at boot and
+           after every mutation: the augmented rich-type snapshot with
+           `bulk-omitted-fields` stripped from each entry. The old
+           `?fn=<name>` per-fn full-entry backfill is gone with its only
+           client consumer — the return-type-rule popover is a server
+           partial now, and the layout strip facts read the raw registry
+           directly. How the type-checker's registry reaches the browser as
+           a lean payload."}]}
+
+  {:id :layout
+   :title "Layout — the editor's graph view"
+   :status :toured
+   :summary "Turn raw fn/slot/binding rows into the placed cards, edges and
+             server-computed facts the editor renders."
+   :paths ["src/graphden/layout/"]
+   :after [:web]
+   :steps
+   [{:ns graphden.layout.data :defn load-graph-entities-uncached
+     :say "Stage 1's data pull — every fn / slot / fn-slot / binding /
+           list-item row in one branch-cached batch (versioned) or five
+           vanilla queries. The whole pipeline is a pure transform over this
+           snapshot; a per-context graph cache keeps hover-frequency layout
+           requests from re-reading storage."}
+    {:ns graphden.layout.data :defn derive-fn-slot-views
+     :say "Synthesizes the per-fn 'arg view' rows the walkers consume: for
+           each fn, its inherited slot surface with bindings overlaid
+           closer-fn-wins, plus the `:source-id` chains that let an edge
+           attribute an inherited slot to the ancestor that declared it.
+           The slot/binding model's read-side counterpart."}
+    {:ns graphden.layout.graph :defn build-graph-elements
+     :say "Stage 2's orchestrator — dispatches the cycle-guarded `process-*`
+           walkers over the expansion spec, then pipes the accumulated state
+           through the post-processing transforms (optional/HOF badges,
+           captured-edge migration, overlay dedup, strip facts). Produces
+           the node/edge element lists the client draws verbatim."}
+    {:ns graphden.layout.core :defn compute-layout-matrix
+     :say "Stages 3+ — grid placement: roots at column zero, dependents
+           right of their sources, rows packed to avoid overlap, plus the
+           validation summary. Pixel geometry stays client-side (measured
+           reflow off the real DOM); the server owns the grid topology."}
+    {:ns graphden.layout.strip-facts :defn annotate
+     :say "The editor-facing tail: attach server-computed FACTS to each
+           fn-node — the inherited return-type alias, the rule-owning
+           base-fn (`registry/rule-owner-of`), and the transitive
+           branch-local seed (`branch-local/branch-local-seed`). These
+           replaced three hand-written client mirrors of the same walks;
+           the client renders facts, it doesn't re-derive them."
+     :see [[:versioning "effective-branch-local?"]]}]}
 
   {:id :services
    :title "Services & the fleet"

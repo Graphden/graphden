@@ -36,8 +36,8 @@ or-equivalent recursion concern got sidestepped — see 0b.
 
 | Primitive | Status | Shape | Purpose |
 |---|---|---|---|
-| `:fn-row-by-id` | commit `08c77e7a` | Pure fn-def: `:storage-query-call` → `:first` → `:decode-row` | Read one fn entity by id. Used by every row-actions partial to look up name / description / namespace-id. |
-| `:request-authed?` | commit `08c77e7a` | Thin alias of `:_bearer-equals-env?` | Conditional rendering of edit affordances. |
+| `:fn-row-by-id` | commit `08c77e7a`; rewritten onto the storage PROTOCOL (`:get-entity` through VersionedStorage) after the raw `:storage-query-call` HSQL read was caught returning CREATE-TIME values (post-update renames / descriptions / declared effects never showed). Lives in `app/lookups/fns.edn`. | Nil-guarded `:if` → `:assert-some` → `:get-entity` (version-resolved) | Read one fn entity by id. Used by every row-actions partial to look up name / description / namespace-id. |
+| `:request-authed?` | commit `08c77e7a`; re-based on the provider-agnostic `:request-authenticated?` seam when pluggable auth landed | Thin alias of `:request-authenticated?` (web/ring-adapter) | Conditional rendering of edit affordances. |
 | `:fn-ns-path` | commit `fa990ca9`; rewritten as a `:fix` graph composition once `:fix` shipped | Pure fn-def: `:fix` walk over `:get-entity`, 20-level depth cap graph-visible | Produce `"core.refinements"` string from a `:namespace-id`. |
 | `:fn-usage-count` | ⏳ deferred to Phase A4 | Multi-table count: `binding.ref-fn-id` + `binding-list-item.ref-fn-id` + `fn.parent-ids` membership | Only the root-row buttons need editability gating (✎ rename, ✕ delete). Col-header / MI-cell / use-site contexts gate editability CLIENT-SIDE in the dispatcher — server emits the button always, client re-checks `isFnEditable(fnId)` from `lookups` at click time. This keeps Phase A1-A3 unblocked. |
 | `:fn-is-editable?` | ⏳ with 0c | `(zero? :fn-usage-count)` | Same as above. |
@@ -61,7 +61,7 @@ same contexts (parent-edit row → `cell`; read-only fall-through
 | A1 | `79865f17` | `col-header` | ns / i / ↗ |
 | A2 | `7b251ebe` | `cell` (MI cell + Phase-A4.5 parent-edit) | ns / i / ↗ / × Remove-MI / + Add-MI (last two when `editable=true` |
 | A3 | `179f8bc5` | `use-site-arg` | ns / i / ↗ / × Remove-binding / ✎ Change-value (last two when `editable=true` |
-| A4 | `6076f1d2` | `root-row` | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ✎ Rename / + Extend / ✕ Delete (with `edit-block-reason` + `service-blocked-reason` disabled-with-reason variants) |
+| A4 | `6076f1d2` | `root-row` | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ✎ Rename / + Extend / ✕ Delete. Disabled-with-reason: `edit-block-reason` is still a client-passed query param; the ⚙ reason is computed INSIDE the partial from `:service-blocking-free-args` (no param — the client-computed one died with the `freeArgsOf` mirror) |
 | A4.5 | `6afddd33` | (reuses cell + col-header) | parent-edit row → cell; read-only fallthrough → col-header |
 | A5 | `e3f737b1` | (cleanup) | Deleted `createNamespaceBadge` / `createPinnedIconButton` / `createEditPencilButton` / `applyIconDisabledReason` / `makeAddMIParentButton` / `rowWantsNamespaceBadge` — `-261 LOC` editor JS |
 
@@ -96,81 +96,23 @@ same contexts (parent-edit row → `cell`; read-only fall-through
         :title "Open in new tab"} "↗"])]
 ```
 
-**Client side** (`editor-row-actions.js` additions):
+**Client side** — the as-shipped contract lives in
+`editor-row-actions.js` (`loadRowActionsContent` + the
+`registerActionHandler` dispatchers); the sketch that used to sit
+here drifted from it, so read the code. The load-bearing facts:
 
-```js
-// Wire-up: replace each buildContent callback with this loader.
-async function loadRowActionsContent(host, fnId, context, opts) {
-  opts = opts || {};
-  host.innerHTML = '<span class="row-actions-loading">…</span>';
-  try {
-    const url = '/partials/row-actions?fn-id=' + encodeURIComponent(fnId)
-              + '&context=' + encodeURIComponent(context)
-              + (opts.showOpen === false ? '&show-open=false' : '')
-              + (opts.useSiteArgId
-                  ? '&use-site-arg-id=' + encodeURIComponent(opts.useSiteArgId)
-                  : '');
-    const r = await fetch(url);
-    if (!r.ok) {
-      host.innerHTML = '<span class="row-actions-error">Failed</span>';
-      return;
-    }
-    host.innerHTML = await r.text();
-    bindRowActionsDispatch(host);
-  } catch (err) { host.innerHTML = '<span class="row-actions-error">Network</span>'; }
-}
-
-// Single delegated click handler routes data-action to JS handlers.
-function bindRowActionsDispatch(host) {
-  host.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    const action = btn.dataset.action;
-    const fnId = btn.dataset.fnId;
-    const fnEntity = lookups?.fnMap?.get(fnId);
-    switch (action) {
-      case 'namespace-move':
-        if (isAuthenticated() && isFnEditable(fnId) && fnEntity) {
-          enterNamespaceMoveEditMode(fnEntity, btn);
-        }
-        break;
-      case 'description':
-        showDescriptionTooltip({
-          name: btn.dataset.name,
-          description: btn.dataset.description,
-          entityType: btn.dataset.entityType,
-          entityId: btn.dataset.entityId
-        }, e);
-        break;
-      case 'open':
-        /* default <a> behavior */
-        break;
-      case 'run':
-        showExecutePopover(fnEntity, btn); break;
-      case 'history':
-        showFnVersionsPopover(fnEntity, btn); break;
-      case 'service':
-        showServicePopover(fnEntity, btn); break;
-      case 'rename':
-        enterFnRenameEditMode(fnEntity, btn); break;
-      case 'extend':
-        enterExtendEditMode(fnEntity, btn); break;
-      case 'delete-fn':
-        confirmAndDeleteFn(fnEntity); break;
-      case 'remove-mi-parent':
-        removeParentInline(getFnById(btn.dataset.cardFnId), fnId); break;
-      case 'add-mi-parent':
-        addMIParent(getFnById(btn.dataset.cardFnId), null, 1); break;
-      case 'remove-binding':
-        deleteUseSiteBinding(getUseSiteArg(btn.dataset.useSiteArgId));
-        break;
-      case 'change-binding-value':
-        enterFreeArgBindEditMode(getUseSiteArg(btn.dataset.useSiteArgId), btn);
-        break;
-    }
-  });
-}
-```
+- URL params actually built: `fn-id`, `context`, `show-open`,
+  `card-fn-id` (cell context), `binding-id` (use-site context — NOT
+  the sketched `use-site-arg-id`), `editable`, `edit-block-reason`.
+  The ⚙ `service-blocked-reason` is NOT a param — the partial
+  computes it server-side from `:service-blocking-free-args`.
+- Use-site buttons carry only `data-binding-id`; the dispatcher
+  recovers the rich arg object from the `_rowActionsUseSiteArgs`
+  registry (populated at load time from client `lookups`, pruned on
+  every richTypes refresh).
+- Dispatch goes through the shared `registerActionHandler` /
+  `bindActionDispatch` runtime (web/runtime/graphden-runtime.js),
+  not a bespoke switch.
 
 ## Post-Phase-A re-scoping: Phase B / C deferred
 
@@ -213,9 +155,10 @@ under skill §6's `keep JS` criteria.
 - **Auth gating per button**: server needs to check request auth
   state inside the partial (not just route-level 401). Pattern
   needs design.
-- **Service badge state**: ⚙ button is disabled when fn has free
-  args. Free-args computation is rich-types-dependent — server
-  has it but routing through a base-fn needs care.
+- **Service badge state**: RESOLVED — the ⚙ disabled-with-reason
+  state is computed server-side inside the partial via the
+  `:service-blocking-free-args` base-fn (the same predicate the
+  create-service guard uses).
 - **Viewport zoom/pan re-anchor**: Phase A doesn't change this;
   row-actions popover still re-positions on `cy.on('zoom pan')`.
   Verify the post-swap `bindRowActionsDispatch` doesn't break

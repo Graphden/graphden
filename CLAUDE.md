@@ -285,7 +285,7 @@ The editor frontend is split into modules for better maintainability:
 | `web/runtime/graphden-forms.js` | Platform-shared form runtime (NOT editor-specific) — hiccup→DOM `renderHiccup` (createElement-only, no innerHTML), `collectFormValue`/`fillFormValue`, `initUnions`, `installTextareaEnterGuard`, `hydrateWidgets` (mounts `window.GraphdenFormWidgets`). Pure DOM + the widget registry; bundled into BOTH the editor and `/assets/graphden-runtime.js` so user pages can render server-sent forms. |
 | `editor-value-form.js` | Editor-COUPLED half of the value-edit popover — fetches `POST /api/value-form`, live-validates against the slot type, orchestrates render (via `graphden-forms.js`), saves through the binding/sequence write helpers, singleton read-only value viewer. The generic render/collect/fill/widget core lives in `web/runtime/graphden-forms.js`. |
 | `editor-widget-rating.js` | Tier-2 custom value-form widget — a 1-5 slider, registered on `window.GraphdenFormWidgets`; reference example for adding widgets |
-| `editor-tooltips.js` | Description-tooltip + full-name popover singletons |
+| `editor-tooltips.js` | Description-tooltip + full-name popover + icon-reason popover singletons (the last is the disabled-with-reason surface the row-actions ✎/+/✕ buttons open) |
 | `editor-icons.js` | Sidebar / edge-label icon factories (`createDescriptionBadge`, `createOpenInNewTabButton`, `createMoreActionsTrigger`, `applyActionIconBox`). In-card badge/action rendering lives in the server-rendered `:partial-row-actions`. |
 | `web/runtime/graphden-runtime.js` | Platform-shared client primitives (NOT editor-specific) — `registerActionHandler(action, fn)` / `bindActionDispatch(host)` / `loadPartial(host, url, opts)`. Component fn-defs / partials / graph-composed pages reuse the same dispatch / fetch-and-swap surface. Bundled into both the editor JS bundle and `/assets/graphden-runtime.js` (the standalone user-page runtime — see `:_graphden-runtime-js-paths`). Sandbox-tested via `tools/runtime-test/runtime.test.js` (no browser). |
 | `web/runtime/graphden-actions-builtin.js` | Three platform-provided action handlers: `navigate` (sets `window.location.href` from `data-href`), `submit-form` (finds the nearest `<form>` ancestor, POSTs via fetch, swaps the response into `data-target` or back into the form), and `custom` (evaluates `data-custom-handler` as `(btn, event, host) => …`). Registered via `graphden-runtime.js`'s `registerActionHandler`. Sandbox-tested in `tools/runtime-test/actions-builtin.test.js`. |
@@ -299,8 +299,8 @@ The editor frontend is split into modules for better maintainability:
 | `editor-edit-modes-type.js` | type-level edit modes — compatible-type select (server option list via `GET /partials/compatible-type-options`), arg-type flip with picker-chaining rollback, free-arg binder. Split out of `editor-edit-modes.js` |
 | `editor-edit-reparent.js` | Phase 3 re-parent cascade + parent-set editor popover |
 | `editor-execute-result.js` | Pure render helpers shared by the execute popover — scalar / list / record / pending / error / oversize JSON panes. No state. |
-| `editor-execute-history.js` | Execute popover history panel — `/api/executions` fetch, summary row builder, Repeat re-fill via the orchestrator's `argFormHosts`. |
-| `editor-execute.js` | Execute popover orchestrator — ▶ button entry, free-arg lookup, value-form mount, polling state machine, Run / Cancel, effects gate + persist toggle. |
+| `editor-execute-history.js` | Execute popover history panel — mounts the server-rendered `GET /partials/execute-history` (+ `GET /partials/execute-result` per row-expand); JS owns row-expand toggling and Repeat re-fill via the orchestrator's `argFormHosts`. |
+| `editor-execute.js` | Execute popover orchestrator — ▶ entry mounts the server shell (`GET /partials/execute-popover`: header, effects banner, free-arg hosts from the backend's `:free-arg-slot-map`, options, action bar); JS mounts `/api/value-form` widgets into the hosts and owns the run/poll/cancel state machine + branch pill. |
 | `editor-fn-versions.js` | `⌛` history popover anchored to the fn-card root row. Fetches `GET /api/fns/:fn-id/versions`, renders a per-branch timeline (latest first), each row has a `switch` button that jumps the editor to that branch via `switchToBranch`. |
 | `editor-service-popover.js` | Service-status popover anchored to a fn-card. Mounts the server-rendered `GET /partials/service-popover` (create / start / stop / delete a `:service` for the fn, plus `:enabled?` / `:restart-policy` / `:cardinality` / `:branch-id` controls); JS owns anchored positioning + dismissal only and collects the radio/checkbox values into the save `PUT`/`POST`. Holds a per-fn `_servicePopoverCache` Map, cleared via `invalidateServicePopoverCache()` on save/delete so the next open re-fetches fresh desired-state. |
 | `editor-secrets.js` | Secret CRUD helpers integrated INTO the namespace tree (no separate section). Exposes `isSecretFn(fn)` (parents exactly `[:secret-leaf]`) for the sidebar's kind classification + 🔒 badge, `secretRecordForFn(fn-id)` (name + vault path from the primed `/api/secrets` list), and `buildSecretRowActions(actionsEl, fn)` (per-row rotate ↻ + delete × on secret tree rows, auth-gated). The New-secret form (name + path + value + description, value write-only) opens from `#secret-add-btn` in the filter bar via `openCreateSecretForm`. Backed by `/api/secrets/*`. |
@@ -359,9 +359,10 @@ The same directory also hosts e2e edit-flow tests (`edit-*.test.js`) and
 the type-system UI helper smoke tests, split by concern:
 
 ```bash
-# refinementChain, typeKindLabel, closedEnumOf, formatTypeHumanReadable,
-# shortTypeLabel — pure type helpers from editor-literal-types.js +
-# editor-overlay-type-expand.js. No DOM construction asserted here.
+# refinementChain, typeKindLabel (editor-type-expand-render.js),
+# closedEnumOf (editor-literal-types.js), formatTypeHumanReadable,
+# shortTypeLabel (editor-type-format.js) — pure type helpers.
+# No DOM construction asserted here.
 node type-system-ui-types.test.js
 
 # appendResolutionSection (incl. multi-override visualization +

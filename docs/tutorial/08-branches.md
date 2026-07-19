@@ -160,4 +160,4 @@ fork.
 
 ## Next
 
-Lesson 09 — Executing a fn (planned — see [tutorial/README.md](README.md))
+[Lesson 09 — Executing a fn](09-executing-a-fn.md)

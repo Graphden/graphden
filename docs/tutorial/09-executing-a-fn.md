@@ -18,7 +18,7 @@ Run paths:
 
 | Path | When to use |
 |---|---|
-| `▶` button on the fn-card | Interactive — you click + view the result |
+| `▶ Run` in the row's `⋯` actions popover | Interactive — you click + view the result |
 | `POST /api/execute` | Programmatic — scripts / curl / other services |
 | Internal calls (refs in fn-graph) | Happens automatically when one fn refs another at runtime |
 
@@ -68,26 +68,35 @@ Every fn carries a set of effects it transitively touches
 | `:time` | Reads wall-clock time |
 | `:random` | Non-deterministic input |
 | `:process` | Spawns supervised background work (service-eligibility marker) |
+| `:raw-sql` | Raw SQL escape hatches (`:pg-query` & co) that bypass the storage protocol |
 
-When you click `▶` on a fn with EFFECTS, the popover shows a
-gate row:
+When you open the run popover for a fn with EFFECTS, it shows
+a warning banner — `side effects:` followed by one chip per
+category — plus a confirm checkbox:
 
 ```
-This fn will: 🌐 network, 💾 db. Continue?
-[ Cancel ]  [ Run anyway ]
+side effects: [network] [db]
+[ ] I understand this will produce side effects
+[Run]   ← disabled until the box is ticked
 ```
 
-The gate prevents accidental side effects. For pure fns (no
-effects in the registry) the gate doesn't show — `▶` runs
-immediately.
+The gate prevents accidental side effects: Run stays disabled
+until you tick the acknowledgement. For pure fns (no effects
+in the registry) neither the banner nor the checkbox appears —
+the popover opens straight to the form (or the "No free
+arguments" note) with Run enabled.
 
 ## The persist toggle
 
-By default, execute results are kept in memory only — visible
-for the next few minutes (TTL), then garbage-collected.
+By default, PURE runs are kept in memory only — visible for
+the next few minutes (TTL), then garbage-collected. Tick the
+`Save to history` checkbox in the popover and the result
+writes a `:fn-execution` row.
 
-Flip the `Persist` checkbox in the popover and the result
-writes a `:fn-execution` row carrying:
+Effectful runs don't get a choice: the checkbox comes
+pre-ticked and locked (*"Automatically saved — runs that
+produce side effects are always persisted for audit trail"*).
+The persisted row carries:
 
 - `:fn-id` + `:fn-version-id` (frozen at start time so the
   audit trail survives later fn-def edits)
@@ -103,9 +112,9 @@ Persisted executions show up in the fn-card's history panel
 
 ## The history panel
 
-Below the free-arg form, the popover has a `History` section
-listing recent executions of this fn — both persisted and
-in-memory-not-yet-gc'd. Each row shows:
+The popover header has a `History` toggle; clicking it fetches
+and expands a panel listing this fn's PERSISTED runs (in-memory
+non-persisted runs never appear there). Each row shows:
 
 - The args used
 - The status (`succeeded` / `failed` / `cancelled` / `running`)
@@ -113,8 +122,9 @@ in-memory-not-yet-gc'd. Each row shows:
 - A `Repeat` button — re-fills the form with the same args so
   you can re-run
 
-History is per-fn (across branches). The persist toggle is what
-controls whether a result survives the in-memory TTL.
+History is per-fn (across branches). `Save to history` is what
+controls whether a pure run's result survives the in-memory TTL
+— effectful runs are always there.
 
 ## Cancel
 
@@ -170,9 +180,9 @@ live in PG until you delete them.
 
 Two side effects of this:
 
-1. The history panel for a heavily-used fn shows the
-   persisted + recent-in-memory mix. Older non-persisted runs
-   drop off without notice.
+1. Only persisted runs appear in the History panel — a pure
+   run without `Save to history` leaves no visible trace once
+   its in-memory row expires.
 2. The TTL also bounds the cancel window — once a row's
    garbage-collected, you can't cancel an execution you no
    longer have a handle for.
@@ -182,7 +192,7 @@ Two side effects of this:
 1. On `:str-len`, run with `:string = "hello"` (no persist).
    See the result + a fresh history row.
 2. Run again with `:string = "world"` (also no persist).
-3. Toggle `Persist`. Run with `:string = "graphden"`.
+3. Tick `Save to history`. Run with `:string = "graphden"`.
 4. Refresh the page. The first two runs are gone; the third
    (persisted) is still in history.
 5. Click `Repeat` on the persisted row — the form pre-fills,

@@ -90,7 +90,7 @@ Two fn-defs, one parent each:
 
 `:my-probe` now has zero free args (every slot in the chain is
 bound) AND the `:process` effect (inherited from `:future`).
-The `⚙` button on its card is enabled. Click it → popover
+The `⚙` button in its row-actions popover is enabled. Click it → popover
 says "Make service: :my-probe" + "Create & reconcile". The
 reconciler starts a daemon thread that calls `:my-tick` once
 and exits; with `:restart-policy :always`, it respawns. With

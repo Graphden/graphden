@@ -119,6 +119,20 @@ You were started in one of two ways:
      default economics: one hidden break re-queues everyone).
    - If the queue is busy the gate blocks waiting its turn — expected; let the
      background run wait.
+
+   **The gate is YOURS to watch.** Launching it is not the end of your job:
+   poll its progress about once a minute (tail the newest `bb wt log <name>`,
+   or check `.git/wtq/results/<name>` for the RESULT line) until it lands.
+   Concretely:
+   - **No output / not starting** (no log growth for a couple of minutes, no
+     RESULT, not visibly waiting on the queue lock) → tell the user what you
+     observe NOW — a silently stalled gate wastes a serialized slot the whole
+     pool waits behind. Check the obvious causes first: host load (a killed
+     gate leaves no RESULT file), a stale queue holder, Docker down.
+   - **RED / FAIL in the log** → start fixing IMMEDIATELY, before being asked:
+     read the failing check's output in the gate log, reproduce with a focused
+     local run, fix on your branch, re-run the gate. Report what broke and
+     what you are doing about it — don't sit on a red gate.
 5. **Clean up** — once landed and you have nothing left to do: `cd` back to the
    main checkout first (you cannot delete the worktree you are standing in),
    then `bb wt drop <name>`. Report done.

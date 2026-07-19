@@ -14,11 +14,11 @@ function truncateLabel(label, maxLen) {
 
 
 // Structural deep-equality for JSON-shaped values (primitives,
-// arrays, plain objects). Used by clientSubtype / clientConstraintImplies
-// in place of `JSON.stringify(a) === JSON.stringify(b)` — the
-// stringify path allocated two strings AND walked the structure
-// twice (once per side); deep refinement chains paid the cost in
-// every recursion frame.
+// arrays, plain objects). Used by clientSubtype in place of
+// `JSON.stringify(a) === JSON.stringify(b)` — the stringify path
+// allocated two strings AND walked the structure twice (once per
+// side); deep refinement chains paid the cost in every recursion
+// frame.
 function structEq(a, b) {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -43,92 +43,21 @@ function structEq(a, b) {
 // CLIENT-SIDE SUBTYPE CHECK
 // ============================================================================
 //
-// Mirrors the backend's `subtype?` from src/graphden/types/core.clj for
-// the cases the editor needs (fn-picker filtering, hint validation).
-// Types come from /api/types as JSON, so keywords arrive as strings
-// (`"int"`), records as objects, and vectors as arrays. The function is
-// permissive on the side that means "deliberately wide" — `:any` /
-// `:jsonb` / unknown shapes accept anything — to avoid false negatives.
-
-const CLIENT_NUMERIC_SUPERS = { int: ['numeric'], float: ['numeric'] };
-
-function clientPrimitiveSubtype(sub, sup) {
-  if (sub === sup) return true;
-  const sups = CLIENT_NUMERIC_SUPERS[sub] || [];
-  return sups.some(s => clientPrimitiveSubtype(s, sup));
-}
-
-function clientNormalise(t) {
-  // :sequence (storage primitive) ≡ [:list :any]
-  if (t === 'sequence') return ['list', 'any'];
-  return t;
-}
-
-// Mirror of backend `atom-implies?` (types/core.clj) — does leaf
-// constraint `a` imply `b`? Numeric comparison crosses plus
-// set-membership / equality reasoning. Returns true / false / null
-// (null = shapes outside the supported set → caller falls back).
-function clientAtomImplies(a, b) {
-  if (!Array.isArray(a) || !Array.isArray(b)) return null;
-  const ak = a[0], av = a.length >= 2 ? a[1] : undefined;
-  const bk = b[0], bv = b.length >= 2 ? b[1] : undefined;
-  const numeric = typeof av === 'number' && typeof bv === 'number';
-  if (structEq(a, b)) return true;
-  if (ak === '=' && numeric) {
-    switch (bk) {
-      case '=':    return av === bv;
-      case '>':    return av > bv;
-      case '>=':   return av >= bv;
-      case '<':    return av < bv;
-      case '<=':   return av <= bv;
-      case 'not=': return av !== bv;
-      default:     return null;
-    }
-  }
-  if (numeric && ak === bk) {
-    if (ak === '>' || ak === '>=') return av >= bv;
-    if (ak === '<' || ak === '<=') return av <= bv;
-    return null;
-  }
-  if (numeric && ak === '>'  && bk === '>=') return av >= bv;
-  if (numeric && ak === '>=' && bk === '>')  return av > bv;
-  if (numeric && ak === '<'  && bk === '<=') return av <= bv;
-  if (numeric && ak === '<=' && bk === '<')  return av < bv;
-  // Set-membership — `:in` operands arrive as JSON arrays.
-  const has = (coll, x) => Array.isArray(coll)
-    && coll.some(e => JSON.stringify(e) === JSON.stringify(x));
-  if (ak === '=' && bk === 'in')  return has(bv, av);
-  if (ak === 'in' && bk === 'in') return Array.isArray(av) && av.every(e => has(bv, e));
-  if (ak === 'in' && bk === '=')  return Array.isArray(av) && av.length === 1 && has(av, bv);
-  if (ak === '=' && bk === 'not=') return !structEq(av, bv);
-  if (ak === 'in' && bk === 'not=') return Array.isArray(av) && !has(av, bv);
-  return null;
-}
-
-// Mirror of backend `constraint-implies?` — true iff every value
-// satisfying refinement constraint `a` also satisfies `b`. Recurses
-// through `[:and …]` / `[:or …]`; leaves go to `clientAtomImplies`.
-function clientConstraintImplies(a, b) {
-  if (structEq(a, b)) return true;
-  if (a == null || b == null) return false;
-  if (Array.isArray(b) && b[0] === 'and') {
-    return b.slice(1).every(x => clientConstraintImplies(a, x));
-  }
-  if (Array.isArray(a) && a[0] === 'or') {
-    return a.slice(1).every(x => clientConstraintImplies(x, b));
-  }
-  if (Array.isArray(a) && a[0] === 'and') {
-    return a.slice(1).some(x => clientConstraintImplies(x, b));
-  }
-  if (Array.isArray(b) && b[0] === 'or') {
-    return b.slice(1).some(x => clientConstraintImplies(a, x));
-  }
-  return clientAtomImplies(a, b) === true;
-}
-
+// Fast local approximation for the fn-picker's INITIAL paint only —
+// primitives + numeric hierarchy (`primitiveSubtype`, defined in
+// editor-literal-types.js; call-time resolution, so file order doesn't
+// matter), unions, refinement erasure, covariant lists. Anything
+// structural (records, maps, tuples, fn-types, refinement-constraint
+// implication) answers false: the authoritative /api/types/candidates
+// response upgrades those a moment later, and it only ever upgrades —
+// a conservative miss self-heals, a false positive would stick. A full
+// structural mirror of the backend `subtype?` used to live here; it
+// was redundant with the server call and drifted from
+// src/graphden/types/core.clj. Don't grow it back.
 function clientSubtype(sub, sup) {
-  sub = clientNormalise(sub);
-  sup = clientNormalise(sup);
+  // :sequence (storage primitive) ≡ [:list :any]
+  if (sub === 'sequence') sub = ['list', 'any'];
+  if (sup === 'sequence') sup = ['list', 'any'];
   if (sub == null || sup == null) return true;
   if (structEq(sub, sup)) return true;
   if (sup === 'any')  return true;
@@ -141,60 +70,24 @@ function clientSubtype(sub, sup) {
   if (Array.isArray(sup) && sup[0] === 'union') {
     return sup.slice(1).some(m => clientSubtype(sub, m));
   }
-  if (typeof sub === 'string' && typeof sup === 'string') {
-    if (clientPrimitiveSubtype(sub, sup)) return true;
-    if (sup === 'jsonb') return sub !== 'fn';   // fn is not a json value
-    return false;
-  }
-  // Refinement: [:refine B c] ⊆ B; B ⊄ refinement.
+  // Refinement erasure: [:refine B c] ⊆ B. Constraint implication
+  // between two non-identical refinements is structural — server's call.
   if (Array.isArray(sub) && sub[0] === 'refine') {
-    if (Array.isArray(sup) && sup[0] === 'refine') {
-      // Constraint subtyping via implication (not just equality) so
-      // the picker hint matches the backend `subtype?` save-check.
-      return clientConstraintImplies(sub[2], sup[2])
-          && clientSubtype(sub[1], sup[1]);
-    }
     return clientSubtype(sub[1], sup);
   }
   if (Array.isArray(sup) && sup[0] === 'refine') return false;
+  if (typeof sub === 'string' && typeof sup === 'string') {
+    if (primitiveSubtype(sub, sup)) return true;
+    if (sup === 'jsonb') return sub !== 'fn';   // fn is not a json value
+    return false;
+  }
   // List subtype: covariant elem.
   if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'list' && sup[0] === 'list') {
     return clientSubtype(sub[1], sup[1]);
   }
-  // Map subtype: covariant key AND value.
-  if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'map' && sup[0] === 'map') {
-    return clientSubtype(sub[1], sup[1]) && clientSubtype(sub[2], sup[2]);
-  }
-  // A keyword-keyed record is a valid [:map :keyword V] value.
-  if (sub && typeof sub === 'object' && !Array.isArray(sub)
-      && Array.isArray(sup) && sup[0] === 'map') {
-    return clientSubtype('keyword', sup[1])
-        && Object.values(sub).every(vt => clientSubtype(vt, sup[2]));
-  }
-  // Tuple subtype: equal length, covariant per position.
-  if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'tuple' && sup[0] === 'tuple') {
-    if (sub.length !== sup.length) return false;
-    return sub.slice(1).every((t, i) => clientSubtype(t, sup[i + 1]));
-  }
-  // Record subtype: open — sub has every field sup requires.
-  if (sub && typeof sub === 'object' && !Array.isArray(sub)
-      && sup && typeof sup === 'object' && !Array.isArray(sup)) {
-    return Object.entries(sup).every(([k, st]) =>
-      sub[k] != null && clientSubtype(sub[k], st));
-  }
-  // Fn subtype: contravariant args, covariant return.
-  if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'fn' && sup[0] === 'fn') {
-    if (!clientSubtype(sub[2], sup[2])) return false;
-    const a = sub[1] || {}, b = sup[1] || {};
-    if (Object.keys(a).length !== Object.keys(b).length) return false;
-    return Object.entries(b).every(([k, bt]) => a[k] != null && clientSubtype(bt, a[k]));
-  }
-  // Mixed shapes (jsonb / list-of-X / etc.) — fall back to permissive
-  // for the wider side. Editors prefer false positives over rejecting
-  // a valid pick.
-  if (sup === 'jsonb' && Array.isArray(sub)
-      && (sub[0] === 'list' || sub[0] === 'refine' || sub[0] === 'map'
-          || sub[0] === 'tuple')) return true;
+  // Any remaining json-shaped value (list / map / tuple / record) IS
+  // a valid :jsonb.
+  if (sup === 'jsonb' && typeof sub !== 'string') return true;
   return false;
 }
 

@@ -2470,11 +2470,31 @@ textarea.arg-value-edit-input {
   letter-spacing: 0.02em;
 }
 
+/* Description tooltip — singleton bubble managed by
+   editor-tooltips.js. JS owns only the dynamic bits (display,
+   left/top placement); everything static lives here. `pointer-events`
+   is toggled to `auto` by JS in sticky/edit mode. */
+.description-tooltip {
+  position: fixed;
+  z-index: 10000;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 10px;
+  border-radius: 4px;
+  max-width: 360px;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+  display: none;
+  white-space: pre-wrap;
+}
+
 /* In-tooltip dismiss — the × button is the obvious affordance for
    touch users; the document-level pointerdown handler is a fallback
    for desktop "tap-outside". Sized 20×20 to be a comfortable touch
    target without dominating the tooltip header. */
-.description-tooltip { position: relative; }
 .description-tooltip-close {
   position: absolute; top: 4px; right: 4px;
   width: 20px; height: 20px; padding: 0;
@@ -2515,6 +2535,52 @@ textarea.arg-value-edit-input {
 .description-tooltip-error {
   margin-top: 4px; font-size: 11px;
   color: var(--error-fg);
+}
+
+/* Full-name popover — bubble shown over a truncated ancestor-row name.
+   Singleton managed by editor-tooltips.js; JS toggles display,
+   opacity + translateY for the fade, and left/top placement. */
+.full-name-tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  box-shadow: var(--shadow-sm);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 110ms ease-out, transform 110ms ease-out;
+  display: none;
+}
+
+/* Disabled-icon reason popover — click-to-reveal "why is this action
+   disabled" bubble. Same singleton lifecycle as .full-name-tooltip
+   but multi-line and interactive (outside-click dismissed). */
+.icon-reason-popover {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--input-border);
+  box-shadow: var(--shadow-md);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  max-width: 260px;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 110ms ease-out, transform 110ms ease-out;
+  display: none;
 }
 
 /* Right-edge action icons — `i` (description) and `↗` (open in new tab).

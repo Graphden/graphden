@@ -23,23 +23,7 @@ let descriptionTooltipEditing = false;
 function ensureDescriptionTooltip() {
   if (descriptionTooltipEl) return descriptionTooltipEl;
   const el = document.createElement('div');
-  el.className = 'description-tooltip';
-  Object.assign(el.style, {
-    position: 'fixed',
-    zIndex: '10000',
-    background: 'var(--tooltip-bg)',
-    color: 'var(--tooltip-fg)',
-    fontFamily: 'system-ui, sans-serif',
-    fontSize: '12px',
-    lineHeight: '1.4',
-    padding: '6px 10px',
-    borderRadius: '4px',
-    maxWidth: '360px',
-    pointerEvents: 'none',
-    boxShadow: 'var(--shadow-md)',
-    display: 'none',
-    whiteSpace: 'pre-wrap'
-  });
+  el.className = 'description-tooltip';   // static looks live in editor-styles.css
   document.body.appendChild(el);
   descriptionTooltipEl = el;
   return el;
@@ -321,26 +305,7 @@ let fullNameTooltipEl = null;
 function ensureFullNameTooltip() {
   if (fullNameTooltipEl) return fullNameTooltipEl;
   const el = document.createElement('div');
-  el.className = 'full-name-tooltip';
-  Object.assign(el.style, {
-    position: 'fixed',
-    zIndex: '9999',
-    background: 'var(--bg)',
-    color: 'var(--fg)',
-    border: '1px solid var(--input-border)',
-    boxShadow: 'var(--shadow-sm)',
-    padding: '4px 10px',
-    borderRadius: '4px',
-    fontFamily: 'inherit',
-    fontSize: '12px',
-    fontWeight: '600',
-    whiteSpace: 'nowrap',
-    pointerEvents: 'none',
-    opacity: '0',
-    transform: 'translateY(4px)',
-    transition: 'opacity 110ms ease-out, transform 110ms ease-out',
-    display: 'none'
-  });
+  el.className = 'full-name-tooltip';   // static looks live in editor-styles.css
   document.body.appendChild(el);
   fullNameTooltipEl = el;
   return el;
@@ -397,27 +362,8 @@ let iconReasonAnchor = null;
 function ensureIconReasonPopover() {
   if (iconReasonPopoverEl) return iconReasonPopoverEl;
   const el = document.createElement('div');
-  el.className = 'icon-reason-popover';
+  el.className = 'icon-reason-popover';   // static looks live in editor-styles.css
   el.setAttribute('role', 'status');
-  Object.assign(el.style, {
-    position: 'fixed',
-    zIndex: '9999',
-    background: 'var(--bg)',
-    color: 'var(--fg)',
-    border: '1px solid var(--input-border)',
-    boxShadow: 'var(--shadow-md)',
-    padding: '6px 10px',
-    borderRadius: '4px',
-    fontFamily: 'inherit',
-    fontSize: '12px',
-    lineHeight: '1.35',
-    maxWidth: '260px',
-    pointerEvents: 'auto',
-    opacity: '0',
-    transform: 'translateY(4px)',
-    transition: 'opacity 110ms ease-out, transform 110ms ease-out',
-    display: 'none'
-  });
   document.body.appendChild(el);
   iconReasonPopoverEl = el;
   // Outside-click / Escape dismissal. Same handler is safe to bind once.

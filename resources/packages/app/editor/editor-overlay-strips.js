@@ -265,16 +265,9 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
       provBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Look up the rule-owner base-fn's id so the popover's "open
-        // base-fn" link can navigate. lookups.fnMap is indexed by id;
-        // scan once.
-        let ruleOwnerFnId = null;
-        if (typeof lookups !== 'undefined' && lookups?.fnMap) {
-          for (const f of lookups.fnMap.values()) {
-            if (f.name === ruleOwner) { ruleOwnerFnId = f.id; break; }
-          }
-        }
-        showReturnTypeRulePopover(entry, ruleOwner, ruleOwnerFnId, provBtn, cardFnEntity.name);
+        // Server partial owns the rule-owner walk, narrative and
+        // Inputs table; it only needs the fn's name.
+        showReturnTypeRulePopover(cardFnEntity.name, provBtn);
       });
       strip.appendChild(provBtn);
     }

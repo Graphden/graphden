@@ -2063,6 +2063,436 @@
    :args {:body :_partial-provenance-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; return-type-rule popover ("Type rule") — the `↳` badge on a
+  ;; fn-card's RETURN-TYPE strip. Used to be a fully JS-built popover
+  ;; (`showReturnTypeRulePopover` + a ~185-line `ruleNarrators` prose
+  ;; mirror of the per-base-fn `:return-type-rule` semantics); the
+  ;; server renders it now and JS only mounts + anchors.
+  ;;
+  ;; URL: `GET /partials/return-type-rule?fn=<name>`.
+  ;;
+  ;; Chain: fn name → RAW registry entry (`:rich-type-of-name` — raw,
+  ;; so rule presence is `:return-type-rule` directly, no wire
+  ;; projection) → `:fix` walk up `:primary-parent` links to the
+  ;; rule-owning base-fn → header + intro (owner as `data-fn-id`
+  ;; nav-link) + static per-rule narrative (`:_rtr-narratives`) +
+  ;; Inputs table over `:resolved-bindings`. When the queried fn has
+  ;; no rule-owning ancestor the body collapses to a hidden span —
+  ;; the JS caller probes for `.provenance-popover-intro` and skips
+  ;; showing (same UX the old client-side bail gave).
+
+  {:name :_rtr-fn-name
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "fn"}}}
+
+  {:name :_rtr-entry
+   :description "Full RAW rich-types registry entry for the queried fn — nil for unknown names. Raw (not the `/api/types` wire projection), so `:return-type-rule` / `:primary-parent` read directly."
+   :parent :rich-type-of-name
+   :args {:fn-name :_rtr-fn-name}}
+
+  ;; --- `:primary-parent` reader, shared by seed + walk ------------------
+  ;; Registry entries store `:primary-parent` as a KEYWORD fn-name;
+  ;; the walk state keeps the cursor as TEXT so it feeds
+  ;; `:rich-type-of-name`'s `:nullable-text` slot honestly. Free arg:
+  ;; `:entry` — the registry entry to read from.
+
+  {:name :_rtr-pp-kw
+   :parent :get
+   :args {:coll {:as :entry} :key {:value :primary-parent} :default nil}}
+
+  {:name :_rtr-pp-some?
+   :parent :some?
+   :args {:value :_rtr-pp-kw}}
+
+  {:name :_rtr-pp-text
+   :parent :keyword-to-str
+   :args {:keyword {:ref :_rtr-pp-kw :type :keyword}}}
+
+  {:name :_rtr-pp-of
+   :description "Text name of `entry`'s `:primary-parent`; nil when absent (base-fns / unknown entries)."
+   :parent :if
+   :args {:test :_rtr-pp-some?
+          :then :_rtr-pp-text
+          :else {:value nil}}}
+
+  ;; --- rule-owner walk --------------------------------------------------
+  ;; The rule lives on a BASE-FN at the leaf of the primary-parent
+  ;; chain; the queried fn-def's immediate parent is often itself a
+  ;; fn-def (`:assoc-timestamp → :assoc`). Walk `:primary-parent`
+  ;; links until an entry carries `:return-type-rule` or the chain
+  ;; ends. Depth-capped at 32 (the old JS hop cap) so a misshapen
+  ;; registry can't lock the renderer. Pattern mirrors
+  ;; `app.lookups/:fn-ns-path`.
+
+  {:name :RtrOwnerInput
+   :description "Type-row exposing the `:start-name` input slot of `:_rtr-owner-run`."
+   :type {:start-name :nullable-text}}
+
+  {:name :_rtr-owner-run
+   :description "The `:fix` walk itself — returns the rule-owner's text name or nil."
+   :parents [:fix :RtrOwnerInput]
+   :args {:step :_rtr-owner-step
+          :input :_rtr-owner-initial}}
+
+  {:name :_rtr-owner-initial
+   :parent :zipmap
+   :args {:keys [{:value :cur} {:value :depth}]
+          :vals [{:as :start-name} {:value 0}]}}
+
+  {:name :_rtr-owner-cur
+   :parent :get
+   :args {:coll {:as :input} :key {:value :cur}}}
+
+  {:name :_rtr-owner-depth
+   :parent :get
+   :args {:coll {:as :input} :key {:value :depth}}}
+
+  {:name :_rtr-owner-depth-capped?
+   :parent :gte
+   :args {:nums [:_rtr-owner-depth {:value 32}]}}
+
+  {:name :_rtr-owner-cur-nil?
+   :parent :nil?
+   :args {:value :_rtr-owner-cur}}
+
+  ;; Only forced past the nil-guard (`:or` short-circuits), so the
+  ;; registry lookup never sees a nil name.
+  {:name :_rtr-owner-cur-entry
+   :parent :rich-type-of-name
+   :args {:fn-name {:ref :_rtr-owner-cur :type :nullable-text}}}
+
+  {:name :_rtr-owner-entry-nil?
+   :parent :nil?
+   :args {:value :_rtr-owner-cur-entry}}
+
+  {:name :_rtr-owner-dead-end?
+   :parent :or
+   :args {:values [:_rtr-owner-cur-nil?
+                   :_rtr-owner-depth-capped?
+                   :_rtr-owner-entry-nil?]}}
+
+  {:name :_rtr-owner-rule?
+   :description "True when the cursor's RAW registry entry carries a `:return-type-rule` (the rule value itself is a Clojure fn — only its presence matters here)."
+   :parent :some?
+   :args {:value {:parent :get
+                  :args {:coll :_rtr-owner-cur-entry
+                         :key {:value :return-type-rule}
+                         :default nil}}}}
+
+  {:name :_rtr-owner-step
+   :parent :if
+   :args {:test :_rtr-owner-dead-end?
+          :then {:value nil}
+          :else :_rtr-owner-check}}
+
+  {:name :_rtr-owner-check
+   :parent :if
+   :args {:test :_rtr-owner-rule?
+          :then :_rtr-owner-cur
+          :else :_rtr-owner-recurse}}
+
+  {:name :_rtr-owner-next-cur
+   :parent :_rtr-pp-of
+   :args {:entry :_rtr-owner-cur-entry}}
+
+  {:name :_rtr-owner-depth-inc
+   :parent :add
+   :args {:nums [:_rtr-owner-depth {:value 1}]}}
+
+  {:name :_rtr-owner-next
+   :parent :zipmap
+   :args {:keys [{:value :cur} {:value :depth}]
+          :vals [:_rtr-owner-next-cur :_rtr-owner-depth-inc]}}
+
+  {:name :_rtr-owner-recurse
+   :parent :invoke
+   :args {:func {:as :self} :arg :_rtr-owner-next}}
+
+  ;; Seed = the QUERIED entry's own primary parent (a base-fn card has
+  ;; none → no owner → hidden body, matching the old JS behaviour).
+  {:name :_rtr-start
+   :parent :_rtr-pp-of
+   :args {:entry :_rtr-entry}}
+
+  {:name :_rtr-owner-run-here
+   :parent :_rtr-owner-run
+   :args {:start-name :_rtr-start}}
+
+  ;; `:fix` returns `:any`; the `:const` wrapper carries the author
+  ;; `:type` assertion (the walk's terminals are text names or nil).
+  {:name :_rtr-owner-name
+   :parent :const
+   :args {:value {:ref :_rtr-owner-run-here :type :nullable-text}}}
+
+  {:name :_rtr-owner-some?
+   :parent :some?
+   :args {:value :_rtr-owner-name}}
+
+  ;; Narrowed owner name — every consumer below sits inside the
+  ;; `:_rtr-owner-some?` branch, so the assert never fires.
+  {:name :_rtr-owner-sure
+   :parent :assert-some
+   :args {:value :_rtr-owner-name}}
+
+  ;; --- per-rule narrative -----------------------------------------------
+  ;; Static prose per rule — the graph-resident successor of the JS
+  ;; `ruleNarrators` table (same pattern as `:_effect-descriptions`).
+  ;; The dynamic specifics the JS templates interpolated (literal key,
+  ;; input types, computed return) are all visible in the Inputs table
+  ;; below / the return-type strip itself, so the prose carries the
+  ;; RULE SEMANTICS only. Rules without an entry fall through to a
+  ;; hidden span — the Inputs table speaks for itself.
+
+  {:name :_rtr-narratives
+   :description "Per-rule narrative prose for the return-type-rule popover — `{rule-name-keyword → sentence}`. Covered by `graphden.app.rule-narratives-test`, which trips when a rule from the known roster loses its narrative."
+   :parent :const
+   :args {:value
+          {:assoc "Literal key + typed value add that field to the map's record shape; a computed (non-literal) key widens the result to :jsonb."
+           :dissoc "Literal key removed from the map's record shape; a computed key falls back to :jsonb."
+           :get "Literal key looked up in coll's record shape; a computed key returns the slot's declared default."
+           :get-in "Path walks coll's record shape to type the returned leaf."
+           :assoc-in "Path-walked update — inner record shapes refined when every segment is a literal key."
+           :update-in "Lambda applied at path — result type follows `:f`'s return."
+           :conj "Item appended/prepended to coll — element type widened to include the item."
+           :first "Returns [:union :null a] — head of a list, or :null when empty."
+           :rest "Returns [:list a] — drops the head, element type preserved."
+           :cons "Item prepended — element type widens to LUB with coll's."
+           :list "Element type LUB'd over the literal vector of items."
+           :merge "Records merged left-to-right — later keys win, per-item record shapes unioned."
+           :into "Items poured into destination — returns destination's effective shape."
+           :range "Integer sequence [start, end) by step — return [:list :int]."
+           :repeat "Fixed-count copies of value — return [:list a]."
+           :keys "Returns [:list k] — keys of the homogeneous [:map k v]."
+           :vals "Returns [:list v] — values of the homogeneous [:map k v]."
+           :case "Dispatch table union'd with default."
+           :cond "Result-position branches union'd."
+           :coalesce ":null stripped from value's type, unioned with default's."
+           :if "Branches union'd: [:union then-type else-type]."
+           :invoke "Bound callable's return type pulled in; runtime decides between hof-wrap and thunk by produces-callable?."
+           :const "Identity passthrough — return type follows `:value`."
+           :identity "Identity passthrough — return type follows `:value`."
+           :take "First :count items — element type preserved from coll."
+           :drop "All but first :count items — element type preserved."
+           :reverse "Items reversed — element type preserved."
+           :sort "Items sorted — element type preserved."
+           :distinct "Duplicates removed — element type preserved."
+           :concat "Colls concatenated — element type LUB'd across inputs."
+           :add "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
+           :sub "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
+           :mul "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
+           :mod "Modulo — :int when dividend and divisor are :int, else :numeric widening."
+           :neg "Negation — refinement constraints don't propagate through arithmetic; a :positive-int negated is :int."
+           :abs "Absolute value — constraint inference deliberately not propagated through arithmetic."}}}
+
+  {:name :_rtr-narrative-text
+   :parent :get
+   :args {:coll :_rtr-narratives
+          :key {:parent :str-to-keyword :args {:string :_rtr-owner-sure}}
+          :default nil}}
+
+  {:name :_rtr-narrative-div
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_rtr-narrative-text}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "provenance-popover-narrative"}}
+                        :children [:_rtr-narrative-text]}}
+          :else {:value [:span {:hidden "1"}]}}}
+
+  ;; --- owner nav-link ---------------------------------------------------
+  ;; `a[data-fn-id]` — the same post-swap contract as the provenance
+  ;; partial: JS binds `selectFn` navigation on it. Falls back to a
+  ;; plain span when the name doesn't resolve to a row (shouldn't
+  ;; happen for registered base-fns; defensive parity with the old JS).
+
+  {:name :_rtr-owner-fn-id
+   :parent :fn-id-by-name
+   :args {:fn-name :_rtr-owner-sure}}
+
+  {:name :_rtr-owner-fn-id-some?
+   :parent :some?
+   :args {:value :_rtr-owner-fn-id}}
+
+  {:name :_rtr-owner-label
+   :parent :str-join
+   :args {:coll [{:value ":"} :_rtr-owner-sure] :separator {:value ""}}}
+
+  {:name :_rtr-owner-link-title
+   :parent :str-join
+   :args {:coll [{:value "Open base-fn :"} :_rtr-owner-sure] :separator {:value ""}}}
+
+  {:name :_rtr-owner-fn-id-text
+   :parent :to-str
+   :args {:value :_rtr-owner-fn-id}}
+
+  {:name :_rtr-owner-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :href} {:value :class}
+                                {:value :data-fn-id} {:value :title}]
+                         :vals [{:value "#"}
+                                {:value "type-inline-resolution-link"}
+                                :_rtr-owner-fn-id-text
+                                :_rtr-owner-link-title]}}
+          :children [:_rtr-owner-label]}}
+
+  {:name :_rtr-owner-plain
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {}}
+          :children [:_rtr-owner-label]}}
+
+  {:name :_rtr-owner-link-or-span
+   :parent :if
+   :args {:test :_rtr-owner-fn-id-some?
+          :then :_rtr-owner-link
+          :else :_rtr-owner-plain}}
+
+  {:name :_rtr-intro
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-intro"}}
+          :children [{:value "Return type computed by "}
+                     :_rtr-owner-link-or-span
+                     {:value "'s :return-type-rule"}]}}
+
+  ;; --- Inputs table -----------------------------------------------------
+  ;; One row per resolved binding — name + kind (`ref→:x` / `= literal`
+  ;; / `(free)`) + effective type. The shape mirrors the type-rule's
+  ;; view of the world: which slot was bound by literal vs ref is what
+  ;; makes the rule's output explicable.
+
+  {:name :_rtr-bindings
+   :parent :get
+   :args {:coll :_rtr-entry :key {:value :resolved-bindings} :default {:value {}}}}
+
+  {:name :_rtr-binding-names
+   :parent :sort
+   :args {:coll {:parent :keys :args {:map :_rtr-bindings}}}}
+
+  {:name :_rtr-has-inputs?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_rtr-binding-names}}}}
+
+  {:name :_rtr-row-binding
+   :parent :get
+   :args {:coll :_rtr-bindings :key {:as :item} :default {:value {}}}}
+
+  {:name :_rtr-row-ref
+   :parent :get
+   :args {:coll :_rtr-row-binding :key {:value :ref} :default nil}}
+
+  {:name :_rtr-row-value
+   :parent :get
+   :args {:coll :_rtr-row-binding :key {:value :value} :default nil}}
+
+  {:name :_rtr-row-kind
+   :description "`ref→:x` when the rule input is a fn-ref, `= <literal>` when a bound literal, `(free)` otherwise."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_rtr-row-ref}}
+          :then {:parent :str-join
+                 :args {:coll [{:value "ref→:"}
+                               {:parent :keyword-to-str
+                                :args {:keyword {:ref :_rtr-row-ref :type :keyword}}}]
+                        :separator {:value ""}}}
+          :else {:parent :if
+                 :args {:test {:parent :some? :args {:value :_rtr-row-value}}
+                        :then {:parent :str-join
+                               :args {:coll [{:value "= "}
+                                             {:parent :pr-str
+                                              :args {:value :_rtr-row-value}}]
+                                      :separator {:value ""}}}
+                        :else {:value "(free)"}}}}}
+
+  {:name :_rtr-row-name-text
+   :parent :keyword-to-str
+   :args {:keyword {:as :item}}}
+
+  {:name :_rtr-row-label
+   :parent :str-join
+   :args {:coll [:_rtr-row-name-text {:value " "} :_rtr-row-kind]
+          :separator {:value ""}}}
+
+  {:name :_rtr-row-type
+   :parent :get
+   :args {:coll :_rtr-row-binding :key {:value :type} :default nil}}
+
+  {:name :_rtr-row-type-text
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_rtr-row-type}}
+          :then {:parent :to-str :args {:value :_rtr-row-type}}
+          :else {:value "—"}}}
+
+  {:name :_rtr-input-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-inline-resolution-row"}}
+          :children [{:value [:span {:class "type-inline-resolution-mark"} "·"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "type-inline-resolution-label"}}
+                             :children [:_rtr-row-label]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "type-inline-resolution-type"}}
+                             :children [:_rtr-row-type-text]}}]}}
+
+  {:name :_rtr-input-rows
+   :parent :map
+   :args {:func :_rtr-input-row
+          :coll :_rtr-binding-names}}
+
+  {:name :_rtr-inputs-section
+   :parent :if
+   :args {:test :_rtr-has-inputs?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "provenance-popover-inputs"}}
+                        :children [{:value [:div {:class "type-inline-resolution-head"} "Inputs"]}
+                                   :_rtr-input-rows]}}
+          :else {:value [:span {:hidden "1"}]}}}
+
+  ;; --- assembly ---------------------------------------------------------
+
+  {:name :_rtr-header
+   :parent :const
+   :args {:value
+          [:div {:class "provenance-popover-header"}
+           [:span {:class "provenance-popover-title"} "Type rule"]
+           [:button {:type "button"
+                     :class "provenance-popover-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close type rule popover"} "×"]]}}
+
+  {:name :_rtr-body
+   :description "Intro + narrative + Inputs when a rule-owning ancestor exists; hidden span otherwise (the JS caller probes `.provenance-popover-intro` and skips showing)."
+   :parent :if
+   :args {:test :_rtr-owner-some?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {}}
+                        :children [:_rtr-intro
+                                   :_rtr-narrative-div
+                                   :_rtr-inputs-section]}}
+          :else {:value [:span {:hidden "1"}]}}}
+
+  {:name :_rtr-fragment
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-content"}}
+          :children [:_rtr-header :_rtr-body]}}
+
+  {:name :_rtr-html
+   :parent :render-hiccup
+   :args {:hiccup :_rtr-fragment}}
+
+  {:name :_partial-rtr-handler
+   :description "Ring handler for `GET /partials/return-type-rule?fn=<name>` — returns the return-type-rule popover hiccup as `text/html`. Replaces the JS-built popover + `ruleNarrators` prose mirror; JS mounts + anchors only."
+   :parent :html-ok-response
+   :args {:body :_rtr-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-picker incompat-explainer. The fn-picker popover surfaces
   ;; functions whose return type doesn't satisfy the slot's expected
   ;; type under a separate "Other" section; clicking such a candidate

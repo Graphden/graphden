@@ -1,7 +1,9 @@
-// DOM-building smoke tests for the type-resolution surfaces:
-//   appendClosedEnumSection / appendEffectConstraintSection /
-//   appendPopoverSection / appendResolutionSection (incl. multi-
-//   override visualization + onNavigate clickable wiring).
+// DOM-building smoke tests for appendResolutionSection
+// (editor-overlay-type-expand.js) — multi-override visualization +
+// onNavigate clickable wiring. The former sibling helpers
+// (appendClosedEnumSection / appendEffectConstraintSection /
+// appendPopoverSection) are gone: every section of the provenance
+// popovers ships pre-rendered from the server partials now.
 //
 // Each test constructs a synthetic prov object, calls the renderer
 // into a detached <div>, and asserts on the resulting DOM. No live
@@ -14,67 +16,8 @@ const {assert, newContext} = require('./edit-test-helpers');
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  console.log('type-system-ui-resolution — DOM rendering of the provenance popover');
+  console.log('type-system-ui-resolution — DOM rendering of the inline resolution section');
   try {
-    // appendClosedEnumSection — DOM rendering of allowed values.
-    const enumDom = await page.evaluate(() => {
-      const host = document.createElement('div');
-      appendClosedEnumSection(host, {
-        base: 'keyword',
-        members: [
-          { value: ':red',   label: ':red' },
-          { value: ':green', label: ':green' },
-        ],
-      });
-      return {
-        sectionCount: host.querySelectorAll('.provenance-popover-enum').length,
-        chipCount:    host.querySelectorAll('.provenance-popover-enum-chip').length,
-        head:         host.querySelector('.type-inline-resolution-head')?.textContent,
-      };
-    });
-    assert(enumDom.sectionCount === 1,
-           'appendClosedEnumSection creates one wrapper section');
-    assert(enumDom.chipCount === 2,
-           'two members → two chips rendered');
-    assert(enumDom.head === 'Allowed values',
-           'section header reads "Allowed values"');
-
-    // appendEffectConstraintSection — DOM rendering of slot-effect chip row.
-    const effectDom = await page.evaluate(() => {
-      const host1 = document.createElement('div');
-      appendEffectConstraintSection(host1, new Set([])); // pure
-      const host2 = document.createElement('div');
-      appendEffectConstraintSection(host2, new Set(['env', 'db']));
-      return {
-        pureLabel: host1.querySelector('.type-inline-effects-pure')?.textContent,
-        chipCount: host2.querySelectorAll('.effects-chip').length,
-      };
-    });
-    assert(effectDom.pureLabel === 'pure',
-           'empty set → "pure" pill');
-    assert(effectDom.chipCount === 2,
-           'concrete set of two effects → two chips');
-
-    // appendPopoverSection — shared header + body helper.
-    const sectionDom = await page.evaluate(() => {
-      const host = document.createElement('div');
-      const body = document.createElement('span');
-      body.textContent = 'body content';
-      appendPopoverSection(host, 'Header Label', body, 'test-class');
-      const sect = host.querySelector('.test-class');
-      return {
-        hasSection: !!sect,
-        headText: sect?.querySelector('.type-inline-resolution-head')?.textContent,
-        bodyText: sect?.querySelector('span')?.textContent,
-      };
-    });
-    assert(sectionDom.hasSection,
-           'appendPopoverSection emits a wrapper with the provided class');
-    assert(sectionDom.headText === 'Header Label',
-           'header text passes through verbatim');
-    assert(sectionDom.bodyText === 'body content',
-           'body element is appended');
-
     // appendResolutionSection — multi-override inheritance chain.
     //
     // Backend hands the chain to the UI in closer-first order; the

@@ -69,6 +69,36 @@
           :entity-type {:value "fn"}}}
 
   ;; =============================================================================
+  ;; FN ID BY NAME — resolve a global fn name to its row id
+  ;; =============================================================================
+  ;;
+  ;; One `:query-entities` protocol call (versioned-resolved,
+  ;; branch-aware). Fn names are validated globally unique at sync
+  ;; time, so first-row IS the row. Used by partials that emit
+  ;; `data-fn-id` nav-links for a fn they only know by name (e.g.
+  ;; the return-type-rule popover's rule-owner link).
+
+  {:name :_fibn-where
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :name}
+          :value {:as :fn-name}}}
+
+  {:name :_fibn-rows
+   :parent :query-entities
+   :args {:entity-type {:value "fn"}
+          :where :_fibn-where}}
+
+  {:name :_fibn-row
+   :parent :first
+   :args {:coll :_fibn-rows}}
+
+  {:name :fn-id-by-name
+   :description "Fn row id (uuid) for a global fn name; nil when no fn with that name exists on the current branch. Free arg: `:fn-name` (text)."
+   :parent :get
+   :args {:coll :_fibn-row :key {:value :id} :default nil}}
+
+  ;; =============================================================================
   ;; NAMESPACE PATH WALKER — joins ns chain into a dotted path
   ;; =============================================================================
   ;;

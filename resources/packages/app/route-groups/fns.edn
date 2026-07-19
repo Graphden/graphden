@@ -30,6 +30,7 @@
                   :partial-execute-result-effects
                   :partial-mismatch-explainer
                   :partial-provenance
+                  :partial-return-type-rule
                   :partial-fn-picker-incompat
                   :partial-execute-result
                   :partial-execute-result-inline

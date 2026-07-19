@@ -306,7 +306,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
 | `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random / process / raw-sql) + the canonical effect tag |
 | `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom. Fn-type panels include a read-only `eff: pure / <chips>` row (`makeEffectsReadOnly`) showing the slot-level effect constraint — separate from the editable tightening widgets below. Exports `appendResolutionSection(host, prov, opts?)` — the shared 4-tier + inheritance-chain renderer; `opts.onNavigate(fnId)` makes ancestor / source-fn labels clickable links |
-| `editor-provenance-popover.js` | Click-driven singleton popover anchored to the `↳` provenance badge on an arg-overlay's type-chip. Calls `slotTypeProvenance` for data + `appendResolutionSection` for rendering (with `onNavigate: selectFn`), so every ancestor / source-fn row navigates on click. Surfaces the FULL narrowing chain without forcing the user to open the inline `▸/▾` type-expand panel |
+| `editor-provenance-popover.js` | Click-driven singleton popover for BOTH `↳` provenance badges. Slot-narrowing variant fetches `GET /partials/provenance?binding-id=…`; return-type-rule variant fetches `GET /partials/return-type-rule?fn=…` (rule-owner walk + `:_rtr-narratives` prose + Inputs table all server-rendered). JS owns the singleton lifecycle, anchoring, and post-swap binding of `[data-explainer-close]` + `a[data-fn-id]` → `selectFn` navigation |
 | `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator, type-narrowing `↳` provenance badge). Column-flex outer: inline row of value+chip+trigger+mismatch sits over a drag-handle docked below. Exports `createTypeChip` (stacks base+constraint for refinements), `getTypeNarrowingInfo` (detects both `:type-override` and ref-return narrowing), and `createProvenanceBadge` (the `↳` glyph reused by edge-label overlays) |
 | `editor-overlay-edge-label.js` | Edge-label overlay (rename click, type-chip + inline-expand trigger, stacked type-narrowing chain, description badge, sequence add/remove, `↳` provenance badge for ref-binding narrowing). Anchored AFTER the taxi-bend so the shared part of a branching edge stays visible |
 | `editor-overlay-fn.js` | Fn-overlay renderer — ancestor rows, MI cells, paint state machine, `createFnOverlay` |
@@ -358,16 +358,14 @@ the type-system UI helper smoke tests, split by concern:
 # editor-overlay-type-expand.js. No DOM construction asserted here.
 node type-system-ui-types.test.js
 
-# ruleNarrators dispatch table — coverage check + per-rule prose
-# spot-checks. Trips when a new return-rule is registered without a
-# matching narrator template.
-node type-system-ui-narrators.test.js
-
 # appendResolutionSection (incl. multi-override visualization +
-# onNavigate spy), appendClosedEnumSection, appendEffectConstraintSection,
-# appendPopoverSection — DOM rendering of the provenance popover.
+# onNavigate spy) — DOM rendering of the inline resolution section.
 node type-system-ui-resolution.test.js
 ```
+
+(The return-type-rule popover's prose table lives in the graph now —
+`:_rtr-narratives` in `app/editor/fns.edn`, covered by the Clojure
+test `graphden.packages.app.rule-narratives-test`.)
 
 Each `*.test.js` file is a standalone Node script — exit code 0 = PASS,
 1 = FAIL. Run individually or via `./run-edit-tests.sh`.

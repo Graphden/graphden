@@ -87,6 +87,13 @@
       nil)))
 
 
+(def ^:private compile-pattern
+  "Compile each :relevant string once per run, not once per (pattern ×
+   changed-file) pair — a wide diff is thousands of files against ~50
+   patterns."
+  (memoize re-pattern))
+
+
 (defn relevant?
   "Does the diff make this check worth running? A check with no `:relevant`
    patterns always is; otherwise ≥1 changed path must match ≥1 pattern.
@@ -94,7 +101,7 @@
   [c changed]
   (or (nil? changed)
       (nil? (:relevant c))
-      (boolean (some (fn [pat] (some #(re-find (re-pattern pat) %) changed))
+      (boolean (some (fn [pat] (some #(re-find (compile-pattern pat) %) changed))
                      (:relevant c)))))
 
 
@@ -131,7 +138,14 @@
   [registry args]
   (let [groups-arg (flag-value args "--groups")
         wanted (when groups-arg
-                 (into #{} (map (comp keyword str/trim)) (str/split groups-arg #",")))
+                 (into #{}
+                       (comp (map str/trim) (remove str/blank?) (map keyword))
+                       (str/split groups-arg #",")))
+        ;; `--groups ""` would select ZERO checks — a green run that ran
+        ;; nothing. That can only be a caller bug; refuse it.
+        _ (when (and groups-arg (empty? wanted))
+            (throw (ex-info "--groups selected no groups (empty argument)"
+                            {:groups groups-arg})))
         since (flag-value args "--since")
         changed (when since (changed-files since))
         skip-arg (flag-value args "--skip")

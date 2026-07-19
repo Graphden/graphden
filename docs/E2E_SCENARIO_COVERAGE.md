@@ -53,9 +53,12 @@ matrix above absorbs them.
 
 - ✓ Add / remove / first-item (`edit-phase5-sequence`)
 - ✓ Sequence-items full coverage (`edit-sequence-items`)
-- ✓ Regression: sequence with fn-ref (`regression-sequence-fn-ref`)
-- ✓ Regression: value-binding migration on fn-ref
-  (`regression-migrate-on-fn-ref`)
+- ⚠ Regression: sequence with fn-ref (`regression-sequence-fn-ref`) —
+  MANUAL-ONLY: depends on the dev/test-only `examples` package, so no
+  runner picks it up (`run-edit-tests.sh` globs `edit-*` deliberately);
+  run by hand against a demo stack with examples loaded
+- ⚠ Regression: value-binding migration on fn-ref
+  (`regression-migrate-on-fn-ref`) — MANUAL-ONLY, same reason
 
 ### Type-row CRUD
 

@@ -70,3 +70,12 @@ Override `AUTH_TOKEN` / `GRAPHDEN_URL` via env vars to point at a
 different deployment. Test fns are named `test-edit-phase*` and are
 created/cleaned per-run, so it is safe to run against a non-pristine
 graph.
+
+## Manual smokes (not in any runner)
+
+- `contact-demo-smoke.js` — end-to-end smoke for the `/demo/contact`
+  page (runtime + built-in `submit-form` handler). Run by hand:
+  `node contact-demo-smoke.js`.
+- `regression-sequence-fn-ref.test.js` / `regression-migrate-on-fn-ref.test.js`
+  — need the dev/test-only `examples` package; deliberately outside the
+  `edit-*` glob. Run by hand against a demo stack with examples loaded.

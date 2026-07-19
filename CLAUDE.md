@@ -37,6 +37,7 @@ bb wt list             # every agent: branch, drift vs develop, last gate RESULT
 bb wt status           # same, plus the recent gate runs
 bb wt task <name>      # the task spec you were handed
 bb wt log <name>       # full transcript of your last gate run
+bb wt watch <name>     # follow a running gate: 60s ticks until RESULT, then print it
 bb wt bootstrap        # reprint the discussion-phase (nameless-agent) launch prompt
 bb wt kickoff <name>   # reprint the launch prompt for an already-claimed agent
 ```

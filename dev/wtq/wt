@@ -1036,12 +1036,24 @@ cmd_merge() {
   [ "$wt" != "$MAIN_WT" ]    || die "run 'wt merge' from a feature worktree, not the main checkout."
   bootstrap_node_modules "$wt"     # the gate runs bb ci in here — it needs the deps
 
+  # A queued merge INVALIDATES the previous verdict: `wt watch` and retry
+  # drivers read "no RESULT file" as "gate running/queued", and the load-wait
+  # below can hold that window open for minutes — a stale verdict here would
+  # be reported as if it were this run's outcome.
+  rm -f "$RESULT_DIR/$(basename "$wt")"
+
   # The per-check timeouts are ceilings measured on an idle box; starting the
   # gate into an oversubscribed host doesn't run slower, it gets KILLED or
   # times out spuriously (observed: load 14-21 from leftover load generators).
   # Wait for headroom instead of burning a serialized queue slot on a doomed
-  # run. Override the threshold with WTQ_LOAD_MAX (integer load1, default 8).
+  # run. Override the threshold with WTQ_LOAD_MAX — an INTEGER load1 bound
+  # (absolute, not per-core: the box this queue serializes is host-shared);
+  # anything non-integer falls back to the default rather than wedging the
+  # comparison below in an infinite error loop.
   local max_load="${WTQ_LOAD_MAX:-8}" load1
+  case "$max_load" in
+    ''|*[!0-9]*) warn "WTQ_LOAD_MAX='$max_load' is not an integer — using 8"; max_load=8 ;;
+  esac
   while :; do
     load1="$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)"
     [ "$load1" -lt "$max_load" ] && break

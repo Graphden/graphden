@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
@@ -94,6 +94,9 @@ jobs:
 
   coverage:
     name: coverage
+    # Instrumented run ~doubles the unit suite — main-only by design;
+    # develop landings are gated by the local wtq gate's plain suite.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -196,7 +199,7 @@ jobs:
           if [ -n "$NVD_API_KEY" ]; then
             echo "nvd.api-key=$NVD_API_KEY" > cljwatson.properties
           fi
-          bb security || echo "Security scan completed with warnings"
+          bb security
 
   outdated:
     name: outdated deps
@@ -339,14 +342,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Run shellcheck via Docker
+      - name: Run shellcheck via Docker (globbed — same set as bb shellcheck)
         run: |
+          # shellcheck disable=SC2046
           docker run --rm -v "$PWD:/src" -w /src \
             koalaman/shellcheck:stable \
-            tools/browser-test/run-edit-tests.sh \
-            .claude/hooks/check-ui-on-stop.sh \
-            .claude/hooks/remind-packages-quality-on-impls-edit.sh \
-            development/crac/build-checkpoint-in-container.sh
+            dev/wtq/wt $(git ls-files '*.sh')
+
+  registry-selftest:
+    name: ci-selftest + devtour
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          bb: latest
+
+      - name: CI selector self-test (scripts/ci_select.clj + checks.edn)
+        run: bb ci-test
+
+      - name: Developer-tour drift guard
+        run: bb devtour-check
 
   hadolint:
     name: hadolint (Dockerfile)

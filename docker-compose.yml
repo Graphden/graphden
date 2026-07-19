@@ -133,7 +133,6 @@ services:
         condition: service_completed_successfully
     environment:
       PORT: 8080
-      STORAGE_TYPE: postgres
       JDBC_URL: jdbc:postgresql://postgres:5432/graphden
       DB_USERNAME: graphden
       DB_PASSWORD: graphden

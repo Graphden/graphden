@@ -146,6 +146,12 @@
   (is (not (ci-select/relevant? {:relevant ["\\.clj$"]} #{"a.md"}))))
 
 
+(deftest empty-groups-arg-is-refused
+  ;; `--groups ""` would select ZERO checks — a green run that ran nothing.
+  (is (thrown? Exception (ci-select/select-checks real-registry ["--groups" ""])))
+  (is (thrown? Exception (ci-select/select-checks real-registry ["--groups" " , "]))))
+
+
 (let [{:keys [fail error]} (run-tests 'ci-select-test)]
   (when (pos? (+ fail error))
     (System/exit 1)))

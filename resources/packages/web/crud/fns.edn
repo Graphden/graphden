@@ -439,6 +439,11 @@
    :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
    :return-type :nullable-text}
 
+  {:name :declarable-effect-categories
+   :description "Sorted declarable effect-category names — the canonical `types.check/known-effect-categories` set (what sync accepts). Roster of `/partials/expects-effects-form`'s checkboxes."
+   :args {}
+   :return-type [:list :text]}
+
   {:name :type-name-kinds
    :description "Sorted `{:name :kind}` rows for the editor's type-name datalist — named type-rows classified via `compute-fn-role` plus the bare primitives. Backs `/partials/type-name-datalist`."
    :args {}

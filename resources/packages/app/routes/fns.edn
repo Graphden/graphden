@@ -169,6 +169,11 @@
    :parent :get-auth-required
    :args {:path "/partials/compatible-type-options" :handler :_partial-cto-handler}}
 
+  {:name :partial-expects-effects-form
+   :description "GET /partials/expects-effects-form?fn-id={uuid} — the declared-effects edit form (mode radios + the canonical category checkbox grid, pre-filled from the fn row). AUTH-REQUIRED — edit affordance."
+   :parent :get-auth-required
+   :args {:path "/partials/expects-effects-form" :handler :_partial-eef-handler}}
+
   {:name :partial-execute-result
    :description "GET /partials/execute-result?id={uuid} — execution body hiccup (scalar / list / record / tainted / large-JSON / 5MB-truncated / error). Consumed by `editor-execute-history.js` row-expand + `editor-execute.js` orchestrator after Run."
    :parent :get-auth-required

@@ -798,7 +798,7 @@
     :else #{}))
 
 
-(def ^:private known-effect-categories
+(def known-effect-categories
   "Effect tags graphden's runtime knows how to record. Each base-fn's
    side effects map to one of these via `cr/record-effect!`. A
    `:expects-effects` / `:effects` declaration carrying a tag outside
@@ -811,7 +811,13 @@
    `:expects-effects #{:process}` to opt into supervisor reconciliation)
    and `:raw-sql` for the raw SQL escape hatches (`:pg-query` /
    `:pg-execute` / `:pg-tx` / `:sql-query` / `:sql-exec`) that bypass
-   the org-scoped storage protocol."
+   the org-scoped storage protocol.
+
+   PUBLIC: also the option roster of the editor's declared-effects
+   form (`/partials/expects-effects-form`) — the one set drives both
+   what the form offers and what sync accepts, so the UI can never
+   offer an undeclarable category or omit a declarable one (the old
+   hand-copied JS list silently lacked `:process` / `:raw-sql`)."
   #{:db :env :io :network :time :random :process :raw-sql})
 
 

@@ -132,6 +132,28 @@
         (is (str/includes? body "no compatible types"))))))
 
 
+(deftest expects-effects-form-partial
+  ;; The category roster comes from the canonical
+  ;; known-effect-categories set — the old client grid listed six and
+  ;; made :process / :raw-sql undeclarable through the UI.
+  (let [{:keys [ctx storage]} *bootstrap*
+        handler-id (get (:all-name->id *bootstrap*) :_partial-eef-handler)
+        render (fn [fn-name]
+                 (:body (setup/exec-with-storage
+                          ctx storage handler-id
+                          {:request {:query-params
+                                     {"fn-id" (str (get (:all-name->id *bootstrap*) fn-name))}}})))]
+    (testing "no-contract fn: none-mode checked, full roster disabled"
+      (let [body (render :add)]
+        (doseq [cat ["db" "env" "io" "network" "time" "random" "process" "raw-sql"]]
+          (is (str/includes? body (str "value=\"" cat "\""))
+              (str cat " offered")))
+        (is (re-find #"checked=\"checked\"[^>]*value=\"none\"" body)
+            "no-contract mode pre-selected (hiccup sorts attrs alphabetically)")
+        (is (str/includes? body "disabled")
+            "checkboxes disabled while no contract")))))
+
+
 (deftest static-scaffold-parts
   (let [body (render-shell :add)]
     (doseq [marker ["execute-popover-header" "execute-history-toggle"

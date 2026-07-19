@@ -35,6 +35,7 @@
                   :partial-execute-popover
                   :partial-type-name-datalist
                   :partial-compatible-type-options
+                  :partial-expects-effects-form
                   :partial-execute-result
                   :partial-execute-result-inline
                   :partial-branch-popover

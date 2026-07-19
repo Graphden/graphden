@@ -60,6 +60,10 @@
                   "packages/app/editor/editor-namespace-picker.js"
                   "packages/app/editor/editor-edit-validation.js"
                   "packages/app/editor/editor-edit-modes.js"
+                  ;; fn-level + type-level edit modes — split out of
+                  ;; editor-edit-modes.js (which keeps the skeleton).
+                  "packages/app/editor/editor-edit-modes-fn.js"
+                  "packages/app/editor/editor-edit-modes-type.js"
                   "packages/app/editor/editor-edit-reparent.js"
                   "packages/app/editor/editor-execute-result.js"
                   "packages/app/editor/editor-execute-history.js"
@@ -2779,6 +2783,121 @@
    :description "Ring handler for `GET /partials/compatible-type-options` — the compatible-type <option> list as `text/html`."
    :parent :html-ok-response
    :args {:body :_cto-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; declared-effects form — `GET /partials/expects-effects-form?fn-id=…`.
+  ;; The mode radios + category checkbox grid, pre-filled from the fn
+  ;; row's `:expects-effects` (nil = no contract, [] = pinned purity,
+  ;; list = explicit). The checkbox roster is the canonical
+  ;; `known-effect-categories` set — the old hand-built JS grid listed
+  ;; six categories and silently made `:process` / `:raw-sql`
+  ;; undeclarable through the UI. JS owns only the
+  ;; radio→enable/disable toggle and the save collect.
+
+  {:name :_eef-fn-id
+   :parent :parse-uuid
+   :args {:string {:parent :query-param
+                   :args {:request {:as :request}
+                          :param-name {:value "fn-id"}}}}}
+
+  {:name :_eef-row
+   :parent :fn-row-by-id
+   :args {:fn-id {:ref :_eef-fn-id :type :nullable-uuid}}}
+
+  {:name :_eef-declared
+   :description "The fn's `:expects-effects` — nil = no contract, [] = pinned purity, non-empty = explicit set."
+   :parent :get
+   :args {:coll :_eef-row :key {:value :expects-effects} :default nil}}
+
+  {:name :_eef-has-contract?
+   :parent :some?
+   :args {:value :_eef-declared}}
+
+  {:name :_eef-name-of
+   :parent :keyword-to-str
+   :args {:keyword {:as :item}}}
+
+  {:name :_eef-declared-names
+   :parent :map
+   :args {:func :_eef-name-of
+          :coll {:parent :coalesce
+                 :args {:value :_eef-declared :default {:value []}}}}}
+
+  {:name :_eef-cat-checked?
+   :parent :some?
+   :args {:value {:parent :position-in
+                  :args {:coll :_eef-declared-names :value {:as :item}}}}}
+
+  {:name :_eef-cb-attrs
+   :description "Per-category checkbox attrs — checked when the contract lists it, disabled while in no-contract mode."
+   :parent :if
+   :args {:test :_eef-has-contract?
+          :then {:parent :if
+                 :args {:test :_eef-cat-checked?
+                        :then {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :value} {:value :checked}]
+                                      :vals [{:value "checkbox"} {:as :item} {:value "checked"}]}}
+                        :else {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :value}]
+                                      :vals [{:value "checkbox"} {:as :item}]}}}}
+          :else {:parent :zipmap
+                 :args {:keys [{:value :type} {:value :value} {:value :disabled}]
+                        :vals [{:value "checkbox"} {:as :item} {:value "disabled"}]}}}}
+
+  {:name :_eef-checkbox
+   :parent :hiccup
+   :args {:tag {:value "label"}
+          :attrs {:value {:class "expects-effects-checkbox"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "input"}
+                             :attrs :_eef-cb-attrs
+                             :children {:value []}}}
+                     {:parent :str-join
+                      :args {:coll [{:value " "} {:as :item}]
+                             :separator {:value ""}}}]}}
+
+  {:name :_eef-grid
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "expects-effects-grid"}}
+          :children [{:parent :map
+                      :args {:func :_eef-checkbox
+                             :coll :declarable-effect-categories}}]}}
+
+  {:name :_eef-mode-row
+   :parent :if
+   :args {:test :_eef-has-contract?
+          :then {:value [:div {:class "expects-effects-mode-row"}
+                         [:label {:title "Drift checker is off for this fn (default)."}
+                          [:input {:type "radio" :name "ee-mode" :value "none"}]
+                          " no contract"]
+                         [:label {:title "Drift checker compares computed effects against the ticked set. Empty = pinned purity."}
+                          [:input {:type "radio" :name "ee-mode" :value "contract"
+                                   :checked "checked"}]
+                          " explicit contract"]]}
+          :else {:value [:div {:class "expects-effects-mode-row"}
+                         [:label {:title "Drift checker is off for this fn (default)."}
+                          [:input {:type "radio" :name "ee-mode" :value "none"
+                                   :checked "checked"}]
+                          " no contract"]
+                         [:label {:title "Drift checker compares computed effects against the ticked set. Empty = pinned purity."}
+                          [:input {:type "radio" :name "ee-mode" :value "contract"}]
+                          " explicit contract"]]}}}
+
+  {:name :_eef-fragment
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "expects-effects-edit"}}
+          :children [:_eef-mode-row :_eef-grid]}}
+
+  {:name :_eef-html
+   :parent :render-hiccup
+   :args {:hiccup :_eef-fragment}}
+
+  {:name :_partial-eef-handler
+   :description "Ring handler for `GET /partials/expects-effects-form?fn-id=<uuid>` — the declared-effects edit form as `text/html`."
+   :parent :html-ok-response
+   :args {:body :_eef-html}}
 
   ;; ---------------------------------------------------------------------
   ;; fn-picker incompat-explainer. The fn-picker popover surfaces

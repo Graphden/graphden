@@ -20,6 +20,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
+    [graphden.types.check :as tcheck]
     [graphden.schema.graph.schema :as graph-schema]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check.literals :as types-lit]
@@ -424,6 +425,15 @@
   (registry/rule-owner-of fn-name))
 
 
+(defbase declarable-effect-categories
+  "Sorted vec of the declarable effect-category names — the canonical
+   `types.check/known-effect-categories` set, the same one sync-time
+   validation accepts. Single source for the declared-effects form's
+   checkbox roster."
+  []
+  (vec (sort (map name tcheck/known-effect-categories))))
+
+
 (defbase type-name-kinds
   "Sorted `{:name :kind}` rows for the editor's type-name datalist —
    named type-rows classified via `compute-fn-role` plus the bare
@@ -697,6 +707,7 @@
    :fn-type-bound-effects fn-type-bound-effects
    :rich-type-of-name rich-type-of-name
    :rule-owner-of-name rule-owner-of-name
+   :declarable-effect-categories declarable-effect-categories
    :type-name-kinds type-name-kinds
    :compatible-type-names compatible-type-names
    :_types-usages-apply _types-usages-apply

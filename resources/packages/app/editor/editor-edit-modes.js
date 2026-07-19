@@ -433,438 +433,14 @@ function enterArgRenameEditMode(arg, anchorEl, displayLabel) {
   });
 }
 
-// --- fn rename (Phase 1) ---
-//
-// Click ✎ pencil on the root fn name → rename popover. After save,
-// the sidebar tree needs a refresh too, so we go through the heavy
-// `initGraph()` path rather than patch-in-place.
-
-// Extend = create a new composed fn with `fn` as parent, in the same
-// namespace. Replaces the misguided "add a new arg to this fn"
-// pattern that the storage layer now correctly rejects (the new fn
-// is the legitimate place for new args / renames). After save, the
-// editor navigates to the new fn so the user can immediately add
-// `:as` renames + value bindings to extend its interface.
-function enterExtendEditMode(fn, anchorEl) {
-  if (!fn) return;
-  let pendingName = '';
-  openInlineEditPopover({
-    anchorEl,
-    ariaLabel: 'Extend (create child fn)',
-    makeControl(root) {
-      const hint = document.createElement('div');
-      hint.className = 'arg-value-edit-hint';
-      hint.textContent = 'Creates a new fn with :parent '
-        + (fn.name || '(this fn)') + '. Open it to add new bindings or renames.';
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'arg-value-edit-input';
-      input.placeholder = 'New fn name';
-      root.insertBefore(input, root.firstChild);
-      root.insertBefore(hint, root.firstChild);
-      return input;
-    },
-    async doSave(input) {
-      const newName = (input.value || '').trim();
-      if (!newName) return false;
-      const opKey = 'extend:' + fn.id + ':' + newName;
-      if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return false;
-      pendingName = newName;
-      const fields = { name: newName, 'parent-ids': fn.id };
-      if (fn['namespace-id']) fields['namespace-id'] = fn['namespace-id'];
-      const work = async () => {
-        try {
-          const r = await postEntity('fn', fields);
-          if (r && r.status >= 200 && r.status < 300) return true;
-        } catch (_) {}
-        return false;
-      };
-      return (typeof withBusy === 'function')
-        ? await withBusy(opKey, 'Creating ' + newName + '…', work)
-        : await work();
-    },
-    onSaved() {
-      // Refetch + auto-select the new fn so the user sees its empty
-      // body and can start adding bindings via the existing edit
-      // affordances. The whole "init + select" sequence runs under
-      // the same busy slot as the create, so the banner stays up
-      // until the user-visible state matches the DB.
-      const opKey = 'extend-finalise:' + fn.id;
-      const finalise = async () => {
-        if (typeof initGraph === 'function') await initGraph();
-        if (pendingName && typeof selectFnByName === 'function') {
-          selectFnByName(pendingName);
-        }
-      };
-      if (typeof withBusy === 'function') {
-        withBusy(opKey, 'Loading ' + (pendingName || 'new fn') + '…', finalise);
-      } else {
-        finalise();
-      }
-    }
-  });
-}
 
 
-function enterFnRenameEditMode(fn, anchorEl) {
-  if (!fn) return;
-  openInlineEditPopover({
-    anchorEl,
-    ariaLabel: 'Rename function',
-    makeControl(root) {
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'arg-value-edit-input';
-      input.value = fn.name || '';
-      root.insertBefore(input, root.firstChild);
-      return input;
-    },
-    async doSave(input) {
-      const newName = (input.value || '').trim();
-      if (!newName) return false;
-      try {
-        const r = await authMutate('PUT',
-                                   API.api_entities_type_id('fn', fn.id),
-                                   { name: newName });
-        if (r?.ok) return true;
-      } catch (_) {}
-      return false;
-    },
-    onSaved() { if (typeof initGraph === 'function') initGraph(); }
-  });
-}
-
-// --- fn return-type select (Phase 1) ---
-//
-// Click the `→ <type>` strip on the root fn card → small `<select>`
-// dropdown of `value_kind` enum entries → save.
-
-// --- :expects-effects contract edit ---
-//
-// Three states the backend recognises:
-//   - null / undefined    "no contract"        no drift checking
-//   - []                  "explicit purity"    drift = any effect at all
-//   - ["db", "io", …]     "contract"           drift = effect ∉ this set
-// The picker exposes a "no contract" radio + 6 effect checkboxes; if
-// no effects are ticked but "explicit purity" is chosen, we POST `[]`.
-function enterExpectsEffectsEditMode(fn, anchorEl, currentDeclared) {
-  if (!fn) return;
-  const cats = ['db', 'env', 'io', 'network', 'time', 'random'];
-  const initial = Array.isArray(currentDeclared) ? currentDeclared : null;
-  openInlineEditPopover({
-    anchorEl,
-    ariaLabel: 'Edit declared effects',
-    makeControl(root) {
-      const wrap = document.createElement('div');
-      wrap.className = 'expects-effects-edit';
-      // Mode picker — choose between "no contract" and "explicit
-      // contract" — the second mode unlocks the checkbox grid.
-      const modeNone = document.createElement('label');
-      const noneRadio = document.createElement('input');
-      noneRadio.type = 'radio';
-      noneRadio.name = 'ee-mode';
-      noneRadio.value = 'none';
-      noneRadio.checked = initial == null;
-      modeNone.appendChild(noneRadio);
-      modeNone.appendChild(document.createTextNode(' no contract'));
-      modeNone.title = 'Drift checker is off for this fn (default).';
-
-      const modeContract = document.createElement('label');
-      const contractRadio = document.createElement('input');
-      contractRadio.type = 'radio';
-      contractRadio.name = 'ee-mode';
-      contractRadio.value = 'contract';
-      contractRadio.checked = initial != null;
-      modeContract.appendChild(contractRadio);
-      modeContract.appendChild(document.createTextNode(' explicit contract'));
-      modeContract.title = 'Drift checker compares computed effects against the ticked set. Empty = pinned purity.';
-
-      const modeRow = document.createElement('div');
-      modeRow.className = 'expects-effects-mode-row';
-      modeRow.appendChild(modeNone);
-      modeRow.appendChild(modeContract);
-      wrap.appendChild(modeRow);
-
-      const grid = document.createElement('div');
-      grid.className = 'expects-effects-grid';
-      const boxes = {};
-      cats.forEach((c) => {
-        const lab = document.createElement('label');
-        lab.className = 'expects-effects-checkbox';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.value = c;
-        cb.checked = !!(initial && initial.indexOf(c) >= 0);
-        cb.disabled = initial == null;
-        boxes[c] = cb;
-        lab.appendChild(cb);
-        lab.appendChild(document.createTextNode(' ' + c));
-        grid.appendChild(lab);
-      });
-      wrap.appendChild(grid);
-
-      const refreshDisabled = () => {
-        const inContract = contractRadio.checked;
-        cats.forEach(c => { boxes[c].disabled = !inContract; });
-      };
-      noneRadio.addEventListener('change', refreshDisabled);
-      contractRadio.addEventListener('change', refreshDisabled);
-
-      root.insertBefore(wrap, root.firstChild);
-      // Expose collected state on the control element for doSave to
-      // read — keeping doSave's signature single-argument matches the
-      // shape openInlineEditPopover uses for every other edit-mode.
-      wrap._collect = () => {
-        if (noneRadio.checked) return null;
-        return cats.filter(c => boxes[c].checked);
-      };
-      return wrap;
-    },
-    async doSave(control) {
-      const value = control._collect();
-      // The form payload encodes the three states via a single
-      // string field: "" (clear → nil), "[]" (explicit empty),
-      // or a comma-separated list. parse-fn-from-form does the
-      // round-trip.
-      const wireValue =
-        value == null       ? '' :
-        value.length === 0  ? '[]' :
-                              value.join(',');
-      try {
-        const r = await authMutate('PUT',
-          API.api_entities_type_id('fn', fn.id),
-          { 'expects-effects': wireValue });
-        if (r?.ok) {
-          patchFnFieldInState(fn.id, 'expects-effects', value);
-          return true;
-        }
-      } catch (_) {}
-      return false;
-    },
-    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
-  });
-}
 
 
-function enterFnReturnTypeEditMode(fn, anchorEl) {
-  if (!fn) return;
-  openInlineEditPopover({
-    anchorEl,
-    ariaLabel: 'Change return type',
-    makeControl(root) {
-      const select = document.createElement('select');
-      select.className = 'arg-value-edit-input';
-      const kinds = (typeof VALUE_KINDS !== 'undefined') ? VALUE_KINDS
-                  : ['null','uuid','text','int','bool','numeric','timestamptz','jsonb','bytes','any','fn','sequence'];
-      // First option is "(none)" so the user can clear return-type.
-      const noneOpt = document.createElement('option');
-      noneOpt.value = '';
-      noneOpt.textContent = '(none)';
-      select.appendChild(noneOpt);
-      kinds.forEach(k => {
-        const o = document.createElement('option');
-        o.value = k;
-        o.textContent = k;
-        if (fn['return-type'] === k) o.selected = true;
-        select.appendChild(o);
-      });
-      root.insertBefore(select, root.firstChild);
-      return select;
-    },
-    async doSave(select) {
-      try {
-        const r = await authMutate('PUT',
-                                   API.api_entities_type_id('fn', fn.id),
-                                   { 'return-type': select.value });
-        if (r?.ok) {
-          patchFnFieldInState(fn.id, 'return-type', select.value || null);
-          return true;
-        }
-      } catch (_) {}
-      return false;
-    },
-    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
-  });
-}
-
-// --- arg type flip (Phase 2) ---
-//
-// Type-chip click → small select of `value_kind` enum. On save we
-// orchestrate two PUTs to /api/entities/arg/:id:
-//
-//   1. type=<new>&value=&ref-id=  — backend doesn't cascade type
-//      changes, so we have to wipe both bindings explicitly. The
-//      permissive parse honours empty form values now (Phase 2
-//      backend change).
-//   2. (only when new type is `:fn`) ref-id=<picked-fn-id> — opens
-//      the fn-picker and writes the chosen ref-id, then refetches.
-//
-// Refetch is `initGraph()` because flipping type→fn restructures
-// the canvas (arg-value node disappears, ref-edge appears).
-
-// Populate `select` with every type-name T such that
-// `T ⊆ expectedSlotType(arg)` per the server's alias-aware `subtype?`,
-// so the dropdown only lists types the slot can legally narrow to —
-// an fn-type slot like `:handler` never offers `:int`. One
-// server-rendered option list (`/partials/compatible-type-options`,
-// primitives included) — the per-name fan-out is gone.
-async function populateCompatibleTypes(arg, select, cur, loadingOpt) {
-  if (typeof expectedSlotType !== 'function') return;
-  let expected = expectedSlotType(arg);
-  // A null `expected` does NOT mean "nothing is compatible" — most of the time it
-  // means the slots simply have not arrived yet. `initGraph()` rebuilds `lookups`
-  // from `?scope=tree`, which carries namespaces + counts and NO slots; the slot /
-  // binding rows land later, per view, through `ensureSubtreeFor()`. Open this
-  // popover inside that window — the chip on screen is still the previous render's
-  // — and `lookups.slotMap` is empty, so the slot is unknown and the picker used to
-  // quietly drop its "loading…" placeholder and offer the current type alone.
-  // Nothing re-ran it when the subtree landed, so the user was left with a type
-  // picker that could not change the type, with no error to explain it.
-  //
-  // Measured, at the moment of the call rather than after the fact:
-  //   {slotMapSize: 0, slotKnown: false, result: null}   <- the click
-  //   {slotMapSize: 1, slotKnown: true,  result: "any"}  <- re-renders, too late
-  //
-  // So wait for the payload that carries slots, then ask again. `ensureSubtreeFor`
-  // is idempotent and hands back the in-flight fetch, so this costs nothing when
-  // the subtree is already there.
-  if (!expected && typeof ensureSubtreeFor === 'function') {
-    try {
-      await ensureSubtreeFor(selectedFnId || arg?.['fn-id']);
-    } catch (_) { /* fall through — reported as "no compatible types" below */ }
-    expected = expectedSlotType(arg);
-  }
-  if (!expected) {
-    if (loadingOpt) loadingOpt.remove();
-    return;
-  }
-  await loadCompatibleTypeOptions(select, expected,
-                                  { current: cur, includePrimitives: true });
-  if (loadingOpt) loadingOpt.remove();
-}
 
 
-function enterArgTypeEditMode(arg, anchorEl) {
-  if (!arg) return;
-  // Capture pre-edit binding state so we can roll back if the user
-  // changes type to `:fn`, then cancels the chained fn-picker. Without
-  // this revert, the row is left as `:fn` with no ref — an orphaned
-  // mismatch the user has to discover via the red ring. Reverting
-  // makes "I changed my mind" a non-destructive operation.
-  const preEdit = {
-    typeOverrideFnId: arg['type-override-fn-id'] || '',
-    valueJson: arg.value == null ? '' : JSON.stringify(arg.value),
-    refFnId: arg['ref-id'] || arg['ref-fn-id'] || '',
-    type: arg.type ? String(arg.type).replace(/^:/, '') : null,
-  };
-  openInlineEditPopover({
-    anchorEl,
-    ariaLabel: 'Change arg type',
-    makeControl(root) {
-      const select = document.createElement('select');
-      select.className = 'arg-value-edit-input';
-      const cur = arg.type ? String(arg.type).replace(/^:/, '') : '';
-      // Seed with the current type so the popover renders something
-      // immediately; the rest of the compatible options stream in
-      // asynchronously below (the subtype filter needs the server's
-      // alias-aware `subtype?` predicate, no JS analogue handles
-      // refinements / records / fn-types fully).
-      if (cur) {
-        // `selected=true` + the option being the very first item is
-        // enough signal for the user; appending " (current)" was
-        // redundant chrome the inline-expand panel already dropped.
-        const o = document.createElement('option');
-        o.value = cur;
-        o.textContent = cur;
-        o.selected = true;
-        select.appendChild(o);
-      }
-      const loading = document.createElement('option');
-      loading.value = '';
-      loading.textContent = 'loading compatible types…';
-      loading.disabled = true;
-      select.appendChild(loading);
-      root.insertBefore(select, root.firstChild);
-      // Fire-and-forget async populate. Only narrows the picker — if
-      // it fails, user keeps the current-only option (still valid).
-      populateCompatibleTypes(arg, select, cur, loading);
-      return select;
-    },
-    async doSave(select) {
-      const newType = select.value;
-      const curType = arg.type ? String(arg.type).replace(/^:/, '') : null;
-      if (newType === curType) return true;  // no-op
-      // Type override = binding's `:type-override-fn-id` pointing at
-      // the type-row whose name matches the picker selection. The
-      // picker offers PRIMITIVES (`:text`, `:int`, …) AND
-      // REFINEMENTS (`:non-blank-text`, `:port`, …) — both are
-      // valid override targets, the only constraint is
-      // "parent-less" (rules out composed fn-defs that
-      // happen to share a name). The earlier "primitive only"
-      // filter (`!base-fn-id && !element-fn-id`) rejected
-      // refinements which the picker happily listed, leaving the
-      // user staring at a silent 400 from `writeBindingFields`.
-      const overrideFnId = await (async () => {
-        if (!newType || !graphData) return '';
-        const parentLess = f => !f['parent-ids'] || f['parent-ids'].length === 0;
-        // Fast path: an already-loaded parent-less type-fn.
-        let fn = (graphData.fns || []).find(f => f.name === newType && parentLess(f));
-        // Slow path: the type-fn (primitive / refinement) may not be loaded —
-        // it lives in the root bucket. Resolve it by name via the server.
-        if (!fn && typeof resolveFnByName === 'function') {
-          const resolved = await resolveFnByName(newType);
-          if (resolved && parentLess(resolved)) fn = resolved;
-        }
-        return fn ? fn.id : '';
-      })();
-      if (!(await writeBindingFields(arg, {
-        'type-override-fn-id': overrideFnId,
-        value: '',
-        'ref-fn-id': ''
-      })).ok) return false;
-      // Local arg-shape mirror — used by onSaved below to decide
-      // whether to chain into the fn-picker. The next initGraph()
-      // refetches authoritative state, so this only needs to live
-      // until then.
-      arg.type = newType;
-      arg.value = null;
-      arg['ref-id'] = null;
-      return true;
-    },
-    onSaved() {
-      const newType = arg.type ? String(arg.type).replace(/^:/, '') : null;
-      if (newType === 'fn' && typeof openFnPicker === 'function') {
-        // Allow self-reference but exclude only the fn the arg is
-        // attached to to keep things sane. Re-parent (Phase 3) will
-        // need the descendants exclusion.
-        const fnId = arg['fn-id'];
-        openFnPicker({
-          anchorEl: document.getElementById('graph-surface') || document.body,
-          excludeIds: fnId ? [fnId] : [],
-          expectedType: expectedSlotType(arg),
-          onPick: async (fn) => { await saveArgRef(arg, fn.id); },
-          onCancel: async () => {
-            // Roll back the type change so the row doesn't end up
-            // as `:fn` with no value/ref. We re-issue a write
-            // restoring the pre-edit binding fields, then refresh.
-            // If the rollback itself fails the row is left in the
-            // pending state and the mismatch indicator + explainer
-            // will surface it — better to fail loud than silently
-            // half-revert.
-            await writeBindingFields(arg, {
-              'type-override-fn-id': preEdit.typeOverrideFnId,
-              value: preEdit.valueJson,
-              'ref-fn-id': preEdit.refFnId,
-            });
-            if (typeof initGraph === 'function') initGraph();
-          }
-        });
-      } else if (typeof initGraph === 'function') {
-        initGraph();
-      }
-    }
-  });
-}
+
+
 
 // --- free-arg binding (Phase 4) ---
 //
@@ -876,103 +452,41 @@ function enterArgTypeEditMode(arg, anchorEl) {
 // for `:fn` the chooser short-circuits straight to the picker
 // since a literal `fn-id` makes no sense.
 
-function enterFreeArgBindEditMode(arg, anchorEl) {
-  if (!arg) return;
-  closeInlineEdit();
-
-  // Slot-level type drives the default action.
-  const effType = arg.type ? String(arg.type).replace(/^:/, '') : null;
-
-  // For `:fn` slots the only sensible binding is a fn-ref; jump straight
-  // into the picker.
-  if (effType === 'fn') {
-    if (typeof openFnPicker === 'function') {
-      openFnPicker({
-        anchorEl,
-        excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
-        // The slot's structural type from /api/types — picker uses
-        // it to highlight type-compatible fns.
-        expectedType: expectedSlotType(arg),
-        onPick: async (fn) => { await saveArgRef(arg, fn.id); }
-      });
-    }
-    return;
-  }
-
-  // Otherwise show a literal-vs-ref chooser, then descend into the
-  // appropriate input.
+// Shared two-button "literal vs fn-ref" chooser popover — the same
+// skeleton serves the free-arg binder and the sequence-append flow
+// (different labels + follow-ups). Both buttons close the popover and
+// hand off; the skeleton's Save is inert.
+function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel, onLiteral, onRef }) {
   openInlineEditPopover({
     anchorEl,
-    ariaLabel: 'Bind free arg',
+    ariaLabel,
     makeControl(root) {
       const wrap = document.createElement('div');
       wrap.className = 'free-arg-bind-chooser';
-      const litBtn = document.createElement('button');
-      litBtn.type = 'button';
-      litBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
-      litBtn.textContent = 'Bind literal';
-      const refBtn = document.createElement('button');
-      refBtn.type = 'button';
-      refBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
-      refBtn.textContent = 'Bind fn-ref';
-      litBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeInlineEdit();
-        // Fall through into the existing arg-value editor.
-        enterArgValueEditMode(arg, anchorEl);
-      });
-      refBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeInlineEdit();
-        if (typeof openFnPicker === 'function') {
-          openFnPicker({
-            anchorEl,
-            excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
-            expectedType: expectedSlotType(arg),
-            onPick: async (fn) => { await saveArgRef(arg, fn.id); }
-          });
-        }
-      });
-      wrap.appendChild(litBtn);
-      wrap.appendChild(refBtn);
+      const mk = (label, handler) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+        btn.textContent = label;
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          closeInlineEdit();
+          handler();
+        });
+        wrap.appendChild(btn);
+        return btn;
+      };
+      const litBtn = mk(litLabel, onLiteral);
+      mk(refLabel, onRef);
       root.insertBefore(wrap, root.firstChild);
       return litBtn;  // initial focus target
     },
-    // Save isn't used here — both buttons handle their own flow and
-    // close the popover. The skeleton's Save still appears but does
-    // nothing useful; users will pick a button instead.
     async doSave() { return false; }
   });
 }
 
-// --- namespace-move (Phase 5) ---
-//
-// Click on the namespace strip on the root card → namespace-picker.
-// Pick → PUT namespace-id=<id>. After save, sidebar tree needs a
-// rebuild, so we go through initGraph() rather than patch-in-place.
 
-function enterNamespaceMoveEditMode(fn, anchorEl) {
-  if (!fn) return;
-  if (typeof openNamespacePicker !== 'function') return;
-  openNamespacePicker({
-    anchorEl,
-    onPick: async (picked) => {
-      try {
-        // (root) sentinel uses `namespace-id=` literal so the backend
-        // clears the FK column. `authMutate`'s field-map form strips
-        // empty-string values, so pass the pre-encoded body when the
-        // pick is the root namespace.
-        const body = picked.id
-          ? { 'namespace-id': picked.id }
-          : 'namespace-id=';
-        const r = await authMutate('PUT',
-                                   API.api_entities_type_id('fn', fn.id),
-                                   body);
-        if (r?.ok && typeof initGraph === 'function') initGraph();
-      } catch (_) {}
-    }
-  });
-}
+
 
 // --- sequence add/remove (Phase 5) ---
 //
@@ -991,42 +505,21 @@ async function appendSequenceItem(fnId, anchorEl, expectedType) {
   // Two-step UX mirroring free-arg binding: pick "Literal" or "Fn-ref",
   // then enter the value / pick the fn. The endpoint accepts the
   // chosen body in the same request, so we wait for the user's pick.
-  openInlineEditPopover({
+  openLiteralVsRefChooser({
     anchorEl: anchorEl || document.getElementById('graph-surface') || document.body,
     ariaLabel: 'Append sequence item',
-    makeControl(root) {
-      const wrap = document.createElement('div');
-      wrap.className = 'free-arg-bind-chooser';
-      const litBtn = document.createElement('button');
-      litBtn.type = 'button';
-      litBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
-      litBtn.textContent = 'Append literal';
-      const refBtn = document.createElement('button');
-      refBtn.type = 'button';
-      refBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
-      refBtn.textContent = 'Append fn-ref';
-      litBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeInlineEdit();
-        promptLiteralForAppend(fnId, anchorEl, expectedType);
-      });
-      refBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeInlineEdit();
-        if (typeof openFnPicker === 'function') {
-          openFnPicker({
-            anchorEl: anchorEl || document.body,
-            excludeIds: [fnId],
-            onPick: async (fn) => { await postSequenceAppend(fnId, { ref: fn.id }); }
-          });
-        }
-      });
-      wrap.appendChild(litBtn);
-      wrap.appendChild(refBtn);
-      root.insertBefore(wrap, root.firstChild);
-      return litBtn;
-    },
-    async doSave() { return false; }
+    litLabel: 'Append literal',
+    refLabel: 'Append fn-ref',
+    onLiteral: () => promptLiteralForAppend(fnId, anchorEl, expectedType),
+    onRef: () => {
+      if (typeof openFnPicker === 'function') {
+        openFnPicker({
+          anchorEl: anchorEl || document.body,
+          excludeIds: [fnId],
+          onPick: async (fn) => { await postSequenceAppend(fnId, { ref: fn.id }); }
+        });
+      }
+    }
   });
 }
 
@@ -1165,11 +658,3 @@ async function saveArgRef(arg, refFnId) {
   return false;
 }
 
-function patchFnFieldInState(fnId, field, value) {
-  if (!graphData || !Array.isArray(graphData.fns)) return;
-  for (const f of graphData.fns) {
-    if (f && f.id === fnId) { f[field] = value; break; }
-  }
-  if (typeof buildLookups === 'function') lookups = buildLookups(graphData);
-  if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
-}

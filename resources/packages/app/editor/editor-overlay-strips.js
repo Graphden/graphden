@@ -312,7 +312,7 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
         editBtn.setAttribute('aria-label', editBtn.title);
         editBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          enterExpectsEffectsEditMode(cardFnEntity, editBtn, declared);
+          enterExpectsEffectsEditMode(cardFnEntity, editBtn);
         });
         effRow.appendChild(editBtn);
       }

@@ -72,18 +72,87 @@
   (edn/read-string (slurp "scripts/checks.edn")))
 
 
+(defn- flag-value
+  [args flag]
+  (second (drop-while #(not= flag %) args)))
+
+
+(defn- changed-files
+  "Repo-relative paths that differ from `since` — committed AND uncommitted
+   (`git diff`) plus untracked (`git ls-files --others`), so a scoped local run
+   never misses a file the author just created. Returns nil (= no scoping,
+   run everything) when git can't answer — a bad ref must widen the run, not
+   silently narrow it."
+  [since]
+  (try
+    (let [diff (p/shell {:out :string :err :string :continue true}
+                        "git" "diff" "--name-only" since)
+          untracked (p/shell {:out :string :err :string :continue true}
+                             "git" "ls-files" "--others" "--exclude-standard")]
+      (if (and (zero? (:exit diff)) (zero? (:exit untracked)))
+        (into #{}
+              (remove str/blank?)
+              (concat (str/split-lines (:out diff))
+                      (str/split-lines (:out untracked))))
+        (do (println (str yellow "⚠ --since " since ": git diff failed — running every check" reset))
+            nil)))
+    (catch Exception e
+      (println (str yellow "⚠ --since " since ": " (ex-message e) " — running every check" reset))
+      nil)))
+
+
+(defn- relevant?
+  "Does the diff make this check worth running? A check with no `:relevant`
+   patterns always is; otherwise ≥1 changed path must match ≥1 pattern.
+   With no diff info (nil `changed`) everything is relevant — conservative."
+  [c changed]
+  (or (nil? changed)
+      (nil? (:relevant c))
+      (boolean (some (fn [pat] (some #(re-find (re-pattern pat) %) changed))
+                     (:relevant c)))))
+
+
 (defn- select-checks
-  "The checks to run for `args`. `--groups a,b` restricts to those groups; with
-   no `--groups` the whole registry runs (lint + test + info). Each selected
-   entry gets its `:cmd` — `bb <task>`, the single command source."
+  "Partitions the registry for `args` into `{:run … :scoped … :manual …}`.
+
+   `--groups a,b`  restricts to those groups (no key = whole registry).
+   `--since <ref>` diff-scopes: checks whose `:relevant` patterns (see
+                   scripts/checks.edn) match no changed file land in :scoped.
+   `--skip a,b`    force-skips by check name or group name — :manual. The
+                   caller (the landing gate) is expected to announce it, so a
+                   green scoped run is never mistaken for a full one.
+
+   `:post-test` reads what the `:test` wave writes (`bb perf` grades
+   perf/runs/*.edn) — if no :test check will run, :post-test is scoped out
+   too, whatever its own patterns say: grading a stale run passes on a
+   regression it never saw.
+
+   Every runnable entry gets its `:cmd` — `bb <task>`, the single command
+   source."
   [args]
-  (let [groups-arg (second (drop-while #(not= "--groups" %) args))
+  (let [groups-arg (flag-value args "--groups")
         wanted (when groups-arg
-                 (into #{} (map (comp keyword str/trim)) (str/split groups-arg #",")))]
-    (into []
-          (comp (filter (fn [c] (or (nil? wanted) (contains? wanted (:group c)))))
-                (map (fn [c] (assoc c :cmd ["bb" (:bb c)]))))
-          registry)))
+                 (into #{} (map (comp keyword str/trim)) (str/split groups-arg #",")))
+        since (flag-value args "--since")
+        changed (when since (changed-files since))
+        skip-arg (flag-value args "--skip")
+        skip-set (when skip-arg
+                   (into #{} (map str/trim) (str/split skip-arg #",")))
+        in-groups (filterv (fn [c] (or (nil? wanted) (contains? wanted (:group c))))
+                           registry)
+        manual? (fn [c] (and skip-set
+                             (or (contains? skip-set (:name c))
+                                 (contains? skip-set (name (:group c))))))
+        {manual true rest' false} (group-by (comp boolean manual?) in-groups)
+        {run true scoped false} (group-by #(relevant? % changed) rest')
+        tests-run? (boolean (some #(= :test (:group %)) run))
+        {post-orphaned true run false} (group-by #(and (not tests-run?)
+                                                       (= :post-test (:group %)))
+                                                 run)]
+    {:run (mapv (fn [c] (assoc c :cmd ["bb" (:bb c)])) (vec run))
+     :scoped (into (vec scoped) post-orphaned)
+     :manual (vec manual)
+     :since since}))
 
 
 (defn has-warnings?
@@ -114,6 +183,8 @@
     :timeout (str red "⏱" reset)
     :warning (str yellow "⚠" reset)
     :skipped (str yellow "⊘" reset)
+    :scoped (str yellow "⊘" reset)
+    :manual-skip (str yellow "⊘" reset)
     "?"))
 
 
@@ -265,9 +336,21 @@
 
 (defn run-ci
   []
-  (let [;; The check set + its metadata (bb task, timeout, group) come from the
-        ;; registry in `scripts/checks.edn`; `--groups a,b` narrows it.
-        checks (select-checks *command-line-args*)
+  (let [;; The check set + its metadata (bb task, timeout, group, relevant
+        ;; paths) come from the registry in `scripts/checks.edn`; `--groups`
+        ;; narrows it, `--since` diff-scopes it, `--skip` force-skips.
+        {checks :run scoped :scoped manual :manual since :since}
+        (select-checks *command-line-args*)
+        ;; Skipped checks are REPORTED, never silently dropped — a green
+        ;; scoped run must read as scoped in the log.
+        _ (when (seq scoped)
+            (println (str yellow "⊘ out of scope" reset " (--since " since
+                          ", per scripts/checks.edn :relevant): "
+                          (str/join " " (map :name scoped)))))
+        _ (when (seq manual)
+            (println (str yellow "⊘ MANUALLY SKIPPED" reset " (--skip): "
+                          (str/join " " (map :name manual))
+                          " — this run is PARTIAL by operator choice")))
         ;; The host-wide lock exists to keep two testcontainer stacks off one
         ;; Docker daemon — so it is only needed when the unit suite runs. A
         ;; lint-only run (`bb lint`, `bb lint-clj`) skips it and never waits on a
@@ -283,7 +366,9 @@
           (when lock-handle (release-lock! lock-handle)))))
     (try
       (let [;; Status tracking
-            status (atom (into {} (map (fn [c] [(:name c) :running]) checks)))
+            status (atom (merge (into {} (map (fn [c] [(:name c) :running]) checks))
+                                (into {} (map (fn [c] [(:name c) :scoped]) scoped))
+                                (into {} (map (fn [c] [(:name c) :manual-skip]) manual))))
             results (atom {})
             failed (atom false)
             start-time (System/currentTimeMillis)
@@ -402,8 +487,10 @@
         (println (str bold "═══════════════════════════════════════════════════════════════" reset))
         (println)
 
-        ;; Show each check result
-        (doseq [c checks]
+        ;; Show each check result — skipped ones included, in registry order,
+        ;; so a scoped run's report still lists what it did NOT do.
+        (doseq [c (let [order (into {} (map-indexed (fn [i c] [(:name c) i]) registry))]
+                    (sort-by (comp order :name) (concat checks scoped manual)))]
           (let [check-name (:name c)
                 r (get @results check-name)
                 s (get @status check-name)
@@ -421,6 +508,8 @@
                             :timeout (str " " red "TIMED OUT" reset)
                             :warning (str " " yellow "WARNINGS" reset)
                             :skipped (str " " yellow "SKIPPED" reset " (lint failed first)")
+                            :scoped (str " " yellow "SKIPPED" reset " (out of scope — no relevant files changed since " since ")")
+                            :manual-skip (str " " yellow "SKIPPED" reset " (--skip: operator choice)")
                             "")
                           (when ms (format "  %.1fs" (/ ms 1000.0)))
                           (when near-ceiling?
@@ -442,17 +531,23 @@
               ;; Skipped (unit suite gated off by a lint failure) is not "failed"
               ;; per-se, but it wasn't run — exclude it from the denominator so
               ;; the count reflects what actually executed.
-              total-count (count (remove (fn [c] (= :skipped (get @status (:name c)))) checks))]
+              total-count (count (remove (fn [c] (= :skipped (get @status (:name c)))) checks))
+              ;; A scoped/partial pass must SAY so on its verdict line — the
+              ;; gate log's last words are what a reader trusts.
+              scope-note (str (when (seq scoped)
+                                (str "; " (count scoped) " out of scope"))
+                              (when (seq manual)
+                                (str "; " (count manual) " SKIPPED by --skip")))]
           (println)
           (if @failed
             (do
               (println (str red bold "✗ CI FAILED" reset
                             " (" passed-count "/" total-count
-                            " checks passed in " (format "%.1fs" elapsed) ")"))
+                            " checks passed in " (format "%.1fs" elapsed) scope-note ")"))
               (System/exit 1))
             (println (str green bold "✓ CI PASSED" reset
                           " (" total-count "/" total-count
-                          " checks passed in " (format "%.1fs" elapsed) ")")))))
+                          " checks passed in " (format "%.1fs" elapsed) scope-note ")")))))
       (finally
         (when lock-handle (release-lock! lock-handle))))))
 

@@ -4,8 +4,8 @@
 ;; `bb lint-<group>`). Each check delegates to its `bb <bb>` task — the actual
 ;; command lives ONLY in that task, so this file never duplicates it; here we
 ;; hold just the metadata the runner needs: display name, which bb task runs it,
-;; a per-check timeout ceiling (ms, measured on an idle box), and the group it
-;; belongs to.
+;; a per-check timeout ceiling (ms, measured on an idle box), the group it
+;; belongs to, and which files make it relevant.
 ;;
 ;; Groups drive the command hierarchy:
 ;;   :clj :web :infra :docs :sec   — domain lint sub-groups (`bb lint-clj`, …)
@@ -16,27 +16,58 @@
 ;;                                   a wave with the runs it grades
 ;;   :info                         — non-blocking (a warning never fails the run)
 ;;
+;; `:relevant` — diff-scoping (the landing gate's `bb ci --since <ref>`): a
+;; vector of Java regexes matched (re-find) against each repo-relative changed
+;; path. With `--since`, a check runs iff ≥1 changed file matches ≥1 pattern.
+;; NO `:relevant` key = the check ALWAYS runs (typos scans identifiers in every
+;; file kind; gitleaks — any file can carry a secret; commitlint — the commits
+;; themselves are always new). Without `--since` the key is ignored and
+;; everything runs — scoping is opt-in, the conservative default stands.
+;; When editing a `bb` task's scan set, keep its `:relevant` in sync — a
+;; too-narrow pattern silently green-lights a change the check never saw.
+;;
 ;; `bb lint`  = every lint/commit group.
 ;; `bb ci`    = lint (fail-fast) -> test -> post-test  (+ :info alongside).
 ;; Order in this vector is the display order.
-[{:name "clj-kondo"     :bb "kondo"         :timeout 120000 :group :clj}
- {:name "splint"        :bb "splint"        :timeout 120000 :group :clj}
- {:name "cljstyle"      :bb "cljstyle"      :timeout 120000 :group :clj}
- {:name "biome"         :bb "biome"         :timeout  60000 :group :web}
- {:name "stylelint"     :bb "stylelint"     :timeout 120000 :group :web}
- {:name "shellcheck"    :bb "shellcheck"    :timeout 120000 :group :infra}
- {:name "hadolint"      :bb "hadolint"      :timeout 120000 :group :infra}
- {:name "actionlint"    :bb "actionlint"    :timeout  60000 :group :infra}
- {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs}
- {:name "lychee"        :bb "lychee"        :timeout  60000 :group :docs}
+[{:name "clj-kondo"     :bb "kondo"         :timeout 120000 :group :clj
+  :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
+ {:name "splint"        :bb "splint"        :timeout 120000 :group :clj
+  :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
+ {:name "cljstyle"      :bb "cljstyle"      :timeout 120000 :group :clj
+  :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
+ {:name "biome"         :bb "biome"         :timeout  60000 :group :web
+  :relevant ["\\.(js|mjs|jsonc?)$"]}
+ {:name "stylelint"     :bb "stylelint"     :timeout 120000 :group :web
+  :relevant ["\\.css$" "^\\.stylelintrc"]}
+ {:name "shellcheck"    :bb "shellcheck"    :timeout 120000 :group :infra
+  :relevant ["\\.sh$" "^dev/wtq/wt$"]}
+ {:name "hadolint"      :bb "hadolint"      :timeout 120000 :group :infra
+  :relevant ["^Dockerfile"]}
+ {:name "actionlint"    :bb "actionlint"    :timeout  60000 :group :infra
+  :relevant ["^\\.github/workflows/"]}
+ {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs
+  :relevant ["\\.md$" "^\\.markdownlint"]}
+ {:name "lychee"        :bb "lychee"        :timeout  60000 :group :docs
+  :relevant ["\\.md$" "^\\.lychee"]}
  {:name "typos"         :bb "typos"         :timeout  60000 :group :docs}
- {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs}
+ {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
+  :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"]}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}
- {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec}
- {:name "license-check" :bb "license-check" :timeout 120000 :group :sec}
+ {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec
+  :relevant ["^Dockerfile" "deps\\.edn$" "package(-lock)?\\.json$" "^\\.trivyignore"]}
+ {:name "license-check" :bb "license-check" :timeout 120000 :group :sec
+  :relevant ["deps\\.edn$" "package(-lock)?\\.json$"]}
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
- {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test}
- {:name "tests-unit"    :bb "test-unit"     :timeout 600000 :group :test}
- {:name "tests-perf"    :bb "test-perf"     :timeout 300000 :group :test}
- {:name "perf"          :bb "perf"          :timeout  60000 :group :post-test}
- {:name "outdated"      :bb "outdated"      :timeout 120000 :group :info}]
+ {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test
+  :relevant ["\\.(js|mjs)$" "^tools/runtime-test/"]}
+ {:name "tests-unit"    :bb "test-unit"     :timeout 600000 :group :test
+  :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
+             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/"]}
+ {:name "tests-perf"    :bb "test-perf"     :timeout 300000 :group :test
+  :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
+             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^perf/"]}
+ {:name "perf"          :bb "perf"          :timeout  60000 :group :post-test
+  :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
+             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^perf/"]}
+ {:name "outdated"      :bb "outdated"      :timeout 120000 :group :info
+  :relevant ["deps\\.edn$" "package(-lock)?\\.json$"]}]

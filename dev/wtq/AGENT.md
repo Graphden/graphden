@@ -87,8 +87,10 @@ You were started in one of two ways:
    batch of edits — it catches most gate-reds for pennies. Run targeted tests
    (`clojure -M:dev:test -m kaocha.runner --focus <ns>`) around the code you
    actually changed. A full local `bb ci` before queueing is OPTIONAL when you
-   are the only agent in the pool — the gate re-runs the identical `bb ci` on
-   the merged result anyway, so a pre-queue full run only duplicates it. When
+   are the only agent in the pool — the gate re-runs `bb ci` on the merged
+   result anyway (diff-scoped via `--since`: checks whose `:relevant` paths in
+   `scripts/checks.edn` saw no change are skipped visibly; `WTQ_CI_SKIP=a,b`
+   force-skips a stage when you must, announced in the gate log), so a pre-queue full run only duplicates it. When
    `bb wt list` shows OTHER claimed agents, go `bb ci`-green before queueing:
    a red gate then burns a ~35-min serialized slot the whole pool waits behind.
    Either way, `bb ci` stays your only ALLOWED local heavy test command — never

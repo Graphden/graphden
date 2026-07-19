@@ -177,6 +177,9 @@ bb repl         # Start REPL with dev profile
 # CI check hierarchy — one runner (scripts/ci.clj) over one registry
 # (scripts/checks.edn); every task below delegates, no command is duplicated.
 bb ci           # Full CI: lint (fail-fast) THEN unit tests. A lint slip skips the suite.
+                #   --since <ref>  diff-scope: skip checks whose :relevant paths
+                #                  (scripts/checks.edn) saw no change — skips are VISIBLE
+                #   --skip <a,b>   force-skip by check/group name (gate: WTQ_CI_SKIP)
 bb lint         # Every linter, NO tests — the fast pre-gate check (~1 min)
 bb check        #   alias for `bb lint`
 bb lint-clj     # Clojure only (kondo/splint/cljstyle) — after editing .clj

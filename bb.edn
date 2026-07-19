@@ -665,7 +665,7 @@
            (load-file "scripts/perf.clj"))}
 
   ci
-  {:doc "Full CI: lint (fail-fast) then unit tests, over scripts/checks.edn. ~4 min."
+  {:doc "Full CI: lint (fail-fast) then unit tests, over scripts/checks.edn. ~4 min. Flags: --since <ref> diff-scopes (checks with no :relevant changed files are skipped, visibly); --skip <names/groups> force-skips; --groups <g,…> restricts."
    :task (load-file "scripts/ci.clj")}
 
   lint

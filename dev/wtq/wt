@@ -49,6 +49,10 @@
 #   WTQ_TARGET   integration branch (default: develop)
 #   WTQ_ROOT     where worktrees live (default: <repo-parent>/graphden-wt)
 #   WTQ_NO_PUSH  =1 -> gate advances develop LOCALLY only, never pushes (push yourself)
+#   WTQ_CI_SKIP  comma list of check names/groups force-skipped in the gate's
+#                `bb ci` (passed through as `bb ci --skip`). Announced loudly in
+#                the gate log — a GREEN with it set is a SCOPED result, use only
+#                when you know why (e.g. a flaky third-party linter outage).
 set -euo pipefail
 
 # --- locate the repo / shared plumbing -------------------------------------
@@ -187,8 +191,11 @@ governance_drift() {
 #
 #   - the table is FAIL-SAFE: anything it does not recognise runs EVERYTHING;
 #   - whatever is skipped is PRINTED, because a silent skip reads as "checked";
-#   - `bb ci` always runs, whatever changed. It is 5 minutes, and it is what
-#     catches a broken lint, unit test or commit message.
+#   - `bb ci` always runs, but DIFF-SCOPED (`--since`): each check declares its
+#     relevant paths in scripts/checks.edn; a check whose paths saw no change is
+#     skipped VISIBLY in the report (docs-only -> no unit suite, no clj/js
+#     linters). No `:relevant` key on a check = it always runs, and an
+#     unrecognised ref widens to everything — same fail-safe stance.
 #
 #   *.md, docs/**                    no runtime surface     -> nothing heavy
 #   dev/**                           this queue's own tooling; not on any
@@ -867,10 +874,16 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e"
     elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
     else echo "  e2e:         SKIPPED — docs only, no runtime surface"; fi
-    echo "  (bb ci always runs. Anything unrecognised runs everything.)"
+    echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
+    echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
-    step "bb ci (lint + unit, on merged result)"
-    ( cd "$wt" && bb ci ) || { echo "FAIL: bb ci"; return 1; }
+    step "bb ci (diff-scoped lint + tests, on merged result)"
+    if [ -n "${WTQ_CI_SKIP:-}" ]; then
+      echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
+      ( cd "$wt" && bb ci --since "$TARGET" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
+    else
+      ( cd "$wt" && bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
+    fi
 
     if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ]; then
       step "no runtime surface changed — skipping image build + suites"

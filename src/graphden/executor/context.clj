@@ -93,13 +93,19 @@
             ;; corrected the leak within the same call). `smoke-pass-test [7]`
             ;; pins it end to end.
             fresh-fns (vec (sp/query-entities storage :fn {:id (vec ids)}))
-            fresh-fn-slots (into [] (mapcat #(sp/query-entities storage :fn-slot {:fn-id %})) ids)
-            fresh-bindings (into [] (mapcat #(sp/query-entities storage :binding {:fn-id %})) ids)
+            ;; One batched query per table, not one per changed fn: on a
+            ;; VersionedStorage each query-entities call pays a full
+            ;; version-table resolve, so the per-id mapcat cost K full scans
+            ;; per delta write. The where filter treats a vector as IN, and
+            ;; these caches are keyed by maps downstream — result order is
+            ;; not load-bearing.
+            fresh-fn-slots (vec (sp/query-entities storage :fn-slot {:fn-id (vec ids)}))
+            fresh-bindings (vec (sp/query-entities storage :binding {:fn-id (vec ids)}))
             fresh-binding-ids (into #{} (map :id) fresh-bindings)
-            fresh-items (into []
-                              (mapcat #(sp/query-entities storage :binding-list-item
-                                                          {:binding-id %}))
-                              fresh-binding-ids)
+            fresh-items (if (seq fresh-binding-ids)
+                          (vec (sp/query-entities storage :binding-list-item
+                                                  {:binding-id (vec fresh-binding-ids)}))
+                          [])
             ;; Items keyed off bindings the changed fns USED to own must go too,
             ;; even when the binding itself is gone now.
             stale-binding-ids (into #{}

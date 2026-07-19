@@ -198,6 +198,10 @@ async function initGraph() {
       console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
       richTypes = {};
     }
+    // Server-partial popovers key rich args by binding-id in
+    // `_rowActionsUseSiteArgs`; entries staled by this refresh would
+    // otherwise accumulate for the whole session.
+    if (typeof _rowActionsUseSiteArgs !== 'undefined') _rowActionsUseSiteArgs.clear();
     // The type registry just (re)loaded, so any cached
     // `/api/types/compatible` verdicts may now be stale. `initGraph` is
     // also the fn-rename refresh path, where a retype changes the answers.
@@ -274,9 +278,10 @@ async function loadGraphData() {
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); }
     catch (_) { /* keep prior richTypes rather than blanking chips */ }
-    // A mutation may have added / renamed / retyped a fn-def, changing the
-    // type registry — drop the cached `/api/types/compatible` verdicts so the
-    // next type-picker / mismatch check re-asks the server.
+    // Post-mutation refresh — prune the binding-id-keyed rich-arg
+    // registry the row-actions popover fills; stale entries would
+    // otherwise accumulate for the whole session.
+    if (typeof _rowActionsUseSiteArgs !== 'undefined') _rowActionsUseSiteArgs.clear();
   }
   if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
   // Re-fetch subtree for the previously-rendered fn so overlays /

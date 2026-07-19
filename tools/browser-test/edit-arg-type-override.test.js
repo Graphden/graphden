@@ -109,16 +109,10 @@ async function cleanup(page) {
            '<select> pre-fills with "any": '
            + JSON.stringify(popoverState.currentValue));
 
-    // Wait for the compatible types to populate: one `POST /api/types/compatible`
-    // per candidate name (~14), because the subtype predicate is alias-aware and
-    // has no JS analogue.
-    //
-    // This wait used to carry a story about `/api/types/candidates` scoring every
-    // fn in the registry and the JVM stalling in GC under the 3 GB cap — which is
-    // why its budget had been raised 10 s -> 30 s. None of it was true: the editor
-    // never calls that endpoint, and when the wait failed, NO request had been sent
-    // at all. The picker had given up before asking, because the slots had not
-    // loaded yet (see Phase B2). Measured after the fix: ~400-600 ms.
+  // The compatible-option list arrives from ONE server call
+  // (GET /partials/compatible-type-options — the per-name
+  // /api/types/compatible fan-out is gone); options stream into the
+  // select when the response lands.
     await page.waitForFunction(
       () => {
         const sel = document.querySelector(

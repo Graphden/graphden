@@ -69,6 +69,23 @@
           :entity-type {:value "fn"}}}
 
   ;; =============================================================================
+  ;; FN-ID QUERY-PARAM READER — request → ?fn-id= → nullable uuid
+  ;; =============================================================================
+  ;;
+  ;; The `query-param "fn-id" → parse-uuid` pair used to be copied (in
+  ;; two different spellings) at every fn-scoped partial. One public
+  ;; reader; nil for a missing/malformed param — each consumer degrades
+  ;; per its own contract (anonymous shell, hidden section, or an
+  ;; `:assert-some` 500 where a nil is a programming error).
+
+  {:name :fn-id-param
+   :description "The request's `fn-id` query param as a uuid; nil when absent/malformed (`parse-uuid` swallows garbage). Free arg: `:request`."
+   :parent :parse-uuid
+   :args {:string {:parent :query-param
+                   :args {:request {:as :request}
+                          :param-name {:value "fn-id"}}}}}
+
+  ;; =============================================================================
   ;; FN ID BY NAME — resolve a global fn name to its row id
   ;; =============================================================================
   ;;

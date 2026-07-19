@@ -10,7 +10,9 @@
 // installTextareaEnterGuard, hydrateWidgets (+ their helpers).
 //
 // SECURITY: renderHiccup builds only via createElement / createTextNode — never
-// innerHTML — so server-sent hiccup cannot inject <script>.
+// innerHTML — so server-sent hiccup cannot inject <script>. (Attrs
+// ARE applied verbatim via setAttribute, incl. on* — server hiccup
+// is the trust boundary, not this renderer.)
 
 // ============================================================================
 // HICCUP -> DOM
@@ -23,7 +25,9 @@
 // Falsy children (null / undefined / false) are skipped — backend
 // conditionals render falsy. Built only via createElement /
 // createTextNode — never innerHTML, so server hiccup cannot inject
-// script.
+// <script>. (Attributes ARE applied verbatim via setAttribute, incl.
+// on* handlers — the trusted-server hiccup is the trust boundary,
+// not this renderer.)
 function renderHiccup(node) {
   if (Array.isArray(node)) {
     // Fragment — a bare list of elements (head is itself an array).

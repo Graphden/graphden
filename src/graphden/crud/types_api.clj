@@ -627,13 +627,14 @@
 
 
 (def bulk-omitted-fields
-  "Per-entry fields dropped from the BULK `/api/types` payload. Either NO
-   editor code reads them off the type registry (`:source-file` /
-   `:source-line` / `:tags` / `:arg-effects` / `:call-time-effects` /
-   `:description` — the editor sources descriptions from graph rows, not
-   from here), OR the sole reader is a click-driven popover that now
-   backfills them per-fn via `?fn=<name>` (`:resolved-bindings`, read by
-   the return-type-rule provenance popover). Measured 2026-07-16: these
+  "Per-entry fields dropped from the BULK `/api/types` payload — NO
+   editor code reads any of them off the type registry any more:
+   `:source-file` / `:source-line` / `:tags` / `:arg-effects` /
+   `:call-time-effects` (never read), `:description` (the editor
+   sources descriptions from graph rows), `:resolved-bindings` and
+   `:primary-parent` (their former readers moved server-side — the
+   return-type-rule partial and the layout strip facts read the RAW
+   registry directly). Measured 2026-07-16: these
    were ~57% of the 2.4 MB decoded payload, re-fetched on every mutation,
    to paint chips for the handful of fns on screen. Kept in bulk:
    `:return` / `:args` / `:effects` / `:slot-types` / `:nav-types` /

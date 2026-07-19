@@ -627,28 +627,20 @@ body.sidebar-collapsed .sidebar-expand-floating {
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
-.fn-versions-row-expanded { background: var(--bg); }
-.fn-versions-runs {
-  font-size: 10px; color: var(--muted-fg);
-  background: var(--bg); padding: 1px 5px; border-radius: 2px;
-  margin-left: 4px;
-}
-.fn-versions-row-expanded .fn-versions-runs {
-  background: var(--fg); color: var(--bg);
-}
+
+
+
 
 /* Inline per-version executions, lazy-loaded on row click. */
 .fn-versions-execs {
   margin-top: 4px; padding-top: 4px;
   border-top: 1px dashed var(--border);
 }
-.fn-versions-execs-loading,
-.fn-versions-execs-empty,
-.fn-versions-execs-error {
+.fn-versions-execs-empty {
   font-size: 10px; color: var(--muted-fg);
   padding: 2px 0;
 }
-.fn-versions-execs-error { color: var(--fg); }
+
 .fn-versions-execs-list {
   display: flex; flex-direction: column; gap: 2px;
   max-height: 160px; overflow-y: auto;
@@ -668,10 +660,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .fn-versions-execs-status-failed,
 .fn-versions-execs-status-cancelled { background: var(--fg); color: var(--bg); }
 .fn-versions-execs-ts { color: var(--muted-fg); }
-.fn-versions-execs-result {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  flex: 1; min-width: 0;
-}
+
 
 /* Merge conflicts modal — full-viewport overlay + centred card.
    Shown when POST /api/branches/:target/merge returns
@@ -834,10 +823,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
   padding: 1px 6px; border-radius: 2px;
   font-size: 10px;
 }
-.branch-diff-section-hint {
-  font-weight: 400; color: var(--muted-fg);
-  font-size: 10px; margin-left: 4px;
-}
+
 .branch-diff-rows {
   display: flex; flex-direction: column; gap: 4px;
 }
@@ -2838,11 +2824,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
   overflow-wrap: anywhere;
 }
-.type-explainer-actions {
-  display: flex; gap: 8px; align-items: center;
-  margin-top: 8px; padding-top: 6px;
-  border-top: 1px solid var(--light-border);
-}
+
 .type-explainer-btn {
   font-family: inherit; font-size: 11px;
   padding: 4px 10px; border-radius: 3px; cursor: pointer;
@@ -3003,10 +2985,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border: 1px solid var(--card-fg);
 }
 .mismatch-explainer-btn:hover { opacity: 0.85; }
-.mismatch-explainer-hint {
-  font-size: 11px; color: var(--muted-fg);
-  font-style: italic;
-}
+
 
 /* Right-edge warning chip on a mismatched arg-overlay. Sits to the
    right of the type-chip when present; otherwise pinned alone. The
@@ -3890,10 +3869,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
   font-family: monospace;
 }
-.execute-history-duration {
-  color: var(--muted-fg);
-  font-style: italic;
-}
+
 .execute-history-repeat-btn {
   margin-left: auto;
   padding: 1px 6px;
@@ -4073,43 +4049,17 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
 }
 
-.execute-history-tainted-badge {
-  margin-left: 6px;
-  font-size: 11px;
-}
+
 
 /* Audit trail badge + filter. Distinct from the
    tainted-result badge above — fires when the fn touched a secret
    AND observed a side-effect, even if its return-type is plain. */
 
-.execute-history-audit-badge {
-  margin-left: 4px;
-  padding: 0 5px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  background: var(--effect-chip-misc);
-  color: var(--effect-chip-fg);
-  border-radius: 3px;
-  text-transform: uppercase;
-}
 
-.execute-history-audit-filter {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  margin-bottom: 6px;
-  font-size: 12px;
-  color: var(--muted-fg);
-  user-select: none;
-  cursor: pointer;
-}
 
-.execute-history-audit-filter-count {
-  color: var(--muted-fg);
-  font-size: 11px;
-}
+
+
+
 
 /* Row-actions popover content (server-rendered partial; HTMX
    migration Phase A1). Flex container hosts ns / i / ↗ buttons.

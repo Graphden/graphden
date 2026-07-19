@@ -163,8 +163,8 @@ function enterExpectsEffectsEditMode(fn, anchorEl) {
       // shape openInlineEditPopover uses for every other edit-mode.
       wrap._collect = () => {
         if (!wrap._loaded) {
-          // Form never arrived — refuse to save rather than silently
-          // clearing the contract.
+          // Belt-and-braces — doSave checks _loaded first and returns
+          // a specific error; this throw guards any other caller.
           throw new Error('effects form not loaded');
         }
         const none = wrap.querySelector('input[name="ee-mode"][value="none"]');
@@ -178,6 +178,12 @@ function enterExpectsEffectsEditMode(fn, anchorEl) {
       return wrap;
     },
     async doSave(control) {
+      if (!control._loaded) {
+        // Form never arrived — refuse with a SPECIFIC reason instead
+        // of the skeleton's generic "check that you're signed in".
+        return { ok: false,
+                 error: 'The effects form has not finished loading — wait a moment and try again.' };
+      }
       try {
         const value = control._collect();
         // The form payload encodes the three states via a single
@@ -217,11 +223,22 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
       noneOpt.value = '';
       noneOpt.textContent = '(none)';
       select.appendChild(noneOpt);
+      // Seed the CURRENT type first (same pattern as the arg-type
+      // select) — if the boot fetch failed and `kinds` is empty,
+      // open-then-Save stays a no-op instead of clearing the field.
+      const cur = fn['return-type'];
+      if (cur && !kinds.includes(cur)) {
+        const curOpt = document.createElement('option');
+        curOpt.value = cur;
+        curOpt.textContent = cur;
+        curOpt.selected = true;
+        select.appendChild(curOpt);
+      }
       kinds.forEach(k => {
         const o = document.createElement('option');
         o.value = k;
         o.textContent = k;
-        if (fn['return-type'] === k) o.selected = true;
+        if (cur === k) o.selected = true;
         select.appendChild(o);
       });
       root.insertBefore(select, root.firstChild);

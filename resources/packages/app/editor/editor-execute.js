@@ -475,4 +475,3 @@ installPopoverDismiss({
 
 
 window.showExecutePopover = showExecutePopover;
-window.hideExecutePopover = hideExecutePopover;

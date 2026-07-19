@@ -761,10 +761,6 @@
   ;;   - `:try`-wrapped `:parse-int` for `:limit` so a non-numeric
   ;;     `?limit=abc` collapses to nil instead of 500-ing.
 
-  {:name :_list-exec-fn-id-raw
-   :parent :query-param
-   :args {:request {:as :request} :param-name {:value "fn-id"}}}
-
   {:name :_list-exec-version-id-raw
    :parent :query-param
    :args {:request {:as :request} :param-name {:value "fn-version-id"}}}
@@ -795,7 +791,7 @@
    :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit}`."
    :parent :zipmap
    :args {:keys [{:value :fn-id} {:value :version-id} {:value :limit}]
-          :vals [{:parent :parse-uuid :args {:string :_list-exec-fn-id-raw}}
+          :vals [:fn-id-param
                  {:parent :parse-uuid :args {:string :_list-exec-version-id-raw}}
                  :_list-exec-limit]}}
 
@@ -1200,19 +1196,14 @@
   ;; full `:fn` table with `:where {}`.
   ;; ---------------------------------------------------------------------
 
-  {:name :_partial-service-popover-fn-id-str
-   :parent :query-param
-   :args {:request {:as :request} :param-name {:value "fn-id"}}}
-
-  {:name :_partial-service-popover-fn-id-raw
-   :parent :parse-uuid
-   :args {:string :_partial-service-popover-fn-id-str}}
+  ;; Shared `:fn-id-param` reader (app.lookups); the `:assert-some`
+  ;; below keeps this partial's strict-uuid contract.
 
   {:name :_partial-service-popover-fn-id
    :description "Strict-uuid narrowing — `:render-service-popover-hiccup`'s `:fn-id` slot is `:uuid`. The JS caller only opens the popover with a real fn-id; a nil here is a programming error worth a 500 instead of silently rendering an empty popover."
    :parent :assert-some
    :return-type :uuid
-   :args {:value :_partial-service-popover-fn-id-raw}}
+   :args {:value :fn-id-param}}
 
   {:name :_partial-service-popover-fn-name
    :description "Display name from the all-fns index built by the existing services chain — works for any fn (even those without a service), because `:_list-services-fn-names` is keyed off `:_list-services-fn-rows` which selects the full `:fn` table."

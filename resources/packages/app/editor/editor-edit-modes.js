@@ -4,10 +4,12 @@
 // (`openInlineEditPopover`) and a small set of state-patching helpers
 // (`patchFnFieldInState`) that don't escape this file.
 //
-// Globals consumed: lookups, graphData, authFetch, openFnPicker,
-// openNamespacePicker, initGraph, renderGraph, buildLookups,
-// rebuildImplementationFnIds, expectedSlotType, formatTypeHint,
-// validateLiteralAgainstType, VALUE_KINDS.
+// Globals consumed: authFetch/authMutate (editor-auth.js),
+// fetchValueForm/renderValueForm/collectFormValue (editor-value-form.js
+// + web/runtime), expectedSlotType/validateLiteralAgainstType
+// (editor-literal-types.js), openFnPicker (editor-fn-picker.js),
+// initGraph/renderGraph. fn-level and type-level modes live in
+// editor-edit-modes-fn.js / editor-edit-modes-type.js.
 
 // ============================================================================
 // INLINE EDIT POPOVERS — arg-value, arg-rename, fn-rename, fn-return-type

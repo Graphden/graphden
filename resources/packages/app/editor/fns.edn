@@ -540,6 +540,22 @@
   ;; =============================================================================
   ;; HTMX PARTIALS — server-rendered fragments swapped into editor mount-points
   ;;
+  ;; Collapse-to-nothing placeholder for `:if` branches that render no
+  ;; section — hidden, so both the DOM and the JS probes that decide
+  ;; "anything to show?" see nothing.
+  {:name :_hidden-span
+   :parent :const
+   :args {:value [:span {:hidden "1"}]}}
+
+  ;; Shared HOF callback — text name of the current `:item` keyword.
+  ;; Every partial chain that maps a keyword roster to text uses it
+  ;; (effect chips, arg names, resolved-binding names, category
+  ;; checkboxes). Single-node callbacks shape-dedup at sync anyway;
+  ;; the single NAME is for the reader.
+  {:name :_kw-item-name
+   :parent :keyword-to-str
+   :args {:keyword {:as :item}}}
+
   ;; The effect-explainer popover. The lookup lives in
   ;; `:_effect-descriptions` below (one fn-def, editable through the
   ;; editor itself), rendered to hiccup, and served at
@@ -741,11 +757,6 @@
    :args {:request {:as :request}
           :param-name {:value "fn-id"}}}
 
-  {:name :_partial-row-actions-fn-id
-   :description "Parsed fn-id UUID. nil-tolerant — downstream `:fn-row-by-id` returns nil and the partial renders an empty toolbar (caller's bug, not user-visible)."
-   :parent :parse-uuid
-   :args {:string :_partial-row-actions-fn-id-str}}
-
   {:name :_partial-row-actions-context-str
    :description "Read the `context` query-string parameter — one of `col-header` / `cell` / `use-site-arg` / `root-row`. A1 only handles `col-header`; other contexts trigger the default branch which emits an empty toolbar (Phase A2-A4 fills them in)."
    :parent :query-param
@@ -820,12 +831,11 @@
    :args {:coll {:parent :vec
                  :args {:coll {:parent :keys
                                :args {:map {:parent :service-blocking-free-args
-                                            :args {:fn-id :_partial-row-actions-fn-id}}}}}}}}
+                                            :args {:fn-id :fn-id-param}}}}}}}}
 
   {:name :_partial-row-actions-svc-name-text
    :parent :str-join
-   :args {:coll [{:value ":"}
-                 {:parent :keyword-to-str :args {:keyword {:as :item}}}]
+   :args {:coll [{:value ":"} :_kw-item-name]
           :separator {:value ""}}}
 
   {:name :_partial-row-actions-svc-names-text
@@ -854,7 +864,7 @@
   {:name :_partial-row-actions-fn-row
    :description "The decoded fn row for the popover's target fn."
    :parent :fn-row-by-id
-   :args {:fn-id :_partial-row-actions-fn-id}}
+   :args {:fn-id :fn-id-param}}
 
   {:name :_partial-row-actions-fn-name
    :parent :get
@@ -1535,7 +1545,7 @@
                  :args {:tag {:value "div"}
                         :attrs {:value {:class "mismatch-explainer-leaf-more"}}
                         :children [:_partial-mismatch-diff-overflow-text]}}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   ;; Per-leaf row — `:map` over the truncated leaf list. Each leaf is
   ;; `{:path :expected :actual}`. The `:as :leaf` rename gives the
@@ -1600,7 +1610,7 @@
                         :children [:_partial-mismatch-diff-leaves-head-div
                                    :_partial-mismatch-diff-leaf-rows
                                    :_partial-mismatch-diff-overflow-row]}}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   ;; STEP 3 — provenance section. The 4-tier resolution chain
   ;; (override → unified → ref-return → slot) tells users WHERE the
@@ -1736,7 +1746,7 @@
    :parent :if
    :args {:test :_provenance-tier-applies?
           :then :_provenance-tier-row-built
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   {:name :_provenance-tier-rows
    :parent :map
@@ -1801,7 +1811,7 @@
                         :attrs {:value {:class "type-inline-resolution-inheritance"}}
                         :children [:_provenance-inh-head
                                    :_provenance-inh-rows]}}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   {:name :_provenance-built
    :parent :hiccup
@@ -1816,7 +1826,7 @@
    :parent :if
    :args {:test :_provenance-some?
           :then :_provenance-built
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   ;; STEP 4 — Edit-action button. The partial route is `:get-auth-
   ;; required`, so reaching this partial means the user is signed in;
@@ -1989,7 +1999,7 @@
    :parent :if
    :args {:test :_provenance-enum-some?
           :then :_provenance-enum-section-built
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   ;; Wrapper that binds `:parsed` for the new section — same pattern
   ;; as `:_partial-provenance-prov-section`. Lets the fragment include
@@ -2086,7 +2096,7 @@
    :parent :if
    :args {:test :_provenance-eff-some?
           :then :_provenance-eff-section-built
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   {:name :_partial-provenance-eff-section
    :parent :_provenance-eff-section
@@ -2225,7 +2235,7 @@
                  :args {:tag {:value "div"}
                         :attrs {:value {:class "provenance-popover-narrative"}}
                         :children [:_rtr-narrative-text]}}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   ;; --- owner nav-link ---------------------------------------------------
   ;; `a[data-fn-id]` — the same post-swap contract as the provenance
@@ -2333,13 +2343,9 @@
                                       :separator {:value ""}}}
                         :else {:value "(free)"}}}}}
 
-  {:name :_rtr-row-name-text
-   :parent :keyword-to-str
-   :args {:keyword {:as :item}}}
-
   {:name :_rtr-row-label
    :parent :str-join
-   :args {:coll [:_rtr-row-name-text {:value " "} :_rtr-row-kind]
+   :args {:coll [:_kw-item-name {:value " "} :_rtr-row-kind]
           :separator {:value ""}}}
 
   {:name :_rtr-row-type
@@ -2379,7 +2385,7 @@
                         :attrs {:value {:class "provenance-popover-inputs"}}
                         :children [{:value [:div {:class "type-inline-resolution-head"} "Inputs"]}
                                    :_rtr-input-rows]}}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   ;; --- assembly ---------------------------------------------------------
 
@@ -2403,7 +2409,7 @@
                         :children [:_rtr-intro
                                    :_rtr-narrative-div
                                    :_rtr-inputs-section]}}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   {:name :_rtr-fragment
    :parent :hiccup
@@ -2431,21 +2437,13 @@
   ;; described itself as a mirror of that very fn) is gone, along with
   ;; its wait-for-subtree workaround.
 
-  {:name :_xp-fn-id-str
-   :parent :query-param
-   :args {:request {:as :request} :param-name {:value "fn-id"}}}
-
-  {:name :_xp-fn-id
-   :parent :parse-uuid
-   :args {:string :_xp-fn-id-str}}
-
   ;; `:nullable-uuid` honestly — `parse-uuid` yields nil for a
   ;; missing/malformed param; the shell then degrades to the
   ;; "(anonymous)" header (see the missing-fn-id test) instead of
   ;; pretending the value can't be nil.
   {:name :_xp-row
    :parent :fn-row-by-id
-   :args {:fn-id {:ref :_xp-fn-id :type :nullable-uuid}}}
+   :args {:fn-id {:ref :fn-id-param :type :nullable-uuid}}}
 
   {:name :_xp-name
    :parent :get
@@ -2499,13 +2497,9 @@
    :parent :not
    :args {:value {:parent :empty? :args {:coll :_xp-effects}}}}
 
-  {:name :_xp-eff-name
-   :parent :keyword-to-str
-   :args {:keyword {:as :item}}}
-
   {:name :_xp-eff-chip-class
    :parent :str-join
-   :args {:coll [{:value "effects-chip effects-chip-"} :_xp-eff-name]
+   :args {:coll [{:value "effects-chip effects-chip-"} :_kw-item-name]
           :separator {:value ""}}}
 
   {:name :_xp-eff-chip
@@ -2514,7 +2508,7 @@
           :attrs {:parent :zipmap
                   :args {:keys [{:value :class}]
                          :vals [:_xp-eff-chip-class]}}
-          :children [:_xp-eff-name]}}
+          :children [:_kw-item-name]}}
 
   {:name :_xp-eff-chips
    :parent :map
@@ -2528,23 +2522,19 @@
                         :attrs {:value {:class "execute-effects-warning"}}
                         :children [{:value [:span {:class "execute-effects-warning-label"} "side effects: "]}
                                    :_xp-eff-chips]}}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   ;; --- free-arg scaffold ------------------------------------------------
 
   {:name :_xp-free-map
    :parent :free-arg-slot-map
-   :args {:fn-id {:ref :_xp-fn-id :type :nullable-uuid}}}
+   :args {:fn-id {:ref :fn-id-param :type :nullable-uuid}}}
 
   {:name :_xp-free-names
    :description "Free-arg names, sorted for a stable row order (the slot-map is unordered)."
    :parent :sort
    :args {:coll {:parent :vec
                  :args {:coll {:parent :keys :args {:map :_xp-free-map}}}}}}
-
-  {:name :_xp-arg-name-text
-   :parent :keyword-to-str
-   :args {:keyword {:as :item}}}
 
   {:name :_xp-arg-slot-id-text
    :parent :to-str
@@ -2559,7 +2549,7 @@
                   :args {:keys [{:value :class} {:value :data-slot-id} {:value :data-slot-name}]
                          :vals [{:value "execute-arg-form"}
                                 :_xp-arg-slot-id-text
-                                :_xp-arg-name-text]}}
+                                :_kw-item-name]}}
           :children [{:value "…"}]}}
 
   {:name :_xp-arg-row
@@ -2569,7 +2559,7 @@
           :children [{:parent :hiccup
                       :args {:tag {:value "div"}
                              :attrs {:value {:class "execute-arg-label"}}
-                             :children [:_xp-arg-name-text]}}
+                             :children [:_kw-item-name]}}
                      :_xp-arg-host]}}
 
   {:name :_xp-arg-rows
@@ -2584,7 +2574,7 @@
                       :args {:test {:parent :empty? :args {:coll :_xp-free-names}}
                              :then {:value [:div {:class "execute-no-args-note"}
                                             "No free arguments — click Run to invoke."]}
-                             :else {:value [:span {:hidden "1"}]}}}
+                             :else :_hidden-span}}
                      :_xp-arg-rows]}}
 
   ;; --- options + actions -----------------------------------------------
@@ -2774,7 +2764,7 @@
                                  {:parent :nil? :args {:value :_cto-current}}]}}
           :then {:value [:option {:value "" :disabled "disabled"}
                          "(no compatible types)"]}
-          :else {:value [:span {:hidden "1"}]}}}
+          :else :_hidden-span}}
 
   {:name :_cto-fragment
    :description "Wrapper div — JS lifts the <option> nodes out of it into the live <select>."
@@ -2802,15 +2792,9 @@
   ;; undeclarable through the UI. JS owns only the
   ;; radio→enable/disable toggle and the save collect.
 
-  {:name :_eef-fn-id
-   :parent :parse-uuid
-   :args {:string {:parent :query-param
-                   :args {:request {:as :request}
-                          :param-name {:value "fn-id"}}}}}
-
   {:name :_eef-row
    :parent :fn-row-by-id
-   :args {:fn-id {:ref :_eef-fn-id :type :nullable-uuid}}}
+   :args {:fn-id {:ref :fn-id-param :type :nullable-uuid}}}
 
   {:name :_eef-declared
    :description "The fn's `:expects-effects` — nil = no contract, [] = pinned purity, non-empty = explicit set."
@@ -2821,13 +2805,9 @@
    :parent :some?
    :args {:value :_eef-declared}}
 
-  {:name :_eef-name-of
-   :parent :keyword-to-str
-   :args {:keyword {:as :item}}}
-
   {:name :_eef-declared-names
    :parent :map
-   :args {:func :_eef-name-of
+   :args {:func :_kw-item-name
           :coll {:parent :coalesce
                  :args {:value :_eef-declared :default {:value []}}}}}
 
@@ -3121,16 +3101,6 @@
   ;; produced, so the e2e contract is preserved).
   ;; ---------------------------------------------------------------------
 
-  {:name :_partial-fn-versions-fn-id-str
-   :description "Raw `fn-id` query-string parameter — string UUID."
-   :parent :query-param
-   :args {:request {:as :request}
-          :param-name {:value "fn-id"}}}
-
-  {:name :_partial-fn-versions-fn-id
-   :description "Parsed UUID for `fn-id`; nil when absent or malformed (`:list-fn-versions` returns an empty list on nil)."
-   :parent :parse-uuid
-   :args {:string :_partial-fn-versions-fn-id-str}}
 
   {:name :_partial-fn-versions-current-branch
    :description "Currently-selected branch name (from `?current-branch=`), used to highlight the matching row in the timeline. Empty string when absent — no row gets the `-current` class."
@@ -3141,7 +3111,7 @@
   {:name :_partial-fn-versions-data
    :description "Live versions data for the requested fn — wraps `:list-fn-versions`."
    :parent :list-fn-versions
-   :args {:fn-id :_partial-fn-versions-fn-id}}
+   :args {:fn-id :fn-id-param}}
 
   {:name :_partial-fn-versions-rows
    :description "The `:versions` list out of `:list-fn-versions`'s envelope — already sorted latest-first, each row enriched with `:branch-name` and `:execution-count`."

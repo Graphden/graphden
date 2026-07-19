@@ -45,17 +45,17 @@
         :why
         "The sidebar's first paint. 1 round trip, steady-state (the compile is paid by whichever scenario runs first — see bb.edn's test-perf note on --no-randomize). This endpoint was 95 ms / 4.5 MB before it was scoped down to ?scope=tree; if this climbs, the scoping has sprung a leak and the sidebar is reading rows it does not paint."},
        :create-fn
-       {:max 22,
+       {:max 19,
         :why
         "Creating one :fn costs 20 round trips, steady-state — it runs first, so it pays the compile reads for the suite. A jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."}},
  :trend
  #:trend{:graph-entities-tree
-         {:units 14.6,
+         {:units 19.59,
           :band 2.0,
           :why
           "The sidebar's first paint got materially slower relative to a round trip. It issues only ONE query, so anything here is compile/serialisation work, not the database."},
          :create-fn
-         {:units 4748.76,
+         {:units 2043.46,
           :band 2.0,
           :why
           "Creating one :fn costs thousands of round trips' worth of time against only 20 actual queries — the time is in the compile, not the SQL, exactly as PERF_NOTES describes (477 ms of 918 ms re-reading the graph). A jump here means the compile path regressed."}}}

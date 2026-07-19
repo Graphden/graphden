@@ -132,7 +132,7 @@ Full walkthrough: [ARCHITECTURE.md § Function composition](docs/ARCHITECTURE.md
 bb repl        # REPL with the dev profile
 bb rebuild     # Build uberjar + docker image, restart the executor container
 bb test        # Run the test suite (uses testcontainers for Postgres)
-bb ci          # Full gate: clj + JS/CSS linters + tests + coverage
+bb ci          # Full CI: lint (fail-fast) then unit tests; --since <ref> diff-scopes it (coverage: bb coverage)
 bb check       # Clojure linters only (clj-kondo / splint / cljstyle)
 bb fix         # Auto-fix Clojure formatting
 ```

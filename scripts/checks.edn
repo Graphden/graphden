@@ -45,6 +45,10 @@
   :relevant ["^Dockerfile"]}
  {:name "actionlint"    :bb "actionlint"    :timeout  60000 :group :infra
   :relevant ["^\\.github/workflows/"]}
+ ;; The scoping mechanism guards itself: selector partition semantics +
+ ;; checks.edn shape/regex validity + the canonical path→check drift table.
+ {:name "ci-selftest"   :bb "ci-test"       :timeout  60000 :group :infra
+  :relevant ["^scripts/ci" "^scripts/checks\\.edn$" "^bb\\.edn$"]}
  {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs
   :relevant ["\\.md$" "^\\.markdownlint"]}
  {:name "lychee"        :bb "lychee"        :timeout  60000 :group :docs
@@ -54,20 +58,25 @@
   :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"]}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}
  {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec
-  :relevant ["^Dockerfile" "deps\\.edn$" "package(-lock)?\\.json$" "^\\.trivyignore"]}
+  ;; `trivy config .` is a RECURSIVE IaC misconfig scan — docker-compose and
+  ;; the deploy/ (kind, helm) manifests are scan targets, not just Dockerfiles.
+  :relevant ["^Dockerfile" "deps\\.edn$" "package(-lock)?\\.json$" "^\\.trivyignore"
+             "^docker-compose" "^deploy/"]}
+ ;; npm-only audit — a deps.edn change must NOT trigger it: the green would
+ ;; read as "the new JVM dep's license was vetted", which this task never does.
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec
-  :relevant ["deps\\.edn$" "package(-lock)?\\.json$"]}
+  :relevant ["package(-lock)?\\.json$"]}
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
  {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/"]}
  {:name "tests-unit"    :bb "test-unit"     :timeout 600000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
-             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/"]}
+             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}
  {:name "tests-perf"    :bb "test-perf"     :timeout 300000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
-             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^perf/"]}
+             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/" "^perf/"]}
  {:name "perf"          :bb "perf"          :timeout  60000 :group :post-test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
-             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^perf/"]}
+             "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/" "^perf/"]}
  {:name "outdated"      :bb "outdated"      :timeout 120000 :group :info
   :relevant ["deps\\.edn$" "package(-lock)?\\.json$"]}]

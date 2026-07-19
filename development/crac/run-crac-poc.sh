@@ -52,4 +52,4 @@ t1=$(date +%s%3N)
 echo "  restore: $((t1 - t0)) ms"
 grep -iE "restore|error" /tmp/grestore.out | tail -2 || true
 # cleanup: the restored process resumes on the ORIGINAL (checkpoint-time) PID
-for p in $(ps -eo pid,cmd | grep "CRaCRestoreFrom" | grep -v grep | awk '{print $1}'); do kill -9 "$p" 2>/dev/null || true; done
+for p in $(pgrep -f "CRaCRestoreFrom"); do kill -9 "$p" 2>/dev/null || true; done

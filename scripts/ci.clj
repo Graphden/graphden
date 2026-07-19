@@ -16,7 +16,6 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
-    [clojure.edn :as edn]
     [clojure.string :as str])
   (:import
     (java.nio.channels
@@ -65,94 +64,26 @@
 ;; kaocha deadlock, antq network hiccup) is killed at the deadline and reported.
 ;; ===========================================================================
 
+;; Selection core (registry read + validation + --groups/--since/--skip
+;; partitioning) lives in `scripts/ci_select.clj` so the `ci-selftest` check
+;; can load and test it WITHOUT running a CI pass.
+(load-file "scripts/ci_select.clj")
+
+
 (def ^:private registry
-  "The check registry — a vector of `{:name :bb :timeout :group}`, from
-   `scripts/checks.edn`. `:bb` is the task that actually runs the check, so the
-   command is defined ONCE (in bb.edn) and this runner delegates to it."
-  (edn/read-string (slurp "scripts/checks.edn")))
-
-
-(defn- flag-value
-  [args flag]
-  (second (drop-while #(not= flag %) args)))
-
-
-(defn- changed-files
-  "Repo-relative paths that differ from `since` — committed AND uncommitted
-   (`git diff`) plus untracked (`git ls-files --others`), so a scoped local run
-   never misses a file the author just created. Returns nil (= no scoping,
-   run everything) when git can't answer — a bad ref must widen the run, not
-   silently narrow it."
-  [since]
-  (try
-    (let [diff (p/shell {:out :string :err :string :continue true}
-                        "git" "diff" "--name-only" since)
-          untracked (p/shell {:out :string :err :string :continue true}
-                             "git" "ls-files" "--others" "--exclude-standard")]
-      (if (and (zero? (:exit diff)) (zero? (:exit untracked)))
-        (into #{}
-              (remove str/blank?)
-              (concat (str/split-lines (:out diff))
-                      (str/split-lines (:out untracked))))
-        (do (println (str yellow "⚠ --since " since ": git diff failed — running every check" reset))
-            nil)))
-    (catch Exception e
-      (println (str yellow "⚠ --since " since ": " (ex-message e) " — running every check" reset))
-      nil)))
-
-
-(defn- relevant?
-  "Does the diff make this check worth running? A check with no `:relevant`
-   patterns always is; otherwise ≥1 changed path must match ≥1 pattern.
-   With no diff info (nil `changed`) everything is relevant — conservative."
-  [c changed]
-  (or (nil? changed)
-      (nil? (:relevant c))
-      (boolean (some (fn [pat] (some #(re-find (re-pattern pat) %) changed))
-                     (:relevant c)))))
+  "The check registry — a vector of `{:name :bb :timeout :group :relevant}`,
+   from `scripts/checks.edn`. `:bb` is the task that actually runs the check,
+   so the command is defined ONCE (in bb.edn) and this runner delegates to it.
+   Validated on EVERY run — a malformed entry (bad :relevant regex, missing
+   :timeout, typo'd :group) fails here, at authoring time, instead of
+   detonating mid-wave or only inside the landing gate's scoped run."
+  (ci-select/validate-registry!
+    (ci-select/read-registry "scripts/checks.edn")))
 
 
 (defn- select-checks
-  "Partitions the registry for `args` into `{:run … :scoped … :manual …}`.
-
-   `--groups a,b`  restricts to those groups (no key = whole registry).
-   `--since <ref>` diff-scopes: checks whose `:relevant` patterns (see
-                   scripts/checks.edn) match no changed file land in :scoped.
-   `--skip a,b`    force-skips by check name or group name — :manual. The
-                   caller (the landing gate) is expected to announce it, so a
-                   green scoped run is never mistaken for a full one.
-
-   `:post-test` reads what the `:test` wave writes (`bb perf` grades
-   perf/runs/*.edn) — if no :test check will run, :post-test is scoped out
-   too, whatever its own patterns say: grading a stale run passes on a
-   regression it never saw.
-
-   Every runnable entry gets its `:cmd` — `bb <task>`, the single command
-   source."
   [args]
-  (let [groups-arg (flag-value args "--groups")
-        wanted (when groups-arg
-                 (into #{} (map (comp keyword str/trim)) (str/split groups-arg #",")))
-        since (flag-value args "--since")
-        changed (when since (changed-files since))
-        skip-arg (flag-value args "--skip")
-        skip-set (when skip-arg
-                   (into #{} (map str/trim) (str/split skip-arg #",")))
-        in-groups (filterv (fn [c] (or (nil? wanted) (contains? wanted (:group c))))
-                           registry)
-        manual? (fn [c] (and skip-set
-                             (or (contains? skip-set (:name c))
-                                 (contains? skip-set (name (:group c))))))
-        {manual true rest' false} (group-by (comp boolean manual?) in-groups)
-        {run true scoped false} (group-by #(relevant? % changed) rest')
-        tests-run? (boolean (some #(= :test (:group %)) run))
-        {post-orphaned true run false} (group-by #(and (not tests-run?)
-                                                       (= :post-test (:group %)))
-                                                 run)]
-    {:run (mapv (fn [c] (assoc c :cmd ["bb" (:bb c)])) (vec run))
-     :scoped (into (vec scoped) post-orphaned)
-     :manual (vec manual)
-     :since since}))
+  (ci-select/select-checks registry args))
 
 
 (defn has-warnings?

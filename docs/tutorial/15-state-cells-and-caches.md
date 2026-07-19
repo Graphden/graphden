@@ -171,5 +171,4 @@ falls back to `:atom` behaviour — fresh each call.
 
 ## Next
 
-That's the end of the current tutorial. New lessons are added as
-features ship — see [tutorial/README.md](README.md).
+[Lesson 16 — Users: the operator's account panel](16-users-admin.md)

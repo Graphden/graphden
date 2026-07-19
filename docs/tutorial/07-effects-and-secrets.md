@@ -102,6 +102,44 @@ computed set is enough. The cases where you'd add it:
 - A service-eligible fn where `:process` MUST be present (the
   service-create guard asserts this from rich-types).
 
+## Editing the contract from the card (✎)
+
+You don't have to touch `fns.edn` to manage `:expects-effects` —
+the effects strip at the bottom of a fn-card carries a `✎`
+pencil (visible when you're signed in and the card is the
+selected fn). Clicking it opens a small server-rendered form:
+
+- Two radio modes: **no contract** ("Drift checker is off for
+  this fn") and **explicit contract** ("Drift checker compares
+  computed effects against the ticked set").
+- Under them, one checkbox per declarable category — the full
+  canonical set of eight, including `:process` and `:raw-sql`.
+  The checkboxes stay disabled until you pick *explicit
+  contract*.
+- **Pinned purity**: pick *explicit contract* and tick NOTHING.
+  That saves an EMPTY declared set — "I assert this fn is
+  pure" — so any effect that later creeps in via a ref edit
+  lights up as drift.
+
+Save writes the fn row's `:expects-effects`; switching back to
+*no contract* and saving clears it (the drift checker turns
+off). The checkbox roster comes from the same server-side set
+that sync-time validation accepts, so the form can never offer
+an undeclarable category.
+
+### Try it
+
+1. Select any pure fn-def of yours (e.g. the `:greet` from
+   lesson 01) and click `✎` on its (empty) effects strip.
+2. Pick *explicit contract*, tick nothing, Save. You've pinned
+   purity.
+3. Now bind one of its args to a ref that reaches `:env` or
+   `:pg-query`. The computed effect appears as a chip with a
+   red outline — drift against your pinned-pure contract.
+4. Reopen `✎` — the form comes back pre-filled from the saved
+   contract. Tick the offending category (or switch to *no
+   contract*) and Save to clear the drift.
+
 ## Effect propagation through HOFs
 
 When a HOF takes a `:fn`-typed callback, the callback's effects

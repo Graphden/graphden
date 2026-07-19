@@ -37,6 +37,8 @@
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written |
+| 16 | [Users — the operator's account panel](16-users-admin.md) | ✅ written |
+| 17 | [Grants — who may touch what](17-grants.md) | ✅ written |
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

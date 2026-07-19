@@ -265,6 +265,50 @@ unfolded structural form.
 Click the chip's `▸` to expand inline and see the structural form.
 The provenance ↳ badge shows where the type came from.
 
+## Type UX in the editor
+
+Three affordances make the type system usable without ever
+typing a structural form by hand:
+
+**1. The compatible-type select.** Click an arg's type-chip on
+an editable card and the select lists ONLY the types that can
+legally narrow the slot — primitives, refinements, records,
+unions — computed by one server-side, alias-aware `subtype?`
+sweep over every named type in the graph. The current type is
+seeded first; the rest of the options stream in when the server
+answers. An fn-typed slot never offers `:int`; a `:numeric`
+slot offers `:int`, `:positive-int`, `:port`, and friends.
+(The inline `▸` panel's "narrow to…" select is the same list,
+minus the bare primitives.)
+
+**2. The "Type rule" popover.** When a fn-def's return type was
+COMPUTED by an ancestor base-fn's type rule (`:assoc`, `:get`,
+`:first`, arithmetic, …) rather than declared, the return-type
+strip carries a `↳` badge. Clicking it opens a server-rendered
+popover that names the rule-owning base-fn (clickable — jumps
+to it), explains in one sentence what the rule did (e.g. for
+`:assoc`: literal key + typed value add that field to the map's
+record shape; a computed key widens to `:jsonb`), and lists the
+Inputs the rule saw — which slots were bound by literal vs
+fn-ref, and their effective types.
+
+**3. Name autocomplete in the create-type form.** The name
+fields in the `+ Type` form autocomplete from a server-fed
+datalist of every named type-row, each labeled with its kind
+(`refinement` / `record` / `union` / `variant` / `list`) plus
+the primitives — so "base type" and "element type" inputs offer
+real names instead of trusting your memory.
+
+### Try it
+
+1. On your `:tutorial-cursor` record from earlier, click an
+   `:int`-typed arg's chip. The select offers `positive-int`,
+   `port`, `non-negative-int`, … — and NOT `:text`.
+2. Create a fn-def with `:parent :assoc` and bind `:key` to a
+   literal `:total`. Its return-type strip grows a `↳` — click
+   it and read which rule computed the record shape and from
+   which inputs.
+
 ## What we glossed over
 
 - **Type aliases at runtime** — `register-type-alias!` in

@@ -585,8 +585,12 @@ user-контекста в middleware (`ring-adapter`), проброс в `Execu
 ```
 grant(subject, capability, scope)
   subject    = user | group
-  capability = :read | :write | :execute | :bind-args | :append-list
-             | :publish | :install | :admin
+  capability = :read | :write | :execute | :admin
+             | :bind-args | :append-list
+  ;; as-shipped closed set (grant.clj); the once-sketched
+  ;; :publish/:install never became capabilities — package ops
+  ;; gate on :write of the target namespace. subject: the panel
+  ;; handles user subjects; groups remain a sketch.
   scope      = поддерево неймспейса (или конкретная fn)
 ```
 

@@ -1,10 +1,17 @@
-(ns ^:integration graphden.versioning.merge.core-test
+(ns ^:integration ^:serial graphden.versioning.merge.core-test
   "Tests for `graphden.versioning.merge.core` — merge protection traits.
 
    Storage stack: PostgreSQL via testcontainer + graph + versioning +
    traits schema. The trait-based protection requires a real binding
    row to attach to, so every test seeds a base-fn + slot + binding
-   before exercising the protection API."
+   before exercising the protection API.
+
+   `^:serial` (tests.edn contract): the resolution-write-failure test
+   `with-redefs`es `pg-crud/create-entities` — a PROCESS-WIDE root
+   var. Under the parallel runner the injected `boom` leaked into
+   whatever sibling NS happened to sync fn-defs during that window
+   (observed: state-cell-test's `sync-fns-to-storage!` dying with
+   `{:injected true}` in a landing gate)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]

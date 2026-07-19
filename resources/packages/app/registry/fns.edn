@@ -547,7 +547,9 @@
    :parent :zipmap
    :args {:keys [{:value :pending} {:value :visited}]
           :vals [:_inst-rest :_inst-visited]}}
-  {:name :_inst-skip-recurse
+  ;; `(self rest-state)` — the single "advance" re-entry, used by both
+  ;; the already-visited skip and the post-install continue.
+  {:name :_inst-advance
    :parent :invoke
    :args {:func {:as :self} :arg :_inst-rest-state}}
 
@@ -596,7 +598,7 @@
   {:name :_inst-do-resolve
    :parent :cond
    :args {:clauses [:_inst-row-nil?  :_inst-fail-not-found
-                    :_inst-visiting? :_inst-skip-recurse
+                    :_inst-visiting? :_inst-advance
                     {:value true}    :_inst-expand-recurse]}}
 
   ;; --- :install op: guard fn-level deps, materialize (unless already
@@ -665,16 +667,13 @@
   {:name :_inst-rest-empty?
    :parent :empty?
    :args {:coll {:ref :_inst-rest :type [:list :any]}}}
-  {:name :_inst-continue
-   :parent :invoke
-   :args {:func {:as :self} :arg :_inst-rest-state}}
   ;; post-order guarantees the LAST op is the root's install — its
   ;; success envelope is the loop's return value.
   {:name :_inst-after-write
    :parent :if
    :args {:test :_inst-rest-empty?
           :then :_inst-ok
-          :else :_inst-continue}}
+          :else :_inst-advance}}
   {:name :_inst-write-then-continue
    :parent :do
    :args {:steps [:_inst-i-mat-maybe :_inst-i-pin :_inst-after-write]}}
@@ -784,31 +783,47 @@
    :parent :get
    :args {:coll :_pkgv-row :key {:value :fns} :default {:value []}}}
 
-  ;; --- :update-package-version — pin lookup → guards → apply, all graph. ---
+  ;; Shared failure envelopes over the guard prefix — one per rejection
+  ;; kind, not one per flow (they were byte-identical in all three).
+  {:name :_pkgv-err-not-found
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
+          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
 
-  {:name :_upd-pin-where-b
+  {:name :_pkgv-err-missing
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :missing}]
+          :vals [{:value false} {:value "missing-dependencies"} :_pkgv-missing]}}
+
+  ;; `{:branch-id <current>}` — the seed of every pin-table :where
+  ;; (update's pin lookup, the installed list, uninstall).
+  {:name :_pins-where-branch
    :parent :assoc-empty
    :args {:key {:value :branch-id} :value :current-branch-id}}
 
-  {:name :_upd-pin-where
+  ;; This branch's pin row for `:pkg-name` (nil when not installed) —
+  ;; the lookup update AND uninstall both start from.
+  {:name :_pins-where
    :parent :assoc
-   :args {:map :_upd-pin-where-b :key {:value :package-name} :value {:as :pkg-name :type :text}}}
+   :args {:map :_pins-where-branch :key {:value :package-name} :value {:as :pkg-name :type :text}}}
 
-  {:name :_upd-pin-rows
+  {:name :_pins-rows
    :parent :query-entities
-   :args {:entity-type {:value "package-install"} :where :_upd-pin-where}}
+   :args {:entity-type {:value "package-install"} :where :_pins-where}}
 
-  {:name :_upd-pin
+  {:name :_pin-row
    :parent :first
-   :args {:coll :_upd-pin-rows}}
+   :args {:coll :_pins-rows}}
+
+  ;; --- :update-package-version — pin lookup → guards → apply, all graph. ---
 
   {:name :_upd-pin-nil?
    :parent :nil?
-   :args {:value :_upd-pin}}
+   :args {:value :_pin-row}}
 
   {:name :_upd-old
    :parent :get
-   :args {:coll :_upd-pin :key {:value :version} :default nil}}
+   :args {:coll :_pin-row :key {:value :version} :default nil}}
 
   {:name :_upd-same?
    :description "Target resolves to the already-pinned version — a no-op."
@@ -828,20 +843,10 @@
    :args {:keys [{:value :ok} {:value :reason} {:value :name}]
           :vals [{:value false} {:value "not-installed"} {:as :pkg-name}]}}
 
-  {:name :_upd-err-not-found
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
-          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
-
   {:name :_upd-noop
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}]
           :vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved {:value 0}]}}
-
-  {:name :_upd-err-missing
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :missing}]
-          :vals [{:value false} {:value "missing-dependencies"} :_pkgv-missing]}}
 
   {:name :_upd-ok
    :parent :zipmap
@@ -852,9 +857,9 @@
    :description "Update (or roll back) an installed package to a different version: materialize the target, REWRITE the project's own refs from the pinned version to the target (package-internal refs untouched), repoint the pin. Symmetric (older version = rollback). Pure graph :cond — rejects on not-installed / not-found / missing-dependencies; same-version is a no-op; the apply core (`:update-package-apply`) is the coupled write+invalidate unit."
    :parent :cond
    :args {:clauses [:_upd-pin-nil?      :_upd-err-not-installed
-                    :_pkgv-row-nil?     :_upd-err-not-found
+                    :_pkgv-row-nil?     :_pkgv-err-not-found
                     :_upd-same?         :_upd-noop
-                    :_pkgv-missing-any? :_upd-err-missing
+                    :_pkgv-missing-any? :_pkgv-err-missing
                     {:value true}       :_upd-ok]}
    :return-type :keyword-map}
 
@@ -896,16 +901,6 @@
    :parent :fork-package-fns
    :args {:fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
 
-  {:name :_fork-do-err-not-found
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
-          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
-
-  {:name :_fork-do-err-missing
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :missing}]
-          :vals [{:value false} {:value "missing-dependencies"} :_pkgv-missing]}}
-
   {:name :_fork-do-ok
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :forked}]
@@ -914,8 +909,8 @@
   {:name :fork-package
    :description "Fork published `(:pkg-name, :pkg-version)`: sync its fns into the graph at their ORIGINAL namespace, DUPLICATING rows so the caller can modify them (copy-on-write). Unlike reference install, this copies. Pure graph :cond over the shared `:_pkgv-*` guard prefix + per-flow envelopes; the apply core (`:fork-package-fns`) is the coupled sync+invalidate unit."
    :parent :cond
-   :args {:clauses [:_pkgv-row-nil?     :_fork-do-err-not-found
-                    :_pkgv-missing-any? :_fork-do-err-missing
+   :args {:clauses [:_pkgv-row-nil?     :_pkgv-err-not-found
+                    :_pkgv-missing-any? :_pkgv-err-missing
                     {:value true}       :_fork-do-ok]}
    :return-type :keyword-map}
 
@@ -966,16 +961,6 @@
           :version {:ref :_pkgv-resolved :type :text}
           :fn-ns {:ref :_pkgv-ns-root :type :text}}}
 
-  {:name :_mat-err-not-found
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :requested}]
-          :vals [{:value false} {:value "not-found"} {:as :pkg-name} {:as :pkg-version}]}}
-
-  {:name :_mat-err-missing
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :reason} {:value :missing}]
-          :vals [{:value false} {:value "missing-dependencies"} :_pkgv-missing]}}
-
   {:name :_mat-ok
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :namespace} {:value :materialized}]
@@ -984,8 +969,8 @@
   {:name :materialize-package-version
    :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Pure graph :cond over the shared `:_pkgv-*` guard prefix; the apply core (`:materialize-package-fns`) is the coupled sync+invalidate unit."
    :parent :cond
-   :args {:clauses [:_pkgv-row-nil?     :_mat-err-not-found
-                    :_pkgv-missing-any? :_mat-err-missing
+   :args {:clauses [:_pkgv-row-nil?     :_pkgv-err-not-found
+                    :_pkgv-missing-any? :_pkgv-err-missing
                     {:value true}       :_mat-ok]}
    :return-type :keyword-map}
 
@@ -1014,13 +999,9 @@
 
   ;; Installed list — pure graph composition: this branch's pins,
   ;; reshaped per-row for clean JSON.
-  {:name :_inst-where
-   :parent :assoc-empty
-   :args {:key {:value :branch-id} :value :current-branch-id}}
-
   {:name :_inst-rows
    :parent :query-entities
-   :args {:entity-type {:value "package-install"} :where :_inst-where}}
+   :args {:entity-type {:value "package-install"} :where :_pins-where-branch}}
 
   {:name :_inst-entry-name
    :parent :get :args {:coll {:as :item} :key {:value :package-name} :default nil}}
@@ -1047,31 +1028,16 @@
    :args {:func :_inst-entry :coll :_inst-rows}
    :return-type [:list :keyword-map]}
 
-  ;; Uninstall — pure graph composition: find the pin, delete it when
-  ;; present, return the idempotent envelope.
-  {:name :_unpin-where-b
-   :parent :assoc-empty
-   :args {:key {:value :branch-id} :value :current-branch-id}}
-
-  {:name :_unpin-where
-   :parent :assoc
-   :args {:map :_unpin-where-b :key {:value :package-name} :value {:as :pkg-name :type :text}}}
-
-  {:name :_unpin-rows
-   :parent :query-entities
-   :args {:entity-type {:value "package-install"} :where :_unpin-where}}
-
-  {:name :_unpin-existing
-   :parent :first
-   :args {:coll :_unpin-rows}}
-
+  ;; Uninstall — pure graph composition: find the pin (shared
+  ;; `:_pin-row` lookup), delete it when present, return the
+  ;; idempotent envelope.
   {:name :_unpin-present?
    :parent :some?
-   :args {:value :_unpin-existing}}
+   :args {:value :_pin-row}}
 
   {:name :_unpin-id
    :parent :get
-   :args {:coll :_unpin-existing :key {:value :id} :default nil}}
+   :args {:coll :_pin-row :key {:value :id} :default nil}}
 
   {:name :_unpin-delete
    :parent :delete-entity

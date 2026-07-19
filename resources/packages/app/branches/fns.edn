@@ -580,10 +580,18 @@
    :args {:keys [{:value :target-ref} {:value :against-ref}]
           :vals [:_branches-target-ref :_diff-against-ref]}}
 
-  {:name :_diff-target-branch
+  ;; Shared across the diff / conflicts / merge handlers — every
+  ;; branch-op request resolves its target (and optional source) the
+  ;; same way, off the same `parsed` shape.
+  {:name :_target-branch
    :description "Resolve the target branch by ref; nil when missing. `:resolve-branch-ref` over `(get parsed :target-ref)`."
    :parent :resolve-branch-ref
    :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :target-ref} :default nil}}}}
+
+  {:name :_source-branch
+   :description "Resolve the source branch when supplied; nil otherwise. `:resolve-branch-ref` over `(get parsed :source-ref)`."
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :source-ref} :default nil}}}}
 
   {:name :_diff-source-branch
    :description "Resolve the source branch when `?against=` was supplied; nil otherwise."
@@ -662,7 +670,7 @@
    :effects #{:db}}
 
   {:name :_diff-apply-raw
-   :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_diff-target-branch`. The `:assert-some` wraps mirror the `:cond` guards (`:_diff-source-missing?` / `:_diff-target-missing?` reject nil branches upstream) — they bridge the type-checker's per-arm narrowing gap."
+   :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_target-branch`. The `:assert-some` wraps mirror the `:cond` guards (`:_diff-source-missing?` / `:_diff-target-missing?` reject nil branches upstream) — they bridge the type-checker's per-arm narrowing gap."
    :parent :diff-branches
    :args {:source-branch-id {:parent :assert-some
                              :args {:value {:parent :get
@@ -739,7 +747,7 @@
                     :_diff-source-missing?  :_diff-err-source-missing
                     {:value true}           :_diff-apply]
           :parsed :_diff-parsed
-          :target-branch :_diff-target-branch
+          :target-branch :_target-branch
           :source-branch :_diff-source-branch}}
 
   {:name :diff-branches-handler
@@ -1149,16 +1157,6 @@
    :args {:keys [{:value :target-ref} {:value :source-ref}]
           :vals [:_branches-target-ref :_conflicts-source-ref]}}
 
-  {:name :_conflicts-target
-   :description "Resolve the target branch by ref; nil when missing."
-   :parent :resolve-branch-ref
-   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :target-ref} :default nil}}}}
-
-  {:name :_conflicts-source
-   :description "Resolve the source branch when supplied; nil otherwise."
-   :parent :resolve-branch-ref
-   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :source-ref} :default nil}}}}
-
   {:name :_conflicts-target-missing?
    :description "Guard #1 — target branch not found. `:nil? :target`."
    :parent :nil?
@@ -1291,8 +1289,8 @@
                     :_conflicts-source-missing?      :_conflicts-err-source-missing
                     {:value true}                    :_conflicts-apply]
           :parsed :_conflicts-parsed
-          :target :_conflicts-target
-          :source :_conflicts-source}}
+          :target :_target-branch
+          :source :_source-branch}}
 
   {:name :preview-conflicts-handler
    :description "Ring handler for GET /api/branches/:ref/conflicts."
@@ -1411,16 +1409,6 @@
    :parent :zipmap
    :args {:keys [{:value :target-ref} {:value :source-ref} {:value :resolutions}]
           :vals [:_branches-target-ref :_merge-source-ref :_merge-resolutions]}}
-
-  {:name :_merge-target
-   :description "Resolve target branch by ref; nil when missing."
-   :parent :resolve-branch-ref
-   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :target-ref} :default nil}}}}
-
-  {:name :_merge-source
-   :description "Resolve source branch when supplied; nil otherwise."
-   :parent :resolve-branch-ref
-   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :source-ref} :default nil}}}}
 
   {:name :_merge-target-missing?
    :description "Guard #1 — target branch not found. `:nil? :target`."
@@ -1617,8 +1605,8 @@
                     :_merge-same?                :_merge-err-same
                     {:value true}                :_merge-apply]
           :parsed :_merge-parsed
-          :target :_merge-target
-          :source :_merge-source}}
+          :target :_target-branch
+          :source :_source-branch}}
 
   {:name :merge-branch-handler
    :description "Ring handler for POST /api/branches/:ref/merge (auth-required)."

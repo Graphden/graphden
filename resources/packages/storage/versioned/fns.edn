@@ -455,9 +455,11 @@
    :parent :assoc
    :args {:map {:value {:select [:*] :from :fn-version}}
           :key {:value :where}
-          :value :_resolve-fn-versions-hsql-where}}
+          :value :_version-rows-branch-where}}
 
-  {:name :_resolve-fn-versions-hsql-where
+  ;; `[:in :branch-id <chain>]` — the branch-visibility filter every
+  ;; version-table read shares (fn / binding / binding-list-item).
+  {:name :_version-rows-branch-where
    :parent :vec
    :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
 
@@ -490,11 +492,7 @@
    :parent :assoc
    :args {:map {:value {:select [:*] :from :binding-version}}
           :key {:value :where}
-          :value :_resolve-binding-versions-hsql-where}}
-
-  {:name :_resolve-binding-versions-hsql-where
-   :parent :vec
-   :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
+          :value :_version-rows-branch-where}}
 
   {:name :_resolve-binding-versions-decode
    :parent :decode-row
@@ -523,11 +521,7 @@
    :parent :assoc
    :args {:map {:value {:select [:*] :from :binding-list-item-version}}
           :key {:value :where}
-          :value :_resolve-binding-list-item-versions-hsql-where}}
-
-  {:name :_resolve-binding-list-item-versions-hsql-where
-   :parent :vec
-   :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
+          :value :_version-rows-branch-where}}
 
   {:name :_resolve-binding-list-item-versions-decode
    :parent :decode-row

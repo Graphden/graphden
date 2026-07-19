@@ -797,11 +797,11 @@
   ;; :error}` rejection response directly (or nil), so the `:if`'s
   ;; `:then` branch is the validation result itself; `_rejected?` is
   ;; shared with the entity create/update handlers. ---
-  {:name :_create-record-type-parsed-name-raw
+  {:name :_type-form-name-raw
    :parent :get
    :args {:coll :_parsed-body :key {:value :name} :default nil}}
 
-  {:name :_create-record-type-parsed-ns-id-raw
+  {:name :_type-form-ns-id-raw
    :parent :get
    :args {:coll :_parsed-body :key {:value :namespace-id} :default nil}}
 
@@ -810,11 +810,11 @@
    :parent :zipmap
    :args {:keys [{:value :name} {:value :ns-id} {:value :description} {:value :fields}]
           :vals [{:parent :if
-                  :args {:test {:parent :some? :args {:value :_create-record-type-parsed-name-raw}}
-                         :then {:parent :to-str :args {:value :_create-record-type-parsed-name-raw}}
+                  :args {:test {:parent :some? :args {:value :_type-form-name-raw}}
+                         :then {:parent :to-str :args {:value :_type-form-name-raw}}
                          :else {:value nil}}}
                  {:parent :parse-uuid
-                  :args {:string {:parent :to-str :args {:value :_create-record-type-parsed-ns-id-raw}}}}
+                  :args {:string {:parent :to-str :args {:value :_type-form-ns-id-raw}}}}
                  {:parent :get :args {:coll :_parsed-body :key {:value :description} :default nil}}
                  {:parent :vec
                   :args {:coll {:parent :get
@@ -893,24 +893,16 @@
           :journal :_apply-create-record-type-journal
           :parsed {:as :parsed}}}
 
-  {:name :_create-list-type-parsed-name-raw
-   :parent :get
-   :args {:coll :_parsed-body :key {:value :name} :default nil}}
-
-  {:name :_create-list-type-parsed-ns-id-raw
-   :parent :get
-   :args {:coll :_parsed-body :key {:value :namespace-id} :default nil}}
-
   {:name :_create-list-type-parsed
    :description "Stage 1 of create-list-type — JSON body → `{:name :ns-id :description :element-ref}`."
    :parent :zipmap
    :args {:keys [{:value :name} {:value :ns-id} {:value :description} {:value :element-ref}]
           :vals [{:parent :if
-                  :args {:test {:parent :some? :args {:value :_create-list-type-parsed-name-raw}}
-                         :then {:parent :to-str :args {:value :_create-list-type-parsed-name-raw}}
+                  :args {:test {:parent :some? :args {:value :_type-form-name-raw}}
+                         :then {:parent :to-str :args {:value :_type-form-name-raw}}
                          :else {:value nil}}}
                  {:parent :parse-uuid
-                  :args {:string {:parent :to-str :args {:value :_create-list-type-parsed-ns-id-raw}}}}
+                  :args {:string {:parent :to-str :args {:value :_type-form-ns-id-raw}}}}
                  {:parent :get :args {:coll :_parsed-body :key {:value :description} :default nil}}
                  {:parent :get :args {:coll :_parsed-body :key {:value :element-type} :default nil}}]}
    :return-type :_create-list-type-parsed-shape}
@@ -976,10 +968,6 @@
           :journal :_apply-create-list-type-journal
           :parsed {:as :parsed}}}
 
-  {:name :_update-record-type-parsed-name-raw
-   :parent :get
-   :args {:coll :_parsed-body :key {:value :name} :default nil}}
-
   {:name :_update-record-type-parsed
    :description "Stage 1 of update-record-type — JSON body → `{:fn-id :name :has-description? :description :fields}`. `:has-description?` distinguishes a submitted-nil description (clear) from an absent key (leave untouched)."
    :parent :zipmap
@@ -988,8 +976,8 @@
                   :args {:string {:parent :to-str :args {:value {:parent :get
                                                                  :args {:coll :_parsed-body :key {:value :id} :default nil}}}}}}
                  {:parent :if
-                  :args {:test {:parent :some? :args {:value :_update-record-type-parsed-name-raw}}
-                         :then {:parent :to-str :args {:value :_update-record-type-parsed-name-raw}}
+                  :args {:test {:parent :some? :args {:value :_type-form-name-raw}}
+                         :then {:parent :to-str :args {:value :_type-form-name-raw}}
                          :else {:value nil}}}
                  {:parent :contains?
                   :args {:coll :_parsed-body :key {:value :description}}}
@@ -1262,15 +1250,15 @@
   ;; The `:_*-rej?` predicates stay as `:some?` over the graph result
   ;; for cond-readability; result-cache dedupes the underlying eval.
 
-  {:name :_create-parsed-entity-type
+  {:name :_parsed-entity-type
    :parent :get
    :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}
 
-  {:name :_create-parsed-type-str
+  {:name :_parsed-type-str
    :parent :get
    :args {:coll {:as :parsed} :key {:value :type-str} :default nil}}
 
-  {:name :_create-parsed-form-data
+  {:name :_parsed-form-data
    :parent :get
    :args {:coll {:as :parsed} :key {:value :form-data} :default nil}}
 
@@ -1281,14 +1269,14 @@
   ;; --- Guard 1: unknown entity type
   {:name :_create-entity-type-nil?
    :parent :nil?
-   :args {:value :_create-parsed-entity-type}}
+   :args {:value :_parsed-entity-type}}
 
   {:name :_create-entity-type-suffix
    :description "': <type-str>' when the URI segment was supplied, else empty string. Lets the rejection cite the offending segment without leaking the literal `nil`."
    :parent :if
-   :args {:test {:parent :some? :args {:value :_create-parsed-type-str}}
+   :args {:test {:parent :some? :args {:value :_parsed-type-str}}
           :then {:parent :str
-                 :args {:parts [{:value ": "} :_create-parsed-type-str]}}
+                 :args {:parts [{:value ": "} :_parsed-type-str]}}
           :else {:value ""}}}
 
   {:name :_create-entity-type-reason
@@ -1318,7 +1306,7 @@
   ;; downstream apply create entities with zero fields).
   {:name :_create-form-data-empty?
    :parent :empty?
-   :args {:coll :_create-parsed-form-data}}
+   :args {:coll :_parsed-form-data}}
 
   {:name :_create-form-data-rej-data
    :parent :const
@@ -1366,11 +1354,11 @@
 
   {:name :_create-fn-slot-fn-id
    :parent :get
-   :args {:coll :_create-entity-data :key {:value :fn-id} :default nil}}
+   :args {:coll :_parsed-entity-data :key {:value :fn-id} :default nil}}
 
   {:name :_create-fn-slot-slot-id
    :parent :get
-   :args {:coll :_create-entity-data :key {:value :slot-id} :default nil}}
+   :args {:coll :_parsed-entity-data :key {:value :slot-id} :default nil}}
 
   {:name :_create-fn-slot-fn-row
    :description "Owner fn row (the fn being given a slot). Read lazily — `:_create-fn-slot-rename-fires?`'s outer `:and` short-circuits non-fn-slot creates before this evaluates."
@@ -1399,8 +1387,8 @@
   {:name :_create-fn-slot-is-fn-slot-create?
    :description "Lazy short-circuit guard — only fire DB reads + checks when this is actually a `:fn-slot` create."
    :parent :and
-   :args {:values [{:parent :some? :args {:value :_create-entity-data}}
-                   {:parent :equal? :args {:a :_create-parsed-type-str :b {:value "fn-slot"}}}]}}
+   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
+                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "fn-slot"}}}]}}
 
   {:name :_create-fn-slot-violation?
    :description "Both rows resolved AND the fn is composed AND the slot isn't a rename. Each clause is lazy via `:and`."
@@ -1444,20 +1432,20 @@
   ;; "permissive" / "strict" definition by composing a different free-
   ;; arg-filter at the graph layer (e.g. allow optional slots).
 
-  {:name :_create-entity-data
+  {:name :_parsed-entity-data
    :parent :get
    :args {:coll {:as :parsed} :key {:value :entity-data} :default nil}}
 
   {:name :_create-svc-fn-id
    :description "`:fn-id` from the create payload (only meaningful for service creates)."
    :parent :get
-   :args {:coll :_create-entity-data :key {:value :fn-id} :default nil}}
+   :args {:coll :_parsed-entity-data :key {:value :fn-id} :default nil}}
 
   {:name :_create-is-service-create?
    :description "True iff this request creates a `:service` row AND carries a target `:fn-id`."
    :parent :and
-   :args {:values [{:parent :some? :args {:value :_create-entity-data}}
-                   {:parent :equal? :args {:a :_create-parsed-type-str :b {:value "service"}}}
+   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
+                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "service"}}}
                    {:parent :some? :args {:value :_create-svc-fn-id}}]}}
 
   {:name :_create-svc-free-args
@@ -1563,8 +1551,8 @@
   {:name :_create-write-rej
    :description "Guard 7 — generic cycle / MI / value-override / `:list-closed` write-time checks via `:write-rej`. Reuses the same primitive `:_update-validation` does. Server-only enforcement: editor pre-runs the cycle / MI subset, other API consumers don't."
    :parent :write-rej
-   :args {:entity-type :_create-parsed-type-str
-          :entity-data :_create-entity-data}}
+   :args {:entity-type :_parsed-type-str
+          :entity-data :_parsed-entity-data}}
 
   {:name :_create-write-rej?
    :description "True when guard 7 fired."
@@ -1574,15 +1562,15 @@
   {:name :_create-is-binding-create?
    :description "Lazy gate — only fire `:type-check-binding-rej` for binding creates."
    :parent :and
-   :args {:values [{:parent :some? :args {:value :_create-entity-data}}
-                   {:parent :equal? :args {:a :_create-parsed-type-str :b {:value "binding"}}}]}}
+   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
+                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "binding"}}}]}}
 
   {:name :_create-binding-type-rej
    :description "Guard 8 (binding creates only) — save-time type-check for the binding's `:value`/`:ref`. The underlying `:type-check-binding-rej` primitive returns `{:reason <message>}` on mismatch (surfaced as a 400 by the Stage-2 `:cond`), nil otherwise. `:id` is nil on CREATE."
    :parent :if
    :args {:test :_create-is-binding-create?
           :then {:parent :type-check-binding-rej
-                 :args {:entity-data :_create-entity-data
+                 :args {:entity-data :_parsed-entity-data
                         :id {:value nil}}}
           :else nil}}
 
@@ -1624,32 +1612,20 @@
   {:name :_create-apply-result
    :description "Outcome of the atomic create unit. `{:created <id>}` on success, `{:error <human-msg>}` on capability-rej / write-failure / post-check rejection (the rollback is internal)."
    :parent :try-apply-create
-   :args {:entity-type :_create-apply-entity-type-str
-          :entity-data :_create-apply-entity-data
-          :type-str :_create-apply-type-str
-          :form-data :_create-apply-form-data}}
+   :args {:entity-type :_apply-entity-type-str
+          :entity-data :_parsed-entity-data
+          :type-str :_parsed-type-str
+          :form-data :_parsed-form-data}}
 
-  {:name :_create-apply-entity-type-str
+  {:name :_apply-entity-type-str
    :parent :name
    :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}}}
 
-  {:name :_create-apply-entity-data
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :entity-data} :default nil}}
-
-  {:name :_create-apply-type-str
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :type-str} :default nil}}
-
-  {:name :_create-apply-form-data
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :form-data} :default nil}}
-
   {:name :_create-apply-error?
    :parent :some?
-   :args {:value :_create-apply-error-msg}}
+   :args {:value :_apply-error-msg}}
 
-  {:name :_create-apply-error-msg
+  {:name :_apply-error-msg
    :parent :get
    :args {:coll {:as :result} :key {:value :error} :default nil}}
 
@@ -1660,7 +1636,7 @@
   {:name :_create-apply-err-response
    :parent :html-error-response
    :args {:status {:value 400}
-          :reason :_create-apply-error-msg}}
+          :reason :_apply-error-msg}}
 
   ;; Success: invalidate cache → emit NOTIFY → 200 response. `:do :steps`
   ;; sequences the side effects left-to-right.
@@ -1675,18 +1651,18 @@
   ;; FKs (binding-list-item needs `:binding-id`).
   {:name :_create-apply-success-payload
    :parent :assoc
-   :args {:map :_create-apply-entity-data
+   :args {:map :_parsed-entity-data
           :key {:value :id}
           :value :_create-apply-created-id}}
 
   {:name :_create-apply-do-invalidate
    :parent :invalidate-after-write
-   :args {:entity-type :_create-apply-entity-type-str
+   :args {:entity-type :_apply-entity-type-str
           :entity-data :_create-apply-success-payload}}
 
   {:name :_create-apply-do-notify
    :parent :notify-after-write
-   :args {:entity-type :_create-apply-entity-type-str
+   :args {:entity-type :_apply-entity-type-str
           :op {:value "write"}
           :entity-data :_create-apply-success-payload}}
 
@@ -1816,10 +1792,6 @@
   ;; nil and this is a binding update, type-check-binding-rej runs.
   ;; `:if`-gated so non-binding updates skip the type-check.
 
-  {:name :_update-parsed-entity-data
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :entity-data} :default nil}}
-
   {:name :_update-parsed-id-str
    :parent :get
    :args {:coll {:as :parsed} :key {:value :id-str} :default nil}}
@@ -1851,23 +1823,23 @@
    :description "`(merge pre-existing entity-data {:id id-uuid})` — the post-write picture that write-time validators check."
    :parent :merge
    :args {:maps [:_update-parsed-pre-existing
-                 :_update-parsed-entity-data
+                 :_parsed-entity-data
                  :_update-id-as-map]}}
 
   {:name :_update-write-rej-result
    :description "Generic write-time check against the merged view. nil when entity-data was empty (no actual update)."
    :parent :if
-   :args {:test {:parent :some? :args {:value :_update-parsed-entity-data}}
+   :args {:test {:parent :some? :args {:value :_parsed-entity-data}}
           :then {:parent :write-rej
-                 :args {:entity-type :_create-parsed-type-str
+                 :args {:entity-type :_parsed-type-str
                         :entity-data :_update-merged-data}}
           :else nil}}
 
   {:name :_update-is-binding-update?
    :description "Lazy gate — only fire `:type-check-binding-rej` for binding updates with a resolved id."
    :parent :and
-   :args {:values [{:parent :some? :args {:value :_update-parsed-entity-data}}
-                   {:parent :equal? :args {:a :_create-parsed-type-str :b {:value "binding"}}}
+   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
+                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "binding"}}}
                    {:parent :some? :args {:value :_update-parsed-id-uuid}}]}}
 
   {:name :_update-binding-type-rej-result
@@ -1875,7 +1847,7 @@
    :parent :if
    :args {:test :_update-is-binding-update?
           :then {:parent :type-check-binding-rej
-                 :args {:entity-data :_update-parsed-entity-data
+                 :args {:entity-data :_parsed-entity-data
                         :id :_update-parsed-id-uuid}}
           :else nil}}
 
@@ -1912,31 +1884,15 @@
   {:name :_update-apply-result
    :description "Outcome of the atomic update unit. `{:updated <id>}` on success, `{:error <msg>}` on write failure."
    :parent :try-apply-update
-   :args {:entity-type :_update-apply-entity-type-str
+   :args {:entity-type :_apply-entity-type-str
           :id-uuid :_update-apply-id-uuid
-          :entity-data :_update-apply-entity-data
-          :type-str :_update-apply-type-str
-          :form-data :_update-apply-form-data}}
-
-  {:name :_update-apply-entity-type-str
-   :parent :name
-   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}}}
+          :entity-data :_parsed-entity-data
+          :type-str :_parsed-type-str
+          :form-data :_parsed-form-data}}
 
   {:name :_update-apply-id-uuid
    :parent :get
    :args {:coll {:as :parsed} :key {:value :id-uuid} :default nil}}
-
-  {:name :_update-apply-entity-data
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :entity-data} :default nil}}
-
-  {:name :_update-apply-type-str
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :type-str} :default nil}}
-
-  {:name :_update-apply-form-data
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :form-data} :default nil}}
 
   {:name :_update-apply-pre-existing
    :parent :get
@@ -1944,16 +1900,12 @@
 
   {:name :_update-apply-error?
    :parent :some?
-   :args {:value :_update-apply-error-msg}}
-
-  {:name :_update-apply-error-msg
-   :parent :get
-   :args {:coll {:as :result} :key {:value :error} :default nil}}
+   :args {:value :_apply-error-msg}}
 
   {:name :_update-apply-err-response
    :parent :html-error-response
    :args {:status {:value 400}
-          :reason :_update-apply-error-msg}}
+          :reason :_apply-error-msg}}
 
   {:name :_update-apply-success
    :parent :do
@@ -1967,7 +1919,7 @@
   {:name :_update-apply-success-payload
    :parent :merge
    :args {:maps [:_update-apply-pre-existing
-                 :_update-apply-entity-data
+                 :_parsed-entity-data
                  :_update-apply-success-id-only]}}
 
   {:name :_update-apply-success-id-only
@@ -1977,12 +1929,12 @@
 
   {:name :_update-apply-do-invalidate
    :parent :invalidate-after-write
-   :args {:entity-type :_update-apply-entity-type-str
+   :args {:entity-type :_apply-entity-type-str
           :entity-data :_update-apply-success-payload}}
 
   {:name :_update-apply-do-notify
    :parent :notify-after-write
-   :args {:entity-type :_update-apply-entity-type-str
+   :args {:entity-type :_apply-entity-type-str
           :op {:value "write"}
           :entity-data :_update-apply-success-payload}}
 
@@ -2118,23 +2070,19 @@
   {:name :_delete-fn-is-secret?
    :description "Guard #2 — the targeted entity is a secret-shaped fn-def (`:vault-get` / `:secret-leaf`). Bounce to `DELETE /api/secrets/:fn-id` so OpenBao stays in sync."
    :parent :and
-   :args {:values [:_delete-target-is-fn?
-                   :_delete-target-id-present?
+   :args {:values [:_delete-is-fn?
+                   :_delete-id-present?
                    :_delete-target-has-secret-shape?]}}
-
-  {:name :_delete-target-entity-type
-   :parent :get
-   :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}
 
   {:name :_delete-target-id
    :parent :get
    :args {:coll {:as :parsed} :key {:value :id} :default nil}}
 
-  {:name :_delete-target-is-fn?
+  {:name :_delete-is-fn?
    :parent :equal?
-   :args {:a :_delete-target-entity-type :b {:value :fn}}}
+   :args {:a :_parsed-entity-type :b {:value :fn}}}
 
-  {:name :_delete-target-id-present?
+  {:name :_delete-id-present?
    :parent :some?
    :args {:value :_delete-target-id}}
 
@@ -2222,15 +2170,8 @@
   {:name :_delete-fn-in-use-gate?
    :description "Cheap gate — short-circuit when target isn't a :fn delete with a present id."
    :parent :and
-   :args {:values [:_delete-fn-target-is-fn?
-                   :_delete-fn-target-id-present?]}}
-
-  {:name :_delete-fn-target-is-fn?
-   :parent :equal?
-   :args {:a :_delete-target-entity-type :b {:value :fn}}}
-
-  {:name :_delete-fn-target-id-present?
-   :parent :some? :args {:value :_delete-target-id}}
+   :args {:values [:_delete-is-fn?
+                   :_delete-id-present?]}}
 
   ;; Conditional final message.
   {:name :_delete-fn-in-use-conditional-message
@@ -2518,14 +2459,11 @@
    :description "Cheap gate — short-circuit when target isn't a :ns delete with a present id."
    :parent :and
    :args {:values [:_delete-ns-target-is-ns?
-                   :_delete-ns-target-id-present?]}}
+                   :_delete-id-present?]}}
 
   {:name :_delete-ns-target-is-ns?
    :parent :equal?
-   :args {:a :_delete-target-entity-type :b {:value :ns}}}
-
-  {:name :_delete-ns-target-id-present?
-   :parent :some? :args {:value :_delete-target-id}}
+   :args {:a :_parsed-entity-type :b {:value :ns}}}
 
   ;; Conditional message: nil when no children, the human-readable
   ;; string otherwise.
@@ -2767,7 +2705,7 @@
   {:name :_delete-apply-entity-type-str
    :description "Bare-identifier text form of the entity-type — `:fn` becomes `\"fn\"`. Used by the storage-facing slots (`:get-entity`/`:delete-entity`/`:invalidate-after-write`/`:notify-after-write`) which keyword the text via `keyword`."
    :parent :name
-   :args {:value :_delete-target-entity-type}}
+   :args {:value :_parsed-entity-type}}
 
   {:name :_delete-apply-existing
    :description "Pre-read snapshot of the row about to be deleted. nil when no such row exists. The return-type stays the unrefined `:nullable-keyword-map` from `:get-entity` because the entity-type is dynamic (parsed from the URL) — every entity-type-shape alias would lie about non-matching callers."
@@ -2795,14 +2733,14 @@
   {:name :_delete-apply-success
    :parent :do
    :args {:steps [:_delete-apply-do-delete
-                  :_delete-apply-ok-response]}}
+                  :_apply-ok-empty-response]}}
 
   {:name :_delete-apply-do-delete
    :parent :delete-entity
    :args {:entity-type :_delete-apply-entity-type-str
           :id :_delete-target-id}}
 
-  {:name :_delete-apply-ok-response
+  {:name :_apply-ok-empty-response
    :parent :const
    :args {:value {:status 200 :body ""}}}
 
@@ -2902,16 +2840,12 @@
 
   {:name :_seq-append-apply-error?
    :parent :some?
-   :args {:value :_seq-append-apply-error-msg}}
-
-  {:name :_seq-append-apply-error-msg
-   :parent :get
-   :args {:coll {:as :result} :key {:value :error} :default nil}}
+   :args {:value :_apply-error-msg}}
 
   {:name :_seq-append-apply-err-response
    :parent :html-error-response
    :args {:status {:value 400}
-          :reason :_seq-append-apply-error-msg}}
+          :reason :_apply-error-msg}}
 
   {:name :_seq-append-apply-success
    :parent :do
@@ -3014,7 +2948,7 @@
    :description "Success branch — delete the row (base-fn invalidates + NOTIFYs), return 200."
    :parent :do
    :args {:steps [:_seq-remove-apply-do-delete
-                  :_seq-remove-apply-ok-response]}}
+                  :_apply-ok-empty-response]}}
 
   {:name :_seq-remove-apply-do-delete
    :parent :delete-entity
@@ -3028,10 +2962,6 @@
           ;; one in the upstream `:nil?` guard.)
           :id {:parent :get :type :uuid
                :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
-
-  {:name :_seq-remove-apply-ok-response
-   :parent :const
-   :args {:value {:status 200 :body ""}}}
 
   {:name :process-sequence-remove
    :description "DELETE /api/sequence/item/:item-id — remove one binding-list-item. The two validation guards and the success path are a flat `:cond` — `[invalid-id? → 400, not-found? → 404, true → apply]`. `:cond` is lazy, so the DB delete runs only when both guards pass. `parsed` + `item` are shared sub-results bound once at the `:cond` fn-def."
@@ -3092,30 +3022,22 @@
 
   {:name :_seq-update-apply-error?
    :parent :some?
-   :args {:value :_seq-update-apply-error-msg}}
-
-  {:name :_seq-update-apply-error-msg
-   :parent :get
-   :args {:coll {:as :result} :key {:value :error} :default nil}}
+   :args {:value :_apply-error-msg}}
 
   {:name :_seq-update-apply-err-response
    :parent :html-error-response
    :args {:status {:value 400}
-          :reason :_seq-update-apply-error-msg}}
+          :reason :_apply-error-msg}}
 
   {:name :_seq-update-apply-success
    :parent :do
    :args {:steps [:_seq-update-apply-do-invalidate
-                  :_seq-update-apply-ok-response]}}
+                  :_apply-ok-empty-response]}}
 
   {:name :_seq-update-apply-do-invalidate
    :parent :invalidate-after-write
    :args {:entity-type {:value "binding-list-item"}
           :entity-data {:as :item}}}
-
-  {:name :_seq-update-apply-ok-response
-   :parent :const
-   :args {:value {:status 200 :body ""}}}
 
   {:name :process-sequence-update
    :description "PUT /api/sequence/item/:item-id — replace the value/ref of one existing binding-list-item. Validation guards + success path are a flat `:cond` — `[invalid-id? → 400, invalid-body? → 400, item-not-found? → 404, true → apply]`. `:cond` is lazy, so the DB update + write-rej payload-resolution only run when every guard passes."
@@ -3412,7 +3334,7 @@
   ;;   :expects-effects — comma-separated bare effect names → vec,
   ;;     with literal "[]" / "null" handling.
 
-  {:name :_parse-fn-form-name-fragment
+  {:name :_form-name-fragment
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :name}}}
@@ -3464,7 +3386,7 @@
                         :vals [:_parse-fn-form-namespace-id-coerced]}}
           :else {:value {}}}}
 
-  {:name :_parse-fn-form-description-fragment
+  {:name :_form-description-fragment
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :description}}}
@@ -3653,10 +3575,10 @@
    :description "Extract a fn entity's field map from a parsed form-data map. 10 fields: name + parent-id + namespace-id + description + return-type → return-type-fn-id + parent-ids (CSV-of-UUIDs) + base-fn-id + element-fn-id + expects-effects (CSV-of-bare-names with `null`/`[]` literals) + constraint (JSON + recursive keyword-restore)."
    :parent :merge
    :args {:maps [{:value {}}
-                 :_parse-fn-form-name-fragment
+                 :_form-name-fragment
                  :_parse-fn-form-parent-id-fragment
                  :_parse-fn-form-namespace-id-fragment
-                 :_parse-fn-form-description-fragment
+                 :_form-description-fragment
                  :_parse-fn-form-return-type-fragment
                  :_parse-fn-form-parent-ids-fragment
                  :_parse-fn-form-base-fn-id-fragment
@@ -3671,20 +3593,6 @@
   ;; else {}}`. Admins extending the form (adding a `:tags`
   ;; field, a custom `:slug`, …) edit the fragment list instead
   ;; of Clojure.
-
-  {:name :_parse-ns-form-name-fragment
-   :description "`{:name (str (:name form-data))}` when form-data contains `:name`; else `{}`."
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :name}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :name}]
-                        :vals [{:parent :to-str
-                                :args {:value {:parent :get
-                                               :args {:coll {:as :form-data}
-                                                      :key {:value :name}
-                                                      :default nil}}}}]}}
-          :else {:value {}}}}
 
   {:name :_parse-ns-form-parent-id-raw
    :parent :get
@@ -3702,26 +3610,13 @@
                                 :args {:string :_parse-ns-form-parent-id-raw}}]}}
           :else {:value {}}}}
 
-  {:name :_parse-ns-form-description-fragment
-   :description "`{:description …}` when form-data contains `:description`; else `{}`. Pass-through (no coercion)."
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :description}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :description}]
-                        :vals [{:parent :get
-                                :args {:coll {:as :form-data}
-                                       :key {:value :description}
-                                       :default nil}}]}}
-          :else {:value {}}}}
-
   {:name :parse-ns-from-form
    :description "Extract a namespace entity's field map from a parsed form-data map. `:name` (string) is required; `:parent-id` and `:description` are optional. The form is the body of `POST /api/entities/ns` from the editor's `+` menu."
    :parent :merge
    :args {:maps [{:value {}}
-                 :_parse-ns-form-name-fragment
+                 :_form-name-fragment
                  :_parse-ns-form-parent-id-fragment
-                 :_parse-ns-form-description-fragment]
+                 :_form-description-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
@@ -3729,19 +3624,6 @@
   ;; pattern. 4 fields: `:name` (str), `:type-fn-id` (uuid via
   ;; `:parse-uuid`), `:description` (pass-through), `:required` (bool
   ;; via `:equal? "true"`).
-
-  {:name :_parse-slot-form-name-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :name}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :name}]
-                        :vals [{:parent :to-str
-                                :args {:value {:parent :get
-                                               :args {:coll {:as :form-data}
-                                                      :key {:value :name}
-                                                      :default nil}}}}]}}
-          :else {:value {}}}}
 
   {:name :_parse-slot-form-type-fn-id-fragment
    :parent :if
@@ -3754,18 +3636,6 @@
                                                 :args {:coll {:as :form-data}
                                                        :key {:value :type-fn-id}
                                                        :default nil}}}}]}}
-          :else {:value {}}}}
-
-  {:name :_parse-slot-form-description-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :description}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :description}]
-                        :vals [{:parent :get
-                                :args {:coll {:as :form-data}
-                                       :key {:value :description}
-                                       :default nil}}]}}
           :else {:value {}}}}
 
   {:name :_parse-slot-form-required-fragment
@@ -3787,9 +3657,9 @@
    :description "Extract a slot entity's field map from a parsed form-data map. `:name` (string) is required on create; `:type-fn-id` (UUID), `:description`, `:required` are optional."
    :parent :merge
    :args {:maps [{:value {}}
-                 :_parse-slot-form-name-fragment
+                 :_form-name-fragment
                  :_parse-slot-form-type-fn-id-fragment
-                 :_parse-slot-form-description-fragment
+                 :_form-description-fragment
                  :_parse-slot-form-required-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
@@ -3798,7 +3668,7 @@
   ;; pattern as `:parse-ns-from-form`. 3 fields: `:fn-id`, `:slot-id`
   ;; (UUIDs via `:parse-uuid`), `:position` (int via `:parse-int`).
 
-  {:name :_parse-fn-slot-form-fn-id-fragment
+  {:name :_form-fn-id-fragment
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :fn-id}}}
@@ -3842,7 +3712,7 @@
    :description "Extract a fn-slot junction's field map. `:fn-id` and `:slot-id` (UUIDs) are required; `:position` (int) is optional and defaults to 0."
    :parent :merge
    :args {:maps [{:value {}}
-                 :_parse-fn-slot-form-fn-id-fragment
+                 :_form-fn-id-fragment
                  :_parse-fn-slot-form-slot-id-fragment
                  :_parse-fn-slot-form-position-fragment]
           :form-data {:type :_form-data-shape
@@ -3854,19 +3724,6 @@
   ;; non-blank for `:override-kind`, pass-through for `:description`,
   ;; `:equal? "true"` for the three boolean flags, and a nullable
   ;; "true"-bool for `:required`.
-
-  {:name :_parse-bnd-form-fn-id-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :fn-id}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :fn-id}]
-                        :vals [{:parent :parse-uuid
-                                :args {:string {:parent :get
-                                                :args {:coll {:as :form-data}
-                                                       :key {:value :fn-id}
-                                                       :default nil}}}}]}}
-          :else {:value {}}}}
 
   {:name :_parse-bnd-form-slot-id-fragment
    :parent :if
@@ -3954,18 +3811,6 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
-  {:name :_parse-bnd-form-description-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :description}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :description}]
-                        :vals [{:parent :get
-                                :args {:coll {:as :form-data}
-                                       :key {:value :description}
-                                       :default nil}}]}}
-          :else {:value {}}}}
-
   {:name :_parse-bnd-form-list-append-fragment
    :parent :if
    :args {:test {:parent :contains?
@@ -4022,13 +3867,13 @@
    :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool), `:override-kind` (`:fixed` / `:default`). Empty form values clear the corresponding column."
    :parent :merge
    :args {:maps [{:value {}}
-                 :_parse-bnd-form-fn-id-fragment
+                 :_form-fn-id-fragment
                  :_parse-bnd-form-slot-id-fragment
                  :_parse-bnd-form-value-fragment
                  :_parse-bnd-form-ref-fn-id-fragment
                  :_parse-bnd-form-override-kind-fragment
                  :_parse-bnd-form-type-override-fn-id-fragment
-                 :_parse-bnd-form-description-fragment
+                 :_form-description-fragment
                  :_parse-bnd-form-list-append-fragment
                  :_parse-bnd-form-list-closed-fragment
                  :_parse-bnd-form-required-fragment]
@@ -4149,19 +3994,6 @@
   ;; up-front by the parser-dispatch's `nil` fall-through with the
   ;; opaque "data must be a map" message.
 
-  {:name :_parse-svc-form-fn-id-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :fn-id}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :fn-id}]
-                        :vals [{:parent :parse-uuid
-                                :args {:string {:parent :get
-                                                :args {:coll {:as :form-data}
-                                                       :key {:value :fn-id}
-                                                       :default nil}}}}]}}
-          :else {:value {}}}}
-
   {:name :_parse-svc-form-enabled-fragment
    :parent :if
    :args {:test {:parent :contains?
@@ -4235,7 +4067,7 @@
    :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:cardinality` (`:singleton` / `:per-pod` / `:pool`, optional) says how many pods run it at once; `:pool-size` (int, optional) is the pod count for `:pool`; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
    :parent :merge
    :args {:maps [{:value {}}
-                 :_parse-svc-form-fn-id-fragment
+                 :_form-fn-id-fragment
                  :_parse-svc-form-enabled-fragment
                  :_parse-svc-form-restart-policy-fragment
                  :_parse-svc-form-cardinality-fragment

@@ -47,6 +47,10 @@
   #uuid "3a1b7e92-4c05-4d68-9f2a-8b6c1e0d47a5")
 
 
+(def ^:private token-kind-field-uuid
+  #uuid "538b0323-1890-5e7c-988e-56eb9f29f558")
+
+
 (defn extend-builder
   "Add the `:token` entity — `(token-hash, user, org, expires-at)` with a
    UNIQUE hash."
@@ -72,5 +76,12 @@
                       :org {:uuid token-org-field-uuid :type :text}
                       :expires-at {:uuid token-expires-at-field-uuid
                                    :type :int
-                                   :nullable? true}})
+                                   :nullable? true}
+                      ;; nil = session / operator API key (the only kinds that
+                      ;; AUTHENTICATE — auth.clj matches :kind nil); "invite" =
+                      ;; single-use org invite (users/redeem-invite!). Nullable
+                      ;; for the additive migration, same pattern as :user-id.
+                      :kind {:uuid token-kind-field-uuid
+                             :type :text
+                             :nullable? true}})
       (ds/add-constraint :token {:type :unique :fields [:token-hash]})))

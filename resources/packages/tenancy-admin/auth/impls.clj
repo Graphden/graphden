@@ -31,6 +31,26 @@
     ((:signup ops) ctx username password org request)))
 
 
+;; Mint a single-use invite into the CALLER'S org (LAUNCH_PLAN stage 1.3).
+;; No addon / unauthenticated / public-org caller / over-quota IP → nil.
+(defbase invoke-invite-create
+  [request]
+  (when-let [ops (:user-ops ctx)]
+    (when-let [create (:invite-create ops)]
+      (cr/record-effect! :db)
+      (create ctx request))))
+
+
+;; Redeem an invite: create the user INSIDE the invite's org + auto-login.
+;; nil on unknown/expired invite or taken username; {:rate-limited true} over quota.
+(defbase invoke-invite-redeem
+  [invite username password request]
+  (when-let [ops (:user-ops ctx)]
+    (when-let [redeem (:invite-redeem ops)]
+      (cr/record-effect! :db)
+      (redeem ctx invite username password request))))
+
+
 ;; Logout (§4.1): delete the caller's session token server-side (the seam reads
 ;; the bearer from `request`). No addon → nil. Returns true iff a row was
 ;; deleted; the editor clears its local token regardless.

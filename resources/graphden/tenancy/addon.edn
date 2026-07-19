@@ -23,7 +23,10 @@
 
  :db/versioned {:base-storage #ig/ref :org/scoped-storage}
 
- :tenancy/request-scope {}
+ ;; org-rate-max-per-min: per-ORG fixed-window API rate limit (429 over it);
+ ;; default 600/min, 0 disables. Env override for ops tuning without redeploy
+ ;; of this fragment.
+ :tenancy/request-scope {:org-rate-max-per-min #long #or [#env GRAPHDEN_ORG_RATE_LIMIT_PER_MIN 600]}
 
  :exec/context {:request-scope #ig/ref :tenancy/request-scope}
 

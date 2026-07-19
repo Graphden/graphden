@@ -359,3 +359,28 @@
                              :request-scope scope})))))
     (tc/invalidate-byo-cache!)
     (is (= "public" (tc/current-org)) "org binding restored after dispatch")))
+
+
+;; --- Per-org request rate limit (LAUNCH_PLAN stage 1.3) ---
+
+(deftest request-scope-429s-a-tenant-over-its-org-window
+  (let [scope (ig/init-key :tenancy/request-scope {:org-rate-max-per-min 2})
+        ctx {:auth-provider (org-provider "acme") :request-scope scope}]
+    (testing "first two requests run, the third 429s — keyed by org"
+      (is (= 200 (:status (dispatch-status ctx))))
+      (is (= 200 (:status (dispatch-status ctx))))
+      (is (= 429 (:status (dispatch-status ctx)))))
+    (testing "another org has its own window"
+      (is (= 200 (:status (dispatch-status
+                            (assoc ctx :auth-provider (org-provider "globex")))))))
+    (testing "the platform org is never limited"
+      (dotimes [_ 5]
+        (is (= 200 (:status (dispatch-status
+                              (assoc ctx :auth-provider (org-provider tc/public-org))))))))))
+
+
+(deftest request-scope-rate-limit-disabled-at-zero
+  (let [scope (ig/init-key :tenancy/request-scope {:org-rate-max-per-min 0})
+        ctx {:auth-provider (org-provider "acme") :request-scope scope}]
+    (dotimes [_ 5]
+      (is (= 200 (:status (dispatch-status ctx)))))))

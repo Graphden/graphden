@@ -5,7 +5,9 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [graphden.auth.provider :as ap]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.users :as users]))
 
 
@@ -95,3 +97,90 @@
     (testing "already-stamped + unresolvable rows are NOT written"
       (is (not-any? #(= :t2 (second %)) @updates))
       (is (not-any? #(= :g2 (second %)) @updates)))))
+
+
+;; --- Invite flow (LAUNCH_PLAN stage 1.3) ---
+
+(defn- mem-storage
+  "Atom-backed StorageCRUD stub — enough surface for the invite round-trip
+   (:token / :user / :org query, create, delete)."
+  []
+  (let [db (atom {})]
+    (reify sp/StorageCRUD
+      (create-entity
+        [_ en data]
+        (let [row (assoc data :id (or (:id data) (random-uuid)))]
+          (swap! db update en (fnil conj []) row)
+          row))
+
+      (query-entities
+        [_ en where]
+        (filterv (fn [r] (every? (fn [[k v]] (= (get r k) v)) where))
+                 (get @db en)))
+
+      (query-entities [_ _ _ _] nil)
+
+      (read-entity
+        [_ en id]
+        (first (filter #(= id (:id %)) (get @db en))))
+
+      (update-entity [_ _ _ _] nil)
+
+      (delete-entity
+        [_ en id]
+        (let [before (count (get @db en))]
+          (swap! db update en (fn [rows] (filterv #(not= id (:id %)) rows)))
+          (> before (count (get @db en)))))
+
+      (query-latest-per-group [_ _ _ _] nil))))
+
+
+(deftest invite-roundtrip
+  (let [storage (mem-storage)
+        ctx {:storage storage}
+        {:keys [invite org]} (users/create-invite! ctx "alice" "alice-id" "acme")]
+    (testing "mint: raw returned once, only the hash + kind stored"
+      (is (string? invite))
+      (is (= "acme" org))
+      (let [row (first (sp/query-entities storage :token {:kind "invite"}))]
+        (is (some? row))
+        (is (not= invite (:token-hash row)) "raw never persisted")
+        (is (some? (:expires-at row)))))
+    (testing "an invite token does NOT authenticate as a session bearer"
+      (let [p (tauth/storage-token-provider storage)]
+        (is (not (:authenticated?
+                   (ap/authenticate
+                     p {:headers {"authorization" (str "Bearer " invite)}}))))))
+    (testing "redeem creates the user INSIDE the invite's org + auto-login"
+      (let [res (users/redeem-invite! ctx invite "bob" "pw-bob")]
+        (is (some? res))
+        (is (= "acme" (:org res)))
+        (is (string? (:token res)))
+        (is (= "acme" (:org (first (sp/query-entities storage :user {:username "bob"})))))
+        (testing "…and the minted session token DOES authenticate"
+          (let [p (tauth/storage-token-provider storage)
+                session (ap/authenticate
+                          p {:headers {"authorization" (str "Bearer " (:token res))}})]
+            (is (:authenticated? session))
+            (is (= "acme" (:org session)))))))
+    (testing "single-use: a second redeem fails"
+      (is (nil? (users/redeem-invite! ctx invite "carol" "pw"))))))
+
+
+(deftest invite-rejects-expired-and-taken
+  (let [storage (mem-storage)
+        ctx {:storage storage}]
+    (testing "expired invite → nil"
+      (let [{:keys [invite]} (users/create-invite! ctx "alice" "alice-id" "acme")
+            row (first (sp/query-entities storage :token {:kind "invite"}))]
+        (sp/delete-entity storage :token (:id row))
+        (sp/create-entity storage :token (assoc row :expires-at 1))
+        (is (nil? (users/redeem-invite! ctx invite "bob" "pw")))))
+    (testing "taken username → nil, invite already burned by the race guard design"
+      (let [{:keys [invite]} (users/create-invite! ctx "alice" "alice-id" "acme")]
+        (sp/create-entity storage :user {:username "bob" :org "other"})
+        (is (nil? (users/redeem-invite! ctx invite "bob" "pw")))))
+    (testing "blank inputs → nil"
+      (is (nil? (users/redeem-invite! ctx "" "u" "p")))
+      (is (nil? (users/redeem-invite! ctx "tok" "" "p")))
+      (is (nil? (users/redeem-invite! ctx "tok" "u" ""))))))

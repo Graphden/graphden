@@ -163,6 +163,112 @@
    :args {:path "/api/signup" :handler :_signup-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; INVITES (LAUNCH_PLAN stage 1.3) — POST /api/invites (auth-required)
+  ;; mints a single-use, 7-day invite into the CALLER'S org; POST
+  ;; /api/invite-signup (unauthenticated, flat path — a nested
+  ;; /api/signup/invite would conflict with /api/signup in reitit)
+  ;; redeems it: creates the user INSIDE the invite's org + auto-login.
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-invite-create
+   :description "Invoke the addon's invite-create seam — mint a single-use invite into the caller's org. Returns {:invite <raw> :org <org>}, or nil (no addon / public-org caller / rate-limited)."
+   :args {:request {:type :ring-request-shape :description "The Ring request — principal supplies the org, client IP feeds the limiter."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_invite-create-do
+   :parent :invoke-invite-create}
+
+  {:name :_invite-create-token
+   :parent :get
+   :args {:coll :_invite-create-do :key {:value :invite} :default {:value ""}}}
+
+  {:name :_invite-create-text
+   :parent :to-str
+   :args {:value :_invite-create-token}}
+
+  {:name :_invite-create-blank?
+   :parent :blank?
+   :args {:string :_invite-create-text}}
+
+  {:name :_invite-create-200
+   :parent :text-ok-response
+   :args {:body :_invite-create-text}}
+
+  {:name :_invite-create-handler
+   :description "Ring handler for POST /api/invites — 200 + the raw invite token (shown once), or 401 when minting failed (no addon / public-org / rate-limited)."
+   :parent :if
+   :args {:test :_invite-create-blank? :then :_auth-401 :else :_invite-create-200}}
+
+  {:name :invite-create-route
+   :description "POST /api/invites — mint a single-use invite into the caller's org. Auth-required."
+   :parent :post
+   :args {:path "/api/invites" :handler :_invite-create-handler}}
+
+  {:name :invoke-invite-redeem
+   :description "Invoke the addon's invite-redeem seam — create the user inside the invite's org + auto-login. Returns {:token :user :org}, {:rate-limited true}, or nil on failure."
+   :args {:invite {:type :text :description "The raw invite token from the invite link."}
+          :username {:type :text :description "Desired login id (must be free)."}
+          :password {:type :text :description "Raw password — only its bcrypt hash is stored."}
+          :request {:type :ring-request-shape :description "The Ring request — its client IP feeds the limiter."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_invite-redeem-form
+   :parent :parse-form-body-kw}
+
+  {:name :_invite-redeem-invite
+   :parent :get
+   :args {:coll :_invite-redeem-form :key {:value :invite} :default {:value ""}}}
+
+  {:name :_invite-redeem-username
+   :parent :get
+   :args {:coll :_invite-redeem-form :key {:value :username} :default {:value ""}}}
+
+  {:name :_invite-redeem-password
+   :parent :get
+   :args {:coll :_invite-redeem-form :key {:value :password} :default {:value ""}}}
+
+  {:name :_invite-redeem-do
+   :parent :invoke-invite-redeem
+   :args {:invite :_invite-redeem-invite
+          :username :_invite-redeem-username
+          :password :_invite-redeem-password}}
+
+  {:name :_invite-redeem-rate-limited?
+   :parent :get
+   :args {:coll :_invite-redeem-do :key {:value :rate-limited} :default {:value false}}}
+
+  {:name :_invite-redeem-token
+   :parent :get
+   :args {:coll :_invite-redeem-do :key {:value :token} :default {:value ""}}}
+
+  {:name :_invite-redeem-token-text
+   :parent :to-str
+   :args {:value :_invite-redeem-token}}
+
+  {:name :_invite-redeem-token-blank?
+   :parent :blank?
+   :args {:string :_invite-redeem-token-text}}
+
+  {:name :_invite-redeem-200
+   :parent :text-ok-response
+   :args {:body :_invite-redeem-token-text}}
+
+  {:name :_invite-redeem-token-result
+   :parent :if
+   :args {:test :_invite-redeem-token-blank? :then :_auth-401 :else :_invite-redeem-200}}
+
+  {:name :_invite-redeem-handler
+   :description "Ring handler for POST /api/invite-signup — 200 + session token, 401 on bad/expired invite or taken username, 429 over the per-IP limit."
+   :parent :if
+   :args {:test :_invite-redeem-rate-limited? :then :_signup-429 :else :_invite-redeem-token-result}}
+
+  {:name :invite-signup-route
+   :description "POST /api/invite-signup — redeem an invite: create the user inside the invite's org, get a session token. UNAUTHENTICATED."
+   :parent :post-route
+   :args {:path "/api/invite-signup" :handler :_invite-redeem-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; LOGOUT (§4.1) — POST /api/logout. Deletes the caller's session `:token`
   ;; server-side (the seam reads the bearer from `:request`), so a leaked
   ;; token can't be replayed after sign-out. Auth-required (you present the

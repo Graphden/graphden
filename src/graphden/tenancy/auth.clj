@@ -59,7 +59,7 @@
   (sha256-hex token))
 
 
-(defn- token-live?
+(defn token-live?
   "A `:token` row is usable iff it has no expiry (operator API key) or its
    expiry (`:expires-at`, epoch millis) is still in the future. Expired session
    tokens fail closed exactly like an unknown token."
@@ -78,7 +78,12 @@
   (->TokenAuthProvider
     (fn [token]
       (when-not (str/blank? token)
-        (when-let [row (first (sp/query-entities storage :token {:token-hash (sha256-hex token)}))]
+        ;; :kind nil = session / operator API key. An "invite" row shares the
+        ;; table but must NEVER authenticate — without this filter an invite
+        ;; link would double as a login bearer for the inviter's org.
+        (when-let [row (first (sp/query-entities storage :token
+                                                 {:token-hash (sha256-hex token)
+                                                  :kind nil}))]
           (when (token-live? row)
             ;; `:user-id` is the STABLE authz identity (grants key on it);
             ;; `:user` (username) rides along for display + the personal-

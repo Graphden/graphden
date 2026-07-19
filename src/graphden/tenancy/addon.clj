@@ -157,7 +157,22 @@
                ;; maps to 429 (distinct from a nil signup-failure → 401).
                (if (signup-limiter (users/client-ip request))
                  (users/signup! ctx u p o)
-                 {:rate-limited true}))}))
+                 {:rate-limited true}))
+     ;; Invites (LAUNCH_PLAN stage 1.3). Identity comes from the
+     ;; AUTHENTICATED principal — org is never client input, so an invite
+     ;; can't target a foreign org by construction. Platform/public
+     ;; principals don't invite (operators use :create-user); the same
+     ;; signup limiter throttles both minting and redeeming per IP.
+     :invite-create (fn [ctx request]
+                      (when-let [p tc/*current-principal*]
+                        (when (and (:org p)
+                                   (not= (:org p) tc/public-org)
+                                   (signup-limiter (users/client-ip request)))
+                          (users/create-invite! ctx (:user p) (:user-id p) (:org p)))))
+     :invite-redeem (fn [ctx invite u pw request]
+                      (if (signup-limiter (users/client-ip request))
+                        (users/redeem-invite! ctx invite u pw)
+                        {:rate-limited true}))}))
 
 
 (defmethod ig/init-key :tenancy/session-cleanup [_ {:keys [storage period-ms]}]
@@ -271,6 +286,16 @@
     (subdomain/identity-org-resolver)))
 
 
+(def ^:private rate-limited-response
+  "429 for a tenant org over its request-rate window (LAUNCH_PLAN stage
+   1.3). Plain text like its siblings; Retry-After is deliberately absent —
+   the window is short and fixed, and advertising it precisely just tunes
+   an abuser's clock."
+  {:status 429
+   :headers {"Content-Type" "text/plain"}
+   :body "Rate limit exceeded — slow down."})
+
+
 (def ^:private forbidden-response
   {:status 403
    :headers {"Content-Type" "application/json"}
@@ -355,7 +380,8 @@
         (assoc-in [:headers "X-Graphden-Workspace"] (str/join "," workspace)))))
 
 
-(defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store org-resolver base-domain host-resolver]}]
+(defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store org-resolver base-domain host-resolver
+                                                         org-rate-max-per-min org-rate-window-ms]}]
   ;; (fn [ctx request thunk] …) — authenticate, bind the org, restrict
   ;; effects, enforce grants, then run the handler. A request the provider
   ;; can't authenticate (or one with no `:org`) is public → unrestricted,
@@ -363,124 +389,141 @@
   ;; OPT-IN: only when a `:grant-store` is wired (else writes pass, subject
   ;; only to OrgScopedStorage + the effect gate). Every non-403 response
   ;; carries `X-Graphden-Capabilities` so the editor can gate affordances.
-  (fn [ctx request thunk]
-    (let [principal (when-let [p (:auth-provider ctx)]
-                      (auth/authenticate p request))
-          ;; Org AUTHORITY is the authenticated principal (single-membership:
-          ;; the token carries the user's org). The `Host` subdomain (§3.2) is
-          ;; a routing GUARD, never a widener — it must NOT be able to set the
-          ;; org context to one the principal doesn't belong to, or any caller
-          ;; could read another org's data by spoofing the Host. So: the
-          ;; subdomain only ever DENIES (a tenant on a foreign subdomain →
-          ;; cross-org → 403); it never grants. Anonymous (no principal) → the
-          ;; subdomain is ignored → public.
-          org (tc/org-from-principal principal)
-          ;; The org the Host points at: a `<org>.<base-domain>` subdomain
-          ;; (§3.2) or a verified custom domain (R10). Same guard semantics
-          ;; either way — it can only deny, never widen.
-          host-org (or (subdomain/org-from-request org-resolver request base-domain)
-                       (domain/org-from-request host-resolver request))
-          cross-org? (and host-org
-                          (not= org tc/public-org)
-                          (not= host-org org))
-          ;; BYO refusal: a `:byo` org runs on the customer's own executor, so
-          ;; a HOSTED pod must not serve it. Read `:org` HERE (public context,
-          ;; before `with-org` binds the tenant org — `:org` is tenant-hidden
-          ;; once scoped). A BYO executor pod (`:byo-executor?`) skips the
-          ;; refusal for the orgs in its shard.
-          byo-refused? (and (not (:byo-executor? ctx))
-                            (tc/byo-org? (:storage ctx) org))
-          ;; Per-request memo over the singleton grant-store, shared by every
-          ;; `grants-for` consumer this request: the coarse gate, the header
-          ;; builders (capabilities runs `can?` per action cap + workspace
-          ;; once), and the storage write guard (fires per row on a batch
-          ;; write). Without it each is a fresh `:grant` query. Bound onto
-          ;; `*request-grant-store*` below so the init-time guard closure picks
-          ;; it up. Fresh atom per request, read-only window (no grant mutation
-          ;; between), so it can't serve stale grants.
-          header-grant-store (when grant-store (grant/memoizing-grant-store grant-store))
-          ;; Run the handler, attach the capability header, and map a
-          ;; per-namespace `:authz/forbidden` thrown at the storage layer to
-          ;; a clean 403 (the storage guard is where the target namespace is
-          ;; known — see tenancy.authz).
-          run (fn []
-                (try
-                  (with-tenancy-headers
-                    (thunk)
-                    (request-capabilities header-grant-store principal org)
-                    (request-workspace header-grant-store principal org))
-                  (catch clojure.lang.ExceptionInfo e
-                    (let [t (:type (ex-data e))]
-                      (cond
-                        (= :authz/forbidden t) forbidden-response
-                        (domain-error-status t) (domain-error-response t (domain-error-status t))
-                        :else (throw e))))))]
-      ;; `*current-principal*` is read by the storage-layer per-namespace
-      ;; guard; `*current-org*` scopes storage + RLS;
-      ;; `*request-grant-store*` shares the per-request grant memo with the
-      ;; storage guard (which fires per row on a batch write) + the coarse
-      ;; gate below, collapsing all of them to ONE `:grant` query per subject.
-      (binding [tc/*current-principal* principal
-                grant/*request-grant-store* header-grant-store]
-        (tc/with-org org
-                     (cond
-                       ;; Cross-org (§3.2): an authenticated tenant whose org
-                       ;; doesn't match the Host subdomain → wrong workspace →
-                       ;; 403. Guards against Host-spoofing to reach another
-                       ;; org; the subdomain can only deny, never widen.
-                       cross-org?
-                       forbidden-response
-                       ;; Wrong pod: this executor's shard doesn't include the
-                       ;; request's org, so its fns were never compiled here.
-                       ;; Runs AFTER the cross-org check so a Host-spoofing
-                       ;; attempt still gets 403 rather than a routing hint,
-                       ;; and BEFORE the public-org short-circuit so a
-                       ;; misconfigured shard (one that omits the public org,
-                       ;; where the platform packages live) fails loudly at the
-                       ;; first request instead of 404'ing every fn.
-                       ;; Wrong executor → 421, for either reason: the org
-                       ;; isn't in this pod's shard, OR it's a `:byo` org on a
-                       ;; hosted pod (its graph lives here but running it is
-                       ;; the customer's executor's job — `byo-refused?`).
-                       (or (not (cr/org-in-shard? (:executor-orgs ctx) org))
-                           byo-refused?)
-                       misdirected-response
-                       ;; Platform / admin — no restriction.
-                       (= org tc/public-org)
-                       (run)
-                       ;; Tenant who isn't a writer/executor at all for this request →
-                       ;; 403 (the precise per-namespace check runs in `run` via the
-                       ;; storage guard).
-                       (and grant-store
-                            (not (grant/request-permitted? header-grant-store principal request org)))
-                       forbidden-response
-                       ;; Tenant — gate the request's effects, run. The
-                       ;; handler-level allow-list blocks the external-world
-                       ;; effects (env / io / network / process) so a tenant
-                       ;; can't drive them through a platform endpoint, but it
-                       ;; ALLOWS `:raw-sql`: the trusted handler reads storage
-                       ;; via `:pg-query` (a `:raw-sql`-recording base-fn) on
-                       ;; the tenant's behalf — gating it here 403'd essentially
-                       ;; every tenant request. The tenant's OWN submitted graph
-                       ;; is gated more strictly (WITHOUT `:raw-sql`) at the
-                       ;; execute boundary (`crud.fn-execution/apply-execute`
-                       ;; sets `:allowed-effects` on the exec ctx).
-                       ;;
-                       ;; A READ request additionally runs under the org-filtered
-                       ;; type-alias view (§4 Risk-2) so editor display paths
-                       ;; (value-form / types) resolve a tenant's `Foo`, never
-                       ;; another org's. Writes are NOT wrapped — registration
-                       ;; (rebuild) must reach the org-agnostic global; their
-                       ;; type-checks are filtered narrowly in crud.type-check.
-                       :else
-                       ;; Same tenant scope also turns on the error envelope:
-                       ;; internal failures (no whitelisted :type) surface as
-                       ;; "Internal error, ref: <uuid>" — full detail stays in
-                       ;; the server log under the ref. The binding conveys
-                       ;; into apply-execute's futures, so the async-persisted
-                       ;; row the history panel reads is scrubbed too.
-                       (binding [cr/*allowed-effects* cr/cloud-request-allowed-effects
-                                 cr/*scrub-internal-errors?* true]
-                         (if (= :read (grant/request->capability request))
-                           (typecheck/with-org-alias-view* run)
-                           (run)))))))))
+  ;; Per-ORG fixed-window limiter over ALL tenant API requests (auth
+  ;; endpoints have their own per-IP limiters in :tenancy/user-ops). The
+  ;; default is generous — the editor legitimately bursts (layout + types +
+  ;; partials per interaction) — and it exists to blunt runaway loops and
+  ;; scripted abuse, not to meter honest use. 0 disables. Keyed by org, not
+  ;; IP: one org hammering from many IPs is throttled; many orgs behind one
+  ;; NAT are not collectively punished. Platform/public is never limited.
+  (let [org-rate-max (or org-rate-max-per-min 600)
+        org-limiter (when (pos? org-rate-max)
+                      (users/make-rate-limiter org-rate-max
+                                               (or org-rate-window-ms 60000)))]
+    (fn [ctx request thunk]
+      (let [principal (when-let [p (:auth-provider ctx)]
+                        (auth/authenticate p request))
+            ;; Org AUTHORITY is the authenticated principal (single-membership:
+            ;; the token carries the user's org). The `Host` subdomain (§3.2) is
+            ;; a routing GUARD, never a widener — it must NOT be able to set the
+            ;; org context to one the principal doesn't belong to, or any caller
+            ;; could read another org's data by spoofing the Host. So: the
+            ;; subdomain only ever DENIES (a tenant on a foreign subdomain →
+            ;; cross-org → 403); it never grants. Anonymous (no principal) → the
+            ;; subdomain is ignored → public.
+            org (tc/org-from-principal principal)
+            ;; The org the Host points at: a `<org>.<base-domain>` subdomain
+            ;; (§3.2) or a verified custom domain (R10). Same guard semantics
+            ;; either way — it can only deny, never widen.
+            host-org (or (subdomain/org-from-request org-resolver request base-domain)
+                         (domain/org-from-request host-resolver request))
+            cross-org? (and host-org
+                            (not= org tc/public-org)
+                            (not= host-org org))
+            ;; BYO refusal: a `:byo` org runs on the customer's own executor, so
+            ;; a HOSTED pod must not serve it. Read `:org` HERE (public context,
+            ;; before `with-org` binds the tenant org — `:org` is tenant-hidden
+            ;; once scoped). A BYO executor pod (`:byo-executor?`) skips the
+            ;; refusal for the orgs in its shard.
+            byo-refused? (and (not (:byo-executor? ctx))
+                              (tc/byo-org? (:storage ctx) org))
+            ;; Per-request memo over the singleton grant-store, shared by every
+            ;; `grants-for` consumer this request: the coarse gate, the header
+            ;; builders (capabilities runs `can?` per action cap + workspace
+            ;; once), and the storage write guard (fires per row on a batch
+            ;; write). Without it each is a fresh `:grant` query. Bound onto
+            ;; `*request-grant-store*` below so the init-time guard closure picks
+            ;; it up. Fresh atom per request, read-only window (no grant mutation
+            ;; between), so it can't serve stale grants.
+            header-grant-store (when grant-store (grant/memoizing-grant-store grant-store))
+            ;; Run the handler, attach the capability header, and map a
+            ;; per-namespace `:authz/forbidden` thrown at the storage layer to
+            ;; a clean 403 (the storage guard is where the target namespace is
+            ;; known — see tenancy.authz).
+            run (fn []
+                  (try
+                    (with-tenancy-headers
+                      (thunk)
+                      (request-capabilities header-grant-store principal org)
+                      (request-workspace header-grant-store principal org))
+                    (catch clojure.lang.ExceptionInfo e
+                      (let [t (:type (ex-data e))]
+                        (cond
+                          (= :authz/forbidden t) forbidden-response
+                          (domain-error-status t) (domain-error-response t (domain-error-status t))
+                          :else (throw e))))))]
+        ;; `*current-principal*` is read by the storage-layer per-namespace
+        ;; guard; `*current-org*` scopes storage + RLS;
+        ;; `*request-grant-store*` shares the per-request grant memo with the
+        ;; storage guard (which fires per row on a batch write) + the coarse
+        ;; gate below, collapsing all of them to ONE `:grant` query per subject.
+        (binding [tc/*current-principal* principal
+                  grant/*request-grant-store* header-grant-store]
+          (tc/with-org org
+                       (cond
+                         ;; Cross-org (§3.2): an authenticated tenant whose org
+                         ;; doesn't match the Host subdomain → wrong workspace →
+                         ;; 403. Guards against Host-spoofing to reach another
+                         ;; org; the subdomain can only deny, never widen.
+                         cross-org?
+                         forbidden-response
+                         ;; Wrong pod: this executor's shard doesn't include the
+                         ;; request's org, so its fns were never compiled here.
+                         ;; Runs AFTER the cross-org check so a Host-spoofing
+                         ;; attempt still gets 403 rather than a routing hint,
+                         ;; and BEFORE the public-org short-circuit so a
+                         ;; misconfigured shard (one that omits the public org,
+                         ;; where the platform packages live) fails loudly at the
+                         ;; first request instead of 404'ing every fn.
+                         ;; Wrong executor → 421, for either reason: the org
+                         ;; isn't in this pod's shard, OR it's a `:byo` org on a
+                         ;; hosted pod (its graph lives here but running it is
+                         ;; the customer's executor's job — `byo-refused?`).
+                         (or (not (cr/org-in-shard? (:executor-orgs ctx) org))
+                             byo-refused?)
+                         misdirected-response
+                         ;; Platform / admin — no restriction.
+                         (= org tc/public-org)
+                         (run)
+                         ;; Tenant over its org-wide request-rate window → 429
+                         ;; before any work runs. After the public short-circuit
+                         ;; (platform is never limited), before the grant gate
+                         ;; (a limited org shouldn't pay the grant query either).
+                         (and org-limiter (not (org-limiter org)))
+                         rate-limited-response
+                         ;; Tenant who isn't a writer/executor at all for this request →
+                         ;; 403 (the precise per-namespace check runs in `run` via the
+                         ;; storage guard).
+                         (and grant-store
+                              (not (grant/request-permitted? header-grant-store principal request org)))
+                         forbidden-response
+                         ;; Tenant — gate the request's effects, run. The
+                         ;; handler-level allow-list blocks the external-world
+                         ;; effects (env / io / network / process) so a tenant
+                         ;; can't drive them through a platform endpoint, but it
+                         ;; ALLOWS `:raw-sql`: the trusted handler reads storage
+                         ;; via `:pg-query` (a `:raw-sql`-recording base-fn) on
+                         ;; the tenant's behalf — gating it here 403'd essentially
+                         ;; every tenant request. The tenant's OWN submitted graph
+                         ;; is gated more strictly (WITHOUT `:raw-sql`) at the
+                         ;; execute boundary (`crud.fn-execution/apply-execute`
+                         ;; sets `:allowed-effects` on the exec ctx).
+                         ;;
+                         ;; A READ request additionally runs under the org-filtered
+                         ;; type-alias view (§4 Risk-2) so editor display paths
+                         ;; (value-form / types) resolve a tenant's `Foo`, never
+                         ;; another org's. Writes are NOT wrapped — registration
+                         ;; (rebuild) must reach the org-agnostic global; their
+                         ;; type-checks are filtered narrowly in crud.type-check.
+                         :else
+                         ;; Same tenant scope also turns on the error envelope:
+                         ;; internal failures (no whitelisted :type) surface as
+                         ;; "Internal error, ref: <uuid>" — full detail stays in
+                         ;; the server log under the ref. The binding conveys
+                         ;; into apply-execute's futures, so the async-persisted
+                         ;; row the history panel reads is scrubbed too.
+                         (binding [cr/*allowed-effects* cr/cloud-request-allowed-effects
+                                   cr/*scrub-internal-errors?* true]
+                           (if (= :read (grant/request->capability request))
+                             (typecheck/with-org-alias-view* run)
+                             (run))))))))))

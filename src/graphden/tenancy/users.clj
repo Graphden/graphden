@@ -296,6 +296,63 @@
                      (login! ctx username password))))))
 
 
+(def default-invite-ttl-ms
+  "Invites live 7 days — long enough to land in an inbox, short enough that a
+   forgotten link doesn't stay a standing door into the org."
+  (* 7 24 60 60 1000))
+
+
+(defn create-invite!
+  "Mint a SINGLE-USE invite into `org` (LAUNCH_PLAN stage 1.3 — before this,
+   signup could only create a brand-new org, so a two-person team was
+   impossible without the operator). Caller identity comes from the addon's
+   op wrapper (the authenticated principal): any member may invite into their
+   OWN org — the org is taken from the principal, never from client input, so
+   an invite can't target a foreign org by construction. Returns
+   `{:invite <raw> :org org}`; the raw token is shown once, only its SHA-256
+   is stored (same discipline as sessions). Stored as a `:token` row with
+   `:kind \"invite\"` — auth.clj refuses to authenticate it."
+  [ctx inviter-username inviter-user-id org]
+  (let [storage (:storage ctx)
+        raw (random-token)]
+    (tc/with-org tc/public-org
+                 (sp/create-entity storage :token
+                                   {:token-hash (tauth/token-hash raw)
+                                    :user inviter-username
+                                    :user-id inviter-user-id
+                                    :org org
+                                    :kind "invite"
+                                    :expires-at (+ (System/currentTimeMillis)
+                                                   default-invite-ttl-ms)}))
+    {:invite raw :org org}))
+
+
+(defn redeem-invite!
+  "Redeem an invite: create `username` INSIDE the invite's org and auto-login.
+   nil on any failure (unknown/expired invite, blank or taken username) so the
+   endpoint maps nil → 401 exactly like login/signup. The invite row is
+   deleted BEFORE the user row is created — single-use even when two redeems
+   race (the loser's delete-entity finds the row gone and bails)."
+  [ctx invite-token username password & _]
+  (let [storage (:storage ctx)]
+    (when (and (not (str/blank? invite-token))
+               (not (str/blank? username))
+               (not (str/blank? password)))
+      (tc/with-org tc/public-org
+                   (when-let [row (first (sp/query-entities
+                                           storage :token
+                                           {:token-hash (tauth/token-hash invite-token)
+                                            :kind "invite"}))]
+                     (when (and (tauth/token-live? row)
+                                (empty? (sp/query-entities storage :user {:username username}))
+                                (sp/delete-entity storage :token (:id row)))
+                       (sp/create-entity storage :user
+                                         {:username username
+                                          :password-hash (hash-password password)
+                                          :org (:org row)})
+                       (login! ctx username password)))))))
+
+
 (defn logout!
   "Invalidate the current session — delete the `:token` row for `request`'s
    bearer, so a leaked/observed token can't be replayed after sign-out

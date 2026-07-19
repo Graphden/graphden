@@ -275,7 +275,7 @@
 
 
 (deftest postgres-storage-error-classifier-test
-  (let [storage (core/->PostgresStorage nil nil nil)]
+  (let [storage (core/->PostgresStorage nil nil nil (atom {}))]
     (testing "classify-error delegates to error classifier"
       (is (= :unique-violation (sp/classify-error storage (make-sql-exception "23505"))))
       (is (= :foreign-key-violation (sp/classify-error storage (make-sql-exception "23503"))))

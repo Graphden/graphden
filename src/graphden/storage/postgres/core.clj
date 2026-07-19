@@ -131,7 +131,7 @@
 
 
 (defrecord PostgresStorage
-  [pool metadata-cache ^ReentrantReadWriteLock rw-lock]
+  [pool metadata-cache ^ReentrantReadWriteLock rw-lock slot-row-cache]
 
   sp/Storage
 
@@ -153,6 +153,11 @@
                           ;; If migration throws, cache stays nil - next read refreshes from DB.
                           ;; This is correct: DB state is authoritative, cache is just optimization.
                           (reset! metadata-cache nil)
+                          ;; Schema (re)init is the one lifecycle point where
+                          ;; previously-read slot rows can stop being true
+                          ;; (test fixtures DROP SCHEMA CASCADE, deploy
+                          ;; truncates) — drop the immutable-row cache with it.
+                          (reset! slot-row-cache {})
                           (migration/do-initialize pool schema))))
 
 
@@ -208,18 +213,36 @@
 
   (read-entity
     [_this entity-name id]
-    (crud/read-entity pool entity-name id
-                      (get-entity-fields pool metadata-cache rw-lock entity-name)))
+    ;; :slot identity rows are immutable post-create and never deleted
+    ;; (no update/delete call site repo-wide), yet they are read one-at-
+    ;; a-time on every value-form / binding type-check / provenance /
+    ;; cross-org-ref guard — 163k single-row lookups on a 1.6k-row table
+    ;; in one demo window. Cache the RAW row per storage instance (below
+    ;; the org-scoping wrapper, whose own? gate still runs on every
+    ;; read). nil results are NOT cached — a slot created later by
+    ;; another instance must stay readable.
+    (if (= :slot entity-name)
+      (or (get @slot-row-cache id)
+          (when-some [row (crud/read-entity pool entity-name id
+                                            (get-entity-fields pool metadata-cache rw-lock entity-name))]
+            (swap! slot-row-cache assoc id row)
+            row))
+      (crud/read-entity pool entity-name id
+                        (get-entity-fields pool metadata-cache rw-lock entity-name))))
 
 
   (update-entity
     [_this entity-name id data]
+    ;; No live code path mutates :slot; the eviction is insurance so a
+    ;; future mutation path cannot silently serve a stale cached row.
+    (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
     (crud/update-entity pool entity-name id data
                         (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
   (delete-entity
     [_this entity-name id]
+    (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
     (crud/delete-entity pool entity-name id))
 
 
@@ -322,4 +345,4 @@
    - Multiple concurrent reads allowed, writes are exclusive
    - CRUD operations use PostgreSQL's own transaction isolation"
   [opts]
-  (->PostgresStorage (pool/create-pool opts) (atom nil) (ReentrantReadWriteLock.)))
+  (->PostgresStorage (pool/create-pool opts) (atom nil) (ReentrantReadWriteLock.) (atom {})))

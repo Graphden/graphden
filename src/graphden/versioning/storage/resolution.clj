@@ -102,11 +102,14 @@
         :version-id-field :fn-id
         :version-data-fields #{:name :description :constraint
                                :base-fn-id :element-fn-id :return-type-fn-id
-                               :anonymous-hash :expects-effects}}
+                               :anonymous-hash :expects-effects}
+        :candidate-bound-keys #{:name :anonymous-hash :base-fn-id
+                                :element-fn-id :return-type-fn-id}}
 
    :fn-slot {:version-entity :fn-slot-version
              :version-id-field :fn-slot-id
-             :version-data-fields #{:fn-id :slot-id :position}}
+             :version-data-fields #{:fn-id :slot-id :position}
+             :candidate-bound-keys #{:fn-id :slot-id}}
 
    :binding {:version-entity :binding-version
              :version-id-field :binding-id
@@ -115,12 +118,15 @@
                                     :override-kind
                                     :type-override-fn-id :description
                                     :list-append :list-closed :terminal
-                                    :required}}
+                                    :required}
+             :candidate-bound-keys #{:fn-id :slot-id :ref-fn-id
+                                     :type-override-fn-id}}
 
    :binding-list-item {:version-entity :binding-list-item-version
                        :version-id-field :item-id
                        :version-data-fields #{:binding-id :position :value
-                                              :ref-fn-id :literal}}})
+                                              :ref-fn-id :literal}
+                       :candidate-bound-keys #{:binding-id :ref-fn-id}}})
 
 
 (defn versioned-entity?
@@ -247,6 +253,53 @@
         (merge identity-rec (extract-version-data version version-id-field))))))
 
 
+(defn- bounded-entity-ids
+  "A bounding id-vector for the version load, extracted from `where` —
+   or nil when `where` cannot bound it (full-table load, the pre-2026-07
+   behaviour for every call). Three strata, safest first:
+
+   1. `:id` — the entity ids verbatim (immutable, exact).
+   2. Identity-level keys (present in `where`, absent from
+      `version-data-fields`, not the ref-many `:parent-ids`) — one SQL
+      query on the identity table. Exact: identity columns cannot drift
+      across versions (that is what makes the raw-read gotcha in
+      feedback_raw_storage_query_reads_are_create_time SAFE here).
+   3. One `:candidate-bound-keys` key — every entity-id with ANY version
+      row matching it. A SUPERSET of the truth (an old version on some
+      branch may match while the resolved row does not), which is safe
+      because the caller re-applies the FULL where in memory after
+      resolution; version-data keys outside the whitelist (jsonb
+      `:value`, booleans) stay unbounded rather than risk an encoding
+      mismatch in the version-table query.
+
+   Returns [] when a bound exists and is empty — the caller can skip
+   the version load entirely."
+  [base-storage entity-name where]
+  (let [{:keys [version-entity version-id-field version-data-fields
+                candidate-bound-keys]} (get entity-config entity-name)]
+    (cond
+      (contains? where :id)
+      (let [v (:id where)]
+        (vec (if (and (coll? v) (not (map? v))) v [v])))
+
+      :else
+      (let [identity-keys (into []
+                                (comp (remove #(contains? version-data-fields %))
+                                      (remove #{:parent-ids}))
+                                (keys where))]
+        (if (seq identity-keys)
+          (mapv :id (sp/query-entities base-storage entity-name
+                                       (select-keys where identity-keys)))
+          (when-some [k (some candidate-bound-keys (keys where))]
+            (into []
+                  (comp (map version-id-field) (distinct))
+                  (sp/query-entities base-storage version-entity
+                                     (select-keys where [k])))))))))
+
+
+(declare resolve-all-entities*)
+
+
 (defn resolve-all-entities
   "Resolves all entities of a type visible on the current branch.
    Filters by where clause after resolution.
@@ -255,14 +308,26 @@
    Only returns entities that have at least one version visible on the branch chain.
    This is different from resolve-entities-batch which returns all entities.
 
-   Optimized: uses batch version loading instead of N+1 queries.
-   Merge-aware as of #52 — versions on merged-in source branches
-   surface here too."
+   Optimized: uses batch version loading instead of N+1 queries, and
+   bounds the load to the ids `where` implies when it can
+   (`bounded-entity-ids`) — a `{:id #{x}}` query used to cost the same
+   whole-version-table scan as `{}`. Merge-aware as of #52 — versions
+   on merged-in source branches surface here too."
   [base-storage entity-name branch-id where]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-        {:keys [versions-by-id merges-by-target branch-chain]}
+        entity-ids (when (seq where)
+                     (bounded-entity-ids base-storage entity-name where))]
+    (if (and (some? entity-ids) (empty? entity-ids))
+      []
+      (resolve-all-entities* base-storage entity-name branch-id where
+                             version-entity version-id-field entity-ids))))
+
+
+(defn- resolve-all-entities*
+  [base-storage entity-name branch-id where version-entity version-id-field entity-ids]
+  (let [{:keys [versions-by-id merges-by-target branch-chain]}
         (load-merge-aware-cache base-storage version-entity version-id-field
-                                nil branch-id)
+                                entity-ids branch-id)
         ;; Entities visible: those with at least one loaded version
         ;; (loaded set already covers chain + merge sources).
         entity-ids-with-versions (set (keys versions-by-id))

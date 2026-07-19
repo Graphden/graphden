@@ -37,7 +37,6 @@ USER graphden
 
 # Set default environment variables
 ENV PORT=8080
-ENV STORAGE_TYPE=postgres
 ENV DB_POOL_SIZE=10
 
 # Expose port

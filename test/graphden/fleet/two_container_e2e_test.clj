@@ -63,7 +63,6 @@
   (doto (GenericContainer. ^String (or (System/getenv "GD_IMAGE") "graphden-executor:latest"))
     (GenericContainer/.withEnv "PORT" "8080")
     (GenericContainer/.withEnv "GRAPHDEN_PORT" "8080")
-    (GenericContainer/.withEnv "STORAGE_TYPE" "postgres")
     (GenericContainer/.withEnv "JDBC_URL" "jdbc:postgresql://postgres:5432/graphden")
     (GenericContainer/.withEnv "DB_USERNAME" "graphden")
     (GenericContainer/.withEnv "DB_PASSWORD" "graphden")

@@ -34,7 +34,6 @@ COPY target/crac-checkpoint /app/crac-checkpoint
 COPY target/native /app/native
 
 ENV PORT=8080
-ENV STORAGE_TYPE=postgres
 EXPOSE 8080
 
 # Run as a non-root user (trivy AVD-DS-0002). NOTE: CRIU restores the process

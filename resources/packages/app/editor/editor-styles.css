@@ -2119,7 +2119,25 @@ textarea.arg-value-edit-input {
    z-index 10 cover the chip's right tail and the user loses the
    tail of the type signature. We trade: a few pixels of card chrome
    sit BEHIND the overlay rather than the type-chip disappearing. */
-.edge-label-overlay { z-index: 11; }
+/* Edge-label overlay — arg-name + type-chip + description badge on an
+   inheritance edge. JS owns only the dynamic bits (left/top placement
+   after the taxi bend, scale transform). */
+.edge-label-overlay {
+  z-index: 11;
+  position: absolute;
+  pointer-events: auto;
+  background: var(--bg);
+  color: var(--muted-fg);
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 2px 4px;
+  white-space: pre;
+  text-align: left;
+  transform-origin: top left;
+  user-select: none;
+  -webkit-user-select: none;
+}
 .type-inline-row {
   display: block;
   white-space: normal;

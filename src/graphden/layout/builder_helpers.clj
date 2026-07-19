@@ -188,6 +188,39 @@
         (:next-arg-id arg) (assoc :sourceNextArgId (str (:next-arg-id arg)))))))
 
 
+(defn edge-description-fields
+  "Optional `:descSource` edge-data field — WHICH entity carries the
+   arg's description: the closest binding in the owning fn's
+   `:parent-ids` closure with a non-empty `:description` (a per-fn
+   override), else the slot row itself (canonical). The editor's
+   edge-label overlay used to re-derive this precedence client-side
+   with its own BFS over `lookups`; it now reads the walk result here
+   and looks the TEXT up by id, so an in-page description edit stays
+   fresh without a layout refetch. `{}` when the arg row / slot can't
+   be resolved, so callers can `merge` unconditionally."
+  [lookups arg-id]
+  (or (when-let [arg (get-in lookups [:arg-map arg-id])]
+        (let [{:keys [fn-map binding-by-fn-slot slot-map]} lookups
+              slot-id (:slot-id arg)]
+          (when slot-id
+            (or (loop [queue [(:fn-id arg)]
+                       visited #{}]
+                  (when-let [cur (first queue)]
+                    (if (contains? visited cur)
+                      (recur (rest queue) visited)
+                      (let [b (get binding-by-fn-slot [cur slot-id])]
+                        (if (seq (:description b))
+                          {:descSource {:entityType "binding"
+                                        :entityId (str (:id b))}}
+                          (recur (concat (rest queue)
+                                         (:parent-ids (get fn-map cur)))
+                                 (conj visited cur)))))))
+                (when-let [slot (get slot-map slot-id)]
+                  {:descSource {:entityType "slot"
+                                :entityId (str (:id slot))}})))))
+      {}))
+
+
 (defn add-arg-value-node
   "Emit a value-style arg node + edge linking it to `source-node-id`.
    No-op when the node is already present (dedup by `:added-node-ids`).
@@ -233,6 +266,7 @@
                             :argName (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
                                          (when arg-name (name arg-name)))}
                            (edge-source-fields lookups arg-id)
+                           (edge-description-fields lookups arg-id)
                            (edge-narrowing-fields lookups arg-id expanded-fns))}))
     node-id))
 
@@ -688,6 +722,7 @@
                               :argName (or (compute-edge-label lookups source-arg-id source-node-id source-expanded-fns)
                                            (when edge-arg-name (name edge-arg-name)))}
                              (edge-source-fields lookups source-arg-id)
+                             (edge-description-fields lookups source-arg-id)
                              (edge-narrowing-fields lookups source-arg-id source-expanded-fns))})))))
 
 
@@ -921,6 +956,7 @@
                                ;; the type-chip on this edge (the placeholder
                                ;; carries no type label of its own).
                                (edge-source-fields lookups arg-id)
+                               (edge-description-fields lookups arg-id)
                                (edge-narrowing-fields lookups arg-id expanded-fns))}))))))
 
 

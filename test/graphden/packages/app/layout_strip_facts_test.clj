@@ -34,9 +34,8 @@
       (f))))
 
 
-(defn- layout-for
-  "Run `:get-layout-data` for the named root fn and return the node
-   whose `:originalFnId` is the root's id."
+(defn- layout-response
+  "Run `:get-layout-data` for the named root fn."
   [root-name]
   (let [{:keys [ctx storage]} *bootstrap*
         root-id (get (:all-name->id *bootstrap*) root-name)
@@ -45,6 +44,15 @@
         resp (setup/exec-with-storage ctx storage handler-id
                                       {:request {:body body}})]
     (is (vector? (:nodes resp)) "layout returns a node vector")
+    (assoc resp ::root-id root-id)))
+
+
+(defn- layout-for
+  "Run `:get-layout-data` for the named root fn and return the node
+   whose `:originalFnId` is the root's id."
+  [root-name]
+  (let [resp (layout-response root-name)
+        root-id (::root-id resp)]
     (some #(when (= (str root-id) (get-in % [:data :originalFnId])) %)
           (:nodes resp))))
 
@@ -69,6 +77,21 @@
         (is (map? bl))
         (is (false? (:own bl)))
         (is (= "http-server" (:seed bl)))))))
+
+
+(deftest edge-desc-source-fact
+  ;; Every arg edge should carry `:descSource` — the server-resolved
+  ;; description precedence (closest binding with a description in the
+  ;; parent-ids closure, else the slot row). The editor reads the TEXT
+  ;; by id from its lookups; only the WALK moved server-side.
+  (let [resp (layout-response :web-server)
+        arg-edges (filter #(get-in % [:data :slotId]) (:edges resp))]
+    (is (seq arg-edges) "web-server layout has arg edges")
+    (doseq [e arg-edges]
+      (let [ds (get-in e [:data :descSource])]
+        (is (map? ds) (str "edge " (get-in e [:data :id]) " carries descSource"))
+        (is (contains? #{"binding" "slot"} (:entityType ds)))
+        (is (string? (:entityId ds)))))))
 
 
 (deftest base-fn-node-carries-no-owner-fact

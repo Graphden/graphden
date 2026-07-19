@@ -3,6 +3,14 @@
 // add-remove affordances when the arg is in the immediate
 // implementation.
 //
+// graph-first-exception: the label / type-chip / typeChain rendering
+// stays client-side — every input is either layout-emitted edge data
+// (argName, typeChain, descSource, sibling pointers) rendered
+// verbatim, or the client type formatter shared with the arg-chips
+// (sub-100ms canvas path, §6.1/6.2); the one server-logic mirror this
+// file carried (the description-precedence BFS) now ships from the
+// layout as `:descSource`.
+//
 // Globals consumed: lookups, implementationFnIds, isAuthenticated,
 // enterArgRenameEditMode, createTypeChip, removeSequenceItem,
 // appendSequenceItem, createDescriptionBadge.
@@ -19,61 +27,29 @@ function createEdgeLabelOverlay(edge, container) {
   const label = edge.data('argName');
   if (!label) return;
 
-  // Description lives either on a `:binding` (per-fn override) or on
-  // the `:slot` row itself (canonical, when no fn has carved out an
-  // override yet). Walk the fn's inheritance chain looking for the
-  // closest binding that carries a non-empty `:description`; fall
-  // back to the slot's own description.
+  // Description precedence (closest binding with a non-empty
+  // `:description` in the owning fn's parent-ids closure, else the
+  // slot row) is resolved SERVER-side now — the layout emits
+  // `:descSource {entityType, entityId}` per edge
+  // (`edge-description-fields` in layout/builder_helpers.clj). The
+  // TEXT is read from client lookups by id so an in-page description
+  // edit shows fresh on the next overlay rebuild without a layout
+  // refetch.
   let description = null;
   let descriptionTarget = null;       // {entityType, entityId} for Edit
-  const sourceArgId = edge.data('sourceArgId');
-  const sourceFnId = edge.data('fnId');
-  const sourceSlotId = edge.data('slotId');
-  if (sourceFnId && sourceSlotId && lookups) {
-    const visited = new Set();
-    const queue = [sourceFnId];
-    let chosenBinding = null;
-    while (queue.length) {
-      const fid = queue.shift();
-      if (visited.has(fid)) continue;
-      visited.add(fid);
-      const b = (typeof getBindingForFnSlot === 'function')
-                  ? getBindingForFnSlot(fid, sourceSlotId) : null;
-      if (b?.description) { description = b.description; chosenBinding = b; break; }
-      const fn = lookups.fnMap.get(fid);
-      if (fn && Array.isArray(fn['parent-ids'])) {
-        for (const pid of fn['parent-ids']) queue.push(pid);
-      }
-    }
-    if (chosenBinding) {
-      descriptionTarget = { entityType: 'binding', entityId: chosenBinding.id };
-    } else {
-      const slot = lookups.slotMap?.get(sourceSlotId);
-      if (slot) {
-        if (slot.description) description = slot.description;
-        descriptionTarget = { entityType: 'slot', entityId: slot.id };
-      }
-    }
+  const descSource = edge.data('descSource');
+  if (descSource?.entityId && lookups) {
+    descriptionTarget = { entityType: descSource.entityType,
+                          entityId: descSource.entityId };
+    const row = descSource.entityType === 'binding'
+      ? lookups.bindingMap?.get(descSource.entityId)
+      : lookups.slotMap?.get(descSource.entityId);
+    description = row?.description || null;
   }
 
   const overlay = document.createElement('div');
-  overlay.className = 'edge-label-overlay';
+  overlay.className = 'edge-label-overlay';   // static looks in editor-styles.css
   overlay.dataset.edgeId = edge.id();
-  Object.assign(overlay.style, {
-    position: 'absolute',
-    pointerEvents: 'auto',
-    background: 'var(--bg)',
-    color: 'var(--muted-fg)',
-    fontFamily: 'SF Mono, Monaco, monospace',
-    fontSize: '10px',
-    lineHeight: '1.2',
-    padding: '2px 4px',
-    whiteSpace: 'pre',
-    textAlign: 'left',
-    transformOrigin: 'top left',
-    userSelect: 'none',
-    WebkitUserSelect: 'none'
-  });
 
   const labelSpan = document.createElement('span');
   labelSpan.textContent = label;

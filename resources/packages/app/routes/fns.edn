@@ -154,6 +154,11 @@
    :parent :get-auth-required
    :args {:path "/partials/fn-picker-incompat" :handler :_partial-fn-picker-incompat-handler}}
 
+  {:name :partial-execute-popover
+   :description "GET /partials/execute-popover?fn-id={uuid} — the Run-popover shell (header / effects banner / free-arg mount hosts / options / action bar). AUTH-REQUIRED like the ▶ affordance itself; editor-execute.js mounts value-forms into the hosts and owns run/poll/cancel/history."
+   :parent :get-auth-required
+   :args {:path "/partials/execute-popover" :handler :_partial-xp-handler}}
+
   {:name :partial-execute-result
    :description "GET /partials/execute-result?id={uuid} — execution body hiccup (scalar / list / record / tainted / large-JSON / 5MB-truncated / error). Consumed by `editor-execute-history.js` row-expand + `editor-execute.js` orchestrator after Run."
    :parent :get-auth-required

@@ -2372,6 +2372,228 @@
    :args {:body :_rtr-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; execute-popover shell — `GET /partials/execute-popover?fn-id=<uuid>`.
+  ;; Server renders the header / effects banner / free-arg scaffold /
+  ;; options row / action bar / hosts; `editor-execute.js` mounts the
+  ;; per-arg value-forms into the `[data-slot-id]` hosts (same
+  ;; `/api/value-form` flow as before) and owns the run / poll /
+  ;; cancel / history lifecycle. Free args come from the backend's own
+  ;; `:free-arg-slot-map` — the JS `freeArgsOf` re-derivation (which
+  ;; described itself as a mirror of that very fn) is gone, along with
+  ;; its wait-for-subtree workaround.
+
+  {:name :_xp-fn-id-str
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "fn-id"}}}
+
+  {:name :_xp-fn-id
+   :parent :parse-uuid
+   :args {:string :_xp-fn-id-str}}
+
+  {:name :_xp-row
+   :parent :fn-row-by-id
+   :args {:fn-id {:ref :_xp-fn-id :type :uuid}}}
+
+  {:name :_xp-name
+   :parent :get
+   :args {:coll :_xp-row :key {:value :name} :default nil}}
+
+  {:name :_xp-title-name
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_xp-name}}
+          :then :_xp-name
+          :else {:value "(anonymous)"}}}
+
+  {:name :_xp-title
+   :parent :str-join
+   :args {:coll [{:value "Run :"} :_xp-title-name] :separator {:value ""}}}
+
+  ;; The branch pill is inserted CLIENT-side after the swap — which
+  ;; branch chip the user sees is client state (URL ?branch= +
+  ;; localStorage), and the JS already owns that surface.
+  {:name :_xp-header
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-popover-header"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "execute-popover-title"}}
+                             :children [:_xp-title]}}
+                     {:value [:button {:type "button"
+                                       :class "execute-history-toggle"
+                                       :title "Show persisted runs of this fn"
+                                       :aria-expanded "false"} "History"]}
+                     {:value [:button {:type "button"
+                                       :class "execute-popover-close"
+                                       :aria-label "Close run-fn popover"} "×"]}]}}
+
+  ;; --- effects banner ---------------------------------------------------
+
+  {:name :_xp-entry
+   :parent :rich-type-of-name
+   :args {:fn-name :_xp-name}}
+
+  {:name :_xp-effects
+   :description "Sorted vec of the fn's computed effects (raw registry entry holds a set of keywords)."
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :get
+                               :args {:coll :_xp-entry
+                                      :key {:value :effects}
+                                      :default []}}}}}}
+
+  {:name :_xp-has-effects?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_xp-effects}}}}
+
+  {:name :_xp-eff-name
+   :parent :keyword-to-str
+   :args {:keyword {:as :item}}}
+
+  {:name :_xp-eff-chip-class
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} :_xp-eff-name]
+          :separator {:value ""}}}
+
+  {:name :_xp-eff-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class}]
+                         :vals [:_xp-eff-chip-class]}}
+          :children [:_xp-eff-name]}}
+
+  {:name :_xp-eff-chips
+   :parent :map
+   :args {:func :_xp-eff-chip :coll :_xp-effects}}
+
+  {:name :_xp-effects-banner
+   :parent :if
+   :args {:test :_xp-has-effects?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "execute-effects-warning"}}
+                        :children [{:value [:span {:class "execute-effects-warning-label"} "side effects: "]}
+                                   :_xp-eff-chips]}}
+          :else {:value [:span {:hidden "1"}]}}}
+
+  ;; --- free-arg scaffold ------------------------------------------------
+
+  {:name :_xp-free-map
+   :parent :free-arg-slot-map
+   :args {:fn-id {:ref :_xp-fn-id :type :nullable-uuid}}}
+
+  {:name :_xp-free-names
+   :description "Free-arg names, sorted for a stable row order (the slot-map is unordered)."
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :keys :args {:map :_xp-free-map}}}}}}
+
+  {:name :_xp-arg-name-text
+   :parent :keyword-to-str
+   :args {:keyword {:as :item}}}
+
+  {:name :_xp-arg-slot-id-text
+   :parent :to-str
+   :args {:value {:parent :get
+                  :args {:coll :_xp-free-map :key {:as :item} :default nil}}}}
+
+  {:name :_xp-arg-host
+   :description "Empty per-arg mount host — editor-execute.js fetches `/api/value-form` for the `(fn-id, slot-id)` pair and renders the widget into it post-swap."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class} {:value :data-slot-id} {:value :data-slot-name}]
+                         :vals [{:value "execute-arg-form"}
+                                :_xp-arg-slot-id-text
+                                :_xp-arg-name-text]}}
+          :children [{:value "…"}]}}
+
+  {:name :_xp-arg-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-arg-row"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:class "execute-arg-label"}}
+                             :children [:_xp-arg-name-text]}}
+                     :_xp-arg-host]}}
+
+  {:name :_xp-arg-rows
+   :parent :map
+   :args {:func :_xp-arg-row :coll :_xp-free-names}}
+
+  {:name :_xp-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-popover-body"}}
+          :children [{:parent :if
+                      :args {:test {:parent :empty? :args {:coll :_xp-free-names}}
+                             :then {:value [:div {:class "execute-no-args-note"}
+                                            "No free arguments — click Run to invoke."]}
+                             :else {:value [:span {:hidden "1"}]}}}
+                     :_xp-arg-rows]}}
+
+  ;; --- options + actions -----------------------------------------------
+  ;; Effects-bearing fns: confirm checkbox gates Run (server emits Run
+  ;; disabled; JS live-toggles), persist is pre-checked + locked (the
+  ;; backend auto-persists effectful runs regardless).
+
+  {:name :_xp-options
+   :parent :if
+   :args {:test :_xp-has-effects?
+          :then {:value [:div {:class "execute-options-row"}
+                         [:label {:class "execute-option-label execute-confirm-label"}
+                          [:input {:type "checkbox" :class "execute-confirm-checkbox"}]
+                          [:span " I understand this will produce side effects"]]
+                         [:label {:class "execute-option-label execute-option-label-locked"
+                                  :title "Automatically saved — runs that produce side effects are always persisted for audit trail."}
+                          [:input {:type "checkbox" :class "execute-persist-checkbox"
+                                   :checked "checked" :disabled "disabled"}]
+                          [:span " Save to history"]]]}
+          :else {:value [:div {:class "execute-options-row"}
+                         [:label {:class "execute-option-label"
+                                  :title "When checked, this run is saved to fn-execution storage. Pure fast runs are NOT saved by default — tick this for runs you want to keep."}
+                          [:input {:type "checkbox" :class "execute-persist-checkbox"}]
+                          [:span " Save to history"]]]}}}
+
+  {:name :_xp-actions
+   :parent :if
+   :args {:test :_xp-has-effects?
+          :then {:value [:div {:class "execute-action-bar"}
+                         [:button {:type "button" :class "execute-run-btn"
+                                   :disabled "disabled"
+                                   :title "Confirm side-effects acknowledgement first"} "Run"]
+                         [:button {:type "button" :class "execute-cancel-btn"
+                                   :style "display:none"} "Cancel"]]}
+          :else {:value [:div {:class "execute-action-bar"}
+                         [:button {:type "button" :class "execute-run-btn"} "Run"]
+                         [:button {:type "button" :class "execute-cancel-btn"
+                                   :style "display:none"} "Cancel"]]}}}
+
+  {:name :_xp-fragment
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-popover-content"}}
+          :children [:_xp-header
+                     {:value [:div {:class "execute-history-host"
+                                    :style "display:none"}]}
+                     :_xp-effects-banner
+                     :_xp-body
+                     :_xp-options
+                     :_xp-actions
+                     {:value [:div {:class "execute-result-host"}]}]}}
+
+  {:name :_xp-html
+   :parent :render-hiccup
+   :args {:hiccup :_xp-fragment}}
+
+  {:name :_partial-xp-handler
+   :description "Ring handler for `GET /partials/execute-popover?fn-id=<uuid>` — the Run-popover shell as `text/html`. JS mounts value-forms into the arg hosts and owns run/poll/cancel/history."
+   :parent :html-ok-response
+   :args {:body :_xp-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-picker incompat-explainer. The fn-picker popover surfaces
   ;; functions whose return type doesn't satisfy the slot's expected
   ;; type under a separate "Other" section; clicking such a candidate

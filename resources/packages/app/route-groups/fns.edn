@@ -32,6 +32,7 @@
                   :partial-provenance
                   :partial-return-type-rule
                   :partial-fn-picker-incompat
+                  :partial-execute-popover
                   :partial-execute-result
                   :partial-execute-result-inline
                   :partial-branch-popover

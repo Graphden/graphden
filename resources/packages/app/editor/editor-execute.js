@@ -88,107 +88,43 @@ function hideExecutePopover() {
 }
 
 
-// === Free-args lookup ======================================================
+// === Arg-form mounting =====================================================
 //
-// Walk the fn's inheritance chain to collect every slot the executor
-// would treat as a free-arg (no value / ref / list-append binding).
-// Mirrors the backend's `free-arg-slot-map` — kept in JS so the form
-// can render without an extra HTTP round-trip.
-function freeArgsOf(fnEntity) {
-  if (!fnEntity || typeof lookups === 'undefined' || !lookups) return [];
-  const chain = (typeof getInheritanceChain === 'function')
-    ? getInheritanceChain(fnEntity.id) : [fnEntity.id];
-  const chainSet = new Set(chain);
-  const fnSlots = [];
-  const seenSlotIds = new Set();
-  for (const fid of chain) {
-    const list = lookups.fnSlotsByFn?.get(fid) || [];
-    for (const fs of list) {
-      if (!seenSlotIds.has(fs['slot-id'])) {
-        seenSlotIds.add(fs['slot-id']);
-        fnSlots.push(fs);
-      }
-    }
-  }
-  // Bound = any binding for this slot anywhere in the chain has a
-  // value, ref, or list-append.
-  const bound = new Set();
-  if (lookups.bindingMap) {
-    for (const b of lookups.bindingMap.values()) {
-      if (!chainSet.has(b['fn-id'])) continue;
-      if (b.value !== null && b.value !== undefined) bound.add(b['slot-id']);
-      else if (b['ref-fn-id']) bound.add(b['slot-id']);
-      else if (b['list-append'] === true) bound.add(b['slot-id']);
-    }
-  }
-  return fnSlots
-    .filter((fs) => !bound.has(fs['slot-id']))
-    .map((fs) => {
-      const slot = lookups.slotMap?.get(fs['slot-id']);
-      return slot ? { name: slot.name, id: slot.id, position: fs.position } : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-}
+// The popover shell (header / effects banner / per-arg rows / options
+// / action bar) ships from `GET /partials/execute-popover?fn-id=…` —
+// including the free-arg set, which the server derives via its own
+// `:free-arg-slot-map` (the former JS re-derivation of it lived here
+// and could drift). Each `[data-slot-id]` host in the shell gets its
+// `/api/value-form` widget mounted by `mountArgFormHost`.
 
-
-// === Declared-effects lookup ===============================================
-
-function declaredEffectsOf(fnEntity) {
-  if (!fnEntity?.name) return [];
-  if (typeof richTypes !== 'object' || !richTypes) return [];
-  const entry = richTypes[fnEntity.name];
-  const eff = entry?.effects || [];
-  return Array.isArray(eff) ? eff : Array.from(eff);
-}
-
-
-// === Arg-form sections =====================================================
-
-function makeRow(labelText, bodyEl) {
-  const row = document.createElement('div');
-  row.className = 'execute-arg-row';
-  const label = document.createElement('div');
-  label.className = 'execute-arg-label';
-  label.textContent = labelText;
-  row.appendChild(label);
-  row.appendChild(bodyEl);
-  return row;
-}
-
-
-// Build one arg's form by fetching the value-form payload for that
-// (fn-id, slot-id). Returns the host element + a `read()` closure
-// that collectFormValue's the current input.
-async function buildArgFormSection(fnEntity, slot) {
-  const host = document.createElement('div');
-  host.className = 'execute-arg-form';
-  host.textContent = '…';
+// Mount one arg's form into a server-rendered host. Returns a
+// `read()` closure that collectFormValue's the current input.
+async function mountArgFormHost(fnEntity, host) {
+  const slotId = host.dataset.slotId;
+  const slotName = host.dataset.slotName;
   const payload = await fetchValueForm({ 'fn-id': fnEntity.id,
-                                         'slot-id': slot.id });
+                                         'slot-id': slotId });
+  host.textContent = '';
   if (!payload || payload.ok === false) {
-    host.textContent = payload?.error || 'Could not load form for ' + slot.name;
+    host.textContent = payload?.error || 'Could not load form for ' + slotName;
     host.classList.add('execute-arg-form-error');
   } else {
     renderValueForm(host, payload, {});
   }
-  return {
-    host,
-    read: () => {
-      const root = host.querySelector('[data-form-root]') || host;
-      if (typeof collectFormValue !== 'function') return null;
-      const collected = collectFormValue(root);
-      // `collectFormValue` returns `{ok, value, errors}` — when the
-      // user's input fails type-validation, ok=false and value may be
-      // stale / undefined. We surface the value either way; the
-      // backend will reject if the unwrapped shape doesn't fit the
-      // slot type. (Front-end validation is a hint, not a gate.)
-      if (collected && typeof collected === 'object'
-          && 'value' in collected && 'ok' in collected) {
-        return collected.value;
-      }
-      return collected;
-    },
+  return () => {
+    const root = host.querySelector('[data-form-root]') || host;
+    if (typeof collectFormValue !== 'function') return null;
+    const collected = collectFormValue(root);
+    // `collectFormValue` returns `{ok, value, errors}` — when the
+    // user's input fails type-validation, ok=false and value may be
+    // stale / undefined. We surface the value either way; the
+    // backend will reject if the unwrapped shape doesn't fit the
+    // slot type. (Front-end validation is a hint, not a gate.)
+    if (collected && typeof collected === 'object'
+        && 'value' in collected && 'ok' in collected) {
+      return collected.value;
+    }
+    return collected;
   };
 }
 
@@ -369,17 +305,46 @@ async function showExecutePopover(fnEntity, anchorEl) {
   el.textContent = '';
   argFormHosts = [];
 
-  // Header
-  const head = document.createElement('div');
-  head.className = 'execute-popover-header';
-  const title = document.createElement('span');
-  title.className = 'execute-popover-title';
-  title.textContent = 'Run :' + (fnEntity.name || '(anonymous)');
-  head.appendChild(title);
-  // Branch indicator — non-default-branch users SHOULD see at-a-glance
-  // that ▶ won't run main's version. Inverted-pill style mirrors the
-  // top-bar chip's "on a feature branch" affordance.
-  if (typeof isOnDefaultBranch === 'function' && !isOnDefaultBranch()) {
+  // Shell ships from the server — header / effects banner / free-arg
+  // hosts / options / action bar / hosts, all derived from the fn row
+  // + rich-types registry + the backend's own free-arg-slot-map.
+  let html;
+  try {
+    const r = await authFetch('/partials/execute-popover?fn-id='
+                              + encodeURIComponent(fnEntity.id));
+    if (!r.ok) {
+      el.textContent = 'Could not load the run form (HTTP ' + r.status + ').';
+      return;
+    }
+    html = await r.text();
+  } catch (e) {
+    el.textContent = 'Could not load the run form: ' + e.message;
+    return;
+  }
+  el.innerHTML = html;
+
+  // --- post-swap wiring ---
+  const head = el.querySelector('.execute-popover-header');
+  const historyBtn = el.querySelector('.execute-history-toggle');
+  const historyHost = el.querySelector('.execute-history-host');
+  const confirmCb = el.querySelector('.execute-confirm-checkbox');
+  const persistCb = el.querySelector('.execute-persist-checkbox');
+  const runBtn = el.querySelector('.execute-run-btn');
+  const cancelBtn = el.querySelector('.execute-cancel-btn');
+  const resultHost = el.querySelector('.execute-result-host');
+  const close = el.querySelector('.execute-popover-close');
+  if (close) {
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideExecutePopover();
+    });
+  }
+
+  // Branch indicator — which branch chip the user is on is CLIENT
+  // state (URL ?branch= + localStorage), so the pill is inserted here
+  // rather than baked into the partial. Inverted-pill style mirrors
+  // the top-bar chip's "on a feature branch" affordance.
+  if (head && typeof isOnDefaultBranch === 'function' && !isOnDefaultBranch()) {
     const branchPill = document.createElement('span');
     branchPill.className = 'execute-popover-branch';
     const branchName = typeof getCurrentBranchName === 'function'
@@ -387,177 +352,33 @@ async function showExecutePopover(fnEntity, anchorEl) {
     branchPill.textContent = 'on ' + branchName;
     branchPill.title = 'Run resolves to this fn as seen on branch "'
                        + branchName + '"; switch branches to run a different version';
-    head.appendChild(branchPill);
-  }
-  // History toggle — toggles a collapsible panel listing persisted
-  // runs for this fn. Lazy fetch on first open so the header doesn't
-  // pay an HTTP roundtrip every time the popover opens.
-  const historyBtn = document.createElement('button');
-  historyBtn.type = 'button';
-  historyBtn.className = 'execute-history-toggle';
-  historyBtn.textContent = 'History';
-  historyBtn.title = 'Show persisted runs of this fn';
-  historyBtn.setAttribute('aria-expanded', 'false');
-  head.appendChild(historyBtn);
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'execute-popover-close';
-  close.setAttribute('aria-label', 'Close run-fn popover');
-  close.textContent = '×';
-  close.addEventListener('click', (e) => {
-    e.stopPropagation();
-    hideExecutePopover();
-  });
-  head.appendChild(close);
-  el.appendChild(head);
-
-  // History host — content built lazily after Result host is mounted
-  // below (the panel rows need to know where to render an expanded
-  // result). The click handler is wired AFTER resultHost exists.
-  const historyHost = document.createElement('div');
-  historyHost.className = 'execute-history-host';
-  historyHost.style.display = 'none';
-  el.appendChild(historyHost);
-
-  // Effects banner — explicit warning when the fn isn't pure.
-  const effs = declaredEffectsOf(fnEntity);
-  if (effs.length > 0) {
-    const banner = document.createElement('div');
-    banner.className = 'execute-effects-warning';
-    const lbl = document.createElement('span');
-    lbl.className = 'execute-effects-warning-label';
-    lbl.textContent = 'side effects: ';
-    banner.appendChild(lbl);
-    for (const cat of effs) {
-      const chip = document.createElement('span');
-      chip.className = 'effects-chip effects-chip-' + cat;
-      chip.textContent = cat;
-      banner.appendChild(chip);
-    }
-    el.appendChild(banner);
+    const titleEl = head.querySelector('.execute-popover-title');
+    if (titleEl?.nextSibling) head.insertBefore(branchPill, titleEl.nextSibling);
+    else head.appendChild(branchPill);
   }
 
-  // Body — one form per free-arg.
-  const body = document.createElement('div');
-  body.className = 'execute-popover-body';
-  el.appendChild(body);
-  // The free-args are derived from fn-slots, bindings and slots — and those live
-  // in the per-view SUBTREE payload, not in the `?scope=tree` one that
-  // `initGraph()` rebuilds `lookups` from. Open this popover before the subtree
-  // lands and `freeArgsOf` sees empty maps, reports no free args at all, and the
-  // popover renders "No free arguments — click Run to invoke." for an fn that in
-  // fact takes some. The user gets a Run button and no way to pass anything to it.
-  //
-  // Same shape as the arg-type picker's dead <select>: a not-loaded-yet read of
-  // `lookups` mistaken for an answer. Wait for the payload that carries the slots.
-  // `ensureSubtreeFor` is idempotent and hands back the in-flight fetch, so this is
-  // free once the view has settled.
-  if (typeof ensureSubtreeFor === 'function') {
-    try {
-      await ensureSubtreeFor(selectedFnId || fnEntity?.id);
-    } catch (_) { /* fall through — the empty-args note below is then the truth */ }
-  }
-  const frees = freeArgsOf(fnEntity);
-  if (frees.length === 0) {
-    const note = document.createElement('div');
-    note.className = 'execute-no-args-note';
-    note.textContent = 'No free arguments — click Run to invoke.';
-    body.appendChild(note);
-  }
-  // Fetch every free-arg's value-form in parallel — sequential await
-  // serialised the N HTTP roundtrips, making popover-open scale O(N)
-  // in wall time for fns with multiple free args.
-  const sections = await Promise.all(
-    frees.map((slot) => buildArgFormSection(fnEntity, slot)),
+  // Mount every free-arg's value-form in parallel — sequential await
+  // would serialise the N HTTP roundtrips.
+  const hosts = Array.from(el.querySelectorAll('.execute-arg-form[data-slot-id]'));
+  const readers = await Promise.all(
+    hosts.map((host) => mountArgFormHost(fnEntity, host)),
   );
-  for (let i = 0; i < frees.length; i++) {
-    const slot = frees[i];
-    const section = sections[i];
-    argFormHosts.push({ slotName: slot.name, slotId: slot.id, hostEl: section.host,
-                         read: section.read });
-    body.appendChild(makeRow(slot.name, section.host));
+  for (let i = 0; i < hosts.length; i++) {
+    argFormHosts.push({ slotName: hosts[i].dataset.slotName,
+                        slotId: hosts[i].dataset.slotId,
+                        hostEl: hosts[i],
+                        read: readers[i] });
   }
 
-  // Option toggles row — sits above the action bar. Two checkboxes:
-  //   * effect-confirm (only when effs.length > 0) — hard-gates Run
-  //     so user can't fire an effectful fn without explicit OK.
-  //   * persist? — when ticked, even pure fast fns leave a row in
-  //     fn-execution storage (useful for tracking ad-hoc runs).
-  //     Effects-bearing fns ignore this — they auto-persist on the
-  //     backend regardless.
-  const opts = document.createElement('div');
-  opts.className = 'execute-options-row';
-  let confirmCb = null;
-  if (effs.length > 0) {
-    const confirmLabel = document.createElement('label');
-    confirmLabel.className = 'execute-option-label execute-confirm-label';
-    confirmCb = document.createElement('input');
-    confirmCb.type = 'checkbox';
-    confirmCb.className = 'execute-confirm-checkbox';
-    confirmLabel.appendChild(confirmCb);
-    const txt = document.createElement('span');
-    txt.textContent = ' I understand this will produce side effects';
-    confirmLabel.appendChild(txt);
-    opts.appendChild(confirmLabel);
-  }
-  const persistLabel = document.createElement('label');
-  persistLabel.className = 'execute-option-label';
-  const persistCb = document.createElement('input');
-  persistCb.type = 'checkbox';
-  persistCb.className = 'execute-persist-checkbox';
-  // Effects-bearing fns auto-persist on the backend regardless of
-  // this flag — pre-check + disable so the UI matches reality and
-  // doesn't lie that the run might NOT be saved.
-  if (effs.length > 0) {
-    persistCb.checked = true;
-    persistCb.disabled = true;
-    persistLabel.classList.add('execute-option-label-locked');
-    persistLabel.title =
-      'Automatically saved — runs that produce side effects are '
-      + 'always persisted for audit trail.';
-  } else {
-    persistLabel.title =
-      'When checked, this run is saved to fn-execution storage. '
-      + 'Pure fast runs are NOT saved by default — tick this for '
-      + 'runs you want to keep.';
-  }
-  persistLabel.appendChild(persistCb);
-  const persistTxt = document.createElement('span');
-  persistTxt.textContent = ' Save to history';
-  persistLabel.appendChild(persistTxt);
-  opts.appendChild(persistLabel);
-  el.appendChild(opts);
-
-  // Action bar
-  const actions = document.createElement('div');
-  actions.className = 'execute-action-bar';
-  const runBtn = document.createElement('button');
-  runBtn.type = 'button';
-  runBtn.className = 'execute-run-btn';
-  runBtn.textContent = 'Run';
-  // Effect-confirm gate — Run disabled until checkbox ticked when the
-  // fn declares effects. Live-toggle as user checks/unchecks.
-  if (confirmCb) {
-    runBtn.disabled = true;
-    runBtn.title = 'Confirm side-effects acknowledgement first';
+  // Effect-confirm gate — the partial emits Run disabled when the fn
+  // declares effects; live-toggle as the user checks/unchecks.
+  if (confirmCb && runBtn) {
     confirmCb.addEventListener('change', () => {
       runBtn.disabled = !confirmCb.checked;
-      runBtn.title = confirmCb.checked ? 'Run' : 'Confirm side-effects acknowledgement first';
+      runBtn.title = confirmCb.checked
+        ? 'Run' : 'Confirm side-effects acknowledgement first';
     });
   }
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'execute-cancel-btn';
-  cancelBtn.textContent = 'Cancel';
-  cancelBtn.style.display = 'none';
-  actions.appendChild(runBtn);
-  actions.appendChild(cancelBtn);
-  el.appendChild(actions);
-
-  // Result host (filled after Run / history-row click)
-  const resultHost = document.createElement('div');
-  resultHost.className = 'execute-result-host';
-  el.appendChild(resultHost);
 
   // History toggle handler — needs resultHost in scope so panel
   // rows can expand their full result into it.

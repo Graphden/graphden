@@ -26,3 +26,30 @@ tags = ["graphden", "credential", "fallback"]
   regexes = [
     '''\|\|\s*['"](?:test123|changeme|placeholder|dummy|example|localhost)['"]''',
   ]
+
+
+# ---------------------------------------------------------------------------
+# History allowlist.
+#
+# The working tree is clean; these are commits that already shipped. gitleaks
+# in CI scans HISTORY (the `bb gitleaks` task scans the working tree with
+# --no-git), which is why they were invisible locally until the workflow was
+# revived on develop.
+# ---------------------------------------------------------------------------
+[allowlist]
+description = "Findings in already-shipped commits, each triaged below."
+commits = [
+  # 2026-06-20 — the dev-instance AUTH_TOKEN as a literal `||` fallback in five
+  # browser tests (the very leak the rule above was written for; the tree was
+  # cleaned then, the history kept it). The credential was ROTATED on
+  # 2026-07-20 and verified dead (old token → 401, new token → 200), so what
+  # history holds is a revoked 8-char string for a demo instance. History is
+  # NOT rewritten: 1747 commits of SHAs are referenced from docs and ADRs, and
+  # rewriting them to bury a dead credential trades real traceability for
+  # cosmetics. If a LIVE credential ever lands, rotate first — then decide.
+  "9a36f0fe1cd10cd36d4dd5d7614c847668c7f4e0",
+  # 2026-04-07 — `generic-api-key` firing on a fn ROUTE UUID
+  # (21164217-585a-4335-8ade-da58f255c6ce) in two throwaway probe scripts.
+  # A graph entity id, not a credential.
+  "ec38978b6d50f64fcc99385a479ce4dbd3ed8c51",
+]

@@ -465,11 +465,10 @@
                   "-M:dev:test -m kaocha.runner :unit")}
 
   test-js
-  {:doc "JS tests that need NO graphden stack — ~15s. The type-system UI helpers (tools/browser-test/type-system-ui-*.test.js: a headless chromium, but no server — they eval editor modules and assert pure functions + DOM building) and the shared client runtime (tools/runtime-test/*.test.js: node's vm, no browser at all). Nothing ran these before: `bb test-e2e`'s runner globs `edit-*.test.js`, which they deliberately don't match, so CLAUDE.md documented invoking them by hand and CI never did."
+  {:doc "JS tests that need NO graphden stack — the shared client runtime (tools/runtime-test/*.test.js: node's vm, no browser at all). The type-system UI helpers used to sit here too, on the belief that they needed no server; they call editor globals INSIDE a loaded page, so they need one — locally that was masked by a running demo instance, and GitHub CI (no stack) is where it surfaced. They now ride the e2e runner, which has a stack."
    :task (let [;; dir → glob. Same contract as run-edit-tests.sh: adding a file
                ;; takes a glob, never an edit here.
-               groups {"tools/browser-test" "type-system-ui-*.test.js"
-                       "tools/runtime-test" "*.test.js"}
+               groups {"tools/runtime-test" "*.test.js"}
                failed (atom [])]
            (doseq [[dir pattern] groups
                    f (sort-by str (fs/glob dir pattern))

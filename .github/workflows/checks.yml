@@ -95,8 +95,12 @@ jobs:
           key: deps-${{ hashFiles('deps.edn') }}
           restore-keys: deps-
 
-      - name: Run tests
-        run: bb test
+      # Unit suite only. Integration + e2e need a built graphden-executor
+      # image and a live stack; the landing gate runs those on every merge,
+      # so paying ~19 min to duplicate them here (and failing on a docker
+      # image the runner cannot have) buys nothing.
+      - name: Run unit tests
+        run: bb test-unit
 
   coverage:
     name: coverage
@@ -319,11 +323,10 @@ jobs:
       - name: Compare against perf/budgets.edn
         run: bb perf
 
-  # The JS tests that need no graphden stack. They existed and ran nowhere:
-  # `bb test-e2e`'s runner globs `edit-*.test.js` and these deliberately don't
-  # match, so the only thing that ever invoked them was a human following
-  # CLAUDE.md. Chromium is needed (the type-system-ui tests eval editor modules
-  # inside a page); a server is not.
+  # The JS tests that need no graphden stack: the shared client runtime, run
+  # under node's `vm`. No browser, no server — so no chromium install here.
+  # (The type-system-ui tests moved to the e2e runner: they drive editor
+  # globals inside a LOADED page, which needs the stack.)
   tests-js:
     name: tests-js (no-stack JS)
     runs-on: ubuntu-latest
@@ -333,14 +336,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '20'
-
-      - name: Install browser-test deps
-        working-directory: tools/browser-test
-        run: npm ci
-
-      - name: Install chromium
-        working-directory: tools/browser-test
-        run: npx playwright install --with-deps chromium
 
       - uses: DeLaGuardo/setup-clojure@13.6.1
         with:
@@ -457,12 +452,12 @@ jobs:
       - name: Run lychee (online — verifies external HTTP links too)
         uses: lycheeverse/lychee-action@v2
         with:
+          # Share ONE exclusion list with `bb lychee` (.lychee.toml) — without
+          # it the online run dials the docs' localhost:9002 examples and
+          # fails on connection-refused.
           args: |
+            --config .lychee.toml
             --no-progress
-            --exclude-path node_modules
-            --exclude-path target
-            --exclude-path .tools
-            --exclude-path .playwright-mcp
             '**/*.md'
           fail: true
 

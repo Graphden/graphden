@@ -118,6 +118,12 @@
 
   :splint
   {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.24.0"}}
+   ;; Tool aliases resolve the ROOT :deps too, so without this override they
+   ;; try the private `mathx` git coord over SSH — which a CI runner has no
+   ;; key for. Locally it passes on a warm ~/.gitlibs + ssh-agent, so the
+   ;; failure is CI-only and invisible here. Same hermetic override the
+   ;; :dev/:test aliases carry.
+   :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts ["-m" "noahtheduke.splint"]}
 
   ;; NOTE: Eastwood removed - incompatible with Clojure 1.12 qualified methods (Class/.method)
@@ -127,6 +133,10 @@
   ;; Utilities
   :outdated
   {:extra-deps {com.github.liquidz/antq {:mvn/version "2.11.1276"}}
+   ;; The `--exclude` below keeps mathx out of the REPORT; this keeps it out
+   ;; of CLASSPATH RESOLUTION, which antq does first and which needs SSH to
+   ;; the private repo (CI has no key — locally a warm ~/.gitlibs hides it).
+   :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts
    ["-m" "antq.core"
     "--exclude=org.testcontainers/testcontainers"
@@ -141,6 +151,12 @@
 
   :watson
   {:extra-deps {io.github.clj-holmes/clj-watson {:git/tag "v6.1.0" :git/sha "be98e4d"}}
+   ;; Tool aliases resolve the ROOT :deps too, so without this override they
+   ;; try the private `mathx` git coord over SSH — which a CI runner has no
+   ;; key for. Locally it passes on a warm ~/.gitlibs + ssh-agent, so the
+   ;; failure is CI-only and invisible here. Same hermetic override the
+   ;; :dev/:test aliases carry.
+   :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts ["-m" "clj-watson.cli" "scan"]}
 
   ;; Build uberjar

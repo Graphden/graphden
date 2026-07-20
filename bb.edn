@@ -250,7 +250,7 @@
   typos
   {:doc "Spelling check over docs + src via crate-ci/typos. Downloads the binary to .tools/typos on first run (Linux x86_64). Config: _typos.toml at repo root."
    :task (let [binary ".tools/typos"
-               version "v1.31.0"]
+               version "v1.48.0"]
            (when-not (fs/exists? binary)
              (println "Downloading typos" version "…")
              (fs/create-dirs ".tools")

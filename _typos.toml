@@ -18,6 +18,12 @@
 edn = "edn"
 EDN = "EDN"
 
+# `vor` — the value-override test family's prefix (value-override-ref):
+# fn names like `vor-value-parent` / `vor-narrow-child` in
+# crud/validation_test.clj exercise binding value-override inheritance.
+# 20+ sites, all inside test fn names. typos v1.48 added `vor -> for`.
+vor = "vor"
+
 # `clojure.core/juxt` — standard library function ((juxt f g h)
 # returns a fn that runs f, g, h on its arg and returns
 # [(f x) (g x) (h x)]). 57 sites in the codebase.

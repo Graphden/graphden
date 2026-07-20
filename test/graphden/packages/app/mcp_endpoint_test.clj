@@ -152,9 +152,10 @@
         (is (map? data))
         (is (true? (:ok data)))
         (is (sequential? (:diffs data)) "diff carries the per-entity change list")
-        (is (some (fn [d] (and (= "fn" (:entity-name d))
-                               (= "added-in-target" (:change d))
-                               (= "mcp-test-sum" (get-in d [:target-version :name]))))
+        (is (some (fn [d]
+                    (and (= "fn" (:entity-name d))
+                         (= "added-in-target" (:change d))
+                         (= "mcp-test-sum" (get-in d [:target-version :name]))))
                   (:diffs data))
             (str "the proposed fn shows up as added-in-target: " (pr-str (:diffs data))))))))
 

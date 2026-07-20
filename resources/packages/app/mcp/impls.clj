@@ -18,8 +18,8 @@
     [graphden.executor.composition.interface :as composition]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.packages.records.ids :as ids]
     [graphden.packages.loader :as loader]
+    [graphden.packages.records.ids :as ids]
     [graphden.system.branch-router :as br]
     [graphden.versioning.storage.core :as vs]))
 

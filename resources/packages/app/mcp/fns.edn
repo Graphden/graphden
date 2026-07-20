@@ -455,8 +455,10 @@
    :args {:result :_mcp-resources-catalog}}
 
   {:name :_mcp-ai-context-text
-   :parent :const
-   :args {:value "# Graphden AI context (seed)\n\nGraphden stores programs as a GRAPH in a database: a `fn` is either a base-fn (Clojure impl) or a COMPOSITION — a fn-def declared as `{:name :my-fn :parent :base-or-fn :args {...}}`. You write fn-defs, never text code. Args bind slots inherited through :parent; unbound slots surface as the fn's own free args. There is no text code to edit — you compose existing fns.\n\nWorkflow: (1) call list-namespaces, then search-fns / read-fn to learn the vocabulary; (2) NEVER mutate main — create a branch and work there (mutation tools are branch-scoped); (3) execute-fn to verify; (4) the human reviews your branch as a graph-diff.\n\nThe full document ships with Block 9.3 (docs/AI_CONTEXT.md)."}}
+   :description "The AI-author guide (Block 9.3) — read from the classpath so the served resource IS docs/AI_CONTEXT.md, never a hand-kept copy of it (the .md at resources/packages/app/mcp/ai-context.md is that file, kept identical by mcp-ai-context-doc-in-sync-test). Static platform content, like the editor's CSS/JS assets, so the `:io` read rides the same unrestricted platform face."
+   :parent :read-resource
+   :return-type :text
+   :args {:path "packages/app/mcp/ai-context.md"}}
 
   {:name :_mcp-resource-uri
    :parent :get

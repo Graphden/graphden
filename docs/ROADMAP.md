@@ -193,14 +193,14 @@ than text-diffs.
    key config UI, encrypted at rest via the existing `:vault-*`
    surface (cloud-shared) or kept client-side (self-hosted).
    **~2 weeks.**
-3. **AI-context resource.** Curated description of graphden's entity
-   model, design principles, common patterns, naming conventions,
-   and how to mutate the graph via MCP tools, served by the MCP
-   server as a `get-ai-context` resource and as a downloadable
-   `docs/AI_CONTEXT.md` for clients that don't auto-fetch resources.
-   Distinct from `CLAUDE.md` (which is developer-side guidance for
-   working on graphden) — this teaches an external AI how to write
-   *user* fn-defs. **~3–4 days.**
+3. **AI-context resource — SHIPPED.** `docs/AI_CONTEXT.md` teaches an
+   external AI the entity model, the fn-def map, slot/inheritance/free-args,
+   control-flow-as-data, the tool workflow, naming/style, and the cloud
+   effect budget. The MCP server serves it verbatim at the
+   `graphden://ai-context` resource by reading the classpath copy
+   (`resources/packages/app/mcp/ai-context.md`), kept byte-identical by
+   `mcp-doc-sync-test`. Distinct from `CLAUDE.md` (developer guidance) —
+   this teaches *user* fn-def authoring.
 
 #### Growth piece (~4–5 weeks, post-MVP)
 

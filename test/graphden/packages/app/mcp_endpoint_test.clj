@@ -110,8 +110,10 @@
     (is (= "graphden://ai-context"
            (-> rpc :result :resources first :uri))))
   (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 11 :method "resources/read"
-                             :params {:uri "graphden://ai-context"}})]
-    (is (re-find #"fn-defs" (-> rpc :result :contents first :text))))
+                             :params {:uri "graphden://ai-context"}})
+        text (-> rpc :result :contents first :text)]
+    (is (re-find #"Code is a graph in a database" text) "serves the real AI_CONTEXT doc")
+    (is (re-find #"create-branch" text) "documents the mutation workflow"))
   (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 12 :method "resources/read"
                              :params {:uri "graphden://nope"}})]
     (is (= -32002 (get-in rpc [:error :code])))))

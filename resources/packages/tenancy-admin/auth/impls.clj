@@ -74,4 +74,6 @@
   {:invoke-login invoke-login
    :invoke-logout invoke-logout
    :invoke-logout-all invoke-logout-all
-   :invoke-signup invoke-signup})
+   :invoke-signup invoke-signup
+   :invoke-invite-create invoke-invite-create
+   :invoke-invite-redeem invoke-invite-redeem})

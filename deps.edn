@@ -101,7 +101,7 @@
   :nrepl
   {:extra-deps
    {nrepl/nrepl {:mvn/version "1.7.0"}
-    cider/cider-nrepl {:mvn/version "0.62.1"}
+    cider/cider-nrepl {:mvn/version "0.62.2"}
     refactor-nrepl/refactor-nrepl {:mvn/version "3.14.0"}}
    :main-opts
    ["-m" "nrepl.cmdline"

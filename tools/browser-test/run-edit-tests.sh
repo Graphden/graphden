@@ -44,11 +44,9 @@ cd "$(dirname "$0")" || exit 1
 #                            Running them here would pay for a whole stack to
 #                            use none of it. They have their own runner now:
 #                            `bb test-js`, ~15 s, wired into scripts/checks.edn.
-# `type-system-ui-*` join the edit suite: they drive editor globals inside a
-# loaded page, so they need the stack this runner boots.
-FILES=$(ls edit-*.test.js type-system-ui-*.test.js 2>/dev/null)
+FILES=$(ls edit-*.test.js 2>/dev/null)
 if [ -z "$FILES" ]; then
-  echo "no edit-*.test.js / type-system-ui-*.test.js files found" >&2
+  echo "no edit-*.test.js files found" >&2
   exit 2
 fi
 

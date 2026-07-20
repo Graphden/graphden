@@ -158,7 +158,7 @@ fn-defs — Lesson 11) reaches a graphden it wasn't authored in.
 The moving parts, with the worked example `mathx` (a tiny package whose
 whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
 
-1. **The package is its own repo.** `BonsaiFlow/graphden-mathx` is a
+1. **The package is its own repo.** `graphden/graphden-mathx` is a
    normal Clojure project — a `deps.edn` and a `packages/mathx/`
    resource tree (`package.edn` + `ops/fns.edn` + `ops/impls.clj`),
    exactly the on-disk shape from Lesson 11, just outside the main tree.
@@ -171,7 +171,7 @@ whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
    {:packages
     [{:name "mathx"
       :lib mathx/mathx
-      :coord {:git/url "git@github.com:BonsaiFlow/graphden-mathx.git"
+      :coord {:git/url "git@github.com:graphden/graphden-mathx.git"
               :git/sha "a99354d1…"}}]}
    ```
 

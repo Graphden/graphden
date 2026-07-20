@@ -1,4 +1,4 @@
-;; Standalone parity with the BonsaiFlow/graphden-examples repo. The monorepo's
+;; Standalone parity with the graphden/graphden-examples repo. The monorepo's
 ;; own dev/test loads these examples via an :extra-paths entry onto
 ;; external-packages/examples/resources (see the repo-root deps.edn :dev/:test
 ;; aliases) — prod never carries them.

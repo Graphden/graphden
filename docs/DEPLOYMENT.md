@@ -27,7 +27,7 @@ The build resolves every dependency in `deps.edn` **and** every external
 Type-2 package listed in `resources/executor-packages.edn` (see
 [PACKAGE_DISTRIBUTION § 5.1](PACKAGE_DISTRIBUTION.md)). When such a package is
 pulled by a **git coord onto a private repo** — as `mathx`
-(`BonsaiFlow/graphden-mathx`) is — the build host must be able to read that
+(`graphden/graphden-mathx`) is — the build host must be able to read that
 repo, or `clojure -T:build uber` / `bb rebuild` / `bb check` fail to resolve it.
 
 On a host whose SSH key is passphrase-protected, unlock it once per session

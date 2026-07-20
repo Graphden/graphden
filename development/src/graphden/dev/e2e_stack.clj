@@ -30,6 +30,7 @@
    container in reverse start order (Ryuk is the safety net)."
   (:require
     [cheshire.core :as json]
+    [clojure.math :as math]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
@@ -318,8 +319,8 @@
                           ("MiB" "MB") v
                           ("GiB" "GB") (* v 1024.0)
                           v)))]
-          {:mem-mb (Math/round (to-mb (nth m 1) (nth m 2)))
-           :limit-mb (Math/round (to-mb (nth m 3) (nth m 4)))
+          {:mem-mb (math/round (to-mb (nth m 1) (nth m 2)))
+           :limit-mb (math/round (to-mb (nth m 3) (nth m 4)))
            :mem-pct (Double/parseDouble (nth m 5))})))
     (catch Exception _)))
 
@@ -420,7 +421,7 @@
               (let [size-mb (-> (java.io.File. dump-host)
                                 java.io.File/.length
                                 (/ (* 1024.0 1024.0))
-                                Math/round)]
+                                math/round)]
                 (log/info (format "🔥 heap dump extracted: %s (%dMB) — analyze with `jhat` or VisualVM"
                                   dump-host size-mb)))))
           (catch Exception _))

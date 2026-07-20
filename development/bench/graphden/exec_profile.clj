@@ -45,14 +45,16 @@
       PostgreSQLContainer)))
 
 
-(defn- full-schema []
+(defn- full-schema
+  []
   (-> (mds/create-builder)
       (gds/extend-builder) (vts/extend-builder) (vds/extend-builder)
       (es/extend-builder) (svcs/extend-builder) (pkgs/extend-builder)
       (ds/build)))
 
 
-(defn- versioned-storage [cfg]
+(defn- versioned-storage
+  [cfg]
   (let [storage (pg/create-storage cfg)]
     (sp/initialize storage (full-schema))
     (sp/upsert-entities storage :fn
@@ -73,7 +75,8 @@
     :args {:func :_bench-cb :coll :_bench-range}}])
 
 
-(defn- sync-and-invalidate! [ctx storage fn-defs]
+(defn- sync-and-invalidate!
+  [ctx storage fn-defs]
   (fn-composition/sync-fns-to-storage! storage fn-defs)
   (let [ids (keep #(:id (first (sp/query-entities storage :fn {:name (name (:name %))})))
                   fn-defs)]
@@ -84,12 +87,12 @@
   [& _]
   (println "Starting throwaway PG container…")
   (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
-                    (.withStartupAttempts 3))]
+                    (PostgreSQLContainer/.withStartupAttempts 3))]
     (try
-      (.start container)
-      (let [cfg {:jdbc-url (.getJdbcUrl container)
-                 :username (.getUsername container)
-                 :password (.getPassword container)}
+      (PostgreSQLContainer/.start container)
+      (let [cfg {:jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
+                 :username (PostgreSQLContainer/.getUsername container)
+                 :password (PostgreSQLContainer/.getPassword container)}
             storage (versioned-storage cfg)
             _ (sys/bootstrap-from-packages! storage ["core"] {:skip-type-check? true})
             ctx (exec/create-context {:storage storage})
@@ -107,4 +110,4 @@
           (crit/quick-bench (run 2000))
           (println "done.")))
       (finally
-        (.stop container)))))
+        (PostgreSQLContainer/.stop container)))))

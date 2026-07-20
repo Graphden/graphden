@@ -19,9 +19,14 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.6.1
         with:
           clj-kondo: latest
+          bb: latest
 
+      # Delegate: the path set lives ONCE, in bb.edn's `all-paths`. When this
+      # job spelled its own `src test development`, CI linted a set `bb ci`
+      # never saw — local-green/CI-red was structural, and `development/` sat
+      # on two real errors nobody local could hit.
       - name: Run clj-kondo
-        run: clj-kondo --lint src test development
+        run: bb kondo
 
   splint:
     name: splint
@@ -60,9 +65,10 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.6.1
         with:
           cljstyle: latest
+          bb: latest
 
       - name: Check formatting
-        run: cljstyle check src test development
+        run: bb cljstyle
 
   test:
     name: tests
@@ -198,8 +204,15 @@ jobs:
           # Create properties file with API key if provided
           if [ -n "$NVD_API_KEY" ]; then
             echo "nvd.api-key=$NVD_API_KEY" > cljwatson.properties
+            bb security
+          else
+            # Without the key cljwatson runs the rate-limited path, which
+            # fails on NVD throttling rather than on a real CVE — a red that
+            # says nothing. Report, don't gate, until NVD_API_KEY is set as a
+            # repo secret (then this branch stops being taken).
+            echo "::warning::NVD_API_KEY not set — CVE scan runs unauthenticated and is advisory only"
+            bb security || echo "::warning::CVE scan did not complete (no NVD key)"
           fi
-          bb security
 
   outdated:
     name: outdated deps

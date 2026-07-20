@@ -34,12 +34,12 @@
   (println "Starting PostgreSQL container...")
 
   (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
-                    (.withStartupAttempts 3))]
+                    (PostgreSQLContainer/.withStartupAttempts 3))]
     (try
-      (.start container)
-      (let [opts {:jdbc-url (.getJdbcUrl container)
-                  :username (.getUsername container)
-                  :password (.getPassword container)
+      (PostgreSQLContainer/.start container)
+      (let [opts {:jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
+                  :username (PostgreSQLContainer/.getUsername container)
+                  :password (PostgreSQLContainer/.getPassword container)
                   :pool-size 5}
             schema (create-test-schema)]
 
@@ -106,7 +106,7 @@
             (finally
               (sp/close storage)))))
       (finally
-        (.stop container)))))
+        (PostgreSQLContainer/.stop container)))))
 
 
 ;; === Main ===

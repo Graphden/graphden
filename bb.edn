@@ -10,7 +10,10 @@
           ;; resources/packages (impls.clj files loaded via load-file —
           ;; previously un-linted, see .clj-kondo/config.edn for the
           ;; namespace-name-mismatch carve-out).
-          (def all-paths "src test resources/packages")
+          ;; `development/` is on the :dev classpath (deps.edn :extra-paths) and
+          ;; the GitHub workflow lints it — it must not be invisible to `bb ci`,
+          ;; or local-green/CI-red is structural.
+          (def all-paths "src test development resources/packages")
           (def green "\u001b[32m")
           (def red "\u001b[31m")
           (def cyan "\u001b[36m")

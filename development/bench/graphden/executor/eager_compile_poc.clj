@@ -1,7 +1,6 @@
 ;; POC: сравнить current executor vs ideal hand-written eager Clojure closure
 ;; на минимальной композиции. Цель: подтвердить что eager compile реально
 ;; даёт ~2x от Clojure, а не упрётся в что-то непредвиденное.
-(require '[clojure.repl :refer [pst]])
 (require '[graphden.executor.test-setup :as setup])
 (require '[graphden.storage.protocol.postgres-test-helpers :as pth])
 (require '[graphden.executor.interface :as exec])
@@ -12,6 +11,10 @@
 (def ^:dynamic *container* nil)
 
 
+;; The closures below ARE the subject of this POC: it measures what a bound
+;; base-fn impl costs against a naked call, so `(fn [n] (- n))` must stay a
+;; closure. splint's fn-wrapper is excluded for development/bench in
+;; .splint.edn for exactly this reason.
 (defn bench
   [label n f]
   (dotimes [_ 100] (f))           ; warmup
@@ -47,11 +50,11 @@
             ;;    impl call invokes directly.
             neg-impl (fn [n] (- n))   ; the bound base-fn impl
             ideal-callable (fn [free-args] (neg-impl (get free-args :number)))
-            ideal-call (fn [] (ideal-callable {:number 5}))
+            ideal-call (partial ideal-callable {:number 5})
 
             ;; D. Pure Clojure naked invoke — physical floor.
             naked-fn (fn [n] (- n))
-            naked-call (fn [] (naked-fn 5))]
+            naked-call (partial naked-fn 5)]
 
         (println "Sanity:")
         (println "  current-exec    =>" (current-exec))

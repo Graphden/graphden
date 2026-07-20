@@ -1,5 +1,15 @@
-(ns graphden.types.closure-capture-test
-  "Failing tests demonstrating the closure-capture extension's target
+(ns ^:serial graphden.types.closure-capture-test
+  "FLAKY UNDER PARALLEL — pinned serial (same family as
+   `graphden.types.check-test`): `load-core-into-rich-types!` calls
+   `system.core/register-type-aliases!`, which writes the PROCESS-GLOBAL,
+   name-keyed type-alias registry (deliberately global — see
+   docs/adr/AUDIT-name-vs-id-resolution.md). `with-isolated-rich-types`
+   scopes the rich-types atoms, not that registry, so a sibling NS
+   re-registering aliases concurrently makes `record-rich-types!` throw
+   for `:schedule`; the helper swallows it and the assertion then sees a
+   nil rich-type. Observed in a landing gate at host load ~10.
+
+   Failing tests demonstrating the closure-capture extension's target
    behavior. Spec lives in `docs/CLOSURE_CAPTURE.md`.
 
    Status:

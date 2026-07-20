@@ -285,16 +285,13 @@
                   "rhysd/actionlint:1.7.7" "-color")}
 
   lychee
-  {:doc "Offline link-check (.md files) via Docker lycheeverse/lychee. External HTTP links are NOT contacted — run `bb lychee-online` for that. Config: .lychee.toml."
+  {:doc "Offline link-check (.md files) via Docker lycheeverse/lychee. External HTTP links are NOT contacted — run `bb lychee-online` for that. ALL exclusions live in .lychee.toml, which the GitHub job reads too — repeating them as flags is how the two drifted apart before."
    :task (p/shell "docker" "run" "--rm"
                   "-v" (str (System/getenv "PWD") ":/data")
                   "-w" "/data"
                   "lycheeverse/lychee:0.24.2-alpine"
+                  "--config" ".lychee.toml"
                   "--offline" "--no-progress"
-                  "--exclude-path" "node_modules"
-                  "--exclude-path" "target"
-                  "--exclude-path" ".tools"
-                  "--exclude-path" ".playwright-mcp"
                   "**/*.md")}
 
   lychee-online
@@ -303,11 +300,8 @@
                   "-v" (str (System/getenv "PWD") ":/data")
                   "-w" "/data"
                   "lycheeverse/lychee:0.24.2-alpine"
+                  "--config" ".lychee.toml"
                   "--no-progress"
-                  "--exclude-path" "node_modules"
-                  "--exclude-path" "target"
-                  "--exclude-path" ".tools"
-                  "--exclude-path" ".playwright-mcp"
                   "**/*.md")}
 
   trivy

@@ -120,7 +120,7 @@ and the runtime dispatch: `:fn`-typed slots receive the fn-id (a
 higher-order callable); every other slot gets the executed result. There
 is no name-based special-casing anywhere in the executor.
 
-Full walkthrough: [ARCHITECTURE.md § Function composition](docs/ARCHITECTURE.md#part-55-function-composition-fn-defs).
+Full walkthrough: [ARCHITECTURE.md § Composition](docs/ARCHITECTURE.md#part-6-composition-fn-defs).
 
 ---
 

@@ -24,6 +24,15 @@ exclude_path = [
 # Skip URL patterns that the offline check would still try to resolve
 # (rare with --offline but kept for the online run too).
 exclude = [
+  # PRIVATE repos: the online run is anonymous, so GitHub answers 404 for
+  # them exactly as it would for a stranger. That is the correct answer to
+  # the wrong question — the check would only pass by handing CI a token,
+  # i.e. by making a link-checker an authenticated client of our own repos.
+  '^https://github\.com/BonsaiFlow/graphden-(mathx|examples|cloud)',
+  # A personal host used as a deploy EXAMPLE in deploy/kind/README.md. Its
+  # uptime is not a property of this repository.
+  '^https?://izpa\.xyz',
+
   # Localhost references in docs — not real URLs to validate.
   '^https?://localhost(:\d+)?($|/)',
   '^https?://127\.0\.0\.1',
@@ -48,6 +57,11 @@ max_retries = 2
 # many times across docs. Codes 200-299 + 301/302/308 also ok.
 accept = ["200..=299", "301", "302", "308", "429"]
 
-# Cache successful results — repeat invocations are sub-second.
-cache = true
-max_cache_age = "1w"
+# Caching is DELIBERATELY off. lychee writes `.lycheecache` into the working
+# directory, which here is a docker bind-mount — the container's user cannot
+# create it, so the run finishes its checks and THEN exits non-zero on
+# "Permission denied", i.e. a green link report reported as a red check.
+# (It only surfaced once the tasks started reading this config at all;
+# before that the flags they passed silently left caching off.) The offline
+# run is 60 ms; the online one is ~1 s. There is nothing here worth caching.
+cache = false

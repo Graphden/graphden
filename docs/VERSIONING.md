@@ -7,7 +7,7 @@ of it in `feat/versioning`: the HTTP surface, the per-branch executor
 routing, the editor UI, and the dev-loop ergonomics.
 
 For the underlying schema + branch resolution algorithm, see
-[ROADMAP.md § Git-like Versioning](ROADMAP.md#git-like-versioning-done).
+[ROADMAP.md § Git-like Versioning](ROADMAP.md#git-like-versioning).
 
 ## Mental model
 

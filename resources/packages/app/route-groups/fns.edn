@@ -13,14 +13,11 @@
  [{:name :all
    :description "Top-level reitit entries — standalone leaves and the `:api-routes` prefix group that the router walks. Adding a new path = either drop a new leaf in here (if it has no prefix-mate) or extend the appropriate sub-group inside `:api-routes`."
    :parent :list
-   ;; :mcp-route is APPENDED at the tail, not inserted mid-list: the
-   ;; declarative sync's list diff mishandles a mid-insert against an
-   ;; EXISTING database — positions past the insertion point keep their
-   ;; old refs while earlier ones shift, and one ref falls out of the
-   ;; resolved view entirely (observed live: :api-routes vanished -> every
-   ;; /api/* 404'd on the demo while a fresh-DB e2e stayed green).
-   ;; Append is the sync-safe list operation. Fixing the diff itself is
-   ;; tracked as its own wave.
+   ;; Route order is free again: the list-grow bug that made a mid-insert
+   ;; drop `:api-routes` from a LIVE database (versionless identity
+   ;; remnants never got a version row, so they stayed invisible) is fixed
+   ;; in versioning/storage/core's batch update path, pinned by
+   ;; `upsert-onto-versionless-identity-writes-a-version-test`.
    :args {:items [:favicon
                   :editor
                   :editor-js-asset

@@ -388,7 +388,12 @@
                 (when name-write?
                   (check-fn-name-collision! st branch-id entity-name
                                             (assoc merged :id id)))
-                ;; Skip creating new version if data unchanged
+                ;; Skip creating new version if data unchanged. (A
+                ;; versionless identity can't reach here at all — the
+                ;; `resolve-entity` above is version-gated and already threw
+                ;; not-found. The batch path, which the package sync uses,
+                ;; resolves identity-as-is and therefore needs the explicit
+                ;; versionless guard it carries.)
                 (when (not= current-data merged-data)
                   (create-version-record! st entity-name id branch-id merged))
                 ;; Apply non-versioned fields directly. base-storage's
@@ -560,10 +565,29 @@
                          (when current (assoc (merge current data) :id id))))
                      data-seq)))
         ;; Compute merged versions and filter to only changed ones
-        (let [{:keys [version-entity version-data-fields] :as config}
+        (let [{:keys [version-entity version-id-field version-data-fields] :as config}
               (get res/entity-config entity-name)
               timestamp (now)
-              ;; Build version records only for changed entities
+              ;; An identity row with NO version on the chain resolves to
+              ;; ITSELF (resolution/resolve-entities-batch's identity-as-is
+              ;; fallback), so a content-equal update diffs to nothing — and
+              ;; without a version row the READ path (`resolve-all-entities`,
+              ;; which lists only entities that have one) never returns it.
+              ;; Such remnants are real: item-ids are deterministic per
+              ;; (binding, position), so an older, longer list leaves identity
+              ;; rows that a later sync re-touches. Growing a package list
+              ;; through one silently dropped a route from the live demo's
+              ;; router (2026-07-20) while a fresh-DB run stayed green.
+              ;; So: force a version for any id that has none, whatever the diff.
+              versionless-ids
+              (if (seq ids)
+                (let [with-versions (into #{}
+                                          (map version-id-field)
+                                          (sp/query-entities base-storage version-entity
+                                                             {version-id-field (vec ids)}))]
+                  (into #{} (remove with-versions) ids))
+                #{})
+              ;; Build version records for changed entities + versionless ones
               version-records
               (into []
                     (keep (fn [data]
@@ -572,7 +596,8 @@
                                   merged (merge current data)
                                   current-data (select-keys current version-data-fields)
                                   merged-data (select-keys merged version-data-fields)]
-                              (when (not= current-data merged-data)
+                              (when (or (not= current-data merged-data)
+                                        (contains? versionless-ids id))
                                 (prepare-version-record config id branch-id
                                                         timestamp merged)))))
                     data-seq)]

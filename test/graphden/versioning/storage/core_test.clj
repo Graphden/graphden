@@ -1306,3 +1306,65 @@
                  (vec (sp/query-ref-many-owners v :fn :parent-ids (:id parent))))
               "a delete on a feature branch must not make main's guard blind")))
       (finally (sp/close base)))))
+
+
+(deftest upsert-onto-versionless-identity-writes-a-version-test
+  ;; A package re-sync grows a list: `upsert-entities` classifies an item
+  ;; whose IDENTITY row already exists as an update. If that identity has
+  ;; NO version row on the chain (a remnant of an older list — item-ids are
+  ;; deterministic per (binding, position), so they come back), the diff ran
+  ;; against the identity itself, came out empty, and no version row was
+  ;; written — while the read path needs one, so the item stayed INVISIBLE.
+  ;; Live consequence (2026-07-20): appending a route mid-list dropped
+  ;; `:api-routes` from the demo's route list and every /api/* 404'd.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "w")
+            ;; A versionless identity row: written straight to BASE storage,
+            ;; exactly the shape an old sync left behind.
+            orphan-id (random-uuid)
+            _ (sp/create-entity base :binding-list-item
+                                {:id orphan-id :binding-id (:id b)
+                                 :position 0 :value 1})]
+        (testing "precondition: invisible through the versioned view"
+          (is (empty? (sp/query-entities v :binding-list-item
+                                         {:binding-id (:id b)}))))
+        (testing "upsert of the SAME content makes it visible (version row written)"
+          (sp/upsert-entities v :binding-list-item
+                              [{:id orphan-id :binding-id (:id b)
+                                :position 0 :value 1}])
+          (let [rows (sp/query-entities v :binding-list-item
+                                        {:binding-id (:id b)})]
+            (is (= 1 (count rows)))
+            (is (= 1 (:value (first rows))))))
+        (testing "and a subsequent no-op upsert stays a no-op (no version churn)"
+          (let [before (count (sp/query-entities base :binding-list-item-version
+                                                 {:item-id orphan-id}))]
+            (sp/upsert-entities v :binding-list-item
+                                [{:id orphan-id :binding-id (:id b)
+                                  :position 0 :value 1}])
+            (is (= before (count (sp/query-entities base :binding-list-item-version
+                                                    {:item-id orphan-id})))))))
+      (finally (sp/close base)))))
+
+
+(deftest singular-update-onto-versionless-identity-is-not-found-test
+  ;; The asymmetry with the batch path above is deliberate and pinned here:
+  ;; singular `update-entity` resolves through the VERSION-gated
+  ;; `resolve-entity`, so a versionless identity is simply absent on this
+  ;; branch → :not-found. Only the batch path (what the package sync drives)
+  ;; resolves identity-as-is, which is why the versionless guard lives there.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "w")
+            orphan-id (random-uuid)
+            _ (sp/create-entity base :binding-list-item
+                                {:id orphan-id :binding-id (:id b)
+                                 :position 0 :value 7})]
+        (is (empty? (sp/query-entities v :binding-list-item {:binding-id (:id b)}))
+            "precondition: invisible")
+        (is (thrown? clojure.lang.ExceptionInfo
+              (sp/update-entity v :binding-list-item orphan-id {:value 7}))))
+      (finally (sp/close base)))))

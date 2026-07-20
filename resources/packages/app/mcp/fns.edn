@@ -1,0 +1,344 @@
+;; MCP server (ROADMAP Block 9.1, LAUNCH_PLAN stage 1.1) — graphden's
+;; primitives over the Model Context Protocol, so any MCP client (Claude
+;; Code / Desktop, Cursor) drives the graph on the USER'S OWN subscription.
+;;
+;; Pure graph composition: one auth-required POST /mcp endpoint, a JSON-RPC
+;; 2.0 dispatch (:cond over the method string), and each tool is an ADAPTER
+;; around an existing data fn-def / route handler — reads call
+;; :list-all-graph-entities directly with named args; execute synthesizes a
+;; Ring request for the existing :execute-handler. No new base-fns: the MCP
+;; layer is exactly the kind of composition the graph exists to express.
+;;
+;; Per-user auth for free: /mcp is a `:post` (auth-required) route, so every
+;; tool call rides the normal request scope — org-scoping + RLS, the effect
+;; gate, grants, the tenant error envelope and the per-org rate limit all
+;; apply to the AI exactly as to its human.
+;;
+;; Stateless streamable-HTTP shape: each POST carries one JSON-RPC message;
+;; notifications get 202/no-body; unknown methods get -32601.
+{:namespace "app.mcp"
+ :description "MCP server — JSON-RPC endpoint + tools/resources over existing graph primitives."
+ :fns
+ [;; ==========================================================================
+  ;; JSON-RPC envelope
+  ;; ==========================================================================
+  {:name :_mcp-body
+   :description "Parsed JSON-RPC message of POST /mcp (keywordized): {:jsonrpc :id :method :params}."
+   :parent :parse-json-body}
+
+  {:name :_mcp-method
+   :parent :get
+   :args {:coll :_mcp-body :key {:value :method} :default {:value ""}}}
+
+  {:name :_mcp-id
+   :parent :get
+   :args {:coll :_mcp-body :key {:value :id} :default nil}}
+
+  {:name :_mcp-params
+   :parent :get
+   :args {:coll :_mcp-body :key {:value :params} :default {:value {}}}}
+
+  {:name :_mcp-tool-name
+   :description "tools/call → params.name (string)."
+   :parent :get
+   :args {:coll :_mcp-params :key {:value :name} :default {:value ""}}}
+
+  {:name :_mcp-tool-args
+   :description "tools/call → params.arguments (keywordized map)."
+   :parent :get
+   :args {:coll :_mcp-params :key {:value :arguments} :default {:value {}}}}
+
+  ;; --- response builders --------------------------------------------------
+  {:name :_mcp-result-envelope
+   :description "JSON-RPC success envelope: {jsonrpc \"2.0\" :id <echo> :result <result>}. Free arg: :result."
+   :parent :zipmap
+   :args {:keys [{:value :jsonrpc} {:value :id} {:value :result}]
+          :vals ["2.0" :_mcp-id {:as :result}]}}
+
+  {:name :_mcp-ok
+   :description "200 + JSON-RPC success envelope around :result (json-handler stringifies)."
+   :parent :json-handler
+   :args {:data :_mcp-result-envelope}}
+
+  {:name :_mcp-error-body
+   :description "JSON-RPC error object. Free args: :code (int), :message (text)."
+   :parent :zipmap
+   :args {:keys [{:value :code} {:value :message}]
+          :vals [{:as :code} {:as :message}]}}
+
+  {:name :_mcp-error-envelope
+   :parent :zipmap
+   :args {:keys [{:value :jsonrpc} {:value :id} {:value :error}]
+          :vals ["2.0" :_mcp-id :_mcp-error-body]}}
+
+  {:name :_mcp-err
+   :description "200 + JSON-RPC error envelope (JSON-RPC errors ride HTTP 200). Free args: :code, :message."
+   :parent :json-handler
+   :args {:data :_mcp-error-envelope}}
+
+  {:name :_mcp-method-not-found
+   :parent :_mcp-err
+   :args {:code {:value -32601} :message {:value "Method not found"}}}
+
+  {:name :_mcp-tool-not-found
+   :parent :_mcp-err
+   :args {:code {:value -32602} :message {:value "Unknown tool"}}}
+
+  {:name :_mcp-202
+   :description "202 Accepted, empty body — the JSON-RPC notification reply (notifications carry no id and expect no result)."
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :body}]
+          :vals [{:value 202} ""]}}
+
+  ;; --- tool-result wrapper --------------------------------------------------
+  {:name :_mcp-text-content-item
+   :description "One MCP content item: {type \"text\" text <text>}. Free arg: :text."
+   :parent :zipmap
+   :args {:keys [{:value :type} {:value :text}]
+          :vals ["text" {:as :text}]}}
+
+  {:name :_mcp-tool-result
+   :description "tools/call result: {content [{type text ...}] isError false}. Free arg: :text."
+   :parent :zipmap
+   :args {:keys [{:value :content} {:value :isError}]
+          :vals [{:parent :list :args {:items [:_mcp-text-content-item]}}
+                 {:value false}]}}
+
+  {:name :_mcp-tool-ok
+   :description "Full 200 JSON-RPC response wrapping one text content item. Free arg: :text."
+   :parent :_mcp-ok
+   :args {:result :_mcp-tool-result}}
+
+  ;; ==========================================================================
+  ;; initialize / initialized
+  ;; ==========================================================================
+  {:name :_mcp-initialize-result
+   :parent :const
+   :args {:value {:protocolVersion "2025-03-26"
+                  :capabilities {:tools {:listChanged false}
+                                 :resources {:listChanged false}}
+                  :serverInfo {:name "graphden"
+                               :title "Graphden — code as a graph"
+                               :version "1.0.0"}
+                  :instructions "Graphden stores programs as a GRAPH of fn-defs (composition, not text). Read the graphden://ai-context resource FIRST — it teaches the entity model and how to compose fn-defs. Work in a branch, never in main: mutations are reviewed by the human as graph-diffs."}}}
+
+  {:name :_mcp-initialize
+   :parent :_mcp-ok
+   :args {:result :_mcp-initialize-result}}
+
+  ;; ==========================================================================
+  ;; tools/list — the catalog (Phase A: read + execute; mutations are Phase B)
+  ;; ==========================================================================
+  {:name :_mcp-tools-catalog
+   :parent :const
+   :args {:value
+          {:tools
+           [{:name "list-namespaces"
+             :description "Overview of the graph: every namespace with its fn counts. Start here to orient."
+             :inputSchema {:type "object" :properties {} :required []}}
+            {:name "search-fns"
+             :description "Search fns by name substring. Returns light rows (name, id, namespace, kind)."
+             :inputSchema {:type "object"
+                           :properties {:q {:type "string" :description "Name substring to search for."}}
+                           :required ["q"]}}
+            {:name "read-fn"
+             :description "Read one fn-def and everything reachable from it (parents, slots, bindings, types, effects) — the full subgraph, JSON."
+             :inputSchema {:type "object"
+                           :properties {:name {:type "string" :description "Global fn name, without the leading colon."}}
+                           :required ["name"]}}
+            {:name "execute-fn"
+             :description "Execute a fn by name with an args object. Returns {status result} inline, or {status pending execution-id} for slow/effectful runs."
+             :inputSchema {:type "object"
+                           :properties {:name {:type "string" :description "Global fn name."}
+                                        :args {:type "object" :description "Arg-name -> value map (free args of the fn)."}}
+                           :required ["name"]}}]}}}
+
+  {:name :_mcp-tools-list
+   :parent :_mcp-ok
+   :args {:result :_mcp-tools-catalog}}
+
+  ;; ==========================================================================
+  ;; Tools — adapters over existing data fns / handlers
+  ;; ==========================================================================
+  ;; list-namespaces → the sidebar's ?scope=tree data, JSON-stringified.
+  {:name :_mcp-tool-list-namespaces
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data {:parent :list-all-graph-entities
+                               :args {:scope {:value :tree}
+                                      :root-id nil
+                                      :namespace-id nil
+                                      :q nil}}}}}}
+
+  ;; search-fns → ?scope=search&q=…
+  {:name :_mcp-search-q
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :q} :default {:value ""}}}
+
+  {:name :_mcp-tool-search-fns
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data {:parent :list-all-graph-entities
+                               :args {:scope {:value :search}
+                                      :root-id nil
+                                      :namespace-id nil
+                                      :q :_mcp-search-q}}}}}}
+
+  ;; read-fn → resolve name → id (current branch), then ?scope=subtree.
+  {:name :_mcp-read-fn-name
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :name} :default {:value ""}}}
+
+  {:name :_mcp-read-fn-id
+   :description "Target fn's id for read-fn — nil when the name doesn't resolve on this branch."
+   :parent :fn-id-by-name
+   :args {:fn-name :_mcp-read-fn-name}}
+
+  {:name :_mcp-read-fn-missing
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:parent :str
+                    :args {:parts ["No fn named '" :_mcp-read-fn-name "' on this branch."]}}}}
+
+  {:name :_mcp-tool-read-fn-found
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data {:parent :list-all-graph-entities
+                               :args {:scope {:value :subtree}
+                                      :root-id :_mcp-read-fn-id
+                                      :namespace-id nil
+                                      :q nil}}}}}}
+
+  {:name :_mcp-tool-read-fn
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_mcp-read-fn-id}}
+          :then :_mcp-read-fn-missing
+          :else :_mcp-tool-read-fn-found}}
+
+  ;; execute-fn → synthesize a Ring request for the EXISTING :execute-handler
+  ;; (same admission path: caps, quotas, effect gate, persisted history).
+  {:name :_mcp-exec-args
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :args} :default {:value {}}}}
+
+  {:name :_mcp-exec-parsed
+   :description "The execute pipeline's parsed-request shape, built from tool arguments instead of an HTTP body. Overriding :execute's :parsed slot (closer-fn-wins) skips its own body parse — re-entering the Ring handler with a synthesized request would collide with the OUTER :request free arg the MCP dispatch itself reads."
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
+                 {:value :timeout-ms} {:value :persist?}]
+          :vals [{:parent :parse-uuid :args {:string nil}}
+                 {:parent :to-str :args {:value :_mcp-read-fn-name}}
+                 {:parent :coalesce :args {:value :_mcp-exec-args :default {}}}
+                 {:value 10000} {:value false}]}}
+
+  {:name :_mcp-exec-validation
+   :description "The execute pipeline's stage-2 guard cond, fed my parsed map — :_execute-validation binds :parsed at itself (closer-fn-wins), so overriding :execute from outside can't reach it; this child rebinds it directly."
+   :parent :_execute-validation
+   :args {:parsed :_mcp-exec-parsed}}
+
+  {:name :_mcp-exec-run
+   :description "validate → apply, mirroring :execute's own :if — same guards, caps, quotas, effect gate and persisted history as POST /api/execute, minus the HTTP body parse (tool arguments feed :parsed)."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_mcp-exec-validation}}
+          :then :_mcp-exec-validation
+          ;; :fn-row must be re-bound HERE too: apply-bound's own :fn-row
+          ;; ref resolves its free :parsed against apply-bound's binding set,
+          ;; and a child's :parsed override does not retro-feed a ref bound
+          ;; at the parent — without this the apply stage resolved fn-row
+          ;; from the (absent) HTTP body and executed nothing.
+          :else {:parent :_execute-apply-bound
+                 :args {:parsed :_mcp-exec-parsed
+                        :fn-row {:parent :_execute-fn-row
+                                 :args {:parsed :_mcp-exec-parsed}}}}}}
+
+  {:name :_mcp-tool-execute
+   :description "execute-fn tool — the shared execute pipeline fed from tool arguments."
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data :_mcp-exec-run}}}}
+
+  ;; --- tools/call dispatch ---------------------------------------------------
+  {:name :_mcp-tools-call
+   :description "Dispatch tools/call on params.name."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_mcp-tool-name :b {:value "list-namespaces"}}}
+                    :_mcp-tool-list-namespaces
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "search-fns"}}}
+                    :_mcp-tool-search-fns
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "read-fn"}}}
+                    :_mcp-tool-read-fn
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "execute-fn"}}}
+                    :_mcp-tool-execute
+                    {:value true}
+                    :_mcp-tool-not-found]}}
+
+  ;; ==========================================================================
+  ;; resources — the AI-context document (Block 9.3 serves the real text;
+  ;; Phase A ships the wiring + a seed document)
+  ;; ==========================================================================
+  {:name :_mcp-resources-catalog
+   :parent :const
+   :args {:value {:resources
+                  [{:uri "graphden://ai-context"
+                    :name "ai-context"
+                    :title "How to write graphden fn-defs"
+                    :description "The entity model (fn/slot/binding), composition patterns, naming rules, and how to mutate the graph through the MCP tools. Read before writing."
+                    :mimeType "text/markdown"}]}}}
+
+  {:name :_mcp-resources-list
+   :parent :_mcp-ok
+   :args {:result :_mcp-resources-catalog}}
+
+  {:name :_mcp-ai-context-text
+   :parent :const
+   :args {:value "# Graphden AI context (seed)\n\nGraphden stores programs as a GRAPH in a database: a `fn` is either a base-fn (Clojure impl) or a COMPOSITION — a fn-def declared as `{:name :my-fn :parent :base-or-fn :args {...}}`. You write fn-defs, never text code. Args bind slots inherited through :parent; unbound slots surface as the fn's own free args. There is no text code to edit — you compose existing fns.\n\nWorkflow: (1) call list-namespaces, then search-fns / read-fn to learn the vocabulary; (2) NEVER mutate main — create a branch and work there (mutation tools are branch-scoped); (3) execute-fn to verify; (4) the human reviews your branch as a graph-diff.\n\nThe full document ships with Block 9.3 (docs/AI_CONTEXT.md)."}}
+
+  {:name :_mcp-resource-uri
+   :parent :get
+   :args {:coll :_mcp-params :key {:value :uri} :default {:value ""}}}
+
+  {:name :_mcp-resource-contents
+   :parent :zipmap
+   :args {:keys [{:value :contents}]
+          :vals [{:parent :list
+                  :args {:items [{:parent :zipmap
+                                  :args {:keys [{:value :uri} {:value :mimeType} {:value :text}]
+                                         :vals ["graphden://ai-context"
+                                                "text/markdown"
+                                                :_mcp-ai-context-text]}}]}}]}}
+
+  {:name :_mcp-resource-not-found
+   :parent :_mcp-err
+   :args {:code {:value -32002} :message {:value "Unknown resource uri"}}}
+
+  {:name :_mcp-resources-read
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_mcp-resource-uri :b {:value "graphden://ai-context"}}}
+          :then {:parent :_mcp-ok :args {:result :_mcp-resource-contents}}
+          :else :_mcp-resource-not-found}}
+
+  ;; ==========================================================================
+  ;; Method dispatch + route
+  ;; ==========================================================================
+  {:name :_mcp-dispatch
+   :description "JSON-RPC method dispatch for POST /mcp."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_mcp-method :b {:value "initialize"}}}
+                    :_mcp-initialize
+                    {:parent :equal? :args {:a :_mcp-method :b {:value "notifications/initialized"}}}
+                    :_mcp-202
+                    {:parent :equal? :args {:a :_mcp-method :b {:value "tools/list"}}}
+                    :_mcp-tools-list
+                    {:parent :equal? :args {:a :_mcp-method :b {:value "tools/call"}}}
+                    :_mcp-tools-call
+                    {:parent :equal? :args {:a :_mcp-method :b {:value "resources/list"}}}
+                    :_mcp-resources-list
+                    {:parent :equal? :args {:a :_mcp-method :b {:value "resources/read"}}}
+                    :_mcp-resources-read
+                    {:value true}
+                    :_mcp-method-not-found]}}
+
+  {:name :mcp-route
+   :description "POST /mcp — the MCP endpoint (JSON-RPC 2.0, stateless streamable-HTTP). Auth-required: the bearer is the user's normal graphden token, so every AI tool call carries exactly that user's rights."
+   :parent :post
+   :args {:path "/mcp" :handler :_mcp-dispatch}}]}

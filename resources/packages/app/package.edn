@@ -5,7 +5,7 @@
  ;; (`:_list-services-rows`, …) query the DB via the direct
  ;; `:pg-query` + `:decode-row` primitives from the `storage/pg` module.
  :dependencies ["core" "web" "storage"]
- :modules ["common" "lookups" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "routes-auth" "route-groups" "server"]
+ :modules ["common" "lookups" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "routes-auth" "mcp" "route-groups" "server"]
  ;; `:per-pod` — every executor pod must bind its own HTTP port. A
  ;; `:singleton` listener would leave every pod but the advisory-lock
  ;; winner without a listener, so a load balancer would see one healthy

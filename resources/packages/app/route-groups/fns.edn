@@ -14,6 +14,7 @@
    :description "Top-level reitit entries — standalone leaves and the `:api-routes` prefix group that the router walks. Adding a new path = either drop a new leaf in here (if it has no prefix-mate) or extend the appropriate sub-group inside `:api-routes`."
    :parent :list
    :args {:items [:favicon
+                  :mcp-route
                   :editor
                   :editor-js-asset
                   :api-routes-js-asset

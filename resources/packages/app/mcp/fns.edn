@@ -20,6 +20,21 @@
  :description "MCP server — JSON-RPC endpoint + tools/resources over existing graph primitives."
  :fns
  [;; ==========================================================================
+  ;; Base-fns (impls.clj) — the only two Clojure boundaries Phase B needs
+  ;; ==========================================================================
+  {:name :parse-edn
+   :description "Read one EDN value from text; nil when it doesn't parse. Generic counterpart to `:parse-json` — fn-defs travel as EDN because that is the one encoding where a reference (`:other-fn`) stays distinguishable from a string."
+   :args {:string {:type :nullable-text :description "EDN source text."}}
+   :return-type :any}
+
+  {:name :sync-fn-defs-branch!
+   :description "Sync fn-defs into a NAMED branch + delta-invalidate that branch's registry. Atomic effect boundary (same carve-out as `:merge-branch!`). Returns the synced fn-ids as text."
+   :args {:branch-id {:type :uuid :description "Target branch — the AI's `ai/…` branch, never the request's own."}
+          :fn-defs {:type [:list :keyword-map] :description "Parsed fn-def maps, exactly the fns.edn shape."}}
+   :return-type [:list :text]
+   :effects #{:db}}
+
+  ;; ==========================================================================
   ;; JSON-RPC envelope
   ;; ==========================================================================
   {:name :_mcp-body
@@ -151,7 +166,25 @@
              :inputSchema {:type "object"
                            :properties {:name {:type "string" :description "Global fn name."}
                                         :args {:type "object" :description "Arg-name -> value map (free args of the fn)."}}
-                           :required ["name"]}}]}}}
+                           :required ["name"]}}
+            {:name "create-branch"
+             :description "Create a branch to work in. ALWAYS do this before any mutation: main is the human's; your proposal lives on its own branch and is reviewed as a graph-diff."
+             :inputSchema {:type "object"
+                           :properties {:name {:type "string" :description "Branch name, e.g. ai/add-rate-limiter."}
+                                        :base {:type "string" :description "Branch to fork from. Defaults to main."}}
+                           :required ["name"]}}
+            {:name "upsert-fn-defs"
+             :description "Create or update fn-defs IN A BRANCH. `fn-defs` is EDN text: a vector of maps in fns.edn syntax, e.g. [{:name :my-fn :parent :add :args {:nums [1 2]}}]. EDN, not JSON — only there does a reference (:other-fn) stay distinguishable from a string. The same constraints as a human's fns.edn apply (cycles, name collisions, type-check), so a rejection is feedback you can act on."
+             :inputSchema {:type "object"
+                           :properties {:branch {:type "string" :description "Target branch name — never main."}
+                                        :fn-defs {:type "string" :description "EDN vector of fn-def maps."}}
+                           :required ["branch" "fn-defs"]}}
+            {:name "diff-branch"
+             :description "What your branch changed against another (default main): added / modified / removed entities. This is what the human reviews."
+             :inputSchema {:type "object"
+                           :properties {:branch {:type "string" :description "Your branch."}
+                                        :against {:type "string" :description "Branch to compare against. Defaults to main."}}
+                           :required ["branch"]}}]}}}
 
   {:name :_mcp-tools-list
    :parent :_mcp-ok
@@ -257,6 +290,132 @@
    :args {:text {:parent :to-json-string
                  :args {:data :_mcp-exec-run}}}}
 
+  ;; ==========================================================================
+  ;; Mutation tools (Phase B) — always branch-scoped: the AI proposes on its
+  ;; own branch, the human reviews the graph-diff and merges. Same
+  ;; parse → validate → apply shape as app/execution.
+  ;; ==========================================================================
+
+  ;; --- create-branch: reuse the /api/branches pipeline, fed from args ---------
+  {:name :_mcp-branch-arg
+   :description "tools/call → arguments.branch (the AI's working branch)."
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :branch} :default {:value ""}}}}}
+
+  {:name :_mcp-create-branch-parsed
+   :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main."
+   :parent :zipmap
+   :args {:keys [{:value :branch-name} {:value :base-ref}]
+          :vals [{:parent :to-str
+                  :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :name} :default {:value ""}}}}}
+                 {:parent :to-str
+                  :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :base} :default {:value "main"}}}}}]}}
+
+  {:name :_mcp-tool-create-branch
+   :description "create-branch tool — the SAME guards POST /api/branches runs (blank name, name taken, base missing), so a bad request reads as feedback the model can act on."
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data {:parent :_create-branch-data
+                               :args {:parsed :_mcp-create-branch-parsed
+                                      :resolved-parent {:parent :_create-branch-resolved-parent
+                                                        :args {:parsed :_mcp-create-branch-parsed}}}}}}}}
+
+  ;; --- diff-branch: reuse the /api/branches/:ref/diff pipeline ----------------
+  {:name :_mcp-diff-parsed
+   :parent :zipmap
+   :args {:keys [{:value :target-ref} {:value :against-ref}]
+          :vals [:_mcp-branch-arg
+                 {:parent :to-str
+                  :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :against} :default {:value "main"}}}}}]}}
+
+  {:name :_mcp-tool-diff-branch
+   :description "diff-branch tool — what the human will review, in the same shape the editor's Δ view renders."
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data {:parent :_diff-branches-data
+                               :args {:parsed :_mcp-diff-parsed
+                                      :target-branch {:parent :_target-branch
+                                                      :args {:parsed :_mcp-diff-parsed}}
+                                      :source-branch {:parent :_diff-source-branch
+                                                      :args {:parsed :_mcp-diff-parsed}}}}}}}}
+
+  ;; --- upsert-fn-defs: parse EDN → validate → sync into the branch ------------
+  {:name :_mcp-upsert-edn
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :fn-defs} :default {:value ""}}}}}
+
+  {:name :_mcp-upsert-parsed
+   :description "The EDN text the AI wrote, read into data. nil when it doesn't parse."
+   :parent :parse-edn
+   :args {:string :_mcp-upsert-edn}}
+
+  {:name :_mcp-upsert-target-branch
+   :description "The branch named in `:branch`; nil when it doesn't resolve — mutations NEVER fall back to the request's own branch."
+   :parent :resolve-branch-ref
+   :args {:ref :_mcp-branch-arg}}
+
+  ;; Guards, one predicate each (the `:cond` below reads as the rule list).
+  {:name :_mcp-upsert-not-a-vector?
+   :parent :not
+   :args {:value {:parent :is-a? :args {:value :_mcp-upsert-parsed :type {:value :vector}}}}}
+
+  {:name :_mcp-upsert-item-is-named-map?
+   :description "One fn-def is a map carrying a :name — anonymous defs can't be addressed by a later call."
+   :parent :and
+   :args {:values [{:parent :is-a? :args {:value {:as :item} :type {:value :map}}}
+                   {:parent :some?
+                    :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}]}}
+
+  {:name :_mcp-upsert-items-malformed?
+   :parent :not
+   :args {:value {:parent :every?
+                  :args {:pred :_mcp-upsert-item-is-named-map?
+                         :coll :_mcp-upsert-parsed}}}}
+
+  {:name :_mcp-upsert-branch-missing?
+   :parent :nil?
+   :args {:value :_mcp-upsert-target-branch}}
+
+  {:name :_mcp-err-branch-missing
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:parent :str
+                    :args {:parts ["No branch named '" :_mcp-branch-arg
+                                   "'. Call create-branch first — mutations never touch main."]}}}}
+
+  {:name :_mcp-err-not-a-vector
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:value "fn-defs must be readable EDN holding a VECTOR of fn-def maps, e.g. [{:name :my-fn :parent :add :args {:nums [1 2]}}]"}}}
+
+  {:name :_mcp-err-items-malformed
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:value "every fn-def must be a map with a :name"}}}
+
+  {:name :_mcp-upsert-applied
+   :description "Sync into the resolved branch; returns the written fn-ids."
+   :parent :sync-fn-defs-branch!
+   :args {:branch-id {:parent :get :args {:coll :_mcp-upsert-target-branch :key {:value :id} :default nil}}
+          :fn-defs :_mcp-upsert-parsed}}
+
+  {:name :_mcp-upsert-result
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :branch} {:value :fn-ids}]
+          :vals [{:value true} :_mcp-branch-arg :_mcp-upsert-applied]}}
+
+  {:name :_mcp-tool-upsert-ok
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string :args {:data :_mcp-upsert-result}}}}
+
+  {:name :_mcp-tool-upsert
+   :description "upsert-fn-defs tool — guards first (branch resolves, EDN is a vector, every item is a named map), then the atomic branch-scoped sync. A rejection is a -32602 the model can read and fix."
+   :parent :cond
+   :args {:clauses [:_mcp-upsert-branch-missing?  :_mcp-err-branch-missing
+                    :_mcp-upsert-not-a-vector?    :_mcp-err-not-a-vector
+                    :_mcp-upsert-items-malformed? :_mcp-err-items-malformed
+                    {:value true}                 :_mcp-tool-upsert-ok]}}
+
   ;; --- tools/call dispatch ---------------------------------------------------
   {:name :_mcp-tools-call
    :description "Dispatch tools/call on params.name."
@@ -269,6 +428,12 @@
                     :_mcp-tool-read-fn
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "execute-fn"}}}
                     :_mcp-tool-execute
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "create-branch"}}}
+                    :_mcp-tool-create-branch
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "upsert-fn-defs"}}}
+                    :_mcp-tool-upsert
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "diff-branch"}}}
+                    :_mcp-tool-diff-branch
                     {:value true}
                     :_mcp-tool-not-found]}}
 

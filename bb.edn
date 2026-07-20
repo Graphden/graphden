@@ -289,7 +289,7 @@
    :task (p/shell "docker" "run" "--rm"
                   "-v" (str (System/getenv "PWD") ":/data")
                   "-w" "/data"
-                  "lycheeverse/lychee:sha-467197f-alpine"
+                  "lycheeverse/lychee:0.24.2-alpine"
                   "--offline" "--no-progress"
                   "--exclude-path" "node_modules"
                   "--exclude-path" "target"
@@ -302,7 +302,7 @@
    :task (p/shell "docker" "run" "--rm"
                   "-v" (str (System/getenv "PWD") ":/data")
                   "-w" "/data"
-                  "lycheeverse/lychee:sha-467197f-alpine"
+                  "lycheeverse/lychee:0.24.2-alpine"
                   "--no-progress"
                   "--exclude-path" "node_modules"
                   "--exclude-path" "target"

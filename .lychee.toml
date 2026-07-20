@@ -36,7 +36,7 @@ exclude = [
 
 # Treat `[…]: (mailto:…)` and `[…]: (#anchor)` as fine even in offline mode.
 include_mail = false
-include_fragments = true
+include_fragments = "full"   # lychee >= 0.24 takes a mode, not a bool
 
 # Network politeness for the eventual online run.
 max_concurrency = 16

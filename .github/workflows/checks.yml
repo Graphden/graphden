@@ -218,9 +218,12 @@ jobs:
             bb security || echo "::warning::CVE scan did not complete (no NVD key)"
           fi
 
+  # Advisory, exactly like its `:info` group in scripts/checks.edn: antq exits
+  # non-zero merely because an upgrade EXISTS, which is news, not a defect.
   outdated:
     name: outdated deps
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 
@@ -452,6 +455,10 @@ jobs:
       - name: Run lychee (online — verifies external HTTP links too)
         uses: lycheeverse/lychee-action@v2
         with:
+          # Pin the SAME release `bb lychee` runs (bb.edn's docker tag).
+          # Unpinned, CI drifted to a lychee whose config schema had moved
+          # (`include_fragments` bool → mode) and died on the shared config.
+          lycheeVersion: v0.24.2
           # Share ONE exclusion list with `bb lychee` (.lychee.toml) — without
           # it the online run dials the docs' localhost:9002 examples and
           # fails on connection-refused.

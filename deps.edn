@@ -114,6 +114,10 @@
 
   :cljstyle
   {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.17.642"}}
+   ;; Same hermetic override as :splint / :watson / :outdated — tool aliases
+   ;; resolve the ROOT :deps, and the private mathx git coord needs SSH that
+   ;; CI has no key for.
+   :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts ["-m" "cljstyle.main"]}
 
   :splint

@@ -205,6 +205,14 @@ index of all 45+ docs).
 
 ---
 
+## Community
+
+- **Website** — [graphden.dev](https://graphden.dev)
+- [X / Twitter](https://x.com/graphdendev) · [Bluesky](https://bsky.app/profile/graphden.dev) · [LinkedIn](https://www.linkedin.com/company/graphden) · [YouTube](https://www.youtube.com/@Graphdendev)
+- [Discord](https://discord.gg/UDC4pZFvp) · [Telegram](https://t.me/graphden)
+
+---
+
 ## License
 
 GNU Affero General Public License v3.0 (AGPL-3.0) — see [LICENSE](LICENSE).

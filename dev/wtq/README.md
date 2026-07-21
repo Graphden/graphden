@@ -1,8 +1,14 @@
 # `wt` — parallel feature dev with autonomous agents + a merge queue
 
-Run several features at once, each handled by an autonomous agent in its own
-git worktree, and land them on `develop` one at a time through a serialized,
+Run several features at once, each handled by an AI agent in its own git
+worktree, and land them on `develop` one at a time through a serialized,
 fully-tested gate.
+
+Graphden is human-directed: an engineer chooses what to build, approves the
+design, and reviews and owns every change that lands. This `wt` system is the
+automation that lets several human-directed features be implemented in parallel
+and merge only when fully green — a force multiplier for one developer, not
+software that writes itself.
 
 ## The hands-off flow (what you actually do)
 

@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**How Graphden is built.** Graphden is developed by a human engineer who uses AI
+coding agents as an accelerator. The engineer sets the direction, owns the design
+decisions, and reviews every change before it lands. This file and the `dev/wtq/`
+workflow describe how that human-directed work is organized so one developer can
+move fast — they are not a claim that the software writes itself. AI involvement
+is deliberate and not hidden.
+
 ## Are you a pooled feature agent? (read before editing)
 
 Parallel feature work happens in **isolated git worktrees** behind a serialized

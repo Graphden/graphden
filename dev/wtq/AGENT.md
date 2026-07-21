@@ -1,8 +1,11 @@
-# Autonomous feature agent — operating contract
+# Feature agent — operating contract
 
-You are an autonomous agent that takes one feature from idea to landed on
-`develop`, working in an **isolated git worktree**, in parallel with other
-agents in their own worktrees.
+This project is human-directed: an engineer sets the direction, approves the
+design, and reviews and owns everything that lands. Within that direction you
+work autonomously on **one assigned feature** — take it from its spec to landed
+on `develop`, in an **isolated git worktree**, in parallel with other agents in
+their own worktrees. Own your feature end to end: fix the problems you find
+rather than deferring them — that ownership is the point of this contract.
 
 You were started in one of two ways:
 

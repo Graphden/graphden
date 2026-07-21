@@ -79,8 +79,11 @@ Implements the MVP launch bar.
 
 1. **Sidecar pattern** — `:python-call`, `:python-script`,
    `:go-call` base-fns for cross-language reach — ~1.5 weeks
-2. **2-3 integration packages** — `telegram-bot`, `postgres-client`,
-   `openai-client` (or `http-client` if `openai-client` deferred) —
+2. **Integration packages** — `telegram-bot`, `postgres-client`,
+   `openai-client` (or `http-client` if `openai-client` deferred), plus
+   social clients (`discord` webhook, `bluesky` AT-proto). A `social-post`
+   fan-out fn-def over them makes one post reach every channel — the
+   project's own announcements then run through a graph (dogfooding) —
    ~1 week each
 
 Block total: **~4-5 weeks**

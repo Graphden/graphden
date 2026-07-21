@@ -159,7 +159,8 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
 | [docs/EXTENDING.md](docs/EXTENDING.md) | HOF semantics, custom storage, schema extensions | When extending below the package layer |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning || [docs/AI_CONTEXT.md](docs/AI_CONTEXT.md) | The AI-author guide the MCP server serves at `graphden://ai-context` (Block 9.3) — entity model + fn-def authoring for an EXTERNAL AI. Not CLAUDE.md (that's for devs working ON graphden). Its classpath copy `resources/packages/app/mcp/ai-context.md` is kept identical by `mcp-doc-sync-test` | When editing what the AI is taught, or adding an MCP tool the guide should mention |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning |
+| [docs/AI_CONTEXT.md](docs/AI_CONTEXT.md) | The AI-author guide the MCP server serves at `graphden://ai-context` (Block 9.3) — entity model + fn-def authoring for an EXTERNAL AI. Not CLAUDE.md (that's for devs working ON graphden). Its classpath copy `resources/packages/app/mcp/ai-context.md` is kept identical by `mcp-doc-sync-test` | When editing what the AI is taught, or adding an MCP tool the guide should mention |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
 | [docs/EXECUTION.md](docs/EXECUTION.md) | Function execution feature: schema, HTTP API, cancel/TTL/UI | When touching `/api/execute*` or the editor's Run popover |

@@ -4,10 +4,9 @@
 > This document is the plan-of-record for splitting graphden into
 > distributable modules. It is the concrete, decision-fixed successor to
 > [PLATFORM_PLAN.md § 2 (Packages)](PLATFORM_PLAN.md) — read PLATFORM_PLAN
-> first for the wider org/tenancy framing and
-> [DISTRIBUTION.md § Packages](DISTRIBUTION.md#packages--open-ecosystem)
-> for the business/license framing (open-core AGPL, no app-store commission,
-> "cloud-shared users cannot ship custom Clojure impls").
+> first for the wider org/tenancy framing. The business/license framing is
+> open-core AGPL: no app-store commission, and cloud-shared users cannot ship
+> custom Clojure impls.
 >
 > **Nothing here starts from zero.** The registry (`:package-version` +
 > publish/list/fetch/install), the round-trip exporter, the tenancy addon

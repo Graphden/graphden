@@ -26,20 +26,19 @@ base-fn set and **WebSocket** live-updates.
 ## Roadmap by Blocks (current plan)
 
 This is the active forward plan, agreed with the author. See
-[PHILOSOPHY § Positioning](PHILOSOPHY.md#positioning) and
-[DISTRIBUTION § Author Horizon](DISTRIBUTION.md#author-horizon) for
+[PHILOSOPHY § Positioning](PHILOSOPHY.md#positioning) for
 context. The plan supersedes the per-item entries in § Future Work
 below; those entries remain for historical context and as
 deeper-design references.
 
 **Path to MVP launch with external users**: launch STAGING (weeks,
-go-to-market, monetization, legal) lives in
-[LAUNCH_PLAN.md](LAUNCH_PLAN.md) — the primary launch plan; this doc
-stays the authority on feature blocks and their sizes. The remaining
+go-to-market, monetization, legal) is tracked separately in a private
+planning repo; this doc stays the authority on feature blocks and their
+sizes. The remaining
 critical path is Blocks 4 → 9-Launch, with Blocks 3 / 6 parallelizable.
 (Blocks 1, 2 and 5 are done — see § Implemented.)
 
-Launch-order refinements agreed in LAUNCH_PLAN (2026-07-20):
+Launch-order refinements agreed 2026-07-20:
 
 - The AI-launch piece is **MCP-first**: 9.1 + 9.3 are on the critical
   path (users co-edit through their EXISTING subscription clients —
@@ -76,7 +75,7 @@ Block total (remaining items 1–5): **~3-4 weeks**
 
 ### Block 4 — Ecosystem (after Block 1)
 
-Implements the MVP launch bar from [DISTRIBUTION § MVP Launch Bar](DISTRIBUTION.md#mvp-launch-bar).
+Implements the MVP launch bar.
 
 1. **Sidecar pattern** — `:python-call`, `:python-script`,
    `:go-call` base-fns for cross-language reach — ~1.5 weeks

@@ -58,8 +58,7 @@ already exists. Two consequences for design:
   AI — not ours — is the one in the loop. The managed-model gateway
   is an optional billed add-on, never a gate.
 
-See [DISTRIBUTION § Paid Add-ons](DISTRIBUTION.md#paid-add-ons) and
-[ROADMAP Block 9](ROADMAP.md#block-9--ai-integration).
+See [ROADMAP Block 9](ROADMAP.md#block-9--ai-integration).
 
 ### The three-tier ecosystem
 

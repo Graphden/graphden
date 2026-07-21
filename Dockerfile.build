@@ -1,7 +1,7 @@
 # Full build Dockerfile - builds uberjar inside container
 # Use: docker build -f Dockerfile.build -t graphden-executor-server .
 
-FROM clojure:temurin-21-tools-deps-jammy AS builder
+FROM clojure:temurin-22-tools-deps-jammy AS builder
 
 WORKDIR /app
 

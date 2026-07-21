@@ -35,7 +35,7 @@ same image into the fleet and rolls the pods.
 
 ## Public TLS front (example.com:9443)
 
-Port **443 is the host's another service — untouched.** graphden takes a
+Port **443 belongs to another service on the host — untouched.** graphden takes a
 separate port. Caddy fronts the fleet's host NodePort (30080) with a Let's
 Encrypt cert obtained via the HTTP-01 challenge (port 80; TLS-ALPN, which needs
 443, is disabled in the Caddyfile).

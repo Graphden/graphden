@@ -12,7 +12,7 @@ COPY . .
 RUN clojure -T:build uber
 
 # Runtime stage
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 
 # Pinned curl version — mirrors Dockerfile; see its comment for why.
 RUN apt-get update && apt-get install -y --no-install-recommends \

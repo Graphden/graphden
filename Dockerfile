@@ -1,7 +1,7 @@
 # Simple single-stage Dockerfile for local development
 # Pre-built uberjar must be placed in target/executor-server.jar
 
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 
 # Install curl for healthcheck. Pinned via base-image's apt repo
 # (jammy = Ubuntu 22.04 LTS) — a security update REMOVES the superseded

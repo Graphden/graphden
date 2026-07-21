@@ -6,10 +6,9 @@
 [extend]
 useDefault = true
 
-# A real AUTH_TOKEN for the dev instance was committed as the `||` fallback of
-# an env lookup in five browser tests, and shipped in git history. The built-in
-# rules don't fire on it: the value is a short opaque word with no vendor
-# prefix, no entropy signature, no `key =` shape.
+# Guards the `||` fallback of a credential env lookup in browser tests. The
+# built-in rules don't fire on a short opaque token (no vendor prefix, no
+# entropy signature, no `key =` shape), so this rule does.
 #
 # The convention is that the fallback is a documented placeholder (see
 # `tools/browser-test/edit-test-helpers.js`, which uses `test123`). Anything
@@ -29,27 +28,17 @@ tags = ["graphden", "credential", "fallback"]
 
 
 # ---------------------------------------------------------------------------
-# History allowlist.
-#
-# The working tree is clean; these are commits that already shipped. gitleaks
-# in CI scans HISTORY (the `bb gitleaks` task scans the working tree with
-# --no-git), which is why they were invisible locally until the workflow was
-# revived on develop.
+# History allowlist — content-based, so it survives a history rewrite (the
+# previous commit-SHA entries were invalidated when LAUNCH_PLAN/DISTRIBUTION and
+# a dead demo token were purged from history). The dead AUTH_TOKEN is gone from
+# history (replaced with the `test123` placeholder), so it no longer needs an
+# entry — the rule above allowlists `test123` on its own.
 # ---------------------------------------------------------------------------
 [allowlist]
-description = "Findings in already-shipped commits, each triaged below."
-commits = [
-  # 2026-06-20 — the dev-instance AUTH_TOKEN as a literal `||` fallback in five
-  # browser tests (the very leak the rule above was written for; the tree was
-  # cleaned then, the history kept it). The credential was ROTATED on
-  # 2026-07-20 and verified dead (old token → 401, new token → 200), so what
-  # history holds is a revoked 8-char string for a demo instance. History is
-  # NOT rewritten: 1747 commits of SHAs are referenced from docs and ADRs, and
-  # rewriting them to bury a dead credential trades real traceability for
-  # cosmetics. If a LIVE credential ever lands, rotate first — then decide.
-  "9a36f0fe1cd10cd36d4dd5d7614c847668c7f4e0",
-  # 2026-04-07 — `generic-api-key` firing on a fn ROUTE UUID
-  # (21164217-585a-4335-8ade-da58f255c6ce) in two throwaway probe scripts.
+description = "Known non-credential matches."
+regexes = [
+  # `generic-api-key` fires on a fn ROUTE UUID in two throwaway probe scripts
+  # (tools/browser-test/test_expand_both_routes.js, test_two_routes_direct.js).
   # A graph entity id, not a credential.
-  "ec38978b6d50f64fcc99385a479ce4dbd3ed8c51",
+  '''21164217-585a-4335-8ade-da58f255c6ce''',
 ]

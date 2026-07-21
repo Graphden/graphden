@@ -1,5 +1,6 @@
 # Graphden
 
+[![CI](https://github.com/Graphden/graphden/actions/workflows/checks.yml/badge.svg)](https://github.com/Graphden/graphden/actions/workflows/checks.yml)
 [![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 

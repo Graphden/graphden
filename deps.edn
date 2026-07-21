@@ -54,7 +54,7 @@
   ;; `bb test` / `bb dev` DON'T need that access: the :test + :dev aliases
   ;; below carry an :override-deps back onto the in-tree copy so lint/test
   ;; stay hermetic + offline.
-  mathx/mathx {:git/url "git@github.com:graphden/graphden-mathx.git"
+  mathx/mathx {:git/url "https://github.com/Graphden/graphden-mathx.git"
                :git/sha "a99354d1d2cae3b36bedca07523bf133921c595d"}}
 
  :aliases

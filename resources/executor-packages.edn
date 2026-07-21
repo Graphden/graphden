@@ -16,5 +16,5 @@
   ;; that via the :override-deps in deps.edn (see § 12 / DEPLOYMENT).
   {:name "mathx"
    :lib mathx/mathx
-   :coord {:git/url "git@github.com:graphden/graphden-mathx.git"
+   :coord {:git/url "https://github.com/Graphden/graphden-mathx.git"
            :git/sha "a99354d1d2cae3b36bedca07523bf133921c595d"}}]}

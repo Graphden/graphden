@@ -33,6 +33,22 @@
           (def gd-executor (str gd-instance "-executor"))
           (def gd-url (str "http://localhost:" (or (System/getenv "GD_PORT_HTTP") "9002")))
 
+          ;; --- shared SSH agent for the private mathx clone -----------------
+          ;; `bb rebuild` builds the uberjar, which resolves the PRIVATE
+          ;; `graphden-mathx` git coord over SSH (the :build alias is the only
+          ;; one without the :dev/:test local-root override — by design, it is
+          ;; the real distribution form). A per-shell `ssh-agent` doesn't help:
+          ;; `bb ssh-key` and `bb rebuild` run in separate shells that don't
+          ;; share it. So `bb ssh-key` loads the key into ONE agent bound to a
+          ;; FIXED socket path, and `ssh-env` points every SSH-using child at
+          ;; it — no `export SSH_AUTH_SOCK` needed in your rc.
+          (def gd-ssh-sock (str (System/getenv "HOME") "/.ssh/graphden-agent.sock"))
+          (defn ssh-env
+            "p/shell opts pointing SSH at the fixed graphden agent socket when it
+             exists; {} otherwise (so callers can splice it unconditionally)."
+            []
+            (if (fs/exists? gd-ssh-sock) {:extra-env {"SSH_AUTH_SOCK" gd-ssh-sock}} {}))
+
           (defn linked-worktree?
             "True inside an agent worktree (git-dir is <common>/worktrees/<name>),
              false in the main checkout where the two paths coincide."
@@ -779,13 +795,41 @@
 
   ;; === DOCKER DEPLOYMENT ===
 
+  ssh-key
+  {:doc "Load an SSH key into a FIXED-socket agent that every `bb` task shares, so `bb rebuild` can clone the private mathx repo without an `export SSH_AUTH_SOCK` in your rc. Usage: bb ssh-key [keyfile]. Default key: first of ~/.ssh/{id_ed25519,id_ecdsa,id_rsa}. Run it once per boot (or after a passphrase timeout)."
+   :task
+   (let [home (System/getenv "HOME")
+         key (or (first *command-line-args*)
+                 (->> ["id_ed25519" "id_ecdsa" "id_rsa"]
+                      (map (fn [n] (str home "/.ssh/" n)))
+                      (filter fs/exists?)
+                      first))]
+     (when-not key
+       (println (str red "No key in ~/.ssh (id_ed25519/id_ecdsa/id_rsa). Pass one: "
+                     yellow "bb ssh-key <path>" reset))
+       (System/exit 1))
+     ;; ssh-add -l exit codes: 0 = agent up w/ keys, 1 = up but empty,
+     ;; 2 = cannot connect. Only 2 means we must (re)spawn the agent.
+     (let [probe (p/shell {:out :string :err :string :continue true
+                           :extra-env {"SSH_AUTH_SOCK" gd-ssh-sock}}
+                          "ssh-add" "-l")]
+       (when (= 2 (:exit probe))
+         (fs/delete-if-exists gd-ssh-sock)
+         (p/shell {:out :string :err :string} "ssh-agent" "-a" gd-ssh-sock)))
+     (println (str "Loading " key " into agent at " gd-ssh-sock " ..."))
+     ;; Interactive on purpose: an encrypted key prompts for its passphrase,
+     ;; so run this via `! bb ssh-key` (in your session shell), not headless.
+     (p/shell {:extra-env {"SSH_AUTH_SOCK" gd-ssh-sock}} "ssh-add" key)
+     (p/shell {:extra-env {"SSH_AUTH_SOCK" gd-ssh-sock}} "ssh-add" "-l")
+     (println (str green "✓ Key loaded. `bb rebuild` will now use it." reset)))}
+
   rebuild
-  {:doc "Rebuild jar + docker and restart the CANONICAL instance (keeps DB data). In an agent worktree this refuses to run unless GD_INSTANCE is set — use `bb wt up` for your own isolated stack."
+  {:doc "Rebuild jar + docker and restart the CANONICAL instance (keeps DB data). In an agent worktree this refuses to run unless GD_INSTANCE is set — use `bb wt up` for your own isolated stack. Needs the private mathx clone over SSH: run `bb ssh-key` first (see that task)."
    :task (do
            (assert-not-clobbering-shared-stack! "bb rebuild")
 
            (println "1. Building uberjar...")
-           (p/shell "clojure -T:build uber")
+           (p/shell (ssh-env) "clojure -T:build uber")
 
            (println "2. Rebuilding docker image...")
            (p/shell "docker-compose build executor")

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 2 28 28" fill="none" role="img" aria-label="Graphden lambda mark">
+  <g stroke="#0066cc" stroke-width="3" stroke-linecap="round">
+    <line x1="9" y1="6" x2="25" y2="26"/><line x1="17" y1="16" x2="8" y2="26"/>
+  </g>
+  <g fill="#0066cc">
+    <circle cx="9" cy="6" r="3"/><circle cx="25" cy="26" r="3"/><circle cx="8" cy="26" r="3"/>
+  </g>
+</svg>

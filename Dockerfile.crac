@@ -17,7 +17,7 @@
 
 # Azul Zulu 21 with CRaC. `crac_supported=true` builds bundle criu under
 # $JAVA_HOME/lib/criu; a distro criu also works.
-FROM azul/zulu-openjdk:21-jdk-crac
+FROM azul/zulu-openjdk:26-jdk-crac
 
 WORKDIR /app
 

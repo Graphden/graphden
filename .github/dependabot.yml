@@ -1,40 +1,21 @@
 version: 2
 updates:
-  # GitHub Actions used by the workflows in .github/workflows.
+  # GitHub Actions — security-relevant, low volume. Grouped, monthly.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
     groups:
       actions:
         patterns: ["*"]
 
-  # Base images in the Dockerfiles at the repo root.
-  - package-ecosystem: docker
-    directory: "/"
-    schedule:
-      interval: weekly
-
-  # npm tooling. Clojure deps (deps.edn) are covered by `bb outdated`,
-  # not Dependabot, which has no Clojure ecosystem.
+  # Root npm deps, grouped, monthly. Clojure (deps.edn) -> `bb outdated`.
+  # Docker base-image bumps and the dev-only tool dirs are intentionally
+  # NOT tracked here (JDK pins are deliberate; those PRs were just noise).
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: weekly
-    groups:
-      npm:
-        patterns: ["*"]
-  - package-ecosystem: npm
-    directory: "/tools/browser-test"
-    schedule:
-      interval: weekly
-    groups:
-      npm:
-        patterns: ["*"]
-  - package-ecosystem: npm
-    directory: "/tools/visual-tests"
-    schedule:
-      interval: weekly
+      interval: monthly
     groups:
       npm:
         patterns: ["*"]

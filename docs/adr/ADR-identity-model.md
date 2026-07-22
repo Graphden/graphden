@@ -59,14 +59,20 @@ classification and the secrets redaction all read whichever wrote last).
 
 Stage 1 (this branch): registry re-key (above). Remaining, in order:
 
-- **Stage 2 — type-alias registry.** Name-keyed by design, but
-  `register-type-alias!` silently REPLACES on re-register; per-ns
-  type names need qualified alias keys (or org/ns-scoped registries,
-  mirroring the per-org slice).
-- **Stage 3 — anon-hash use-site tuple + namespace.** `parse.clj`'s
-  `anon-fn-name` hashes `[parent-name arg-name]` without the
-  namespace; the code comment already prescribes adding it before
-  per-ns names ship.
+- **Stage 2 — type-alias registry: DONE (owner diagnostics).** Alias
+  entries now track their declaring type-row's id (`alias-owners`
+  side-table in `types/core.clj`); a cross-owner re-bind warn-logs
+  loudly instead of silently shadowing. Resolution itself stays
+  last-write-wins until stage 4 makes it namespace-aware — that is
+  the honest scope: per-ns duplicates are LEGAL, so a hard reject
+  would be wrong; invisibility was the bug.
+- **Stage 3 — anon-hash use-site tuple + namespace: DONE.**
+  `anon-fn-name` now mixes the host fn-def's namespace into the
+  use-site identity (`[namespace parent-name arg-name]`), so
+  same-named parents in different namespaces keep distinct anon
+  entries. Synthetic anon names (and their derived ids) changed once
+  as a consequence — old anon rows in long-lived dev DBs become
+  unreferenced (harmless; clean deploys unaffected).
 - **Stage 4 — qualified refs in fns.edn.** `:ns.path/name` keyword
   refs; an unqualified ref must be UNAMBIGUOUS across the loaded set,
   else sync fails with a suggestion to qualify.

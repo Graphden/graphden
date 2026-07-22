@@ -49,6 +49,7 @@
   (:refer-clojure :exclude [resolve])
   (:require
     [clojure.set]
+    [clojure.tools.logging :as log]
     [graphden.types.core.shapes :as shapes]))
 
 
@@ -319,6 +320,37 @@
 (declare register-type-aliases-batch)
 
 
+;; Diagnostic side-table `{alias-name → owner-fn-id}` for the GLOBAL
+;; registry only (override-bound contexts — test isolation, per-org
+;; filtered views — skip it). Per-namespace names mean two DIFFERENT
+;; type-rows may legally share a bare name; until alias RESOLUTION is
+;; namespace-aware (per-ns migration stage 4, ADR-identity-model.md)
+;; the registry stays last-write-wins — this table makes the
+;; cross-owner overwrite LOUD instead of silent, so a same-named type
+;; shadowing another is a visible event, not a mystery type error.
+(defonce ^:private alias-owners (atom {}))
+
+
+(defn- track-alias-owner!
+  "Record `owner-fn-id` as the owner of `alias-name`, warn-logging when
+   a DIFFERENT owner previously registered the name (the cross-ns
+   collision the per-ns migration exists to resolve). No-op when the
+   owner is unknown or an override registry is bound."
+  [alias-name owner-fn-id]
+  (when (and owner-fn-id (nil? *type-aliases-override*))
+    (let [prev (get @alias-owners alias-name)]
+      (when (and prev (not= prev owner-fn-id))
+        (log/warn "type-alias collision: name re-bound by a DIFFERENT type-row"
+                  {:alias alias-name
+                   :previous-owner prev
+                   :new-owner owner-fn-id
+                   :consequence (str "resolution is last-write-wins until "
+                                     "per-ns alias resolution ships "
+                                     "(ADR-identity-model.md stage 4) — "
+                                     "the earlier type is now shadowed")}))
+      (swap! alias-owners assoc alias-name owner-fn-id))))
+
+
 (defn register-type-alias!
   "Bind `alias-name` to a structural type. Throws if `alias-name` is
    already a primitive (would shadow it confusingly) or if `t` isn't
@@ -329,19 +361,25 @@
    are valid here: validation runs against a view that includes the
    name being registered, so `:tree` resolves as a known reference
    inside its own body. For mutual recursion across names, batch
-   them via `register-type-aliases-batch`."
-  [alias-name t]
-  (when (primitives alias-name)
-    (throw (ex-info (str "type-alias name shadows a primitive: " (pr-str alias-name))
-                    {:type :types/invalid-alias
-                     :name alias-name})))
-  (binding [*alias-view* (assoc @(aliases-atom) alias-name :any)]
-    (when-not (well-formed? t)
-      (throw (ex-info (str "type-alias body is not well-formed: " (pr-str t))
-                      {:type :types/invalid-alias
-                       :name alias-name :body t}))))
-  (swap! (aliases-atom) assoc alias-name t)
-  alias-name)
+   them via `register-type-aliases-batch`.
+
+   The optional `owner-fn-id` feeds the collision diagnostic (see
+   `alias-owners` above) — pass the declaring type-row's id whenever
+   the caller holds one."
+  ([alias-name t] (register-type-alias! alias-name t nil))
+  ([alias-name t owner-fn-id]
+   (when (primitives alias-name)
+     (throw (ex-info (str "type-alias name shadows a primitive: " (pr-str alias-name))
+                     {:type :types/invalid-alias
+                      :name alias-name})))
+   (binding [*alias-view* (assoc @(aliases-atom) alias-name :any)]
+     (when-not (well-formed? t)
+       (throw (ex-info (str "type-alias body is not well-formed: " (pr-str t))
+                       {:type :types/invalid-alias
+                        :name alias-name :body t}))))
+   (track-alias-owner! alias-name owner-fn-id)
+   (swap! (aliases-atom) assoc alias-name t)
+   alias-name))
 
 
 (defn resolve-alias
@@ -397,7 +435,7 @@
 
 
 (defn register-type-aliases-batch
-  "Register a batch of `[alias-name body]` pairs that may reference
+  "Register a batch of `[alias-name body owner-fn-id?]` tuples that may reference
    each other or themselves — typical for record-types with
    mutual / recursive shape (Tree, LinkedList, Person↔Address).
 
@@ -412,6 +450,9 @@
    `{:registered #{names} :failed [{:name n :body b :reason r} ...]}`."
   [pairs]
   (let [proposed-names (into #{} (keep first) pairs)
+        owner-of (into {}
+                       (keep (fn [[nm _ owner]] (when owner [nm owner])))
+                       pairs)
         scratch (merge @(aliases-atom)
                        (zipmap proposed-names (repeat :any)))
         classify
@@ -430,6 +471,8 @@
         failed   (->> results (remove :ok)
                       (mapv (fn [r] (select-keys r [:nm :body :reason]))))]
     (when (seq ok-pairs)
+      (doseq [[nm _] ok-pairs]
+        (track-alias-owner! nm (get owner-of nm)))
       (swap! (aliases-atom)
              (fn [m]
                (reduce (fn [acc [nm body]] (assoc acc nm body))
@@ -475,12 +518,26 @@
       :else             nil)))
 
 
+(defn unregister-type-alias!
+  "Drop ONE alias (and its owner-diagnostic entry when writing the
+   global registry). Counterpart of `register-type-alias!` for delete
+   paths and for tests that probe the global registry and must clean
+   up after themselves without nuking sibling registrations."
+  [alias-name]
+  (when (nil? *type-aliases-override*)
+    (swap! alias-owners dissoc alias-name))
+  (swap! (aliases-atom) dissoc alias-name)
+  nil)
+
+
 (defn clear-aliases!
   "Drop every registered alias. Test convenience — production
    registers aliases via `register-alias!` calls driven by
    `:type` / `:refine` / `:list` / `:union` / `:variant` fn-defs in
    the package loader."
   []
+  (when (nil? *type-aliases-override*)
+    (reset! alias-owners {}))
   (reset! (aliases-atom) {}))
 
 

@@ -446,3 +446,33 @@
       (is (some? child-binding) "pure rename emits a binding row")
       (is (not (true? (:value-present child-binding)))
           "pure rename must not flip the value-present flag"))))
+
+
+;; =============================================================================
+;; Per-ns migration stage 3 — anon use-site identity includes the namespace
+;; =============================================================================
+
+(deftest anon-use-site-identity-includes-namespace
+  ;; Two IDENTICAL inline anons whose host fn-defs share a bare NAME but
+  ;; live in different namespaces must lift to DIFFERENT synthetic
+  ;; anon names — otherwise per-namespace parent names would collapse
+  ;; them onto one entry and re-introduce the Phase-α' cross-flow
+  ;; narrowing poisoning (see anon-fn-name's docstring).
+  (let [base [{:name :host-base :namespace "ns-a"
+               :args {:x :any} :return-type :any}]
+        mk (fn [ns-path]
+             {:name :same-host :namespace ns-path :parent :host-base
+              :args {:x {:parent :host-base :args {:x {:value 1}}}}})
+        anon-names (fn [fns]
+                     (->> (r/parse-module fns)
+                          (filter #(and (= :fn (:kind %))
+                                        (some-> (:name %) (.startsWith "_anon-"))))
+                          (map :name)
+                          set))
+        in-a (anon-names (conj base (mk "ns-a")))
+        in-b (anon-names (conj base (mk "ns-b")))]
+    (is (= 1 (count in-a)))
+    (is (= 1 (count in-b)))
+    (is (not= in-a in-b)
+        "same-shape anon under same-NAMED hosts in different namespaces
+         must get distinct use-site identities")))

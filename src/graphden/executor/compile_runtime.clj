@@ -228,9 +228,14 @@
                            (:constraint f)
 
                            nil)]
-                (when body {:nm nm :body body :org (:org-id f)}))))
+                (when body {:nm nm :body body :org (:org-id f)
+                            ;; Owner id feeds the alias-collision
+                            ;; diagnostic — per-ns names may repeat,
+                            ;; a silent alias overwrite must not.
+                            :owner (:id f)}))))
           fns)
-        {:keys [failed]} (types/register-type-aliases-batch (map (juxt :nm :body) candidates))
+        {:keys [failed]} (types/register-type-aliases-batch
+                           (map (juxt :nm :body :owner) candidates))
         failed-names (set (map :nm failed))]
     ;; Rebuild the per-org slice from the SUCCESSFULLY-registered candidates
     ;; (reuse the already-validated bodies; no re-check). Lockstep with the

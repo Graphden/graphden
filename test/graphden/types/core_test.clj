@@ -945,3 +945,36 @@
              [:secret :text]))))
   (testing "empty bindings-info — no taint, no wrap"
     (is (= :text (t/taint-with-secret-if-tainted {} :text)))))
+
+
+;; =============================================================================
+;; Per-ns migration stage 2 — alias owner tracking + loud collision
+;; =============================================================================
+
+(deftest alias-cross-owner-collision-is-loud
+  ;; Two DIFFERENT type-rows registering the same alias name (legal
+  ;; under per-namespace names) must produce a visible warn — the
+  ;; registry stays last-write-wins until stage-4 per-ns resolution
+  ;; (ADR-identity-model.md), but never a SILENT shadow.
+  (let [warns (atom [])
+        owner-a (random-uuid)
+        owner-b (random-uuid)]
+    ;; The tracker only runs against the GLOBAL registry (override-bound
+    ;; contexts skip it), so unbind the fixture's override for the probe
+    ;; and clean the single probe name up afterwards.
+    (binding [t/*type-aliases-override* nil]
+      (try
+        (with-redefs [clojure.tools.logging/log*
+                      (fn [_ level _ message]
+                        (swap! warns conj [level message]))]
+          (t/register-type-alias! :collide-probe :text owner-a)
+          (testing "same owner re-registering is silent"
+            (t/register-type-alias! :collide-probe :text owner-a)
+            (is (empty? (filter #(= :warn (first %)) @warns))))
+          (testing "a DIFFERENT owner re-binding the name warns"
+            (t/register-type-alias! :collide-probe :int owner-b)
+            (is (some #(and (= :warn (first %))
+                            (re-find #"type-alias collision" (str (second %))))
+                      @warns))))
+        (finally
+          (t/unregister-type-alias! :collide-probe))))))

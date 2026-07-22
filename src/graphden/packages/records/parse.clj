@@ -839,18 +839,17 @@
    OUTER anon's already-uniquified name + the nested arg-name; the
    uniqueness propagates down.
 
-   LOAD-BEARING INVARIANT: `host`'s `parent-fn-def-name` is a bare fn
-   NAME, NOT namespace-qualified. Its use-site uniqueness therefore
-   RELIES on fn-names being GLOBALLY unique — enforced by
-   `system/core/validate-no-name-collisions!` (frequencies over every
-   base-fn + fn-def name at sync). If that invariant were ever relaxed
-   to per-namespace names, two parents sharing a name in different
-   namespaces would collapse distinct anons back onto one synthetic
-   entry and re-introduce the Phase-α' cross-flow poisoning above.
-   Any move to per-namespace names MUST add the namespace to this host
-   tuple first."
-  [anon-def host]
-  (let [shape-with-host (assoc anon-def ::_use-site host)]
+   The hash ALSO mixes the host fn-def's NAMESPACE (`ns-path`,
+   nil-safe): host names are bare, so under per-namespace name
+   uniqueness (ADR-identity-model.md) two parents sharing a name in
+   different namespaces would otherwise collapse distinct anons onto
+   one synthetic entry and re-introduce the Phase-α' cross-flow
+   poisoning above. This closes migration stage 3 — use-site identity
+   is `[namespace parent-name arg-name]`, unique under per-ns names."
+  [anon-def host ns-path]
+  (let [shape-with-host (assoc anon-def
+                               ::_use-site host
+                               ::_use-site-ns (or ns-path ""))]
     (keyword (str "_anon-" (subs (ids/shape-hash shape-with-host) 0 16)))))
 
 
@@ -879,7 +878,7 @@
           ;; synthetic name based on per-call-site overrides.
           binding-type (:type v)
           v* (dissoc v :type)
-          synthetic-name (anon-fn-name v* host)
+          synthetic-name (anon-fn-name v* host ns-id)
           ;; Anon inherits the outer fn-def's namespace so its fn-id
           ;; lands in the same module's namespace tree.
           named (-> v*

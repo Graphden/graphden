@@ -263,6 +263,14 @@
            / binding / binding-list-item) and how each splits across two tables:
            `version-data-fields` live in the version table, identity fields stay
            on the base row. Everything downstream keys off this config."}
+    {:ns graphden.schema.versioned.schema :defn derive-version-fields
+     :say "Where the `-version` mirror entities come from: derived from the
+           base entity's field map (refs demote to bare uuids, framework
+           columns spliced in), never hand-copied. A new base column without a
+           pinned mirror uuid or an identity-level declaration fails the build
+           loudly — the old failure mode was the decorator silently dropping
+           that column's writes. `version-data-fields` above derives from the
+           same source, so the two can never disagree."}
     {:ns graphden.versioning.storage.resolution :defn resolve-version
      :say "The public per-branch read: for one entity, load its version chain,
            merge in a single batched pass, and return the winning version (nil

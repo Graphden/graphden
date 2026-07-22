@@ -955,6 +955,105 @@
     (vec (concat expanded-defs unique-extras))))
 
 
+(defn- normalize-qref
+  "One qualified fn/type reference keyword → its bare form, validated:
+   the qualified pair must be a KNOWN fn (dual-keyed `name->id`), else
+   throw loud with the pair. Bare keywords pass through untouched."
+  [kw name->id]
+  (if (qualified-keyword? kw)
+    (if (contains? name->id kw)
+      (keyword (name kw))
+      (throw (ex-info (str "Unresolved qualified reference: " (pr-str kw)
+                           " — no fn named " (pr-str (keyword (name kw)))
+                           " in namespace " (pr-str (namespace kw)))
+                      {:type :packages/unresolved-ref :ref kw})))
+    kw))
+
+
+(declare normalize-qualified-arg-value)
+
+
+(defn- normalize-qualified-type-ref
+  "Type-reference positions accept keywords, inline-composite maps
+   (`{field type}`), and structural vectors (`[:list T]`, `[:refine B C]`,
+   `[:union …]`, `[:fn {args} ret]`, `[:map K V]`, `[:tuple …]`) —
+   normalize any qualified keyword found in type position, leaving
+   refinement CONSTRAINT payloads (value world) untouched."
+  [t name->id]
+  (cond
+    (keyword? t) (normalize-qref t name->id)
+    (map? t) (into {} (map (fn [[k v]] [k (normalize-qualified-type-ref v name->id)])) t)
+    (vector? t)
+    (case (first t)
+      :refine (assoc t 1 (normalize-qualified-type-ref (nth t 1) name->id))
+      (:list :union :tuple :map) (into [(first t)]
+                                       (map #(normalize-qualified-type-ref % name->id))
+                                       (rest t))
+      :fn (cond-> t
+            (map? (nth t 1 nil)) (assoc 1 (normalize-qualified-type-ref (nth t 1) name->id))
+            (>= (count t) 3) (assoc 2 (normalize-qualified-type-ref (nth t 2) name->id)))
+      t)
+    :else t))
+
+
+(defn- normalize-qualified-arg-value
+  "Normalize qualified references inside ONE arg-value, mirroring the
+   shapes `arg-value->binding-fields` recognises. Literal payloads
+   (`:value`, refinement constraints) are deliberately untouched — a
+   qualified keyword there is user DATA, not a reference."
+  [v name->id]
+  (cond
+    (keyword? v) (normalize-qref v name->id)
+    (vector? v) (mapv #(normalize-qualified-arg-value % name->id) v)
+    (map? v)
+    (cond-> v
+      (contains? v :ref)     (update :ref #(normalize-qref % name->id))
+      (contains? v :type)    (update :type #(normalize-qualified-type-ref % name->id))
+      (contains? v :append)  (update :append (fn [items] (mapv #(normalize-qualified-arg-value % name->id) items)))
+      ;; inline anon fn-def in arg position
+      (contains? v :parent)  (update :parent #(normalize-qref % name->id))
+      (contains? v :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id) ps)))
+      (contains? v :args)    (update :args (fn [args]
+                                             (into {}
+                                                   (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id)]))
+                                                   args))))
+    :else v))
+
+
+(defn- normalize-qualified-refs
+  "Per-ns migration stage 4 (ADR-identity-model.md): accept
+   `:ns.path/name`-QUALIFIED reference keywords in every fn/type
+   reference position of a fn-def — parents, arg refs, `{:ref …}`
+   maps, sequence items, inline-anon bodies, `:return-type` and
+   type-row member positions — validate the (namespace, name) pair
+   against the dual-keyed `name->id`, and rewrite to the bare form.
+
+   Normalizing (rather than threading qualified names further) is the
+   deliberate stage-4 scope: while `validate-no-name-collisions!`
+   still enforces GLOBAL name uniqueness, a qualified ref is exactly
+   equivalent to its bare form — the win is authoring: self-documenting
+   references that fail loud on a wrong namespace instead of silently
+   resolving to a same-named fn elsewhere. Namespace-aware resolution
+   through the type-checker's name world is stage 5."
+  [fd name->id]
+  (cond-> fd
+    (contains? fd :parent)  (update :parent #(normalize-qref % name->id))
+    (contains? fd :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id) ps)))
+    (contains? fd :args)    (update :args (fn [args]
+                                            (into {}
+                                                  (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id)]))
+                                                  args)))
+    (contains? fd :return-type) (update :return-type #(normalize-qualified-type-ref % name->id))
+    (contains? fd :type)    (update :type #(normalize-qualified-type-ref % name->id))
+    (contains? fd :list)    (update :list #(normalize-qualified-type-ref % name->id))
+    (contains? fd :union)   (update :union (fn [ts] (mapv #(normalize-qualified-type-ref % name->id) ts)))
+    (contains? fd :refine)  (update-in [:refine :base] #(normalize-qref % name->id))
+    (contains? fd :variant) (update :variant (fn [ts] (mapv #(normalize-qualified-type-ref % name->id) ts)))
+    (contains? fd :fn-type) (update :fn-type (fn [[args ret]]
+                                               [(normalize-qualified-type-ref args name->id)
+                                                (normalize-qualified-type-ref ret name->id)]))))
+
+
 (defn parse-module
   "Parse fn-defs into records. Two passes:
    1. Pre-compute `name->id` (deterministic UUIDs) and `defs-by-name`
@@ -974,7 +1073,23 @@
   ([module-fn-defs extra-name->id]
    (parse-module module-fn-defs extra-name->id {}))
   ([module-fn-defs extra-name->id extra-defs-by-name]
-   (let [;; Pre-pass: lift every inline `{:parent X :args Y}` map in
+   (let [;; Stage 4 — validate + rewrite `:ns.path/name`-qualified refs
+         ;; to bare BEFORE anon expansion, so a qualified and a bare
+         ;; spelling of the same ref hash to the SAME anon identity.
+         ;; The validation map is dual-keyed from the RAW named defs
+         ;; (+ prior syncs) — synthetic anon names are never the
+         ;; target of a qualified ref.
+         pre-name->id (merge extra-name->id
+                             (into {}
+                                   (comp (filter :name)
+                                         (mapcat (fn [fd]
+                                                   (let [id (ids/fn-id (:namespace fd) (:name fd))]
+                                                     (cons [(:name fd) id]
+                                                           (when-let [ns-path (:namespace fd)]
+                                                             [[(keyword ns-path (name (:name fd))) id]]))))))
+                                   module-fn-defs))
+         module-fn-defs (mapv #(normalize-qualified-refs % pre-name->id) module-fn-defs)
+         ;; Pre-pass: lift every inline `{:parent X :args Y}` map in
          ;; arg-value position into a synthetic `_anon-<hash>` fn-def
          ;; (deterministic, dedup'd by shape). The regular parser
          ;; then sees a longer list with all the anons as ordinary
@@ -985,10 +1100,19 @@
          ;; `:fn-type` rows carry their structural shape in
          ;; `:constraint` (see parse-fn-def), so they take the
          ;; standard name→id path.
+         ;; DUAL-keyed: every named def lands under its bare name AND
+         ;; its namespace-qualified form (`:core.strings/upper`), so a
+         ;; qualified ref resolves through the same map + `contains?`
+         ;; fail-loud path as a bare one. Qualified refs don't depend
+         ;; on global name uniqueness — per-ns migration stage 4
+         ;; (ADR-identity-model.md).
          own-name->id (into {}
-                            (keep (fn [fd]
-                                    (when (:name fd)
-                                      [(:name fd) (ids/fn-id (:namespace fd) (:name fd))])))
+                            (comp (filter :name)
+                                  (mapcat (fn [fd]
+                                            (let [id (ids/fn-id (:namespace fd) (:name fd))]
+                                              (cons [(:name fd) id]
+                                                    (when-let [ns-path (:namespace fd)]
+                                                      [[(keyword ns-path (name (:name fd))) id]]))))))
                             module-fn-defs)
          name->id (merge extra-name->id own-name->id)
          defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name module-fn-defs))

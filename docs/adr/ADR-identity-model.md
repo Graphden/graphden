@@ -73,9 +73,18 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   entries. Synthetic anon names (and their derived ids) changed once
   as a consequence — old anon rows in long-lived dev DBs become
   unreferenced (harmless; clean deploys unaffected).
-- **Stage 4 — qualified refs in fns.edn.** `:ns.path/name` keyword
-  refs; an unqualified ref must be UNAMBIGUOUS across the loaded set,
-  else sync fails with a suggestion to qualify.
+- **Stage 4 — qualified refs in fns.edn: DONE (syntax + validation).**
+  `:ns.path/name`-qualified reference keywords are accepted in every
+  reference position (parents, arg refs, `{:ref …}`, sequence items,
+  inline-anon bodies, `:return-type`, type-row members), validated
+  against the dual-keyed name map, and REWRITTEN TO BARE at parse
+  entry (`normalize-qualified-refs`) — before anon expansion, so both
+  spellings hash identically. While stage 5 hasn't relaxed global
+  uniqueness this is exactly equivalent to the bare form; the win is
+  authoring (self-documenting refs that fail loud on a wrong
+  namespace). Namespace-aware resolution through the type-checker's
+  name world — and the exporter emitting qualified forms for
+  ambiguous names — is the remaining stage-5 work.
 - **Stage 5 — relax `validate-no-name-collisions!`** to per-(ns, name)
   — last, after stages 2-4 hold; base-fn (Clojure impl registry) names
   stay globally unique (they are code-level identifiers, like Clojure

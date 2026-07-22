@@ -477,3 +477,42 @@
     (is (not= in-a in-b)
         "same-shape anon under same-NAMED hosts in different namespaces
          must get distinct use-site identities")))
+
+
+;; =============================================================================
+;; Per-ns migration stage 4 — namespace-qualified reference keywords
+;; =============================================================================
+
+(deftest qualified-refs-normalize-to-bare
+  ;; A `:ns.path/name`-qualified spelling of any reference must parse to
+  ;; the SAME records as the bare spelling (validated + rewritten at
+  ;; parse entry), and a wrong namespace must fail loud instead of
+  ;; silently resolving to a same-named fn elsewhere.
+  (let [base [{:name :q-int :namespace "ns-q" :refine {:base :int :constraint [:> 0]}}
+              {:name :q-sink :namespace "ns-q"
+               :args {:x :any :items :sequence} :return-type :any}
+              {:name :q-src :namespace "ns-q" :args {:v :any} :return-type :q-int}]
+        bare (conj base
+                   {:name :q-user :namespace "ns-q" :parent :q-sink
+                    :args {:x :q-src
+                           :items [:q-src {:value 1}]}
+                    :return-type :q-int})
+        qualified (conj base
+                        {:name :q-user :namespace "ns-q" :parent :ns-q/q-sink
+                         :args {:x :ns-q/q-src
+                                :items [:ns-q/q-src {:value 1}]}
+                         :return-type :ns-q/q-int})
+        norm (fn [fns] (set (map #(into (sorted-map) %) (r/parse-module fns))))]
+    (is (= (norm bare) (norm qualified))
+        "qualified and bare spellings parse to identical records")
+    (testing "a wrong namespace fails loud"
+      (is (thrown-with-msg? Exception #"Unresolved qualified reference"
+            (r/parse-module
+              (conj base {:name :q-user :namespace "ns-q" :parent :wrong.ns/q-sink})))))
+    (testing "a qualified keyword in :value position stays literal data"
+      (let [recs (r/parse-module
+                   (conj base {:name :q-lit :namespace "ns-q" :parent :q-sink
+                               :args {:x {:value :wrong.ns/not-a-ref}}}))
+            b (first (filter #(and (= :binding (:kind %)) (:value-present %)) recs))]
+        (is (= :wrong.ns/not-a-ref (:value b))
+            "literal payloads are not treated as references")))))

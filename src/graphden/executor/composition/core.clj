@@ -210,12 +210,18 @@
 
 
 (defn- name->id-from-fns
-  "Pure: project a vector of `:fn` rows to the name→id map."
+  "Pure: project a vector of `:fn` rows to the name→id map. DUAL-keyed
+   — bare name AND `:ns.path/name` qualified form (when the row's
+   `:namespace-id` is the dotted path, as `graph->records` yields), so
+   qualified cross-module refs resolve against already-synced fns."
   [fns]
   (into {}
-        (keep (fn [f]
-                (when-let [n (:name f)]
-                  [(keyword n) (:id f)])))
+        (comp (filter :name)
+              (mapcat (fn [f]
+                        (let [n (:name f) id (:id f) ns-path (:namespace-id f)]
+                          (cons [(keyword n) id]
+                                (when (string? ns-path)
+                                  [[(keyword ns-path n) id]]))))))
         fns))
 
 

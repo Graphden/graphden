@@ -366,10 +366,30 @@
         params (renames/hof-lambda-params (:id handler-fn) (:id value-slot)
                                           bnd (:id wrap-fn) lookups)]
     (try
-      (testing "one-shot HOF returns [] when alpha-equiv has only globally env-bound candidates"
-        (is (= [] params)
-            "before the iteration-vs-one-shot fix, hof-lambda-params returned [:injected] for the wrap site even though :injected is bound as an env-binding elsewhere in the graph (mirrors :_app-ring-response's :storage-query :pg-query). At runtime the wrap's lambda-arg merge would overwrite the captured env-bound value."))
-      (finally (sp/close storage)))))
+      (testing "one-shot HOF accepts the single OWN-slot candidate"
+        ;; New contract (explicit-over-implicit): `:injected` is the
+        ;; callee's own declared arg, so a one-shot caller supplying it
+        ;; per invocation is the honest default. The retired
+        ;; global-env-name heuristic used to guess [] here; the
+        ;; env-collision protection is now an AUTHORED declaration —
+        ;; see the next assertion.
+        (is (= [:injected] params)))
+      (testing ":lambda-params [] declares captured-only and wins"
+        (registry/record-rich-types-raw!
+          (:id handler-fn) :test-handler
+          {:return :any :args {} :lambda-params []})
+        (is (= [] (renames/hof-lambda-params (:id handler-fn) (:id value-slot)
+                                             bnd (:id wrap-fn) lookups))))
+      (testing "a :lambda-params typo (not a free arg) fails loud"
+        (registry/record-rich-types-raw!
+          (:id handler-fn) :test-handler
+          {:return :any :args {} :lambda-params [:nope]})
+        (is (thrown-with-msg? Exception #"lambda-params names args"
+              (renames/hof-lambda-params (:id handler-fn) (:id value-slot)
+                                         bnd (:id wrap-fn) lookups))))
+      (finally
+        (registry/unregister-rich-type! :test-handler)
+        (sp/close storage)))))
 
 
 (deftest binding-on-source-slot-closes-rename-too-test

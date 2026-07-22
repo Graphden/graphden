@@ -158,7 +158,19 @@ dispatcher. It reads the slot's structural shape (via
   alpha-equivalence resolver picks the lambda-param name from R's
   non-captured frees — covers conventional positional callsites like
   `:filter :pred :some?` (slot's positional `:item` vs `:some?`'s
-  domain-named `:value`).
+  domain-named `:value`). The resolver is accepted only when
+  UNAMBIGUOUS: one-shot `:arg` slots take a single candidate only if
+  it is R's OWN declared arg (a ref-lifted deep free is captured
+  plumbing); multi-candidate cases throw
+  `:compile/ambiguous-lambda-params`. The escape hatch is an authored
+  **`:lambda-params`** on the callable fn-def (registry-carried, like
+  `:lazy-seq-args`): the ordered call-site parameter list, `[]`
+  meaning "everything captured". It overrides all inference and is
+  validated against R's frees. (This replaced the retired
+  global-env-binding-name heuristic that used to GUESS variadic-ignore
+  for handler chains; those are now honestly typed — route/handler
+  slots declare `[:fn {} resp]`, the request reaching the callable
+  through wrap-time capture.)
 - **2+-arg slot** (`[:fn {:a A :b B} ret]`) → sub free args matching
   slot's structural names. Map-callable; covers
   `:wrap-middleware :handler` (`{:request _ :next-handler _}`).

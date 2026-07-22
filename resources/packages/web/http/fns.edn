@@ -23,7 +23,7 @@
 
   {:name :http-server
    :description "Start an http-kit HTTP server. The `:handler` is a Ring-style fn `(fn [request] response)`; the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request. http-server itself does nothing beyond starting the listener and forwarding the request — body realisation, response post-processing, and the response cache are composed in via the wraps below."
-   :args {:handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
+   :args {:handler {:type [:fn {} :ring-response-shape]
                     :description "Ring-style handler — typically the full wrap chain (see this package's fn-defs below)."}
           :port {:type :port
                  :description "TCP port to listen on (e.g., 8080) — refinement narrows :int to 1..65535."}}
@@ -460,7 +460,7 @@
   {:name :_call-base-handler
    :description "Invoke the wrapped `:base-handler` with the current `:request`. The leaf reused by every wrap below."
    :parent :call
-   :args {:func {:as :base-handler :type [:fn {:request :ring-request-shape} :ring-response-shape]}
+   :args {:func {:as :base-handler :type [:fn {} :ring-response-shape]}
           :arg  {:as :request      :type :ring-request-shape}}}
 
   ;; --- realize-body wrap: slurps :body InputStream before the handler ---
@@ -473,7 +473,7 @@
   {:name :realize-body-wrap
    :description "Handler wrap — slurps `:body InputStream` into a String, then invokes `:base-handler` with the realised request. Free args: `:base-handler`, `:request`."
    :parent :call
-   :args {:func {:as :base-handler :type [:fn {:request :ring-request-shape} :ring-response-shape]}
+   :args {:func {:as :base-handler :type [:fn {} :ring-response-shape]}
           :arg  :_realized-request}
    :return-type :ring-response-shape}
 
@@ -539,7 +539,7 @@
    :args {:test :_cache-hit?
           :then :_cached-response
           :else :_fresh-with-maybe-store
-          :base-handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
+          :base-handler {:type [:fn {} :ring-response-shape]
                          :description "Inner handler chain. NOT called on cache hit."}
           :request {:as :request :type :ring-request-shape}}
    :return-type :ring-response-shape}]}

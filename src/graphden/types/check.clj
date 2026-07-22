@@ -76,6 +76,7 @@
    is already such a split) is the only move that pays off."
   (:require
     [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.core :as registry]
     [graphden.types.check.literals :as lit]
@@ -1224,7 +1225,11 @@
                            {})
         capture-eff    (reduce into #{}
                                (vals (select-keys per-arg stripped-keys)))
-        final-effects  (if (seq stripped-keys)
+        ;; `:any` in effect position is the canonical "no effect
+        ;; constraint declared" marker (parse-fn-type-decl's 4th
+        ;; element), not a set — stripping captures from an
+        ;; unconstrained contract leaves it unconstrained.
+        final-effects  (if (and (seq stripped-keys) (set? actual-effects))
                          (set/difference actual-effects capture-eff)
                          actual-effects)]
     (if (and (= final-args raw-args)
@@ -1864,6 +1869,11 @@
       fn-name
       (cond-> (merge {:return computed-return :args free-args}
                      (source-info-for fn-def))
+        ;; `:lambda-params` — authored HOF call-site parameter list;
+        ;; must survive into the registry entry the runtime's
+        ;; wrap-arity dispatch reads (compile.renames/hof-lambda-params).
+        (contains? fn-def :lambda-params)
+        (assoc :lambda-params (vec (:lambda-params fn-def)))
         (seq resolved)    (assoc :resolved-bindings resolved)
         (seq slot-types)  (assoc :slot-types slot-types)
         (seq nav-types)   (assoc :nav-types nav-types)
@@ -2308,34 +2318,41 @@
 
    Called by `system.core/sync-fn-entities-from-packages!` after the
    sweep; exposed as a separate fn so unit tests can exercise the
-   logic without bootstrapping integrant."
-  [failed-names]
-  (let [actual              (set failed-names)
-        unexpected-failures (set/difference actual allowed-type-check-failures)
-        stale-allowlist     (set/difference allowed-type-check-failures actual)]
-    (when (seq unexpected-failures)
-      (throw (ex-info
-               (str "Type-check sweep: " (count unexpected-failures)
-                    " NEW failure(s) not in allowlist. Add to"
-                    " `graphden.types.check/allowed-type-check-failures`"
-                    " ONLY after confirming the failure is architectural known-debt"
-                    " (not a runtime bug). Failing names: "
-                    (pr-str (sort unexpected-failures)))
-               {:type :types/sweep-regression
-                :unexpected unexpected-failures
-                :allowlist allowed-type-check-failures})))
-    (when (seq stale-allowlist)
-      (throw (ex-info
-               (str "Type-check sweep: allowlist contains "
-                    (count stale-allowlist)
-                    " name(s) that NO LONGER fail. Remove from"
-                    " `graphden.types.check/allowed-type-check-failures`"
-                    " to keep the ledger honest. Stale names: "
-                    (pr-str (sort stale-allowlist)))
-               {:type :types/sweep-stale-allowlist
-                :stale stale-allowlist
-                :allowlist allowed-type-check-failures})))
-    :ok))
+   logic without bootstrapping integrant. The optional `detail` map
+   `{name → failure message}` is embedded in the regression error so
+   a red sweep names WHY each fn failed, not just which."
+  ([failed-names] (assert-sweep-failures-match-allowlist! failed-names nil))
+  ([failed-names detail]
+   (let [actual              (set failed-names)
+         unexpected-failures (set/difference actual allowed-type-check-failures)
+         stale-allowlist     (set/difference allowed-type-check-failures actual)]
+     (when (seq unexpected-failures)
+       (throw (ex-info
+                (str "Type-check sweep: " (count unexpected-failures)
+                     " NEW failure(s) not in allowlist. Add to"
+                     " `graphden.types.check/allowed-type-check-failures`"
+                     " ONLY after confirming the failure is architectural known-debt"
+                     " (not a runtime bug).\n"
+                     (str/join "\n"
+                               (for [n (sort unexpected-failures)]
+                                 (str "  " n " — "
+                                      (or (get detail n) "(no detail captured)")))))
+                {:type :types/sweep-regression
+                 :unexpected unexpected-failures
+                 :detail (select-keys (or detail {}) unexpected-failures)
+                 :allowlist allowed-type-check-failures})))
+     (when (seq stale-allowlist)
+       (throw (ex-info
+                (str "Type-check sweep: allowlist contains "
+                     (count stale-allowlist)
+                     " name(s) that NO LONGER fail. Remove from"
+                     " `graphden.types.check/allowed-type-check-failures`"
+                     " to keep the ledger honest. Stale names: "
+                     (pr-str (sort stale-allowlist)))
+                {:type :types/sweep-stale-allowlist
+                 :stale stale-allowlist
+                 :allowlist allowed-type-check-failures})))
+     :ok)))
 
 
 ;; -----------------------------------------------------------------------------

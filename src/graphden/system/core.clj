@@ -468,29 +468,30 @@
      out — useful when loading a SUBSET of production packages."
   [expanded-fn-defs skip-allowlist-gate?]
   (let [sorted (deps/topological-sort expanded-fn-defs)
-        failed-names (atom #{})]
+        failures (atom {})]
     (doseq [fd sorted]
       (try (types-check/check-fn-def! fd)
            (catch Exception e
-             (swap! failed-names conj (:name fd))
+             (swap! failures assoc (:name fd) (ex-message e))
              (log/debug "Type-check failed for fn-def" (:name fd) "—"
                         (ex-message e)))))
     (let [narrowings (types-narrowing/build-caller-narrowings sorted)
           overrides  (types-narrowing/build-ref-return-overrides sorted)]
-      (reset! failed-names #{})
+      (reset! failures {})
       (doseq [fd sorted]
         (try (types-narrowing/check-fn-def-with-narrowings! fd narrowings overrides)
              (catch Exception e
-               (swap! failed-names conj (:name fd))
+               (swap! failures assoc (:name fd) (ex-message e))
                (log/debug "Type-check failed for fn-def" (:name fd) "—"
                           (ex-message e))))))
-    (when (pos? (count @failed-names))
-      (log/warn "Type-check sweep: " (count @failed-names)
+    (when (pos? (count @failures))
+      (log/warn "Type-check sweep: " (count @failures)
                 "fn-defs failed (DEBUG-logged) — runtime unaffected,"
                 " editor effect/return strips may be missing for those names —"
                 " docs/TYPE_CHECK_BACKLOG.md"))
     (when-not skip-allowlist-gate?
-      (types-check/assert-sweep-failures-match-allowlist! @failed-names))))
+      (types-check/assert-sweep-failures-match-allowlist!
+        (set (keys @failures)) @failures))))
 
 
 (defn sync-fn-entities-from-packages!

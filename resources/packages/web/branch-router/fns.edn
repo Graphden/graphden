@@ -69,5 +69,5 @@
    :args {:test :_branch-router-installed?
           :then :_branch-dispatched
           :else :_base-handler-fallback
-          :base-handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
+          :base-handler {:type [:fn {} :ring-response-shape]
                          :description "Single-branch Ring fallback handler — invoked when no branch router is installed. Consumers (e.g. `:_branch-routed-handler`) bind this to their full app-level Ring handler."}}}]}

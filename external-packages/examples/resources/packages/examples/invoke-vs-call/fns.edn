@@ -50,6 +50,10 @@
   {:name :_ex-static-handler
    :description "Builds a constant Ring handler `(fn [_req] {:status 200 …})` via `:make-handler`."
    :parent :make-handler
+   ;; One-shot `:invoke :func` use-site: the handler ignores its
+   ;; per-call input; every surviving free is chain plumbing, captured
+   ;; at wrap time.
+   :lambda-params []
    :args {:response {:value {:status 200 :headers {} :body "hi"}}}}
 
   ;; Side-by-side: same logical operation, two different shapes.

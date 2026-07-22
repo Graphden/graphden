@@ -712,28 +712,30 @@
       (set (keys (or (second constraint) {}))))))
 
 
-(defn- global-env-binding-names
-  "Set of every env-binding `:env-name` across the WHOLE graph,
-   memoised on `lookups`. Used by `alpha-equiv-lambda-params` to spot
-   names a wrap-time-captured `fa` is LIKELY to already carry — any
-   env-binding name a fn somewhere declares can flow into `fa` via
-   the closure-capture propagation from an upstream caller.
+(def ^:private rich-type-of-id-fn
+  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
 
-   Names found in this set are at risk of collision when chosen as a
-   lambda-param: the wrap's `(merge fa lambda-args)` would overwrite
-   the captured value (request, env-binding callable, etc.) with the
-   per-call lambda value. The full hof-lambda-params policy decides
-   what to do with the risk based on the slot's iteration semantics
-   (`:item`-style iteration wants the override; `:arg`-style generic
-   one-shot does NOT)."
-  [{:keys [fn-map global-env-cache] :as lookups}]
-  (let [compute (fn []
-                  (set (mapcat #(keep :env-name
-                                      (b/collect-env-bindings % lookups))
-                               (keys fn-map))))]
-    (if-let [cache global-env-cache]
-      (or @cache (let [r (compute)] (reset! cache r) r))
-      (compute))))
+
+(defn- declared-lambda-params
+  "The fn-def's AUTHORED `:lambda-params` (ordered vector of its own
+   free-arg names), from the rich-types registry entry — or nil when
+   the author declared none. `[]` is a meaningful declaration:
+   \"everything captured, no per-call parameter\" (handler chains).
+   Validated against R's deep frees so a typo fails the compile loudly
+   instead of silently wrapping with a dead parameter."
+  [r-fn-id lookups]
+  (when-let [declared (:lambda-params (@rich-type-of-id-fn r-fn-id))]
+    (let [frees (set (deep-free-ext-names r-fn-id lookups))
+          unknown (remove frees declared)]
+      (when (seq unknown)
+        (throw (ex-info (str ":lambda-params names args that are not free "
+                             "args of the fn: " (pr-str (vec unknown))
+                             " (frees: " (pr-str (sort frees)) ")")
+                        {:type :compile/invalid-lambda-params
+                         :fn-id r-fn-id
+                         :declared declared
+                         :unknown (vec unknown)})))
+      (vec declared))))
 
 
 (defn alpha-equiv-lambda-params
@@ -788,44 +790,58 @@
     (vec (remove captured r-frees))))
 
 
+(defn- own-slot-names
+  "Names of the slots R itself EXPOSES — its own + inheritance-chain
+   fn-slot rows (renamed views included). The distinction one-shot
+   lambda-param acceptance rides on: a candidate that is R's own
+   declared arg (`:str-upper`'s `:string`) is the parameter the caller
+   supplies per invocation; a candidate that is only a REF-LIFTED deep
+   free (`:storage-query` plumbing lifted through a handler chain) is
+   semantically captured and must not be wrapped as the parameter."
+  [r-fn-id {:keys [fn-slots-by-fn slot-map] :as lookups}]
+  (into #{}
+        (comp (mapcat #(get fn-slots-by-fn % []))
+              (keep #(some-> (get slot-map (:slot-id %)) :name keyword)))
+        (l/inheritance-chain* r-fn-id lookups)))
+
+
 (defn hof-lambda-params
   "Lambda-param names of HOF target `r-fn-id` when invoked from
-   `f-fn-id` through the binding `b-row`. Dispatched on the slot's
-   structural `[:fn {ARGS} RET]` shape (closure-capture;
-   docs/CLOSURE_CAPTURE.md):
+   `f-fn-id` through the binding `b-row`.
 
-   - 0-arg slot (`[:fn {} a]`) → `[]`
-     Variadic-ignore wrap; R's free args are all captured at wrap
-     time (`:future :body`, `:loop-until-interrupted :body`).
-   - 1-arg slot (`[:fn {:x T} a]`) → structural name when R declares
-     it, alpha-equivalent positional unification when not
-     If R's free args include the slot's structural name, return
-     `[structural-name]` directly (the fast path — sub-fn was
-     written to match the slot contract, e.g. `:try`'s `:on-throw`
-     typed `[:fn {:exception :any} a]` with `_rollback` declaring an
-     `:exception` arg). Otherwise call `alpha-equiv-lambda-params`,
-     which picks the lambda-param name from R's non-captured frees —
-     covers `:filter :pred :some?` where the slot's positional
-     `:item` doesn't match `:some?`'s domain-named `:value`.
-   - 2+-arg slot (`[:fn {:a A :b B} ret]`) → R's free args matching
-     the slot's structural ARGS by NAME (map-callable;
-     `:wrap-middleware :handler {:request _ :next-handler _}`).
+   Resolution order (docs/CLOSURE_CAPTURE.md):
 
-   Bare `:fn` keyword slots are REJECTED with a sync-time error —
-   every HOF slot must declare its structural shape.
+   1. Authored `:lambda-params` on R's fn-def (registry-carried, like
+      `:lazy-seq-args`) — explicit, validated, no inference. `[]`
+      means every free arg is captured (handler chains).
+   2. The slot's structural `[:fn {ARGS} RET]` shape:
+      - 0-arg -> `[]` (variadic-ignore; cron / `:future :body`).
+      - 1-arg -> the structural name when R declares it; otherwise
+        alpha-equiv positional unification, accepted only when
+        UNAMBIGUOUS (exactly one non-captured free on an iteration
+        slot). One-shot `:arg` slots and multi-candidate cases throw
+        `:compile/ambiguous-lambda-params` demanding an authored
+        declaration — the retired global-env-name heuristic used to
+        guess here.
+      - 2+-arg -> R's frees matching the structural names (map-callable).
+   Bare `:fn` keyword slots fall back to alpha-equiv (test surface).
 
    `hof-wrap` picks its call shape from `(count lambda-params)`:
-   0 / 1 / N → variadic / single-arg / map-callable."
+   0 / 1 / N -> variadic / single-arg / map-callable."
   [r-fn-id slot-id b-row f-fn-id lookups]
   (let [structural-args (slot-structural-call-site-args slot-id b-row f-fn-id
-                                                        lookups)]
+                                                        lookups)
+        declared (declared-lambda-params r-fn-id lookups)]
     (cond
+      ;; Authored `:lambda-params` — the fn-def SAYS what its call-site
+      ;; parameters are; no inference. `[]` = everything captured.
+      (some? declared)
+      declared
+
       ;; Bare `:fn` keyword slot — no structural shape to constrain
-      ;; on. Falls back to the alpha-equiv heuristic: a deep-free of
-      ;; R is a lambda-param iff nothing on F's chain supplies a
-      ;; value for it; everything else is captured at wrap time.
-      ;; Used by the closure-capture acceptance test and any other
-      ;; slot whose author opted out of structural typing.
+      ;; on. Falls back to alpha-equiv: a deep-free of R is a
+      ;; lambda-param iff nothing on F's chain supplies a value for
+      ;; it; everything else is captured at wrap time.
       (nil? structural-args)
       (alpha-equiv-lambda-params r-fn-id f-fn-id lookups)
 
@@ -834,38 +850,71 @@
       (zero? (count structural-args))
       []
 
-      ;; 1-arg structural slot — structural name when R declares it,
-      ;; alpha-equivalent positional unification otherwise.
+      ;; 1-arg structural slot — structural name when R declares it;
+      ;; otherwise alpha-equivalent positional unification, which is
+      ;; SOUND only when it is unambiguous:
       ;;
-      ;; Iteration vs one-shot policy (#52-followup): the structural
-      ;; name `:arg` is the generic-positional convention for one-shot
-      ;; HOF slots (`:call`, `:invoke`, `:assoc-fn`, route handlers).
-      ;; All OTHER structural names (`:item`, `:value`, `:pair`,
-      ;; `:existing`, `:acc`, `:request`, …) declare per-element or
-      ;; domain-specific iteration semantics where the lambda-arg IS
-      ;; meant to override fa.
-      ;;
-      ;; For one-shot slots whose callee doesn't use `:arg`, if the
-      ;; alpha-equiv fallback finds ONLY names that would collide
-      ;; with `fa` keys (every candidate is somewhere an env-binding
-      ;; name), return `[]` — variadic-ignore wrap — so reitit's
-      ;; `(handler request)` call doesn't overwrite a captured
-      ;; `:storage-query → :pg-query` callable with the request map.
-      ;; Real-world repro: `/api/branches` and `/api/services` whose
-      ;; handler chains have only `[:storage-query]` as r-frees.
+      ;; - ITERATION slots (`:item`, `:value`, `:pair`, `:acc`,
+      ;;   `:request`, …): exactly ONE non-captured free → that is the
+      ;;   positional parameter (`:filter :pred :some?`); zero frees →
+      ;;   variadic-ignore. MULTIPLE candidates would mean guessing
+      ;;   which free receives the element — refuse and demand an
+      ;;   authored `:lambda-params`.
+      ;; - ONE-SHOT slots (structural name `:arg` — `:call`, `:invoke`,
+      ;;   route handlers): a surviving candidate is NOT trustworthy —
+      ;;   the real-world repro (`/api/branches` handler chains) has
+      ;;   exactly one candidate (`:storage-query`) that is semantically
+      ;;   CAPTURED through a dynamic env chain static subtraction
+      ;;   can't see; wrapping it as the parameter overwrites the
+      ;;   captured callable with the request map. The retired
+      ;;   global-env-name heuristic guessed its way around this;
+      ;;   now the author states it: `:lambda-params []` (captured-only)
+      ;;   or `[name]`.
       (= 1 (count structural-args))
       (let [structural-name (first structural-args)
             r-frees (deep-free-ext-names r-fn-id lookups)]
         (if (some #{structural-name} r-frees)
           [structural-name]
           (let [a (alpha-equiv-lambda-params r-fn-id f-fn-id lookups)
-                one-shot? (= :arg structural-name)
-                global-env (when one-shot? (global-env-binding-names lookups))]
-            (if (and one-shot?
-                     (seq a)
-                     (every? global-env a))
-              []
-              a))))
+                fn-name-of (fn [id] (some-> (get (:fn-map lookups) id) :name))
+                demand (fn [why]
+                         (throw (ex-info
+                                  (str "Cannot infer the lambda parameter for "
+                                       "HOF callable " (pr-str (fn-name-of r-fn-id))
+                                       " (used from " (pr-str (fn-name-of f-fn-id))
+                                       "): " why
+                                       " Declare `:lambda-params` on the "
+                                       "callable fn-def — `[]` when every "
+                                       "free arg is captured from the "
+                                       "binding chain, or the one name the "
+                                       "caller supplies per invocation.")
+                                  {:type :compile/ambiguous-lambda-params
+                                   :fn-id r-fn-id
+                                   :fn-name (fn-name-of r-fn-id)
+                                   :caller-fn-id f-fn-id
+                                   :caller-fn-name (fn-name-of f-fn-id)
+                                   :slot-id slot-id
+                                   :structural-name structural-name
+                                   :candidates (vec a)})))]
+            (cond
+              (empty? a) []
+              (> (count a) 1)
+              (demand (str "multiple non-captured free args "
+                           (pr-str (vec a)) " for a 1-arg slot."))
+              ;; One-shot (:arg) slots accept the single candidate only
+              ;; when it is R's OWN declared slot — a ref-lifted deep
+              ;; free is semantically captured plumbing, and wrapping it
+              ;; as the parameter overwrites the captured value with the
+              ;; per-call arg (the /api/branches repro the retired
+              ;; global-env heuristic guessed around).
+              (and (= :arg structural-name)
+                   (not (contains? (own-slot-names r-fn-id lookups)
+                                   (first a))))
+              (demand (str "one-shot slot (structural name :arg) whose "
+                           "surviving free " (pr-str (first a))
+                           " is a ref-lifted deep free, not one of the "
+                           "callable's own declared args."))
+              :else a))))
 
       ;; Map-callable structural slot — names must match. Sub free
       ;; args outside structural-args are captured.

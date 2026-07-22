@@ -416,6 +416,14 @@
                    ;; native `if`/`and`/`or` short-circuit on un-read args.
                    (:lazy-seq-args fn-def)    (assoc :lazy-seq-args
                                                      (:lazy-seq-args fn-def))
+                   ;; `:lambda-params` — the fn-def's EXPLICIT ordered
+                   ;; call-site parameter list for HOF use. Overrides the
+                   ;; wrap-arity inference in
+                   ;; `compile.renames/hof-lambda-params`; `[]` means
+                   ;; "everything captured" (a handler chain that takes
+                   ;; no per-call value).
+                   (contains? fn-def :lambda-params)
+                   (assoc :lambda-params (vec (:lambda-params fn-def)))
                    ;; `:compile-time-value?` — base-fn is evaluated ONCE at
                    ;; compile time and its result baked as `(constantly …)`
                    ;; into the closure (compile_eager reads this via the

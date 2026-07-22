@@ -685,7 +685,8 @@
   [fn-name]
   (let [drop-entry (fn [reg]
                      (let [id (get-in reg [:by-name fn-name])
-                           id (if (= id :graphden.packages.records.types/ambiguous) nil id)
+                           id (when-not (= id :graphden.packages.records.types/ambiguous)
+                                id)
                            entry (when id (get-in reg [:by-id id]))]
                        (reduce (fn [r k] (update r :by-name dissoc k))
                                (update reg :by-id dissoc id)

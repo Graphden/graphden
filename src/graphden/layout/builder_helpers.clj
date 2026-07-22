@@ -28,7 +28,8 @@
     [clojure.string :as str]
     [graphden.executor.compile.bindings :as cb]
     [graphden.layout.bindings :as bnd]
-    [graphden.layout.data :as data]))
+    [graphden.layout.data :as data]
+    [graphden.packages.records.types :as record-types]))
 
 
 ;; =============================================================================
@@ -735,24 +736,10 @@
 (declare add-fn-node)
 
 
-(defn type-row-role
-  "Classify a fn-row into one of the type roles. Mirrors
-   `executor.compile-runtime/type-row-role` so the layout can decide
-   whether to surface internal-structure edges for a type. Returns
-   `:base-fn` / `:composed` / `:refinement` / `:list` / `:union` /
-   `:variant` / `:fn-type` / `:record` / `:primitive`."
-  [fn-row has-slots?]
-  (let [c (:constraint fn-row)]
-    (cond
-      (seq (:parent-ids fn-row))      :composed
-      (some? (:return-type-fn-id fn-row)) :base-fn
-      (some? (:base-fn-id fn-row))    :refinement
-      (some? (:element-fn-id fn-row)) :list
-      (and (vector? c) (= :union (first c)))   :union
-      (and (vector? c) (= :variant (first c))) :variant
-      (and (vector? c) (= :fn (first c)))      :fn-type
-      has-slots?                      :record
-      :else                           :primitive)))
+(def type-row-role
+  "Row-role classifier — the shared `records.types/type-row-role`
+   (single source; the layout used to keep a hand-mirrored copy)."
+  record-types/type-row-role)
 
 
 (defn resolve-type-ref

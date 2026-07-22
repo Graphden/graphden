@@ -17,6 +17,7 @@
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
     [graphden.util.counters :as counters]))
@@ -75,37 +76,6 @@
       :fn-slots   (q :fn-slot)
       :bindings   (q :binding)
       :list-items (q :binding-list-item)})))
-
-
-(defn- type-row-role
-  "Classify a fn-row into one of the type roles (per the schema role
-   table) — `:record`, `:refinement`, `:list`, `:union`, `:variant`,
-   `:fn-type`, `:base-fn`, `:composed`, or `:primitive`. Used by
-   `register-type-aliases-from-db!` to pick the right alias body shape.
-
-   Unions, variants, AND structural fn-types share the storage shape
-   — all three stash their payload in `:constraint`
-   (`[:union T1 T2 …]` / `[:variant tag1 T1 tag2 T2 …]` /
-   `[:fn args ret]`). The leading keyword discriminates.
-
-   `:return-type-fn-id` is the base-fn signal; a real type-row has
-   none. A base-fn with slots (e.g. `:parse-fn-from-form`,
-   `:create-entity`) is thus never misclassified as a `:record`
-   type-row."
-  [fn-row has-slots?]
-  (cond
-    (seq (:parent-ids fn-row))     :composed
-    (some? (:return-type-fn-id fn-row)) :base-fn
-    (some? (:base-fn-id fn-row))   :refinement
-    (some? (:element-fn-id fn-row)) :list
-    (and (vector? (:constraint fn-row))
-         (= :union (first (:constraint fn-row)))) :union
-    (and (vector? (:constraint fn-row))
-         (= :variant (first (:constraint fn-row)))) :variant
-    (and (vector? (:constraint fn-row))
-         (= :fn (first (:constraint fn-row)))) :fn-type
-    has-slots?                     :record
-    :else                          :primitive))
 
 
 (defonce ^:private per-org-aliases
@@ -178,7 +148,7 @@
               (let [own-slots (->> (get slots-by-fn (:id f) [])
                                    (sort-by :position)
                                    (keep #(get slot-by-id (:slot-id %))))
-                    role (type-row-role f (seq own-slots))
+                    role (record-types/type-row-role f (seq own-slots))
                     body (case role
                            :record
                            (into {}

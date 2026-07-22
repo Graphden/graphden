@@ -207,3 +207,30 @@
     (->> forms
          (mapcat inline-fn-type-rows-from-form)
          (distinct))))
+
+
+(defn type-row-role
+  "Classify a fn-row into its role — the SINGLE source for the
+   discriminator that used to be copied across compile-runtime, the
+   layout builder and the types API (each drifting independently).
+   Returns `:composed` / `:base-fn` / `:refinement` / `:list` /
+   `:union` / `:variant` / `:fn-type` / `:record` / `:primitive`.
+
+   Unions, variants AND structural fn-types share the storage shape —
+   all three stash their payload in `:constraint`; the leading keyword
+   discriminates. `:return-type-fn-id` is the base-fn signal (a real
+   type-row has none), so a base-fn WITH slots is never misclassified
+   as a `:record` type-row. `has-slots?` — whether the row exposes own
+   fn-slot rows (the record signal)."
+  [fn-row has-slots?]
+  (let [c (:constraint fn-row)]
+    (cond
+      (seq (:parent-ids fn-row))          :composed
+      (some? (:return-type-fn-id fn-row)) :base-fn
+      (some? (:base-fn-id fn-row))        :refinement
+      (some? (:element-fn-id fn-row))     :list
+      (and (vector? c) (= :union (first c)))   :union
+      (and (vector? c) (= :variant (first c))) :variant
+      (and (vector? c) (= :fn (first c)))      :fn-type
+      has-slots?                          :record
+      :else                               :primitive)))

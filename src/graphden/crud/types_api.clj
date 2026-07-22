@@ -16,6 +16,7 @@
     [graphden.crud.type-check :as tc]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs])
@@ -49,16 +50,14 @@
 
 
 (defn compute-fn-role
-  "Mirrors `executor.compile-runtime/type-row-role`. The primary
-   base-fn signal is `:return-type-fn-id` presence (a real type-row
-   has none). As a belt-and-braces fallback we also cross-reference
-   the `rich-types-registry` snapshot: if a fn-name has a non-empty
-   `:args` map and is NOT marked `:type-row?`, it's a base-fn. Roles:
+  "Row-role via the shared `records.types/type-row-role`, plus a
+   belt-and-braces registry fallback: a fn-name with a non-empty
+   `:args` map that is NOT marked `:type-row?` is a base-fn even when
+   its row predates the `:return-type-fn-id` marker. Roles:
    `:composed`, `:base-fn`, `:refinement`, `:list`, `:union`,
    `:variant`, `:fn-type`, `:record`, `:primitive`."
   [fn-row has-slots? rich-snapshot]
-  (let [c (:constraint fn-row)
-        rich-entry (some-> (:name fn-row) keyword rich-snapshot)
+  (let [rich-entry (some-> (:name fn-row) keyword rich-snapshot)
         base-fn-via-registry? (and rich-entry
                                    (not (:type-row? rich-entry))
                                    (seq (:args rich-entry)))]
@@ -66,13 +65,7 @@
       (seq (:parent-ids fn-row))                 :composed
       (or (some? (:return-type-fn-id fn-row))
           base-fn-via-registry?)                 :base-fn
-      (some? (:base-fn-id fn-row))               :refinement
-      (some? (:element-fn-id fn-row))            :list
-      (and (vector? c) (= :union (first c)))     :union
-      (and (vector? c) (= :variant (first c)))   :variant
-      (and (vector? c) (= :fn (first c)))        :fn-type
-      has-slots?                                 :record
-      :else                                      :primitive)))
+      :else (record-types/type-row-role fn-row has-slots?))))
 
 
 (defn type-name-kinds

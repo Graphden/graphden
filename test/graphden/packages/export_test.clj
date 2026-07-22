@@ -138,6 +138,57 @@
 
 
 ;; =============================================================================
+;; Secret-path bindings — faithful round-trip + share-time stripping
+;; =============================================================================
+
+(def ^:private secret-fixture
+  "A sink with a plain slot + a fn-def that vault-binds it. The binding
+   form (not the slot's declared type) is what drives the round-trip —
+   the `[:secret …]` marker lives in the rich-types registry, which the
+   parse/export layer never consults."
+  [{:name :sink :namespace "ex" :args {:password :text :sql :text} :return-type :int}
+   {:name :db-call :namespace "ex" :parent :sink
+    :args {:password {:secret-path "user-db/password"} :sql {:value "SELECT 1"}}}])
+
+
+(deftest roundtrip-secret-path
+  (testing "a {:secret-path …} binding survives parse → export → parse"
+    (is (roundtrips-exactly? secret-fixture) (pr-str (diff-report secret-fixture))))
+  (testing "parse stores the path under :override-kind :secret-path"
+    (let [recs (parse/parse-module secret-fixture)
+          b (first (filter #(and (= :binding (:kind %))
+                                 (= "user-db/password" (:value %)))
+                           recs))]
+      (is (some? b) "binding row with the path exists")
+      (is (= :secret-path (:override-kind b)))
+      (is (true? (:value-present b)))))
+  (testing "export emits {:secret-path …}, never a {:value <path>} literal"
+    (let [out (export/records->fn-defs (parse/parse-module secret-fixture))
+          db-call (first (filter #(= :db-call (:name %)) out))]
+      (is (= {:secret-path "user-db/password"}
+             (get-in db-call [:args :password]))
+          "the regression this guards: the path silently degrading to a
+           plain literal (broken secret + disclosed path) on re-import"))))
+
+
+(deftest strip-secret-paths-policy
+  (let [out (export/records->fn-defs (parse/parse-module secret-fixture))]
+    (testing "secret-path-args manifests every vault-path binding"
+      (is (= [{:fn :db-call :arg :password}] (export/secret-path-args out))))
+    (testing "strip removes the arg entry entirely — slot reverts to free"
+      (let [stripped (export/strip-secret-paths out)
+            db-call (first (filter #(= :db-call (:name %)) stripped))]
+        (is (not (contains? (:args db-call) :password)))
+        (is (= {:value "SELECT 1"} (get-in db-call [:args :sql]))
+            "non-secret bindings untouched")))
+    (testing "strip keeps a remainder when the map carried more than the path"
+      (let [defs [{:name :x :namespace "ex" :parent :sink
+                   :args {:password {:secret-path "p" :required true}}}]
+            [stripped] (export/strip-secret-paths defs)]
+        (is (= {:required true} (get-in stripped [:args :password])))))))
+
+
+;; =============================================================================
 ;; Corpus fixpoint — the publish / install guarantee
 ;; =============================================================================
 
@@ -193,8 +244,11 @@
 
 (deftest export-graph-bundle-shape
   (let [bundle (export/export-graph-bundle *storage*)]
-    (testing "the migration bundle is exactly {:fns :namespaces}"
-      (is (= #{:fns :namespaces} (set (keys bundle)))))
+    (testing "the migration bundle shape (incl. the always-present secret keys)"
+      (is (= #{:fns :namespaces :secrets :secret-paths-included?}
+             (set (keys bundle))))
+      (is (= [] (:secrets bundle)) "golden graph has no secret bindings")
+      (is (false? (:secret-paths-included? bundle))))
     (testing ":fns is the whole-graph export (thousands of fn-defs, known one present)"
       (is (> (count (:fns bundle)) 2000))
       (is (some #(= :html-page-handler (:name %)) (:fns bundle))))

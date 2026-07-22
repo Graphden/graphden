@@ -280,11 +280,17 @@
    type-override the author never wrote)."
   [b ctx]
   (let [type-ref (when (:type-override-fn-id b)
-                   (id->type-ref (:type-override-fn-id b) ctx))]
+                   (id->type-ref (:type-override-fn-id b) ctx))
+        secret-path? (= :secret-path (:override-kind b))]
     (cond-> {}
       (:ref-fn-id b)
       (assoc :ref (keyword (:name (get-in ctx [:fns (:ref-fn-id b)]))))
-      (:value-present b) (assoc :value (:value b))
+      ;; A `:secret-path` binding's stored `:value` is the VAULT PATH,
+      ;; not a literal — emit the dedicated `:secret-path` key so
+      ;; re-parse restores `:override-kind :secret-path` instead of
+      ;; degrading the binding to a plain literal carrying the path.
+      secret-path? (assoc :secret-path (:value b))
+      (and (:value-present b) (not secret-path?)) (assoc :value (:value b))
       (:list-append b) (assoc :append (binding-items b ctx))
       (and (:list-append b) (:list-closed b)) (assoc :closed true)
       type-ref (assoc :type type-ref)
@@ -310,6 +316,16 @@
         items
         (cond-> {:append items}
           (:list-closed b) (assoc :closed true)))
+
+      ;; secret-path binding: the stored `:value` is the OpenBao/vault
+      ;; PATH the executor derefs at run time, not a literal. Emit the
+      ;; dedicated `{:secret-path …}` form so re-parse restores
+      ;; `:override-kind :secret-path` — the plain `{:value …}` form
+      ;; would silently turn the secret into a literal string holding
+      ;; the path (broken AND path-disclosing) on round-trip.
+      (= :secret-path (:override-kind b))
+      (cond-> {:secret-path (:value b)}
+        (some? (:required b)) (assoc :required (:required b)))
 
       ;; ref binding (optionally with a type-override / required marker)
       (:ref-fn-id b)
@@ -537,6 +553,55 @@
   (records->fn-defs (graph->records storage)))
 
 
+;; =============================================================================
+;; Secret-path policy — never share a vault path silently
+;; =============================================================================
+;;
+;; A secret's VALUE never enters graph storage (it lives in OpenBao; the
+;; binding stores only the KV path), so a bundle can never leak the value.
+;; The PATH is still org-topology information, and a fn-def that fixes it
+;; is org-local configuration — so bundles built for sharing (publish,
+;; whole-graph export) strip the paths BY DEFAULT and carry an explicit
+;; `:secrets` manifest instead, so neither side learns about the secrets
+;; "незаметно": the exporter sees what was stripped, the importer sees
+;; what must be defined. `include-secret-paths?` opts back in for
+;; org-internal migration (same vault topology on both ends).
+
+(defn secret-path-args
+  "Manifest of vault-path bindings across exported fn-defs — one
+   `{:fn <fn-name> :arg <arg-name>}` entry per `{:secret-path …}`
+   arg-value. This is what an importer must re-define (each listed arg
+   is a `[:secret …]`-typed slot that will surface as a free arg when
+   the path is stripped)."
+  [fn-defs]
+  (vec (for [fd fn-defs
+             [arg v] (:args fd)
+             :when (and (map? v) (contains? v :secret-path))]
+         {:fn (:name fd) :arg arg})))
+
+
+(defn strip-secret-paths
+  "Remove vault paths from exported fn-defs. A `{:secret-path …}`
+   arg-value loses its `:secret-path` key; when nothing else remains the
+   arg entry is dropped entirely, so the slot reverts to a FREE arg of
+   its (secret-typed) slot — the type system then surfaces 'needs a
+   secret defined' at the importer's side instead of silently carrying
+   the exporter's vault topology."
+  [fn-defs]
+  (mapv (fn [fd]
+          (if-let [args (:args fd)]
+            (let [args' (into {}
+                              (keep (fn [[k v]]
+                                      (if (and (map? v) (contains? v :secret-path))
+                                        (when-let [rest-v (not-empty (dissoc v :secret-path))]
+                                          [k rest-v])
+                                        [k v])))
+                              args)]
+              (if (seq args') (assoc fd :args args') (dissoc fd :args)))
+            fd))
+        fn-defs))
+
+
 (defn export-graph-bundle
   "Export the ENTIRE stored graph as a migration bundle:
 
@@ -548,11 +613,21 @@
    from (namespace, name), re-syncing this bundle onto a *booted* install is
    idempotent on any fn-def already present (the platform packages) and purely
    additive for the caller's own fns — so it is a faithful \"download my whole
-   project\" migration artifact. Powers GET /api/export/graph."
-  [storage]
-  (let [fns (export-graph storage)]
-    {:fns fns
-     :namespaces (vec (sort (distinct (keep :namespace fns))))}))
+   project\" migration artifact. Powers GET /api/export/graph.
+
+   Vault paths are STRIPPED by default (see § Secret-path policy above);
+   `:secrets` lists what was affected and `:secret-paths-included?` states
+   which mode produced the bundle. Pass `{:include-secret-paths? true}`
+   for an org-internal migration that keeps the paths."
+  ([storage] (export-graph-bundle storage {}))
+  ([storage {:keys [include-secret-paths?]}]
+   (let [fns (export-graph storage)
+         secrets (secret-path-args fns)
+         fns (if include-secret-paths? fns (strip-secret-paths fns))]
+     {:fns fns
+      :namespaces (vec (sort (distinct (keep :namespace fns))))
+      :secrets secrets
+      :secret-paths-included? (boolean include-secret-paths?)})))
 
 
 ;; =============================================================================
@@ -646,52 +721,64 @@
    subtree but DEFINED outside it (excluding primitives) — what an
    installer must already have present. This is the core of
    `POST /api/packages/publish` (cloud) and `extract` (self-hosted);
-   registry persistence + versioning wrap this."
-  [storage root]
-  (let [records (graph->records storage)
-        ctx (index-records records)
-        all-defs (records->fn-defs records)
-        owned-defs (filterv #(under-ns? (:namespace %) root) all-defs)
-        owned-fn-ids (into #{}
-                           (comp (filter #(under-ns? (:namespace-id %) root))
-                                 (map :id))
-                           (vals (:fns ctx)))
-        ;; name index for resolving constraint type-name keywords → ns.
-        name->ns (into {}
-                       (keep (fn [f]
-                               (when (:name f)
-                                 [(keyword (:name f)) (:namespace-id f)])))
-                       (vals (:fns ctx)))
-        ;; External structural fn-id refs reachable from every owned fn —
-        ;; named, defined OUTSIDE the subtree, not a primitive. Collected once
-        ;; so we can derive both the fn-NAME deps and the package deps.
-        external-ref-fn-ids (into #{}
-                                  (comp (mapcat #(fn-ref-fn-ids % ctx))
-                                        (filter (fn [id]
-                                                  (let [f (get-in ctx [:fns id])]
-                                                    (and (:name f)
-                                                         (not (under-ns? (:namespace-id f) root))
-                                                         (not (contains? prim-id->kw id)))))))
-                                  owned-fn-ids)
-        ref-deps (into #{}
-                       (map #(keyword (:name (get-in ctx [:fns %]))))
-                       external-ref-fn-ids)
-        ;; The namespaces those external fns live in — the versioned ones
-        ;; (`X@V`) reverse-map to the packages this bundle depends on.
-        dep-namespaces (into #{}
-                             (keep #(:namespace-id (get-in ctx [:fns %])))
-                             external-ref-fn-ids)
-        ;; constraint type-name keywords (union / variant / map / tuple /
-        ;; fn-type) on owned fn rows whose target is defined outside.
-        constraint-deps (into #{}
-                              (comp (map #(get-in ctx [:fns %]))
-                                    (mapcat #(constraint-type-names (:constraint %)))
-                                    (filter (fn [nm]
-                                              (when-let [ns (name->ns nm)]
-                                                (not (under-ns? ns root))))))
-                              owned-fn-ids)]
-    {:namespace root
-     :namespaces (vec (sort (distinct (map :namespace owned-defs))))
-     :fns owned-defs
-     :dependencies (vec (sort (into ref-deps constraint-deps)))
-     :package-dependencies (package-deps-from-namespaces storage dep-namespaces)}))
+   registry persistence + versioning wrap this.
+
+   Vault paths are STRIPPED by default (publishing is sharing — see
+   § Secret-path policy above); `:secrets` manifests what the installer
+   must define. Pass `{:include-secret-paths? true}` only for an
+   org-internal bundle."
+  ([storage root] (export-namespace storage root {}))
+  ([storage root {:keys [include-secret-paths?]}]
+   (let [records (graph->records storage)
+         ctx (index-records records)
+         all-defs (records->fn-defs records)
+         owned-defs (filterv #(under-ns? (:namespace %) root) all-defs)
+         secrets (secret-path-args owned-defs)
+         owned-defs (if include-secret-paths?
+                      owned-defs
+                      (strip-secret-paths owned-defs))
+         owned-fn-ids (into #{}
+                            (comp (filter #(under-ns? (:namespace-id %) root))
+                                  (map :id))
+                            (vals (:fns ctx)))
+         ;; name index for resolving constraint type-name keywords → ns.
+         name->ns (into {}
+                        (keep (fn [f]
+                                (when (:name f)
+                                  [(keyword (:name f)) (:namespace-id f)])))
+                        (vals (:fns ctx)))
+         ;; External structural fn-id refs reachable from every owned fn —
+         ;; named, defined OUTSIDE the subtree, not a primitive. Collected once
+         ;; so we can derive both the fn-NAME deps and the package deps.
+         external-ref-fn-ids (into #{}
+                                   (comp (mapcat #(fn-ref-fn-ids % ctx))
+                                         (filter (fn [id]
+                                                   (let [f (get-in ctx [:fns id])]
+                                                     (and (:name f)
+                                                          (not (under-ns? (:namespace-id f) root))
+                                                          (not (contains? prim-id->kw id)))))))
+                                   owned-fn-ids)
+         ref-deps (into #{}
+                        (map #(keyword (:name (get-in ctx [:fns %]))))
+                        external-ref-fn-ids)
+         ;; The namespaces those external fns live in — the versioned ones
+         ;; (`X@V`) reverse-map to the packages this bundle depends on.
+         dep-namespaces (into #{}
+                              (keep #(:namespace-id (get-in ctx [:fns %])))
+                              external-ref-fn-ids)
+         ;; constraint type-name keywords (union / variant / map / tuple /
+         ;; fn-type) on owned fn rows whose target is defined outside.
+         constraint-deps (into #{}
+                               (comp (map #(get-in ctx [:fns %]))
+                                     (mapcat #(constraint-type-names (:constraint %)))
+                                     (filter (fn [nm]
+                                               (when-let [ns (name->ns nm)]
+                                                 (not (under-ns? ns root))))))
+                               owned-fn-ids)]
+     {:namespace root
+      :namespaces (vec (sort (distinct (map :namespace owned-defs))))
+      :fns owned-defs
+      :dependencies (vec (sort (into ref-deps constraint-deps)))
+      :package-dependencies (package-deps-from-namespaces storage dep-namespaces)
+      :secrets secrets
+      :secret-paths-included? (boolean include-secret-paths?)})))

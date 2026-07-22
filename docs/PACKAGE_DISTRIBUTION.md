@@ -507,6 +507,17 @@ version input covers update/rollback.)
   - The paywall/billing **gate** stays a cloud-control-plane concern (closed
     source, per DISTRIBUTION.md) — the open-core executor just exposes the
     capability; the control plane decides who may call it.
+- **Secret-path policy** (both export AND publish): vault paths
+  (`:override-kind :secret-path` bindings) are **stripped by default** and
+  manifested in `:secrets` + `:secret-paths-included?` on the bundle — the
+  publisher sees a stripped-secrets notice, the installer gets the manifest
+  back as `:needs-definition` in the install envelope (persisted on the
+  `:package-version` row's nullable `:secrets` column) plus a Packages-panel
+  notice. `?include-secret-paths=true` on `GET /api/export/graph` opts in for
+  org-internal migration. Full rationale + round-trip form:
+  [SECRETS.md § Sharing / export policy](SECRETS.md).
+  Tests: `export-test/{roundtrip-secret-path,strip-secret-paths-policy}`,
+  `registry-test/publish-carries-secrets-manifest-install-reports-needs-definition`.
 
 ---
 

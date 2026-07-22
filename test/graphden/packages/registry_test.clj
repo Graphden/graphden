@@ -184,9 +184,12 @@
   (testing ":export-graph runs through the executor against the whole live graph"
     (let [{:keys [ctx all-name->id]} *bootstrap*
           bundle (exec/execute-with-named-args ctx (get all-name->id :export-graph) {})]
-      (is (= #{:fns :namespaces} (set (keys bundle))))
+      (is (= #{:fns :namespaces :secrets :secret-paths-included?}
+             (set (keys bundle))))
       (is (> (count (:fns bundle)) 2000) "whole graph = thousands of fn-defs")
-      (is (contains? (set (:namespaces bundle)) "app.page"))))
+      (is (contains? (set (:namespaces bundle)) "app.page"))
+      (is (false? (:secret-paths-included? bundle))
+          "no query param bound → default strip mode")))
   (testing "GET /api/export/graph returns the bundle as an application/edn body"
     (let [resp (setup/via-graph *bootstrap* :_export-graph-handler
                                 {:request-method :get})
@@ -197,10 +200,46 @@
       ;; the wire, but via-graph returns the raw handler output — so assert on
       ;; the value, key-form-independent.
       (is (contains? (set (vals (:headers resp))) "application/edn"))
-      (is (= #{:fns :namespaces} (set (keys bundle)))
+      (is (= #{:fns :namespaces :secrets :secret-paths-included?}
+             (set (keys bundle)))
           "the EDN body round-trips to the same bundle shape (keywords preserved)")
       (is (some #(= :html-page-handler (:name %)) (:fns bundle))
           "a known fn-def survives the EDN round-trip with keyword keys/values"))))
+
+
+(deftest publish-carries-secrets-manifest-install-reports-needs-definition
+  ;; The share-safety contract end-to-end: a bundle whose export stripped
+  ;; a vault path carries the :secrets manifest → publish persists +
+  ;; returns it (the publisher's warning) → install surfaces it as
+  ;; :needs-definition (the installer's todo). The secret-shaped def
+  ;; (:parent :secret-leaf, no :in binding) materializes fine — its :in
+  ;; slot is simply a free [:secret :text] arg until the installer binds
+  ;; a vault path of their own.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        bundle {:namespace "sectest"
+                :namespaces ["sectest"]
+                :fns [{:name :sec-pass :namespace "sectest" :parent :secret-leaf}]
+                :dependencies [:secret-leaf]
+                :package-dependencies []
+                :secrets [{:fn :sec-pass :arg :in}]
+                :secret-paths-included? false}
+        pub (exec/execute-with-named-args
+              ctx (get all-name->id :publish-package-apply)
+              {:pkg-name "sec.pkg" :pkg-version "1.0.0" :bundle bundle})]
+    (testing "publish returns + persists the secrets manifest"
+      (is (true? (:ok pub)))
+      (is (= [{:fn :sec-pass :arg :in}] (:secrets pub))
+          "the publisher is told what was stripped — never silent")
+      (let [row (first (sp/query-entities (storage) :package-version
+                                          {:name "sec.pkg"}))]
+        (is (= [{:fn :sec-pass :arg :in}] (:secrets row)))))
+    (testing "install surfaces :needs-definition from the stored manifest"
+      (let [res (exec/execute-with-named-args
+                  ctx (get all-name->id :install-package)
+                  {:pkg-name "sec.pkg" :pkg-version "1.0.0"})]
+        (is (true? (:ok res)))
+        (is (= [{:fn :sec-pass :arg :in}] (:needs-definition res))
+            "the installer is told which secrets to define")))))
 
 
 (defn- publish-req

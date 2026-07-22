@@ -239,6 +239,38 @@ No `:network` / `:io` / `:db` sink uses `:any` for a content slot
 (verified by grep across `resources/packages/web/*/fns.edn`).
 The only remaining concern is `:throw` — see Known limits.
 
+## Sharing / export policy — "never silently"
+
+A secret's VALUE never enters graph storage, so no export can leak it.
+The vault PATH does live in the graph (`binding.value` under
+`:override-kind :secret-path`) and is org-topology information — so
+every share-shaped bundle treats it explicitly:
+
+- **`GET /api/export/graph`** and **`POST /api/packages/publish`**
+  STRIP vault paths by default: the `{:secret-path …}` arg entry is
+  dropped, the slot reverts to a free `[:secret T]` arg, and the
+  bundle carries a `:secrets` manifest (`[{:fn … :arg …} …]`) plus a
+  `:secret-paths-included?` flag. Both sides are told: the publish
+  response (and the Packages-panel publish notice) lists what was
+  stripped; the install envelope surfaces the same manifest as
+  `:needs-definition` (and the panel shows a "needs secrets defined"
+  notice). `GET /api/export/graph?include-secret-paths=true` opts back
+  in for org-internal migration (same vault on both ends).
+- **Round-trip form**: the exporter emits `{:secret-path "kv/path"}`
+  (never a `{:value …}` literal) and the parser restores
+  `:override-kind :secret-path` from it — so an included path
+  re-imports as a working secret binding, not as a literal string
+  holding the path.
+- **`GET /api/export/graph-rows`** (BYO-executor bootstrap) keeps
+  `:secret-path` rows verbatim BY DESIGN: it is an org-scoped,
+  auth-required operational channel and the remote executor needs the
+  path to deref the org's own vault at run time. It is not a sharing
+  surface.
+- An installed-but-undefined secret is just a fn whose `:in` slot is a
+  free `[:secret :text]` arg — validate-execute reports it, and the
+  editor's inline secret-binding form (vault path + write-only value)
+  is the affordance to define it.
+
 ## Known limits
 
 1. **Side-effect exfiltration via secret-aware sinks themselves** —

@@ -253,6 +253,31 @@ Adding more is one `defmethod` of
 
 ## Subtleties worth knowing
 
+### Parent-set edits are ROOT-branch-only (gated)
+
+`:parent-ids` is a `:ref-many` junction on the IDENTITY row — it is NOT
+versioned, so a re-parent is visible to EVERY branch the moment it
+commits, while the re-parent cascade's binding migration writes version
+rows on the request branch only. Ungated, a re-parent from a feature
+branch left every other branch resolving NEW parents over OLD bindings
+(bindings whose slots fell out of the new inheritance closure silently
+unbind — prod behaviour changes with no prod-visible edit).
+
+`validation/reparent-cross-branch-rej` therefore rejects a parent-set
+change unless BOTH hold:
+
+- the request branch is the ROOT branch (`:base-branch-id nil`), and
+- no other branch holds its own `:fn-version` / `:binding-version` /
+  `:fn-slot-version` rows for this fn (the reject names the diverging
+  branches — merge or delete them first).
+
+Parent-PRESERVING updates and non-versioned storages are unaffected.
+This is deliberately option (б) of the two coherent designs — the
+alternative (а), versioning the parent-set itself (an ordered array on
+`fn-version` + version-aware reverse-parent queries), stays open in
+[ADR-identity-model.md](adr/ADR-identity-model.md)'s companion notes if
+branch-local inheritance experiments ever become a requirement.
+
 ### `:fn-version` ≠ "functional behaviour"
 
 Only the `:fn` row itself is anchored when you make a change to its

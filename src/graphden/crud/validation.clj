@@ -550,6 +550,62 @@
         {:reason ":override-kind :secret-path requires the slot's effective type to carry a `:secret` marker — without it the dereferenced value would silently flow into a non-secret slot, defeating the type-system enforcement"}))))
 
 
+(defn- reparent-cross-branch-rej
+  "Guard the parent-set/binding desync: `:parent-ids` lives on the
+   IDENTITY row (a junction — visible to every branch instantly), while
+   the re-parent cascade's binding migration writes VERSION rows on the
+   request branch only. An off-root re-parent, or one performed while
+   other branches hold their own versions of this fn, therefore leaves
+   those branches resolving NEW parents over OLD bindings — bindings
+   whose slots fell out of the new inheritance closure silently unbind.
+   Until the parent-set itself is versioned (ADR-identity-model.md
+   companion decision — option (а)), re-parenting is allowed only on
+   the ROOT branch with no diverging branch versions.
+
+   Skips entirely on a non-versioned storage (no `:branch-id` — no
+   branches, no desync) and on creates / parent-preserving updates."
+  [storage entity-type data]
+  (when (and (= :fn entity-type)
+             (contains? data :parent-ids)
+             (:id data)
+             (:branch-id storage))
+    (let [existing (sp/read-entity storage :fn (:id data))]
+      (when (and existing
+                 (not= (set (or (:parent-ids existing) []))
+                       (set (or (:parent-ids data) []))))
+        (let [branch-id (:branch-id storage)
+              branch (sp/read-entity storage :branch branch-id)
+              fn-id (:id data)
+              foreign-branch-ids
+              (fn [entity]
+                (into #{}
+                      (comp (map :branch-id)
+                            (remove #(= branch-id %)))
+                      (sp/query-entities storage entity {:fn-id fn-id})))]
+          (cond
+            (some? (:base-branch-id branch))
+            {:reason (str "Changing a fn's parents affects EVERY branch "
+                          "(parent links are identity-level), but the "
+                          "accompanying binding changes land only on this "
+                          "branch — switch to the root branch to re-parent.")}
+
+            :else
+            (let [foreign (into (foreign-branch-ids :fn-version)
+                                (concat (foreign-branch-ids :binding-version)
+                                        (foreign-branch-ids :fn-slot-version)))]
+              (when (seq foreign)
+                (let [names (into []
+                                  (keep #(some-> (sp/read-entity storage :branch %)
+                                                 :name))
+                                  foreign)]
+                  {:reason (str "Other branches hold their own versions of "
+                                "this fn — re-parenting would leave them "
+                                "with new parents over old bindings. Merge "
+                                "or delete those branch versions first. "
+                                "Diverging branches: "
+                                (pr-str (sort names)))})))))))))
+
+
 (defn write-rej
   "Run every server-side write-time guard against the proposed row.
    Returns the first `{:reason :type}` rejection or nil if all pass.
@@ -570,4 +626,6 @@
       (some-> (list-closed-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/list-closed))
       (some-> (secret-path-rej storage entity-type entity-data)
-              (assoc :type :capability/secret-path-on-non-secret-slot))))
+              (assoc :type :capability/secret-path-on-non-secret-slot))
+      (some-> (reparent-cross-branch-rej storage entity-type entity-data)
+              (assoc :type :constraint-violation/reparent-cross-branch))))

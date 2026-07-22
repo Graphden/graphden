@@ -10,7 +10,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.validation :as v]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -454,3 +455,36 @@
           (is (nil? (v/write-rej storage :binding
                                  {:fn-id (:id a) :ref-fn-id (:id b)}))))
         (finally (sp/close storage))))))
+
+
+;; =============================================================================
+;; reparent-cross-branch-rej — parent-set edits are root-branch-only
+;; =============================================================================
+
+(deftest reparent-cross-branch-gate-test
+  (let [storage (setup/create-versioned-test-storage)]
+    (try
+      (let [p1 (setup/create-base-fn! storage "rcb-parent-1")
+            p2 (setup/create-base-fn! storage "rcb-parent-2")
+            f (sp/create-entity storage :fn {:name "rcb-child"
+                                             :parent-ids [(:id p1)]})
+            reparent {:id (:id f) :parent-ids [(:id p2)]}]
+        (testing "root branch, no diverging versions → allowed"
+          (is (nil? (v/write-rej storage :fn reparent))))
+        (testing "parent-preserving update → allowed anywhere"
+          (is (nil? (v/write-rej storage :fn {:id (:id f)
+                                              :parent-ids [(:id p1)]
+                                              :description "relabel"}))))
+        (testing "off-root branch → rejected"
+          (let [b (vs/create-branch! storage "rcb-feature")
+                on-b (vs/switch-branch storage (:id b))]
+            (is (re-find #"root branch"
+                         (:reason (v/write-rej on-b :fn reparent))))
+            (testing "…and a version row written on that branch blocks
+                      the ROOT-side re-parent too"
+              (sp/update-entity on-b :fn (:id f) {:description "branch edit"})
+              (let [rej (v/write-rej storage :fn reparent)]
+                (is (some? rej))
+                (is (re-find #"rcb-feature" (:reason rej))
+                    "the diverging branch is named in the reason"))))))
+      (finally (sp/close storage)))))

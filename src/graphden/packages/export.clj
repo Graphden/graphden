@@ -104,16 +104,29 @@
      :items    (group-by :binding-id (:binding-list-item by-kind))}))
 
 
+(defn- edn-keyword-ns?
+  "Can `ns-path` serve as an EDN keyword namespace? Version-qualified
+   materialized namespaces (`web.components@1-2-0`) contain `@`, which
+   the EDN reader rejects in symbols."
+  [ns-path]
+  (boolean (re-matches #"[A-Za-z0-9._-]+" ns-path)))
+
+
 (defn- ref-kw
   "Reference keyword for the fn with `id` — QUALIFIED when its bare
    name is duplicated across the export set (`:dup-names`), bare
-   otherwise (canonical minimal form)."
+   otherwise (canonical minimal form). A duplicated name whose
+   namespace is NOT EDN-keyword-safe (version-materialized `@`-ns)
+   falls back to the bare form — the pre-existing behaviour for that
+   corner; precise refs into materialized namespaces are re-derived by
+   the installer's own materialize pass, not by bundle re-parse."
   [id ctx]
   (let [f (get-in ctx [:fns id])
         n (:name f)]
     (when n
       (if (and (contains? (:dup-names ctx) n)
-               (string? (:namespace-id f)))
+               (string? (:namespace-id f))
+               (edn-keyword-ns? (:namespace-id f)))
         (keyword (:namespace-id f) n)
         (keyword n)))))
 

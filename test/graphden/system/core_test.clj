@@ -225,15 +225,40 @@
 
 
 (deftest validate-no-name-collisions-test
+  ;; Per-ns names (ADR-identity-model.md stage 5): collisions are
+  ;; per-(namespace, name) — the pair IS the deterministic fn-id —
+  ;; plus bare-name uniqueness for BASE-FNS only (the Clojure impls
+  ;; registry is name-keyed).
   (let [check @#'graphden.system.core/validate-no-name-collisions!]
     (testing "distinct base-fn + fn-def names pass"
-      (is (nil? (check {:base-fn-defs {:foo {}} :fn-defs [{:name :bar} {:name :baz}]}))))
-    (testing "a base-fn ↔ fn-def name collision fails loud"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Colliding fn names"
-            (check {:base-fn-defs {:foo {}} :fn-defs [{:name :foo}]}))))
-    (testing "two fn-defs sharing a name fail too"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Colliding fn names"
-            (check {:base-fn-defs {} :fn-defs [{:name :dup} {:name :dup}]}))))
+      (is (nil? (check {:base-fn-defs {:foo {:namespace "a"}}
+                        :fn-defs [{:name :bar :namespace "a"}
+                                  {:name :baz :namespace "a"}]}))))
+    (testing "a base-fn ↔ fn-def SAME-(ns,name) collision fails loud"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Colliding \(namespace, name\)"
+            (check {:base-fn-defs {:foo {:namespace "a"}}
+                    :fn-defs [{:name :foo :namespace "a"}]}))))
+    (testing "two fn-defs sharing (ns, name) fail too"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Colliding \(namespace, name\)"
+            (check {:base-fn-defs {} :fn-defs [{:name :dup :namespace "a"}
+                                               {:name :dup :namespace "a"}]}))))
+    (testing "same-named fn-defs in DIFFERENT namespaces are legal now"
+      (is (nil? (check {:base-fn-defs {}
+                        :fn-defs [{:name :dup :namespace "a"}
+                                  {:name :dup :namespace "b"}]}))))
+    (testing "a fn-def named like a base-fn in ANOTHER ns is allowed
+              (only base↔base bare collisions are guarded — the impls
+              registry is name-keyed; base-fn-defs being a map means a
+              cross-module base dup collapses in the loader before the
+              validator, a pre-existing reality the seq-shaped guard
+              defends against)"
+      (is (nil? (check {:base-fn-defs {:bfn {:namespace "a"}}
+                        :fn-defs [{:name :bfn :namespace "b"}]})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"BASE-FN names"
+            (check {:base-fn-defs [[:dup {:namespace "a"}]
+                                   [:dup {:namespace "b"}]]
+                    :fn-defs []}))))
     (testing "anonymous (name nil) fn-defs are excluded from the check"
-      (is (nil? (check {:base-fn-defs {:foo {}}
-                        :fn-defs [{:name nil} {:name nil} {:name :bar}]}))))))
+      (is (nil? (check {:base-fn-defs {:foo {:namespace "a"}}
+                        :fn-defs [{:name nil} {:name nil}
+                                  {:name :bar :namespace "a"}]}))))))

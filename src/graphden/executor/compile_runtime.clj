@@ -341,21 +341,22 @@
   ;; requiring it here would cycle. Deferred-resolved + asserted
   ;; non-nil so a future rename fails loudly instead of silently
   ;; degrading.
-  (let [snap (or (requiring-resolve
-                   'graphden.executor.registry.core/rich-types-snapshot)
-                 (throw (ex-info
-                          "rich-types-snapshot missing — namespace rename?"
-                          {:type :compile/missing-symbol
-                           :symbol 'graphden.executor.registry.core/rich-types-snapshot})))
-        rich (snap)
+  (let [type-of-id (or (requiring-resolve
+                         'graphden.executor.registry.core/rich-type-of-id)
+                       (throw (ex-info
+                                "rich-type-of-id missing — namespace rename?"
+                                {:type :compile/missing-symbol
+                                 :symbol 'graphden.executor.registry.core/rich-type-of-id})))
         fresh-cats #{:time :random}
         fresh-ids
         (into #{}
               (keep (fn [f]
-                      (when-let [nm (:name f)]
-                        (let [eff (:effects (get rich (keyword nm)))]
-                          (when (and eff (some fresh-cats eff))
-                            (:id f))))))
+                      ;; Registry entries key on the fn's IDENTITY — the
+                      ;; row id in hand — so same-named fns in different
+                      ;; namespaces each get their own freshness verdict.
+                      (let [eff (:effects (type-of-id (:id f)))]
+                        (when (and eff (some fresh-cats eff))
+                          (:id f)))))
               fns)]
     (ce/set-always-fresh-fn-ids! fresh-ids)))
 

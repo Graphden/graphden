@@ -141,17 +141,27 @@
    (create-base-fn! storage fn-name nil))
   ([storage fn-name return-type-keyword]
    (sp/create-entity storage :fn
-                     {:name fn-name
+                     ;; Deterministic id (same nil-ns derivation the
+                     ;; registry's name-keyed test writes use) so a
+                     ;; rich-types stub recorded by NAME and this row
+                     ;; agree on the fn's IDENTITY — the id-keyed
+                     ;; registry reads (produces-callable?,
+                     ;; lazy-seq-args, compile-time-value?, redaction)
+                     ;; resolve test fns exactly like synced ones.
+                     {:id (records/fn-id nil fn-name)
+                      :name fn-name
                       :parent-ids nil
                       :return-type-fn-id (get primitive-fn-ids
                                               (or return-type-keyword :any))})))
 
 
 (defn create-composed-fn!
-  "Creates a composed fn-row inheriting from `parent-id`."
+  "Creates a composed fn-row inheriting from `parent-id`. Deterministic
+   id — see `create-base-fn!`."
   [storage fn-name parent-id]
   (sp/create-entity storage :fn
-                    {:name fn-name
+                    {:id (records/fn-id nil fn-name)
+                     :name fn-name
                      :parent-ids [parent-id]}))
 
 

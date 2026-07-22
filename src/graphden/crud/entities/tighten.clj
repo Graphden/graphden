@@ -147,8 +147,8 @@
               (let [eff-set (or new-eff #{})
                     ref-fn-id (:ref-fn-id b)
                     ref-row (when ref-fn-id (sp/read-entity storage :fn ref-fn-id))
-                    ref-info (when-let [n (:name ref-row)]
-                               (registry/rich-type-of (keyword n)))
+                    ref-info (some-> (:id ref-row)
+                                     (registry/rich-type-of-id))
                     ref-effects (or (:effects ref-info) #{})
                     escapes (when (and (some? new-eff) (seq ref-effects))
                               (clojure.set/difference (set ref-effects) eff-set))]

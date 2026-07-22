@@ -205,12 +205,16 @@
 ;; =============================================================================
 
 (defn declared-effects-of
-  "Look up the declared `:effects` set for `fn-name` from rich-types
-   registry. Returns a vec of strings (for jsonb wire); nil when fn
-   has no effects (pure)."
-  [fn-name]
-  (when fn-name
-    (some-> (registry/rich-type-of (keyword fn-name))
+  "Look up the declared `:effects` set for the fn IDENTIFIED BY `fn-id`
+   from the rich-types registry. Returns a vec of strings (for jsonb
+   wire); nil when fn has no effects (pure).
+
+   Keyed by id, not name: per-namespace names may repeat, and an
+   effect-set read off a same-named neighbour would mis-classify the
+   run (persist-vs-inline decision)."
+  [fn-id]
+  (when fn-id
+    (some-> (registry/rich-type-of-id fn-id)
             :effects
             seq
             (->> (mapv name)))))
@@ -288,32 +292,31 @@
 
 
 (defn tainted-fn?
-  "True iff `fn-name`'s registered effective return-type carries a
+  "True iff the fn's registered effective return-type carries a
    `:secret` marker anywhere in its structure. Looked up against the
-   rich-types registry — same place the type-checker consults. Pure
-   data lookup, no name-dispatch on behaviour: every call walks the
-   computed type, not a hard-coded fn-name list.
-
-   `fn-name` arrives from storage as a string (the `:fn.name` field
-   is `:text`); the registry keys on keywords, mirroring
-   `declared-effects-of` just above."
-  [fn-name]
-  (and fn-name
-       (when-let [ret (:return (registry/rich-type-of (keyword fn-name)))]
+   rich-types registry by the fn's IDENTITY — per-namespace names may
+   repeat, and redaction consulting a same-named neighbour's entry
+   could unhide a secret result. Pure data lookup, no name-dispatch on
+   behaviour: every call walks the computed type, not a hard-coded
+   fn-name list."
+  [fn-id]
+  (and fn-id
+       (when-let [ret (:return (registry/rich-type-of-id fn-id))]
          (types/contains-secret? ret))))
 
 
 (defn touches-secret?
-  "True iff `fn-name`'s rich-type carries the `:secret` marker on
+  "True iff the fn's rich-type carries the `:secret` marker on
    its return OR on any of its declared arg slots. Broader than
    `tainted-fn?`: `tainted-fn?` only fires when the fn RETURNS a
    secret; `touches-secret?` also fires when the fn CONSUMES one
    (e.g. `:sql-exec` whose `:password` slot is `[:secret :text]`
    but whose return is plain `:int`). Used by the audit trail to
-   flag executions that fed a secret into a side-effecting sink."
-  [fn-name]
-  (when fn-name
-    (when-let [rt (registry/rich-type-of (keyword fn-name))]
+   flag executions that fed a secret into a side-effecting sink.
+   Keyed by fn IDENTITY — see `tainted-fn?`."
+  [fn-id]
+  (when fn-id
+    (when-let [rt (registry/rich-type-of-id fn-id)]
       (boolean
         (or (types/contains-secret? (or (:return rt) :any))
             (some (fn [[_ arg-entry]]
@@ -331,15 +334,15 @@
    intersection is the row admins want to review.
 
    Returns the outcome unchanged when one or both halves are false."
-  [fn-name outcome]
+  [fn-id outcome]
   (cond-> outcome
-    (and (touches-secret? fn-name)
+    (and (touches-secret? fn-id)
          (seq (:runtime-effects outcome)))
     (assoc :touched-secret? true)))
 
 
 (defn redact-outcome
-  "If `fn-name` is tainted (per `tainted-fn?`), strip the secret value
+  "If the fn is tainted (per `tainted-fn?`), strip the secret value
    from a succeeded/failed outcome — the result body and the error
    message can both carry the secret in plain text. Replaces them with
    `:tainted?` markers so the caller (and the persisted row) hide the
@@ -347,8 +350,8 @@
 
    Cancelled outcomes pass through (no value attached). Non-tainted
    outcomes pass through unchanged."
-  [fn-name outcome]
-  (if (tainted-fn? fn-name)
+  [fn-id outcome]
+  (if (tainted-fn? fn-id)
     (case (:status outcome)
       :succeeded (-> outcome
                      (assoc :result nil :tainted? true)
@@ -648,12 +651,12 @@
    row's `:runtime-effects` field alongside the terminal status, and
    warn-log if it diverges from `declared-effects`.
 
-   `fn-name` is consulted by `redact-outcome` to hide the result body
-   when the fn-def's effective return-type is `:secret`-marked. This
-   is the async-completion path; the sync inline-success path in
-   `apply-execute` redacts independently. Both write the same shape
-   to the row."
-  [storage execution-id fn-name ^java.util.concurrent.Future fut trace-atom declared-effects]
+   `fn-id` is consulted by `redact-outcome` (via the id-keyed registry)
+   to hide the result body when the fn-def's effective return-type is
+   `:secret`-marked. This is the async-completion path; the sync
+   inline-success path in `apply-execute` redacts independently. Both
+   write the same shape to the row."
+  [storage execution-id fn-id ^java.util.concurrent.Future fut trace-atom declared-effects]
   (future
     (try
       (let [result @fut
@@ -662,9 +665,9 @@
         (write-finished! storage execution-id
                          (->> (cond-> {:status :succeeded :result result}
                                 runtime-eff (assoc :runtime-effects runtime-eff))
-                              (stamp-touched-secret fn-name)
-                              (redact-outcome fn-name)
-                              (scrub-outcome fn-name))))
+                              (stamp-touched-secret fn-id)
+                              (redact-outcome fn-id)
+                              (scrub-outcome fn-id))))
       (catch java.util.concurrent.ExecutionException ee
         (let [cause (java.util.concurrent.ExecutionException/.getCause ee)
               runtime-eff (snapshot-runtime-effects trace-atom)]
@@ -679,9 +682,9 @@
                                            :error-data (when (ex-data cause)
                                                          (ex-data cause))}
                                     runtime-eff (assoc :runtime-effects runtime-eff))
-                                  (stamp-touched-secret fn-name)
-                                  (redact-outcome fn-name)
-                                  (scrub-outcome fn-name))))))
+                                  (stamp-touched-secret fn-id)
+                                  (redact-outcome fn-id)
+                                  (scrub-outcome fn-id))))))
       (catch java.util.concurrent.CancellationException _
         (write-finished! storage execution-id {:status :cancelled}))
       (catch Exception e

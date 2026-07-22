@@ -336,8 +336,8 @@
                                       ctx)))))))
 
 
-(def ^:private rich-type-of-fn
-  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of)))
+(def ^:private rich-type-of-id-fn
+  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
 
 
 (defn- compile-time-value-root?
@@ -347,8 +347,8 @@
    time and bake `(constantly result)`. Backs `:cell`'s registry-
    persistent atom."
   [fn-id {:keys [fn-map] :as lookups}]
-  (boolean (some-> (l/root-fn fn-id fn-map lookups) :name keyword
-                   (@rich-type-of-fn) :compile-time-value?)))
+  (boolean (some-> (l/root-fn fn-id fn-map lookups) :id
+                   (@rich-type-of-id-fn) :compile-time-value?)))
 
 
 (defn- compile-time-value-closure

@@ -187,24 +187,24 @@
 ;; declared-effects-of — registry lookup
 ;; =============================================================================
 
-(deftest declared-effects-of-nil-name
+(deftest declared-effects-of-nil-id
   (is (nil? (persist/declared-effects-of nil))))
 
 
 (deftest declared-effects-of-no-entry
-  (with-redefs [registry/rich-type-of (constantly nil)]
-    (is (nil? (persist/declared-effects-of "no-such-fn")))))
+  (with-redefs [registry/rich-type-of-id (constantly nil)]
+    (is (nil? (persist/declared-effects-of (random-uuid))))))
 
 
 (deftest declared-effects-of-empty-effects
-  (with-redefs [registry/rich-type-of (constantly {:effects #{}})]
-    (is (nil? (persist/declared-effects-of "pure-fn"))
+  (with-redefs [registry/rich-type-of-id (constantly {:effects #{}})]
+    (is (nil? (persist/declared-effects-of (random-uuid)))
         "empty effects set means `pure` — same nil signal as missing entry")))
 
 
 (deftest declared-effects-of-stringified
-  (with-redefs [registry/rich-type-of (constantly {:effects #{:db :env}})]
-    (is (= #{"db" "env"} (set (persist/declared-effects-of "x"))))))
+  (with-redefs [registry/rich-type-of-id (constantly {:effects #{:db :env}})]
+    (is (= #{"db" "env"} (set (persist/declared-effects-of (random-uuid)))))))
 
 
 ;; =============================================================================

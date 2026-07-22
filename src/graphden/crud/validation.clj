@@ -542,8 +542,7 @@
                             (first (sp/query-entities storage :fn-slot {:slot-id slot-id})))
           owner-fn (when owning-junction
                      (sp/read-entity storage :fn (:fn-id owning-junction)))
-          owner-name (some-> owner-fn :name keyword)
-          owner-rich (when owner-name (registry/rich-type-of owner-name))
+          owner-rich (some-> owner-fn :id registry/rich-type-of-id)
           arg-info (when (and owner-rich slot-name)
                      (get-in owner-rich [:args slot-name]))
           arg-type (or (:type arg-info) arg-info)]

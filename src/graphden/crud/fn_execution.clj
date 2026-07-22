@@ -62,14 +62,14 @@
    future when persisted, and attaches `:execution-id` when there is
    one. Pure on `base-outcome`; side effects scoped to `ctx`.
 
-   `ctx` keys: `:storage` `:row` `:fn-name` `:declared-effects`
+   `ctx` keys: `:storage` `:row` `:fn-id` `:declared-effects`
    `:runtime-effects`."
-  [base-outcome {:keys [storage row fn-name declared-effects runtime-effects]}]
+  [base-outcome {:keys [storage row fn-id declared-effects runtime-effects]}]
   (let [outcome (->> (cond-> base-outcome
                        runtime-effects (assoc :runtime-effects runtime-effects))
-                     (persist/stamp-touched-secret fn-name)
-                     (persist/redact-outcome fn-name)
-                     (persist/scrub-outcome fn-name))]
+                     (persist/stamp-touched-secret fn-id)
+                     (persist/redact-outcome fn-id)
+                     (persist/scrub-outcome fn-id))]
     (persist/log-effect-drift! (some-> row :id) declared-effects runtime-effects)
     (when row
       ;; Unregister even if the terminal write throws (DB error) — else
@@ -114,13 +114,12 @@
                     (not= (tc/current-org) tc/public-org)
                     (assoc :allowed-effects cr/default-cloud-allowed-effects))
          fn-id (:id fn-row)
-         fn-name (:name fn-row)
          fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
          ;; Cached: this call was ~1.3–1.9 s uncached and runs once per
          ;; request. Safe here because /api/execute runs after CRUD writes
          ;; (which invalidate), never during one. See lookup ns.
          free-slots (lookup/free-arg-slot-map-cached ctx fn-id)
-         declared-eff (persist/declared-effects-of fn-name)
+         declared-eff (persist/declared-effects-of fn-id)
          need-persist? (or (:persist? parsed) (seq declared-eff))
          executor-args (into {}
                              (keep (fn [[k v]]
@@ -182,13 +181,13 @@
                      storage fn-version-id declared-eff
                      (:user-id parsed) (:args parsed) free-slots)]
              (persist/register-future! (:id r) fut cancel-flag)
-             (persist/record-completion! storage (:id r) fn-name fut trace declared-eff)
+             (persist/record-completion! storage (:id r) fn-id fut trace declared-eff)
              {:status :pending :execution-id (str (:id r))})
 
            ;; Timeout AND we pre-persisted — record-completion's tail-future
            ;; fills in :result; client polls our row.
            (= ::pending result)
-           (do (persist/record-completion! storage (:id row) fn-name fut trace declared-eff)
+           (do (persist/record-completion! storage (:id row) fn-id fut trace declared-eff)
                {:status :pending :execution-id (str (:id row))})
 
            ;; Inline failure — write outcome to the row synchronously (if
@@ -202,7 +201,7 @@
                {:status :failed
                 :error (or (ex-message cause) (str cause))
                 :error-data (ex-data cause)}
-               {:storage storage :row row :fn-name fn-name
+               {:storage storage :row row :fn-id fn-id
                 :declared-effects declared-eff :runtime-effects (runtime-eff)}))
 
            ;; Inline success — same: write synchronously so the GET endpoint
@@ -212,7 +211,7 @@
            :else
            (-> (finalize-inline-outcome
                  {:status :succeeded :result result}
-                 {:storage storage :row row :fn-name fn-name
+                 {:storage storage :row row :fn-id fn-id
                   :declared-effects declared-eff :runtime-effects (runtime-eff)})
                (assoc :declared-effects declared-eff))))))))
 

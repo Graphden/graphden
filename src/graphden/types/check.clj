@@ -1857,6 +1857,10 @@
                                                      parent-info
                                                      (keys free-args))]
     (registry/record-rich-types-raw!
+      ;; Key by the fn's IDENTITY: crud-path fn-defs carry the ROW id
+      ;; (random for editor fns), sync-path defs derive the same
+      ;; uuid-v5(ns, name) their storage rows use.
+      (registry/fn-def-registry-id fn-name fn-def)
       fn-name
       (cond-> (merge {:return computed-return :args free-args}
                      (source-info-for fn-def))

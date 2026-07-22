@@ -274,6 +274,11 @@
                                (->> (get fn-by-id+refs))
                                :name keyword)]
           (cond-> {:name (some-> (:name own) keyword)
+                   ;; The ROW id — editor-created fns have RANDOM ids
+                   ;; (not the sync path's name-derived uuid-v5), so the
+                   ;; registry write that follows the check must key the
+                   ;; entry by THIS id, not a derived one.
+                   :fn-id fn-id
                    :args args}
             (= 1 (count parent-ids)) (assoc :parent (parent-name (first parent-ids)))
             (> (count parent-ids) 1) (assoc :parents (mapv parent-name parent-ids))
@@ -351,7 +356,7 @@
           (some? new-ref-id)
           (let [target-fn (sp/read-entity storage :fn new-ref-id)
                 target-name (some-> target-fn :name keyword)
-                target-info (when target-name (registry/rich-type-of target-name))
+                target-info (some-> target-fn :id registry/rich-type-of-id)
                 target-ret (or (some-> target-info :return) :any)
                 ;; Same `:any` escape on the target side — without rich-
                 ;; type info we can't reason about a freshly-created fn

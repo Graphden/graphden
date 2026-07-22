@@ -151,7 +151,21 @@
 ;; checking can do real subtype/unify against the original. Empty
 ;; until `sync-defs-to-storage!` populates it.
 
-(defonce ^:private rich-types-registry (atom {}))
+;; Internal shape: ONE atom holding BOTH the id-keyed entries and the
+;; name index — `{:by-id {fn-id → entry} :by-name {fn-name → fn-id}}`.
+;; fn-id is the entity's IDENTITY (per-namespace names are only unique
+;; within their namespace — a bare-name key silently clobbered
+;; same-named fns across namespaces/orgs); the name index serves the
+;; type-checker and public boundaries, whose native currency is the
+;; authored name. One atom (not two) so the parallel-test isolation
+;; override machinery (`*rich-types-override*` below) keeps working
+;; unchanged on an opaque snapshot.
+(defonce ^:private rich-types-registry (atom {:by-id {} :by-name {}}))
+
+
+(defn- empty-registry
+  []
+  {:by-id {} :by-name {}})
 
 
 ;; Thread-local override for parallel-test isolation. When `nil`
@@ -207,13 +221,15 @@
   @(target-rich-types-atom))
 
 
-;; §4 Risk-2 (rich-types): the global registry is keyed by BARE fn-name, so two
-;; orgs' same-named composed fns collide (last-write-wins). This per-org slice
-;; `{org → {fn-name → info}}` keeps each org's own. Populated by
-;; `record-rich-types-raw!` (the type-checker's tenant-fn writes) under the
-;; ambient org; `rich-type-of` prefers it for a tenant and falls back to the
-;; org-agnostic global — so the compile / public path is UNCHANGED (it never has
-;; a tenant org bound), only tenant type-checks/reads gain precedence.
+;; §4 Risk-2 (rich-types): the NAME INDEX is still bare-name-keyed, so two
+;; orgs' same-named composed fns collide there (last-write-wins on the
+;; index; the id-keyed entries themselves never collide — org fns have
+;; distinct ids). This per-org slice `{org → {:by-id … :by-name …}}` keeps
+;; each org's own name resolution. Populated by `record-rich-types-raw!`
+;; (the type-checker's tenant-fn writes) under the ambient org;
+;; `rich-type-of` prefers it for a tenant and falls back to the
+;; org-agnostic global — so the compile / public path is UNCHANGED (it never
+;; has a tenant org bound), only tenant type-checks/reads gain precedence.
 (defonce ^:private per-org-rich-types (atom {}))
 
 
@@ -264,6 +280,20 @@
                                           (resolve 'graphden.tenancy.context/public-org)))]
                    @v)]
       (when (not= org public) org))))
+
+
+(defn fn-def-registry-id
+  "fn-id for a name-plus-def registry write: an explicit `:fn-id` on the
+   def wins (the crud path threads the ROW id — editor fns have random
+   ids); else the name index's existing id when the name is already
+   registered (so a re-record — sync refresh, test stub — OVERWRITES the
+   live entry instead of forking a second one under a derived id); else
+   the deterministic `records/fn-id(namespace, name)` — the exact id the
+   records parser mints for this def's storage row on the sync path."
+  [fn-name fn-def]
+  (or (:fn-id fn-def)
+      (get-in (rich-types-view) [:by-name fn-name])
+      (records/fn-id (:namespace fn-def) fn-name)))
 
 
 (defn- validate-arg-type!
@@ -339,9 +369,18 @@
    per-base-fn type-rules declared at the base-fn's `impls.clj`
    registration site. When present they ride into the registry entry
    so the type-checker looks them up by base-fn identity instead of
-   dispatching a multimethod on the fn name."
-  [fn-name fn-def]
-  (let [args (:args fn-def)
+   dispatching a multimethod on the fn name.
+
+   Arities: the 2-arity derives the fn-id — reusing the name index's
+   existing id when the name is already registered (test-stub overwrite
+   + editor-fn re-record land on the row's id), else the deterministic
+   `records/fn-id(namespace, name)` the sync path's storage rows use.
+   Editor-created fns have RANDOM row ids — their write path threads
+   the id explicitly via the 3-arity."
+  ([fn-name fn-def]
+   (record-rich-types! (fn-def-registry-id fn-name fn-def) fn-name fn-def))
+  ([fn-id fn-name fn-def]
+   (let [args (:args fn-def)
         ret  (some-> (:return-type fn-def) types/resolve-alias)
         per-arg (into {}
                       (map (fn [[arg-name arg-spec]]
@@ -409,32 +448,37 @@
                   ;; preserves identity assertions in tests.
                   (or (:branch-local? fn-def)
                       (some (fn [p]
-                              (get-in (rich-types-view)
-                                      [p :branch-local?]))
+                              (let [v (rich-types-view)]
+                                (get-in v [:by-id (get-in v [:by-name p])
+                                           :branch-local?])))
                             (or (seq (:parents fn-def))
                                 (when (:parent fn-def)
                                   [(:parent fn-def)])
                                 [])))
                   (assoc :branch-local? true)))]
-    ;; `:effects` race resolution: the type-checker computes a fn's
-    ;; full effect set (parent inheritance + own-declared) and writes
-    ;; it via `record-rich-types-raw!`. Earlier in the same sync we
-    ;; wrote a raw `record-rich-types!` entry with only the fn-def's
-    ;; OWN-declared effects (often empty for composed fns that inherit
-    ;; `:process` from `:future`). If a parallel bootstrap re-runs
-    ;; `record-rich-types!` AFTER the type-check has populated
-    ;; computed effects, this second raw write would erase them — any
-    ;; service-eligibility assertion downstream then sees an empty
-    ;; set. Preserve existing non-empty effects when the fn-def
-    ;; declares none.
-    (swap! (target-rich-types-atom)
-           (fn [reg]
-             (let [existing (get reg fn-name)
-                   final-effects (if (and (empty? raw-effects)
-                                          (seq (:effects existing)))
-                                   (:effects existing)
-                                   raw-effects)]
-               (assoc reg fn-name (build final-effects)))))))
+     ;; `:effects` race resolution: the type-checker computes a fn's
+     ;; full effect set (parent inheritance + own-declared) and writes
+     ;; it via `record-rich-types-raw!`. Earlier in the same sync we
+     ;; wrote a raw `record-rich-types!` entry with only the fn-def's
+     ;; OWN-declared effects (often empty for composed fns that inherit
+     ;; `:process` from `:future`). If a parallel bootstrap re-runs
+     ;; `record-rich-types!` AFTER the type-check has populated
+     ;; computed effects, this second raw write would erase them — any
+     ;; service-eligibility assertion downstream then sees an empty
+     ;; set. Preserve existing non-empty effects when the fn-def
+     ;; declares none.
+     (swap! (target-rich-types-atom)
+            (fn [reg]
+              (let [existing (get-in reg [:by-id fn-id])
+                    final-effects (if (and (empty? raw-effects)
+                                           (seq (:effects existing)))
+                                    (:effects existing)
+                                    raw-effects)]
+                (-> reg
+                    (assoc-in [:by-id fn-id]
+                              (assoc (build final-effects)
+                                     :fn-id fn-id :name fn-name))
+                    (assoc-in [:by-name fn-name] fn-id))))))))
 
 
 (defn effectful-rich-type?
@@ -459,38 +503,71 @@
    `:branch-local?` carry-over: when an earlier `record-rich-types!`
    pass stamped the flag, preserve it here so the unification-driven
    raw write doesn't drop the inheritance. Only stashed when true —
-   matches the absent-key default everywhere else."
-  [fn-name rich-type-map]
-  (let [new-reg (swap! (target-rich-types-atom)
-                       (fn [reg]
-                         (let [existing (get reg fn-name)
-                               carry-bl? (or (true? (:branch-local? rich-type-map))
-                                             (true? (:branch-local? existing)))]
-                           (assoc reg fn-name
-                                  (cond-> (update rich-type-map :effects #(or % #{}))
-                                    carry-bl? (assoc :branch-local? true))))))]
-    ;; §4 Risk-2: mirror the entry into a TENANT's slice so its same-named
-    ;; composed fn doesn't read another org's signature from the bare-name
-    ;; global. Public / sync / compile writes are NOT mirrored (they own the
-    ;; global), so the per-org slice never goes stale against record-rich-types!.
-    (when-let [org (current-tenant-org)]
-      (swap! (target-per-org-rich-atom) assoc-in [org fn-name] (get new-reg fn-name)))
-    nil))
+   matches the absent-key default everywhere else.
+
+   Arities mirror `record-rich-types!` — the 2-arity reuses the name
+   index's existing id or derives the namespace-less deterministic id
+   (test stubs); production callers holding a row thread the id."
+  ([fn-name rich-type-map]
+   (record-rich-types-raw! (fn-def-registry-id fn-name rich-type-map)
+                           fn-name rich-type-map))
+  ([fn-id fn-name rich-type-map]
+   (let [new-reg (swap! (target-rich-types-atom)
+                        (fn [reg]
+                          (let [existing (get-in reg [:by-id fn-id])
+                                carry-bl? (or (true? (:branch-local? rich-type-map))
+                                              (true? (:branch-local? existing)))]
+                            (-> reg
+                                (assoc-in [:by-id fn-id]
+                                          (cond-> (-> rich-type-map
+                                                      (update :effects #(or % #{}))
+                                                      (assoc :fn-id fn-id :name fn-name))
+                                            carry-bl? (assoc :branch-local? true)))
+                                (assoc-in [:by-name fn-name] fn-id)))))]
+     ;; §4 Risk-2: mirror the entry into a TENANT's slice so its same-named
+     ;; composed fn doesn't read another org's signature from the bare-name
+     ;; global name index. Public / sync / compile writes are NOT mirrored
+     ;; (they own the global), so the per-org slice never goes stale against
+     ;; record-rich-types!.
+     (when-let [org (current-tenant-org)]
+       (swap! (target-per-org-rich-atom)
+              (fn [m]
+                (-> m
+                    (assoc-in [org :by-id fn-id] (get-in new-reg [:by-id fn-id]))
+                    (assoc-in [org :by-name fn-name] fn-id)))))
+     nil)))
+
+
+(defn rich-type-of-id
+  "Registry entry by the fn's IDENTITY — the primary lookup for every
+   caller that holds a row / fn-map entry (executor compile, persist
+   redaction, crud validation). Never ambiguous: per-namespace names may
+   repeat, ids can't. Tenant precedence mirrors `rich-type-of`."
+  ([fn-id]
+   (or (when-let [org (current-tenant-org)]
+         (get-in @(target-per-org-rich-atom) [org :by-id fn-id]))
+       (get-in (rich-types-view) [:by-id fn-id])))
+  ([fn-id arg-name]
+   (get-in (rich-type-of-id fn-id) [:args arg-name])))
 
 
 (defn rich-type-of
   ;; §4 Risk-2: a tenant prefers its OWN per-org entry; the compile / public
   ;; path (no tenant org bound) and single-tenant fall through to the global —
   ;; UNCHANGED behavior, plus tenant precedence. O(1) gets, no merge.
+  ;;
+  ;; NAME-keyed convenience over the name index — the type-checker's and
+  ;; public boundaries' native currency is the authored name. Resolution
+  ;; goes name → id → entry; callers that already hold the id should use
+  ;; `rich-type-of-id` directly.
   ([fn-name]
    (or (when-let [org (current-tenant-org)]
-         (get-in @(target-per-org-rich-atom) [org fn-name]))
-       (get (rich-types-view) fn-name)))
+         (let [slice (get @(target-per-org-rich-atom) org)]
+           (get-in slice [:by-id (get-in slice [:by-name fn-name])])))
+       (let [v (rich-types-view)]
+         (get-in v [:by-id (get-in v [:by-name fn-name])]))))
   ([fn-name arg-name]
-   (get-in (or (when-let [org (current-tenant-org)]
-                 (get-in @(target-per-org-rich-atom) [org fn-name]))
-               (get (rich-types-view) fn-name))
-           [:args arg-name])))
+   (get-in (rich-type-of fn-name) [:args arg-name])))
 
 
 (defn root-base-fn-name
@@ -533,9 +610,28 @@
           (name root))))))
 
 
+;; Memoized per registry-value identity: the types_api layer caches
+;; derived structures keyed on the snapshot's IDENTITY, so the view must
+;; be a stable object between registry writes (rebuilding per call would
+;; silently disable that cache).
+(def ^:private name-view-cache (atom nil))
+
+
 (defn rich-types-snapshot
+  "NAME-keyed view `{fn-name → entry}` of the registry — the public
+   read surface for iterating consumers (types API, sidebar roles,
+   always-fresh scan). Entries carry `:fn-id` and `:name`. Built from
+   the id-keyed truth via the name index; memoized per registry value."
   []
-  (rich-types-view))
+  (let [reg (rich-types-view)
+        [cached-reg cached-view] @name-view-cache]
+    (if (identical? cached-reg reg)
+      cached-view
+      (let [view (into {}
+                       (map (fn [[nm id]] [nm (get-in reg [:by-id id])]))
+                       (:by-name reg))]
+        (reset! name-view-cache [reg view])
+        view))))
 
 
 (defn unregister-rich-type!
@@ -552,9 +648,15 @@
    the global atom does. Mirror of `record-rich-types!`'s
    `target-rich-types-atom` write target."
   [fn-name]
-  (swap! (target-rich-types-atom) dissoc fn-name)
-  (when-let [org (current-tenant-org)]
-    (swap! (target-per-org-rich-atom) update org dissoc fn-name))
+  (let [drop-entry (fn [reg]
+                     (let [id (get-in reg [:by-name fn-name])]
+                       (-> reg
+                           (update :by-id dissoc id)
+                           (update :by-name dissoc fn-name))))]
+    (swap! (target-rich-types-atom) drop-entry)
+    (when-let [org (current-tenant-org)]
+      (swap! (target-per-org-rich-atom) update org
+             (fn [slice] (when slice (drop-entry slice))))))
   nil)
 
 
@@ -577,9 +679,25 @@
    contaminator-leaks-into-compile-eager symptom — a foreign
    `:effects` / `:return` shape on one of the
    service/handler-internal fn names landed a builder that
-   returned a closure where an Associative was expected."
+   returned a closure where an Associative was expected.
+
+   Accepts either the internal blob (from `snapshot-for-isolation`) or
+   the NAME-keyed view (from `rich-types-snapshot`) — the latter is
+   rebuilt into the blob via each entry's `:fn-id`."
   [snapshot]
-  (reset! (target-rich-types-atom) (or snapshot {})))
+  (reset! (target-rich-types-atom)
+          (cond
+            (nil? snapshot) (empty-registry)
+            (contains? snapshot :by-id) snapshot
+            :else (reduce-kv (fn [reg nm entry]
+                               (let [id (or (:fn-id entry)
+                                            (records/fn-id nil nm))]
+                                 (-> reg
+                                     (assoc-in [:by-id id]
+                                               (assoc entry :fn-id id :name nm))
+                                     (assoc-in [:by-name nm] id))))
+                             (empty-registry)
+                             snapshot))))
 
 
 (defn fn-names-with-tag
@@ -587,9 +705,9 @@
    `:tags`. Used by policy callers (admin-only-vault gate) to discover
    tagged base-fns declaratively instead of hardcoding names."
   [tag]
-  (->> (rich-types-view)
-       (keep (fn [[fn-name info]]
-               (when (contains? (:tags info) tag) fn-name)))
+  (->> (vals (:by-id (rich-types-view)))
+       (keep (fn [info]
+               (when (contains? (:tags info) tag) (:name info))))
        set))
 
 

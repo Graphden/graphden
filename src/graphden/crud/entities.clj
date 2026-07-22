@@ -1149,8 +1149,7 @@
       false
       (let [rows (sp/query-entities storage :fn {:id frontier})
             has-process? (some (fn [row]
-                                 (let [nm (some-> row :name name)
-                                       eff (some-> (registry/rich-type-of (keyword nm))
+                                 (let [eff (some-> (registry/rich-type-of-id (:id row))
                                                    :effects)]
                                    (contains? (or eff #{}) :process)))
                                rows)]

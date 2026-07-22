@@ -10,6 +10,7 @@
    thread them through."
   (:require
     [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]))
 
@@ -738,6 +739,32 @@
       (vec declared))))
 
 
+(defn- global-env-binding-names
+  "DEPRECATED FALLBACK SUPPORT — set of every env-binding `:env-name`
+   across the whole graph, memoised on `lookups`. Consulted only by the
+   legacy one-shot guess in `hof-lambda-params` (see the deprecation
+   warn there): a surviving alpha-equiv candidate that is somewhere an
+   env-binding name is LIKELY a wrap-time-captured value the lambda-arg
+   merge would overwrite. The principled replacement is an authored
+   `:lambda-params` on the callable; this scan stays until the
+   route/handler slot contracts migrate to explicit shapes
+   (follow-up in ADR-identity-model.md's companion plan)."
+  [{:keys [fn-map global-env-cache] :as lookups}]
+  (let [compute (fn []
+                  (set (mapcat #(keep :env-name
+                                      (b/collect-env-bindings % lookups))
+                               (keys fn-map))))]
+    (if-let [cache global-env-cache]
+      (or @cache (let [r (compute)] (reset! cache r) r))
+      (compute))))
+
+
+(def ^:private legacy-guess-warned
+  "One warn per callable per process — the deprecation nudge must not
+   spam every recompile."
+  (atom #{}))
+
+
 (defn alpha-equiv-lambda-params
   "Resolves the single lambda-param of a 1-arg HOF slot by picking
    R's surviving free-arg name AFTER subtracting everything F
@@ -876,45 +903,44 @@
         (if (some #{structural-name} r-frees)
           [structural-name]
           (let [a (alpha-equiv-lambda-params r-fn-id f-fn-id lookups)
-                fn-name-of (fn [id] (some-> (get (:fn-map lookups) id) :name))
-                demand (fn [why]
-                         (throw (ex-info
-                                  (str "Cannot infer the lambda parameter for "
-                                       "HOF callable " (pr-str (fn-name-of r-fn-id))
-                                       " (used from " (pr-str (fn-name-of f-fn-id))
-                                       "): " why
-                                       " Declare `:lambda-params` on the "
-                                       "callable fn-def — `[]` when every "
-                                       "free arg is captured from the "
-                                       "binding chain, or the one name the "
-                                       "caller supplies per invocation.")
-                                  {:type :compile/ambiguous-lambda-params
-                                   :fn-id r-fn-id
-                                   :fn-name (fn-name-of r-fn-id)
-                                   :caller-fn-id f-fn-id
-                                   :caller-fn-name (fn-name-of f-fn-id)
-                                   :slot-id slot-id
-                                   :structural-name structural-name
-                                   :candidates (vec a)})))]
+                fn-name-of (fn [id] (some-> (get (:fn-map lookups) id) :name))]
             (cond
               (empty? a) []
-              (> (count a) 1)
-              (demand (str "multiple non-captured free args "
-                           (pr-str (vec a)) " for a 1-arg slot."))
-              ;; One-shot (:arg) slots accept the single candidate only
-              ;; when it is R's OWN declared slot — a ref-lifted deep
-              ;; free is semantically captured plumbing, and wrapping it
-              ;; as the parameter overwrites the captured value with the
-              ;; per-call arg (the /api/branches repro the retired
-              ;; global-env heuristic guessed around).
-              (and (= :arg structural-name)
-                   (not (contains? (own-slot-names r-fn-id lookups)
-                                   (first a))))
-              (demand (str "one-shot slot (structural name :arg) whose "
-                           "surviving free " (pr-str (first a))
-                           " is a ref-lifted deep free, not one of the "
-                           "callable's own declared args."))
-              :else a))))
+              ;; Unambiguous single candidate that is R's OWN declared
+              ;; slot — accepted (the `:call :str-upper` bread-and-
+              ;; butter and `:filter :pred :some?` iteration case).
+              (and (= 1 (count a))
+                   (contains? (own-slot-names r-fn-id lookups) (first a)))
+              a
+              ;; LEGACY GUESS (deprecated): the pre-`:lambda-params`
+              ;; policy — one-shot slots drop to variadic-ignore when
+              ;; every candidate is somewhere an env-binding name;
+              ;; everything else passes the candidates through. Kept
+              ;; verbatim so existing graphs keep compiling, but each
+              ;; callable that lands here gets a one-time warn telling
+              ;; the author to declare `:lambda-params` — the guess is
+              ;; scheduled to become the `demand` error once the
+              ;; route/handler slot contracts migrate to explicit
+              ;; shapes (boundary slots are genuinely per-call: the
+              ;; uniform 0-arg flip broke /health, see the branch log).
+              :else
+              (let [one-shot? (= :arg structural-name)
+                    global-env (when one-shot?
+                                 (global-env-binding-names lookups))
+                    result (if (and one-shot?
+                                    (seq a)
+                                    (every? global-env a))
+                             []
+                             a)]
+                (when-not (contains? @legacy-guess-warned r-fn-id)
+                  (swap! legacy-guess-warned conj r-fn-id)
+                  (log/warn "hof-lambda-params legacy guess (deprecated) —"
+                            "declare :lambda-params on the callable"
+                            {:fn (fn-name-of r-fn-id)
+                             :caller (fn-name-of f-fn-id)
+                             :candidates (vec a)
+                             :guessed result}))
+                result)))))
 
       ;; Map-callable structural slot — names must match. Sub free
       ;; args outside structural-args are captured.

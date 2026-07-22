@@ -216,7 +216,7 @@
    :parent :invoke
    :return-type :ring-response-shape
    :args {:arg  {:ref :internal-request :type :ring-request-shape}
-          :func {:type [:fn {} :ring-response-shape]}}}
+          :func {:type [:fn {:arg :ring-request-shape} :ring-response-shape]}}}
 
   ;; Opinionated default security headers — merged into every response's
   ;; `:headers` map. Keyword-keyed because http-kit accepts both string
@@ -244,7 +244,7 @@
    :args {:m        :router-result
           :path     [{:value :headers}]
           :defaults :default-security-headers
-          :func     {:type [:fn {} :ring-response-shape]
+          :func     {:type [:fn {:arg :ring-request-shape} :ring-response-shape]
                      :description "Concrete router callable invoked per request. Bound by the consumer (typically a `:router` descendant)."}}}
 
   ;; Same header-merge as :router-ring-response, but as a HANDLER WRAP
@@ -262,7 +262,7 @@
    :description "Runs :base-handler on the :request — the response the wrap will stamp headers onto. Named (not inline) so the HOF :call type-checks like :router-result does."
    :parent :call
    :args {:func {:as :base-handler
-                 :type [:fn {} :ring-response-shape]}
+                 :type [:fn {:request :ring-request-shape} :ring-response-shape]}
           :arg {:as :request}}
    :return-type :ring-response-shape}
 

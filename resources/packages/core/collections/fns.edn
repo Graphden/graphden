@@ -99,7 +99,7 @@
   {:name :assoc-fn
    :description "Variant of `:assoc` whose `:value` is `:fn`-typed — the bound fn-graph is hof-wrap'd into a callable rather than executed and stored. Used where the value must remain a function (e.g. Ring handlers in route maps). Slot type `[:fn {:arg a} b]` — single-arg generic callable; positional unify so the callee's leftover free-arg name is alpha-equivalent."
    :parent :assoc
-   :args {:value {:as :value :type [:fn {} b]}}}
+   :args {:value {:as :value :type [:fn {:arg a} b]}}}
 
   ;; `:assoc` onto a fresh `{}` — a generic collection primitive. Lived
   ;; in `app.common` until the package-layering audit found `core.system`

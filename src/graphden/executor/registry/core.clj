@@ -732,7 +732,7 @@
   ;; Type-rows (`:type {…}` / `:refine {…}` / `:list T`) carry their
   ;; role explicitly and don't need a separate `:return-type`.
   (when-not (or (:type fn-def) (:refine fn-def) (:list fn-def)
-                (:union fn-def) (:variant fn-def))
+                (:union fn-def) (:variant fn-def) (:marker fn-def))
     (when-not (:return-type fn-def)
       (throw (ex-info "Function definition must include :return-type"
                       {:type :invalid-fn-def

@@ -979,3 +979,46 @@
                       @warns))))
         (finally
           (t/unregister-type-alias! :collide-probe))))))
+
+
+;; =============================================================================
+;; Generic marker types — registry-driven (:secret is the seeded instance)
+;; =============================================================================
+
+(deftest generic-marker-engine-test
+  (t/register-marker! :pii-probe {:monotone? true :hide-result? false})
+  (try
+    (testing "subtype asymmetry holds per tag"
+      (is (t/subtype? [:pii-probe :text] [:pii-probe :text]))
+      (is (t/subtype? :text [:pii-probe :text]) "auto-promote on entry")
+      (is (not (t/subtype? [:pii-probe :text] :text)) "can't strip")
+      (is (t/subtype? [:pii-probe :text] :any) "top-type escape hatch"))
+    (testing "different tags never satisfy each other"
+      (is (not (t/subtype? [:pii-probe :text] [:secret :text])))
+      (is (not (t/subtype? [:secret :text] [:pii-probe :text]))))
+    (testing "jsonb sink refuses compounds carrying ANY marker"
+      (is (not (t/subtype? {:a [:pii-probe :text]} :jsonb))))
+    (testing "propagator carries EVERY input marker, deterministically"
+      (let [ret (t/taint-with-secret-if-tainted
+                  {:a {:type [:secret :text]}
+                   :b {:type [:pii-probe :int]}}
+                  :text)]
+        (is (= [:secret [:pii-probe :text]] ret)
+            "both labels wrap the return (sorted tag order)")))
+    (testing "hide-result flag drives the redaction predicate"
+      (is (t/contains-hide-result-marker? [:secret :text]))
+      (is (not (t/contains-hide-result-marker? [:pii-probe :text]))
+          ":pii-probe declared :hide-result? false")
+      (is (t/contains-hide-result-marker? [:pii-probe [:secret :text]])
+          "nested hide-marker still detected"))
+    (testing "resolve/freshen keep the tag"
+      (is (= [:pii-probe :text] (t/resolve-alias [:pii-probe :text])))
+      (is (t/well-formed? [:pii-probe [:list :int]])))
+    (testing "structural heads cannot be shadowed"
+      (is (thrown-with-msg? Exception #"shadows a structural"
+            (t/register-marker! :union {:monotone? true}))))
+    (testing "non-monotone markers are rejected loudly (v1 engine)"
+      (is (thrown-with-msg? Exception #"non-monotone"
+            (t/register-marker! :weird {:monotone? false}))))
+    (finally
+      (t/unregister-marker! :pii-probe))))

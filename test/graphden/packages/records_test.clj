@@ -516,3 +516,25 @@
             b (first (filter #(and (= :binding (:kind %)) (:value-present %)) recs))]
         (is (= :wrong.ns/not-a-ref (:value b))
             "literal payloads are not treated as references")))))
+
+
+;; =============================================================================
+;; Marker type-rows — graph-declared markers (generic :secret siblings)
+;; =============================================================================
+
+(deftest marker-type-row-parses-and-usage-degrades
+  (let [fns [{:name :pii-row :namespace "ns-m"
+              :marker {:monotone? true :hide-result? false}
+              :description "PII label"}
+             {:name :m-sink :namespace "ns-m"
+              :args {:v [:pii-row :text]} :return-type :any}]
+        recs (r/parse-module fns)
+        row (first (filter #(= "pii-row" (:name %)) recs))
+        slot (first (filter #(and (= :slot (:kind %)) (= "v" (:name %))) recs))]
+    (testing "the marker fn-row stores its flags under :marker-def"
+      (is (some? row))
+      (is (= [:marker-def {:monotone? true :hide-result? false}]
+             (:constraint row))))
+    (testing "usage [:pii-row T] degrades to the INNER type at storage"
+      (is (= (get (r/primitive-fn-ids) :text) (:type-fn-id slot))
+          "slot's FK points at :text — the label lives in rich-types only"))))

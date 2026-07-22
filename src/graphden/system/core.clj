@@ -298,6 +298,16 @@
    resolves those. Genuine errors surface later through the
    type-checker on first use."
   [fn-defs]
+  ;; Marker-type declarations register FIRST — a marker tag must be
+  ;; known before any alias body (or slot type) using `[<tag> T]` is
+  ;; validated by `well-formed?`. `{:name :pii :marker {:hide-result?
+  ;; bool}}` — the graph-declared instance of the seeded `:secret`
+  ;; (types.core.shapes/register-marker!).
+  (doseq [fd fn-defs
+          :when (:marker fd)]
+    (try (types/register-marker! (:name fd) (:marker fd))
+         (catch Exception e
+           (log/warn e "register-marker! failed for" (:name fd)))))
   (let [alias-body
         (fn [fd]
           (cond

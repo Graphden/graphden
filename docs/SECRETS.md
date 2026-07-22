@@ -10,6 +10,28 @@ actually is.
 
 ## The marker
 
+**Generalized (2026-07-22):** `:secret` is now the SEEDED instance of a
+registry-driven marker engine (`types.core.shapes/register-marker!`).
+Any `[<tag> <inner>]` with a registered tag gets the same asymmetric
+subtyping, the same jsonb-sink laundering guard, and — because the
+propagators below carry EVERY marker present on any input — the same
+propagation through the already-annotated base-fns, with NO new
+per-fn annotations. A new marker is declared IN THE GRAPH:
+
+```clojure
+{:name :pii
+ :marker {:monotone? true :hide-result? false}}
+```
+
+`:hide-result? true` opts the marker into the `/api/execute` redaction
+(T4 below reads `contains-hide-result-marker?`, not `:secret`
+specifically). Marker rows store their flags in `:constraint` under
+`:marker-def`, so the DB-driven path re-registers them without the EDN
+source; usage (`[:pii :text]`) degrades to the inner type at the
+storage layer exactly like `[:secret T]`. The runtime half of the
+generalization — a `resolver-fn-id` on bindings replacing the
+hardcoded `:secret-path` → vault deref — is the planned follow-up.
+
 `[:secret <inner>]` is a refinement-marker over any type. Subtype
 direction is asymmetric:
 

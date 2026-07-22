@@ -92,9 +92,16 @@
       ;; lives in the rich-types registry alongside the structural form).
       :secret (recur (second t) name->id)
       :union  (ids/primitive-fn-id :any)
-      (throw (ex-info (str "Unsupported structural type: " (pr-str t))
-                      {:type :records/unsupported-type-ref
-                       :ref t})))
+      ;; Registry-driven marker tags (`[:pii T]` etc. — see
+      ;; types.core.shapes/register-marker!) degrade like `:secret`:
+      ;; storage keeps the INNER type, the label lives in rich-types.
+      (if (and (= 2 (count t))
+               ((requiring-resolve 'graphden.types.core.shapes/marker-flags)
+                (first t)))
+        (recur (second t) name->id)
+        (throw (ex-info (str "Unsupported structural type: " (pr-str t))
+                        {:type :records/unsupported-type-ref
+                         :ref t}))))
 
     :else
     (throw (ex-info (str "Unsupported type reference shape: " (pr-str t))
@@ -232,5 +239,6 @@
       (and (vector? c) (= :union (first c)))   :union
       (and (vector? c) (= :variant (first c))) :variant
       (and (vector? c) (= :fn (first c)))      :fn-type
+      (and (vector? c) (= :marker-def (first c))) :marker
       has-slots?                          :record
       :else                               :primitive)))

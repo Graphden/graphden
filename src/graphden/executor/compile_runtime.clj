@@ -187,6 +187,14 @@
                            ;; in a single pass — same as records.
                            (types/desugar-variant (:constraint f))
 
+                           ;; marker declaration — register the TAG in
+                           ;; the marker registry (not an alias) and emit
+                           ;; no alias body.
+                           :marker
+                           (do (types/register-marker!
+                                 nm (second (:constraint f)))
+                               nil)
+
                            :fn-type
                            ;; `[:fn args ret]` — already in canonical
                            ;; structural form, register verbatim. The

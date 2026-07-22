@@ -772,6 +772,27 @@
          (:map fn-def)     (parse-map fn-def name->id)
          (:tuple fn-def)   (parse-tuple fn-def name->id)
          (:variant fn-def) (parse-variant fn-def name->id)
+         ;; Marker-type declaration — `{:name :pii :marker {…flags}}`.
+         ;; The fn-row stores the flags in `:constraint` under the
+         ;; `:marker-def` head so the DB-driven path
+         ;; (`register-type-aliases-from-db!`) can re-register the
+         ;; marker without the EDN source. USAGE (`[:pii T]`) degrades
+         ;; to the inner type at the storage layer, exactly like
+         ;; `[:secret T]` (records.types/resolve-type-ref).
+         (:marker fn-def)
+         (let [{fn-name :name ns-id :namespace
+                description :description flags :marker} fn-def]
+           [{:kind :fn
+             :id (ids/fn-id ns-id fn-name)
+             :name (clojure.core/name fn-name)
+             :namespace-id ns-id
+             :parent-ids []
+             :base-fn-id nil
+             :element-fn-id nil
+             :return-type-fn-id nil
+             :anonymous-hash nil
+             :constraint [:marker-def flags]
+             :description description}])
          ;; `:fn-type` declarations now produce a fn-row with the
          ;; structural `[:fn args ret]` shape stashed in `:constraint`
          ;; (mirrors how unions / variants stash their payload). The
@@ -1073,7 +1094,16 @@
   ([module-fn-defs extra-name->id]
    (parse-module module-fn-defs extra-name->id {}))
   ([module-fn-defs extra-name->id extra-defs-by-name]
-   (let [;; Stage 4 — validate + rewrite `:ns.path/name`-qualified refs
+   (let [;; Marker declarations register FIRST — a module that declares
+         ;; AND uses its own marker (`{:name :pii :marker {…}}` +
+         ;; `[:pii :text]` in a sibling slot) must parse standalone;
+         ;; registration is idempotent with the sync-time pass in
+         ;; `system.core/register-type-aliases!`.
+         _ (doseq [fd module-fn-defs
+                   :when (:marker fd)]
+             ((requiring-resolve 'graphden.types.core.shapes/register-marker!)
+              (:name fd) (:marker fd)))
+         ;; Stage 4 — validate + rewrite `:ns.path/name`-qualified refs
          ;; to bare BEFORE anon expansion, so a qualified and a bare
          ;; spelling of the same ref hash to the SAME anon identity.
          ;; The validation map is dual-keyed from the RAW named defs

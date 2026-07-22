@@ -75,6 +75,14 @@
 (def secret-type?                  shapes/secret-type?)
 (def secret-inner                  shapes/secret-inner)
 (def make-secret-type              shapes/make-secret-type)
+(def marker-type?                  shapes/marker-type?)
+(def marker-tag                    shapes/marker-tag)
+(def marker-inner                  shapes/marker-inner)
+(def make-marker-type              shapes/make-marker-type)
+(def register-marker!              shapes/register-marker!)
+(def unregister-marker!            shapes/unregister-marker!)
+(def contains-marker?              shapes/contains-marker?)
+(def contains-hide-result-marker?  shapes/contains-hide-result-marker?)
 (def coarse-lub                    shapes/coarse-lub)
 (def union-type?                   shapes/union-type?)
 (def refine-base                   shapes/refine-base)
@@ -138,7 +146,7 @@
     (map-type? t)    (and (well-formed? (map-key t)) (well-formed? (map-val t)))
     (tuple-type? t)  (every? well-formed? (tuple-elems t))
     (refine-type? t) (well-formed? (refine-base t))
-    (secret-type? t) (well-formed? (secret-inner t))
+    (marker-type? t) (well-formed? (marker-inner t))
     (union-type? t)  (every? well-formed? (union-members t))
     :else            false))
 
@@ -421,7 +429,7 @@
                             (tuple-elems t))
      (record-type? t) (into {} (map (fn [[k v]] [k (resolve-alias v seen)])) t)
      (refine-type? t) [:refine (resolve-alias (refine-base t) seen) (refine-constraint t)]
-     (secret-type? t) [:secret (resolve-alias (secret-inner t) seen)]
+     (marker-type? t) [(marker-tag t) (resolve-alias (marker-inner t) seen)]
      (union-type? t)  (make-union (mapv #(resolve-alias % seen) (union-members t)))
      :else            t)))
 
@@ -568,7 +576,7 @@
     (tuple-type? t)  (into [:tuple] (map #(resolve subst %)) (tuple-elems t))
     (record-type? t) (into {} (map (fn [[k v]] [k (resolve subst v)])) t)
     (refine-type? t) [:refine (resolve subst (refine-base t)) (refine-constraint t)]
-    (secret-type? t) [:secret (resolve subst (secret-inner t))]
+    (marker-type? t) [(marker-tag t) (resolve subst (marker-inner t))]
     (union-type? t)  (make-union (mapv #(resolve subst %) (union-members t)))
     :else t))
 
@@ -597,7 +605,7 @@
       (tuple-type? t') (some #(occurs? v % subst) (tuple-elems t'))
       (record-type? t') (some #(occurs? v % subst) (vals t'))
       (refine-type? t') (occurs? v (refine-base t') subst)
-      (secret-type? t') (occurs? v (secret-inner t') subst)
+      (marker-type? t') (occurs? v (marker-inner t') subst)
       (union-type? t') (some #(occurs? v % subst) (union-members t'))
       :else            false)))
 
@@ -1066,14 +1074,14 @@
         (or (and (primitive? sub) (primitive? sup)
                  (primitive-subtype? sub sup))
             (and (= sup :jsonb)
-                 ;; A compound carrying a nested `:secret` must NOT flow
+                 ;; A compound carrying ANY nested marker must NOT flow
                  ;; into a jsonb content sink — that would strip the
-                 ;; information-flow marker. The top-level `[:secret T]`
-                 ;; case is already refused by the secret arm below; this
+                 ;; information-flow label. The top-level `[<tag> T]`
+                 ;; case is already refused by the marker arm below; this
                  ;; makes the type core self-defend against the nested
                  ;; case (a record/list/tuple field) instead of relying on
-                 ;; every propagator keeping secrets top-level-typed.
-                 (not (contains-secret? sub))
+                 ;; every propagator keeping markers top-level-typed.
+                 (not (contains-marker? sub))
                  (or (primitive? sub)
                      (record-type? sub)
                      (list-type? sub)
@@ -1105,32 +1113,40 @@
         ;; SUB is not a refinement, SUP is — must NOT widen.
         false
 
-        ;; Secret: information-flow marker — asymmetric subtyping.
+        ;; Markers: registry-driven information-flow labels — asymmetric
+        ;; subtyping, generic over every registered tag (`:secret` is the
+        ;; seeded instance; SECRETS.md):
         ;;
-        ;; `[:secret T] ⊆ [:secret T']` iff `T ⊆ T'` (covariant inside)
-        ;; `[:secret T] ⊆ T'`           NEVER       (can't STRIP the taint)
-        ;; `T ⊆ [:secret T']`           iff `T ⊆ T'` (auto-PROMOTE on entry
-        ;;                                            — monotone direction;
-        ;;                                            plain values can flow
-        ;;                                            into secret slots and
-        ;;                                            become tainted)
+        ;; `[<m> T] ⊆ [<m> T']`  iff `T ⊆ T'` (covariant inside, SAME tag —
+        ;;                                     `[:pii T] ⊄ [:secret T']`)
+        ;; `[<m> T] ⊆ T'`        NEVER        (can't STRIP the label)
+        ;; `T ⊆ [<m> T']`        iff `T ⊆ T'` (auto-PROMOTE on entry —
+        ;;                                     monotone direction; plain
+        ;;                                     values become labelled when
+        ;;                                     they flow into marked slots)
         ;;
         ;; Same shape rationale as `refine` above — the marker is opaque
         ;; to the base type, but unlike `refine` the asymmetry is on
         ;; LEAVING the marker: refine narrows (sub ⊆ base; strip allowed),
-        ;; secret labels (sub ⊄ base; strip forbidden). That's why we
+        ;; a marker labels (sub ⊄ base; strip forbidden). That's why we
         ;; don't reuse `refine` — the subtype direction is the whole point
         ;; of the abstraction.
-        (secret-type? sub)
+        (marker-type? sub)
         (cond
-          (secret-type? sup) (subtype? (secret-inner sub) (secret-inner sup))
-          :else              false)
+          (and (marker-type? sup)
+               (= (marker-tag sub) (marker-tag sup)))
+          (subtype? (marker-inner sub) (marker-inner sup))
+          ;; nested-label case: `[:pii [:secret T]] ⊆ [:secret T']` —
+          ;; peeling the OUTER pii label to satisfy a secret slot would
+          ;; strip it; refuse (the caller wraps the slot type instead).
+          :else false)
 
-        (secret-type? sup)
-        ;; Promotion: plain value into secret slot is fine; the value gets
-        ;; tainted on entry. This is what lets ordinary string fns declare
-        ;; `[:secret :text]` slots and still accept both kinds of input.
-        (subtype? sub (secret-inner sup))
+        (marker-type? sup)
+        ;; Promotion: a plain value into a marked slot is fine; the value
+        ;; gets labelled on entry. This is what lets ordinary string fns
+        ;; declare `[:secret :text]` slots and still accept both kinds of
+        ;; input.
+        (subtype? sub (marker-inner sup))
 
         (and (record-type? sub) (record-type? sup))
         (record-subtype? sub sup)
@@ -1528,7 +1544,7 @@
     (record-type? t) (into {} (map (fn [[k v]] [k (freshen* v subst)])) t)
     (refine-type? t) [:refine (freshen* (refine-base t) subst)
                       (refine-constraint t)]
-    (secret-type? t) [:secret (freshen* (secret-inner t) subst)]
+    (marker-type? t) [(marker-tag t) (freshen* (marker-inner t) subst)]
     (union-type? t)  (make-union (mapv #(freshen* % subst) (union-members t)))
     :else            t))
 

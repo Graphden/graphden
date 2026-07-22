@@ -302,7 +302,10 @@
   [fn-id]
   (and fn-id
        (when-let [ret (:return (registry/rich-type-of-id fn-id))]
-         (types/contains-secret? ret))))
+         ;; Generic over the marker registry: any marker whose flags say
+         ;; :hide-result? (the seeded :secret, or a graph-declared one)
+         ;; redacts the result body.
+         (types/contains-hide-result-marker? ret))))
 
 
 (defn touches-secret?
@@ -318,9 +321,9 @@
   (when fn-id
     (when-let [rt (registry/rich-type-of-id fn-id)]
       (boolean
-        (or (types/contains-secret? (or (:return rt) :any))
+        (or (types/contains-hide-result-marker? (or (:return rt) :any))
             (some (fn [[_ arg-entry]]
-                    (types/contains-secret?
+                    (types/contains-hide-result-marker?
                       (or (some-> arg-entry :type) arg-entry)))
                   (:args rt)))))))
 

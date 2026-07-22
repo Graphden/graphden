@@ -174,16 +174,102 @@
   (and (vector? t) (= :refine (first t)) (= 3 (count t))))
 
 
-(defn secret-type?
-  "`[:secret <inner-type>]` — a monotone information-flow marker on
-   top of `<inner-type>`. Subtype-asymmetric: a secret value flows
-   only into another secret slot. The marker propagates through
-   composition via per-base-fn `:return-type-rule`s (see
-   `graphden.types.check`).
+;; =============================================================================
+;; Marker types — registry-driven monotone information-flow markers
+;; =============================================================================
+;;
+;; `[<tag> <inner-type>]` where <tag> is a REGISTERED marker. The tag
+;; changes nothing at runtime (a `[:secret :text]` is still a string);
+;; it changes how the TYPE SYSTEM treats the value:
+;;   - monotone subtyping: `T ⊆ [<tag> T']` (auto-promote on entry),
+;;     `[<tag> T] ⊄ T'` (the marker cannot be stripped),
+;;     `[<tag> T] ⊆ [<tag> T']` iff `T ⊆ T'` (covariant inside; a
+;;     DIFFERENT tag never satisfies — `[:pii T] ⊄ [:secret T]`);
+;;   - propagation: the taint propagators below carry EVERY monotone
+;;     marker present on any input onto the return;
+;;   - behaviour flags: `:hide-result?` drives the `/api/execute`
+;;     redaction (see `crud.fn-execution.persist`).
+;;
+;; `:secret` is the SEEDED first instance (SECRETS.md). New markers
+;; register at sync time from graph type-rows (`{:name :pii :marker
+;; {:hide-result? false}}` in fns.edn) — no code change.
 
-   Distinct from refinements (which are subtypes of their base —
-   exactly the property we MUST NOT have for secrets, otherwise the
-   marker leaks)."
+(def ^:private structural-heads
+  "Vector heads owned by the structural grammar — a marker tag must
+   never shadow one."
+  #{:fn :list :map :tuple :union :refine :variant :marker-def :secret})
+
+
+(defonce ^:private marker-registry
+  (atom {:secret {:monotone? true :hide-result? true}}))
+
+
+(defn register-marker!
+  "Register `tag` as a marker type with `flags`
+   (`{:monotone? bool :hide-result? bool}`). Idempotent — re-register
+   replaces. v1 engine semantics are monotone-only; the flag is stored
+   for honesty and future non-monotone markers are rejected loudly
+   rather than silently mis-handled."
+  [tag flags]
+  (when (contains? (disj structural-heads :secret) tag)
+    (throw (ex-info (str "marker tag shadows a structural type head: " tag)
+                    {:type :types/invalid-marker :tag tag})))
+  (when (false? (:monotone? flags))
+    (throw (ex-info (str "non-monotone markers are not supported yet: " tag)
+                    {:type :types/invalid-marker :tag tag :flags flags})))
+  (swap! marker-registry assoc tag (merge {:monotone? true} flags))
+  tag)
+
+
+(defn unregister-marker!
+  "Test/cleanup counterpart. `:secret` is seeded and never removed."
+  [tag]
+  (when-not (= :secret tag)
+    (swap! marker-registry dissoc tag))
+  nil)
+
+
+(defn marker-flags
+  [tag]
+  (get @marker-registry tag))
+
+
+(defn marker-type?
+  "`[<registered-tag> <inner>]`?"
+  [t]
+  (and (vector? t) (= 2 (count t))
+       (contains? @marker-registry (first t))))
+
+
+(defn marker-tag
+  [t]
+  (when (marker-type? t) (nth t 0)))
+
+
+(defn marker-inner
+  [t]
+  (when (marker-type? t) (nth t 1)))
+
+
+(defn make-marker-type
+  "Idempotent per TAG: wrapping a value already carrying THIS tag
+   returns it unchanged; a different marker nests
+   (`[:pii [:secret T]]` — both labels hold)."
+  [tag inner]
+  (if (and (marker-type? inner) (= tag (marker-tag inner)))
+    inner
+    [tag inner]))
+
+
+(defn hide-result-marker-type?
+  [t]
+  (and (marker-type? t)
+       (boolean (:hide-result? (marker-flags (marker-tag t))))))
+
+
+(defn secret-type?
+  "`[:secret <inner-type>]` — the seeded information-flow marker
+   instance (see the marker registry above; SECRETS.md)."
   [t]
   (and (vector? t) (= :secret (first t)) (= 2 (count t))))
 
@@ -195,13 +281,10 @@
 
 
 (defn make-secret-type
-  "Smart constructor — idempotent: wrapping a value that's already
-   `[:secret T]` returns the same shape. Lets propagation rules
-   apply it blindly without producing `[:secret [:secret T]]`."
+  "`(make-marker-type :secret inner)` — kept for the 85 existing
+   call sites."
   [inner]
-  (if (secret-type? inner)
-    inner
-    [:secret inner]))
+  (make-marker-type :secret inner))
 
 
 (defn coarse-lub
@@ -331,7 +414,7 @@
     (map-type? t)    [(map-key t) (map-val t)]
     (tuple-type? t)  (vec (tuple-elems t))
     (refine-type? t) [(refine-base t)]
-    (secret-type? t) [(secret-inner t)]
+    (marker-type? t) [(marker-inner t)]
     (union-type? t)  (vec (union-members t))
     (record-type? t) (vec (vals t))
     :else            []))
@@ -353,12 +436,36 @@
 
 (defn contains-secret?
   "True iff `t` contains a `[:secret …]` anywhere in its structure.
-   Used by `:return-type-rule` propagators: an arg whose type holds a
-   secret ANYWHERE (top-level, list element, record field, union
-   branch) taints the fn's return. `type-any?` over `secret-type?` —
-   `child-types` owns the recursion, so this can't miss a new type-kind."
+   The `:secret` instance of `contains-marker?` — kept for the
+   existing call sites."
   [t]
   (type-any? secret-type? t))
+
+
+(defn contains-marker?
+  "True iff `t` contains ANY registered marker anywhere in its
+   structure — the generic jsonb-sink laundering guard."
+  [t]
+  (type-any? marker-type? t))
+
+
+(defn contains-hide-result-marker?
+  "True iff `t` carries a marker whose flags say `:hide-result?` —
+   the `/api/execute` redaction predicate."
+  [t]
+  (type-any? hide-result-marker-type? t))
+
+
+(defn- marker-tags-in
+  "Every registered marker tag present anywhere in `t` (set)."
+  [t]
+  (let [acc (volatile! #{})]
+    (type-any? (fn [x]
+                 (when (marker-type? x)
+                   (vswap! acc conj (marker-tag x)))
+                 false)
+               t)
+    @acc))
 
 
 (defn taint-with-secret-if-tainted
@@ -377,9 +484,19 @@
    rule via `wrap-with-taint` so the structural computation runs
    first AND the taint propagates if applicable."
   [bindings-info default-ret]
-  (if (some (fn [[_slot info]] (contains-secret? (:type info))) bindings-info)
-    (make-secret-type default-ret)
-    default-ret))
+  (let [tags (reduce (fn [acc [_slot info]]
+                       (into acc (marker-tags-in (:type info))))
+                     #{}
+                     bindings-info)]
+    (if (seq tags)
+      ;; Carry EVERY marker present on any input — a fn that read a
+      ;; `[:pii …]` and a `[:secret …]` returns a value labelled with
+      ;; both. Deterministic wrap order (sorted) so computed types are
+      ;; stable across runs.
+      (reduce (fn [t tag] (make-marker-type tag t))
+              default-ret
+              (sort tags))
+      default-ret)))
 
 
 (defn wrap-with-taint

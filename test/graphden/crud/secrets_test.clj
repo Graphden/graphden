@@ -101,7 +101,11 @@
     ;; `shape/find-secret-leaf-fn-id` + `find-admin-only-vault-base-fn-ids`
     ;; resolve to this seeded row (production gets the same tags from
     ;; `web/vault/fns.edn`).
-    (registry/record-rich-types! :secret-leaf
+    ;; Keyed by the SEEDED row's id (3-arity): the validation gate
+    ;; reads the registry by the owner row's identity, and a name-only
+    ;; write would land on the golden graph's web.vault entry id
+    ;; instead of this row's.
+    (registry/record-rich-types! (:id sl) :secret-leaf
                                  {:args {:in {:type [:secret :text]}}
                                   :return-type [:secret :text]
                                   :effects #{:io}

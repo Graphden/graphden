@@ -227,18 +227,6 @@
   (into {} (map vec) entries))
 
 
-(defn vec-return-rule
-  "When the input is a known `[:list T]`, preserve the element type;
-   otherwise fall back to the declared `[:list :any]`. Coercing a
-   typed sequence to a vector is identity at the type level — `vec`
-   just changes the runtime container, not the element story."
-  [bindings-info default-ret]
-  (let [coll-type (get-in bindings-info [:coll :type])]
-    (cond
-      (types/list-type? coll-type) coll-type
-      :else                        default-ret)))
-
-
 (defbase position-in-fn
   "Index of the first occurrence of `:value` in `:coll`, or nil if
    absent. Wraps `java.util.List/.indexOf`; the seq is `vec`'d first
@@ -669,81 +657,13 @@
 ;; --- List-shape rules -------------------------------------------------------
 ;; :first, :rest, :cons, :take, :drop, :reverse, :sort, :distinct.
 ;;
-;; All read `:coll` and either lift the elem-type or preserve the same
-;; `[:list T]`. Two helpers cover both shapes; each rule is then a
-;; single-line dispatch.
-;;
-;; The fn IS allowed to return nil for empty collections at runtime;
-;; that's covered by `:null ⊆ :any` and the type-check's leniency for
-;; null actuals. Returning the precise elem type rather than `:any`
-;; lets downstream uses (e.g. `(:add (:first ints) 1)`) type-check
-;; instead of degrading to :jsonb.
-
-(defn- list-elem-of-arg
-  "If the named arg is bound to a `[:list T]`, return T; else nil."
-  [bindings-info arg-name]
-  (let [t (get-in bindings-info [arg-name :type])]
-    (when (types/list-type? t) (types/list-elem t))))
-
-
-(defn- list-of-arg
-  "If the named arg is bound to a `[:list T]`, return that whole
-   `[:list T]`; else nil."
-  [bindings-info arg-name]
-  (let [t (get-in bindings-info [arg-name :type])]
-    (when (types/list-type? t) t)))
-
-
-(defn- preserve-coll-list
-  "All same-shape ops on `:coll` simply preserve `[:list T]`."
-  [b d]
-  (or (list-of-arg b :coll) d))
-
-
-;; :first lifts `:coll`'s elem-type — but an empty / nil list yields
-;; nil, so the result is `[:union :null T]`, not bare `T`.
-(defn first-return-rule
-  [b d]
-  (if-let [t (list-elem-of-arg b :coll)]
-    (types/make-union [:null t])
-    d))
-
-
-(defn rest-return-rule
-  [b d]
-  (preserve-coll-list b d))
-
-
-(defn cons-return-rule
-  [b d]
-  (preserve-coll-list b d))
-
-
-(defn take-return-rule
-  [b d]
-  (preserve-coll-list b d))
-
-
-(defn drop-return-rule
-  [b d]
-  (preserve-coll-list b d))
-
-
-(defn reverse-return-rule
-  [b d]
-  (preserve-coll-list b d))
-
-
-(defn sort-return-rule
-  [b d]
-  (preserve-coll-list b d))
-
-
-(defn distinct-return-rule
-  [b d]
-  (preserve-coll-list b d))
-
-
+;; The elem-preserving family (:first/:rest/:cons/:take/:drop/:reverse/
+;; :sort/:distinct/:repeat/:vec/:range) needs NO rules here — their
+;; fns.edn declarations are polymorphic (`:coll [:list a]` →
+;; `[:list a]`, `:first` → `[:union :null a]`) and the checker's
+;; declared-signature fallback (`signature-return` in types/check)
+;; resolves the vars from the actual types at each site. The
+;; signature IS the rule.
 ;; --- :keys / :vals ----------------------------------------------------------
 ;; When `:map` is a known record, the result is a list of either the
 ;; key keywords or the field-types respectively. We don't track
@@ -815,16 +735,6 @@
 ;; --- :range / :repeat -------------------------------------------------------
 ;; `:range` always builds an integer vector. `:repeat` builds a vector
 ;; of copies of its `:item`, so the result is `[:list <item-type>]`.
-
-(defn range-return-rule
-  [_b _d]
-  [:list :int])
-
-
-(defn repeat-return-rule
-  [b _d]
-  [:list (or (get-in b [:item :type]) :any)])
-
 
 ;; --- :conj ------------------------------------------------------------------
 ;; `(:conj :coll C :item X)` adds X to C. When C is a known `[:list T]`
@@ -1003,9 +913,9 @@
 ;; (applied centrally by the checker); entries with no
 ;; previous rule become a bare propagator.
 (def impls
-  {:first {:impl first-fn :return-type-rule first-return-rule :taint-propagate? true}
-   :rest {:impl rest-fn :return-type-rule rest-return-rule :taint-propagate? true}
-   :cons {:impl cons-fn :return-type-rule cons-return-rule :taint-propagate? true}
+  {:first {:impl first-fn :taint-propagate? true}
+   :rest {:impl rest-fn :taint-propagate? true}
+   :cons {:impl cons-fn :taint-propagate? true}
    :conj {:impl conj-any-fn :return-type-rule conj-return-rule :taint-propagate? true}
    :get {:impl get-fn :return-type-rule get-return-rule :taint-propagate? true}
    :get-in {:impl get-in-fn :return-type-rule get-in-return-rule :taint-propagate? true}
@@ -1019,15 +929,15 @@
    :merge {:impl merge-fn :return-type-rule merge-return-rule :taint-propagate? true}
    :into {:impl into-fn :return-type-rule into-return-rule :taint-propagate? true}
    :assoc-in {:impl assoc-in-fn :return-type-rule assoc-in-return-rule :taint-propagate? true}
-   :range {:impl range-fn :return-type-rule range-return-rule :taint-propagate? true}
-   :repeat {:impl repeat-fn :return-type-rule repeat-return-rule :taint-propagate? true}
-   :take {:impl take-fn :return-type-rule take-return-rule :taint-propagate? true}
-   :drop {:impl drop-fn :return-type-rule drop-return-rule :taint-propagate? true}
-   :reverse {:impl reverse-fn :return-type-rule reverse-return-rule :taint-propagate? true}
-   :sort {:impl sort-fn :return-type-rule sort-return-rule :taint-propagate? true}
+   :range {:impl range-fn :taint-propagate? true}
+   :repeat {:impl repeat-fn :taint-propagate? true}
+   :take {:impl take-fn :taint-propagate? true}
+   :drop {:impl drop-fn :taint-propagate? true}
+   :reverse {:impl reverse-fn :taint-propagate? true}
+   :sort {:impl sort-fn :taint-propagate? true}
    :concat {:impl concat-fn :return-type-rule concat-return-rule :taint-propagate? true}
    :flatten {:impl flatten-fn :return-type-rule flatten-return-rule :taint-propagate? true}
-   :distinct {:impl distinct-fn :return-type-rule distinct-return-rule :taint-propagate? true}
+   :distinct {:impl distinct-fn :taint-propagate? true}
    :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule :taint-propagate? true}
    :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule :taint-propagate? true}
    :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule :taint-propagate? true}
@@ -1038,6 +948,6 @@
                :slot-types-rule update-in-slot-rule
                :nav-types-rule update-in-nav-rule}
    :list {:impl list-fn :return-type-rule list-return-rule :taint-propagate? true}
-   :vec {:impl vec-fn :return-type-rule vec-return-rule :taint-propagate? true}
+   :vec {:impl vec-fn :taint-propagate? true}
    :pairs->map {:impl pairs->map-fn :taint-propagate? true}
    :position-in {:impl position-in-fn :taint-propagate? true}})

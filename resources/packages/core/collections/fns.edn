@@ -35,8 +35,8 @@
 
   {:name :vec
    :description "Coerce any collection / sequence to a vector. Idempotent on vectors. Compose with `:if (sequential? coll) (vec coll) coll` to apply only when needed. The per-call `vec-return-rule` narrows the element type when the input has a known `[:list T]` shape — falls back to `[:list :any]` for opaque sources."
-   :args {:coll {:type [:list :any] :description "Sequence / collection to coerce."}}
-   :return-type [:list :any]}
+   :args {:coll {:type [:list a] :description "Sequence / collection to coerce."}}
+   :return-type [:list a]}
 
   ;; Converts a list of 2-element pairs into a map. :entries is a sequence-arg
   ;; where each item is either a :pair fn-def result or a literal [k v] vector.

@@ -16,7 +16,7 @@
    arrives as a `delay` (`compile/resolve-seq-thunks`) — `cond-fn`
    forces tests and the one winning result, `nnext`-skips the rest.
 
-   The `:const` / `:case` / `:cond` / `:coalesce` type-rules live here
+   The `:case` / `:cond` / `:coalesce` type-rules live here
    as plain `defn`s, each wired into the `impls` map as
    `{:impl … :return-type-rule …}` and looked up by the type-checker
    through the rich-types registry."
@@ -164,22 +164,11 @@
 
 
 ;; === Type-rules ===
-;; :const / :identity — `(:const :value V)` returns V. `:identity`
-;; is `:parent :const` so the rule covers both via the type-checker's
-;; `registry/root-base-fn-name` walk. Used by graphden renames
-;; (`:value {:as :request :type :ring-request-shape}` → `:ring-request`
-;; exposes `:value` as the free arg `:request`, type flows through).
-;; Without this rule the result type defaults to the polymorphic `'a`
-;; and all structural propagation upstream is lost. The standard
-;; polymorphic `'a → 'a` rule SHOULD work via unify, but type-var
-;; binding only kicks in when the slot's `:type` is consulted at the
-;; rule level — wiring it explicitly here surfaces the type-aware
-;; rename without depending on subst lookup.
-
-(defn const-return-rule
-  [bindings-info default-ret]
-  (or (get-in bindings-info [:value :type]) default-ret))
-
+;; :const / :identity (`a → a`) need no hand rule — the checker's
+;; declared-signature fallback resolves the var from `:value`'s type
+;; at each site, including capture renames (`{:as :request :type
+;; :ring-request-shape}` → the renamed free arg's type flows through
+;; bindings-info exactly as it did for the old explicit rule).
 
 ;; :case — `(get clauses value default)`. A `:case` returns whichever
 ;; clause result matched, or `:default` on a miss. The base-fn declares
@@ -462,7 +451,7 @@
           :lazy-seq-args #{:clauses}}
    :case {:impl case-fn :return-type-rule case-return-rule :taint-propagate? true}
    :coalesce {:impl coalesce :return-type-rule coalesce-return-rule :taint-propagate? true}
-   :const {:impl const :return-type-rule const-return-rule :taint-propagate? true}
+   :const {:impl const :taint-propagate? true}
    :equal? {:impl equal?-fn :taint-propagate? true}
    :constant-time-equal? {:impl constant-time-equal?-fn
                           :taint-propagate? true}

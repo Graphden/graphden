@@ -8,6 +8,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.packages.loader :as loader]
+    [graphden.types.check :as check]
     [graphden.types.core :as t]))
 
 
@@ -35,21 +36,11 @@
      :get       (rule c 'get-return-rule)
      :merge     (rule c 'merge-return-rule)
      :update-in (rule c 'update-in-return-rule)
-     :first     (rule c 'first-return-rule)
-     :rest      (rule c 'rest-return-rule)
-     :cons      (rule c 'cons-return-rule)
-     :take      (rule c 'take-return-rule)
-     :drop      (rule c 'drop-return-rule)
-     :reverse   (rule c 'reverse-return-rule)
-     :sort      (rule c 'sort-return-rule)
-     :distinct  (rule c 'distinct-return-rule)
      :keys      (rule c 'keys-return-rule)
      :vals      (rule c 'vals-return-rule)
      :concat    (rule c 'concat-return-rule)
      :list      (rule c 'list-return-rule)
      :conj      (rule c 'conj-return-rule)
-     :range     (rule c 'range-return-rule)
-     :repeat    (rule c 'repeat-return-rule)
      :into      (rule c 'into-return-rule)
      :assoc-in  (rule c 'assoc-in-return-rule)
      :get-in    (rule c 'get-in-return-rule)
@@ -60,20 +51,42 @@
      :neg       (rule a 'neg-return-rule)
      :abs       (rule a 'abs-return-rule)
      :invoke    (rule s 'invoke-return-rule)
-     :const     (rule l 'const-return-rule)
      :cond      (rule l 'cond-return-rule)
      :case      (rule l 'case-return-rule)
      :coalesce  (rule l 'coalesce-return-rule)}))
 
 
+(def ^:private signature-entries
+  "Declared signatures for base-fns whose hand rules were DELETED in
+   favour of the checker's declared-signature fallback — the shim
+   routes them through `check/signature-return` so the old per-rule
+   assertions now exercise the engine against the same declarations
+   the loader records (mirrored from core fns.edn)."
+  {:first    {:return [:union :null 'a] :args {:coll [:list 'a]}}
+   :rest     {:return [:list 'a] :args {:coll [:list 'a]}}
+   :cons     {:return [:list 'a] :args {:item 'a :coll [:list 'a]}}
+   :take     {:return [:list 'a] :args {:count :non-negative-int :coll [:list 'a]}}
+   :drop     {:return [:list 'a] :args {:count :non-negative-int :coll [:list 'a]}}
+   :reverse  {:return [:list 'a] :args {:coll [:list 'a]}}
+   :sort     {:return [:list 'a] :args {:coll [:list 'a]}}
+   :distinct {:return [:list 'a] :args {:coll [:list 'a]}}
+   :vec      {:return [:list 'a] :args {:coll [:list 'a]}}
+   :range    {:return [:list :int] :args {:start :int :end :int :step :int}}
+   :repeat   {:return [:list 'a] :args {:count :non-negative-int :item 'a}}
+   :const    {:return 'a :args {:value 'a}}})
+
+
 (defn- compute-return-type
   "Test shim — dispatch a return-type rule by base-fn name, mirroring
-   the registry lookup the type-checker does at runtime. Base-fns with
-   no rule (e.g. `:if`, `:int-add`) pass `default-ret` through."
+   the registry lookup the type-checker does at runtime: hand rule
+   first, declared-signature fallback second, `default-ret` through
+   otherwise."
   [base-fn-name bindings-info default-ret]
   (if-let [r (return-rules base-fn-name)]
     (r bindings-info default-ret)
-    default-ret))
+    (if-let [entry (signature-entries base-fn-name)]
+      (check/signature-return entry bindings-info default-ret)
+      default-ret)))
 
 
 (defn- compute-slot-types
@@ -739,8 +752,12 @@
 ;; :range / :repeat
 
 (deftest range-always-builds-an-int-list
+  ;; `:range` needs no rule at all — its declared return is the
+  ;; concrete `[:list :int]`, which IS the checker's static return
+  ;; (the shim's `default-ret` models that); the engine passes it
+  ;; through untouched.
   (is (= [:list :int]
-         (compute-return-type :range {} :jsonb))))
+         (compute-return-type :range {} [:list :int]))))
 
 
 (deftest repeat-builds-list-of-item-type
@@ -749,9 +766,10 @@
            (compute-return-type :repeat {:item {:type :int}} :jsonb)))
     (is (= [:list :text]
            (compute-return-type :repeat {:item {:type :text}} :jsonb))))
-  (testing "untyped item → [:list :any]"
+  (testing "untyped item — nothing binds, the static return stands
+            (production static is the subst-resolved declaration)"
     (is (= [:list :any]
-           (compute-return-type :repeat {} :jsonb)))))
+           (compute-return-type :repeat {} [:list :any])))))
 
 
 ;; -----------------------------------------------------------------------------

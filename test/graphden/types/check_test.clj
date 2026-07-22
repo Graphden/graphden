@@ -1916,6 +1916,7 @@
              (get overrides :_unknown-then))
           "unknown tag → target-static fall-through, not crash"))))
 
+
 ;; -----------------------------------------------------------------------------
 ;; Signature fallback (`signature-return`) — declared polymorphic
 ;; signatures act as the structural rule when no hand rule exists.

@@ -1548,6 +1548,10 @@
          signature-return)
 
 
+;; `signature-return` is PUBLIC: it is the declared-signature engine's
+;; seam — rules_test exercises deleted shadow rules through it.
+
+
 (defn- effective-binding-type
   "The type of a bindings-info entry, resolved with caller-context
    `combined-bindings` overlaid. For ref-bindings, re-fires the
@@ -1924,7 +1928,7 @@
   (rule-key (registry/rich-type-of base-fn-name)))
 
 
-(defn- signature-return
+(defn signature-return
   "Generic structural fallback for a root base-fn with NO hand-written
    `:return-type-rule` whose DECLARED signature carries type variables
    (`:coll [:list a]` → `[:union :null a]`): unify each var-carrying

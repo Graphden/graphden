@@ -138,7 +138,7 @@
     (is (= #{:fn-id :slot-id :position} (vds/version-data-fields :fn-slot)))
     (is (= #{:fn-id :slot-id :value :value-present :ref-fn-id :override-kind
              :type-override-fn-id :description :list-append :list-closed
-             :terminal :required}
+             :terminal :required :resolver-fn-id}
            (vds/version-data-fields :binding)))
     (is (= #{:binding-id :position :value :ref-fn-id :literal}
            (vds/version-data-fields :binding-list-item)))))

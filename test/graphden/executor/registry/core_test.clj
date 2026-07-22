@@ -116,10 +116,17 @@
 
 
 (deftest record-rich-types-raw-test
-  (testing "a precomputed map with effects is stashed verbatim"
+  (testing "a precomputed map with effects is stashed verbatim (plus the
+            identity keys every entry now carries)"
     (let [m {:return [:list :int] :args {:xs [:list :int]} :effects #{:db}}]
       (reg/record-rich-types-raw! :rtc-raw m)
-      (is (= m (reg/rich-type-of :rtc-raw)))))
+      (let [entry (reg/rich-type-of :rtc-raw)]
+        (is (= m (dissoc entry :fn-id :name)))
+        (is (= :rtc-raw (:name entry)))
+        (is (uuid? (:fn-id entry))
+            "entries are keyed by (and carry) the fn's identity")
+        (is (identical? entry (reg/rich-type-of-id (:fn-id entry)))
+            "name-path and id-path resolve the same entry"))))
   (testing "a precomputed map WITHOUT :effects defaults to #{} (pure) on read"
     ;; Mirrors `record-rich-types!`'s P8 invariant — `:effects` is
     ;; always present in registry entries so downstream consumers

@@ -999,44 +999,45 @@
 ;; Anything that takes a coll-of-secret or a secret-key/value must
 ;; mark its result `[:secret …]` so the downstream type-check can't
 ;; drop the marker. We compose each existing structural rule with the
-;; `:secret`-propagator via `types/wrap-with-taint`; entries with no
+;; `:secret`-propagator via the registry's `:taint-propagate?` flag
+;; (applied centrally by the checker); entries with no
 ;; previous rule become a bare propagator.
 (def impls
-  {:first {:impl first-fn :return-type-rule (types/wrap-with-taint first-return-rule)}
-   :rest {:impl rest-fn :return-type-rule (types/wrap-with-taint rest-return-rule)}
-   :cons {:impl cons-fn :return-type-rule (types/wrap-with-taint cons-return-rule)}
-   :conj {:impl conj-any-fn :return-type-rule (types/wrap-with-taint conj-return-rule)}
-   :get {:impl get-fn :return-type-rule (types/wrap-with-taint get-return-rule)}
-   :get-in {:impl get-in-fn :return-type-rule (types/wrap-with-taint get-in-return-rule)}
-   :assoc {:impl assoc-any-fn :return-type-rule (types/wrap-with-taint assoc-return-rule)}
-   :dissoc {:impl dissoc-fn :return-type-rule (types/wrap-with-taint dissoc-return-rule)}
-   :count {:impl count-fn :return-type-rule (types/wrap-with-taint nil)}
-   :empty? {:impl empty?-fn :return-type-rule (types/wrap-with-taint nil)}
-   :contains? {:impl contains?-fn :return-type-rule (types/wrap-with-taint nil)}
-   :keys {:impl keys-fn :return-type-rule (types/wrap-with-taint keys-return-rule)}
-   :vals {:impl vals-fn :return-type-rule (types/wrap-with-taint vals-return-rule)}
-   :merge {:impl merge-fn :return-type-rule (types/wrap-with-taint merge-return-rule)}
-   :into {:impl into-fn :return-type-rule (types/wrap-with-taint into-return-rule)}
-   :assoc-in {:impl assoc-in-fn :return-type-rule (types/wrap-with-taint assoc-in-return-rule)}
-   :range {:impl range-fn :return-type-rule (types/wrap-with-taint range-return-rule)}
-   :repeat {:impl repeat-fn :return-type-rule (types/wrap-with-taint repeat-return-rule)}
-   :take {:impl take-fn :return-type-rule (types/wrap-with-taint take-return-rule)}
-   :drop {:impl drop-fn :return-type-rule (types/wrap-with-taint drop-return-rule)}
-   :reverse {:impl reverse-fn :return-type-rule (types/wrap-with-taint reverse-return-rule)}
-   :sort {:impl sort-fn :return-type-rule (types/wrap-with-taint sort-return-rule)}
-   :concat {:impl concat-fn :return-type-rule (types/wrap-with-taint concat-return-rule)}
-   :flatten {:impl flatten-fn :return-type-rule (types/wrap-with-taint flatten-return-rule)}
-   :distinct {:impl distinct-fn :return-type-rule (types/wrap-with-taint distinct-return-rule)}
-   :select-keys {:impl select-keys-fn :return-type-rule (types/wrap-with-taint select-keys-return-rule)}
-   :zipmap {:impl zipmap-fn :return-type-rule (types/wrap-with-taint zipmap-return-rule)}
-   :update-vals {:impl update-vals-fn :return-type-rule (types/wrap-with-taint update-vals-return-rule)}
-   :update-keys {:impl update-keys-fn :return-type-rule (types/wrap-with-taint update-keys-return-rule)}
-   :postwalk {:impl postwalk-fn :return-type-rule (types/wrap-with-taint nil)}
+  {:first {:impl first-fn :return-type-rule first-return-rule :taint-propagate? true}
+   :rest {:impl rest-fn :return-type-rule rest-return-rule :taint-propagate? true}
+   :cons {:impl cons-fn :return-type-rule cons-return-rule :taint-propagate? true}
+   :conj {:impl conj-any-fn :return-type-rule conj-return-rule :taint-propagate? true}
+   :get {:impl get-fn :return-type-rule get-return-rule :taint-propagate? true}
+   :get-in {:impl get-in-fn :return-type-rule get-in-return-rule :taint-propagate? true}
+   :assoc {:impl assoc-any-fn :return-type-rule assoc-return-rule :taint-propagate? true}
+   :dissoc {:impl dissoc-fn :return-type-rule dissoc-return-rule :taint-propagate? true}
+   :count {:impl count-fn :taint-propagate? true}
+   :empty? {:impl empty?-fn :taint-propagate? true}
+   :contains? {:impl contains?-fn :taint-propagate? true}
+   :keys {:impl keys-fn :return-type-rule keys-return-rule :taint-propagate? true}
+   :vals {:impl vals-fn :return-type-rule vals-return-rule :taint-propagate? true}
+   :merge {:impl merge-fn :return-type-rule merge-return-rule :taint-propagate? true}
+   :into {:impl into-fn :return-type-rule into-return-rule :taint-propagate? true}
+   :assoc-in {:impl assoc-in-fn :return-type-rule assoc-in-return-rule :taint-propagate? true}
+   :range {:impl range-fn :return-type-rule range-return-rule :taint-propagate? true}
+   :repeat {:impl repeat-fn :return-type-rule repeat-return-rule :taint-propagate? true}
+   :take {:impl take-fn :return-type-rule take-return-rule :taint-propagate? true}
+   :drop {:impl drop-fn :return-type-rule drop-return-rule :taint-propagate? true}
+   :reverse {:impl reverse-fn :return-type-rule reverse-return-rule :taint-propagate? true}
+   :sort {:impl sort-fn :return-type-rule sort-return-rule :taint-propagate? true}
+   :concat {:impl concat-fn :return-type-rule concat-return-rule :taint-propagate? true}
+   :flatten {:impl flatten-fn :return-type-rule flatten-return-rule :taint-propagate? true}
+   :distinct {:impl distinct-fn :return-type-rule distinct-return-rule :taint-propagate? true}
+   :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule :taint-propagate? true}
+   :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule :taint-propagate? true}
+   :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule :taint-propagate? true}
+   :update-keys {:impl update-keys-fn :return-type-rule update-keys-return-rule :taint-propagate? true}
+   :postwalk {:impl postwalk-fn :taint-propagate? true}
    :update-in {:impl update-in-fn
-               :return-type-rule (types/wrap-with-taint update-in-return-rule)
+               :return-type-rule update-in-return-rule :taint-propagate? true
                :slot-types-rule update-in-slot-rule
                :nav-types-rule update-in-nav-rule}
-   :list {:impl list-fn :return-type-rule (types/wrap-with-taint list-return-rule)}
-   :vec {:impl vec-fn :return-type-rule (types/wrap-with-taint vec-return-rule)}
-   :pairs->map {:impl pairs->map-fn :return-type-rule (types/wrap-with-taint nil)}
-   :position-in {:impl position-in-fn :return-type-rule (types/wrap-with-taint nil)}})
+   :list {:impl list-fn :return-type-rule list-return-rule :taint-propagate? true}
+   :vec {:impl vec-fn :return-type-rule vec-return-rule :taint-propagate? true}
+   :pairs->map {:impl pairs->map-fn :taint-propagate? true}
+   :position-in {:impl position-in-fn :taint-propagate? true}})

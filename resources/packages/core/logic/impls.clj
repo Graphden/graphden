@@ -199,7 +199,8 @@
 ;; and the inherited fn-def is a literal pick — without the refinement
 ;; the `:int` computed return is correctly rejected as a widening, even
 ;; though both literal branches DO satisfy the slot's constraint. Pure
-;; numeric refinement; secret-flow handled by `wrap-with-taint`.
+;; numeric refinement; secret-flow handled by the registry's
+;; `:taint-propagate?` flag (applied centrally by the checker).
 
 (defn- if-literal-int-branch
   [info]
@@ -447,22 +448,22 @@
 ;; All wrap their existing rule (or get a bare propagator) so a
 ;; tainted input lifts the result into `[:secret …]`.
 (def impls
-  {:and {:impl and-fn :return-type-rule (types/wrap-with-taint nil)}
-   :or {:impl or-fn :return-type-rule (types/wrap-with-taint nil)}
-   :not {:impl not-fn :return-type-rule (types/wrap-with-taint nil)}
-   :some? {:impl some?-fn :return-type-rule (types/wrap-with-taint nil)}
-   :nil? {:impl nil?-fn :return-type-rule (types/wrap-with-taint nil)}
-   :zero? {:impl zero?-fn :return-type-rule (types/wrap-with-taint nil)}
+  {:and {:impl and-fn :taint-propagate? true}
+   :or {:impl or-fn :taint-propagate? true}
+   :not {:impl not-fn :taint-propagate? true}
+   :some? {:impl some?-fn :taint-propagate? true}
+   :nil? {:impl nil?-fn :taint-propagate? true}
+   :zero? {:impl zero?-fn :taint-propagate? true}
    :assert-some {:impl assert-some-fn
-                 :return-type-rule (types/wrap-with-taint assert-some-return-rule)}
-   :if {:impl if-fn :return-type-rule (types/wrap-with-taint if-return-rule)}
+                 :return-type-rule assert-some-return-rule :taint-propagate? true}
+   :if {:impl if-fn :return-type-rule if-return-rule :taint-propagate? true}
    :cond {:impl cond-fn
-          :return-type-rule (types/wrap-with-taint cond-return-rule)
+          :return-type-rule cond-return-rule :taint-propagate? true
           :lazy-seq-args #{:clauses}}
-   :case {:impl case-fn :return-type-rule (types/wrap-with-taint case-return-rule)}
-   :coalesce {:impl coalesce :return-type-rule (types/wrap-with-taint coalesce-return-rule)}
-   :const {:impl const :return-type-rule (types/wrap-with-taint const-return-rule)}
-   :equal? {:impl equal?-fn :return-type-rule (types/wrap-with-taint nil)}
+   :case {:impl case-fn :return-type-rule case-return-rule :taint-propagate? true}
+   :coalesce {:impl coalesce :return-type-rule coalesce-return-rule :taint-propagate? true}
+   :const {:impl const :return-type-rule const-return-rule :taint-propagate? true}
+   :equal? {:impl equal?-fn :taint-propagate? true}
    :constant-time-equal? {:impl constant-time-equal?-fn
-                          :return-type-rule (types/wrap-with-taint nil)}
-   :is-a? {:impl is-a?-fn :return-type-rule (types/wrap-with-taint nil)}})
+                          :taint-propagate? true}
+   :is-a? {:impl is-a?-fn :taint-propagate? true}})

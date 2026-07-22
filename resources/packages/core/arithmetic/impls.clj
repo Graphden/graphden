@@ -183,16 +183,16 @@
 ;; content-passing; bool predicates included since `(eq secret 42)`
 ;; tells you what the secret IS.
 (def impls
-  {:add {:impl add :return-type-rule (types/wrap-with-taint add-return-rule)}
-   :sub {:impl sub :return-type-rule (types/wrap-with-taint sub-return-rule)}
-   :mul {:impl mul :return-type-rule (types/wrap-with-taint mul-return-rule)}
-   :div {:impl div :return-type-rule (types/wrap-with-taint nil)}
-   :mod {:impl mod-fn :return-type-rule (types/wrap-with-taint mod-return-rule)}
-   :neg {:impl neg :return-type-rule (types/wrap-with-taint neg-return-rule)}
-   :abs {:impl abs-fn :return-type-rule (types/wrap-with-taint abs-return-rule)}
-   :eq {:impl eq :return-type-rule (types/wrap-with-taint nil)}
-   :neq {:impl neq :return-type-rule (types/wrap-with-taint nil)}
-   :lt {:impl lt :return-type-rule (types/wrap-with-taint nil)}
-   :lte {:impl lte :return-type-rule (types/wrap-with-taint nil)}
-   :gt {:impl gt :return-type-rule (types/wrap-with-taint nil)}
-   :gte {:impl gte :return-type-rule (types/wrap-with-taint nil)}})
+  {:add {:impl add :return-type-rule add-return-rule :taint-propagate? true}
+   :sub {:impl sub :return-type-rule sub-return-rule :taint-propagate? true}
+   :mul {:impl mul :return-type-rule mul-return-rule :taint-propagate? true}
+   :div {:impl div :taint-propagate? true}
+   :mod {:impl mod-fn :return-type-rule mod-return-rule :taint-propagate? true}
+   :neg {:impl neg :return-type-rule neg-return-rule :taint-propagate? true}
+   :abs {:impl abs-fn :return-type-rule abs-return-rule :taint-propagate? true}
+   :eq {:impl eq :taint-propagate? true}
+   :neq {:impl neq :taint-propagate? true}
+   :lt {:impl lt :taint-propagate? true}
+   :lte {:impl lte :taint-propagate? true}
+   :gt {:impl gt :taint-propagate? true}
+   :gte {:impl gte :taint-propagate? true}})

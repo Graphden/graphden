@@ -1601,9 +1601,13 @@
                            combined)
           root-base (registry/root-base-fn-name ref-name)
           static (or (:return info) :any)
-          recomputed (if-let [rule (base-fn-type-rule :return-type-rule root-base)]
+          root-entry (registry/rich-type-of root-base)
+          structural (if-let [rule (:return-type-rule root-entry)]
                        (rule inner-info static)
-                       static)]
+                       static)
+          recomputed (if (:taint-propagate? root-entry)
+                       (types/taint-with-secret-if-tainted inner-info structural)
+                       structural)]
       (if (= recomputed :any) static recomputed))))
 
 
@@ -1934,10 +1938,16 @@
    rule on `:ring-method` should see `:coll`'s type as a record so
    it can lift `:request-method`'s primitive type out of the shape."
   [fn-def primary-parent parent-args static-ret]
-  (if-let [rule (base-fn-type-rule :return-type-rule
-                                   (registry/root-base-fn-name primary-parent))]
-    (rule (bindings-info-for-rule (:args fn-def) parent-args) static-ret)
-    static-ret))
+  (let [entry (registry/rich-type-of
+                (registry/root-base-fn-name primary-parent))
+        rule (:return-type-rule entry)
+        taint? (:taint-propagate? entry)
+        binfo (when (or rule taint?)
+                (bindings-info-for-rule (:args fn-def) parent-args))
+        structural (if rule (rule binfo static-ret) static-ret)]
+    (if taint?
+      (types/taint-with-secret-if-tainted binfo structural)
+      structural)))
 
 
 (defn- apply-args-only-rule

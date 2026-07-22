@@ -16,13 +16,6 @@
     [graphden.types.core :as types]))
 
 
-(def ^:private taint
-  "Per-base-fn `:return-type-rule` that lifts the declared return into
-   `[:secret …]` iff any actual input carried the marker. Plug-in for
-   every content-passing string op below."
-  types/taint-with-secret-if-tainted)
-
-
 ;; === Validation Helpers ===
 
 (defn- validate-string-index!
@@ -277,7 +270,7 @@
 ;; === Registry ===
 
 (def impls
-  ;; Every entry is a `{:impl … :return-type-rule taint}` map —
+  ;; Every entry is a `{:impl … :taint-propagate? true}` map —
   ;; secret-content-passing is the default for the strings package.
   ;; Anything that takes a `:text` (or a record containing one) and
   ;; returns text / int / bool potentially leaks the content via the
@@ -289,24 +282,24 @@
   ;; are still annotated, since the propagator is a no-op for plain
   ;; inputs. `:parse-query-string` is now a pure graph composition
   ;; — its taint flows through `:str-split` + `:url-decode`.
-  {:str                {:impl str-fn                :return-type-rule taint}
-   :subs               {:impl subs-fn               :return-type-rule taint}
-   :str-len            {:impl str-len-fn            :return-type-rule taint}
-   :byte-len           {:impl byte-len-fn           :return-type-rule taint}
-   :str-upper          {:impl str-upper-fn          :return-type-rule taint}
-   :str-lower          {:impl str-lower-fn          :return-type-rule taint}
-   :str-trim           {:impl str-trim-fn           :return-type-rule taint}
-   :str-split          {:impl str-split-fn          :return-type-rule taint}
-   :str-join           {:impl str-join-fn           :return-type-rule taint}
-   :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule (types/wrap-with-taint str-to-keyword-return-rule)}
-   :keyword-to-str     {:impl keyword-to-str-fn     :return-type-rule taint}
-   :pr-str             {:impl pr-str-fn             :return-type-rule taint}
-   :to-str             {:impl to-str-fn             :return-type-rule taint}
-   :name               {:impl name-fn               :return-type-rule (types/wrap-with-taint name-return-rule)}
-   :blank?             {:impl blank?-fn             :return-type-rule taint}
-   :non-blank?         {:impl non-blank?-fn         :return-type-rule taint}
-   :url-decode         {:impl url-decode-fn         :return-type-rule taint}
-   :str-contains?      {:impl str-contains?-fn      :return-type-rule taint}
-   :str-starts-with?   {:impl str-starts-with?-fn   :return-type-rule taint}
-   :str-replace        {:impl str-replace-fn        :return-type-rule taint}
-   :re-find?           {:impl re-find?-fn           :return-type-rule taint}})
+  {:str                {:impl str-fn                :taint-propagate? true}
+   :subs               {:impl subs-fn               :taint-propagate? true}
+   :str-len            {:impl str-len-fn            :taint-propagate? true}
+   :byte-len           {:impl byte-len-fn           :taint-propagate? true}
+   :str-upper          {:impl str-upper-fn          :taint-propagate? true}
+   :str-lower          {:impl str-lower-fn          :taint-propagate? true}
+   :str-trim           {:impl str-trim-fn           :taint-propagate? true}
+   :str-split          {:impl str-split-fn          :taint-propagate? true}
+   :str-join           {:impl str-join-fn           :taint-propagate? true}
+   :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule str-to-keyword-return-rule :taint-propagate? true}
+   :keyword-to-str     {:impl keyword-to-str-fn     :taint-propagate? true}
+   :pr-str             {:impl pr-str-fn             :taint-propagate? true}
+   :to-str             {:impl to-str-fn             :taint-propagate? true}
+   :name               {:impl name-fn               :return-type-rule name-return-rule :taint-propagate? true}
+   :blank?             {:impl blank?-fn             :taint-propagate? true}
+   :non-blank?         {:impl non-blank?-fn         :taint-propagate? true}
+   :url-decode         {:impl url-decode-fn         :taint-propagate? true}
+   :str-contains?      {:impl str-contains?-fn      :taint-propagate? true}
+   :str-starts-with?   {:impl str-starts-with?-fn   :taint-propagate? true}
+   :str-replace        {:impl str-replace-fn        :taint-propagate? true}
+   :re-find?           {:impl re-find?-fn           :taint-propagate? true}})

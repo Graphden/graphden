@@ -420,6 +420,9 @@
                                                      (:slot-types-rule fn-def))
                    (:nav-types-rule fn-def)   (assoc :nav-types-rule
                                                      (:nav-types-rule fn-def))
+                   ;; `:taint-propagate?` — checker applies marker-taint
+                   ;; propagation centrally on this base-fn's results.
+                   (:taint-propagate? fn-def)  (assoc :taint-propagate? true)
                    ;; `:lazy-seq-args` — slot names where each ITEM in the
                    ;; seq slot's list arrives as a `delay`, so a consumer
                    ;; like `:cond` can step past an unforced item.

@@ -259,7 +259,7 @@
    loader simply hands impl-fn through."
   [fn-def impl-entry]
   (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule
-                lazy-seq-args compile-time-value?]}
+                taint-propagate? lazy-seq-args compile-time-value?]}
         (impl-entry->parts impl-entry)]
     (cond-> {:args (normalize-args (:args fn-def))
              :return-type (:return-type fn-def)
@@ -277,6 +277,11 @@
       return-type-rule      (assoc :return-type-rule return-type-rule)
       slot-types-rule       (assoc :slot-types-rule slot-types-rule)
       nav-types-rule        (assoc :nav-types-rule nav-types-rule)
+      ;; `:taint-propagate?` — marker-taint (`:secret` &c.) flows from
+      ;; any tainted input into the return. Applied CENTRALLY by the
+      ;; checker on top of the structural rule/signature result —
+      ;; replaces the per-site `types/wrap-with-taint` wrapping.
+      taint-propagate?      (assoc :taint-propagate? true)
       ;; `:lazy-seq-args` — seq slots whose ITEMS arrive as delays
       ;; (consumer steps past unforced items, see :cond).
       lazy-seq-args         (assoc :lazy-seq-args lazy-seq-args)

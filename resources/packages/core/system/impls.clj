@@ -291,8 +291,8 @@
 ;; even a HASH of a secret leaks the value (rainbow tables, length
 ;; oracles), so the propagator is mandatory here.
 (def impls
-  {:to-json-string {:impl to-json-string :return-type-rule (types/wrap-with-taint nil)}
-   :parse-json {:impl parse-json :return-type-rule (types/wrap-with-taint nil)}
+  {:to-json-string {:impl to-json-string :taint-propagate? true}
+   :parse-json {:impl parse-json :taint-propagate? true}
    :system-property system-property-fn
    :jvm-uptime-ms jvm-uptime-ms-fn
    :heap-used heap-used-fn
@@ -310,17 +310,17 @@
    :log-warn log-warn-fn
    :current-time-ms current-time-ms
    :env env-fn
-   :ex-info {:impl ex-info-fn :return-type-rule (types/wrap-with-taint nil)}
-   :throw {:impl throw-fn :return-type-rule (types/wrap-with-taint nil)}
+   :ex-info {:impl ex-info-fn :taint-propagate? true}
+   :throw {:impl throw-fn :taint-propagate? true}
    :read-resource-or-nil read-resource-or-nil
-   :invoke {:impl invoke-fn :return-type-rule (types/wrap-with-taint invoke-return-rule)}
-   :call {:impl invoke-fn :return-type-rule (types/wrap-with-taint nil)}
-   :call-noargs {:impl call-noargs-fn :return-type-rule (types/wrap-with-taint nil)}
-   :try {:impl try-fn :return-type-rule (types/wrap-with-taint nil)}
-   :slurp {:impl slurp-fn :return-type-rule (types/wrap-with-taint nil)}
-   :parse-int {:impl parse-int :return-type-rule (types/wrap-with-taint nil)}
-   :sha256-hex {:impl sha256-hex-fn :return-type-rule (types/wrap-with-taint nil)}
-   :throwable-message {:impl throwable-message-fn :return-type-rule (types/wrap-with-taint nil)}
-   :throwable-class-name {:impl throwable-class-name-fn :return-type-rule (types/wrap-with-taint nil)}
-   :ex-data {:impl ex-data-fn :return-type-rule (types/wrap-with-taint nil)}
-   :parse-uuid {:impl parse-uuid-fn :return-type-rule (types/wrap-with-taint nil)}})
+   :invoke {:impl invoke-fn :return-type-rule invoke-return-rule :taint-propagate? true}
+   :call {:impl invoke-fn :taint-propagate? true}
+   :call-noargs {:impl call-noargs-fn :taint-propagate? true}
+   :try {:impl try-fn :taint-propagate? true}
+   :slurp {:impl slurp-fn :taint-propagate? true}
+   :parse-int {:impl parse-int :taint-propagate? true}
+   :sha256-hex {:impl sha256-hex-fn :taint-propagate? true}
+   :throwable-message {:impl throwable-message-fn :taint-propagate? true}
+   :throwable-class-name {:impl throwable-class-name-fn :taint-propagate? true}
+   :ex-data {:impl ex-data-fn :taint-propagate? true}
+   :parse-uuid {:impl parse-uuid-fn :taint-propagate? true}})

@@ -2,7 +2,6 @@
   "Implementations for web/html base functions using Hiccup."
   (:require
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.types.core :as types]
     [hiccup2.core :as h]))
 
 
@@ -40,6 +39,6 @@
   ;; they must propagate the taint so the executor redacts a rendered
   ;; secret at `/api/execute`. `:h-raw` needs no rule — its `:string`
   ;; input can't accept a `[:secret :text]` (taint can't be stripped).
-  {:render-hiccup {:impl render-hiccup :return-type-rule (types/wrap-with-taint nil)}
+  {:render-hiccup {:impl render-hiccup :taint-propagate? true}
    :h-raw h-raw
-   :hiccup {:impl hiccup-element :return-type-rule (types/wrap-with-taint nil)}})
+   :hiccup {:impl hiccup-element :taint-propagate? true}})

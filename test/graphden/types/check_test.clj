@@ -83,6 +83,19 @@
                                  {:args {} :return-type :text})
     (registry/record-rich-types! :get-int
                                  {:args {} :return-type :int})
+    ;; Rule-LESS polymorphic base-fns for the signature-fallback tests
+    ;; (`signature-return`): declared vars must resolve from actuals
+    ;; with no hand `:return-type-rule` present.
+    (registry/record-rich-types! :sig-head
+                                 {:args {:coll {:type [:list 'a]}}
+                                  :return-type [:union :null 'a]})
+    (registry/record-rich-types! :sig-pair
+                                 {:args {:left {:type 'a}
+                                         :right {:type 'a}}
+                                  :return-type [:list 'a]})
+    (registry/record-rich-types! :sig-wrap
+                                 {:args {:value {:type 'a}}
+                                  :return-type [:list 'a]})
     (t)))
 
 
@@ -1902,3 +1915,52 @@
       (is (= {:_anyv :any}
              (get overrides :_unknown-then))
           "unknown tag → target-static fall-through, not crash"))))
+
+;; -----------------------------------------------------------------------------
+;; Signature fallback (`signature-return`) — declared polymorphic
+;; signatures act as the structural rule when no hand rule exists.
+
+(deftest signature-fallback-resolves-declared-vars
+  (testing "[:list a] → [:union :null a] resolves from a literal coll"
+    (check/check-fn-def! {:name :sig-head-use
+                          :parent :sig-head
+                          :args {:coll [1 2 3]}})
+    (is (= #{:null :int}
+           (set (types-core/union-members
+                  (:return (registry/rich-type-of :sig-head-use)))))))
+  (testing "a → [:list a] lifts the single arg's type"
+    (check/check-fn-def! {:name :sig-wrap-use
+                          :parent :sig-wrap
+                          :args {:value "hi"}})
+    (is (= [:list :text]
+           (:return (registry/rich-type-of :sig-wrap-use))))))
+
+
+(deftest signature-fallback-var-conflict-rejected-at-check
+  (testing "same var bound to :int and :text across args — the
+            sequential check-binding! unify is HM-strict, so the
+            SECOND binding mismatches the already-bound var and the
+            author gets a type error (the engine's union-join only
+            serves the uncheckable re-fire path)"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :sig-pair-use
+                                :parent :sig-pair
+                                :args {:left 1 :right "two"}})))
+    (testing "agreeing bindings resolve the var"
+      (check/check-fn-def! {:name :sig-pair-ok
+                            :parent :sig-pair
+                            :args {:left 1 :right 2}})
+      (is (= [:list :int]
+             (:return (registry/rich-type-of :sig-pair-ok)))))))
+
+
+(deftest signature-fallback-degrades-without-information
+  (testing "free arg (no binding) leaves the declared return as-is"
+    (check/check-fn-def! {:name :sig-head-free
+                          :parent :sig-head
+                          :args {}})
+    ;; Nothing bound → subst empty → static (the subst-resolved
+    ;; declared return) stands; the var itself never leaks as a
+    ;; concrete narrowing.
+    (is (some? (:return (registry/rich-type-of :sig-head-free))))))

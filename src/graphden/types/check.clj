@@ -1544,7 +1544,8 @@
 
 (declare base-fn-type-rule
          effective-ref-return
-         effective-ref-return-uncached)
+         effective-ref-return-uncached
+         signature-return)
 
 
 (defn- effective-binding-type
@@ -1604,7 +1605,7 @@
           root-entry (registry/rich-type-of root-base)
           structural (if-let [rule (:return-type-rule root-entry)]
                        (rule inner-info static)
-                       static)
+                       (signature-return root-entry inner-info static))
           recomputed (if (:taint-propagate? root-entry)
                        (types/taint-with-secret-if-tainted inner-info structural)
                        structural)]
@@ -1923,6 +1924,59 @@
   (rule-key (registry/rich-type-of base-fn-name)))
 
 
+(defn- signature-return
+  "Generic structural fallback for a root base-fn with NO hand-written
+   `:return-type-rule` whose DECLARED signature carries type variables
+   (`:coll [:list a]` → `[:union :null a]`): unify each var-carrying
+   declared arg type against the actual type visible at this site,
+   JOIN the per-arg substitutions (a var bound differently by two args
+   unions — return-position covariance makes the join the sound
+   direction for a result type; on the CHECKED path `check-binding!`'s
+   HM-strict unify has already rejected such a conflict, so the join
+   arm only ever fires on the uncheckable re-fire path in
+   `effective-ref-return-uncached`), then resolve the declared return
+   through the joined substitution.
+
+   Degrades to `static-ret` whenever nothing binds or a var stays
+   free — the fallback must never widen or invent. `:any` actuals are
+   skipped: a free/unknown arg carries no information, and letting the
+   var bind to `:any` would widen the resolved return.
+
+   This is the declared-signature path that makes most hand rules
+   redundant: the signature already IS the rule, written where the
+   author reads it (fns.edn)."
+  [root-entry bindings-info static-ret]
+  (let [decl-ret (:return root-entry)]
+    (if-not (has-type-var? decl-ret)
+      static-ret
+      (let [substs (into []
+                         (keep (fn [[arg-name expected]]
+                                 (let [actual (get-in bindings-info
+                                                      [arg-name :type])]
+                                   (when (and (has-type-var? expected)
+                                              actual
+                                              (not= :any actual))
+                                     (let [s (types/unify expected actual {})]
+                                       (when-not (types/fail? s) s))))))
+                         (:args root-entry))
+            joined (reduce (fn [acc s]
+                             (reduce-kv
+                               (fn [m v t]
+                                 (let [prev (get m v)]
+                                   (cond
+                                     (nil? prev) (assoc m v t)
+                                     (= prev t)  m
+                                     :else (assoc m v (types/make-union
+                                                        [prev t])))))
+                               acc s))
+                           {} substs)
+            resolved (when (seq joined)
+                       (types/resolve joined decl-ret))]
+        (if (or (nil? resolved) (has-type-var? resolved))
+          static-ret
+          resolved)))))
+
+
 (defn- compute-return-type
   "Run the ROOT base-fn's type-rule (e.g. `:assoc` record-builder) on
    `static-ret` to produce the rich, possibly-narrowed return shape.
@@ -1942,9 +1996,13 @@
                 (registry/root-base-fn-name primary-parent))
         rule (:return-type-rule entry)
         taint? (:taint-propagate? entry)
-        binfo (when (or rule taint?)
+        sig? (and (not rule) (has-type-var? (:return entry)))
+        binfo (when (or rule taint? sig?)
                 (bindings-info-for-rule (:args fn-def) parent-args))
-        structural (if rule (rule binfo static-ret) static-ret)]
+        structural (cond
+                     rule (rule binfo static-ret)
+                     sig? (signature-return entry binfo static-ret)
+                     :else static-ret)]
     (if taint?
       (types/taint-with-secret-if-tainted binfo structural)
       structural)))

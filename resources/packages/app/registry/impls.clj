@@ -25,9 +25,11 @@
 
 
 (defbase export-graph
-  []
+  [include-secret-paths]
   (cr/record-effect! :db)
-  (export/export-graph-bundle (request/require-storage ctx)))
+  (export/export-graph-bundle
+    (request/require-storage ctx)
+    {:include-secret-paths? (= "true" include-secret-paths)}))
 
 
 (defbase graph-rows
@@ -62,6 +64,7 @@
                                    :fns fns
                                    :dependencies (:dependencies bundle)
                                    :package-dependencies (:package-dependencies bundle)
+                                   :secrets (vec (:secrets bundle))
                                    :content-hash content-hash
                                    :published-at (java.time.Instant/now)})]
         {:ok true
@@ -70,7 +73,11 @@
          :version pkg-version
          :content-hash content-hash
          :fn-count (count fns)
-         :dependencies (:dependencies bundle)}))))
+         :dependencies (:dependencies bundle)
+         ;; What the bundle's export STRIPPED (vault paths) — the
+         ;; publisher's "nothing left silently" warning, and the seed
+         ;; of the installer's :needs-definition.
+         :secrets (vec (:secrets bundle))}))))
 
 
 ;; `:list-package-versions` / `:fetch-package-version` are pure graph

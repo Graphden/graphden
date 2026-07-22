@@ -17,13 +17,20 @@
    :type {:name :text
           :version :text}}
 
+  {:name :secret-arg-ref
+   :description "One vault-path binding a shared bundle carries WITHOUT its path: which fn's which arg is a secret the installer must define. Emitted by the exporter's strip pass; surfaced at install as :needs-definition."
+   :type {:fn :keyword
+          :arg :keyword}}
+
   {:name :package-bundle-shape
-   :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), the external fn-names it depends on, and the PACKAGES (name+version) those external fns come from (for recursive install)."
+   :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), the external fn-names it depends on, the PACKAGES (name+version) those external fns come from (for recursive install), plus the secret-args manifest (:secrets — vault paths stripped unless :secret-paths-included?)."
    :type {:namespace :text
           :namespaces [:list :text]
           :fns [:list :keyword-map]
           :dependencies [:list :keyword]
-          :package-dependencies [:list :package-dependency-shape]}}
+          :package-dependencies [:list :package-dependency-shape]
+          :secrets [:list :secret-arg-ref]
+          :secret-paths-included? :bool}}
 
   {:name :export-namespace
    :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract."
@@ -35,12 +42,15 @@
   ;; Distinct from `:package-bundle-shape`: no single root, no `:dependencies`
   ;; (nothing is external to the whole graph).
   {:name :full-graph-export-shape
-   :description "A whole-graph migration bundle: every named fn-def in the graph (each a keyword-keyed fn-def map) plus the namespaces they span."
+   :description "A whole-graph migration bundle: every named fn-def in the graph (each a keyword-keyed fn-def map), the namespaces they span, and the secret-args manifest (:secrets — vault paths stripped unless :secret-paths-included?)."
    :type {:fns [:list :keyword-map]
-          :namespaces [:list :text]}}
+          :namespaces [:list :text]
+          :secrets [:list :secret-arg-ref]
+          :secret-paths-included? :bool}}
 
   {:name :export-graph
-   :description "Serialise the ENTIRE stored graph (the current branch/scope) into a migration bundle by reading the live graph — every named fn-def plus the namespaces they span. The core of GET /api/export/graph (cloud→self-hosted \"download my whole project\")."
+   :description "Serialise the ENTIRE stored graph (the current branch/scope) into a migration bundle by reading the live graph — every named fn-def plus the namespaces they span. Vault paths are STRIPPED unless :include-secret-paths is the string \"true\" (org-internal migration); the :secrets manifest always lists the affected args. The core of GET /api/export/graph (cloud→self-hosted \"download my whole project\")."
+   :args {:include-secret-paths {:type :nullable-text :description "Query-param opt-in: the string \"true\" keeps vault paths in the bundle. Anything else (incl. nil) strips them."}}
    :return-type :full-graph-export-shape
    :effects #{:db}}
 
@@ -346,8 +356,13 @@
   ;; the handler ctx (like the JSON publish handler), so the full-graph read
   ;; is NOT forced lazily inside a render. Auth-required (whole project).
   ;; ---------------------------------------------------------------------
+  {:name :_export-include-secrets
+   :description "The `include-secret-paths` query param of GET /api/export/graph — \"true\" keeps vault paths (org-internal migration); default strips them."
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "include-secret-paths"}}}
   {:name :_export-graph-result
-   :parent :export-graph}
+   :parent :export-graph
+   :args {:include-secret-paths :_export-include-secrets}}
   {:name :_export-graph-edn
    :description "The whole-graph bundle as an EDN string (`:pr-str`) — keywords preserved for faithful re-load."
    :parent :pr-str :args {:value :_export-graph-result}}
@@ -660,10 +675,18 @@
    :args {:ns-root {:ref :_inst-i-ns-root :type :text}
           :version {:ref :_inst-i-resolved :type :text}
           :fn-ns {:ref :_inst-i-ns-root :type :text}}}
+  ;; The version row's stripped-secrets manifest (written at publish) —
+  ;; what the INSTALLER must define before the installed fns can run.
+  ;; `:default []` covers pre-manifest rows (NULL column).
+  {:name :_inst-i-secrets
+   :parent :get
+   :args {:coll :_inst-i-row :key {:value :secrets} :default {:value []}}}
   {:name :_inst-ok
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :namespace}]
-          :vals [{:value true} :_inst-op-name :_inst-i-resolved :_inst-i-vq-ns]}}
+   :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :namespace}
+                 {:value :needs-definition}]
+          :vals [{:value true} :_inst-op-name :_inst-i-resolved :_inst-i-vq-ns
+                 :_inst-i-secrets]}}
   {:name :_inst-rest-empty?
    :parent :empty?
    :args {:coll {:ref :_inst-rest :type [:list :any]}}}
@@ -1339,9 +1362,62 @@
    :parent :to-str :args {:value :_pkg-install-version-raw}}
   {:name :_pkg-install-do
    :parent :install-package :args {:pkg-name :_pkg-install-name :pkg-version :_pkg-install-version}}
+  ;; Secrets the installed version needs defined → a transient notice
+  ;; above the refreshed panel, so "this package expects secrets you
+  ;; must create" is never silent. Deliberately reads the version ROW's
+  ;; :secrets (a pure re-read via the shared resolve/row pair), NOT the
+  ;; effectful :_pkg-install-do result — an effectful fn is not
+  ;; memoised, so a second ref would run the whole install again (the
+  ;; same footgun the publish notice documents below).
+  {:name :_pkg-install-needs-resolved
+   :parent :resolve-package-version
+   :args {:pkg-name :_pkg-install-name :spec :_pkg-install-version}}
+  {:name :_pkg-install-needs-row
+   :parent :package-version-row
+   :args {:pkg-name :_pkg-install-name :resolved :_pkg-install-needs-resolved}}
+  {:name :_pkg-install-needs
+   :parent :get
+   :args {:coll :_pkg-install-needs-row :key {:value :secrets} :default {:value []}}}
+  {:name :_pkg-install-needs-none?
+   :parent :empty? :args {:coll :_pkg-install-needs}}
+  ;; Generic mapper over :secret-arg-ref entries — bare fn name
+  ;; ("db-pass", not ":db-pass"). Shared by the install needs-notice
+  ;; and the publish stripped-notice.
+  {:name :_secret-ref-fn-name
+   :parent :name
+   :args {:value :_secret-ref-entry-fn}}
+  {:name :_secret-ref-entry-fn
+   :parent :get :args {:coll {:as :item} :key {:value :fn} :default {:value ""}}}
+  {:name :_pkg-inst-need-names
+   :parent :map :args {:func :_secret-ref-fn-name :coll :_pkg-install-needs}}
+  {:name :_pkg-inst-needs-joined
+   :parent :str-join :args {:coll :_pkg-inst-need-names :separator {:value ", "}}}
+  {:name :_pkg-inst-needs-text
+   :parent :str-join
+   :args {:coll [{:value "Installed — this package needs secrets defined before it can run: "}
+                 :_pkg-inst-needs-joined]
+          :separator {:value ""}}}
+  {:name :_pkg-install-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-err"}}
+          :children [:_pkg-inst-needs-text]}}
+  {:name :_pkg-install-notice-maybe
+   :parent :if
+   :args {:test :_pkg-install-needs-none?
+          :then {:value nil}
+          :else :_pkg-install-notice}}
+  {:name :_pkg-install-panel-root
+   :description "Panel root for an install response — the (conditional) needs-secrets notice above the normal installed body + browse details."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-packages-panel "1"}}
+          :children [:_pkg-install-notice-maybe :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
+  {:name :_pkg-install-panel-html
+   :parent :render-hiccup :args {:hiccup :_pkg-install-panel-root}}
   {:name :_pkg-install-then-panel
-   :description "Install, THEN render the refreshed panel — `:do` forces order so :list-installed-packages includes the new pin."
-   :parent :do :args {:steps [:_pkg-install-do :_pkg-panel-html]}}
+   :description "Install, THEN render the refreshed panel (with the needs-secrets notice when applicable) — `:do` forces order so :list-installed-packages includes the new pin."
+   :parent :do :args {:steps [:_pkg-install-do :_pkg-install-panel-html]}}
   {:name :_pkg-install-panel-handler
    :description "Ring handler for POST /api/packages/panel-install — installs and returns the refreshed Packages panel as text/html."
    :parent :html-ok-response :args {:body :_pkg-install-then-panel}}
@@ -1511,11 +1587,47 @@
    :args {:tag {:value "div"}
           :attrs {:value {:class "packages-fork-note packages-fork-ok"}}
           :children [:_pkg-publish-notice-text]}}
+  ;; Stripped-secrets warning — the PUBLISHER's half of the "never
+  ;; silently" contract. Same pure row re-read pattern as the install
+  ;; needs-notice (never re-ref the effectful publish result); after the
+  ;; `:do`-forced publish the row exists and carries the manifest the
+  ;; exporter stripped.
+  {:name :_pkg-pub-secrets-resolved
+   :parent :resolve-package-version
+   :args {:pkg-name :_pkg-publish-name :spec :_pkg-publish-version}}
+  {:name :_pkg-pub-secrets-row
+   :parent :package-version-row
+   :args {:pkg-name :_pkg-publish-name :resolved :_pkg-pub-secrets-resolved}}
+  {:name :_pkg-pub-secrets
+   :parent :get
+   :args {:coll :_pkg-pub-secrets-row :key {:value :secrets} :default {:value []}}}
+  {:name :_pkg-pub-secrets-none?
+   :parent :empty? :args {:coll :_pkg-pub-secrets}}
+  {:name :_pkg-pub-secret-names
+   :parent :map :args {:func :_secret-ref-fn-name :coll :_pkg-pub-secrets}}
+  {:name :_pkg-pub-secrets-joined
+   :parent :str-join :args {:coll :_pkg-pub-secret-names :separator {:value ", "}}}
+  {:name :_pkg-pub-secrets-text
+   :parent :str-join
+   :args {:coll [{:value "Vault paths were NOT included — installers must define these secrets themselves: "}
+                 :_pkg-pub-secrets-joined]
+          :separator {:value ""}}}
+  {:name :_pkg-pub-secrets-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-err"}}
+          :children [:_pkg-pub-secrets-text]}}
+  {:name :_pkg-pub-secrets-notice-maybe
+   :parent :if
+   :args {:test :_pkg-pub-secrets-none?
+          :then {:value nil}
+          :else :_pkg-pub-secrets-notice}}
   {:name :_pkg-publish-panel-root
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:data-packages-panel "1"}}
-          :children [:_pkg-publish-notice :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
+          :children [:_pkg-publish-notice :_pkg-pub-secrets-notice-maybe
+                     :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
   {:name :_pkg-publish-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-publish-panel-root}}
   ;; Force export+publish as an explicit FIRST `:do` step, THEN render — the

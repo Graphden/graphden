@@ -79,6 +79,14 @@
   #uuid "7c9e2a41-3b6d-4f80-9a1c-5e8b0d2f4a63")
 
 
+;; Secret-args manifest: which `{:fn … :arg …}` slots had their vault
+;; paths stripped at publish time (see `packages/export.clj` § Secret-path
+;; policy). Surfaced at install as `:needs-definition` so the installer
+;; learns what secrets to define. Nullable — pre-existing rows have none.
+(def ^:private pv-secrets-field-uuid
+  #uuid "6e1f4b7a-9c2d-4d3e-8a5f-1b0c7d9e2f45")
+
+
 (def ^:private pv-content-hash-field-uuid
   #uuid "c559dbeb-742a-444b-8c26-848ae3c462c8")
 
@@ -151,6 +159,9 @@
                       :package-dependencies {:uuid pv-package-dependencies-field-uuid
                                              :type :jsonb
                                              :nullable? true}
+                      :secrets {:uuid pv-secrets-field-uuid
+                                :type :jsonb
+                                :nullable? true}
                       :content-hash {:uuid pv-content-hash-field-uuid
                                      :type :text}
                       :published-at {:uuid pv-published-at-field-uuid

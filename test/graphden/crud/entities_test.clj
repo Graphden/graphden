@@ -775,10 +775,13 @@
                                       :parent-ids []})
             _ (sp/update-entity storage :binding bid
                                 {:ref-fn-id (:id ref-fn)})
-            r (with-redefs [registry/rich-type-of
-                            (fn [n]
-                              (when (= :esc-effectful n)
-                                {:effects #{:io}}))]
+            ;; The tighten path reads the registry by the ref-row's ID
+            ;; (`rich-type-of-id`) — stub by identity, not name.
+            r (with-redefs [registry/rich-type-of-id
+                            (fn stub
+                              ([id] (when (= (:id ref-fn) id)
+                                      {:effects #{:io}}))
+                              ([id arg] (get-in (stub id) [:args arg])))]
                 ;; Tighten to {:db} — :io must escape → reject.
                 (entities/tighten-fn-type-impl! storage bid {:effects ["db"]}))]
         (is (= 400 (:status r)))

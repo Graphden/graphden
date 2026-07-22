@@ -113,8 +113,11 @@
                                        :ref-fn-id (:id handler)})]
     ;; Record rich-types so the bound-callable effect check can read
     ;; the handler's :effects. Without this, ref-effects defaults to
-    ;; #{} and any narrowing is allowed (silent gap).
+    ;; #{} and any narrowing is allowed (silent gap). Keyed by the
+    ;; handler ROW's id (3-arity) — the tighten path reads the registry
+    ;; by identity, and this row's id is random, not name-derived.
     (registry/record-rich-types-raw!
+      (:id handler)
       (keyword handler-name)
       {:return :null :args {} :effects ref-effects})
     {:host-id (:id host)

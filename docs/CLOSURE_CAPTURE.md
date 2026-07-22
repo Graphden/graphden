@@ -158,19 +158,23 @@ dispatcher. It reads the slot's structural shape (via
   alpha-equivalence resolver picks the lambda-param name from R's
   non-captured frees — covers conventional positional callsites like
   `:filter :pred :some?` (slot's positional `:item` vs `:some?`'s
-  domain-named `:value`). The resolver is accepted only when
-  UNAMBIGUOUS: one-shot `:arg` slots take a single candidate only if
-  it is R's OWN declared arg (a ref-lifted deep free is captured
-  plumbing); multi-candidate cases throw
-  `:compile/ambiguous-lambda-params`. The escape hatch is an authored
+  domain-named `:value`). Resolution is explicit-first: an authored
   **`:lambda-params`** on the callable fn-def (registry-carried, like
-  `:lazy-seq-args`): the ordered call-site parameter list, `[]`
-  meaning "everything captured". It overrides all inference and is
-  validated against R's frees. (This replaced the retired
-  global-env-binding-name heuristic that used to GUESS variadic-ignore
-  for handler chains; those are now honestly typed — route/handler
-  slots declare `[:fn {} resp]`, the request reaching the callable
-  through wrap-time capture.)
+  `:lazy-seq-args` — the ordered call-site parameter list, `[]`
+  meaning "everything captured") overrides ALL inference and is
+  validated against R's frees (`:compile/invalid-lambda-params` on a
+  typo). Without a declaration: an unambiguous single candidate that
+  is R's OWN declared arg is accepted; otherwise the LEGACY one-shot
+  guess runs (candidates that are all env-binding names somewhere →
+  variadic-ignore) — now warn-logged once per callable with a
+  `:lambda-params` nudge. The guess is DEPRECATED but kept until the
+  slot contracts split boundary-vs-inner honestly: `:http-server
+  :handler` is a genuine per-call site (the request exists only at
+  invocation — capture cannot feed it; a uniform 0-arg flip broke
+  `/health`), while inner wrap `:base-handler` slots evaluate under a
+  request-carrying fa and can become `[:fn {} resp]`. That
+  boundary-aware migration is the follow-up that lets the guess become
+  a hard `:compile/ambiguous-lambda-params` error.
 - **2+-arg slot** (`[:fn {:a A :b B} ret]`) → sub free args matching
   slot's structural names. Map-callable; covers
   `:wrap-middleware :handler` (`{:request _ :next-handler _}`).

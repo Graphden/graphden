@@ -1,5 +1,6 @@
 (ns graphden.packages.records-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.packages.records :as r]))
 
@@ -466,7 +467,7 @@
         anon-names (fn [fns]
                      (->> (r/parse-module fns)
                           (filter #(and (= :fn (:kind %))
-                                        (some-> (:name %) (.startsWith "_anon-"))))
+                                        (some-> (:name %) (str/starts-with? "_anon-"))))
                           (map :name)
                           set))
         in-a (anon-names (conj base (mk "ns-a")))

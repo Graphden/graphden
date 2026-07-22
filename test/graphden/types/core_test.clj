@@ -1,6 +1,7 @@
 (ns graphden.types.core-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [clojure.tools.logging]
     [graphden.types.core :as t]))
 
 

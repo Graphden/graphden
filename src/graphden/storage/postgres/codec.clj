@@ -3,6 +3,7 @@
    Handles JSONB, enum, and other type conversions."
   (:require
     [cheshire.core :as json]
+    [graphden.schema.graph.schema :as gds]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp])
   (:import
@@ -21,8 +22,10 @@
 ;; This set contains known value_kind enum values from graph-data-schema.
 
 (def ^:private known-value-kind-values
-  "Known values of the value_kind enum (SQL snake_case form)."
-  #{"null" "uuid" "text" "int" "bool" "numeric" "timestamptz" "jsonb" "bytes" "any" "fn" "sequence" "keyword"})
+  "Known values of the value_kind enum (SQL snake_case form) — DERIVED
+   from the schema's `value-kind-values` declaration instead of a
+   hand-typed duplicate that silently drifted when a kind was added."
+  (into #{} (map name) (keys gds/value-kind-values)))
 
 
 (defn- known-enum-value?

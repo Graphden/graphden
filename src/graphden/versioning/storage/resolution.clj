@@ -21,6 +21,7 @@
    with a dev port, vault path) don't leak across merges."
   (:require
     [clojure.set :as set]
+    [graphden.schema.versioned.schema :as vts]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.branch-local :as bl]))
 
@@ -93,39 +94,40 @@
   "Configuration for versioned entities. Maps base entity name to
    version table metadata.
 
+   `:version-data-fields` is DERIVED (`vts/version-data-fields`) from the
+   same base field map the `-version` mirror entity derives from — one
+   source, so the decorator's select-keys can never silently disagree
+   with the mirror's columns (the old hand-kept-triple footgun).
+   `:candidate-bound-keys` stays hand-curated: it is a read-bounding
+   OPTIMIZATION choice (which version-row columns are useful to bound a
+   candidate query on), not derivable from the schema.
+
    Notes:
    - `:parent-ids` is NOT in fn version-data-fields — it's a :ref-many
-     stored in a junction table, not versioned.
+     stored in a junction table, not versioned (declared identity-level
+     in `vts/mirror-config`).
    - `:slot` is intentionally absent: slots are immutable post-create
      (changing the (name, type-fn-id) pair = creating a new slot)."
   {:fn {:version-entity :fn-version
         :version-id-field :fn-id
-        :version-data-fields #{:name :description :constraint
-                               :base-fn-id :element-fn-id :return-type-fn-id
-                               :anonymous-hash :expects-effects}
+        :version-data-fields (vts/version-data-fields :fn)
         :candidate-bound-keys #{:name :anonymous-hash :base-fn-id
                                 :element-fn-id :return-type-fn-id}}
 
    :fn-slot {:version-entity :fn-slot-version
              :version-id-field :fn-slot-id
-             :version-data-fields #{:fn-id :slot-id :position}
+             :version-data-fields (vts/version-data-fields :fn-slot)
              :candidate-bound-keys #{:fn-id :slot-id}}
 
    :binding {:version-entity :binding-version
              :version-id-field :binding-id
-             :version-data-fields #{:fn-id :slot-id :value :value-present
-                                    :ref-fn-id
-                                    :override-kind
-                                    :type-override-fn-id :description
-                                    :list-append :list-closed :terminal
-                                    :required}
+             :version-data-fields (vts/version-data-fields :binding)
              :candidate-bound-keys #{:fn-id :slot-id :ref-fn-id
                                      :type-override-fn-id}}
 
    :binding-list-item {:version-entity :binding-list-item-version
                        :version-id-field :item-id
-                       :version-data-fields #{:binding-id :position :value
-                                              :ref-fn-id :literal}
+                       :version-data-fields (vts/version-data-fields :binding-list-item)
                        :candidate-bound-keys #{:binding-id :ref-fn-id}}})
 
 

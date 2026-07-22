@@ -307,6 +307,179 @@
 
 
 ;; =============================================================================
+;; Version-mirror derivation — ONE base declaration, no hand-kept copy
+;; =============================================================================
+;;
+;; Historically every `-version` entity was a hand-written parallel copy of
+;; its base entity, and the versioned-storage decorator's
+;; `version-data-fields` was a THIRD hand-kept list — so adding a column
+;; meant 3 coordinated edits, and forgetting the mirror or the list made
+;; the decorator strip the new column's writes SILENTLY. Now the mirror
+;; field map and the version-data-fields set both derive from the base
+;; field map (`gds/fn-fields` & co); the only per-field inputs kept here
+;; are the PINNED column uuids (they must never change — the migration
+;; framework matches columns by uuid, a changed uuid reads as drop+add)
+;; and rare mirror-only tweaks (an explicit `:indexed?`).
+;;
+;; Adding a base column now fails the build LOUDLY unless you either pin
+;; a mirror uuid for it (→ versioned) or list it as identity-level
+;; (→ never versioned). The silent-drop footgun is structurally gone.
+
+(defn- mirror-field-spec
+  "Base field spec → its version-mirror spec: `:ref` demotes to `:uuid`
+   (no FK from a version row — the target identity may be soft-deleted /
+   cross-branch while the version row lingers); everything else copies
+   verbatim, nullability included."
+  [spec]
+  (if (= :ref (:type spec))
+    (-> spec (assoc :type :uuid) (dissoc :ref-entity))
+    spec))
+
+
+(defn derive-version-fields
+  "Derive a `-version` mirror entity's field map from the BASE entity's
+   field map.
+
+   `framework` — the four version-framework columns
+   (`{<id-field> {...ref base} :branch-id {...} :created-at :deleted-at}`),
+   spliced in verbatim.
+   `identity-fields` — base fields that live on the IDENTITY row and never
+   version (structural identity, tenant owner). `:ref-many` fields are
+   junction tables and skip automatically.
+   `uuids` — `{field-name → pinned mirror-column uuid}`. A versioned base
+   field with NO pinned uuid throws at build time: that is the point —
+   the old failure mode was the decorator silently dropping the writes.
+   `tweaks` — `{field-name → spec-merge}` for mirror-only flags
+   (e.g. the explicit `:indexed?` on ref-fn-id — the base column is a
+   real FK and gets its index from the constraint; the mirror's is a
+   bare uuid)."
+  [entity base-fields {:keys [identity-fields uuids tweaks]} framework]
+  (let [data-fields
+        (into {}
+              (keep (fn [[fname spec]]
+                      (when-not (or (contains? identity-fields fname)
+                                    (= :ref-many (:type spec)))
+                        (let [u (get uuids fname)]
+                          (when-not u
+                            (throw (ex-info
+                                     (str "No version-mirror column uuid for "
+                                          entity "/" fname
+                                          " — a new base field must either be "
+                                          "declared identity-level or given a "
+                                          "pinned mirror uuid here. (Without "
+                                          "this check the versioned decorator "
+                                          "silently dropped its writes.)")
+                                     {:entity entity :field fname})))
+                          [fname (-> (mirror-field-spec spec)
+                                     (assoc :uuid u)
+                                     (merge (get tweaks fname)))]))))
+              base-fields)]
+    (merge framework data-fields)))
+
+
+(def ^:private mirror-config
+  "Per-versioned-entity derivation inputs: which base fields stay on the
+   identity row, the pinned mirror-column uuids, mirror-only tweaks."
+  {:fn {:identity-fields #{:namespace-id :parent-ids :org-id :branch-local?}
+        :uuids {:name fn-version-name-field-uuid
+                :description fn-version-description-field-uuid
+                :constraint fn-version-constraint-field-uuid
+                :base-fn-id fn-version-base-fn-id-field-uuid
+                :element-fn-id fn-version-element-fn-id-field-uuid
+                :return-type-fn-id fn-version-return-type-fn-id-field-uuid
+                :anonymous-hash fn-version-anonymous-hash-field-uuid
+                :expects-effects fn-version-expects-effects-field-uuid}}
+   :fn-slot {:identity-fields #{:org-id}
+             :uuids {:fn-id fn-slot-version-fn-id-field-uuid
+                     :slot-id fn-slot-version-slot-id-field-uuid
+                     :position fn-slot-version-position-field-uuid}}
+   :binding {:identity-fields #{:org-id}
+             :uuids {:fn-id binding-version-fn-id-field-uuid
+                     :slot-id binding-version-slot-id-field-uuid
+                     :value binding-version-value-field-uuid
+                     :value-present binding-version-value-present-field-uuid
+                     :ref-fn-id binding-version-ref-fn-id-field-uuid
+                     :override-kind binding-version-override-kind-field-uuid
+                     :type-override-fn-id binding-version-type-override-fn-id-field-uuid
+                     :description binding-version-description-field-uuid
+                     :list-append binding-version-list-append-field-uuid
+                     :list-closed binding-version-list-closed-field-uuid
+                     :terminal binding-version-terminal-field-uuid
+                     :required binding-version-required-field-uuid}
+             ;; :indexed? — drives the version-side of the reverse-ref
+             ;; lookup in `:ref-owner-bindings` (find-fn-usages / delete
+             ;; ref-check). Not a `:ref` (no FK — the target fn may be
+             ;; deleted while a version row lingers), so it needs the
+             ;; explicit index flag.
+             :tweaks {:ref-fn-id {:indexed? true}}}
+   :binding-list-item {:identity-fields #{:org-id}
+                       :uuids {:binding-id binding-list-item-version-binding-id-field-uuid
+                               :position binding-list-item-version-position-field-uuid
+                               :value binding-list-item-version-value-field-uuid
+                               :ref-fn-id binding-list-item-version-ref-fn-id-field-uuid
+                               :literal binding-list-item-version-literal-field-uuid}
+                       ;; Same version-side reverse-ref lookup as
+                       ;; binding-version's :ref-fn-id above.
+                       :tweaks {:ref-fn-id {:indexed? true}}}})
+
+
+(def ^:private mirror-fields
+  "Derived field maps for the four `-version` entities — built once at
+   load from the base maps + `mirror-config`."
+  {:fn-version
+   (derive-version-fields
+     :fn gds/fn-fields (mirror-config :fn)
+     {:fn-id {:uuid fn-version-fn-id-field-uuid
+              :type :ref :ref-entity :fn}
+      :branch-id {:uuid fn-version-branch-id-field-uuid
+                  :type :ref :ref-entity :branch}
+      :created-at {:uuid fn-version-created-at-field-uuid
+                   :type :timestamptz}
+      :deleted-at {:uuid fn-version-deleted-at-field-uuid
+                   :type :timestamptz :nullable? true}})
+   :fn-slot-version
+   (derive-version-fields
+     :fn-slot gds/fn-slot-fields (mirror-config :fn-slot)
+     {:fn-slot-id {:uuid fn-slot-version-fn-slot-id-field-uuid
+                   :type :ref :ref-entity :fn-slot}
+      :branch-id {:uuid fn-slot-version-branch-id-field-uuid
+                  :type :ref :ref-entity :branch}
+      :created-at {:uuid fn-slot-version-created-at-field-uuid
+                   :type :timestamptz}
+      :deleted-at {:uuid fn-slot-version-deleted-at-field-uuid
+                   :type :timestamptz :nullable? true}})
+   :binding-version
+   (derive-version-fields
+     :binding gds/binding-fields (mirror-config :binding)
+     {:binding-id {:uuid binding-version-binding-id-field-uuid
+                   :type :ref :ref-entity :binding}
+      :branch-id {:uuid binding-version-branch-id-field-uuid
+                  :type :ref :ref-entity :branch}
+      :created-at {:uuid binding-version-created-at-field-uuid
+                   :type :timestamptz}
+      :deleted-at {:uuid binding-version-deleted-at-field-uuid
+                   :type :timestamptz :nullable? true}})
+   :binding-list-item-version
+   (derive-version-fields
+     :binding-list-item gds/binding-list-item-fields
+     (mirror-config :binding-list-item)
+     {:item-id {:uuid binding-list-item-version-item-id-field-uuid
+                :type :ref :ref-entity :binding-list-item}
+      :branch-id {:uuid binding-list-item-version-branch-id-field-uuid
+                  :type :ref :ref-entity :branch}
+      :created-at {:uuid binding-list-item-version-created-at-field-uuid
+                   :type :timestamptz}
+      :deleted-at {:uuid binding-list-item-version-deleted-at-field-uuid
+                   :type :timestamptz :nullable? true}})})
+
+
+(def ^:private framework-fields
+  "The version-framework columns present on every mirror — excluded from
+   `version-data-fields` (they are versioning plumbing, not entity data)."
+  #{:branch-id :created-at :deleted-at})
+
+
+;; =============================================================================
 ;; Versioned-entity registry
 ;; =============================================================================
 
@@ -327,6 +500,20 @@
    :fn-slot          :fn-slot-id
    :binding          :binding-id
    :binding-list-item :item-id})
+
+
+(defn version-data-fields
+  "The versioned DATA fields of base entity `base` — derived from the
+   same source as its mirror entity, so the versioned-storage decorator
+   and the mirror can never disagree. This is the set
+   `prepare-version-record` select-keys on: a field missing here had its
+   writes silently dropped under the old hand-kept triple."
+  [base]
+  (let [mirror (get version-entity-for base)
+        id-field (get version-id-field-for base)]
+    (into #{}
+          (remove (conj framework-fields id-field))
+          (keys (get mirror-fields mirror)))))
 
 
 ;; =============================================================================
@@ -371,38 +558,12 @@
                                    :type :timestamptz}})
 
       ;; -----------------------------------------------------------------
-      ;; fn-version
+      ;; fn-version — derived from gds/fn-fields (see § derivation above).
+      ;; The base's `:indexed?` on :name rides along: check-fn-name-
+      ;; collision! finds its candidate set on fn-version.name.
       ;; -----------------------------------------------------------------
       (ds/add-entity :fn-version fn-version-entity-uuid
-                     {:fn-id {:uuid fn-version-fn-id-field-uuid
-                              :type :ref :ref-entity :fn}
-                      :branch-id {:uuid fn-version-branch-id-field-uuid
-                                  :type :ref :ref-entity :branch}
-                      ;; :indexed? — check-fn-name-collision! finds its
-                      ;; candidate set by name here (every version row
-                      ;; carries the fn's then-current name, so this covers
-                      ;; creation names AND renames); without the index each
-                      ;; named fn write would seq-scan the version table.
-                      :name {:uuid fn-version-name-field-uuid
-                             :type :text :nullable? true :indexed? true}
-                      :description {:uuid fn-version-description-field-uuid
-                                    :type :text :nullable? true}
-                      :constraint {:uuid fn-version-constraint-field-uuid
-                                   :type :jsonb :nullable? true}
-                      :base-fn-id {:uuid fn-version-base-fn-id-field-uuid
-                                   :type :uuid :nullable? true}
-                      :element-fn-id {:uuid fn-version-element-fn-id-field-uuid
-                                      :type :uuid :nullable? true}
-                      :return-type-fn-id {:uuid fn-version-return-type-fn-id-field-uuid
-                                          :type :uuid :nullable? true}
-                      :anonymous-hash {:uuid fn-version-anonymous-hash-field-uuid
-                                       :type :text :nullable? true}
-                      :expects-effects {:uuid fn-version-expects-effects-field-uuid
-                                        :type :jsonb :nullable? true}
-                      :created-at {:uuid fn-version-created-at-field-uuid
-                                   :type :timestamptz}
-                      :deleted-at {:uuid fn-version-deleted-at-field-uuid
-                                   :type :timestamptz :nullable? true}})
+                     (mirror-fields :fn-version))
       (ds/add-constraint :fn-version
                          {:type :unique :fields [:fn-id :branch-id :created-at]})
 
@@ -410,69 +571,17 @@
       ;; fn-slot-version
       ;; -----------------------------------------------------------------
       (ds/add-entity :fn-slot-version fn-slot-version-entity-uuid
-                     {:fn-slot-id {:uuid fn-slot-version-fn-slot-id-field-uuid
-                                   :type :ref :ref-entity :fn-slot}
-                      :branch-id {:uuid fn-slot-version-branch-id-field-uuid
-                                  :type :ref :ref-entity :branch}
-                      :fn-id {:uuid fn-slot-version-fn-id-field-uuid
-                              :type :uuid}
-                      :slot-id {:uuid fn-slot-version-slot-id-field-uuid
-                                :type :uuid}
-                      :position {:uuid fn-slot-version-position-field-uuid
-                                 :type :int}
-                      :created-at {:uuid fn-slot-version-created-at-field-uuid
-                                   :type :timestamptz}
-                      :deleted-at {:uuid fn-slot-version-deleted-at-field-uuid
-                                   :type :timestamptz :nullable? true}})
+                     (mirror-fields :fn-slot-version))
       (ds/add-constraint :fn-slot-version
                          {:type :unique :fields [:fn-slot-id :branch-id :created-at]})
 
       ;; -----------------------------------------------------------------
       ;; binding-version
       ;; -----------------------------------------------------------------
+      ;; `:rename-to` retired in Phase 6e (mirror of the main binding
+      ;; entity) — see retire-field call below.
       (ds/add-entity :binding-version binding-version-entity-uuid
-                     {:binding-id {:uuid binding-version-binding-id-field-uuid
-                                   :type :ref :ref-entity :binding}
-                      :branch-id {:uuid binding-version-branch-id-field-uuid
-                                  :type :ref :ref-entity :branch}
-                      :fn-id {:uuid binding-version-fn-id-field-uuid
-                              :type :uuid}
-                      :slot-id {:uuid binding-version-slot-id-field-uuid
-                                :type :uuid}
-                      :value {:uuid binding-version-value-field-uuid
-                              :type :jsonb :nullable? true}
-                      ;; Mirrors :binding's :value-present — see
-                      ;; schema/graph/schema.clj for the rationale.
-                      :value-present {:uuid binding-version-value-present-field-uuid
-                                      :type :bool :nullable? true}
-                      ;; :indexed? — drives the version-side of the reverse-ref
-                      ;; lookup in `:ref-owner-bindings` (find-fn-usages / delete
-                      ;; ref-check). Not a `:ref` (no FK — the target fn may be
-                      ;; deleted while a version row lingers), so it needs the
-                      ;; explicit index flag.
-                      :ref-fn-id {:uuid binding-version-ref-fn-id-field-uuid
-                                  :type :uuid :nullable? true :indexed? true}
-                      :override-kind {:uuid binding-version-override-kind-field-uuid
-                                      :type :enum :enum-name :override-kind
-                                      :nullable? true}
-                      ;; `:rename-to` retired in Phase 6e (mirror of the
-                      ;; main binding entity). See retire-field call below.
-                      :type-override-fn-id {:uuid binding-version-type-override-fn-id-field-uuid
-                                            :type :uuid :nullable? true}
-                      :description {:uuid binding-version-description-field-uuid
-                                    :type :text :nullable? true}
-                      :list-append {:uuid binding-version-list-append-field-uuid
-                                    :type :bool :nullable? true}
-                      :list-closed {:uuid binding-version-list-closed-field-uuid
-                                    :type :bool :nullable? true}
-                      :terminal {:uuid binding-version-terminal-field-uuid
-                                 :type :bool :nullable? true}
-                      :required {:uuid binding-version-required-field-uuid
-                                 :type :bool :nullable? true}
-                      :created-at {:uuid binding-version-created-at-field-uuid
-                                   :type :timestamptz}
-                      :deleted-at {:uuid binding-version-deleted-at-field-uuid
-                                   :type :timestamptz :nullable? true}})
+                     (mirror-fields :binding-version))
       (ds/add-constraint :binding-version
                          {:type :unique :fields [:binding-id :branch-id :created-at]})
 
@@ -480,26 +589,7 @@
       ;; binding-list-item-version
       ;; -----------------------------------------------------------------
       (ds/add-entity :binding-list-item-version binding-list-item-version-entity-uuid
-                     {:item-id {:uuid binding-list-item-version-item-id-field-uuid
-                                :type :ref :ref-entity :binding-list-item}
-                      :branch-id {:uuid binding-list-item-version-branch-id-field-uuid
-                                  :type :ref :ref-entity :branch}
-                      :binding-id {:uuid binding-list-item-version-binding-id-field-uuid
-                                   :type :uuid}
-                      :position {:uuid binding-list-item-version-position-field-uuid
-                                 :type :int}
-                      :value {:uuid binding-list-item-version-value-field-uuid
-                              :type :jsonb :nullable? true}
-                      ;; :indexed? — version-side reverse-ref lookup (see the
-                      ;; :binding-version :ref-fn-id note above).
-                      :ref-fn-id {:uuid binding-list-item-version-ref-fn-id-field-uuid
-                                  :type :uuid :nullable? true :indexed? true}
-                      :literal {:uuid binding-list-item-version-literal-field-uuid
-                                :type :bool :nullable? true}
-                      :created-at {:uuid binding-list-item-version-created-at-field-uuid
-                                   :type :timestamptz}
-                      :deleted-at {:uuid binding-list-item-version-deleted-at-field-uuid
-                                   :type :timestamptz :nullable? true}})
+                     (mirror-fields :binding-list-item-version))
       (ds/add-constraint :binding-list-item-version
                          {:type :unique :fields [:item-id :branch-id :created-at]})
 

@@ -51,7 +51,10 @@
 ;; array-map preserves insertion order — `value-kinds` below derives
 ;; the editor-facing ordered enum list from these keys, so this is the
 ;; single place the value-kind set AND its order are declared.
-(def ^:private value-kind-values
+(def value-kind-values
+  "Public — the storage codec derives its heuristic enum-detection set
+   (`known-value-kind-values`) from these keys instead of keeping a
+   hand-typed duplicate that silently drifts when a kind is added."
   (array-map
     :null        #uuid "c703ffd9-6401-4c49-9ca3-a280f6aac8ba"
     :uuid        #uuid "3a83af1b-f15c-421d-a5f1-f13db07deb72"
@@ -390,6 +393,175 @@
 
 
 ;; =============================================================================
+;; Base field maps — the SINGLE source for each versioned entity's columns.
+;;
+;; Public: `schema.versioned.schema/derive-version-fields` derives the
+;; `-version` mirror entity (refs demoted to :uuid + branch/created/deleted
+;; framework columns) AND the versioned-storage `version-data-fields` set
+;; from these maps — so adding a column here is the ONE edit; the mirror
+;; either derives it automatically or fails the build loudly (never the
+;; old silent-write-drop).
+;; =============================================================================
+
+(def fn-fields
+  "Base `:fn` field specs. Identity-level (never versioned):
+   `:namespace-id` / `:parent-ids` (structural identity), `:org-id`
+   (tenant owner), `:branch-local?` (monotonic identity flag)."
+  {:name {:uuid fn-name-field-uuid
+          :type :text
+          :nullable? true
+          ;; Indexed: name lookups (`query-fn-by-name`, ref-by-name,
+          ;; constraint-type resolution) hit the largest table; a
+          ;; standalone index keeps those O(log n). The mirror keeps the
+          ;; flag — check-fn-name-collision! finds its candidate set on
+          ;; fn-version.name.
+          :indexed? true}
+   :namespace-id {:uuid fn-namespace-id-field-uuid
+                  :type :ref
+                  :ref-entity :ns
+                  :nullable? true}
+   :parent-ids {:uuid fn-parent-ids-field-uuid
+                :type :ref-many
+                :ref-entity :fn
+                :nullable? true}
+   :description {:uuid fn-description-field-uuid
+                 :type :text
+                 :nullable? true}
+   ;; Refinement-type marker.
+   :constraint {:uuid fn-constraint-field-uuid
+                :type :jsonb
+                :nullable? true}
+   ;; Refinement base type (FK→fn).
+   :base-fn-id {:uuid fn-base-fn-id-field-uuid
+                :type :ref
+                :ref-entity :fn
+                :nullable? true}
+   ;; List-type element (FK→fn).
+   :element-fn-id {:uuid fn-element-fn-id-field-uuid
+                   :type :ref
+                   :ref-entity :fn
+                   :nullable? true}
+   ;; Declared return type (FK→fn). Replaces old `return-type` enum column.
+   :return-type-fn-id {:uuid fn-return-type-fn-id-field-uuid
+                       :type :ref
+                       :ref-entity :fn
+                       :nullable? true}
+   ;; Hash for anonymous composite dedup.
+   :anonymous-hash {:uuid fn-anonymous-hash-field-uuid
+                    :type :text
+                    :nullable? true}
+   ;; Authored effect-set declaration (drift checker warns when computed
+   ;; effects diverge from this).
+   :expects-effects {:uuid fn-expects-effects-field-uuid
+                     :type :jsonb
+                     :nullable? true}
+   ;; Identity-level monotonic flag (see ns-doc above).
+   :branch-local? {:uuid fn-branch-local-field-uuid
+                   :type :bool
+                   :nullable? true}
+   ;; Tenant owner (§3.0 B2). NULL ≡ public.
+   :org-id {:uuid fn-org-id-field-uuid
+            :type :text
+            :nullable? true}})
+
+
+(def fn-slot-fields
+  "Base `:fn-slot` field specs. Identity-level: `:org-id`."
+  {:fn-id {:uuid fn-slot-fn-id-field-uuid
+           :type :ref
+           :ref-entity :fn}
+   :slot-id {:uuid fn-slot-slot-id-field-uuid
+             :type :ref
+             :ref-entity :slot}
+   :position {:uuid fn-slot-position-field-uuid
+              :type :int}
+   ;; Tenant owner (§3.0 B2). NULL ≡ public.
+   :org-id {:uuid fn-slot-org-id-field-uuid
+            :type :text
+            :nullable? true}})
+
+
+(def binding-fields
+  "Base `:binding` field specs. Identity-level: `:org-id`."
+  {:fn-id {:uuid binding-fn-id-field-uuid
+           :type :ref
+           :ref-entity :fn}
+   :slot-id {:uuid binding-slot-id-field-uuid
+             :type :ref
+             :ref-entity :slot}
+   :value {:uuid binding-value-field-uuid
+           :type :jsonb
+           :nullable? true}
+   ;; `:value-present` distinguishes "author wrote `{:value nil}`" from
+   ;; "author wrote nothing for this slot". Both serialise `:value` to
+   ;; SQL NULL via `encode-value`'s `(when (some? value) ...)` skip, so
+   ;; without this flag they're indistinguishable at read time — and the
+   ;; classifier falls through to `:free`, leaking the caller's
+   ;; `fa[<slot-name>]` (e.g. Ring request) into the slot. See
+   ;; `compile/bindings.clj/value-binding?`.
+   :value-present {:uuid binding-value-present-field-uuid
+                   :type :bool
+                   :nullable? true}
+   :ref-fn-id {:uuid binding-ref-fn-id-field-uuid
+               :type :ref
+               :ref-entity :fn
+               :nullable? true}
+   :override-kind {:uuid binding-override-kind-field-uuid
+                   :type :enum
+                   :enum-name :override-kind
+                   :nullable? true}
+   ;; `:rename-to` retired in Phase 6e — see retire-field call after the
+   ;; entity declaration. The text was replaced by slot.source-slot-id (FK).
+   :type-override-fn-id {:uuid binding-type-override-fn-id-field-uuid
+                         :type :ref
+                         :ref-entity :fn
+                         :nullable? true}
+   :description {:uuid binding-description-field-uuid
+                 :type :text
+                 :nullable? true}
+   :list-append {:uuid binding-list-append-field-uuid
+                 :type :bool
+                 :nullable? true}
+   :list-closed {:uuid binding-list-closed-field-uuid
+                 :type :bool
+                 :nullable? true}
+   ;; §4.3 explicit seal — locks (fn,slot) vs descendants.
+   :terminal {:uuid binding-terminal-field-uuid
+              :type :bool
+              :nullable? true}
+   :required {:uuid binding-required-field-uuid
+              :type :bool
+              :nullable? true}
+   ;; Tenant owner (§3.0 B2). NULL ≡ public.
+   :org-id {:uuid binding-org-id-field-uuid
+            :type :text
+            :nullable? true}})
+
+
+(def binding-list-item-fields
+  "Base `:binding-list-item` field specs. Identity-level: `:org-id`."
+  {:binding-id {:uuid binding-list-item-binding-id-field-uuid
+                :type :ref
+                :ref-entity :binding}
+   :position {:uuid binding-list-item-position-field-uuid
+              :type :int}
+   :value {:uuid binding-list-item-value-field-uuid
+           :type :jsonb
+           :nullable? true}
+   :ref-fn-id {:uuid binding-list-item-ref-fn-id-field-uuid
+               :type :ref
+               :ref-entity :fn
+               :nullable? true}
+   :literal {:uuid binding-list-item-literal-field-uuid
+             :type :bool
+             :nullable? true}
+   ;; Tenant owner (§3.0 B2). NULL ≡ public.
+   :org-id {:uuid binding-list-item-org-id-field-uuid
+            :type :text
+            :nullable? true}})
+
+
+;; =============================================================================
 ;; Enum builders
 ;; =============================================================================
 
@@ -444,63 +616,7 @@
       ;; -----------------------------------------------------------------
       ;; fn: function entity (also represents types — see ns-doc).
       ;; -----------------------------------------------------------------
-      (ds/add-entity :fn fn-entity-uuid
-                     {:name {:uuid fn-name-field-uuid
-                             :type :text
-                             :nullable? true
-                             ;; Indexed: name lookups (`query-fn-by-name`,
-                             ;; ref-by-name, constraint-type resolution) hit
-                             ;; the largest table; a standalone index keeps
-                             ;; those O(log n).
-                             :indexed? true}
-                      :namespace-id {:uuid fn-namespace-id-field-uuid
-                                     :type :ref
-                                     :ref-entity :ns
-                                     :nullable? true}
-                      :parent-ids {:uuid fn-parent-ids-field-uuid
-                                   :type :ref-many
-                                   :ref-entity :fn
-                                   :nullable? true}
-                      :description {:uuid fn-description-field-uuid
-                                    :type :text
-                                    :nullable? true}
-                      ;; Refinement-type marker.
-                      :constraint {:uuid fn-constraint-field-uuid
-                                   :type :jsonb
-                                   :nullable? true}
-                      ;; Refinement base type (FK→fn).
-                      :base-fn-id {:uuid fn-base-fn-id-field-uuid
-                                   :type :ref
-                                   :ref-entity :fn
-                                   :nullable? true}
-                      ;; List-type element (FK→fn).
-                      :element-fn-id {:uuid fn-element-fn-id-field-uuid
-                                      :type :ref
-                                      :ref-entity :fn
-                                      :nullable? true}
-                      ;; Declared return type (FK→fn). Replaces old
-                      ;; `return-type` enum column.
-                      :return-type-fn-id {:uuid fn-return-type-fn-id-field-uuid
-                                          :type :ref
-                                          :ref-entity :fn
-                                          :nullable? true}
-                      ;; Hash for anonymous composite dedup.
-                      :anonymous-hash {:uuid fn-anonymous-hash-field-uuid
-                                       :type :text
-                                       :nullable? true}
-                      ;; Authored effect-set declaration (drift checker
-                      ;; warns when computed effects diverge from this).
-                      :expects-effects {:uuid fn-expects-effects-field-uuid
-                                        :type :jsonb
-                                        :nullable? true}
-                      ;; Identity-level monotonic flag (see ns-doc above).
-                      :branch-local? {:uuid fn-branch-local-field-uuid
-                                      :type :bool
-                                      :nullable? true}
-                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
-                      :org-id {:uuid fn-org-id-field-uuid
-                               :type :text
-                               :nullable? true}})
+      (ds/add-entity :fn fn-entity-uuid fn-fields)
       ;; NOTE — the `UNIQUE (namespace-id, name)` constraint was retired.
       ;; Like `binding-list-item (binding-id, position)` before it, name
       ;; uniqueness is a per-branch RESOLVED-VIEW property, not a base-table
@@ -550,19 +666,7 @@
       ;; fn-slot: junction many-to-many. fn ⊃ slots с порядком.
       ;; Описывает 'parameters / fields этой fn'.
       ;; -----------------------------------------------------------------
-      (ds/add-entity :fn-slot fn-slot-entity-uuid
-                     {:fn-id {:uuid fn-slot-fn-id-field-uuid
-                              :type :ref
-                              :ref-entity :fn}
-                      :slot-id {:uuid fn-slot-slot-id-field-uuid
-                                :type :ref
-                                :ref-entity :slot}
-                      :position {:uuid fn-slot-position-field-uuid
-                                 :type :int}
-                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
-                      :org-id {:uuid fn-slot-org-id-field-uuid
-                               :type :text
-                               :nullable? true}})
+      (ds/add-entity :fn-slot fn-slot-entity-uuid fn-slot-fields)
       (ds/add-constraint :fn-slot {:type :unique :fields [:fn-id :slot-id]})
 
       ;; -----------------------------------------------------------------
@@ -576,89 +680,14 @@
       ;; Application-side constraint enforces «at most one
       ;; non-nil from {value, ref-fn-id}».
       ;; -----------------------------------------------------------------
-      (ds/add-entity :binding binding-entity-uuid
-                     {:fn-id {:uuid binding-fn-id-field-uuid
-                              :type :ref
-                              :ref-entity :fn}
-                      :slot-id {:uuid binding-slot-id-field-uuid
-                                :type :ref
-                                :ref-entity :slot}
-                      :value {:uuid binding-value-field-uuid
-                              :type :jsonb
-                              :nullable? true}
-                      ;; `:value-present` distinguishes "author wrote
-                      ;; `{:value nil}`" from "author wrote nothing for
-                      ;; this slot". Both serialise `:value` to SQL NULL
-                      ;; via `encode-value`'s `(when (some? value) ...)`
-                      ;; skip, so without this flag they're
-                      ;; indistinguishable at read time — and the
-                      ;; classifier falls through to `:free`, leaking
-                      ;; the caller's `fa[<slot-name>]` (e.g. Ring
-                      ;; request) into the slot. See
-                      ;; `compile/bindings.clj/value-binding?`.
-                      :value-present {:uuid binding-value-present-field-uuid
-                                      :type :bool
-                                      :nullable? true}
-                      :ref-fn-id {:uuid binding-ref-fn-id-field-uuid
-                                  :type :ref
-                                  :ref-entity :fn
-                                  :nullable? true}
-                      :override-kind {:uuid binding-override-kind-field-uuid
-                                      :type :enum
-                                      :enum-name :override-kind
-                                      :nullable? true}
-                      ;; `:rename-to` retired in Phase 6e — see retire-field
-                      ;; call after the entity declaration. The text was
-                      ;; replaced by slot.source-slot-id (FK).
-                      :type-override-fn-id {:uuid binding-type-override-fn-id-field-uuid
-                                            :type :ref
-                                            :ref-entity :fn
-                                            :nullable? true}
-                      :description {:uuid binding-description-field-uuid
-                                    :type :text
-                                    :nullable? true}
-                      :list-append {:uuid binding-list-append-field-uuid
-                                    :type :bool
-                                    :nullable? true}
-                      :list-closed {:uuid binding-list-closed-field-uuid
-                                    :type :bool
-                                    :nullable? true}
-                      ;; §4.3 explicit seal — locks (fn,slot) vs descendants.
-                      :terminal {:uuid binding-terminal-field-uuid
-                                 :type :bool
-                                 :nullable? true}
-                      :required {:uuid binding-required-field-uuid
-                                 :type :bool
-                                 :nullable? true}
-                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
-                      :org-id {:uuid binding-org-id-field-uuid
-                               :type :text
-                               :nullable? true}})
+      (ds/add-entity :binding binding-entity-uuid binding-fields)
       (ds/add-constraint :binding {:type :unique :fields [:fn-id :slot-id]})
 
       ;; -----------------------------------------------------------------
       ;; binding-list-item: ordered items для list-typed slot binding'ов.
       ;; -----------------------------------------------------------------
       (ds/add-entity :binding-list-item binding-list-item-entity-uuid
-                     {:binding-id {:uuid binding-list-item-binding-id-field-uuid
-                                   :type :ref
-                                   :ref-entity :binding}
-                      :position {:uuid binding-list-item-position-field-uuid
-                                 :type :int}
-                      :value {:uuid binding-list-item-value-field-uuid
-                              :type :jsonb
-                              :nullable? true}
-                      :ref-fn-id {:uuid binding-list-item-ref-fn-id-field-uuid
-                                  :type :ref
-                                  :ref-entity :fn
-                                  :nullable? true}
-                      :literal {:uuid binding-list-item-literal-field-uuid
-                                :type :bool
-                                :nullable? true}
-                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
-                      :org-id {:uuid binding-list-item-org-id-field-uuid
-                               :type :text
-                               :nullable? true}})
+                     binding-list-item-fields)
       ;; NOTE — `(binding-id, position)` UNIQUE was retired in favour of
       ;; a per-branch resolved-view check in `VersionedStorage`. The base
       ;; identity row represents cross-branch identity; multiple branches

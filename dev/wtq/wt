@@ -561,6 +561,12 @@ cmd_new() {
   mkdir -p "$WTQ_ROOT"
   info "Creating $branch off $TARGET at $path ..."
   git -C "$MAIN_WT" worktree add -b "$branch" "$path" "$TARGET" >/dev/null
+  # Dockerized lint tools (actionlint, lychee, hadolint) run as non-root
+  # container users against a bind-mount of this checkout. A restrictive
+  # caller umask (e.g. 077) makes the fresh worktree unreadable to them
+  # and the GATE fails on environment, not code ("no project was found" /
+  # "Permission denied: .lychee.toml"). Normalize to world-readable.
+  chmod -R a+rX "$path"
   bootstrap_node_modules "$path"
   # The agent is about to read the contract as it stands right now — record
   # that, so only LATER changes to it count as drift.

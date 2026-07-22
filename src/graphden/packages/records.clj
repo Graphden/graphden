@@ -65,7 +65,8 @@
   "
   (:require
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse]))
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.types :as types]))
 
 
 ;; -----------------------------------------------------------------------------
@@ -85,3 +86,4 @@
 (def boot-primitive-records ids/boot-primitive-records)
 (def parse-fn-def parse/parse-fn-def)
 (def parse-module parse/parse-module)
+(def ambiguous-name types/ambiguous-name)

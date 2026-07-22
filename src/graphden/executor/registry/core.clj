@@ -282,6 +282,19 @@
       (when (not= org public) org))))
 
 
+(defn- index-keys-for
+  "The `:by-name` index keys one entry claims: the bare name always,
+   plus the `:ns.path/name` qualified form when the namespace is
+   known. Under per-ns duplicates the BARE key is last-write-wins and
+   only qualified lookups are precise — ambiguous bare refs are
+   rewritten to qualified form at parse entry, and the editor's crud
+   path reconstructs qualified names, so precise resolution always
+   has the qualified key available."
+  [fn-name ns-path]
+  (cond-> [fn-name]
+    ns-path (conj (keyword ns-path (name fn-name)))))
+
+
 (defn fn-def-registry-id
   "fn-id for a name-plus-def registry write: an explicit `:fn-id` on the
    def wins (the crud path threads the ROW id — editor fns have random
@@ -482,11 +495,13 @@
                                            (seq (:effects existing)))
                                     (:effects existing)
                                     raw-effects)]
-                (-> reg
-                    (assoc-in [:by-id fn-id]
-                              (assoc (build final-effects)
-                                     :fn-id fn-id :name fn-name))
-                    (assoc-in [:by-name fn-name] fn-id))))))))
+                (reduce (fn [r k] (assoc-in r [:by-name k] fn-id))
+                        (assoc-in reg [:by-id fn-id]
+                                  (cond-> (assoc (build final-effects)
+                                                 :fn-id fn-id :name fn-name)
+                                    (:namespace fn-def)
+                                    (assoc :namespace (:namespace fn-def))))
+                        (index-keys-for fn-name (:namespace fn-def)))))))))
 
 
 (defn effectful-rich-type?
@@ -525,13 +540,13 @@
                           (let [existing (get-in reg [:by-id fn-id])
                                 carry-bl? (or (true? (:branch-local? rich-type-map))
                                               (true? (:branch-local? existing)))]
-                            (-> reg
-                                (assoc-in [:by-id fn-id]
-                                          (cond-> (-> rich-type-map
-                                                      (update :effects #(or % #{}))
-                                                      (assoc :fn-id fn-id :name fn-name))
-                                            carry-bl? (assoc :branch-local? true)))
-                                (assoc-in [:by-name fn-name] fn-id)))))]
+                            (reduce (fn [r k] (assoc-in r [:by-name k] fn-id))
+                                    (assoc-in reg [:by-id fn-id]
+                                              (cond-> (-> rich-type-map
+                                                          (update :effects #(or % #{}))
+                                                          (assoc :fn-id fn-id :name fn-name))
+                                                carry-bl? (assoc :branch-local? true)))
+                                    (index-keys-for fn-name (:namespace rich-type-map))))))]
      ;; §4 Risk-2: mirror the entry into a TENANT's slice so its same-named
      ;; composed fn doesn't read another org's signature from the bare-name
      ;; global name index. Public / sync / compile writes are NOT mirrored
@@ -635,9 +650,21 @@
         [cached-reg cached-view] @name-view-cache]
     (if (identical? cached-reg reg)
       cached-view
-      (let [view (into {}
-                       (map (fn [[nm id]] [nm (get-in reg [:by-id id])]))
-                       (:by-name reg))]
+      (let [entries (vals (:by-id reg))
+            bare-counts (frequencies (keep :name entries))
+            view (into {}
+                       (keep (fn [e]
+                               (when-let [nm (:name e)]
+                                 (if (> (get bare-counts nm 0) 1)
+                                   ;; per-ns duplicate — only the
+                                   ;; qualified key is unambiguous;
+                                   ;; entries without a known ns keep
+                                   ;; the bare key (last-write).
+                                   (if-let [ns-path (:namespace e)]
+                                     [(keyword ns-path (name nm)) e]
+                                     [nm e])
+                                   [nm e]))))
+                       entries)]
         (reset! name-view-cache [reg view])
         view))))
 
@@ -657,10 +684,14 @@
    `target-rich-types-atom` write target."
   [fn-name]
   (let [drop-entry (fn [reg]
-                     (let [id (get-in reg [:by-name fn-name])]
-                       (-> reg
-                           (update :by-id dissoc id)
-                           (update :by-name dissoc fn-name))))]
+                     (let [id (get-in reg [:by-name fn-name])
+                           id (if (= id :graphden.packages.records.types/ambiguous) nil id)
+                           entry (when id (get-in reg [:by-id id]))]
+                       (reduce (fn [r k] (update r :by-name dissoc k))
+                               (update reg :by-id dissoc id)
+                               (if entry
+                                 (index-keys-for (:name entry) (:namespace entry))
+                                 [fn-name]))))]
     (swap! (target-rich-types-atom) drop-entry)
     (when-let [org (current-tenant-org)]
       (swap! (target-per-org-rich-atom) update org

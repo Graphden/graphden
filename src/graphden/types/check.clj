@@ -1874,6 +1874,12 @@
         ;; wrap-arity dispatch reads (compile.renames/hof-lambda-params).
         (contains? fn-def :lambda-params)
         (assoc :lambda-params (vec (:lambda-params fn-def)))
+        ;; `:namespace` — the registry index dual-keys entries
+        ;; (bare + qualified) so per-ns duplicate names resolve
+        ;; precisely; without it a composed entry claims only the
+        ;; bare (last-write) key.
+        (:namespace fn-def)
+        (assoc :namespace (:namespace fn-def))
         (seq resolved)    (assoc :resolved-bindings resolved)
         (seq slot-types)  (assoc :slot-types slot-types)
         (seq nav-types)   (assoc :nav-types nav-types)

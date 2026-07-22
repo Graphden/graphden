@@ -86,14 +86,36 @@
 
 
 (defn- index-records
-  "Group a flat record seq into the lookup maps the exporter needs."
+  "Group a flat record seq into the lookup maps the exporter needs.
+   `:dup-names` — bare names shared by MULTIPLE named fns (per-ns
+   duplicates): every reference to one of these emits the QUALIFIED
+   `:ns.path/name` form so re-parse resolves precisely instead of
+   hitting the ambiguity error."
   [records]
-  (let [by-kind (group-by :kind records)]
-    {:fns      (into {} (map (juxt :id identity)) (:fn by-kind))
+  (let [by-kind (group-by :kind records)
+        fns (:fn by-kind)]
+    {:fns      (into {} (map (juxt :id identity)) fns)
+     :dup-names (into #{}
+                      (keep (fn [[n c]] (when (> c 1) n)))
+                      (frequencies (keep :name fns)))
      :slots    (into {} (map (juxt :id identity)) (:slot by-kind))
      :fn-slots (group-by :fn-id (:fn-slot by-kind))
      :bindings (group-by :fn-id (:binding by-kind))
      :items    (group-by :binding-id (:binding-list-item by-kind))}))
+
+
+(defn- ref-kw
+  "Reference keyword for the fn with `id` — QUALIFIED when its bare
+   name is duplicated across the export set (`:dup-names`), bare
+   otherwise (canonical minimal form)."
+  [id ctx]
+  (let [f (get-in ctx [:fns id])
+        n (:name f)]
+    (when n
+      (if (and (contains? (:dup-names ctx) n)
+               (string? (:namespace-id f)))
+        (keyword (:namespace-id f) n)
+        (keyword n)))))
 
 
 (defn- slots-of
@@ -127,7 +149,7 @@
     (let [fnr (get-in ctx [:fns id])]
       (cond
         (nil? fnr) :any
-        (:name fnr) (keyword (:name fnr))
+        (:name fnr) (ref-kw id ctx)
         (and (vector? (:constraint fnr)) (= :fn (first (:constraint fnr))))
         (:constraint fnr)
         (seq (slots-of id ctx)) (reconstruct-record-shape id ctx)
@@ -257,7 +279,7 @@
   [item ctx]
   (let [v (:value item)]
     (cond
-      (:ref-fn-id item) (keyword (:name (get-in ctx [:fns (:ref-fn-id item)])))
+      (:ref-fn-id item) (ref-kw (:ref-fn-id item) ctx)
       (and (map? v) (not (contains? v :ref)) (not (contains? v :value))) v
       (or (keyword? v) (map? v)) {:value v}
       :else v)))
@@ -284,14 +306,14 @@
         secret-path? (= :secret-path (:override-kind b))]
     (cond-> {}
       (:ref-fn-id b)
-      (assoc :ref (keyword (:name (get-in ctx [:fns (:ref-fn-id b)]))))
+      (assoc :ref (ref-kw (:ref-fn-id b) ctx))
       ;; A `:secret-path` binding's stored `:value` is the VAULT PATH,
       ;; not a literal — emit the dedicated `:secret-path` key so
       ;; re-parse restores `:override-kind :secret-path` instead of
       ;; degrading the binding to a plain literal carrying the path.
       secret-path? (assoc :secret-path (:value b))
       (:resolver-fn-id b)
-      (assoc :resolver (keyword (:name (get-in ctx [:fns (:resolver-fn-id b)]))))
+      (assoc :resolver (ref-kw (:resolver-fn-id b) ctx))
       (and (:value-present b) (not secret-path?)) (assoc :value (:value b))
       (:list-append b) (assoc :append (binding-items b ctx))
       (and (:list-append b) (:list-closed b)) (assoc :closed true)
@@ -324,7 +346,7 @@
       ;; round-trip fix below — the plain `{:value …}` form would
       ;; degrade the binding to a literal).
       (:resolver-fn-id b)
-      (cond-> {:resolver (keyword (:name (get-in ctx [:fns (:resolver-fn-id b)])))
+      (cond-> {:resolver (ref-kw (:resolver-fn-id b) ctx)
                :value (:value b)}
         (some? (:required b)) (assoc :required (:required b)))
 
@@ -340,7 +362,7 @@
 
       ;; ref binding (optionally with a type-override / required marker)
       (:ref-fn-id b)
-      (let [ref-name (keyword (:name (get-in ctx [:fns (:ref-fn-id b)])))]
+      (let [ref-name (ref-kw (:ref-fn-id b) ctx)]
         (if (or type-ref (some? (:required b)))
           (cond-> {:ref ref-name}
             type-ref (assoc :type type-ref)
@@ -437,8 +459,7 @@
                                         (binding->arg-value b arg-name ctx)
                                         {:as arg-name})]))))
                     bindings))
-        parent-names (mapv (fn [pid] (keyword (:name (get-in ctx [:fns pid]))))
-                           (:parent-ids fnr))
+        parent-names (mapv #(ref-kw % ctx) (:parent-ids fnr))
         args (merge pb-args binding-args)]
     (cond-> (if (= 1 (count parent-names))
               {:parent (first parent-names)}

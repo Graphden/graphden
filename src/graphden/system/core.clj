@@ -387,29 +387,48 @@
 
 
 (defn- validate-no-name-collisions!
-  "Every named fn must own a globally-unique name across BOTH base-fns AND
-   composed fn-defs. Reference resolution keys on bare names
-   (`compute-all-fn-name-ids`), and a base-fn + fn-def sharing a name in the
-   same namespace collapse to one `(records/fn-id namespace name)` — so the
-   fn-def row SILENTLY upserts over the base-fn row at sync (parent-ids
-   replacing the base-fn's return-type marker while the impl registry still
-   holds the impl), with NO error. The composed-only `validate-all-defs!`
-   never sees the base-fns, so this is the sole cross-set guard. Anonymous
-   defs (name = nil) are content-hash-deduped and excluded."
+  "Per-ns names (ADR-identity-model.md stage 5) — two guards remain:
+
+   1. `(namespace, name)` must be UNIQUE across base-fns AND composed
+      fn-defs: the pair IS the deterministic `records/fn-id`, so a
+      duplicate silently upserts over the other row at sync (parent-ids
+      replacing a base-fn's return-type marker while the impl registry
+      still holds the impl) with no error.
+   2. BASE-FN bare names must be unique among base-fns regardless of
+      namespace: the Clojure impls registry
+      (`exec/register-base-fn!`) is name-keyed — two same-named impls
+      in different namespaces would clobber each other's Clojure fn.
+
+   Same-named composed fn-defs in DIFFERENT namespaces are LEGAL —
+   ambiguous bare references rewrite to qualified form at parse entry
+   (`normalize-qualified-refs`) or fail loud demanding qualification.
+   Anonymous defs (name = nil) are content-hash-deduped and excluded."
   [packages]
-  (let [base-names (keep first (:base-fn-defs packages))
-        def-names  (keep :name (:fn-defs packages))
-        dups (->> (concat base-names def-names)
-                  frequencies
-                  (keep (fn [[n c]] (when (> c 1) n)))
-                  vec)]
-    (when (seq dups)
-      (throw (ex-info (str "Colliding fn names across base-fns + fn-defs: "
-                           (pr-str dups)
-                           " — the same name is defined more than once "
-                           "(a base-fn ↔ fn-def clobber silently overwrites a row at sync).")
+  (let [base-pairs (map (fn [[n d]] [(:namespace d) n]) (:base-fn-defs packages))
+        def-pairs  (keep (fn [d] (when (:name d) [(:namespace d) (:name d)]))
+                         (:fn-defs packages))
+        pair-dups (->> (concat base-pairs def-pairs)
+                       frequencies
+                       (keep (fn [[p c]] (when (> c 1) p)))
+                       vec)
+        base-name-dups (->> (map second base-pairs)
+                            frequencies
+                            (keep (fn [[n c]] (when (> c 1) n)))
+                            vec)]
+    (when (seq pair-dups)
+      (throw (ex-info (str "Colliding (namespace, name) pairs: "
+                           (pr-str pair-dups)
+                           " — the pair IS the deterministic fn-id; a "
+                           "duplicate silently overwrites the other row at sync.")
                       {:type :packages/fn-name-collision
-                       :colliding-names dups})))))
+                       :colliding-pairs pair-dups})))
+    (when (seq base-name-dups)
+      (throw (ex-info (str "Colliding BASE-FN names across namespaces: "
+                           (pr-str base-name-dups)
+                           " — the Clojure impls registry is name-keyed; "
+                           "base-fn names must stay globally unique.")
+                      {:type :packages/base-fn-name-collision
+                       :colliding-names base-name-dups})))))
 
 
 (defn register-base-fns-from-packages!

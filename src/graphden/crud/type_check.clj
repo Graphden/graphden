@@ -175,7 +175,15 @@
         ;; sibling in the EDN `{:as :name :type T}` shape).
         renamed-view (get renamed-view-by-source (:slot-id b))
         ref-id (:ref-fn-id b)
-        ref-name (when ref-id (some-> (get fn-by-id ref-id) :name keyword))]
+        row->kw (fn [row]
+                  (when-let [n (:name row)]
+                    ;; reconstruct pre-annotates rows with ::ns-path so
+                    ;; per-ns duplicate names emit QUALIFIED and resolve
+                    ;; precisely through the registry's dual index.
+                    (if-let [nsp (::ns-path row)]
+                      (keyword nsp n)
+                      (keyword n))))
+        ref-name (when ref-id (some-> (get fn-by-id ref-id) row->kw))]
     (cond
       (some? items)
       (mapv (fn [it]
@@ -183,7 +191,7 @@
                 (some? (:value it)) {:value (:value it)
                                      :literal? (true? (:literal it))}
                 (:ref-fn-id it) (some-> (get fn-by-id (:ref-fn-id it))
-                                        :name keyword)
+                                        row->kw)
                 :else nil))
             items)
 
@@ -220,8 +228,34 @@
                              (assoc (:return-type-fn-id own)
                                     (sp/read-entity storage :fn
                                                     (:return-type-fn-id own)))))
+              ;; ns paths for QUALIFIED name emission — per-ns duplicate
+              ;; names resolve precisely only through the qualified
+              ;; registry key, and the editor world (random ids, any
+              ;; namespace) is exactly where duplicates live. One
+              ;; batched :ns read over the rows in hand.
+              ns-ids (into #{} (keep :namespace-id) (vals fn-by-id))
+              ns-rows (when (seq ns-ids)
+                        (sp/read-entities storage :ns (vec ns-ids)))
+              ns-path (fn ns-path
+                        [nsid]
+                        (when-let [r (get ns-rows nsid)]
+                          (if-let [p (:parent-id r)]
+                            (str (or (ns-path p)
+                                     (some-> (sp/read-entity storage :ns p)
+                                             :name))
+                                 "." (:name r))
+                            (:name r))))
+              annotate (fn [row]
+                         (if-let [nsp (some-> (:namespace-id row) ns-path)]
+                           (assoc row ::ns-path nsp)
+                           row))
+              fn-by-id (into {} (map (fn [[k v]] [k (annotate v)])) fn-by-id)
               parent-name (fn [pid]
-                            (some-> (get fn-by-id pid) :name keyword))
+                            (let [row (get fn-by-id pid)]
+                              (when-let [n (:name row)]
+                                (if-let [nsp (::ns-path row)]
+                                  (keyword nsp n)
+                                  (keyword n)))))
               own-bindings (sp/query-entities storage :binding {:fn-id fn-id})
               ;; Phase 6c — own fn-slot rows of `fn-id` carry the
               ;; renamed-view slots (the FK link replacing the legacy
@@ -260,7 +294,9 @@
                            (remove #(contains? fn-by-id %)))
               fn-by-id+refs (cond-> fn-by-id
                               (seq ref-ids)
-                              (merge (sp/read-entities storage :fn ref-ids)))
+                              (merge (into {}
+                                           (map (fn [[k v]] [k (annotate v)]))
+                                           (sp/read-entities storage :fn ref-ids))))
               args (into {}
                          (keep (fn [b]
                                  (when-let [slot (get slot-by-id (:slot-id b))]

@@ -538,3 +538,45 @@
     (testing "usage [:pii-row T] degrades to the INNER type at storage"
       (is (= (get (r/primitive-fn-ids) :text) (:type-fn-id slot))
           "slot's FK points at :text — the label lives in rich-types only"))))
+
+
+;; =============================================================================
+;; Per-ns names — stage 5: same-named fns in different namespaces COEXIST
+;; =============================================================================
+
+(deftest per-ns-duplicate-names-coexist
+  (let [base [{:name :dup-base :namespace "ns-a"
+               :args {:x :any} :return-type :any}]
+        twin (fn [ns-path v]
+               {:name :same-name :namespace ns-path :parent :dup-base
+                :args {:x {:value v}}})
+        fns (conj base (twin "ns-a" 1) (twin "ns-b" 2))]
+    (testing "both twins sync — distinct ids, per-(ns,name) identity"
+      (let [recs (r/parse-module fns)
+            rows (filter #(and (= :fn (:kind %)) (= "same-name" (:name %))) recs)]
+        (is (= 2 (count rows)))
+        (is (= 2 (count (into #{} (map :id) rows))))))
+    (testing "an AMBIGUOUS bare ref from a third namespace fails loud"
+      (is (thrown-with-msg? Exception #"Ambiguous reference"
+            (r/parse-module
+              (conj fns {:name :caller :namespace "ns-c" :parent :dup-base
+                         :args {:x :same-name}})))))
+    (testing "a bare ref from ONE OF THE TWINS' OWN namespace prefers it"
+      (let [recs (r/parse-module
+                   (conj fns {:name :caller :namespace "ns-a" :parent :dup-base
+                              :args {:x :same-name}}))
+            caller-binding (first (filter #(and (= :binding (:kind %))
+                                                (:ref-fn-id %))
+                                          (filter #(= (r/fn-id "ns-a" :caller)
+                                                      (:fn-id %)) recs)))]
+        (is (= (r/fn-id "ns-a" :same-name) (:ref-fn-id caller-binding))
+            "own-namespace twin wins (Clojure-like resolution)")))
+    (testing "qualified refs pick each twin precisely"
+      (let [recs (r/parse-module
+                   (conj fns {:name :caller-b :namespace "ns-c" :parent :dup-base
+                              :args {:x :ns-b/same-name}}))
+            b (first (filter #(and (= :binding (:kind %))
+                                   (= (r/fn-id "ns-c" :caller-b) (:fn-id %))
+                                   (:ref-fn-id %))
+                             recs))]
+        (is (= (r/fn-id "ns-b" :same-name) (:ref-fn-id b)))))))

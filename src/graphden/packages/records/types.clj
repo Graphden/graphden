@@ -19,6 +19,28 @@
   (and (map? m) (contains? m :type)))
 
 
+(def ambiguous-name
+  "Sentinel in dual-keyed name→id maps for a BARE name that exists in
+   more than one namespace (per-ns names, ADR-identity-model.md
+   stage 5). Shared by the parser and this resolver so both throw the
+   same qualification hint instead of treating the sentinel as an id."
+  ::ambiguous)
+
+
+(defn resolve-name-or-throw
+  "`(get name->id kw)` with ambiguity handling: the sentinel throws a
+   qualification hint; nil passes through (callers keep their own
+   unknown-ref errors)."
+  [name->id kw]
+  (let [v (get name->id kw)]
+    (if (= ambiguous-name v)
+      (throw (ex-info (str "Ambiguous reference " (pr-str kw)
+                           " — the name exists in multiple namespaces; "
+                           "qualify it as :<the.namespace>/" (name kw))
+                      {:type :packages/ambiguous-ref :ref kw}))
+      v)))
+
+
 (defn resolve-type-ref
   "Resolve a `:type T` reference in EDN to a fn-id. T is one of:
    - primitive keyword (e.g. `:int`) → primitive's fn-id
@@ -52,7 +74,7 @@
     (ids/primitive-fn-id :any)
 
     (keyword? t)
-    (or (get name->id t)
+    (or (resolve-name-or-throw name->id t)
         (throw (ex-info (str "Unknown type reference: " (pr-str t))
                         {:type :records/unknown-type-ref
                          :ref t})))

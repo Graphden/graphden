@@ -215,14 +215,22 @@
    `:namespace-id` is the dotted path, as `graph->records` yields), so
    qualified cross-module refs resolve against already-synced fns."
   [fns]
-  (into {}
-        (comp (filter :name)
-              (mapcat (fn [f]
-                        (let [n (:name f) id (:id f) ns-path (:namespace-id f)]
-                          (cons [(keyword n) id]
-                                (when (string? ns-path)
-                                  [[(keyword ns-path n) id]]))))))
-        fns))
+  (reduce
+    (fn [m f]
+      (if-not (:name f)
+        m
+        (let [bare (keyword (:name f))
+              id (:id f)
+              ns-path (:namespace-id f)
+              existing (get m bare)]
+          (cond-> (assoc m bare
+                         (if (and existing (not= existing id))
+                           records/ambiguous-name
+                           id))
+            (string? ns-path)
+            (assoc (keyword ns-path (:name f)) id)))))
+    {}
+    fns))
 
 
 (defn- faithful-defs-by-name
@@ -239,9 +247,13 @@
    a second lossy reconstruction. `records->fn-defs` skips primitives +
    anonymous rows, matching what `parse-module` expects as extra-defs."
   [records]
-  (into {}
-        (map (juxt :name identity))
-        (export/records->fn-defs records)))
+  (reduce
+    (fn [m fd]
+      (cond-> (assoc m (:name fd) fd)
+        (:namespace fd)
+        (assoc (keyword (:namespace fd) (name (:name fd))) fd)))
+    {}
+    (export/records->fn-defs records)))
 
 
 (defn- discover-existing-state

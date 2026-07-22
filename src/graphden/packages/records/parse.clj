@@ -331,6 +331,21 @@
         :description description}])))
 
 
+(def ambiguous-name
+  "Shared sentinel — see `records.types/ambiguous-name`."
+  types/ambiguous-name)
+
+
+(defn- resolve-ref-id
+  "Ambiguity-aware `(get name->id kw)` — shared impl in
+   `records.types/resolve-name-or-throw`; ambiguous bare refs are
+   rewritten to qualified form by `normalize-qualified-refs` before
+   the per-site resolvers run, so a throw here means an unnormalized
+   path slipped a bare duplicate through."
+  [name->id kw]
+  (types/resolve-name-or-throw name->id kw))
+
+
 (defn- resolve-parent-list
   "Pulls the parent fn-ids from a composed fn-def. Accepts either
    `:parent :foo` (single) or `:parents [:a :b]` (multi-inheritance).
@@ -344,7 +359,7 @@
                        :else                   nil)]
     (when (seq parent-names)
       (mapv (fn [parent-name]
-              (or (get name->id parent-name)
+              (or (resolve-ref-id name->id parent-name)
                   (throw (ex-info (str "Unknown parent: " (pr-str parent-name))
                                   {:type :records/unknown-parent
                                    :name (:name fn-def)
@@ -404,7 +419,7 @@
         ;; metadata applied to the SOURCE slot.
         fields (cond-> {}
                  (and ref-name (contains? name->id ref-name))
-                 (assoc :ref-fn-id (get name->id ref-name))
+                 (assoc :ref-fn-id (resolve-ref-id name->id ref-name))
 
                  (and (contains? arg-value :value) (not (contains? arg-value :ref)))
                  (assoc :value value :value-present true)
@@ -433,7 +448,7 @@
                  ;; ("stored → runtime"). Round-trip twin of the
                  ;; exporter's :resolver emission.
                  (and resolver-name (contains? name->id resolver-name))
-                 (assoc :resolver-fn-id (get name->id resolver-name)
+                 (assoc :resolver-fn-id (resolve-ref-id name->id resolver-name)
                         :value value
                         :value-present true)
 
@@ -476,7 +491,7 @@
   [arg-value name->id sequence-slot?]
   (cond
     (and (keyword? arg-value) (contains? name->id arg-value))
-    {:fields {:ref-fn-id (get name->id arg-value)} :items []}
+    {:fields {:ref-fn-id (resolve-ref-id name->id arg-value)} :items []}
 
     ;; Bare vector on a sequence-typed slot → items. Bare vector on
     ;; any other slot is a literal jsonb value (e.g. hiccup data).
@@ -516,13 +531,13 @@
               :literal nil}]
     (cond
       (and (keyword? item) (contains? name->id item))
-      (assoc base :ref-fn-id (get name->id item))
+      (assoc base :ref-fn-id (resolve-ref-id name->id item))
 
       (map? item)
       (let [{:keys [value] ref-name :ref} item]
         (cond
           (and ref-name (contains? name->id ref-name))
-          (assoc base :ref-fn-id (get name->id ref-name))
+          (assoc base :ref-fn-id (resolve-ref-id name->id ref-name))
 
           ;; A `:ref` key names a fn — an unresolved one is an author
           ;; typo, not literal data. Fail loud (mirrors the main-binding
@@ -992,18 +1007,43 @@
 
 
 (defn- normalize-qref
-  "One qualified fn/type reference keyword → its bare form, validated:
-   the qualified pair must be a KNOWN fn (dual-keyed `name->id`), else
-   throw loud with the pair. Bare keywords pass through untouched."
-  [kw name->id]
-  (if (qualified-keyword? kw)
+  "One reference keyword → its canonical form, validated.
+
+   QUALIFIED keywords: the pair must be a KNOWN fn (dual-keyed
+   `name->id`), else throw loud; kept qualified when the bare name is
+   AMBIGUOUS (per-ns duplicate — the qualified spelling IS the
+   disambiguation), rewritten to bare otherwise (canonical minimal
+   form, both spellings hash identically).
+
+   BARE keywords: pass through when unique or unknown; when the name
+   is ambiguous, prefer the current module's namespace (`module-ns`)
+   and rewrite to ITS qualified form — the Clojure-like resolution
+   rule ('your own namespace wins') — else throw demanding explicit
+   qualification."
+  [kw name->id module-ns]
+  (cond
+    (qualified-keyword? kw)
     (if (contains? name->id kw)
-      (keyword (name kw))
+      (if (= ambiguous-name (get name->id (keyword (name kw))))
+        kw
+        (keyword (name kw)))
       (throw (ex-info (str "Unresolved qualified reference: " (pr-str kw)
                            " — no fn named " (pr-str (keyword (name kw)))
                            " in namespace " (pr-str (namespace kw)))
                       {:type :packages/unresolved-ref :ref kw})))
-    kw))
+
+    (= ambiguous-name (get name->id kw))
+    (let [preferred (when module-ns (keyword module-ns (name kw)))]
+      (if (and preferred (contains? name->id preferred))
+        preferred
+        (throw (ex-info (str "Ambiguous reference " (pr-str kw)
+                             " — the name exists in multiple namespaces "
+                             "and none is the current module's; qualify "
+                             "it as :<the.namespace>/" (name kw))
+                        {:type :packages/ambiguous-ref
+                         :ref kw :module-ns module-ns}))))
+
+    :else kw))
 
 
 (declare normalize-qualified-arg-value)
@@ -1015,19 +1055,19 @@
    `[:union …]`, `[:fn {args} ret]`, `[:map K V]`, `[:tuple …]`) —
    normalize any qualified keyword found in type position, leaving
    refinement CONSTRAINT payloads (value world) untouched."
-  [t name->id]
+  [t name->id module-ns]
   (cond
-    (keyword? t) (normalize-qref t name->id)
-    (map? t) (into {} (map (fn [[k v]] [k (normalize-qualified-type-ref v name->id)])) t)
+    (keyword? t) (normalize-qref t name->id module-ns)
+    (map? t) (into {} (map (fn [[k v]] [k (normalize-qualified-type-ref v name->id module-ns)])) t)
     (vector? t)
     (case (first t)
-      :refine (assoc t 1 (normalize-qualified-type-ref (nth t 1) name->id))
+      :refine (assoc t 1 (normalize-qualified-type-ref (nth t 1) name->id module-ns))
       (:list :union :tuple :map) (into [(first t)]
-                                       (map #(normalize-qualified-type-ref % name->id))
+                                       (map #(normalize-qualified-type-ref % name->id module-ns))
                                        (rest t))
       :fn (cond-> t
-            (map? (nth t 1 nil)) (assoc 1 (normalize-qualified-type-ref (nth t 1) name->id))
-            (>= (count t) 3) (assoc 2 (normalize-qualified-type-ref (nth t 2) name->id)))
+            (map? (nth t 1 nil)) (assoc 1 (normalize-qualified-type-ref (nth t 1) name->id module-ns))
+            (>= (count t) 3) (assoc 2 (normalize-qualified-type-ref (nth t 2) name->id module-ns)))
       t)
     :else t))
 
@@ -1037,22 +1077,22 @@
    shapes `arg-value->binding-fields` recognises. Literal payloads
    (`:value`, refinement constraints) are deliberately untouched — a
    qualified keyword there is user DATA, not a reference."
-  [v name->id]
+  [v name->id module-ns]
   (cond
-    (keyword? v) (normalize-qref v name->id)
-    (vector? v) (mapv #(normalize-qualified-arg-value % name->id) v)
+    (keyword? v) (normalize-qref v name->id module-ns)
+    (vector? v) (mapv #(normalize-qualified-arg-value % name->id module-ns) v)
     (map? v)
     (cond-> v
-      (contains? v :ref)     (update :ref #(normalize-qref % name->id))
-      (contains? v :resolver) (update :resolver #(normalize-qref % name->id))
-      (contains? v :type)    (update :type #(normalize-qualified-type-ref % name->id))
-      (contains? v :append)  (update :append (fn [items] (mapv #(normalize-qualified-arg-value % name->id) items)))
+      (contains? v :ref)     (update :ref #(normalize-qref % name->id module-ns))
+      (contains? v :resolver) (update :resolver #(normalize-qref % name->id module-ns))
+      (contains? v :type)    (update :type #(normalize-qualified-type-ref % name->id module-ns))
+      (contains? v :append)  (update :append (fn [items] (mapv #(normalize-qualified-arg-value % name->id module-ns) items)))
       ;; inline anon fn-def in arg position
-      (contains? v :parent)  (update :parent #(normalize-qref % name->id))
-      (contains? v :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id) ps)))
+      (contains? v :parent)  (update :parent #(normalize-qref % name->id module-ns))
+      (contains? v :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id module-ns) ps)))
       (contains? v :args)    (update :args (fn [args]
                                              (into {}
-                                                   (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id)]))
+                                                   (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id module-ns)]))
                                                    args))))
     :else v))
 
@@ -1073,22 +1113,23 @@
    resolving to a same-named fn elsewhere. Namespace-aware resolution
    through the type-checker's name world is stage 5."
   [fd name->id]
-  (cond-> fd
-    (contains? fd :parent)  (update :parent #(normalize-qref % name->id))
-    (contains? fd :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id) ps)))
-    (contains? fd :args)    (update :args (fn [args]
-                                            (into {}
-                                                  (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id)]))
-                                                  args)))
-    (contains? fd :return-type) (update :return-type #(normalize-qualified-type-ref % name->id))
-    (contains? fd :type)    (update :type #(normalize-qualified-type-ref % name->id))
-    (contains? fd :list)    (update :list #(normalize-qualified-type-ref % name->id))
-    (contains? fd :union)   (update :union (fn [ts] (mapv #(normalize-qualified-type-ref % name->id) ts)))
-    (contains? fd :refine)  (update-in [:refine :base] #(normalize-qref % name->id))
-    (contains? fd :variant) (update :variant (fn [ts] (mapv #(normalize-qualified-type-ref % name->id) ts)))
-    (contains? fd :fn-type) (update :fn-type (fn [[args ret]]
-                                               [(normalize-qualified-type-ref args name->id)
-                                                (normalize-qualified-type-ref ret name->id)]))))
+  (let [module-ns (:namespace fd)]
+    (cond-> fd
+      (contains? fd :parent)  (update :parent #(normalize-qref % name->id module-ns))
+      (contains? fd :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id module-ns) ps)))
+      (contains? fd :args)    (update :args (fn [args]
+                                              (into {}
+                                                    (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id module-ns)]))
+                                                    args)))
+      (contains? fd :return-type) (update :return-type #(normalize-qualified-type-ref % name->id module-ns))
+      (contains? fd :type)    (update :type #(normalize-qualified-type-ref % name->id module-ns))
+      (contains? fd :list)    (update :list #(normalize-qualified-type-ref % name->id module-ns))
+      (contains? fd :union)   (update :union (fn [ts] (mapv #(normalize-qualified-type-ref % name->id module-ns) ts)))
+      (contains? fd :refine)  (update-in [:refine :base] #(normalize-qref % name->id module-ns))
+      (contains? fd :variant) (update :variant (fn [ts] (mapv #(normalize-qualified-type-ref % name->id module-ns) ts)))
+      (contains? fd :fn-type) (update :fn-type (fn [[args ret]]
+                                                 [(normalize-qualified-type-ref args name->id module-ns)
+                                                  (normalize-qualified-type-ref ret name->id module-ns)])))))
 
 
 (defn parse-module
@@ -1125,15 +1166,23 @@
          ;; The validation map is dual-keyed from the RAW named defs
          ;; (+ prior syncs) — synthetic anon names are never the
          ;; target of a qualified ref.
-         pre-name->id (merge extra-name->id
-                             (into {}
-                                   (comp (filter :name)
-                                         (mapcat (fn [fd]
-                                                   (let [id (ids/fn-id (:namespace fd) (:name fd))]
-                                                     (cons [(:name fd) id]
-                                                           (when-let [ns-path (:namespace fd)]
-                                                             [[(keyword ns-path (name (:name fd))) id]]))))))
-                                   module-fn-defs))
+         pre-name->id (reduce
+                        (fn [m fd]
+                          (if-not (:name fd)
+                            m
+                            (let [id (ids/fn-id (:namespace fd) (:name fd))
+                                  bare (:name fd)
+                                  existing (get m bare)]
+                              (cond-> (assoc m bare
+                                             (if (and existing (not= existing id))
+                                               ambiguous-name
+                                               id))
+                                (:namespace fd)
+                                (assoc (keyword (:namespace fd)
+                                                (name bare))
+                                       id)))))
+                        extra-name->id
+                        module-fn-defs)
          module-fn-defs (mapv #(normalize-qualified-refs % pre-name->id) module-fn-defs)
          ;; Pre-pass: lift every inline `{:parent X :args Y}` map in
          ;; arg-value position into a synthetic `_anon-<hash>` fn-def
@@ -1152,15 +1201,22 @@
          ;; fail-loud path as a bare one. Qualified refs don't depend
          ;; on global name uniqueness — per-ns migration stage 4
          ;; (ADR-identity-model.md).
-         own-name->id (into {}
-                            (comp (filter :name)
-                                  (mapcat (fn [fd]
-                                            (let [id (ids/fn-id (:namespace fd) (:name fd))]
-                                              (cons [(:name fd) id]
-                                                    (when-let [ns-path (:namespace fd)]
-                                                      [[(keyword ns-path (name (:name fd))) id]]))))))
-                            module-fn-defs)
-         name->id (merge extra-name->id own-name->id)
+         name->id (reduce
+                    (fn [m fd]
+                      (if-not (:name fd)
+                        m
+                        (let [id (ids/fn-id (:namespace fd) (:name fd))
+                              bare (:name fd)
+                              existing (get m bare)]
+                          (cond-> (assoc m bare
+                                         (if (and existing (not= existing id))
+                                           ambiguous-name
+                                           id))
+                            (:namespace fd)
+                            (assoc (keyword (:namespace fd) (name bare))
+                                   id)))))
+                    extra-name->id
+                    module-fn-defs)
          defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name module-fn-defs))
          ;; Inline `[:fn args ret]` references buried in fn-defs'
          ;; type-bearing fields produce anonymous fn-rows that the

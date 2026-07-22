@@ -310,3 +310,19 @@
             ruser (first (filter #(= :ruser (:name %)) out))]
         (is (= {:resolver :rslv :value "stored"}
                (get-in ruser [:args :x])))))))
+
+
+(deftest roundtrip-per-ns-duplicates
+  ;; Stage 5: same-named fns in different namespaces round-trip — the
+  ;; exporter emits QUALIFIED refs for duplicated names so re-parse
+  ;; resolves precisely instead of hitting the ambiguity error.
+  (let [fns [{:name :dup-base :namespace "ns-a" :args {:x :any} :return-type :any}
+             {:name :same-name :namespace "ns-a" :parent :dup-base :args {:x {:value 1}}}
+             {:name :same-name :namespace "ns-b" :parent :dup-base :args {:x {:value 2}}}
+             {:name :caller :namespace "ns-c" :parent :dup-base
+              :args {:x :ns-b/same-name}}]]
+    (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))
+    (testing "the exported caller carries the qualified ref"
+      (let [out (export/records->fn-defs (parse/parse-module fns))
+            caller (first (filter #(= :caller (:name %)) out))]
+        (is (= :ns-b/same-name (get-in caller [:args :x])))))))

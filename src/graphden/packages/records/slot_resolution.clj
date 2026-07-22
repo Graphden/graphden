@@ -457,13 +457,21 @@
 
 (defn build-defs-by-name
   "Map of {fn-name → fn-def} from the input vector for parse-time
-   slot resolution."
+   slot resolution. DUAL-keyed (bare + `:ns.path/name` qualified) —
+   ambiguous PARENT refs arrive already qualified from
+   `normalize-qualified-refs`, so their shape lookups hit the precise
+   key; a bare key under per-ns duplicates is last-write and is only
+   consulted for unique names."
   [module-fn-defs]
-  (into {}
-        (keep (fn [fd]
-                (when-let [n (:name fd)]
-                  [n fd])))
-        module-fn-defs))
+  (reduce
+    (fn [m fd]
+      (if-not (:name fd)
+        m
+        (cond-> (assoc m (:name fd) fd)
+          (:namespace fd)
+          (assoc (keyword (:namespace fd) (name (:name fd))) fd))))
+    {}
+    module-fn-defs))
 
 
 (defn ancestor-type-pin

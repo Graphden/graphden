@@ -85,10 +85,31 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   namespace). Namespace-aware resolution through the type-checker's
   name world — and the exporter emitting qualified forms for
   ambiguous names — is the remaining stage-5 work.
-- **Stage 5 — relax `validate-no-name-collisions!`** to per-(ns, name)
-  — last, after stages 2-4 hold; base-fn (Clojure impl registry) names
-  stay globally unique (they are code-level identifiers, like Clojure
-  vars).
+- **Stage 5 — per-ns names: DONE.** `validate-no-name-collisions!`
+  now enforces `(namespace, name)` uniqueness (the pair IS the
+  deterministic fn-id) plus global uniqueness for BASE-FN bare names
+  only (the Clojure impls registry is name-keyed — code-level
+  identifiers, like Clojure vars). Same-named composed fn-defs in
+  different namespaces COEXIST end to end:
+  - dual-keyed name maps everywhere (parse `name->id`, `defs-by-name`,
+    discovery, the rich-types `:by-name` index) — bare keys carry an
+    `ambiguous` sentinel / last-write on collision, qualified keys are
+    always precise;
+  - ambiguous bare refs resolve by the Clojure-like rule at parse
+    entry (`normalize-qref`): the referencing module's OWN namespace
+    wins, else a loud `:packages/ambiguous-ref` demands qualification;
+  - the exporter emits qualified refs for duplicated names (round-trip
+    proof: `roundtrip-per-ns-duplicates`);
+  - the editor path reconstructs QUALIFIED parent/ref names
+    (`::ns-path`-annotated rows) so the checker resolves duplicates
+    precisely through the dual registry index;
+  - the registry's name-view keys duplicated entries by their
+    qualified form (search/candidates show `:ns/name` — the natural
+    disambiguation display).
+  Residual (documented, warn-covered): the type-ALIAS registry stays
+  last-write for duplicated type names with the stage-2 owner warning
+  — full per-ns alias resolution rides on a future context-aware
+  `resolve-alias` if duplicated type names become common practice.
 - **Stage 6 — UI disambiguation.** Search/deep-links show the
   namespace when a bare name is ambiguous (matches the "hide
   namespaces until needed" editor philosophy).

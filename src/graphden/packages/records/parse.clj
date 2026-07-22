@@ -355,8 +355,8 @@
 (defn- map-arg-value->binding-fields
   "Map-shaped arg-value branch of `arg-value->binding-fields`. Carries
    every recognised key (`:as`, `:ref`, `:value`, `:type`, `:append`,
-   `:closed`, `:required`, `:terminal`) and emits the corresponding binding
-   columns. `:terminal true` seals the slot (§4.3 `validation/terminal-rej`).
+   `:closed`, `:required`, `:terminal`, `:secret-path`) and emits the
+   corresponding binding columns. `:terminal true` seals the slot (§4.3 `validation/terminal-rej`).
    Falls back to `:value <whole-map>` when none of the recognised keys
    are present (literal map binding).
 
@@ -366,10 +366,11 @@
    (widening forbidden); we still pass it through here so the diagnostic
    fires on the actual binding row, not as a silent drop."
   [arg-value name->id]
-  (let [{:keys [as value append closed required terminal]
+  (let [{:keys [as value append closed required terminal secret-path]
          ref-name :ref type-ref :type} arg-value
         has-required? (contains? arg-value :required)
         has-terminal? (contains? arg-value :terminal)
+        has-secret-path? (contains? arg-value :secret-path)
         ;; A `:ref` key names a fn; `name->id` is complete for every
         ;; legitimately-referenceable fn at parse time (own module +
         ;; dependency-loaded ancestors), so an unresolved one is an
@@ -404,13 +405,32 @@
                  (and (contains? arg-value :value) (not (contains? arg-value :ref)))
                  (assoc :value value :value-present true)
 
+                 ;; `{:secret-path "kv/path"}` — a vault-path binding.
+                 ;; The path is stored in `binding.value` with
+                 ;; `:override-kind :secret-path`; the executor derefs
+                 ;; the path via the vault client at arg-resolution
+                 ;; time (the secret VALUE never enters graph storage).
+                 ;; This is the round-trip twin of the exporter's
+                 ;; `:secret-path` emission in `packages/export.clj`.
+                 ;; NOTE: sync is an operator-trusted path — the CRUD
+                 ;; gate (`validation/secret-path-rej`, which refuses
+                 ;; `:secret-path` on slots whose rich-type lacks
+                 ;; `:secret`) runs on the API write path, not here;
+                 ;; the type-check sweep still rejects a secret-typed
+                 ;; ref flowing into a plain slot.
+                 has-secret-path?
+                 (assoc :value secret-path
+                        :value-present true
+                        :override-kind :secret-path)
+
                  override-fn-id (assoc :type-override-fn-id override-fn-id)
                  (or append closed) (assoc :list-append (boolean append)
                                            :list-closed (boolean closed))
                  has-required? (assoc :required (boolean required))
                  has-terminal? (assoc :terminal (boolean terminal))
                  (not (or ref-name (contains? arg-value :value) as type-ref
-                          append closed has-required? has-terminal?))
+                          append closed has-required? has-terminal?
+                          has-secret-path?))
                  (assoc :value arg-value :value-present true))]
     {:fields fields
      :items (vec (when (vector? append) append))}))
@@ -436,6 +456,8 @@
      `{:value v}`                  → literal `:value` (bypasses
                                      bare-keyword fn-ref resolution)
      `{:ref :name}`                → `:ref-fn-id`
+     `{:secret-path p}`            → vault-path binding (`:override-kind
+                                     :secret-path`, path in `:value`)
      anything else (incl. literal map) → `:value`"
   [arg-value name->id sequence-slot?]
   (cond

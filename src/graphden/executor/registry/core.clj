@@ -381,81 +381,81 @@
    (record-rich-types! (fn-def-registry-id fn-name fn-def) fn-name fn-def))
   ([fn-id fn-name fn-def]
    (let [args (:args fn-def)
-        ret  (some-> (:return-type fn-def) types/resolve-alias)
-        per-arg (into {}
-                      (map (fn [[arg-name arg-spec]]
-                             [arg-name (or (arg-spec->rich-type arg-name arg-spec) :any)]))
-                      args)
-        raw-effects (set (:effects fn-def))
-        desc (:description fn-def)
-        build (fn [final-effects]
-                (cond-> {:return (or ret :any)
-                         :args   per-arg
-                         ;; Always store the computed set, even when empty.
-                         ;; compute-effects is total — every fn has a known
-                         ;; set, possibly #{} (pure). Gating on (seq effects)
-                         ;; collapsed "computed pure" and "no info recorded"
-                         ;; into one absent-key state, which forced every
-                         ;; consumer downstream to write (or (:effects info)
-                         ;; #{}) to recover the pure case. Storing #{}
-                         ;; explicitly drops the asymmetry.
-                         :effects final-effects}
-                  (and desc (seq desc))      (assoc :description desc)
-                  (:return-type-rule fn-def) (assoc :return-type-rule
-                                                    (:return-type-rule fn-def))
-                  (:slot-types-rule fn-def)  (assoc :slot-types-rule
-                                                    (:slot-types-rule fn-def))
-                  (:nav-types-rule fn-def)   (assoc :nav-types-rule
-                                                    (:nav-types-rule fn-def))
-                  ;; `:lazy-seq-args` — slot names where each ITEM in the
-                  ;; seq slot's list arrives as a `delay`, so a consumer
-                  ;; like `:cond` can step past an unforced item.
-                  ;;
-                  ;; Scalar lazy slots DON'T need a marker — every `:ref`
-                  ;; binding compiles to a delay by default; Clojure's
-                  ;; native `if`/`and`/`or` short-circuit on un-read args.
-                  (:lazy-seq-args fn-def)    (assoc :lazy-seq-args
-                                                    (:lazy-seq-args fn-def))
-                  ;; `:compile-time-value?` — base-fn is evaluated ONCE at
-                  ;; compile time and its result baked as `(constantly …)`
-                  ;; into the closure (compile_eager reads this via the
-                  ;; root base-fn's rich-type). Backs `:cell`'s persistent
-                  ;; atom.
-                  (:compile-time-value? fn-def) (assoc :compile-time-value? true)
-                  ;; `:source-file` / `:source-line` — origin of the EDN entry
-                  ;; (tools.reader meta). Stored alongside the rich-type so
-                  ;; type-error messages can point at the fn that introduced
-                  ;; the offending constraint.
-                  (:source-file fn-def)      (assoc :source-file
-                                                    (:source-file fn-def))
-                  (:source-line fn-def)      (assoc :source-line
-                                                    (:source-line fn-def))
-                  ;; `:tags` — set of declarative capability / shape markers
-                  ;; on the fn-def. Policy callers (e.g. the admin-only-vault
-                  ;; capability gate in `crud.secret-shape`) query by tag
-                  ;; rather than hardcoding fn-name sets, so adding a new
-                  ;; tagged base-fn is a one-line `fns.edn` annotation.
-                  (seq (:tags fn-def))       (assoc :tags
-                                                    (set (:tags fn-def)))
-                  ;; `:branch-local?` — effective (monotonic OR) over
-                  ;; own + every parent's stored effective. Topo-sort
-                  ;; in sync means parents have been recorded before
-                  ;; us, so we can read from the registry directly.
-                  ;; ONLY stashed when true — false is the default
-                  ;; everywhere else (resolve-version-from-cache,
-                  ;; type-checker), so keeping the absent-key
-                  ;; convention matches existing patterns and
-                  ;; preserves identity assertions in tests.
-                  (or (:branch-local? fn-def)
-                      (some (fn [p]
-                              (let [v (rich-types-view)]
-                                (get-in v [:by-id (get-in v [:by-name p])
-                                           :branch-local?])))
-                            (or (seq (:parents fn-def))
-                                (when (:parent fn-def)
-                                  [(:parent fn-def)])
-                                [])))
-                  (assoc :branch-local? true)))]
+         ret  (some-> (:return-type fn-def) types/resolve-alias)
+         per-arg (into {}
+                       (map (fn [[arg-name arg-spec]]
+                              [arg-name (or (arg-spec->rich-type arg-name arg-spec) :any)]))
+                       args)
+         raw-effects (set (:effects fn-def))
+         desc (:description fn-def)
+         build (fn [final-effects]
+                 (cond-> {:return (or ret :any)
+                          :args   per-arg
+                          ;; Always store the computed set, even when empty.
+                          ;; compute-effects is total — every fn has a known
+                          ;; set, possibly #{} (pure). Gating on (seq effects)
+                          ;; collapsed "computed pure" and "no info recorded"
+                          ;; into one absent-key state, which forced every
+                          ;; consumer downstream to write (or (:effects info)
+                          ;; #{}) to recover the pure case. Storing #{}
+                          ;; explicitly drops the asymmetry.
+                          :effects final-effects}
+                   (and desc (seq desc))      (assoc :description desc)
+                   (:return-type-rule fn-def) (assoc :return-type-rule
+                                                     (:return-type-rule fn-def))
+                   (:slot-types-rule fn-def)  (assoc :slot-types-rule
+                                                     (:slot-types-rule fn-def))
+                   (:nav-types-rule fn-def)   (assoc :nav-types-rule
+                                                     (:nav-types-rule fn-def))
+                   ;; `:lazy-seq-args` — slot names where each ITEM in the
+                   ;; seq slot's list arrives as a `delay`, so a consumer
+                   ;; like `:cond` can step past an unforced item.
+                   ;;
+                   ;; Scalar lazy slots DON'T need a marker — every `:ref`
+                   ;; binding compiles to a delay by default; Clojure's
+                   ;; native `if`/`and`/`or` short-circuit on un-read args.
+                   (:lazy-seq-args fn-def)    (assoc :lazy-seq-args
+                                                     (:lazy-seq-args fn-def))
+                   ;; `:compile-time-value?` — base-fn is evaluated ONCE at
+                   ;; compile time and its result baked as `(constantly …)`
+                   ;; into the closure (compile_eager reads this via the
+                   ;; root base-fn's rich-type). Backs `:cell`'s persistent
+                   ;; atom.
+                   (:compile-time-value? fn-def) (assoc :compile-time-value? true)
+                   ;; `:source-file` / `:source-line` — origin of the EDN entry
+                   ;; (tools.reader meta). Stored alongside the rich-type so
+                   ;; type-error messages can point at the fn that introduced
+                   ;; the offending constraint.
+                   (:source-file fn-def)      (assoc :source-file
+                                                     (:source-file fn-def))
+                   (:source-line fn-def)      (assoc :source-line
+                                                     (:source-line fn-def))
+                   ;; `:tags` — set of declarative capability / shape markers
+                   ;; on the fn-def. Policy callers (e.g. the admin-only-vault
+                   ;; capability gate in `crud.secret-shape`) query by tag
+                   ;; rather than hardcoding fn-name sets, so adding a new
+                   ;; tagged base-fn is a one-line `fns.edn` annotation.
+                   (seq (:tags fn-def))       (assoc :tags
+                                                     (set (:tags fn-def)))
+                   ;; `:branch-local?` — effective (monotonic OR) over
+                   ;; own + every parent's stored effective. Topo-sort
+                   ;; in sync means parents have been recorded before
+                   ;; us, so we can read from the registry directly.
+                   ;; ONLY stashed when true — false is the default
+                   ;; everywhere else (resolve-version-from-cache,
+                   ;; type-checker), so keeping the absent-key
+                   ;; convention matches existing patterns and
+                   ;; preserves identity assertions in tests.
+                   (or (:branch-local? fn-def)
+                       (some (fn [p]
+                               (let [v (rich-types-view)]
+                                 (get-in v [:by-id (get-in v [:by-name p])
+                                            :branch-local?])))
+                             (or (seq (:parents fn-def))
+                                 (when (:parent fn-def)
+                                   [(:parent fn-def)])
+                                 [])))
+                   (assoc :branch-local? true)))]
      ;; `:effects` race resolution: the type-checker computes a fn's
      ;; full effect set (parent inheritance + own-declared) and writes
      ;; it via `record-rich-types-raw!`. Earlier in the same sync we

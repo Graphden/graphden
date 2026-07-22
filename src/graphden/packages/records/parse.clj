@@ -367,10 +367,14 @@
    fires on the actual binding row, not as a silent drop."
   [arg-value name->id]
   (let [{:keys [as value append closed required terminal secret-path]
-         ref-name :ref type-ref :type} arg-value
+         ref-name :ref type-ref :type resolver-name :resolver} arg-value
         has-required? (contains? arg-value :required)
         has-terminal? (contains? arg-value :terminal)
         has-secret-path? (contains? arg-value :secret-path)
+        _ (when (and resolver-name (not (contains? name->id resolver-name)))
+            (throw (ex-info (str "Unresolved resolver ref: " resolver-name)
+                            {:type :packages/unresolved-ref
+                             :ref resolver-name})))
         ;; A `:ref` key names a fn; `name->id` is complete for every
         ;; legitimately-referenceable fn at parse time (own module +
         ;; dependency-loaded ancestors), so an unresolved one is an
@@ -423,6 +427,16 @@
                         :value-present true
                         :override-kind :secret-path)
 
+                 ;; `{:resolver :vault-get :value "kv/path"}` — generic
+                 ;; value-resolver binding: the stored :value is the
+                 ;; INPUT to the resolver graph fn at arg-resolution
+                 ;; ("stored → runtime"). Round-trip twin of the
+                 ;; exporter's :resolver emission.
+                 (and resolver-name (contains? name->id resolver-name))
+                 (assoc :resolver-fn-id (get name->id resolver-name)
+                        :value value
+                        :value-present true)
+
                  override-fn-id (assoc :type-override-fn-id override-fn-id)
                  (or append closed) (assoc :list-append (boolean append)
                                            :list-closed (boolean closed))
@@ -430,7 +444,7 @@
                  has-terminal? (assoc :terminal (boolean terminal))
                  (not (or ref-name (contains? arg-value :value) as type-ref
                           append closed has-required? has-terminal?
-                          has-secret-path?))
+                          has-secret-path? resolver-name))
                  (assoc :value arg-value :value-present true))]
     {:fields fields
      :items (vec (when (vector? append) append))}))
@@ -578,6 +592,7 @@
    :ref-fn-id nil
    :override-kind :fixed
    :type-override-fn-id nil
+   :resolver-fn-id nil
    :description nil
    :list-append nil
    :list-closed nil
@@ -1029,6 +1044,7 @@
     (map? v)
     (cond-> v
       (contains? v :ref)     (update :ref #(normalize-qref % name->id))
+      (contains? v :resolver) (update :resolver #(normalize-qref % name->id))
       (contains? v :type)    (update :type #(normalize-qualified-type-ref % name->id))
       (contains? v :append)  (update :append (fn [items] (mapv #(normalize-qualified-arg-value % name->id) items)))
       ;; inline anon fn-def in arg position

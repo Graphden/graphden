@@ -80,6 +80,14 @@
   ;; custom_metadata. Used to enrich the secrets list with
   ;; provenance info.
   ;; ---------------------------------------------------------------------
+  {:name :vault-get
+   :description "Read the secret value at KV v2 `<:path>`. Returns `[:secret :text]` — the value enters the graph ALREADY marked, so it can only flow into secret-aware slots. The canonical RESOLVER for secret bindings (`{:resolver :vault-get :value " kv/path "}` ≡ the legacy `:override-kind :secret-path`); admin-gated like every vault primitive."
+   :args {:path {:type :non-blank-text
+                 :description "KV v2 path to read."}}
+   :return-type [:secret :text]
+   :effects #{:network}
+   :tags #{:admin-only-vault}}
+
   {:name :vault-metadata-get
    :description "Read KV v2 metadata at `<:path>` — `created_time`, `current_version`, `custom_metadata`. Returns the inner `:data` map (JSON-decoded with keyword keys, OpenBao's snake_case wire form). Throws `:vault/lookup-failed` if the path is missing."
    :args {:path {:type :text

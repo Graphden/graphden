@@ -28,9 +28,22 @@ per-fn annotations. A new marker is declared IN THE GRAPH:
 specifically). Marker rows store their flags in `:constraint` under
 `:marker-def`, so the DB-driven path re-registers them without the EDN
 source; usage (`[:pii :text]`) degrades to the inner type at the
-storage layer exactly like `[:secret T]`. The runtime half of the
-generalization — a `resolver-fn-id` on bindings replacing the
-hardcoded `:secret-path` → vault deref — is the planned follow-up.
+storage layer exactly like `[:secret T]`.
+
+**Runtime half — SHIPPED:** a binding may carry `resolver-fn-id`
+(nullable ref → `:fn`): the stored `:value` becomes the INPUT to that
+graph fn at arg-resolution time ("stored value → runtime value"),
+evaluated through the standard 1-arg callable machinery. Authoring
+form: `{:resolver :vault-get :value "kv/path"}` (fns.edn round-trips
+it; the exporter emits the same form). `:vault-get` is the canonical
+secret resolver — a normal admin-gated base-fn returning
+`[:secret :text]` — making `:override-kind :secret-path` the legacy
+special case of the same mechanism. `validation/resolver-rej` refuses
+a resolver whose registered return carries a hide-result marker when
+the target slot's type carries none (the runtime laundering guard,
+mirroring `secret-path-rej`). A new external value source (consul,
+KMS, feature flags) is now: write one base-fn, use it as `:resolver`
+— no executor change.
 
 `[:secret <inner>]` is a refinement-marker over any type. Subtype
 direction is asymmetric:

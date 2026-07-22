@@ -296,3 +296,17 @@
           (is (seq (:fns bundle)))
           (is (not (upward? bundle tops))
               (str root " must not depend upward on " (pr-str tops))))))))
+
+
+(deftest roundtrip-resolver-binding
+  (let [fns [{:name :rslv :namespace "ex" :args {:v :text} :return-type :text}
+             {:name :sink2 :namespace "ex" :args {:x :text} :return-type :any}
+             {:name :ruser :namespace "ex" :parent :sink2
+              :args {:x {:resolver :rslv :value "stored"}}}]]
+    (testing "a {:resolver …} binding survives parse → export → parse"
+      (is (roundtrips-exactly? fns) (pr-str (diff-report fns))))
+    (testing "export emits {:resolver …}, never a plain literal"
+      (let [out (export/records->fn-defs (parse/parse-module fns))
+            ruser (first (filter #(= :ruser (:name %)) out))]
+        (is (= {:resolver :rslv :value "stored"}
+               (get-in ruser [:args :x])))))))

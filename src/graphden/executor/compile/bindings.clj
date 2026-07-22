@@ -210,6 +210,15 @@
       {:kind :secret-value :base-name base-name :ext-name ext-name
        :slot-id slot-id :path (:value b)}
 
+      ;; Generic value-resolver — the stored :value is the INPUT to the
+      ;; resolver graph fn at arg-resolution time ("stored → runtime").
+      ;; `:secret-path` above is the legacy vault instance of the same
+      ;; idea (SECRETS.md § generalization).
+      (and (value-binding? b) (:resolver-fn-id b))
+      {:kind :resolved-value :base-name base-name :ext-name ext-name
+       :slot-id slot-id :resolver-id (:resolver-fn-id b)
+       :stored (:value b)}
+
       (value-binding? b)
       {:kind :value :base-name base-name :ext-name ext-name :slot-id slot-id
        :value (:value b)}

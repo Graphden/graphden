@@ -364,6 +364,15 @@
   #uuid "7e3a1c08-5d2f-4b96-9a40-8c1e6f7b0d35")
 
 
+(def ^:private binding-resolver-fn-id-field-uuid
+  ;; Generic value-resolver: when set, the executor treats the binding's
+  ;; stored :value as the INPUT to this graph fn at arg-resolution time
+  ;; ("stored value → runtime value"). `:override-kind :secret-path` is
+  ;; the legacy special case (resolver ≡ :vault-get). SECRETS.md
+  ;; § generalization.
+  #uuid "3b7a9c15-4e2d-4f86-9a01-6c8d2e5b7f13")
+
+
 (def ^:private binding-required-field-uuid
   #uuid "54c53941-0b30-4020-b701-530d4d043d63")
 
@@ -532,6 +541,11 @@
    :required {:uuid binding-required-field-uuid
               :type :bool
               :nullable? true}
+   ;; Generic resolver — see the uuid def above.
+   :resolver-fn-id {:uuid binding-resolver-fn-id-field-uuid
+                    :type :ref
+                    :ref-entity :fn
+                    :nullable? true}
    ;; Tenant owner (§3.0 B2). NULL ≡ public.
    :org-id {:uuid binding-org-id-field-uuid
             :type :text

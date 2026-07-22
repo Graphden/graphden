@@ -251,6 +251,11 @@
   #uuid "8f4b2d19-6e3a-4c07-ab51-9d2f7a8c1e46")
 
 
+(def ^:private binding-version-resolver-fn-id-field-uuid
+  ;; Mirror of binding.resolver-fn-id — pinned like every mirror column.
+  #uuid "7d2e5a83-1f96-4b04-8c37-9a5e1d4b6f28")
+
+
 (def ^:private binding-version-required-field-uuid
   ;; Mirror of binding.:required (per-binding optional→required narrowing).
   ;; Without it VersionedStorage would leave `:required` on the shared
@@ -405,7 +410,8 @@
                      :list-append binding-version-list-append-field-uuid
                      :list-closed binding-version-list-closed-field-uuid
                      :terminal binding-version-terminal-field-uuid
-                     :required binding-version-required-field-uuid}
+                     :required binding-version-required-field-uuid
+                     :resolver-fn-id binding-version-resolver-fn-id-field-uuid}
              ;; :indexed? — drives the version-side of the reverse-ref
              ;; lookup in `:ref-owner-bindings` (find-fn-usages / delete
              ;; ref-check). Not a `:ref` (no FK — the target fn may be

@@ -51,6 +51,12 @@
   (vault/delete-secret (require-client! ctx) path))
 
 
+(defbase vault-get
+  [path]
+  (cr/record-effect! :network)
+  (vault/get-secret (require-client! ctx) path))
+
+
 (defbase vault-metadata-get
   [path]
   (cr/record-effect! :network)
@@ -65,6 +71,7 @@
 
 (def impls
   {:secret-leaf secret-leaf
+   :vault-get vault-get
    :vault-put vault-put
    :vault-delete vault-delete
    :vault-metadata-get vault-metadata-get

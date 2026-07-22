@@ -290,6 +290,8 @@
       ;; re-parse restores `:override-kind :secret-path` instead of
       ;; degrading the binding to a plain literal carrying the path.
       secret-path? (assoc :secret-path (:value b))
+      (:resolver-fn-id b)
+      (assoc :resolver (keyword (:name (get-in ctx [:fns (:resolver-fn-id b)]))))
       (and (:value-present b) (not secret-path?)) (assoc :value (:value b))
       (:list-append b) (assoc :append (binding-items b ctx))
       (and (:list-append b) (:list-closed b)) (assoc :closed true)
@@ -316,6 +318,15 @@
         items
         (cond-> {:append items}
           (:list-closed b) (assoc :closed true)))
+
+      ;; generic resolver binding: emit `{:resolver <name> :value V}` so
+      ;; re-parse restores `:resolver-fn-id` (mirror of the secret-path
+      ;; round-trip fix below — the plain `{:value …}` form would
+      ;; degrade the binding to a literal).
+      (:resolver-fn-id b)
+      (cond-> {:resolver (keyword (:name (get-in ctx [:fns (:resolver-fn-id b)])))
+               :value (:value b)}
+        (some? (:required b)) (assoc :required (:required b)))
 
       ;; secret-path binding: the stored `:value` is the OpenBao/vault
       ;; PATH the executor derefs at run time, not a literal. Emit the

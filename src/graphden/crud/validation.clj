@@ -606,6 +606,39 @@
                                 (pr-str (sort names)))})))))))))
 
 
+(defn- resolver-rej
+  "Guard generic resolver bindings: the resolver fn must exist, and
+   when its registered RETURN carries a hide-result marker (e.g.
+   `:vault-get` → `[:secret :text]`), the target slot's rich type must
+   carry a marker too — otherwise the executor would deref a hidden
+   value straight into a plain slot, bypassing the type system's
+   no-strip rule at runtime (same rationale as `secret-path-rej`)."
+  [storage entity-type data]
+  (when (and (#{:binding} entity-type) (:resolver-fn-id data))
+    (let [resolver (sp/read-entity storage :fn (:resolver-fn-id data))]
+      (cond
+        (nil? resolver)
+        {:reason (str "resolver-fn-id does not resolve to a fn: "
+                      (:resolver-fn-id data))}
+
+        (some-> (registry/rich-type-of-id (:id resolver)) :return
+                types/contains-hide-result-marker?)
+        (let [slot (some->> (:slot-id data) (sp/read-entity storage :slot))
+              owner-fs (when slot
+                         (first (sp/query-entities storage :fn-slot
+                                                   {:slot-id (:id slot)})))
+              owner-fn (some->> (:fn-id owner-fs)
+                                (sp/read-entity storage :fn))
+              owner-rich (some-> owner-fn :id registry/rich-type-of-id)
+              slot-type (get-in owner-rich [:args (some-> slot :name keyword)])
+              slot-type (or (some-> slot-type :type) slot-type)]
+          (when-not (some-> slot-type types/contains-hide-result-marker?)
+            {:reason (str "resolver " (pr-str (:name resolver))
+                          " returns a hidden-marked value, but the target "
+                          "slot's type carries no marker — binding it here "
+                          "would launder the value out of the type system")}))))))
+
+
 (defn write-rej
   "Run every server-side write-time guard against the proposed row.
    Returns the first `{:reason :type}` rejection or nil if all pass.
@@ -628,4 +661,6 @@
       (some-> (secret-path-rej storage entity-type entity-data)
               (assoc :type :capability/secret-path-on-non-secret-slot))
       (some-> (reparent-cross-branch-rej storage entity-type entity-data)
-              (assoc :type :constraint-violation/reparent-cross-branch))))
+              (assoc :type :constraint-violation/reparent-cross-branch))
+      (some-> (resolver-rej storage entity-type entity-data)
+              (assoc :type :capability/resolver-marker-laundering))))

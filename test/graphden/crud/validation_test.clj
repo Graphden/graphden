@@ -488,3 +488,30 @@
                 (is (re-find #"rcb-feature" (:reason rej))
                     "the diverging branch is named in the reason"))))))
       (finally (sp/close storage)))))
+
+
+;; =============================================================================
+;; resolver-rej — generic resolver bindings can't launder hidden markers
+;; =============================================================================
+
+(deftest resolver-rej-test
+  (let [storage (setup/create-versioned-test-storage)]
+    (try
+      (let [plain (setup/create-base-fn! storage "rr-plain" :text)
+            plain-slot (setup/create-slot! storage "s" :text)
+            _ (setup/attach-slot! storage (:id plain) (:id plain-slot) 0)
+            owner (setup/create-base-fn! storage "rr-owner" :any)
+            owner-slot (setup/create-slot! storage "x" :text)
+            _ (setup/attach-slot! storage (:id owner) (:id owner-slot) 0)]
+        (testing "nonexistent resolver → rejected"
+          (is (re-find #"does not resolve"
+                       (:reason (v/write-rej storage :binding
+                                             {:fn-id (:id owner)
+                                              :resolver-fn-id (random-uuid)
+                                              :value "v" :value-present true})))))
+        (testing "plain resolver into plain slot → allowed"
+          (is (nil? (v/write-rej storage :binding
+                                 {:fn-id (:id owner)
+                                  :resolver-fn-id (:id plain)
+                                  :value "v" :value-present true})))))
+      (finally (sp/close storage)))))

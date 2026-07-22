@@ -143,14 +143,15 @@
 (defn- supported-shapes?
   "True iff every binding shape `fn-id` carries is supported by the
    current compile-eager stage. With Stage 4 every classify-slot
-   kind (`:value` / `:free` / `:ref` / `:seq` / `:secret-value`)
+   kind (`:value` / `:free` / `:ref` / `:seq` / `:secret-value` /
+   `:resolved-value`)
    has a builder, so every fn whose root has an impl is now
    compilable — this check stays here as a guard against future
    `classify-slot` additions until they get their builder."
   [fn-id lookups]
   (every? (fn [bnd]
             (case (:kind bnd)
-              (:value :free :seq :ref :secret-value) true
+              (:value :free :seq :ref :secret-value :resolved-value) true
               false))
           (b/collect-bindings fn-id lookups)))
 
@@ -376,6 +377,11 @@
     run))
 
 
+(def ^:private make-single-arg-callable-fn
+  (delay (requiring-resolve
+           'graphden.executor.compile-runtime/make-single-arg-callable)))
+
+
 (def ^:private vault-get-secret
   (delay (requiring-resolve 'graphden.clients.vault/get-secret)))
 
@@ -427,7 +433,7 @@
    `cond-fn` that step past unforced items via `nnext`."
   [fn-id
    {:keys [kind ext-name value ref-id is-fn produces-callable? ref-renames
-           items lazy-seq? slot-id path binder-fn-id]
+           items lazy-seq? slot-id path binder-fn-id resolver-id stored]
     :as bnd}
    child-callables
    lookups]
@@ -458,6 +464,17 @@
              (fn [fa _ctx]
                (let [v (get fa sid ::miss)]
                  (if (identical? v ::miss) (get fa k) v))))
+    ;; Generic resolver: evaluate the resolver graph fn with the stored
+    ;; value as its single argument, lazily at first read. Reuses the
+    ;; 1-arg callable machinery — a resolver is just a fn usable as a
+    ;; single-arg callable (`:str-upper`, `:vault-get`, anything).
+    :resolved-value
+    (let [rid resolver-id sv stored]
+      (fn [_fa ctx]
+        (rt/thunk
+          (fn []
+            ((@make-single-arg-callable-fn ctx rid) sv)))))
+
     :secret-value
     (let [p path]
       (fn [_fa ctx]

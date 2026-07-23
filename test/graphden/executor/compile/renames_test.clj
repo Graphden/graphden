@@ -290,6 +290,39 @@
       (finally (sp/close storage)))))
 
 
+(deftest hof-lambda-params-ambiguous-one-arg-throws-test
+  ;; 1-arg structural slot (`:arg` one-shot), R exposes TWO frees the
+  ;; slot's structural name doesn't match, no authored :lambda-params —
+  ;; the retired legacy guess used to pick silently; now the compile
+  ;; refuses with :compile/ambiguous-lambda-params naming the
+  ;; candidates.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base-r (setup/build-fn! storage
+                                    {:name "hlpamb-base-r"
+                                     :slots [{:name "alpha" :type :int}
+                                             {:name "beta" :type :int}]})
+            r-fn   (setup/build-fn! storage
+                                    {:name "hlpamb-r" :parent base-r})
+            callable-fn-id (create-callable-type! storage "hlpamb-callable"
+                                                  {:arg :any})
+            base-f (setup/create-base-fn! storage "hlpamb-base-f")
+            s-cb   (setup/create-slot! storage "cb" callable-fn-id)
+            _      (setup/attach-slot! storage (:id base-f) (:id s-cb) 0)
+            f-fn   (setup/create-composed-fn! storage "hlpamb-f" (:id base-f))
+            b-row  (setup/bind-ref! storage (:id f-fn) (:id s-cb) (-> r-fn :fn :id))
+            ex     (try (r/hof-lambda-params (-> r-fn :fn :id)
+                                             (:id s-cb) b-row (:id f-fn)
+                                             (lookups-for storage))
+                        nil
+                        (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? ex) "ambiguous multi-candidate must throw")
+        (is (= :compile/ambiguous-lambda-params (:type (ex-data ex))))
+        (is (= #{:alpha :beta} (set (:candidates (ex-data ex))))
+            "the error names every candidate for the author"))
+      (finally (sp/close storage)))))
+
+
 ;; ============================================================================
 ;; build-ref-renames — translates F's rename-bindings into the map that
 ;; rewrites R's incoming free-arg names.

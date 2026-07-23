@@ -47,6 +47,7 @@
                                     :description "End-of-body `<script>` hiccup nodes — typically `:graphden-runtime-scripts` for the standard dispatcher bundle, or `{:value []}` for none."}}}}}
 
   {:name :html-page-handler
+   :lambda-params []
    :description "Ring handler returning a full HTML page — `:html-ok-response` wrapping `:html-page-rendered`. Free args: `:title`, `:body`, `:head`, `:scripts`. Use as the `:handler` of a `:get-route`, or as the GET-side `:handler` of a method-map merge."
    :parent :html-ok-response
    :args {:body :html-page-rendered}}

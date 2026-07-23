@@ -380,6 +380,7 @@
           :parsed :_value-form-parsed}}
 
   {:name :value-form-handler
+   :lambda-params [:request]
    :description "Ring handler for `POST /api/value-form` — wraps `:value-form` in a JSON 200 response."
    :parent :json-handler
    :args {:data :value-form}}]}

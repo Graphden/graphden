@@ -116,6 +116,7 @@
   ;; from `app.page` and `app.editor` templates.
 
   {:name :_contact-demo-page-handler
+   :lambda-params [:default]
    :description "GET /demo/contact handler — full HTML page via :html-page-handler with the default components stylesheet + graphden runtime scripts wired in."
    :parent :html-page-handler
    :args {:title "Contact (Graphden demo)"
@@ -160,6 +161,7 @@
    :args {:hiccup :_contact-demo-thanks-partial}}
 
   {:name :_contact-demo-post-handler
+   :lambda-params [:request :limit]
    :description "POST /demo/contact handler — returns a thanks partial that the runtime swaps into `#contact-result`."
    :parent :html-ok-response
    :args {:body :_contact-demo-rendered-thanks}}

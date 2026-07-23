@@ -10,7 +10,6 @@
    thread them through."
   (:require
     [clojure.set :as set]
-    [clojure.tools.logging :as log]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]))
 
@@ -739,32 +738,6 @@
       (vec declared))))
 
 
-(defn- global-env-binding-names
-  "DEPRECATED FALLBACK SUPPORT — set of every env-binding `:env-name`
-   across the whole graph, memoised on `lookups`. Consulted only by the
-   legacy one-shot guess in `hof-lambda-params` (see the deprecation
-   warn there): a surviving alpha-equiv candidate that is somewhere an
-   env-binding name is LIKELY a wrap-time-captured value the lambda-arg
-   merge would overwrite. The principled replacement is an authored
-   `:lambda-params` on the callable; this scan stays until the
-   route/handler slot contracts migrate to explicit shapes
-   (follow-up in ADR-identity-model.md's companion plan)."
-  [{:keys [fn-map global-env-cache] :as lookups}]
-  (let [compute (fn []
-                  (set (mapcat #(keep :env-name
-                                      (b/collect-env-bindings % lookups))
-                               (keys fn-map))))]
-    (if-let [cache global-env-cache]
-      (or @cache (let [r (compute)] (reset! cache r) r))
-      (compute))))
-
-
-(def ^:private legacy-guess-warned
-  "One warn per callable per process — the deprecation nudge must not
-   spam every recompile."
-  (atom #{}))
-
-
 (defn alpha-equiv-lambda-params
   "Resolves the single lambda-param of a 1-arg HOF slot by picking
    R's surviving free-arg name AFTER subtracting everything F
@@ -912,35 +885,28 @@
               (and (= 1 (count a))
                    (contains? (own-slot-names r-fn-id lookups) (first a)))
               a
-              ;; LEGACY GUESS (deprecated): the pre-`:lambda-params`
-              ;; policy — one-shot slots drop to variadic-ignore when
-              ;; every candidate is somewhere an env-binding name;
-              ;; everything else passes the candidates through. Kept
-              ;; verbatim so existing graphs keep compiling, but each
-              ;; callable that lands here gets a one-time warn telling
-              ;; the author to declare `:lambda-params` — the guess is
-              ;; scheduled to become the `demand` error once the
-              ;; route/handler slot contracts migrate to explicit
-              ;; shapes (boundary slots are genuinely per-call: the
-              ;; uniform 0-arg flip broke /health, see the branch log).
+              ;; No declaration, multiple (or untrusted) candidates —
+              ;; REFUSE. The pre-`:lambda-params` legacy guess
+              ;; (one-shot slots dropping to variadic-ignore when every
+              ;; candidate was somewhere an env-binding name) is
+              ;; RETIRED: every callable the packaged graph landed here
+              ;; with now declares `:lambda-params`, so arriving means
+              ;; a genuinely ambiguous new composition — and guessing
+              ;; silently wired `/api/branches`-class bugs (a captured
+              ;; callable overwritten by the request map). The error
+              ;; names the candidates; the author states the contract.
               :else
-              (let [one-shot? (= :arg structural-name)
-                    global-env (when one-shot?
-                                 (global-env-binding-names lookups))
-                    result (if (and one-shot?
-                                    (seq a)
-                                    (every? global-env a))
-                             []
-                             a)]
-                (when-not (contains? @legacy-guess-warned r-fn-id)
-                  (swap! legacy-guess-warned conj r-fn-id)
-                  (log/warn "hof-lambda-params legacy guess (deprecated) —"
-                            "declare :lambda-params on the callable"
-                            {:fn (fn-name-of r-fn-id)
-                             :caller (fn-name-of f-fn-id)
-                             :candidates (vec a)
-                             :guessed result}))
-                result)))))
+              (throw (ex-info
+                       (str "ambiguous lambda-params for callable "
+                            (fn-name-of r-fn-id)
+                            " (used by " (fn-name-of f-fn-id) ") — "
+                            "declare :lambda-params on the callable "
+                            "fn-def; candidates: " (pr-str (vec a))
+                            " ([] = everything captured)")
+                       {:type :compile/ambiguous-lambda-params
+                        :fn (fn-name-of r-fn-id)
+                        :caller (fn-name-of f-fn-id)
+                        :candidates (vec a)}))))))
 
       ;; Map-callable structural slot — names must match. Sub free
       ;; args outside structural-args are captured.

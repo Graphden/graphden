@@ -263,15 +263,19 @@
   ;; an empty table — `:grant` is read-hidden. This is WHY the seam dispatches
   ;; INSIDE the request-scope (`*current-org*` bound): outside it, a tenant's
   ;; read would run as public and enumerate every org's grants.
-  (sp/create-entity (:storage *ctx*) :grant
-                    {:subject "platform-grant" :capability "admin" :namespace "ops"})
-  (let [handler-id (fn-id-of (:storage *ctx*) "_partial-grants-admin-handler")]
-    (testing "platform (public org) sees the grant"
-      (is (str/includes? (:body (tc/with-org tc/public-org (cr/execute *ctx* handler-id {})))
-                         "platform-grant")))
-    (testing "a tenant (org ≠ public) does NOT — the panel is org-gated"
-      (is (not (str/includes? (:body (tc/with-org "tenant-x" (cr/execute *ctx* handler-id {})))
-                              "platform-grant"))))))
+  ;; The Subject cell joins the user row by :subject-id; with no such
+  ;; user the panel shows the raw id — a distinctive marker to assert
+  ;; org-gating on.
+  (let [marker (str (random-uuid))]
+    (sp/create-entity (:storage *ctx*) :grant
+                      {:subject-id marker :capability "admin" :namespace "ops"})
+    (let [handler-id (fn-id-of (:storage *ctx*) "_partial-grants-admin-handler")]
+      (testing "platform (public org) sees the grant"
+        (is (str/includes? (:body (tc/with-org tc/public-org (cr/execute *ctx* handler-id {})))
+                           marker)))
+      (testing "a tenant (org ≠ public) does NOT — the panel is org-gated"
+        (is (not (str/includes? (:body (tc/with-org "tenant-x" (cr/execute *ctx* handler-id {})))
+                                marker)))))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -310,15 +314,19 @@
       (let [user (sp/create-entity storage :user {:username "grants-carol"
                                                   :password-hash "x" :org "acme"})]
         (run! "create-grant" {:subject "grants-carol" :capability "admin" :namespace "ops"})
-        (let [row (first (sp/query-entities storage :grant {:subject "grants-carol"}))]
+        ;; :subject (username) is no longer written — the row carries
+        ;; the stable id only.
+        (let [row (first (sp/query-entities storage :grant
+                                            {:subject-id (str (:id user))}))]
           (is (some? row))
           (is (= "admin" (:capability row)))
-          (is (= (str (:id user)) (:subject-id row))
-              "enforcement keys on the stable id, not the mutable username"))))
+          (is (nil? (:subject row))
+              "the denormalized username column is retired"))))
     (testing "an unknown capability throws — no silently-dead grant row"
       (is (thrown? Exception
             (run! "create-grant" {:subject "eve" :capability "notacap" :namespace "acme"})))
-      (is (empty? (sp/query-entities storage :grant {:subject "eve"}))))))
+      (is (empty? (filter #(= "notacap" (:capability %))
+                          (sp/query-entities storage :grant {})))))))
 
 
 (deftest registration-fn-defs-drive-provisioning
@@ -733,18 +741,22 @@
   (let [storage (:storage *ctx*)
         user (users/create-user! *ctx* "cascade-victim" "pw" "acme")
         uid (:id user)]
+    ;; Rows carry the STABLE id (the only key writers stamp and the
+    ;; cascade matches on since the by-username union was retired).
     (tc/with-org tc/public-org
-                 (sp/create-entity storage :token {:token-hash "cv-h1" :user "cascade-victim" :org "acme"})
-                 (sp/create-entity storage :token {:token-hash "cv-h2" :user "cascade-victim" :org "acme"}))
-    (sp/create-entity storage :grant {:subject "cascade-victim" :capability "write" :namespace "acme"})
+                 (sp/create-entity storage :token {:token-hash "cv-h1" :user "cascade-victim"
+                                                   :user-id (str uid) :org "acme"})
+                 (sp/create-entity storage :token {:token-hash "cv-h2" :user "cascade-victim"
+                                                   :user-id (str uid) :org "acme"}))
+    (sp/create-entity storage :grant {:subject-id (str uid) :capability "write" :namespace "acme"})
     (testing "delete-user! removes the user + all their tokens + grants"
       (let [res (users/delete-user! *ctx* uid)]
         (is (= 2 (:tokens-deleted res)))
         (is (= 1 (:grants-deleted res)))
         (is (nil? (sp/read-entity storage :user uid)))
         (is (empty? (tc/with-org tc/public-org
-                                 (sp/query-entities storage :token {:user "cascade-victim"}))))
-        (is (empty? (sp/query-entities storage :grant {:subject "cascade-victim"})))))
+                                 (sp/query-entities storage :token {:user-id (str uid)}))))
+        (is (empty? (sp/query-entities storage :grant {:subject-id (str uid)})))))
     (testing "deleting a nonexistent user throws :user/not-found"
       (is (thrown? clojure.lang.ExceptionInfo
             (users/delete-user! *ctx* (random-uuid)))))))
@@ -754,13 +766,16 @@
   (let [storage (:storage *ctx*)
         user (users/create-user! *ctx* "reset-me" "old-pw" "acme")
         uid (:id user)]
+    ;; Seed the CURRENT token shape — login! stamps :user-id, and the
+    ;; invalidation matches on it (the by-username path is retired).
     (tc/with-org tc/public-org
-                 (sp/create-entity storage :token {:token-hash "rm-sess1" :user "reset-me" :org "acme"}))
+                 (sp/create-entity storage :token {:token-hash "rm-sess1" :user "reset-me"
+                                                   :user-id (str uid) :org "acme"}))
     (testing "reset-password! sets a new hash + invalidates every session"
       (let [res (users/reset-password! *ctx* uid "new-pw")]
         (is (= 1 (:sessions-invalidated res)))
         (is (empty? (tc/with-org tc/public-org
-                                 (sp/query-entities storage :token {:user "reset-me"}))))
+                                 (sp/query-entities storage :token {:user-id (str uid)}))))
         (is (some? (users/login! *ctx* "reset-me" "new-pw")) "new password logs in")
         (is (nil? (users/login! *ctx* "reset-me" "old-pw")) "old password rejected")))))
 

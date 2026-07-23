@@ -32,7 +32,6 @@
         fn-def never lands in storage."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.clients.vault :as vault]
     [graphden.crud.validation :as validation]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -40,6 +39,7 @@
     [graphden.executor.runtime :as runtime]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.core :as sys]
     [graphden.types.check :as check]
     [graphden.types.core :as types-core]))
 
@@ -290,14 +290,15 @@
 
 
 (deftest secret-path-binding-derefs-via-vault-at-execute-test
-  ;; F-4: end-to-end of the auto-deref path. A binding with
-  ;; `:override-kind :secret-path` on a `[:secret :text]`-typed slot
-  ;; gets its `:value` field (a vault PATH) auto-resolved through
-  ;; `clients.vault/get-secret` by the executor at arg-resolution
-  ;; time — the impl receives the dereferenced secret value, never
-  ;; the path string. We mock the vault client so the test stays
-  ;; self-contained; the real OpenBao integration is covered by
-  ;; `test/graphden/clients/vault_test.clj`.
+  ;; F-4 post-retirement: the same end-to-end, through the CURRENT
+  ;; mechanism. A LEGACY `:override-kind :secret-path` row is first
+  ;; converted by `system.core/migrate-secret-path-bindings!` into a
+  ;; `:vault-get` RESOLVER binding, and the executor's generic
+  ;; resolved-value path derefs it — the impl receives the secret,
+  ;; never the path. (An UNMIGRATED legacy row no longer executes at
+  ;; all: see unmigrated-secret-path-throws-at-compile-test.) We stub
+  ;; :vault-get's impl so the test stays self-contained; the real
+  ;; OpenBao integration is covered by clients/vault_test.clj.
   (let [storage (setup/create-test-storage)
         impl-captured (atom nil)
         ;; Register a stub base-fn whose impl captures what it
@@ -324,12 +325,27 @@
         base (setup/create-base-fn! storage "stub-sink" :int)
         _ (setup/attach-slot! storage (:id base) (:id slot) 0)
         composed (setup/create-composed-fn! storage "_uses-secret" (:id base))
+        ;; :vault-get resolver — row + `path` slot (the single free
+        ;; arg the resolver callable binds the stored value to) +
+        ;; stubbed impl (real one wraps the vault client; the stub
+        ;; asserts it got the PATH).
+        vg (setup/create-base-fn! storage "vault-get" :text)
+        vg-slot (setup/create-slot! storage "path" :text)
+        _ (setup/attach-slot! storage (:id vg) (:id vg-slot) 0)
+        _ (exec/register-base-fn! :vault-get
+                                  (fn [args _ctx]
+                                    (let [path (runtime/resolve-arg args :path)]
+                                      (is (= "user-db/password" path)
+                                          ":vault-get is called with the PATH from binding.value")
+                                      "derefed-secret-value")))
         _ (sp/create-entity storage :binding
                             {:id (random-uuid)
                              :fn-id (:id composed)
                              :slot-id (:id slot)
                              :value "user-db/password"
                              :override-kind :secret-path})
+        ;; The boot migration converts the legacy row in place.
+        _ (sys/migrate-secret-path-bindings! storage)
         ;; `create-context` only honours :storage / :base-fns /
         ;; :clock; the :vault client rides as an extra record-key
         ;; (same pattern as `system/core` ig/init-key on
@@ -338,14 +354,45 @@
                      {:storage storage :base-fns (exec/get-default-registry)})
                    :vault {:address "http://stub" :token "stub"})]
     (try
-      (with-redefs [vault/get-secret
-                    (fn [_client path]
-                      (is (= "user-db/password" path)
-                          "vault is called with the PATH from binding.value")
-                      "derefed-secret-value")]
-        (exec/execute ctx (:id composed) {})
-        (testing "impl received the derefed value, not the path"
-          (is (= "derefed-secret-value" @impl-captured))))
+      (exec/execute ctx (:id composed) {})
+      (testing "impl received the derefed value, not the path"
+        (is (= "derefed-secret-value" @impl-captured)))
+      (finally (sp/close storage)))))
+
+
+(deftest unmigrated-secret-path-throws-at-compile-test
+  ;; A legacy row the boot migration did NOT convert (vault package
+  ;; absent) must refuse to compile — treating the vault PATH as a
+  ;; literal would both break the secret and leak the path.
+  (let [storage (setup/create-test-storage)
+        _ (exec/register-base-fn! :stub-sink2 (fn [_ _] 42))
+        _ (secret-text-rich!)
+        secret-text-fn (sp/create-entity
+                         storage :fn
+                         {:id (random-uuid)
+                          :name "secret-text"
+                          :parent-ids []})
+        slot (sp/create-entity storage :slot
+                               {:id (random-uuid)
+                                :name "cred"
+                                :type-fn-id (:id secret-text-fn)})
+        base (setup/create-base-fn! storage "stub-sink2" :int)
+        _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+        composed (setup/create-composed-fn! storage "_uses-legacy" (:id base))
+        _ (sp/create-entity storage :binding
+                            {:id (random-uuid)
+                             :fn-id (:id composed)
+                             :slot-id (:id slot)
+                             :value "user-db/password"
+                             :override-kind :secret-path})
+        ctx (ctx/create-context
+              {:storage storage :base-fns (exec/get-default-registry)})]
+    (try
+      (let [ex (try (exec/execute ctx (:id composed) {}) nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? ex) "unmigrated legacy row must not execute")
+        (is (= :compile/unmigrated-secret-path
+               (:type (ex-data (or (ex-cause ex) ex))))))
       (finally (sp/close storage)))))
 
 
@@ -368,10 +415,13 @@
                          :slot-id (:id slot)
                          :value "user-db/password"
                          :override-kind :secret-path}]
-        (testing "write-rej fires :capability/secret-path-on-non-secret-slot"
+        (testing "legacy :override-kind write rejects as RETIRED — the
+                  laundering protection for the CURRENT (resolver)
+                  form lives in resolver-rej
+                  (:capability/resolver-marker-laundering)"
           (is (some? text-fn))
           (let [rej (validation/write-rej storage :binding binding-row)]
-            (is (= :capability/secret-path-on-non-secret-slot
+            (is (= :constraint-violation/override-kind-retired
                    (:type rej))))))
       (finally (sp/close storage)))))
 

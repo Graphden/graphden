@@ -37,12 +37,18 @@
    so the codec round-trips it cleanly; the store keywordizes on read."
   [builder]
   (ds/add-entity builder :grant grant-entity-uuid
-                 {:subject {:uuid grant-subject-field-uuid :type :text :indexed? true}
-                  ;; nullable for the additive migration (backfilled from
-                  ;; `:subject`); indexed for enforcement lookup + delete cascade.
-                  ;; :text (the id's string form), not :uuid — written as
-                  ;; `(str user-id)` so the column carries both prod uuids and
-                  ;; any test-supplied id uniformly.
+                 {;; RETIRED-IN-PROGRESS (audit-2): writers no longer stamp
+                  ;; the denormalized username; display joins the user row
+                  ;; by :subject-id. Nullable until the retirement batch
+                  ;; drops the column entirely.
+                  :subject {:uuid grant-subject-field-uuid :type :text
+                            :nullable? true :indexed? true}
+                  ;; The STABLE authz key — enforcement lookup + delete
+                  ;; cascade match on this. :text (the id's string form),
+                  ;; not :uuid — written as `(str user-id)` so the column
+                  ;; carries both prod uuids and any test-supplied id
+                  ;; uniformly. Backfilled from legacy `:subject` rows at
+                  ;; addon boot.
                   :subject-id {:uuid grant-subject-id-field-uuid
                                :type :text
                                :nullable? true

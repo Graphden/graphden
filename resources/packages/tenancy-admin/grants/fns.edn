@@ -21,7 +21,7 @@
   ;; panel only ever sees the current org's grants. Throws when the addon
   ;; isn't active (no :grant table) — callers guard with :try.
   {:name :list-grants
-   :description "All :grant rows as decoded entity maps (:subject :capability :namespace :id). Pure graph composition over `:query-entities`; throws if :grant isn't in the schema (addon inactive), so callers guard with :try."
+   :description "All :grant rows as decoded entity maps (:subject-id :capability :namespace :id). Pure graph composition over `:query-entities`; throws if :grant isn't in the schema (addon inactive), so callers guard with :try."
    :parent :query-entities
    :args {:entity-type {:value "grant"} :where {:value {}}}
    :return-type [:list :keyword-map]}
@@ -77,22 +77,19 @@
    :parent :throw
    :args {:exception :_grant-invalid-error}}
 
-  ;; Resolve the authored username to the user's STABLE id and store BOTH:
-  ;; `:subject-id` is what enforcement matches on (survives a username
-  ;; edit / delete-recreate); `:subject` (username) is kept for display +
-  ;; the personal-namespace path. nil id (no such user yet) → a dead
-  ;; grant, same as a typo'd capability but non-throwing.
+  ;; Resolve the authored username to the user's STABLE id — the ONLY
+  ;; subject key written (audit-2: the denormalized `:subject` username
+  ;; column is retired; display joins the user row by id, the
+  ;; personal-namespace path derives from the auth principal, not the
+  ;; grant row). nil id (no such user yet) → a dead grant, same as a
+  ;; typo'd capability but non-throwing.
   {:name :_grant-subject-id
    :parent :user-id-by-username
    :args {:username {:as :subject :type :text}}}
 
-  {:name :_grant-data-w-subject
-   :parent :assoc-empty
-   :args {:key {:value :subject} :value {:as :subject :type :text}}}
-
   {:name :_grant-data-w-sid
-   :parent :assoc
-   :args {:map :_grant-data-w-subject :key {:value :subject-id} :value :_grant-subject-id}}
+   :parent :assoc-empty
+   :args {:key {:value :subject-id} :value :_grant-subject-id}}
 
   {:name :_grant-data-w-cap
    :parent :assoc
@@ -148,9 +145,39 @@
    :args {:tag {:value "thead"} :children [:_grants-thead-row]}}
 
   ;; --- body row (HOF over :item — one grant map per element) ---
-  {:name :_grant-subject-val
+  ;; Subject DISPLAY joins the user row by the stable `:subject-id`
+  ;; (the denormalized `:subject` username column is retired). A
+  ;; deleted user degrades to the raw id string — an honest dangling
+  ;; marker, not an empty cell.
+  {:name :_grant-row-sid
    :parent :get
-   :args {:coll {:as :item} :key {:value :subject} :default {:value ""}}}
+   :args {:coll {:as :item} :key {:value :subject-id} :default {:value ""}}}
+
+  {:name :_grant-row-uuid
+   :parent :parse-uuid
+   :args {:string :_grant-row-sid}}
+
+  ;; Guarded lookup: `:parse-uuid` is honestly nullable (a dead grant's
+  ;; blank/garbage subject-id), so the `:get-entity` call sits under a
+  ;; `:some?` guard with the canonical author `:type :uuid` assertion
+  ;; on the ref — the TYPES.md-documented narrowing site.
+  {:name :_grant-row-user-fetched
+   :parent :get-entity
+   :args {:entity-type {:value "user"} :id {:ref :_grant-row-uuid :type :uuid}}}
+
+  {:name :_grant-row-user
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_grant-row-uuid}}
+          :then :_grant-row-user-fetched
+          :else {:value nil}}}
+
+  {:name :_grant-row-username
+   :parent :get
+   :args {:coll :_grant-row-user :key {:value :username} :default {:value nil}}}
+
+  {:name :_grant-subject-val
+   :parent :coalesce
+   :args {:value :_grant-row-username :default :_grant-row-sid}}
 
   {:name :_grant-capability-val
    :parent :get

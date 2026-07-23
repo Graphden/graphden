@@ -19,6 +19,7 @@
      reads from here; storage rows degrade structural types to a single
      primitive `value-kind`."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.executor.composition.core :as composition]
     [graphden.executor.interface :as exec]
     [graphden.packages.records :as records]
@@ -625,6 +626,32 @@
    `a`, `[:union a b]` …)."
   [entry]
   (boolean (types/type-any? types/type-var? (:return entry))))
+
+
+(def ^:private stale-id-rescue-warned (atom #{}))
+
+
+(defn rich-type-of-id-or-stale-name
+  "Registry entry by ID, with the STALE-IDENTITY rescue: long-lived
+   DBs hold fn identity rows abandoned by historical namespace moves /
+   renames (a new deterministic id is minted; the old row and any
+   resolved refs to it survive un-tombstoned). Such an id has NO
+   registry entry — but its NAME, when unambiguous, identifies the
+   CURRENT fn carrying the same authored contract. Falls back to the
+   name view (nil for per-ns-ambiguous bares), warn-once per id with
+   the repoint-or-tombstone prescription. Same rescue the
+   lambda-params reader uses; shared here so every silent consumer
+   (produces-callable? / lazy-seq-args / compile-time-value?) degrades
+   LOUDLY-and-correctly instead of silently-and-wrongly."
+  [fn-id row-name]
+  (or (rich-type-of-id fn-id)
+      (when row-name
+        (when-let [entry (rich-type-of (keyword row-name))]
+          (when-not (contains? @stale-id-rescue-warned fn-id)
+            (swap! stale-id-rescue-warned conj fn-id)
+            (log/warn "rich-type resolved by NAME for a stale identity row — repoint or tombstone the legacy fn row"
+                      {:fn-id fn-id :name row-name}))
+          entry))))
 
 
 (defn rule-owner-of

@@ -10,7 +10,6 @@
    thread them through."
   (:require
     [clojure.set :as set]
-    [clojure.tools.logging :as log]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]))
 
@@ -717,11 +716,9 @@
   (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
 
 
-(def ^:private rich-type-of-fn
-  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of)))
-
-
-(def ^:private stale-identity-lp-warned (atom #{}))
+(def ^:private rich-type-of-id-or-stale-name-fn
+  (delay (requiring-resolve
+           'graphden.executor.registry.core/rich-type-of-id-or-stale-name)))
 
 
 (defn- declared-lambda-params
@@ -743,27 +740,15 @@
                                    (get (:fn-map lookups) r-fn-id))
                                  (mapv keyword))
                         (:lambda-params (@rich-type-of-id-fn r-fn-id))
-                        ;; LEGACY-ROW rescue: long-lived DBs hold stale
-                        ;; identity rows from historical namespace
-                        ;; moves — a resolved binding can still
-                        ;; reference the OLD id, whose row predates
-                        ;; the column and whose id the registry never
-                        ;; keyed. Same name ⇒ same authored contract,
-                        ;; so fall back to the CURRENT registry entry
-                        ;; by the row's name (warn-once per id; bare
-                        ;; per-ns-ambiguous names return nil from the
-                        ;; name view and simply skip this arm).
-                        (when-let [row-name (:name (get (:fn-map lookups)
-                                                        r-fn-id))]
-                          (when-let [lp (:lambda-params
-                                          (@rich-type-of-fn
-                                           (keyword row-name)))]
-                            (when-not (contains? @stale-identity-lp-warned
-                                                 r-fn-id)
-                              (swap! stale-identity-lp-warned conj r-fn-id)
-                              (log/warn "lambda-params resolved by NAME for a stale identity row — repoint or tombstone the legacy fn row"
-                                        {:fn-id r-fn-id :name row-name}))
-                            lp)))]
+                        ;; LEGACY-ROW rescue — delegated to the shared
+                        ;; registry helper (audit-3: the same rescue now
+                        ;; also covers produces-callable? /
+                        ;; lazy-seq-args / compile-time-value?, all
+                        ;; previously silent under stale identities).
+                        (:lambda-params
+                          (@rich-type-of-id-or-stale-name-fn
+                           r-fn-id
+                           (:name (get (:fn-map lookups) r-fn-id)))))]
     (let [frees (set (deep-free-ext-names r-fn-id lookups))
           unknown (remove frees declared)]
       (when (seq unknown)

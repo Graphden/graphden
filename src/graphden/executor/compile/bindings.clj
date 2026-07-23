@@ -19,7 +19,9 @@
 
 ;; The registry is part of the executor but its loading transitively
 ;; pulls compile/bindings; avoid the cycle by resolving lazily.
-(def ^:private rich-type-of-id-fn (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
+(def ^:private rich-type-of-id-or-stale-name-fn
+  (delay (requiring-resolve
+           'graphden.executor.registry.core/rich-type-of-id-or-stale-name)))
 
 
 ;; Binding-row shape predicates. Single source of truth for "what kind
@@ -176,8 +178,10 @@
    Decision is keyed on the registered return-type via the rich-types
    registry — purely type-driven, never on fn name. Any fn-def whose
    computed `:return` is a `[:fn …]` type takes this branch."
-  [ref-fn-id _lookups]
-  (when-let [info (@rich-type-of-id-fn ref-fn-id)]
+  [ref-fn-id lookups]
+  (when-let [info (@rich-type-of-id-or-stale-name-fn
+                   ref-fn-id
+                   (:name (get (:fn-map lookups) ref-fn-id)))]
     (types/fn-type? (:return info))))
 
 
@@ -188,8 +192,9 @@
    element. Declared once at the base-fn's `impls.clj` registration
    site and read here by base-fn identity — never by name-dispatch."
   [fn-id {:keys [fn-map] :as lookups}]
-  (some-> (l/root-fn fn-id fn-map lookups) :id
-          (@rich-type-of-id-fn) :lazy-seq-args set))
+  (let [root (l/root-fn fn-id fn-map lookups)]
+    (some-> (@rich-type-of-id-or-stale-name-fn (:id root) (:name root))
+            :lazy-seq-args set)))
 
 
 (defn- classify-slot

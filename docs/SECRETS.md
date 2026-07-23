@@ -183,7 +183,7 @@ The current pattern (works through every protection layer above):
 ```clojure
 ;; admin: create secret via the Secrets panel (path + value)
 ;; → graphden auto-creates `_db-password parent :secret-leaf path:"user-db/password"`
-;;   (with a `:override-kind :secret-path` binding on `:in`)
+;;   (with a `:vault-get` RESOLVER binding on `:in` — the path in :value)
 
 ;; user fn-def:
 _my-sql-call

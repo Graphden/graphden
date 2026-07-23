@@ -126,13 +126,20 @@
 
 
 (defn- make-service-row!
+  ;; Audit-3: seeds carry `:cardinality` like the production seeder
+  ;; ALWAYS does (system/core.clj) — the old omission drove every
+  ;; reconcile-loop test through the nil-cardinality fallback, a path
+  ;; prod rows never take.
   ([storage fn-id enabled?]
-   (make-service-row! storage fn-id enabled? nil))
+   (make-service-row! storage fn-id enabled? nil :singleton))
   ([storage fn-id enabled? branch-id]
+   (make-service-row! storage fn-id enabled? branch-id :singleton))
+  ([storage fn-id enabled? branch-id cardinality]
    (sp/create-entity storage :service
                      (cond-> {:fn-id fn-id
                               :enabled? enabled?
-                              :restart-policy :always}
+                              :restart-policy :always
+                              :cardinality cardinality}
                        branch-id (assoc :branch-id branch-id)))))
 
 

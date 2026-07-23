@@ -87,8 +87,12 @@
   ;; =============================================================================
   ;;
   ;; One `:query-entities` protocol call (versioned-resolved,
-  ;; branch-aware). Fn names are validated globally unique at sync
-  ;; time, so first-row IS the row. Used by partials that emit
+  ;; branch-aware). Names are unique per (namespace, name) — a bare
+  ;; name CAN exist in several namespaces, so first-row is
+  ;; best-effort for duplicated names (callers here resolve
+  ;; rule-owner BASE-FN names, which stay globally unique among
+  ;; base-fns; a composed duplicate would win only if it shadowed a
+  ;; base-fn's bare name at query order). Used by partials that emit
   ;; `data-fn-id` nav-links for a fn they only know by name (e.g.
   ;; the return-type-rule popover's rule-owner link).
 

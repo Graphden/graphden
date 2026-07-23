@@ -632,6 +632,25 @@ Modules adding their own named type-rows just put the
 directly in their `fns.edn` alongside their fn-defs — the loader
 recognises the shape and emits the right fn-row + slot structure.
 
+### Per-namespace alias names
+
+Type names follow the per-namespace rule fn names do
+(ADR-identity-model.md): two modules may each declare `:shape`.
+Every type-row registers its BARE name and a QUALIFIED
+`:ns.path/name` alias (e.g. `:web.crud/shape`). While a bare name
+has one owner it resolves as always; the moment a second type-row
+claims it, the bare form throws `:types/ambiguous-alias` at
+resolution — naming the qualified candidates — instead of silently
+resolving to whichever module loaded last. Disambiguate by writing
+the qualified keyword in the `:type` position:
+
+```edn
+:args {:row {:type :web.crud/shape}}
+```
+
+Version-materialized namespaces (`web.components@1-2-0`) register
+bare-only — `@` is invalid in an EDN keyword namespace.
+
 ### Retired aliases — migration note
 
 `:nullable-int`, `:nullable-bool`, `:nullable-numeric`, and

@@ -62,10 +62,11 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
 - **Stage 2 — type-alias registry: DONE (owner diagnostics).** Alias
   entries now track their declaring type-row's id (`alias-owners`
   side-table in `types/core.clj`); a cross-owner re-bind warn-logs
-  loudly instead of silently shadowing. Resolution itself stays
-  last-write-wins until stage 4 makes it namespace-aware — that is
-  the honest scope: per-ns duplicates are LEGAL, so a hard reject
-  would be wrong; invisibility was the bug.
+  loudly instead of silently shadowing. Superseded by the per-ns
+  alias resolution below: each type-row now ALSO registers a
+  qualified `:ns.path/name` alias, and a bare name with ≥2 distinct
+  owners throws `:types/ambiguous-alias` at resolve time, naming the
+  qualified candidates — shadowing is no longer representable.
 - **Stage 3 — anon-hash use-site tuple + namespace: DONE.**
   `anon-fn-name` now mixes the host fn-def's namespace into the
   use-site identity (`[namespace parent-name arg-name]`), so
@@ -106,10 +107,14 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   - the registry's name-view keys duplicated entries by their
     qualified form (search/candidates show `:ns/name` — the natural
     disambiguation display).
-  Residual (documented, warn-covered): the type-ALIAS registry stays
-  last-write for duplicated type names with the stage-2 owner warning
-  — full per-ns alias resolution rides on a future context-aware
-  `resolve-alias` if duplicated type names become common practice.
+  Residual CLOSED (2026-07-23): the type-ALIAS registry registers
+  bare + qualified `:ns.path/name` keys per type-row
+  (`register-type-alias!` 4-arity; `alias-qualified` side-table);
+  an ambiguous bare name throws at `resolve-alias` with the
+  qualified candidates. Reference sites disambiguate by writing the
+  qualified keyword in the `:type` position — no context-aware
+  resolution needed (`@`-versioned namespaces register bare-only,
+  mirroring export's EDN-keyword guard).
 - **Stage 6 — UI disambiguation.** Search/deep-links show the
   namespace when a bare name is ambiguous (matches the "hide
   namespaces until needed" editor philosophy).

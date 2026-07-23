@@ -339,6 +339,18 @@
 (defonce ^:private alias-owners (atom {}))
 
 
+;; Side-table `{bare-alias-name → {owner-fn-id qualified-keyword}}` for
+;; the GLOBAL registry. Per-ns names mean two DIFFERENT type-rows may
+;; legally share a bare alias name; each also registers under its
+;; QUALIFIED `:ns.path/name` keyword. When a bare name has ≥2 distinct
+;; owners it is AMBIGUOUS — `resolve-alias` throws, naming the
+;; qualified candidates, instead of silently resolving to whichever
+;; registration happened last (the shadowing this table exists to
+;; kill). Mirrors the per-(ns,name) fn-name model
+;; (ADR-identity-model.md stage 4/5).
+(defonce ^:private alias-qualified (atom {}))
+
+
 (defn- track-alias-owner!
   "Record `owner-fn-id` as the owner of `alias-name`, warn-logging when
    a DIFFERENT owner previously registered the name (the cross-ns
@@ -352,10 +364,10 @@
                   {:alias alias-name
                    :previous-owner prev
                    :new-owner owner-fn-id
-                   :consequence (str "resolution is last-write-wins until "
-                                     "per-ns alias resolution ships "
-                                     "(ADR-identity-model.md stage 4) — "
-                                     "the earlier type is now shadowed")}))
+                   :consequence (str "the BARE name is now AMBIGUOUS — "
+                                     "resolve-alias throws on it; use the "
+                                     "QUALIFIED :ns.path/name form at every "
+                                     "reference site")}))
       (swap! alias-owners assoc alias-name owner-fn-id))))
 
 
@@ -375,7 +387,8 @@
    `alias-owners` above) — pass the declaring type-row's id whenever
    the caller holds one."
   ([alias-name t] (register-type-alias! alias-name t nil))
-  ([alias-name t owner-fn-id]
+  ([alias-name t owner-fn-id] (register-type-alias! alias-name t owner-fn-id nil))
+  ([alias-name t owner-fn-id qualified-name]
    (when (primitives alias-name)
      (throw (ex-info (str "type-alias name shadows a primitive: " (pr-str alias-name))
                      {:type :types/invalid-alias
@@ -387,6 +400,16 @@
                         :name alias-name :body t}))))
    (track-alias-owner! alias-name owner-fn-id)
    (swap! (aliases-atom) assoc alias-name t)
+   ;; Qualified variant — the collision-proof reference form. Written
+   ;; to the same alias map (resolve-alias needs no special arm; works
+   ;; in override-bound contexts too). The bare→qualified ambiguity
+   ;; side-table is GLOBAL-registry bookkeeping only, like
+   ;; `alias-owners`.
+   (when qualified-name
+     (swap! (aliases-atom) assoc qualified-name t)
+     (when (and owner-fn-id (nil? *type-aliases-override*))
+       (swap! alias-qualified update alias-name
+              (fnil assoc {}) owner-fn-id qualified-name)))
    alias-name))
 
 
@@ -411,7 +434,27 @@
      (keyword? t)     (if (contains? seen t)
                         t
                         (if-let [target (@(aliases-atom) t)]
-                          (resolve-alias target (conj seen t))
+                          (do
+                            ;; A BARE name registered by ≥2 distinct
+                            ;; type-rows is ambiguous — refuse to pick
+                            ;; a winner silently; the author must use
+                            ;; a qualified form. Qualified keywords
+                            ;; (and override-bound test registries)
+                            ;; skip the check.
+                            (when (and (nil? (namespace t))
+                                       (nil? *type-aliases-override*))
+                              (let [owners (get @alias-qualified t)]
+                                (when (> (count owners) 1)
+                                  (throw (ex-info
+                                           (str "type-alias " (pr-str t)
+                                                " is ambiguous — declared by "
+                                                (count owners) " type-rows; "
+                                                "use a qualified form: "
+                                                (pr-str (sort (vals owners))))
+                                           {:type :types/ambiguous-alias
+                                            :name t
+                                            :candidates (sort (vals owners))})))))
+                            (resolve-alias target (conj seen t)))
                           t))
      (fn-type? t)     (let [base [:fn
                                   (into {} (map (fn [[k v]] [k (resolve-alias v seen)])) (fn-args t))
@@ -533,7 +576,11 @@
    up after themselves without nuking sibling registrations."
   [alias-name]
   (when (nil? *type-aliases-override*)
-    (swap! alias-owners dissoc alias-name))
+    (swap! alias-owners dissoc alias-name)
+    ;; Drop the qualified variants + ambiguity bookkeeping too.
+    (doseq [q (vals (get @alias-qualified alias-name))]
+      (swap! (aliases-atom) dissoc q))
+    (swap! alias-qualified dissoc alias-name))
   (swap! (aliases-atom) dissoc alias-name)
   nil)
 
@@ -545,7 +592,8 @@
    the package loader."
   []
   (when (nil? *type-aliases-override*)
-    (reset! alias-owners {}))
+    (reset! alias-owners {})
+    (reset! alias-qualified {}))
   (reset! (aliases-atom) {}))
 
 

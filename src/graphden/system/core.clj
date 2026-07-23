@@ -349,25 +349,37 @@
             (:fn-type fd)
             (let [[args ret] (:fn-type fd)]
               [:fn (or args {}) ret])))
+        edn-ns? (fn [ns-path]
+                  ;; Version-materialized namespaces
+                  ;; (`web.components@1-2-0`) contain `@` — invalid in
+                  ;; a keyword ns, so those rows register bare-only
+                  ;; (mirrors export's `edn-keyword-ns?`).
+                  (boolean (and ns-path
+                                (re-matches #"[A-Za-z0-9._-]+" ns-path))))
         candidates (for [fd fn-defs
                          :when (:name fd)
                          :let [body (alias-body fd)]
                          :when body]
                      ;; Owner id = the type-row's deterministic sync id —
-                     ;; feeds the cross-owner collision diagnostic
-                     ;; (per-ns names may legally repeat; a silent alias
-                     ;; overwrite must not).
-                     [(:name fd) body (records/fn-id (:namespace fd) (:name fd))])
+                     ;; feeds the cross-owner collision diagnostic. The
+                     ;; QUALIFIED `:ns.path/name` variant registers
+                     ;; alongside the bare name: per-ns names may
+                     ;; legally repeat, and when they do the bare form
+                     ;; goes ambiguous (resolve-alias throws) while the
+                     ;; qualified forms stay precise.
+                     [(:name fd) body (records/fn-id (:namespace fd) (:name fd))
+                      (when (edn-ns? (:namespace fd))
+                        (keyword (:namespace fd) (name (:name fd))))])
         try-once
         (fn [pending]
           ;; Returns the subset of [name body] pairs whose validation
           ;; still fails — caller iterates until fixed point.
           (reduce
-            (fn [still-pending [nm body owner]]
-              (try (types/register-type-alias! nm body owner)
+            (fn [still-pending [nm body owner qualified]]
+              (try (types/register-type-alias! nm body owner qualified)
                    still-pending
                    (catch Exception _
-                     (conj still-pending [nm body owner]))))
+                     (conj still-pending [nm body owner qualified]))))
             []
             pending))]
     ;; Iterate to fixed point — each pass widens `aliases-snapshot`,

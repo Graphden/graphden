@@ -558,9 +558,11 @@
    other branches hold their own versions of this fn, therefore leaves
    those branches resolving NEW parents over OLD bindings — bindings
    whose slots fell out of the new inheritance closure silently unbind.
-   Until the parent-set itself is versioned (ADR-identity-model.md
-   companion decision — option (а)), re-parenting is allowed only on
-   the ROOT branch with no diverging branch versions.
+   This gate is the PERMANENT semantic, not a stopgap: the parent-set
+   is structural identity (it defines the slot closure), so
+   re-parenting is a root-branch, no-diverging-versions operation by
+   decision — see docs/adr/ADR-parent-set-identity.md for why the
+   versioned-parent-set alternative was rejected.
 
    Skips entirely on a non-versioned storage (no `:branch-id` — no
    branches, no desync) and on creates / parent-preserving updates."

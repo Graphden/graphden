@@ -954,9 +954,10 @@
 
 (deftest alias-cross-owner-collision-is-loud
   ;; Two DIFFERENT type-rows registering the same alias name (legal
-  ;; under per-namespace names) must produce a visible warn — the
-  ;; registry stays last-write-wins until stage-4 per-ns resolution
-  ;; (ADR-identity-model.md), but never a SILENT shadow.
+  ;; under per-namespace names) must produce a visible warn; with
+  ;; qualified variants registered the bare name additionally goes
+  ;; AMBIGUOUS (see alias-per-ns-qualified-resolution below) — never
+  ;; a SILENT shadow.
   (let [warns (atom [])
         owner-a (random-uuid)
         owner-b (random-uuid)]
@@ -979,6 +980,49 @@
                       @warns))))
         (finally
           (t/unregister-type-alias! :collide-probe))))))
+
+
+(deftest alias-per-ns-qualified-resolution
+  ;; Per-ns aliases: each type-row registers its bare name AND a
+  ;; qualified `:ns.path/name` variant. One owner → bare resolves as
+  ;; before. Two owners → bare THROWS naming the qualified candidates;
+  ;; each qualified form stays precise.
+  (binding [t/*type-aliases-override* nil]
+    (let [owner-a (random-uuid)
+          owner-b (random-uuid)]
+      (try
+        (t/register-type-alias! :qual-probe :text owner-a :aa.mod/qual-probe)
+        (testing "single owner — bare and qualified both resolve"
+          (is (= :text (t/resolve-alias :qual-probe)))
+          (is (= :text (t/resolve-alias :aa.mod/qual-probe))))
+        (t/register-type-alias! :qual-probe :int owner-b :bb.mod/qual-probe)
+        (testing "two owners — bare throws, listing qualified forms"
+          (let [ex (try (t/resolve-alias :qual-probe) nil
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex) "ambiguous bare must throw")
+            (is (= :types/ambiguous-alias (:type (ex-data ex))))
+            (is (= [:aa.mod/qual-probe :bb.mod/qual-probe]
+                   (:candidates (ex-data ex))))))
+        (testing "qualified forms keep resolving precisely"
+          (is (= :text (t/resolve-alias :aa.mod/qual-probe)))
+          (is (= :int (t/resolve-alias :bb.mod/qual-probe))))
+        (testing "qualified alias inside a compound type resolves"
+          (is (= [:list :int] (t/resolve-alias [:list :bb.mod/qual-probe]))))
+        (finally
+          (t/unregister-type-alias! :qual-probe))))))
+
+
+(deftest alias-ambiguity-skipped-in-override-contexts
+  ;; Isolated (override-bound) registries do their own bookkeeping-free
+  ;; registration — a test fixture re-registering a name must not trip
+  ;; the GLOBAL ambiguity table.
+  (binding [t/*type-aliases-override* (atom {})]
+    (t/register-type-alias! :qual-probe-iso :text (random-uuid) :aa.mod/qual-probe-iso)
+    (t/register-type-alias! :qual-probe-iso :int (random-uuid) :bb.mod/qual-probe-iso)
+    (testing "bare resolves last-write inside the override, no throw"
+      (is (= :int (t/resolve-alias :qual-probe-iso))))
+    (testing "qualified variants still land in the override atom"
+      (is (= :int (t/resolve-alias :bb.mod/qual-probe-iso))))))
 
 
 ;; =============================================================================

@@ -262,6 +262,7 @@
    :args {:steps [:_user-create-do :_users-admin-html]}}
 
   {:name :_user-create-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/users — registers the user and returns the refreshed users panel as text/html (HTMX swap target)."
    :parent :html-ok-response
    :args {:body :_user-create-then-panel}}
@@ -319,6 +320,7 @@
    :args {:body {:value ""}}}
 
   {:name :_user-delete-handler
+   :lambda-params [:request :default :limit]
    :description "DELETE /api/users/:id — cascade-delete the user (tokens + grants), then return an empty 200 so HTMX hx-swap=delete drops the row."
    :parent :do
    :args {:steps [:_user-delete-do :_user-delete-empty-ok]}}
@@ -346,6 +348,7 @@
    :args {:steps [:_user-reset-do :_users-admin-html]}}
 
   {:name :_user-reset-handler
+   :lambda-params [:request :default :limit]
    :description "Ring handler for POST /api/users/:id/password — resets the password and returns the refreshed users panel."
    :parent :html-ok-response
    :args {:body :_user-reset-then-panel}}

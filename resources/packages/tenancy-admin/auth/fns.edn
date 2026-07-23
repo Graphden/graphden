@@ -67,6 +67,7 @@
    :args {:body :_login-token-text}}
 
   {:name :_login-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/login — 200 + the minted session token, or 401 on bad credentials (blank token)."
    :parent :if
    :args {:test :_login-token-blank? :then :_auth-401 :else :_login-200}}
@@ -153,6 +154,7 @@
    :args {:body :_signup-429-body}}
 
   {:name :_signup-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/signup — 429 when rate-limited, else 200 + the new session token, or 401 when signup failed (taken / blank)."
    :parent :if
    :args {:test :_signup-rate-limited? :then :_signup-429 :else :_signup-token-result}}
@@ -195,6 +197,7 @@
    :args {:body :_invite-create-text}}
 
   {:name :_invite-create-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/invites — 200 + the raw invite token (shown once), or 401 when minting failed (no addon / public-org / rate-limited)."
    :parent :if
    :args {:test :_invite-create-blank? :then :_auth-401 :else :_invite-create-200}}
@@ -259,6 +262,7 @@
    :args {:test :_invite-redeem-token-blank? :then :_auth-401 :else :_invite-redeem-200}}
 
   {:name :_invite-redeem-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/invite-signup — 200 + session token, 401 on bad/expired invite or taken username, 429 over the per-IP limit."
    :parent :if
    :args {:test :_invite-redeem-rate-limited? :then :_signup-429 :else :_invite-redeem-token-result}}
@@ -289,6 +293,7 @@
    :args {:value :_logout-do}}
 
   {:name :_logout-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/logout — invalidates the caller's session token."
    :parent :text-ok-response
    :args {:body :_logout-text}}

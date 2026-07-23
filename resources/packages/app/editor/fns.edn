@@ -578,6 +578,7 @@
                   "env"     "Reads environment variables."
                   "io"      "Reads or writes files / classpath resources."
                   "network" "Makes outbound HTTP / network calls."
+                  "state"   "Mutates in-memory shared state (:cell atoms via :swap / :reset). Process-local — lost on restart, not shared across pods."
                   "time"    "Uses wall-clock time — call returns a different value over time."
                   "random"  "Generates random or otherwise non-deterministic values."
                   "process" "Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service."

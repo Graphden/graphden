@@ -100,6 +100,23 @@
 (def contains-secret?              shapes/contains-secret?)
 (def child-types                   shapes/child-types)
 (def type-any?                     shapes/type-any?)
+
+
+(def known-effect-categories
+  "THE effect vocabulary — single source for every consumer: the
+   checker's declaration gate (`types.check/known-effect-categories`
+   aliases this), the runtime recording set
+   (`compile-runtime/known-effects` aliases this), the editor's
+   declared-effects form roster, and the graph's
+   `:_effect-descriptions` table (guarded by
+   `editor-shell-partials-test`). One set — a category can never be
+   recordable-but-undeclarable again (`:state` was exactly that:
+   `:swap`/`:reset` recorded it, the checker rejected declaring it,
+   and every composition over them wore a permanent un-fixable
+   drift chip)."
+  #{:db :env :io :network :process :state :time :random :raw-sql})
+
+
 (def taint-with-secret-if-tainted  shapes/taint-with-secret-if-tainted)
 (def wrap-with-taint               shapes/wrap-with-taint)
 

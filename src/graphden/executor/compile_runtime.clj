@@ -822,12 +822,13 @@
 
 
 (def known-effects
-  "Every effect category the package layer currently records (the
-   `record-effect!` vocabulary). The registry of safe-vs-sensitive lives
-   in `cloud-forbidden-effects`; this is the full set so the safe
-   complement can be derived. Register a new SAFE category here; a new
-   SENSITIVE one goes in BOTH this set AND `cloud-forbidden-effects`."
-  #{:db :env :io :network :process :state :time :random :raw-sql})
+  "Alias of `types.core/known-effect-categories` — the ONE effect
+   vocabulary (recording AND declaration; see its docstring). The
+   registry of safe-vs-sensitive lives in `cloud-forbidden-effects`;
+   this is the full set so the safe complement can be derived. A new
+   SAFE category goes in the types.core set; a new SENSITIVE one goes
+   BOTH there AND in `cloud-forbidden-effects`."
+  types/known-effect-categories)
 
 
 (def default-cloud-allowed-effects

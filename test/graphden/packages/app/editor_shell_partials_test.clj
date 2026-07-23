@@ -14,9 +14,12 @@
      (replaced the per-name /api/types/compatible fan-out);
    - `/partials/expects-effects-form` — canonical category roster."
   (:require
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.test-infra.golden-app :as ga]))
+    [graphden.test-infra.golden-app :as ga]
+    [graphden.types.core :as types]))
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
@@ -146,13 +149,30 @@
   (testing "no-contract fn: none-mode checked, full roster disabled"
     (let [body (body-of :_partial-eef-handler
                         {"fn-id" (str (ga/fn-id :add))})]
-      (doseq [cat ["db" "env" "io" "network" "time" "random" "process" "raw-sql"]]
+      ;; Roster = the FULL canonical vocabulary — every recordable
+      ;; category is declarable (the :state recordable-but-
+      ;; undeclarable split is the bug this pins against).
+      (doseq [cat (sort (map name types/known-effect-categories))]
         (is (str/includes? body (str "value=\"" cat "\""))
             (str cat " offered")))
       (is (re-find #"checked=\"checked\"[^>]*value=\"none\"" body)
           "no-contract mode pre-selected (hiccup sorts attrs alphabetically)")
       (is (str/includes? body "disabled")
           "checkboxes disabled while no contract"))))
+
+
+(deftest effect-descriptions-cover-the-vocabulary
+  ;; `:_effect-descriptions` (graph) must describe EXACTLY the
+  ;; canonical vocabulary — a recordable category without a row falls
+  ;; to the generic popover text (`:state` was exactly that), and a
+  ;; stale row would document a retired category. Pure EDN read, no
+  ;; HTTP.
+  (let [table (->> (io/resource "packages/app/editor/fns.edn")
+                   slurp edn/read-string :fns
+                   (some #(when (= :_effect-descriptions (:name %)) %)))
+        keys* (set (map keyword (keys (get-in table [:args :value]))))]
+    (is (= types/known-effect-categories keys*)
+        "one row per canonical effect category, no extras")))
 
 
 ;; ============================================================================

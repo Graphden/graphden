@@ -800,26 +800,17 @@
 
 
 (def known-effect-categories
-  "Effect tags graphden's runtime knows how to record. Each base-fn's
-   side effects map to one of these via `cr/record-effect!`. A
-   `:expects-effects` / `:effects` declaration carrying a tag outside
-   this set is almost always a typo (`:do` for `:db`, a misspelled
-   `:network` etc.); reject at sync time so the contract isn't a
-   silent no-op.
-
-   Mirrors the docstring of `compile-runtime/record-effect!` plus
-   `:process` from the service registry (services declare
-   `:expects-effects #{:process}` to opt into supervisor reconciliation)
-   and `:raw-sql` for the raw SQL escape hatches (`:pg-query` /
-   `:pg-execute` / `:pg-tx` / `:sql-query` / `:sql-exec`) that bypass
-   the org-scoped storage protocol.
+  "Alias of `types.core/known-effect-categories` — the ONE effect
+   vocabulary (see its docstring). Kept under this name because the
+   editor form roster (`web/crud` impls) and the category gate below
+   consume it here; the def itself lives in types.core so the
+   runtime recording set is the same object.
 
    PUBLIC: also the option roster of the editor's declared-effects
    form (`/partials/expects-effects-form`) — the one set drives both
    what the form offers and what sync accepts, so the UI can never
-   offer an undeclarable category or omit a declarable one (the old
-   hand-copied JS list silently lacked `:process` / `:raw-sql`)."
-  #{:db :env :io :network :time :random :process :raw-sql})
+   offer an undeclarable category or omit a declarable one."
+  types/known-effect-categories)
 
 
 (defn- check-effect-categories!

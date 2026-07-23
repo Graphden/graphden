@@ -689,12 +689,15 @@
   (let [{:keys [args description return-type] fn-name :name ns-id :namespace} fn-def
         own-id (ids/fn-id ns-id fn-name)
         parent-ids (resolve-parent-list fn-def name->id)
+        ;; NO degradation here: `resolve-type-ref` handles every
+        ;; declarable shape itself (structural forms degrade to their
+        ;; storage primitive) and throws ONLY on a genuinely unknown
+        ;; type name — which is an author error that must fail the
+        ;; sync, not silently strip the declared return (the old
+        ;; catch+warn dropped it permanently; downstream checks and
+        ;; the editor's return strip then lied for that fn).
         ret-id (when return-type
-                 (try (types/resolve-type-ref return-type name->id)
-                      (catch Exception e
-                        (log/warn e "Composed-fn :return-type silently lost"
-                                  {:fn-name fn-name :return-type return-type})
-                        nil)))
+                 (types/resolve-type-ref return-type name->id))
         own-fn (composed-own-fn own-id fn-name ns-id parent-ids description ret-id)
         ;; Partition args: own-slot declarations (shape `{:type T}`
         ;; without binding markers) vs. bindings on inherited slots.

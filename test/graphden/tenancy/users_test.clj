@@ -88,7 +88,7 @@
         result   (users/backfill-auth-subject-ids! storage)]
     (testing "counts only the rows actually stamped"
       (is (= 1 (:tokens-backfilled result)) "t1 stamped; t2 already had an id")
-      (is (= 0 (:grants-backfilled result))
+      (is (zero? (:grants-backfilled result))
           "grants arm retired with grant.subject — no username source remains"))
     (testing "the stamped id is the user's id in STRING form"
       (is (= [:token :t1 {:user-id (str alice-id)}]

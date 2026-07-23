@@ -6,13 +6,15 @@
 
    The roster below is HAND-MAINTAINED (inherited from the retired
    browser test): it guards prose drift and keeps roster == map-keys
-   in both directions, but it can NOT detect a brand-new rule
-   registered elsewhere — mechanical derivation isn't possible
-   because `wrap-with-taint` gives every base-fn an opaque rule fn,
-   so \"has a narrative-worthy rule\" is not observable from the
-   registry. When adding a `:return-type-rule` with user-visible
-   semantics, add its narrative to `:_rtr-narratives` AND its key
-   here. Pure EDN comparison, no HTTP roundtrip."
+   in both directions. Since taint became a registry FLAG
+   (`:taint-propagate?`) and shadow rules were replaced by declared
+   signatures, \"has a narrative-worthy rule\" IS now observable from
+   the registry (`:return-type-rule` present, or a var-carrying
+   `:return` — `registry/rule-owner-of`'s exact predicate); the
+   roster stays hand-maintained only to keep this test pure-EDN (no
+   loader). When adding a `:return-type-rule` OR a polymorphic
+   base-fn declaration, add its narrative to `:_rtr-narratives` AND
+   its key here. Pure EDN comparison, no HTTP roundtrip."
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
@@ -45,10 +47,17 @@
    see the ns docstring for why it can't be registry-derived."
   #{:assoc :dissoc :get :get-in :assoc-in :update-in
     :conj :first :rest :cons :list :merge :into
-    :range :repeat :keys :vals
+    :repeat :keys :vals
     :take :drop :reverse :sort :distinct :concat
     :case :cond :coalesce :if :invoke :const :identity
-    :add :sub :mul :mod :neg :abs})
+    :add :sub :mul :mod :neg :abs
+    ;; signature owners — no hand rule; the declared polymorphic
+    ;; signature is the narrowing (checker's `signature-return`).
+    ;; `:range` left OUT deliberately: fully concrete declaration,
+    ;; no rule, no vars — `rule-owner-of` returns nil, the popover
+    ;; never opens, so a narrative would be dead prose.
+    :map :filter :reduce :find-first :group-by :sort-by
+    :constantly :transduce :call :call-noargs :try})
 
 
 (defn- narratives

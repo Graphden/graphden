@@ -618,21 +618,34 @@
         cur))))
 
 
+(defn- signature-owner?
+  "Does this registry entry narrow returns via its DECLARED signature —
+   i.e. the return type carries a type variable the checker's
+   `signature-return` fallback resolves from actuals? (`[:list a]`,
+   `a`, `[:union a b]` …)."
+  [entry]
+  (boolean (types/type-any? types/type-var? (:return entry))))
+
+
 (defn rule-owner-of
-  "Name (string, no leading colon) of the base-fn whose
-   `:return-type-rule` computed `fn-name`'s return type —
-   `root-base-fn-name` over the entry's `:primary-parent`, iff that
-   root's entry carries a rule. nil for unknown names, base-fns (no
-   `:primary-parent`), and rule-less chains. Rules are registered
-   only on base-fns (the roots), so \"first ancestor with a rule\" ≡
-   \"root with a rule\". Consumers: the `:rule-owner-of-name` base-fn
-   behind `/partials/return-type-rule`, and the layout strip-facts
-   pass that tells the editor whether to render the `↳` badge."
+  "Name (string, no leading colon) of the base-fn that computed
+   `fn-name`'s return type — `root-base-fn-name` over the entry's
+   `:primary-parent`, iff that root's entry carries a hand
+   `:return-type-rule` OR a var-carrying declared signature (the
+   checker's `signature-return` fallback). nil for unknown names,
+   base-fns (no `:primary-parent`), and chains whose root has neither
+   (a fully concrete declaration — nothing to explain). Rules and
+   signatures live only on base-fns (the roots), so \"first ancestor
+   with a rule\" ≡ \"root with a rule\". Consumers: the
+   `:rule-owner-of-name` base-fn behind `/partials/return-type-rule`,
+   and the layout strip-facts pass that tells the editor whether to
+   render the `↳` badge."
   [fn-name]
   (when fn-name
     (when-let [pp (:primary-parent (rich-type-of (keyword fn-name)))]
-      (let [root (root-base-fn-name pp)]
-        (when (:return-type-rule (rich-type-of root))
+      (let [root (root-base-fn-name pp)
+            entry (rich-type-of root)]
+        (when (or (:return-type-rule entry) (signature-owner? entry))
           (name root))))))
 
 

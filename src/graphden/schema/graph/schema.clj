@@ -373,6 +373,14 @@
   #uuid "3b7a9c15-4e2d-4f86-9a01-6c8d2e5b7f13")
 
 
+(def ^:private fn-lambda-params-field-uuid
+  ;; Authored HOF call-site parameter list (ordered array of arg-name
+  ;; strings; `[]` = "everything captured"). The compile's wrap-arity
+  ;; dispatch (`compile.renames/declared-lambda-params`) reads it off
+  ;; the fn ROW — sweep-independent, editor-authorable, exported.
+  #uuid "e0982385-4c17-46cc-8ca4-386a8738519f")
+
+
 (def ^:private binding-required-field-uuid
   #uuid "54c53941-0b30-4020-b701-530d4d043d63")
 
@@ -464,6 +472,10 @@
    :expects-effects {:uuid fn-expects-effects-field-uuid
                      :type :jsonb
                      :nullable? true}
+   ;; Authored HOF call-site parameter list (see field-uuid note).
+   :lambda-params {:uuid fn-lambda-params-field-uuid
+                   :type :jsonb
+                   :nullable? true}
    ;; Identity-level monotonic flag (see ns-doc above).
    :branch-local? {:uuid fn-branch-local-field-uuid
                    :type :bool

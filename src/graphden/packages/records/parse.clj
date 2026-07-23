@@ -766,7 +766,7 @@
 (defn- attach-fn-meta
   "Post-process step that copies fn-def-level metadata onto the first
    record of every parser's output (which is always the `:fn` row).
-   Handles authored-only columns: `:expects-effects` and
+   Handles authored-only columns: `:expects-effects`, `:lambda-params` and
    `:branch-local?`. Both pass through verbatim — they're identity-
    level on `:fn` (not versioned), so a single write at parse-time
    suffices."
@@ -776,6 +776,13 @@
     (update 0 assoc :expects-effects
             (vec (map #(if (keyword? %) (name %) (str %))
                       (:expects-effects fn-def))))
+
+    ;; `[]` is a meaningful declaration ("everything captured") —
+    ;; gate on key presence, not truthiness-of-content.
+    (contains? fn-def :lambda-params)
+    (update 0 assoc :lambda-params
+            (vec (map #(if (keyword? %) (name %) (str %))
+                      (:lambda-params fn-def))))
 
     (contains? fn-def :branch-local?)
     (update 0 assoc :branch-local? (boolean (:branch-local? fn-def)))))

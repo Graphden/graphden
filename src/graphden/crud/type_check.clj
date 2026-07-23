@@ -318,7 +318,12 @@
                    :args args}
             (= 1 (count parent-ids)) (assoc :parent (parent-name (first parent-ids)))
             (> (count parent-ids) 1) (assoc :parents (mapv parent-name parent-ids))
-            ret-name (assoc :return-type ret-name)))))))
+            ret-name (assoc :return-type ret-name)
+            ;; Persisted authored contract — flows into the registry
+            ;; entry on re-check (JSONB stores strings; `[]` is a
+            ;; meaningful "everything captured" declaration).
+            (some? (:lambda-params own))
+            (assoc :lambda-params (mapv keyword (:lambda-params own)))))))))
 
 
 (defn type-check-fn-after-mutation!

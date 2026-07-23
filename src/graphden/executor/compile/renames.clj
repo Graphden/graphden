@@ -724,7 +724,17 @@
    Validated against R's deep frees so a typo fails the compile loudly
    instead of silently wrapping with a dead parameter."
   [r-fn-id lookups]
-  (when-let [declared (:lambda-params (@rich-type-of-id-fn r-fn-id))]
+  (when-let [declared (or
+                        ;; PRIMARY: the fn ROW's persisted column —
+                        ;; sweep-independent (test bootstraps skip the
+                        ;; type-check sweep, and the seed pass can't
+                        ;; parse composed fn-defs' binding-shaped
+                        ;; args), branch-versioned, editor-authorable.
+                        ;; JSONB round-trip stores strings.
+                        (some->> (:lambda-params
+                                   (get (:fn-map lookups) r-fn-id))
+                                 (mapv keyword))
+                        (:lambda-params (@rich-type-of-id-fn r-fn-id)))]
     (let [frees (set (deep-free-ext-names r-fn-id lookups))
           unknown (remove frees declared)]
       (when (seq unknown)

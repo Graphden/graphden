@@ -153,6 +153,11 @@
 ;; the graph-data-schema). Must exist on the version mirror or the
 ;; versioned-storage decorator strips writes silently and reads come
 ;; back without the column.
+(def ^:private fn-version-lambda-params-field-uuid
+  ;; Mirror of fn.lambda-params — pinned like every mirror column.
+  #uuid "e8dcc3db-996a-45d2-a6c6-d788e44b255d")
+
+
 (def ^:private fn-version-expects-effects-field-uuid
   #uuid "44a5c620-9e31-4d28-8b3a-6c1f5e9d2a47")
 
@@ -393,7 +398,8 @@
                 :element-fn-id fn-version-element-fn-id-field-uuid
                 :return-type-fn-id fn-version-return-type-fn-id-field-uuid
                 :anonymous-hash fn-version-anonymous-hash-field-uuid
-                :expects-effects fn-version-expects-effects-field-uuid}}
+                :expects-effects fn-version-expects-effects-field-uuid
+                :lambda-params fn-version-lambda-params-field-uuid}}
    :fn-slot {:identity-fields #{:org-id}
              :uuids {:fn-id fn-slot-version-fn-id-field-uuid
                      :slot-id fn-slot-version-slot-id-field-uuid

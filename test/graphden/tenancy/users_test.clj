@@ -88,12 +88,13 @@
         result   (users/backfill-auth-subject-ids! storage)]
     (testing "counts only the rows actually stamped"
       (is (= 1 (:tokens-backfilled result)) "t1 stamped; t2 already had an id")
-      (is (= 1 (:grants-backfilled result)) "g1 stamped; g2's 'ghost' user doesn't resolve"))
+      (is (= 0 (:grants-backfilled result))
+          "grants arm retired with grant.subject — no username source remains"))
     (testing "the stamped id is the user's id in STRING form"
       (is (= [:token :t1 {:user-id (str alice-id)}]
              (first (filter #(= :token (first %)) @updates))))
-      (is (= [:grant :g1 {:subject-id (str alice-id)}]
-             (first (filter #(= :grant (first %)) @updates)))))
+      (is (empty? (filter #(= :grant (first %)) @updates))
+          "no grant writes from the backfill"))
     (testing "already-stamped + unresolvable rows are NOT written"
       (is (not-any? #(= :t2 (second %)) @updates))
       (is (not-any? #(= :g2 (second %)) @updates)))))

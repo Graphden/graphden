@@ -26,8 +26,10 @@
                    (ds/build))]
     (is (contains? (set (ds/entities schema)) :grant))
     (is (every? (set (keys (ds/entity-fields schema :grant)))
-                [:subject :subject-id :capability :namespace])
-        ":grant carries subject / subject-id / capability / namespace")))
+                [:subject-id :capability :namespace])
+        ":grant carries subject-id / capability / namespace")
+    (is (nil? (get (ds/entity-fields schema :grant) :subject))
+        "denormalized username column retired (audit-2 2b)")))
 
 
 (deftest db-schema-seam-applies-extensions

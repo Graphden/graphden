@@ -105,16 +105,47 @@ async function searchFns(q) {
 }
 window.searchFns = searchFns;
 
-// Resolve a fn by its (globally-unique) name to its row. Fast path: the
-// accumulating cache; slow path: an exact-match server search. Used by
-// deep-link nav, type-override resolution, base-fn links, secret-leaf, etc.
+// Resolve a fn by name to its row. Names are unique PER NAMESPACE
+// (ADR-identity-model stage 5), so the input may be qualified —
+// `ns.path/name` pins the namespace; a bare name resolves when it is
+// unique. Fast path: the accumulating cache; slow path: an
+// exact-match server search. A bare name matching fns in SEVERAL
+// namespaces warns with the qualified candidates and returns the
+// first match (deep-links predating duplication keep working; new
+// links should qualify). Used by deep-link nav, type-override
+// resolution, base-fn links, secret-leaf, etc.
 async function resolveFnByName(name) {
   if (!name) return null;
-  for (const f of _knownFns.values()) {
-    if (f.name === name) return f;
-  }
-  const { fns } = await searchFns(name);
-  return fns.find(f => f.name === name) || null;
+  const slash = name.indexOf('/');
+  const wantNs = slash > 0 ? name.slice(0, slash) : null;
+  const bare = slash > 0 ? name.slice(slash + 1) : name;
+  const nsPathOf = (f) => {
+    const p = lookups?.nsPathMap?.get(f['namespace-id']);
+    return p || null;
+  };
+  const matches = (pool) => {
+    const hits = [];
+    for (const f of pool) {
+      if (f.name !== bare) continue;
+      if (wantNs !== null && nsPathOf(f) !== wantNs) continue;
+      hits.push(f);
+    }
+    return hits;
+  };
+  const pick = (hits) => {
+    if (hits.length === 0) return null;
+    if (hits.length > 1) {
+      const qual = hits.map(f => (nsPathOf(f) || '?') + '/' + f.name);
+      console.warn('resolveFnByName: "' + bare + '" is ambiguous across '
+                   + 'namespaces — qualify the reference. Candidates: '
+                   + qual.join(', '));
+    }
+    return hits[0];
+  };
+  const cached = pick(matches(_knownFns.values()));
+  if (cached) return cached;
+  const { fns } = await searchFns(bare);
+  return pick(matches(fns));
 }
 window.resolveFnByName = resolveFnByName;
 

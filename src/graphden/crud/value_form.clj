@@ -399,8 +399,15 @@
     (->> (executor/execute-by-name ctx "_value-form-registry" {})
          (keep (fn [pair]
                  (when (and (sequential? pair) (= 2 (count pair)))
-                   [(types/resolve-alias (keyword (first pair)))
-                    (str (second pair))])))
+                   (let [t (first pair)
+                         ;; A VECTOR type-name is a structural key —
+                         ;; `["secret" "any"]` → `[:secret :any]`
+                         ;; (marker-typed rows). Scalars stay the
+                         ;; alias-resolved keyword path.
+                         t' (if (sequential? t)
+                              (mapv keyword t)
+                              (types/resolve-alias (keyword t)))]
+                     [t' (str (second pair))]))))
          vec)
     (catch clojure.lang.ExceptionInfo e
       ;; `fn-not-found` is expected during early sync (registry fn-def

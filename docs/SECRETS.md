@@ -439,10 +439,17 @@ The Secrets-panel admin flow writes new secrets with this shape:
 
 ## Inline secret-path binding
 
-When a slot's declared type is `[:secret T]`, the editor's value-form
-no longer routes through the generic `/api/value-form` path. Instead
-the in-place edit popover (`enterArgValueEditMode` → `isSecretType`
-branch in `editor-edit-modes.js`) opens a dedicated 2-field form:
+When a slot's effective type carries a hide-result MARKER
+(`[:secret T]`, or any graph-declared marker with `:hide-result?
+true`), the dispatch is form-by-type THROUGH THE GRAPH: the
+value-form registry (`:_value-form-registry` in `app/forms/fns.edn`)
+maps the marker type to `:_form-secret-binding` via a vector-typed
+row (`[["secret" "any"] "_form-secret-binding"]`); `/api/value-form`
+answers with a `data-form-widget="secret-binding"` mount, and the
+editor routes on THAT (`formWidgetName` in `editor-edit-modes.js`) —
+no tag names live client-side (the old hardcoded `isSecretType`
+branch is gone). A new marker opts in by adding its own registry row.
+For a new binding the editor opens a dedicated 2-field form:
 
 | Field | Purpose |
 |---|---|

@@ -157,14 +157,6 @@ function expectedSlotType(arg) {
   return effective;
 }
 
-// `[":secret", T]` predicate — true for a rich-type tagged as
-// secret-labelled at the top level. Used by the inline value-form to
-// switch to the path+value widget instead of the regular literal
-// editor. Wire format strips the colon: `["secret", "text"]`.
-function isSecretType(t) {
-  return Array.isArray(t) && t[0] === 'secret';
-}
-
 
 // Walk the inheritance chain from `fnId` to find the DEEPEST ancestor
 // (root base-fn) whose fn-slot junctions include `slotId` — that's the

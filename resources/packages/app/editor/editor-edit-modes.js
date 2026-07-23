@@ -164,16 +164,6 @@ function enterArgValueEditMode(arg, anchorEl) {
   if (!arg) return;
   const expected = (typeof expectedSlotType === 'function')
                    ? expectedSlotType(arg) : null;
-  // Secret-typed slot (e.g. `:sql-exec/:password`): skip the generic
-  // value-form and open a 2-field path+value popover that writes a
-  // `:secret-path`-kinded binding via POST /api/secrets/binding. Only
-  // for the create-new case — when a binding already exists, the user
-  // must delete it first (the regular popover handles that).
-  if (typeof isSecretType === 'function' && isSecretType(expected)
-      && !arg['binding-id']) {
-    enterSecretBindingEditMode(arg, anchorEl);
-    return;
-  }
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Edit arg value',
@@ -213,6 +203,21 @@ function enterArgValueEditMode(arg, anchorEl) {
           makeLegacyControl(host, arg, expected, status);
           return;
         }
+        // Marker-typed slot (server-dispatched — the graph's
+        // value-form registry mapped the slot's marker type to the
+        // `secret-binding` widget; the editor knows no tag names):
+        // creating a NEW binding routes to the path+value popover
+        // that writes a resolver binding via POST /api/secrets/binding.
+        // An EXISTING binding keeps the legacy control (same UX as
+        // before server dispatch — inspect/replace the raw value).
+        if (formWidgetName(payload.form) === 'secret-binding') {
+          if (!arg['binding-id']) {
+            enterSecretBindingEditMode(arg, anchorEl);
+            return;
+          }
+          makeLegacyControl(host, arg, expected, status);
+          return;
+        }
         renderValueForm(host, payload, { expected, statusEl: status });
       });
       return host;
@@ -233,6 +238,23 @@ function enterArgValueEditMode(arg, anchorEl) {
               ? () => { if (typeof deleteUseSiteBinding === 'function') deleteUseSiteBinding(arg); }
               : null
   });
+}
+
+// First `data-form-widget` attribute in a JSON-hiccup tree — the
+// server-side value-form dispatch names the widget; the client only
+// routes on it (no type-tag knowledge here).
+function formWidgetName(node) {
+  if (!Array.isArray(node)) return null;
+  const attrs = node[1];
+  if (attrs && typeof attrs === 'object' && !Array.isArray(attrs)
+      && attrs['data-form-widget']) {
+    return attrs['data-form-widget'];
+  }
+  for (let i = 1; i < node.length; i += 1) {
+    const found = formWidgetName(node[i]);
+    if (found) return found;
+  }
+  return null;
 }
 
 // Inline `:secret-path` form for a `[:secret T]`-typed slot. Two

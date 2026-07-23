@@ -131,8 +131,27 @@
   ;; entry, and picks the form-fn whose type is the most-specific
   ;; supertype of the slot's effective type via `subtype?`.
 
+  ;; --- marker-typed slots: resolver-binding widget ---
+  ;;
+  ;; A slot whose effective type carries a hide-result MARKER
+  ;; (`[:secret :text]`, or any graph-declared marker with
+  ;; `:hide-result? true`) is not edited as a literal — the editor
+  ;; mounts the `secret-binding` widget (path + initial value,
+  ;; saved via POST /api/secrets/binding as a resolver binding).
+  ;; The dispatch is a REGISTRY row like any other form: the seeded
+  ;; `:secret` marker registers `["secret" "any"]` below; a new
+  ;; graph-declared marker opts into the same widget by adding its
+  ;; own `[["<tag>" "any"] "_form-secret-binding"]` row. Nothing in
+  ;; the editor JS knows the tag names.
+
+  {:name :_form-secret-binding
+   :description "Marker-typed slot form — mounts the editor's `secret-binding` widget (vault path + initial value, resolver-binding save) instead of a literal control."
+   :parent :const
+   :args {:value ["div" {"class" "value-form-widget"
+                         "data-form-widget" "secret-binding"}]}}
+
   {:name :_value-form-registry
-   :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name]; the resolver subtype-matches the slot's effective type, most-specific wins, falling back to _form-json."
+   :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]); the resolver subtype-matches the slot's effective type, most-specific wins, falling back to _form-json."
    :parent :const
    :args {:value [["text" "_form-text"]
                   ["int" "_form-number"]
@@ -143,7 +162,8 @@
                   ["jsonb" "_form-json"]
                   ["any" "_form-json"]
                   ["js-source" "_form-js-source"]
-                  ["vf-rating" "_form-rating"]]}}
+                  ["vf-rating" "_form-rating"]
+                  [["secret" "any"] "_form-secret-binding"]]}}
 
   ;; --- /api/value-form endpoint — parse -> validate -> apply ---
   ;;

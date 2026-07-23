@@ -883,8 +883,7 @@
                     :_pkgv-row-nil?     :_pkgv-err-not-found
                     :_upd-same?         :_upd-noop
                     :_pkgv-missing-any? :_pkgv-err-missing
-                    {:value true}       :_upd-ok]}
-   :return-type :keyword-map}
+                    {:value true}       :_upd-ok]}}
 
   {:name :_update-body
    :description "Parsed JSON body of POST /api/packages/update — `{:name :version}`."

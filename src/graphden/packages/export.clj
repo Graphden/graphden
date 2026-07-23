@@ -316,15 +316,11 @@
   [b ctx]
   (let [type-ref (when (:type-override-fn-id b)
                    (id->type-ref (:type-override-fn-id b) ctx))
-        secret-path? (or (= :secret-path (:override-kind b))
-                         ;; Post-retirement rows carry the generic
-                         ;; resolver form; vault-get-resolved bindings
-                         ;; ARE secret-paths — same dedicated wire key
-                         ;; so the strip/manifest warn-policy keeps
-                         ;; seeing them (a `{:resolver :vault-get}`
-                         ;; emission would slip past strip-secret-paths
-                         ;; and leak the vault topology).
-                         (= :vault-get (ref-kw (:resolver-fn-id b) ctx)))]
+        ;; vault-get-resolved bindings ARE secret-paths — the dedicated
+        ;; wire key keeps the strip/manifest warn-policy seeing them (a
+        ;; `{:resolver :vault-get}` emission would slip past
+        ;; strip-secret-paths and leak the vault topology).
+        secret-path? (= :vault-get (ref-kw (:resolver-fn-id b) ctx))]
     (cond-> {}
       (:ref-fn-id b)
       (assoc :ref (ref-kw (:ref-fn-id b) ctx))
@@ -369,8 +365,7 @@
       ;; it and re-parse restores the vault-get resolver — the plain
       ;; `{:value …}` form would silently turn the secret into a
       ;; literal string holding the path (broken AND path-disclosing).
-      (or (= :secret-path (:override-kind b))
-          (= :vault-get (ref-kw (:resolver-fn-id b) ctx)))
+      (= :vault-get (ref-kw (:resolver-fn-id b) ctx))
       (cond-> {:secret-path (:value b)}
         (some? (:required b)) (assoc :required (:required b)))
 

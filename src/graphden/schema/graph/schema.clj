@@ -527,10 +527,6 @@
                :type :ref
                :ref-entity :fn
                :nullable? true}
-   :override-kind {:uuid binding-override-kind-field-uuid
-                   :type :enum
-                   :enum-name :override-kind
-                   :nullable? true}
    ;; `:rename-to` retired in Phase 6e — see retire-field call after the
    ;; entity declaration. The text was replaced by slot.source-slot-id (FK).
    :type-override-fn-id {:uuid binding-type-override-fn-id-field-uuid
@@ -736,7 +732,14 @@
       ;; presence of `return-type-fn-id` (a type-row never has one). The
       ;; column was always NULL in storage; mark it retired so the
       ;; migration framework issues DROP COLUMN on next deploy.
-      (ds/retire-field :fn :impl-hash fn-impl-hash-field-uuid)))
+      (ds/retire-field :fn :impl-hash fn-impl-hash-field-uuid)
+      ;; `binding.override-kind` retired (audit-2 stage 2b): :fixed was
+      ;; superseded by :terminal, :default was write-only, :secret-path
+      ;; became the :vault-get resolver form (stage 1 writers + stage 2a
+      ;; boot migration converted every row before this drop). The
+      ;; :override-kind ENUM declaration stays until a retire-enum
+      ;; mechanism exists — an unused pg enum type is inert.
+      (ds/retire-field :binding :override-kind binding-override-kind-field-uuid)))
 
 
 (defn build-schema

@@ -47,8 +47,7 @@
   (let [f (sp/create-entity storage :fn (cond-> {:name nm :parent-ids [base-id]}
                                           org (assoc :org-id org)))]
     (sp/create-entity storage :binding (cond-> {:fn-id (:id f) :slot-id slot-id
-                                                :value v :value-present true
-                                                :override-kind :fixed}
+                                                :value v :value-present true}
                                          org (assoc :org-id org)))
     f))
 

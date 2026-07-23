@@ -3,7 +3,7 @@
    (`{:resolver <fn> :value <stored>}` → `binding.resolver-fn-id`):
    the executor evaluates the resolver graph fn with the stored value
    as its single argument at arg-resolution time, and the result flows
-   into the slot. `:override-kind :secret-path` is the legacy vault
+   into the slot. the retired `:override-kind :secret-path` was the legacy vault
    instance of the same mechanism (SECRETS.md § generalization)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

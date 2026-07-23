@@ -223,8 +223,7 @@
                     {:fn-id fn-id
                      :slot-id slot-id
                      :value value
-                     :value-present true
-                     :override-kind :fixed}))
+                     :value-present true}))
 
 
 (defn bind-ref!
@@ -234,8 +233,7 @@
   (sp/create-entity storage :binding
                     {:fn-id fn-id
                      :slot-id slot-id
-                     :ref-fn-id target-fn-id
-                     :override-kind :fixed}))
+                     :ref-fn-id target-fn-id}))
 
 
 (defn create-arg!

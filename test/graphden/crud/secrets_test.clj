@@ -21,7 +21,6 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys]
     [graphden.tenancy.context :as tctx]))
 
 
@@ -466,30 +465,4 @@
                                    c (:id secret) {})]
           (is (not ok))
           (is (re-find #"value" error))))
-      (finally (sp/close storage)))))
-
-
-(deftest migrate-secret-path-bindings-test
-  ;; Audit-2 stage 1 of the :override-kind retirement — boot converts
-  ;; legacy :secret-path rows to the :vault-get resolver form,
-  ;; idempotently; rows already carrying a resolver are untouched.
-  (let [storage (setup/create-test-storage)]
-    (try
-      (let [{:keys [secret-leaf secret-leaf-slot]} (seed-secret-leaf! storage)
-            vg-id (:id (first (sp/query-entities storage :fn {:name "vault-get"})))
-            legacy (sp/create-entity storage :binding
-                                     {:fn-id (:id secret-leaf)
-                                      :slot-id (:id secret-leaf-slot)
-                                      :value "kv/legacy"
-                                      :value-present true
-                                      :override-kind :secret-path})]
-        (is (some? vg-id) "seed provides the resolver row")
-        (sys/migrate-secret-path-bindings! storage)
-        (is (= vg-id (:resolver-fn-id
-                       (sp/read-entity storage :binding (:id legacy))))
-            "legacy row now points at the vault-get resolver")
-        (testing "idempotent — second run changes nothing"
-          (sys/migrate-secret-path-bindings! storage)
-          (is (= vg-id (:resolver-fn-id
-                         (sp/read-entity storage :binding (:id legacy)))))))
       (finally (sp/close storage)))))

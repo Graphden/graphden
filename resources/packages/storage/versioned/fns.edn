@@ -126,7 +126,6 @@
           :value :nullable-jsonb
           :value-present :nullable-bool
           :ref-fn-id :nullable-uuid
-          :override-kind :nullable-keyword
           :type-override-fn-id :nullable-uuid
           :description :nullable-text
           :list-append :nullable-bool
@@ -161,7 +160,6 @@
           :value :nullable-jsonb
           :value-present :nullable-bool
           :ref-fn-id :nullable-uuid
-          :override-kind :nullable-keyword
           :type-override-fn-id :nullable-uuid
           :description :nullable-text
           :list-append :nullable-bool
@@ -474,7 +472,6 @@
    :parent :resolve-versioned-rows
    :args {:version-id-field {:value :binding-id}
           :version-data-fields {:value [:fn-id :slot-id :value :ref-fn-id
-                                        :override-kind :type-override-fn-id
                                         :description :list-append
                                         :list-closed]}
           :version-rows :_resolve-binding-versions}}

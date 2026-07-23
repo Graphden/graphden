@@ -137,7 +137,7 @@
     :version-table :binding-version
     :version-id-field :binding-id
     :version-data-fields [:fn-id :slot-id :value :value-present :ref-fn-id
-                          :override-kind :type-override-fn-id
+                          :type-override-fn-id
                           :description :list-append :list-closed]}
    {:public-name :test-resolve-bli-rows
     :entity-name :binding-list-item

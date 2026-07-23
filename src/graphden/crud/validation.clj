@@ -516,34 +516,6 @@
                               " is not legal on base type :" (name base-name))}))))))))
 
 
-(defn- override-kind-retired-rej
-  "`:override-kind` is RETIRED (audit-2 stage 2): `:fixed`
-   discriminated nothing (`:terminal` is the seal), `:default` was
-   write-only, and `:secret-path` became the `:vault-get` RESOLVER
-   binding (`:resolver-fn-id` — whose own gate, `resolver-rej` below,
-   enforces the secret-marker laundering protection the old
-   secret-path gate provided). Any API write still carrying the key
-   is a stale client — reject with the migration pointer instead of
-   silently accepting a field the executor no longer reads."
-  [storage entity-type entity-data]
-  (when (and (= entity-type :binding)
-             (some? (:override-kind entity-data))
-             ;; The update path validates the MERGED post-write view, so
-             ;; LEGACY RESIDUE on the stored row (a not-yet-dropped
-             ;; `:fixed` from before the retirement) must not block an
-             ;; unrelated update — only an INCOMING write of the field
-             ;; (merged value differs from what's already stored)
-             ;; rejects. On create the stored row is nil, so any
-             ;; non-nil value is incoming by definition.
-             (not= (:override-kind entity-data)
-                   (some->> (:id entity-data)
-                            (sp/read-entity storage :binding)
-                            :override-kind)))
-    {:reason (str ":override-kind is retired — a secret binding is "
-                  "{:resolver-fn-id <vault-get>} with the path in :value; "
-                  ":terminal covers sealing. Remove the field from the write.")}))
-
-
 (defn- reparent-cross-branch-rej
   "Guard the parent-set/binding desync: `:parent-ids` lives on the
    IDENTITY row (a junction — visible to every branch instantly), while
@@ -654,8 +626,6 @@
               (assoc :type :constraint-violation/terminal-seal))
       (some-> (list-closed-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/list-closed))
-      (some-> (override-kind-retired-rej storage entity-type entity-data)
-              (assoc :type :constraint-violation/override-kind-retired))
       (some-> (reparent-cross-branch-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/reparent-cross-branch))
       (some-> (resolver-rej storage entity-type entity-data)

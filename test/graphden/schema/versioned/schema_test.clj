@@ -96,7 +96,8 @@
       (is (= :uuid (:type (:fn-id fields))))
       (is (= :uuid (:type (:slot-id fields))))
       (is (= :jsonb (:type (:value fields))))
-      (is (= :enum (:type (:override-kind fields))))
+      (is (nil? (:override-kind fields))
+          "mirror column retired with its base (audit-2 2b)")
       (is (= :timestamptz (:type (:created-at fields)))))))
 
 
@@ -137,7 +138,7 @@
              :lambda-params}
            (vds/version-data-fields :fn)))
     (is (= #{:fn-id :slot-id :position} (vds/version-data-fields :fn-slot)))
-    (is (= #{:fn-id :slot-id :value :value-present :ref-fn-id :override-kind
+    (is (= #{:fn-id :slot-id :value :value-present :ref-fn-id
              :type-override-fn-id :description :list-append :list-closed
              :terminal :required :resolver-fn-id}
            (vds/version-data-fields :binding)))

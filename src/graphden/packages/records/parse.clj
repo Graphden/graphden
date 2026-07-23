@@ -613,11 +613,6 @@
    :value nil
    :value-present false
    :ref-fn-id nil
-   ;; :override-kind deliberately ABSENT (nil): the enum is retired
-   ;; (audit-2 stage 1) — :fixed discriminated nothing (superseded by
-   ;; :terminal), :default was write-only, :secret-path became the
-   ;; :vault-get resolver form.
-   :override-kind nil
    :type-override-fn-id nil
    :resolver-fn-id nil
    :description nil

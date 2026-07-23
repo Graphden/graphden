@@ -669,50 +669,6 @@
 ;; Fn Entities
 ;; =============================================================================
 
-(defn migrate-secret-path-bindings!
-  "One-time, idempotent data migration (audit-2 stage 1 of the
-   `:override-kind` retirement): every binding still carrying the
-   legacy `:override-kind :secret-path` marker WITHOUT a
-   `:resolver-fn-id` gets pointed at the `:vault-get` resolver — the
-   generic mechanism the legacy marker was the special case of.
-   Root-branch scope through whatever storage the boot hands us; the
-   executor keeps reading BOTH shapes until stage 2 retires the
-   column, so an unmigrated branch row stays executable. No-op when
-   the vault package isn't loaded or nothing matches."
-  [storage]
-  (try
-    (when-let [vault-get-id (:id (first (sp/query-entities
-                                          storage :fn {:name "vault-get"})))]
-      (let [legacy (into []
-                         (remove :resolver-fn-id)
-                         (sp/query-entities storage :binding
-                                            {:override-kind :secret-path}))
-            ;; Stage 2a: BRANCH version rows too — a branch-local
-            ;; secret edit lives in binding-version; resolution takes
-            ;; the latest version per branch, so an unmigrated version
-            ;; row would resurface the legacy marker on that branch.
-            ;; :binding-version is a plain (non-versioned) entity —
-            ;; in-place column fill, same logical content.
-            legacy-versions (into []
-                                  (remove :resolver-fn-id)
-                                  (sp/query-entities storage :binding-version
-                                                     {:override-kind :secret-path}))]
-        (doseq [b legacy]
-          (sp/update-entity storage :binding (:id b)
-                            {:resolver-fn-id vault-get-id}))
-        (doseq [bv legacy-versions]
-          (sp/update-entity storage :binding-version (:id bv)
-                            {:resolver-fn-id vault-get-id}))
-        (when (or (seq legacy) (seq legacy-versions))
-          (log/info "Migrated legacy :secret-path bindings to :vault-get resolver"
-                    {:identity-rows (count legacy)
-                     :version-rows (count legacy-versions)}))))
-    (catch Exception e
-      ;; Loud but non-fatal: the legacy READ path still executes these
-      ;; rows; the next boot retries.
-      (log/error e "secret-path → resolver migration failed — legacy read path still active"))))
-
-
 (defmethod ig/init-key :exec/fn-entities
   [_ {:keys [storage packages base-fns skip-allowlist-gate?]}]
   (log/info "Creating fn entities...")
@@ -720,7 +676,6 @@
               storage packages base-fns
               {:skip-allowlist-gate? skip-allowlist-gate?})]
     (log/info "Fn entities created:" (count fns))
-    (migrate-secret-path-bindings! storage)
     fns))
 
 

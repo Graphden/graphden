@@ -26,7 +26,7 @@
    (`:list-append`, `:list-closed`, …) — `bind-value!` only covers
    the plain value case."
   [storage fields]
-  (sp/create-entity storage :binding (merge {:override-kind :fixed} fields)))
+  (sp/create-entity storage :binding fields))
 
 
 (defn- cyclic-ref-graph!

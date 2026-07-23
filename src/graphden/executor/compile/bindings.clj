@@ -215,17 +215,6 @@
        :slot-id slot-id :resolver-id (:resolver-fn-id b)
        :stored (:value b)}
 
-      ;; UNMIGRATED legacy row — the boot migration
-      ;; (`system.core/migrate-secret-path-bindings!`) should have
-      ;; pointed it at :vault-get. Refuse loudly rather than treat the
-      ;; vault PATH as a literal (which would both break the secret
-      ;; and leak the path into execution).
-      (and (value-binding? b) (= :secret-path (:override-kind b)))
-      (throw (ex-info (str "unmigrated legacy :secret-path binding on slot "
-                           base-name " — the boot migration did not run "
-                           "(is the web/vault package installed?)")
-                      {:type :compile/unmigrated-secret-path
-                       :slot-id slot-id :fn-id fn-id}))
 
       (value-binding? b)
       {:kind :value :base-name base-name :ext-name ext-name :slot-id slot-id

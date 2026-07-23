@@ -410,7 +410,6 @@
                      :value binding-version-value-field-uuid
                      :value-present binding-version-value-present-field-uuid
                      :ref-fn-id binding-version-ref-fn-id-field-uuid
-                     :override-kind binding-version-override-kind-field-uuid
                      :type-override-fn-id binding-version-type-override-fn-id-field-uuid
                      :description binding-version-description-field-uuid
                      :list-append binding-version-list-append-field-uuid
@@ -612,7 +611,10 @@
       ;; `fn-version.impl-hash` retired — mirror of the main `:fn`
       ;; entity. The base-fn discriminator is now `return-type-fn-id`
       ;; presence; the column was always NULL. See retire-field on `:fn`.
-      (ds/retire-field :fn-version :impl-hash fn-version-impl-hash-field-uuid)))
+      (ds/retire-field :fn-version :impl-hash fn-version-impl-hash-field-uuid)
+      ;; Mirror of the retired binding.override-kind (audit-2 2b).
+      (ds/retire-field :binding-version :override-kind
+                       binding-version-override-kind-field-uuid)))
 
 
 (defn build-schema

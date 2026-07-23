@@ -3862,7 +3862,7 @@
           :else {:value {}}}}
 
   {:name :parse-binding-from-form
-   :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool). Empty form values clear the corresponding column. (`:override-kind` retired — writes carrying it reject.)"
+   :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool). Empty form values clear the corresponding column. (`:override-kind` is retired — an unknown-field write rejects at storage.)"
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-fn-id-fragment

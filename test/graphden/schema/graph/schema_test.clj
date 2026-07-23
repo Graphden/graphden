@@ -69,7 +69,7 @@
 
 
 (deftest binding-entity-fields-test
-  (testing "binding carries override-kind enum + per-level metadata"
+  (testing "binding carries per-level metadata (override-kind RETIRED)"
     (let [fields (ds/entity-fields schema :binding)]
       (is (= :ref (get-in fields [:fn-id :type])))
       (is (= :ref (get-in fields [:slot-id :type])))
@@ -77,8 +77,8 @@
       (is (true? (get-in fields [:value :nullable?])))
       (is (= :ref (get-in fields [:ref-fn-id :type])))
       (is (true? (get-in fields [:ref-fn-id :nullable?])))
-      (is (= :enum (get-in fields [:override-kind :type])))
-      (is (= :override-kind (get-in fields [:override-kind :enum-name])))
+      (is (nil? (get fields :override-kind))
+          "column retired (audit-2 2b) — the enum type stays declared")
       ;; `:rename-to` was retired in Phase 6e — replaced by
       ;; slot.source-slot-id FK. Field no longer present in spec.
       (is (nil? (get fields :rename-to)))
@@ -151,8 +151,7 @@
                                   {:id (random-uuid)
                                    :fn-id (random-uuid)
                                    :slot-id (random-uuid)
-                                   :value 42
-                                   :override-kind :fixed}))))
+                                   :value 42}))))
 
   (testing "valid binding-list-item"
     (is (nil? (ds/validate-entity schema :binding-list-item

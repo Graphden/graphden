@@ -103,8 +103,7 @@
               list-bn (sp/create-entity storage :binding
                                         {:fn-id (:id f-fn)
                                          :slot-id (:id s-list)
-                                         :list-append true
-                                         :override-kind :fixed})
+                                         :list-append true})
               ;; A positional `{:as :alpha}` creates a rename slot on
               ;; f-fn named "alpha" whose source chains back to
               ;; s-list. parser does this in production; for the

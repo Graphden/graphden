@@ -204,8 +204,8 @@
 ;; partial renders the real grants table, not the degraded notice.
 ;; ---------------------------------------------------------------------------
 (deftest grants-panel-renders-real-grants
-  (sp/create-entity (:storage *ctx*) :grant {:subject-id "alice" :subject "alice" :capability "write" :namespace "acme"})
-  (sp/create-entity (:storage *ctx*) :grant {:subject-id "bob" :subject "bob" :capability "read" :namespace "shared"})
+  (sp/create-entity (:storage *ctx*) :grant {:subject-id "alice" :capability "write" :namespace "acme"})
+  (sp/create-entity (:storage *ctx*) :grant {:subject-id "bob" :capability "read" :namespace "shared"})
   (let [handler-id (fn-id-of (:storage *ctx*) "_partial-grants-admin-handler")
         resp (cr/execute *ctx* handler-id {})
         body (:body resp)]

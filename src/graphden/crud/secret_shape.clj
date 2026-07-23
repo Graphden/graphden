@@ -39,7 +39,7 @@
    `web.vault` package isn't loaded. `:secret-leaf` is the
    passthrough base-fn used by the Secrets-panel admin path — its
    `:in` slot is `[:secret :text]` and the binding carries
-   `:override-kind :secret-path` (executor auto-derefs the OpenBao
+   a `:vault-get` resolver binding (executor auto-derefs the OpenBao
    path at arg-resolution time; the secret value never appears in
    graphden storage)."
   [storage]

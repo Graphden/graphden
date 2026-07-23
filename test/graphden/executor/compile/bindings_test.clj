@@ -82,7 +82,7 @@
             cseq  (setup/create-composed-fn! storage "cbs-fn" (:id base))
             bind  (sp/create-entity storage :binding
                                     {:fn-id (:id cseq) :slot-id (:id slot)
-                                     :list-append true :override-kind :fixed})
+                                     :list-append true})
             _     (sp/create-entity storage :binding-list-item
                                     {:binding-id (:id bind) :position 0 :value 1})
             _     (sp/create-entity storage :binding-list-item
@@ -196,8 +196,7 @@
           (let [extra (setup/create-slot! storage "extra" :int)]
             (sp/create-entity storage :binding
                               {:fn-id (:id cfn) :slot-id (:id extra)
-                               :value 99 :value-present true
-                               :override-kind :fixed})
+                               :value 99 :value-present true})
             (let [env (b/collect-env-bindings (:id cfn) (lookups-for storage))]
               (is (= 1 (count env)))
               (is (= :extra (:env-name (first env))))

@@ -4,7 +4,7 @@
 
    A secret is represented in graphden as a normal `fn` row with
    `parent-ids=[:secret-leaf]` plus a single `binding` row whose
-   `:override-kind :secret-path` carries the KV path in
+   the `:vault-get` resolver binding carries the KV path in
    `binding.value`. The actual secret VALUE never touches the
    graphden DB — it goes straight to OpenBao via the
    `graphden.clients.vault` client, and the executor auto-derefs

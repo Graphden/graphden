@@ -30,33 +30,34 @@
 
 
 (defn extend-builder
-  "Add the `:grant` entity — `(subject, subject-id, capability, namespace)`.
+  "Add the `:grant` entity — `(subject-id, capability, namespace)`.
    `subject-id` is the STABLE authz key (the user's id) that enforcement
-   matches on; `subject` (username) is kept for display + the personal-
-   namespace path. Capability is plain text (`\"write\"`, not `\":write\"`)
+   matches on; the denormalized `subject` username column is RETIRED —
+   display joins the user row, the personal-namespace path derives from
+   the auth principal. Capability is plain text (`\"write\"`, not `\":write\"`)
    so the codec round-trips it cleanly; the store keywordizes on read."
   [builder]
-  (ds/add-entity builder :grant grant-entity-uuid
-                 {;; RETIRED-IN-PROGRESS (audit-2): writers no longer stamp
-                  ;; the denormalized username; display joins the user row
-                  ;; by :subject-id. Nullable until the retirement batch
-                  ;; drops the column entirely.
-                  :subject {:uuid grant-subject-field-uuid :type :text
-                            :nullable? true :indexed? true}
-                  ;; The STABLE authz key — enforcement lookup + delete
-                  ;; cascade match on this. :text (the id's string form),
-                  ;; not :uuid — written as `(str user-id)` so the column
-                  ;; carries both prod uuids and any test-supplied id
-                  ;; uniformly. Backfilled from legacy `:subject` rows at
-                  ;; addon boot.
-                  :subject-id {:uuid grant-subject-id-field-uuid
-                               :type :text
-                               :nullable? true
-                               :indexed? true}
-                  :capability {:uuid grant-capability-field-uuid :type :text}
-                  :namespace {:uuid grant-namespace-field-uuid
-                              :type :text
-                              :nullable? true}}))
+  (-> builder
+      (ds/add-entity :grant grant-entity-uuid
+                     {;; The STABLE authz key — enforcement lookup + delete
+                      ;; cascade match on this. :text (the id's string form),
+                      ;; not :uuid — written as `(str user-id)` so the column
+                      ;; carries both prod uuids and any test-supplied id
+                      ;; uniformly. Backfilled from legacy `:subject` rows at
+                      ;; addon boot.
+                      :subject-id {:uuid grant-subject-id-field-uuid
+                                   :type :text
+                                   :nullable? true
+                                   :indexed? true}
+                      :capability {:uuid grant-capability-field-uuid :type :text}
+                      :namespace {:uuid grant-namespace-field-uuid
+                                  :type :text
+                                  :nullable? true}})
+      ;; grant.subject retired (audit-2 2b): the denormalized username —
+      ;; enforcement and cascades key on :subject-id, display joins the
+      ;; user row; legacy rows were backfilled at addon boot before
+      ;; this drop.
+      (ds/retire-field :grant :subject grant-subject-field-uuid)))
 
 
 (defrecord StorageBackedGrantStore

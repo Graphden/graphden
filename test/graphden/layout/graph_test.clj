@@ -261,7 +261,7 @@
               c    (setup/create-composed-fn! storage "lg-seq-fn" (:id base))
               bind (sp/create-entity storage :binding
                                      {:fn-id (:id c) :slot-id (:id slot)
-                                      :list-append true :override-kind :fixed})
+                                      :list-append true})
               _    (sp/create-entity storage :binding-list-item
                                      {:binding-id (:id bind) :position 0 :value 1})
               _    (sp/create-entity storage :binding-list-item

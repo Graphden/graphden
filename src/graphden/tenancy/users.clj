@@ -168,7 +168,7 @@
 (defn delete-user!
   "Operator op — delete the user with id `user-id` and CASCADE the rows
    that reference it by name: session `:token`s (`:user`) and `:grant`s
-   (`:subject`), so no dangling auth / authz rows survive the account.
+   (`:subject-id`), so no dangling auth / authz rows survive the account.
 
    Runs in the CALLER's org (NOT forced to public-org) — `:user` /
    `:token` / `:grant` are `tenant-forbidden-entities`, so the storage
@@ -219,7 +219,10 @@
                        (some-> (first (sp/query-entities storage :user {:username username}))
                                :id str)))
         tokens (filter #(nil? (:user-id %)) (sp/query-entities storage :token {}))
-        grants (filter #(nil? (:subject-id %)) (sp/query-entities storage :grant {}))
+        ;; grant.subject is retired — a nil-subject-id grant has no
+        ;; username source left to backfill from; such rows are dead
+        ;; (match no subject) and await manual cleanup.
+        grants []
         stamped (fn [entity id-key name-key rows]
                   (reduce (fn [n row]
                             (if-let [uid (user-id-of (name-key row))]

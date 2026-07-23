@@ -352,11 +352,13 @@
                               {:id probe-a-id
                                :name "regression-secret-a"
                                :parent-ids [leaf-id]})
+          vg-id (fn-id "vault-get")
           _ (sp/create-entity *storage* :binding
                               {:fn-id probe-a-id
                                :slot-id path-slot
                                :value "kv/data/secret-a"
-                               :override-kind :secret-path})
+                               :value-present true
+                               :resolver-fn-id vg-id})
           _ (sp/create-entity *storage* :fn
                               {:id probe-b-id
                                :name "regression-secret-b"
@@ -365,7 +367,8 @@
                               {:fn-id probe-b-id
                                :slot-id path-slot
                                :value "kv/data/secret-b"
-                               :override-kind :secret-path})
+                               :value-present true
+                               :resolver-fn-id vg-id})
           registry (graphden.executor.compile-runtime/registry *context*)
           pg-query-closure (get registry (fn-id "pg-query"))
           storage-query-callable (fn [hsql]

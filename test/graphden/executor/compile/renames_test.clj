@@ -195,8 +195,7 @@
               list-bn (sp/create-entity storage :binding
                                         {:fn-id (:id f-fn)
                                          :slot-id (:id s-list)
-                                         :list-append true
-                                         :override-kind :fixed})]
+                                         :list-append true})]
           ;; Two list items, both literal maps with `:as` → each re-
           ;; exposes its `:as` keyword as a deep-free name of F.
           (sp/create-entity storage :binding-list-item

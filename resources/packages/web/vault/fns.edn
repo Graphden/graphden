@@ -2,7 +2,7 @@
 ;;
 ;; Read-side (`:secret-leaf`) is user-facing — fn-graphs read
 ;; secrets through it instead of `:env`. The executor auto-derefs
-;; the binding's `:override-kind :secret-path` value at
+;; the binding's `:resolver-fn-id :vault-get` value at
 ;; arg-resolution time; the secret value never appears in graphden
 ;; storage. Write / delete / metadata sides are admin-only — the
 ;; capability gate in `crud.entities/secret-leaf-capability-rej`
@@ -23,7 +23,7 @@
   ;;
   ;; Has a single `[:secret :text]` slot that the executor
   ;; auto-derefs through `clients/vault/get-secret` at
-  ;; arg-resolution time when the binding's `:override-kind` is
+  ;; arg-resolution time when the binding's resolver is
   ;; `:secret-path` (the binding's `:value` carries the OpenBao
   ;; path; the actual secret value never appears in graphden
   ;; storage). Impl is a pure passthrough — the executor has
@@ -33,10 +33,10 @@
   ;; `parent :secret-leaf` — the only admin-supported secret shape.
   ;; ---------------------------------------------------------------------
   {:name :secret-leaf
-   :description "Binding-IS-secret leaf. Pure passthrough: the executor reads the binding's `:override-kind :secret-path` shape, dereferences the vault path, and feeds the value to this impl which just returns it. The slot type `[:secret :text]` carries the marker downstream. Use the Secrets sidebar panel to create one — its admin flow writes the path to OpenBao and creates this fn-def + secret-path binding atomically."
+   :description "Binding-IS-secret leaf. Pure passthrough: the executor resolves the binding through its `:vault-get` resolver (`:resolver-fn-id`), dereferencing the vault path, and feeds the value to this impl which just returns it. The slot type `[:secret :text]` carries the marker downstream. Use the Secrets sidebar panel to create one — its admin flow writes the path to OpenBao and creates this fn-def + secret-path binding atomically."
    :tags #{:admin-only-vault :secret-shape}
    :args {:in {:type [:secret :text]
-               :description "Auto-resolved by the executor from a `:override-kind :secret-path` binding whose `:value` is the OpenBao path. Sync-time validation refuses any other binding shape on this slot — see `crud.validation/secret-path-rej`."}}
+               :description "Auto-resolved by the executor from a `:vault-get`-resolver binding whose `:value` is the OpenBao path. `crud.validation/resolver-rej` refuses hide-result resolvers on non-secret slots."}}
    :return-type [:secret :text]
    :effects #{:network}
    ;; Runtime-config marker — see graphden.versioning.branch-local.
@@ -81,7 +81,7 @@
   ;; provenance info.
   ;; ---------------------------------------------------------------------
   {:name :vault-get
-   :description "Read the secret value at KV v2 `<:path>`. Returns `[:secret :text]` — the value enters the graph ALREADY marked, so it can only flow into secret-aware slots. The canonical RESOLVER for secret bindings (`{:resolver :vault-get :value " kv/path "}` ≡ the legacy `:override-kind :secret-path`); admin-gated like every vault primitive."
+   :description "Read the secret value at KV v2 `<:path>`. Returns `[:secret :text]` — the value enters the graph ALREADY marked, so it can only flow into secret-aware slots. The canonical RESOLVER for secret bindings (`{:resolver :vault-get :value " kv/path "}` the retired `:override-kind :secret-path` was its special case); admin-gated like every vault primitive."
    :args {:path {:type :non-blank-text
                  :description "KV v2 path to read."}}
    :return-type [:secret :text]

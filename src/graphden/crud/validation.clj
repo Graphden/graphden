@@ -516,38 +516,21 @@
                               " is not legal on base type :" (name base-name))}))))))))
 
 
-(defn- secret-path-rej
-  "refuse `:override-kind :secret-path` on bindings whose
-   slot's effective rich-type doesn't carry a `:secret` marker.
-   Without this gate, a user could mark any plain `:text`-typed
-   binding as secret-path, the executor would dereference via vault,
-   and the secret value would silently flow into a non-secret slot —
-   bypassing T1's structural enforcement.
-
-   The slot's `:type-fn-id` foreign key is STRUCTURAL — `[:secret T]`
-   stores as the inner `T`'s fn-id (see
-   `packages/records/types.clj`), so the marker is lost at storage
-   level. The MARKER lives in the rich-types registry on the slot-
-   owning fn-row's args. We walk:
-     binding.slot-id → fn-slot.fn-id → fn.name → rich-types[name]
-     → :args → slot-name keyword → arg-info → :type
-   …and ask `contains-secret?` on that type."
-  [storage entity-type entity-data]
+(defn- override-kind-retired-rej
+  "`:override-kind` is RETIRED (audit-2 stage 2): `:fixed`
+   discriminated nothing (`:terminal` is the seal), `:default` was
+   write-only, and `:secret-path` became the `:vault-get` RESOLVER
+   binding (`:resolver-fn-id` — whose own gate, `resolver-rej` below,
+   enforces the secret-marker laundering protection the old
+   secret-path gate provided). Any API write still carrying the key
+   is a stale client — reject with the migration pointer instead of
+   silently accepting a field the executor no longer reads."
+  [entity-type entity-data]
   (when (and (= entity-type :binding)
-             (= :secret-path (:override-kind entity-data)))
-    (let [slot-id (:slot-id entity-data)
-          slot (when slot-id (sp/read-entity storage :slot slot-id))
-          slot-name (some-> slot :name keyword)
-          owning-junction (when slot-id
-                            (first (sp/query-entities storage :fn-slot {:slot-id slot-id})))
-          owner-fn (when owning-junction
-                     (sp/read-entity storage :fn (:fn-id owning-junction)))
-          owner-rich (some-> owner-fn :id registry/rich-type-of-id)
-          arg-info (when (and owner-rich slot-name)
-                     (get-in owner-rich [:args slot-name]))
-          arg-type (or (:type arg-info) arg-info)]
-      (when-not (types/contains-secret? (or arg-type :any))
-        {:reason ":override-kind :secret-path requires the slot's effective type to carry a `:secret` marker — without it the dereferenced value would silently flow into a non-secret slot, defeating the type-system enforcement"}))))
+             (some? (:override-kind entity-data)))
+    {:reason (str ":override-kind is retired — a secret binding is "
+                  "{:resolver-fn-id <vault-get>} with the path in :value; "
+                  ":terminal covers sealing. Remove the field from the write.")}))
 
 
 (defn- reparent-cross-branch-rej
@@ -660,8 +643,8 @@
               (assoc :type :constraint-violation/terminal-seal))
       (some-> (list-closed-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/list-closed))
-      (some-> (secret-path-rej storage entity-type entity-data)
-              (assoc :type :capability/secret-path-on-non-secret-slot))
+      (some-> (override-kind-retired-rej entity-type entity-data)
+              (assoc :type :constraint-violation/override-kind-retired))
       (some-> (reparent-cross-branch-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/reparent-cross-branch))
       (some-> (resolver-rej storage entity-type entity-data)

@@ -486,7 +486,7 @@ shape only — inline rotation is followup work.
 
 Verified end-to-end in 2026-05-29 smoke:
 
-- Gate-reject on `:add/:nums` (`:sequence`) → `:capability/secret-path-on-non-secret-slot`, vault rolled back (subsequent read 404).
+- Gate-reject: a legacy `:override-kind` write → `:constraint-violation/override-kind-retired`; a `:vault-get`-resolver write into a non-secret slot → `:capability/resolver-marker-laundering`, vault rolled back (subsequent read 404).
 - Positive bind on `:sql-exec/:password` of a freshly-created composed fn → `binding` row with `:override-kind :secret-path`, vault holds the value at the path.
 
 ## Tests

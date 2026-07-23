@@ -16,9 +16,9 @@
    `(if test then else)` only forces the picked branch. No
    `:lazy-args` markers or other flags: lazy is built in.
 
-   `graphden.clients.vault` is resolved lazily in the
-   `:secret-value` arg-builder so test runs that never touch a
-   secret slot don't pay its load cost."
+   Secret bindings are ordinary `:resolved-value` args since the
+   `:override-kind` retirement — `:vault-get`'s own impl owns the
+   vault-client resolution (ctx `:vault` + JVM-wide fallback)."
   (:require
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
@@ -143,7 +143,7 @@
 (defn- supported-shapes?
   "True iff every binding shape `fn-id` carries is supported by the
    current compile-eager stage. With Stage 4 every classify-slot
-   kind (`:value` / `:free` / `:ref` / `:seq` / `:secret-value` /
+   kind (`:value` / `:free` / `:ref` / `:seq` /
    `:resolved-value`)
    has a builder, so every fn whose root has an impl is now
    compilable — this check stays here as a guard against future
@@ -151,7 +151,7 @@
   [fn-id lookups]
   (every? (fn [bnd]
             (case (:kind bnd)
-              (:value :free :seq :ref :secret-value :resolved-value) true
+              (:value :free :seq :ref :resolved-value) true
               false))
           (b/collect-bindings fn-id lookups)))
 
@@ -382,20 +382,6 @@
            'graphden.executor.compile-runtime/make-single-arg-callable)))
 
 
-(def ^:private vault-get-secret
-  (delay (requiring-resolve 'graphden.clients.vault/get-secret)))
-
-
-(def ^:private vault-active-client
-  ;; JVM-wide fallback for fn-graphs running on a ctx that doesn't
-  ;; carry `:vault` (per-branch ctx builds — see
-  ;; `system.branch-router/build-branch-ctx`). Lazy resolve preserves
-  ;; the "don't load clients.vault until first use" perf optimisation.
-  ;; `@vault-active-client` is the Var, `(deref @vault-active-client)`
-  ;; is the atom, `@(deref @vault-active-client)` is the client value.
-  (delay (requiring-resolve 'graphden.clients.vault/active-client)))
-
-
 (defn- lazy-seq-of-values
   "Lazy-seq that materialises each item by calling its builder only
    when the consumer pulls the cons-cell — matches Clojure-native
@@ -433,7 +419,7 @@
    `cond-fn` that step past unforced items via `nnext`."
   [fn-id
    {:keys [kind ext-name value ref-id is-fn produces-callable? ref-renames
-           items lazy-seq? slot-id path binder-fn-id resolver-id stored]
+           items lazy-seq? slot-id binder-fn-id resolver-id stored]
     :as bnd}
    child-callables
    lookups]
@@ -475,16 +461,6 @@
           (fn []
             ((@make-single-arg-callable-fn ctx rid) sv)))))
 
-    :secret-value
-    (let [p path]
-      (fn [_fa ctx]
-        (rt/thunk
-          (fn []
-            (let [vault-client (or (:vault ctx)
-                                   (some-> @vault-active-client deref deref)
-                                   (throw (ex-info "Vault client not configured — set VAULT_ADDR / VAULT_TOKEN"
-                                                   {:type :vault/not-configured})))]
-              (@vault-get-secret vault-client p))))))
     :ref
     (let [child (or (get child-callables ref-id)
                     (throw (ex-info "compile-eager: ref-target not yet compiled"

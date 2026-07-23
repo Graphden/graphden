@@ -206,18 +206,26 @@
         ext-name (l/rename-for-slot fn-id slot-id lookups)
         b (effective-binding fn-id slot-id lookups)]
     (cond
-      (and (value-binding? b) (= :secret-path (:override-kind b)))
-      {:kind :secret-value :base-name base-name :ext-name ext-name
-       :slot-id slot-id :path (:value b)}
-
       ;; Generic value-resolver — the stored :value is the INPUT to the
       ;; resolver graph fn at arg-resolution time ("stored → runtime").
-      ;; `:secret-path` above is the legacy vault instance of the same
-      ;; idea (SECRETS.md § generalization).
+      ;; Secret bindings ARE this (resolver = :vault-get) since the
+      ;; :override-kind retirement.
       (and (value-binding? b) (:resolver-fn-id b))
       {:kind :resolved-value :base-name base-name :ext-name ext-name
        :slot-id slot-id :resolver-id (:resolver-fn-id b)
        :stored (:value b)}
+
+      ;; UNMIGRATED legacy row — the boot migration
+      ;; (`system.core/migrate-secret-path-bindings!`) should have
+      ;; pointed it at :vault-get. Refuse loudly rather than treat the
+      ;; vault PATH as a literal (which would both break the secret
+      ;; and leak the path into execution).
+      (and (value-binding? b) (= :secret-path (:override-kind b)))
+      (throw (ex-info (str "unmigrated legacy :secret-path binding on slot "
+                           base-name " — the boot migration did not run "
+                           "(is the web/vault package installed?)")
+                      {:type :compile/unmigrated-secret-path
+                       :slot-id slot-id :fn-id fn-id}))
 
       (value-binding? b)
       {:kind :value :base-name base-name :ext-name ext-name :slot-id slot-id

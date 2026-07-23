@@ -453,8 +453,7 @@
               comp-fn     (setup/create-composed-fn! storage "tu-ovr-comp-fn" (:id host))
               _        (sp/create-entity storage :binding
                                          {:fn-id (:id comp-fn) :slot-id (:id slot)
-                                          :type-override-fn-id (:id type-row)
-                                          :override-kind :fixed})
+                                          :type-override-fn-id (:id type-row)})
               res      (types-usages
                          {:body {:type-fn-id (str (:id type-row))}} c)
               kinds    (set (map :kind (:usages res)))]

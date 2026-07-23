@@ -59,7 +59,7 @@
               slot (setup/create-slot! storage "s" :int)
               b    (sp/create-entity storage :binding
                                      {:fn-id (:id f) :slot-id (:id slot)
-                                      :value 1 :override-kind :fixed})]
+                                      :value 1})]
           (is (= #{(:id f)}
                  (entities/affected-fn-ids storage :binding-list-item
                                            {:binding-id (:id b)})))))
@@ -139,7 +139,7 @@
                 slot (setup/create-slot! storage "s" :int)
                 b    (sp/create-entity storage :binding
                                        {:fn-id (:id f) :slot-id (:id slot)
-                                        :value 1 :override-kind :fixed})]
+                                        :value 1})]
             (entities/notify-after-write! emit-ctx storage :binding-list-item :delete
                                           {:binding-id (:id b) :id (random-uuid)})
             (is (= [{:kind :fn :op :invalidate :id (str (:id f))}] @events)
@@ -378,7 +378,7 @@
     (let [slot (setup/create-slot! storage "sfi-ref-slot" :int)]
       (sp/create-entity storage :binding
                         {:fn-id child :slot-id (:id slot)
-                         :ref-fn-id a2 :override-kind :fixed}))
+                         :ref-fn-id a2}))
     ;; sp/create-entity bypasses the graph-cache invalidation the real
     ;; write path runs — drop the cache so the loader sees these writes.
     (ctx/invalidate-graph-cache! c)
@@ -656,8 +656,7 @@
         bnd (sp/create-entity storage :binding
                               {:fn-id (:id comp-fn)
                                :slot-id (:id slot)
-                               :value nil
-                               :override-kind :fixed})]
+                               :value nil})]
     [(:id bnd) (:id comp-fn)]))
 
 
@@ -682,7 +681,7 @@
             comp-fn (setup/create-composed-fn! storage "tnf-f" (:id base))
             bnd     (sp/create-entity storage :binding
                                       {:fn-id (:id comp-fn) :slot-id (:id slot)
-                                       :value 1 :override-kind :fixed})
+                                       :value 1})
             r (entities/tighten-fn-type-impl! storage (:id bnd)
                                               {:effects ["io"]})]
         (is (= 400 (:status r)))

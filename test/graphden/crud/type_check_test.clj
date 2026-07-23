@@ -177,8 +177,7 @@
         (let [f    (setup/create-base-fn! storage "lifb-fn")
               slot (setup/create-slot! storage "items" :int)
               b    (sp/create-entity storage :binding
-                                     {:fn-id (:id f) :slot-id (:id slot)
-                                      :override-kind :fixed})]
+                                     {:fn-id (:id f) :slot-id (:id slot)})]
           (sp/create-entity storage :binding-list-item
                             {:binding-id (:id b) :position 1 :value 20})
           (sp/create-entity storage :binding-list-item
@@ -236,8 +235,7 @@
               _     (setup/attach-slot! storage (:id base) (:id slot) 0)
               child (setup/create-composed-fn! storage "rfd-list" (:id base))
               b     (sp/create-entity storage :binding
-                                      {:fn-id (:id child) :slot-id (:id slot)
-                                       :override-kind :fixed})
+                                      {:fn-id (:id child) :slot-id (:id slot)})
               _     (sp/create-entity storage :binding-list-item
                                       {:binding-id (:id b) :position 0 :value 1})
               _     (sp/create-entity storage :binding-list-item

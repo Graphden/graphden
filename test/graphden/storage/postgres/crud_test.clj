@@ -120,14 +120,12 @@
               slot (setup/create-slot! storage "x" :int)
               _    (setup/create-fn-slot! storage (:id base) (:id slot) 0)
               bind (setup/create-binding! storage (:id base) (:id slot)
-                                          :value 1 :override-kind :fixed)]
-          ;; updating an unrelated scalar must not choke on the row's
-          ;; override_kind enum column
+                                          :value 1)]
           (sp/update-entity storage :binding (:id bind) {:value 99})
           (let [reread (sp/read-entity storage :binding (:id bind))]
             (is (= 99 (:value reread)))
-            (is (= :fixed (:override-kind reread))
-                "enum round-trips as a keyword, not a bare string")))
+            (is (nil? (:override-kind reread))
+                "retired column absent from decoded rows (audit-2 2b)")))
         (finally
           (sp/close storage))))))
 

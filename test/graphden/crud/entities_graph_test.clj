@@ -235,7 +235,7 @@
           comp-fn (setup/create-composed-fn! storage (uniq "pue-comp") (:id base))
           bind    (sp/create-entity storage :binding
                                     {:fn-id (:id comp-fn) :slot-id (:id slot)
-                                     :value 1 :override-kind :fixed})
+                                     :value 1})
           resp    (via-update (form-req (str "/api/entities/binding/" (:id bind))
                                         "value=99" :put))]
       (is (= 200 (:status resp)))
@@ -267,7 +267,7 @@
           comp-fn (setup/create-composed-fn! storage (uniq "puesr-comp") (:id base))
           bind    (sp/create-entity storage :binding
                                     {:fn-id (:id comp-fn) :slot-id (:id slot)
-                                     :value 1 :override-kind :fixed})
+                                     :value 1})
           renamed (uniq "renamed-orig")
           resp    (via-update (form-req (str "/api/entities/binding/" (:id bind))
                                         (str "value=2&rename-to=" renamed) :put))]
@@ -327,7 +327,7 @@
           comp-fn (setup/create-composed-fn! storage (uniq "pde-bind-comp-fn") (:id base))
           bind (sp/create-entity storage :binding
                                  {:fn-id (:id comp-fn) :slot-id (:id slot)
-                                  :value 1 :override-kind :fixed})
+                                  :value 1})
           resp (via-delete {:uri (str "/api/entities/binding/" (:id bind))
                             :request-method :delete})]
       (is (= 200 (:status resp)))

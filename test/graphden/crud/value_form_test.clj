@@ -327,7 +327,7 @@
             fr   (setup/create-base-fn! storage "nav-owner")
             bnd  (sp/create-entity storage :binding
                                    {:fn-id (:id fr) :slot-id (:id slot)
-                                    :list-append true :override-kind :fixed})
+                                    :list-append true})
             i0   (sp/create-entity storage :binding-list-item
                                    {:binding-id (:id bnd) :position 0
                                     :value :user :literal true})
@@ -366,7 +366,7 @@
               fr   (setup/create-base-fn! storage "cv-owner-2")
               b    (sp/create-entity storage :binding
                                      {:fn-id (:id fr) :slot-id (:id slot)
-                                      :list-append true :override-kind :fixed})
+                                      :list-append true})
               it   (sp/create-entity storage :binding-list-item
                                      {:binding-id (:id b) :position 0 :value 7})]
           (is (= 7 (current-value storage {:binding-id (:id b)
@@ -458,8 +458,7 @@
                                       :slot-id (:id slot)
                                       :value 5
                                       :type-override-fn-id
-                                      (get setup/primitive-fn-ids :text)
-                                      :override-kind :fixed})]
+                                      (get setup/primitive-fn-ids :text)})]
           (is (= :text (vf/resolve-slot-effective-type
                          storage {:binding-id (:id b)})))))
 

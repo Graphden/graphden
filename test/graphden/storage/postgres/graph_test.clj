@@ -119,8 +119,7 @@
               ;; mark the slot as sequence-bearing.
               binding     (sp/create-entity storage :binding
                                             {:fn-id (:id composed)
-                                             :slot-id (:id slot)
-                                             :override-kind :fixed})
+                                             :slot-id (:id slot)})
               _           (sp/create-entity storage :binding-list-item
                                             {:binding-id (:id binding)
                                              :position 0
@@ -152,8 +151,7 @@
               _         (setup/bind-ref! storage (:id leaf) (:id slot1) (:id target1))
               binding2  (sp/create-entity storage :binding
                                           {:fn-id (:id leaf)
-                                           :slot-id (:id slot2)
-                                           :override-kind :fixed})
+                                           :slot-id (:id slot2)})
               _         (sp/create-entity storage :binding-list-item
                                           {:binding-id (:id binding2)
                                            :position 0

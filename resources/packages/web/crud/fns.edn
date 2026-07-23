@@ -3742,7 +3742,7 @@
   ;; --- :parse-binding-from-form. Same per-field-fragment
   ;; pattern; 11 fields. Coercions: `:parse-uuid` for *-id fields,
   ;; `:parse-json`-when-non-blank for `:value`, `:str-to-keyword`-when-
-  ;; non-blank for `:override-kind`, pass-through for `:description`,
+  ;; pass-through for `:description`,
   ;; `:equal? "true"` for the three boolean flags, and a nullable
   ;; "true"-bool for `:required`.
 
@@ -3794,29 +3794,6 @@
                                                 :args {:coll {:as :form-data}
                                                        :key {:value :ref-fn-id}
                                                        :default nil}}}}]}}
-          :else {:value {}}}}
-
-  {:name :_parse-bnd-form-override-kind-raw
-   :parent :get
-   :args {:coll {:as :form-data} :key {:value :override-kind} :default nil}}
-
-  {:name :_parse-bnd-form-override-kind-coerced
-   :description "Keyword-when-non-blank; nil clears."
-   :parent :if
-   :args {:test {:parent :not
-                 :args {:value {:parent :blank?
-                                :args {:string :_parse-bnd-form-override-kind-raw}}}}
-          :then {:parent :str-to-keyword
-                 :args {:string :_parse-bnd-form-override-kind-raw}}
-          :else nil}}
-
-  {:name :_parse-bnd-form-override-kind-fragment
-   :parent :if
-   :args {:test {:parent :contains?
-                 :args {:coll {:as :form-data} :key {:value :override-kind}}}
-          :then {:parent :zipmap
-                 :args {:keys [{:value :override-kind}]
-                        :vals [:_parse-bnd-form-override-kind-coerced]}}
           :else {:value {}}}}
 
   {:name :_parse-bnd-form-type-override-fn-id-fragment
@@ -3885,14 +3862,13 @@
           :else {:value {}}}}
 
   {:name :parse-binding-from-form
-   :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool), `:override-kind` (`:fixed` / `:default`). Empty form values clear the corresponding column."
+   :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool). Empty form values clear the corresponding column. (`:override-kind` retired — writes carrying it reject.)"
    :parent :merge
    :args {:maps [{:value {}}
                  :_form-fn-id-fragment
                  :_parse-bnd-form-slot-id-fragment
                  :_parse-bnd-form-value-fragment
                  :_parse-bnd-form-ref-fn-id-fragment
-                 :_parse-bnd-form-override-kind-fragment
                  :_parse-bnd-form-type-override-fn-id-fragment
                  :_form-description-fragment
                  :_parse-bnd-form-list-append-fragment

@@ -686,13 +686,27 @@
       (let [legacy (into []
                          (remove :resolver-fn-id)
                          (sp/query-entities storage :binding
-                                            {:override-kind :secret-path}))]
-        (when (seq legacy)
-          (doseq [b legacy]
-            (sp/update-entity storage :binding (:id b)
-                              {:resolver-fn-id vault-get-id}))
+                                            {:override-kind :secret-path}))
+            ;; Stage 2a: BRANCH version rows too — a branch-local
+            ;; secret edit lives in binding-version; resolution takes
+            ;; the latest version per branch, so an unmigrated version
+            ;; row would resurface the legacy marker on that branch.
+            ;; :binding-version is a plain (non-versioned) entity —
+            ;; in-place column fill, same logical content.
+            legacy-versions (into []
+                                  (remove :resolver-fn-id)
+                                  (sp/query-entities storage :binding-version
+                                                     {:override-kind :secret-path}))]
+        (doseq [b legacy]
+          (sp/update-entity storage :binding (:id b)
+                            {:resolver-fn-id vault-get-id}))
+        (doseq [bv legacy-versions]
+          (sp/update-entity storage :binding-version (:id bv)
+                            {:resolver-fn-id vault-get-id}))
+        (when (or (seq legacy) (seq legacy-versions))
           (log/info "Migrated legacy :secret-path bindings to :vault-get resolver"
-                    {:count (count legacy)}))))
+                    {:identity-rows (count legacy)
+                     :version-rows (count legacy-versions)}))))
     (catch Exception e
       ;; Loud but non-fatal: the legacy READ path still executes these
       ;; rows; the next boot retries.

@@ -10,6 +10,7 @@
    thread them through."
   (:require
     [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]))
 
@@ -716,6 +717,13 @@
   (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
 
 
+(def ^:private rich-type-of-fn
+  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of)))
+
+
+(def ^:private stale-identity-lp-warned (atom #{}))
+
+
 (defn- declared-lambda-params
   "The fn-def's AUTHORED `:lambda-params` (ordered vector of its own
    free-arg names), from the rich-types registry entry — or nil when
@@ -734,7 +742,28 @@
                         (some->> (:lambda-params
                                    (get (:fn-map lookups) r-fn-id))
                                  (mapv keyword))
-                        (:lambda-params (@rich-type-of-id-fn r-fn-id)))]
+                        (:lambda-params (@rich-type-of-id-fn r-fn-id))
+                        ;; LEGACY-ROW rescue: long-lived DBs hold stale
+                        ;; identity rows from historical namespace
+                        ;; moves — a resolved binding can still
+                        ;; reference the OLD id, whose row predates
+                        ;; the column and whose id the registry never
+                        ;; keyed. Same name ⇒ same authored contract,
+                        ;; so fall back to the CURRENT registry entry
+                        ;; by the row's name (warn-once per id; bare
+                        ;; per-ns-ambiguous names return nil from the
+                        ;; name view and simply skip this arm).
+                        (when-let [row-name (:name (get (:fn-map lookups)
+                                                        r-fn-id))]
+                          (when-let [lp (:lambda-params
+                                          (@rich-type-of-fn
+                                           (keyword row-name)))]
+                            (when-not (contains? @stale-identity-lp-warned
+                                                 r-fn-id)
+                              (swap! stale-identity-lp-warned conj r-fn-id)
+                              (log/warn "lambda-params resolved by NAME for a stale identity row — repoint or tombstone the legacy fn row"
+                                        {:fn-id r-fn-id :name row-name}))
+                            lp)))]
     (let [frees (set (deep-free-ext-names r-fn-id lookups))
           unknown (remove frees declared)]
       (when (seq unknown)

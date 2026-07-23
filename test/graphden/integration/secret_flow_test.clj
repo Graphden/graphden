@@ -32,7 +32,6 @@
         fn-def never lands in storage."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.crud.validation :as validation]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]

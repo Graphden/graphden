@@ -157,7 +157,9 @@
       (throw (ex-info "user not found" {:type :user/not-found :id user-id})))
     (sp/update-entity storage :user user-id
                       {:password-hash (hash-password new-password)})
-    (let [tokens (sp/query-entities storage :token {:user (:username user)})]
+    ;; Session invalidation by the STABLE user-id (same retirement as
+    ;; the delete cascade below — username matching drifts on rename).
+    (let [tokens (sp/query-entities storage :token {:user-id (str user-id)})]
       (when (seq tokens)
         (sp/delete-entities storage :token (mapv :id tokens)))
       {:sessions-invalidated (count tokens)})))
@@ -179,17 +181,17 @@
         user (sp/read-entity storage :user user-id)]
     (when-not user
       (throw (ex-info "user not found" {:type :user/not-found :id user-id})))
-    (let [username (:username user)
-          ;; Cascade by BOTH the stable id AND the (legacy) name, unioned by
-          ;; row id: catches backfilled AND un-backfilled rows, and a row whose
-          ;; username ever drifted from the account is still caught by user-id.
+    (let [;; Cascade by the STABLE id only. The by-username union is
+          ;; retired (audit-2 grant.subject completion): the addon boot
+          ;; backfills legacy rows (`backfill-auth-subject-ids!`) and
+          ;; every writer stamps the id, so a nil-subject-id row can no
+          ;; longer exist past boot — and matching by mutable username
+          ;; was the exact drift-bug class the id column was added for.
           uid-str (str user-id)
           token-ids (into #{} (map :id)
-                          (concat (sp/query-entities storage :token {:user-id uid-str})
-                                  (sp/query-entities storage :token {:user username})))
+                          (sp/query-entities storage :token {:user-id uid-str}))
           grant-ids (into #{} (map :id)
-                          (concat (sp/query-entities storage :grant {:subject-id uid-str})
-                                  (sp/query-entities storage :grant {:subject username})))]
+                          (sp/query-entities storage :grant {:subject-id uid-str}))]
       (when (seq token-ids)
         (sp/delete-entities storage :token (vec token-ids)))
       (when (seq grant-ids)

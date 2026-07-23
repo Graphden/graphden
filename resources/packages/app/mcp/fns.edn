@@ -488,6 +488,7 @@
   ;; Method dispatch + route
   ;; ==========================================================================
   {:name :_mcp-dispatch
+   :lambda-params [:request :storage-query]
    :description "JSON-RPC method dispatch for POST /mcp."
    :parent :cond
    :args {:clauses [{:parent :equal? :args {:a :_mcp-method :b {:value "initialize"}}}

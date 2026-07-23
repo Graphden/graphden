@@ -4153,6 +4153,7 @@
           :param-name {:value "q"}}}
 
   {:name :all-entities-handler
+   :lambda-params [:request]
    :description "Ring handler that returns the graph dump as JSON. `?scope=tree` → `{:namespaces :counts}` (sidebar init). `?scope=namespace&namespace-id=X` → one namespace's light fns (lazy expand). `?scope=search&q=…` → capped name matches (filter / pickers). `?scope=index` → `{:fns :namespaces}` full pull. `?scope=subtree&root-id=X` → subgraph reachable from X. Bound by `app.routes.api-entities`."
    :parent :json-handler
    :args {:data {:parent :list-all-graph-entities
@@ -4203,31 +4204,37 @@
           :parsed :_types-usages-parsed}}
 
   {:name :types-compatible-handler
+   :lambda-params [:request]
    :description "Ring handler for `POST /api/types/compatible` — wraps `:types-compatible` in a JSON 200 response."
    :parent :json-handler
    :args {:data :types-compatible}}
 
   {:name :types-candidates-handler
+   :lambda-params [:request]
    :description "Ring handler for `POST /api/types/candidates` — wraps `:types-candidates` in a JSON 200 response."
    :parent :json-handler
    :args {:data :types-candidates}}
 
   {:name :types-usages-handler
+   :lambda-params [:request]
    :description "Ring handler for `POST /api/types/usages` — wraps `:types-usages` in a JSON 200 response."
    :parent :json-handler
    :args {:data :types-usages}}
 
   {:name :types-create-record-handler
+   :lambda-params [:default :request]
    :description "Ring handler for `POST /api/types/record` — atomic compound create for a record type-row. Wraps `process-create-record-type` in a JSON 200 response (the {:ok false :error} payload itself carries any error)."
    :parent :json-handler
    :args {:data :process-create-record-type}}
 
   {:name :types-create-list-handler
+   :lambda-params [:default :request]
    :description "Ring handler for `POST /api/types/list` — atomic compound create for a list type-row."
    :parent :json-handler
    :args {:data :process-create-list-type}}
 
   {:name :types-update-record-handler
+   :lambda-params [:default :request]
    :description "Ring handler for `PUT /api/types/record` — atomic compound update for a record type-row. Wraps `process-update-record-type` in a JSON 200 response (the {:ok false :error} payload carries failures)."
    :parent :json-handler
    :args {:data :process-update-record-type}}
@@ -4320,31 +4327,37 @@
           :parsed :_update-record-type-parsed}}
 
   {:name :create-entity-handler
+   :lambda-params [:default :request :limit]
    :description "Ring handler for `POST /api/entities/:type` — runs `process-create-entity` and wraps the result via `html-action-response`."
    :parent :html-action-response
    :args {:result :process-create-entity}}
 
   {:name :update-entity-handler
+   :lambda-params [:default :request :limit]
    :description "Ring handler for `PUT /api/entities/:type/:id` — runs `process-update-entity` and wraps the result via `html-action-response`."
    :parent :html-action-response
    :args {:result :process-update-entity}}
 
   {:name :delete-entity-handler
+   :lambda-params [:storage-query :request]
    :description "Ring handler for `DELETE /api/entities/:type/:id` — runs `process-delete-entity` and wraps the result via `html-action-response`."
    :parent :html-action-response
    :args {:result :process-delete-entity}}
 
   {:name :sequence-append-handler
+   :lambda-params [:request :default :limit]
    :description "Ring handler for `POST /api/sequence/append/:fn-id` — appends an item to the named sequence-arg."
    :parent :html-action-response
    :args {:result :process-sequence-append}}
 
   {:name :sequence-remove-handler
+   :lambda-params [:request :default :limit]
    :description "Ring handler for `DELETE /api/sequence/item/:item-id` — removes an item from its sequence-arg."
    :parent :html-action-response
    :args {:result :process-sequence-remove}}
 
   {:name :sequence-update-handler
+   :lambda-params [:request :default :limit]
    :description "Ring handler for `PUT /api/sequence/item/:item-id` — replaces an item's value/ref."
    :parent :html-action-response
    :args {:result :process-sequence-update}}
@@ -4391,6 +4404,7 @@
           :parsed :_tighten-parsed}}
 
   {:name :tighten-binding-effects-handler
+   :lambda-params [:request :default :limit]
    :description "Ring handler for `POST /api/bindings/:binding-id/tighten-fn-effects` — narrow an fn-typed binding's effective type."
    :parent :html-action-response
    :args {:result :process-tighten-binding-effects}}]}

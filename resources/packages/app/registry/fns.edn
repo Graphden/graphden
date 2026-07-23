@@ -199,6 +199,7 @@
           :bundle :_publish-bundle}}
 
   {:name :publish-package-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/publish (auth-required) — JSON `{ok, …}`."
    :parent :json-handler
    :args {:data :_publish-result}}
@@ -340,6 +341,7 @@
    :args {:pkg-name :_fetch-pkg-name :pkg-version :_fetch-pkg-version}}
 
   {:name :fetch-package-handler
+   :lambda-params [:request]
    :description "Ring handler for GET /api/packages/:name/:version (auth-required) — JSON bundle, or null when absent."
    :parent :json-handler
    :args {:data :_fetch-pkg-result}}
@@ -367,6 +369,7 @@
    :description "The whole-graph bundle as an EDN string (`:pr-str`) — keywords preserved for faithful re-load."
    :parent :pr-str :args {:value :_export-graph-result}}
   {:name :_export-graph-handler
+   :lambda-params [:request]
    :description "Ring handler for GET /api/export/graph (auth-required) — `application/edn` bundle."
    :parent :edn-ok-response :args {:body :_export-graph-edn}}
   {:name :api-export-graph
@@ -725,6 +728,7 @@
    :args {:pkg-name :_install-name :pkg-version :_install-version}}
 
   {:name :install-package-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/install (auth-required) — JSON `{ok, …}`."
    :parent :json-handler
    :args {:data :_install-result}}
@@ -883,8 +887,7 @@
                     :_pkgv-row-nil?     :_pkgv-err-not-found
                     :_upd-same?         :_upd-noop
                     :_pkgv-missing-any? :_pkgv-err-missing
-                    {:value true}       :_upd-ok]}
-   :return-type :keyword-map}
+                    {:value true}       :_upd-ok]}}
 
   {:name :_update-body
    :description "Parsed JSON body of POST /api/packages/update — `{:name :version}`."
@@ -905,6 +908,7 @@
    :args {:pkg-name :_update-name :pkg-version :_update-version}}
 
   {:name :update-package-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/update (auth-required) — JSON `{ok, …}`."
    :parent :json-handler
    :args {:data :_update-result}}
@@ -956,6 +960,7 @@
    :args {:pkg-name :_fork-name :pkg-version :_fork-version}}
 
   {:name :fork-package-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/fork (auth-required) — JSON `{ok, …}`."
    :parent :json-handler
    :args {:data :_fork-result}}
@@ -1337,6 +1342,7 @@
    :description "Remove the pin, THEN render the refreshed panel — `:do` forces order so :list-installed-packages excludes the removed pin."
    :parent :do :args {:steps [:_uninstall-do :_pkg-panel-html]}}
   {:name :_uninstall-handler
+   :lambda-params [:request]
    :description "Ring handler for DELETE /api/packages/uninstall — removes the pin and returns the refreshed Packages panel as text/html."
    :parent :html-ok-response :args {:body :_uninstall-then-panel}}
   {:name :api-packages-uninstall
@@ -1419,6 +1425,7 @@
    :description "Install, THEN render the refreshed panel (with the needs-secrets notice when applicable) — `:do` forces order so :list-installed-packages includes the new pin."
    :parent :do :args {:steps [:_pkg-install-do :_pkg-install-panel-html]}}
   {:name :_pkg-install-panel-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/panel-install — installs and returns the refreshed Packages panel as text/html."
    :parent :html-ok-response :args {:body :_pkg-install-then-panel}}
   {:name :api-packages-panel-install
@@ -1446,6 +1453,7 @@
    :description "Update/rollback, THEN render the refreshed panel — `:do` forces order so the installed table shows the new version."
    :parent :do :args {:steps [:_pkg-update-do :_pkg-panel-html]}}
   {:name :_pkg-update-panel-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/packages/panel-update — updates and returns the refreshed Packages panel as text/html."
    :parent :html-ok-response :args {:body :_pkg-update-then-panel}}
   {:name :api-packages-panel-update
@@ -1501,6 +1509,7 @@
   {:name :_pkg-fork-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-fork-panel-root}}
   {:name :_pkg-fork-panel-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/panel-fork — forks and returns the refreshed panel (with a transient fork notice) as text/html."
    :parent :html-ok-response :args {:body :_pkg-fork-panel-html}}
   {:name :api-packages-panel-fork
@@ -1637,6 +1646,7 @@
   {:name :_pkg-publish-then-panel
    :parent :do :args {:steps [:_pkg-publish-result :_pkg-publish-panel-html]}}
   {:name :_pkg-publish-panel-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/packages/panel-publish — exports + publishes the named namespace, returns the refreshed Packages panel (new version now in browse) as text/html."
    :parent :html-ok-response :args {:body :_pkg-publish-then-panel}}
   {:name :api-packages-panel-publish

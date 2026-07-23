@@ -392,6 +392,7 @@
    :args {:hiccup :page}}
 
   {:name :_editor-handler
+   :lambda-params [:default]
    :parent :html-ok-response
    :args {:body :_editor-rendered-page}}
 
@@ -412,6 +413,7 @@
    :args {:value :script}}
 
   {:name :_editor-js-handler
+   :lambda-params [:default]
    :description "Ring handler for `GET /assets/editor.js` — returns the concatenated editor JS bundle (with `__BUILD_HASH__` substituted) as `application/javascript` with `Cache-Control: public, max-age=31536000, immutable`."
    :parent :immutable-js-ok-response
    :args {:body :_editor-js-body}}
@@ -576,6 +578,7 @@
                   "env"     "Reads environment variables."
                   "io"      "Reads or writes files / classpath resources."
                   "network" "Makes outbound HTTP / network calls."
+                  "state"   "Mutates in-memory shared state (:cell atoms via :swap / :reset). Process-local — lost on restart, not shared across pods."
                   "time"    "Uses wall-clock time — call returns a different value over time."
                   "random"  "Generates random or otherwise non-deterministic values."
                   "process" "Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service."
@@ -654,6 +657,7 @@
    :args {:hiccup :_partial-effect-fragment}}
 
   {:name :_partial-effect-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/effect?effect=<tag>` — returns the popover hiccup as `text/html`. JS swaps the response body into the explainer mount-point and handles positioning + dismissal."
    :parent :html-ok-response
    :args {:body :_partial-effect-html}}
@@ -734,6 +738,7 @@
    :args {:hiccup :_auth-form-fields}}
 
   {:name :_partial-auth-form-handler
+   :lambda-params [:children]
    :description "Ring handler for GET /partials/auth-form — the login/signup popover fields as text/html. Unauthenticated (it IS the login form). editor-auth.js mounts it into #auth-popover on first open."
    :parent :html-ok-response
    :args {:body :_auth-form-html}}
@@ -1356,6 +1361,7 @@
    :args {:hiccup :_partial-row-actions-body}}
 
   {:name :_partial-row-actions-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/row-actions` — see the comment block above for the URL shape + JS contract."
    :parent :html-ok-response
    :args {:body :_partial-row-actions-html}}
@@ -1876,6 +1882,7 @@
    :args {:hiccup :_partial-mismatch-fragment}}
 
   {:name :_partial-mismatch-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/mismatch-explainer?binding-id=X[&item-id=Y]` — returns the mismatch-explainer hiccup as `text/html`. STEP 1 of the JS→graph migration: replaces the JS-side validation + render with a server fetch reading the binding straight from DB. Provenance / diff-leaves / Edit button stay JS-side until steps 2-4."
    :parent :html-ok-response
    :args {:body :_partial-mismatch-html}}
@@ -2117,6 +2124,7 @@
    :args {:hiccup :_partial-provenance-fragment}}
 
   {:name :_partial-provenance-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/provenance?binding-id=X[&item-id=Y]` — returns the provenance popover hiccup as `text/html`. STEP 1 of the JS→graph migration: header + the shared `_provenance-section`. Steps 2-3 will add Allowed-values (closed-enum refinement member list) and Slot-effect-bound (`[:fn …]` eff constraint) sections."
    :parent :html-ok-response
    :args {:body :_partial-provenance-html}}
@@ -2432,6 +2440,7 @@
    :args {:hiccup :_rtr-fragment}}
 
   {:name :_partial-rtr-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/return-type-rule?fn=<name>` — returns the return-type-rule popover hiccup as `text/html`. Replaces the JS-built popover + `ruleNarrators` prose mirror; JS mounts + anchors only."
    :parent :html-ok-response
    :args {:body :_rtr-html}}
@@ -2642,6 +2651,7 @@
    :args {:hiccup :_xp-fragment}}
 
   {:name :_partial-xp-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/execute-popover?fn-id=<uuid>` — the Run-popover shell as `text/html`. JS mounts value-forms into the arg hosts and owns run/poll/cancel/history."
    :parent :html-ok-response
    :args {:body :_xp-html}}
@@ -2788,6 +2798,7 @@
    :args {:hiccup :_cto-fragment}}
 
   {:name :_partial-cto-handler
+   :lambda-params [:request :keywordize]
    :description "Ring handler for `GET /partials/compatible-type-options` — the compatible-type <option> list as `text/html`."
    :parent :html-ok-response
    :args {:body :_cto-html}}
@@ -2893,6 +2904,7 @@
    :args {:hiccup :_eef-fragment}}
 
   {:name :_partial-eef-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/expects-effects-form?fn-id=<uuid>` — the declared-effects edit form as `text/html`."
    :parent :html-ok-response
    :args {:body :_eef-html}}
@@ -3028,6 +3040,7 @@
    :args {:hiccup :_partial-fpi-fragment}}
 
   {:name :_partial-fn-picker-incompat-handler
+   :lambda-params [:request :keywordize]
    :description "Ring handler for `GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid}` — returns the fn-picker incompat-explainer hiccup as `text/html`. Replaces the editor's legacy JS `renderMismatchExplainer` path used by `editor-fn-picker.js`'s `explainAndOfferAnyway`."
    :parent :html-ok-response
    :args {:body :_partial-fpi-html}}
@@ -3066,6 +3079,7 @@
    :args {:hiccup :_partial-execute-result-fragment}}
 
   {:name :_partial-execute-result-handler
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/execute-result?id={uuid}` — returns the execution body hiccup as `text/html`. nil execution → an `[:span hidden]` (the popover stays empty so the editor's `Loading…` → empty path is graceful)."
    :parent :html-ok-response
    :args {:body :_partial-execute-result-html}}
@@ -3095,6 +3109,7 @@
    :args {:hiccup :_partial-execute-result-inline-fragment}}
 
   {:name :_partial-execute-result-inline-handler
+   :lambda-params [:request]
    :description "Ring handler for `POST /partials/execute-result-inline` — body is the JSON shape `/api/execute` returns inline (with `:status` / `:result` / `:error` / `:touched-secret?` / etc.). Same `:render-execute-result-hiccup` walker the id-based GET partial uses; lets the orchestrator render non-persisted runs server-side too."
    :parent :html-ok-response
    :args {:body :_partial-execute-result-inline-html}}
@@ -3394,6 +3409,7 @@
    :args {:hiccup :_partial-fnv-fragment}}
 
   {:name :_partial-fn-versions-handler
+   :lambda-params [:request :storage-query]
    :description "Ring handler for `GET /partials/fn-versions?fn-id=X&current-branch=Y&title=Z` — returns the popover hiccup as `text/html`. JS swaps the response into the popover. Row-expand is HTMX-driven (each row carries `hx-get` for its own executions); switch + restore still rebind in JS by selector."
    :parent :html-ok-response
    :args {:body :_partial-fnv-html}}
@@ -3495,6 +3511,7 @@
    :args {:hiccup :_partial-fnv-exec-body}}
 
   {:name :_partial-fn-version-executions-handler
+   :lambda-params []
    :description "Ring handler for `GET /partials/fn-version-executions?fn-version-id=X` — returns the executions sub-list as `text/html`. HTMX-driven from each fn-versions row's `hx-get`; no JS expansion code needed."
    :parent :html-ok-response
    :args {:body :_partial-fnv-exec-html}}
@@ -3696,6 +3713,7 @@
    :args {:hiccup :_partial-eh-fragment}}
 
   {:name :_partial-execute-history-handler
+   :lambda-params [:storage-query :fn-id :request]
    :description "Ring handler for `GET /partials/execute-history?fn-id=X` — returns the history panel hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the panel host and binds Repeat / row-expand handlers post-swap."
    :parent :html-ok-response
    :args {:body :_partial-eh-html}}
@@ -4178,6 +4196,7 @@
    :args {:hiccup :_partial-bd-fragment}}
 
   {:name :_partial-branch-diff-handler
+   :lambda-params [:branch-row :request]
    :description "Ring handler for `GET /partials/branch-diff?target=X&source=Y` — returns the diff body hiccup as `text/html`. JS in `editor-branch-diff.js` swaps the response into the modal body and binds row-click navigation handlers post-swap."
    :parent :html-ok-response
    :args {:body :_partial-bd-html}}
@@ -4569,6 +4588,7 @@
    :args {:hiccup :_partial-mc-card}}
 
   {:name :_partial-merge-conflicts-handler
+   :lambda-params [:request]
    :description "Ring handler for `POST /partials/merge-conflicts` — body is the `{conflicts, source, target}` JSON the failed merge returned to JS; returns the resolution card hiccup as `text/html`. Renders the POSTed conflicts (no re-detection). JS in editor-branches.js owns the overlay chrome + radio/apply lifecycle."
    :parent :html-ok-response
    :args {:body :_partial-mc-html}}
@@ -4789,6 +4809,7 @@
    :args {:hiccup :_partial-rfx-strip}}
 
   {:name :_partial-execute-result-effects-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for `GET /partials/execute-result-effects?runtime=db,io&declared=db` — returns the runtime-effects strip hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the result host below the result body."
    :parent :html-ok-response
    :args {:body :_partial-rfx-html}}

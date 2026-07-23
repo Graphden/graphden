@@ -164,17 +164,18 @@ dispatcher. It reads the slot's structural shape (via
   meaning "everything captured") overrides ALL inference and is
   validated against R's frees (`:compile/invalid-lambda-params` on a
   typo). Without a declaration: an unambiguous single candidate that
-  is R's OWN declared arg is accepted; otherwise the LEGACY one-shot
-  guess runs (candidates that are all env-binding names somewhere →
-  variadic-ignore) — now warn-logged once per callable with a
-  `:lambda-params` nudge. The guess is DEPRECATED but kept until the
-  slot contracts split boundary-vs-inner honestly: `:http-server
-  :handler` is a genuine per-call site (the request exists only at
-  invocation — capture cannot feed it; a uniform 0-arg flip broke
-  `/health`), while inner wrap `:base-handler` slots evaluate under a
-  request-carrying fa and can become `[:fn {} resp]`. That
-  boundary-aware migration is the follow-up that lets the guess become
-  a hard `:compile/ambiguous-lambda-params` error.
+  is R's OWN declared arg is accepted; anything else throws
+  **`:compile/ambiguous-lambda-params`**, naming the candidates. The
+  legacy one-shot guess (candidates all env-binding names somewhere →
+  variadic-ignore) is RETIRED (2026-07-23): every callable the
+  packaged graph landed on it with — 72, almost all route/partial
+  handlers — now declares `:lambda-params` explicitly (values baked
+  from the guess's own output, so compiled behaviour is unchanged;
+  tighten per-fn at leisure with compile feedback). Boundary
+  reminder unchanged: `:http-server :handler` is a genuine per-call
+  site (the request exists only at invocation — capture cannot feed
+  it; a uniform 0-arg flip broke `/health`), so handler declarations
+  keep `:request` in their params.
 - **2+-arg slot** (`[:fn {:a A :b B} ret]`) → sub free args matching
   slot's structural names. Map-callable; covers
   `:wrap-middleware :handler` (`{:request _ :next-handler _}`).

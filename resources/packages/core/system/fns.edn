@@ -286,6 +286,7 @@
   ;; if the path doesn't resolve. fn-def composition on top of
   ;; `:read-resource-or-nil` + `:if` + `:throw` + `:ex-info`.
   {:name :read-resource
+   :lambda-params [:path]
    :description "Read a classpath resource as a string, throwing `execution-error/resource-not-found` when the path doesn't resolve. Pure composition over `:read-resource-or-nil`/`:if`/`:throw`/`:ex-info`. `:path` propagates from the inner `:read-resource-or-nil :path` rename annotation."
    :parent :if
    :args {:test :_resource-nil?

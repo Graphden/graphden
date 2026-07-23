@@ -502,6 +502,8 @@
       ;; key presence, not `seq`.
       (contains? fnr :expects-effects)
       (assoc :expects-effects (mapv keyword (:expects-effects fnr)))
+      (some? (:lambda-params fnr))
+      (assoc :lambda-params (mapv keyword (:lambda-params fnr)))
       (contains? fnr :branch-local?)
       (assoc :branch-local? (:branch-local? fnr)))))
 

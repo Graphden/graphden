@@ -2,7 +2,7 @@
 // server-rendered form (`GET /partials/expects-effects-form`):
 //
 //   • open ✎ on a no-contract fn → form loads async; the category
-//     roster is the CANONICAL set (8 items — the old client grid
+//     roster is the CANONICAL set (9 items — the old client grid
 //     listed six and made :process / :raw-sql undeclarable);
 //   • "no contract" pre-selected, checkboxes disabled;
 //   • switch to "explicit contract" → tick :db + :process → Save →
@@ -24,8 +24,8 @@ const {assert, newContext, api, getEntities, deleteFnByName} =
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const PROBE = 'effects-edit-probe' + RUN_ID;
-const CANONICAL = ['db', 'env', 'io', 'network', 'process',
-                   'random', 'raw-sql', 'time'];
+const CANONICAL = ['db', 'env', 'io', 'network', 'process', 'random',
+                   'raw-sql', 'state', 'time'];
 
 
 async function cleanup(page) {
@@ -118,7 +118,7 @@ async function gotoProbe(page) {
     await openEffectsEditor(page);
     let st = await readFormState(page);
     assert(JSON.stringify(st.categories) === JSON.stringify(CANONICAL),
-           'canonical 8-category roster (incl. process + raw-sql): '
+           'canonical 9-category roster (incl. process + raw-sql + state): '
            + st.categories.join(','));
     assert(st.noneChecked && !st.contractChecked,
            '"no contract" pre-selected');

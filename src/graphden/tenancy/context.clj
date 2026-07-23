@@ -14,6 +14,7 @@
    decorator is wired does scoping take effect — making tenancy opt-in by
    construction (ADR §3.0)."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -115,9 +116,21 @@
                      (= byo-execution-mode
                         (some-> (first (sp/query-entities storage :org {:name org}))
                                 :execution-mode))
-                     (catch Exception _ false))]
-          (swap! cache assoc org {:byo? byo? :at now})
-          byo?)))))
+                     (catch Exception e
+                       ;; Fail hosted for THIS request (a DB blip must
+                       ;; not 421 every tenant) but do NOT cache the
+                       ;; error-derived answer — caching pinned the
+                       ;; org into cloud mode for the whole TTL on a
+                       ;; transient failure, silently mis-routing a
+                       ;; BYO org's execution. `::read-failed` skips
+                       ;; the cache write; the next request re-reads.
+                       (log/warn e "byo-mode read failed — treating as hosted for this request only"
+                                 {:org org})
+                       ::read-failed))]
+          (if (= ::read-failed byo?)
+            false
+            (do (swap! cache assoc org {:byo? byo? :at now})
+                byo?)))))))
 
 
 (defn invalidate-byo-cache!

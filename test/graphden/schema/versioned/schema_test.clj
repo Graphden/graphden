@@ -133,7 +133,8 @@
   (testing "version-data-fields derive from the SAME source as the mirror
             entities — pinned snapshots guard the identity/versioned split"
     (is (= #{:name :description :constraint :base-fn-id :element-fn-id
-             :return-type-fn-id :anonymous-hash :expects-effects}
+             :return-type-fn-id :anonymous-hash :expects-effects
+             :lambda-params}
            (vds/version-data-fields :fn)))
     (is (= #{:fn-id :slot-id :position} (vds/version-data-fields :fn-slot)))
     (is (= #{:fn-id :slot-id :value :value-present :ref-fn-id :override-kind

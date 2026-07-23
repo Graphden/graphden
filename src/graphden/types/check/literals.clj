@@ -33,6 +33,7 @@
    anything literals needs."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.types.core :as types]))
 
 
@@ -183,7 +184,19 @@
          (if (seq base-leaves)
            base-leaves
            (let [sat (try (literal-satisfies-refinement? value constraint)
-                          (catch Exception _ :unknown))]
+                          (catch Exception e
+                            ;; A THROWING predicate is a malformed
+                            ;; constraint or an evaluator bug — not
+                            ;; the benign "operator we can't evaluate
+                            ;; statically" case (that returns
+                            ;; :unknown itself). Accept conservatively
+                            ;; (never reject a value because the
+                            ;; CHECKER crashed) but say so — silently
+                            ;; equating a crash with a pass disabled
+                            ;; the refinement with no trace.
+                            (log/warn e "refinement predicate threw during literal check — accepting conservatively"
+                                      {:constraint constraint :value value})
+                            :unknown))]
              (if (false? sat) (leaf (classify-literal value)) []))))
 
        (and (vector? exp) (= :list (first exp)))

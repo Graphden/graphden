@@ -689,12 +689,15 @@
   (let [{:keys [args description return-type] fn-name :name ns-id :namespace} fn-def
         own-id (ids/fn-id ns-id fn-name)
         parent-ids (resolve-parent-list fn-def name->id)
+        ;; NO degradation here: `resolve-type-ref` handles every
+        ;; declarable shape itself (structural forms degrade to their
+        ;; storage primitive) and throws ONLY on a genuinely unknown
+        ;; type name — which is an author error that must fail the
+        ;; sync, not silently strip the declared return (the old
+        ;; catch+warn dropped it permanently; downstream checks and
+        ;; the editor's return strip then lied for that fn).
         ret-id (when return-type
-                 (try (types/resolve-type-ref return-type name->id)
-                      (catch Exception e
-                        (log/warn e "Composed-fn :return-type silently lost"
-                                  {:fn-name fn-name :return-type return-type})
-                        nil)))
+                 (types/resolve-type-ref return-type name->id))
         own-fn (composed-own-fn own-id fn-name ns-id parent-ids description ret-id)
         ;; Partition args: own-slot declarations (shape `{:type T}`
         ;; without binding markers) vs. bindings on inherited slots.
@@ -766,7 +769,7 @@
 (defn- attach-fn-meta
   "Post-process step that copies fn-def-level metadata onto the first
    record of every parser's output (which is always the `:fn` row).
-   Handles authored-only columns: `:expects-effects` and
+   Handles authored-only columns: `:expects-effects`, `:lambda-params` and
    `:branch-local?`. Both pass through verbatim — they're identity-
    level on `:fn` (not versioned), so a single write at parse-time
    suffices."
@@ -776,6 +779,13 @@
     (update 0 assoc :expects-effects
             (vec (map #(if (keyword? %) (name %) (str %))
                       (:expects-effects fn-def))))
+
+    ;; `[]` is a meaningful declaration ("everything captured") —
+    ;; gate on key presence, not truthiness-of-content.
+    (contains? fn-def :lambda-params)
+    (update 0 assoc :lambda-params
+            (vec (map #(if (keyword? %) (name %) (str %))
+                      (:lambda-params fn-def))))
 
     (contains? fn-def :branch-local?)
     (update 0 assoc :branch-local? (boolean (:branch-local? fn-def)))))

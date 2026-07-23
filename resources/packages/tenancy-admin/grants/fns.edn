@@ -355,6 +355,7 @@
    :args {:steps [:_grant-create-do :_grants-admin-html]}}
 
   {:name :_grant-create-handler
+   :lambda-params [:value :default :request :limit]
    :description "Ring handler for POST /api/grants — creates the grant and returns the refreshed grants panel as text/html (HTMX swap target)."
    :parent :html-ok-response
    :args {:body :_grant-create-then-panel}}

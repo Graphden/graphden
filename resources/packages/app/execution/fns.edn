@@ -624,6 +624,7 @@
           :parsed :_execute-parsed}}
 
   {:name :execute-handler
+   :lambda-params [:storage-query :request]
    :description "Ring handler for POST /api/execute — wraps `:execute` in a JSON 200 response."
    :parent :json-handler
    :args {:data :execute}}
@@ -711,6 +712,7 @@
           :loaded :_get-exec-loaded}}
 
   {:name :get-execution-handler
+   :lambda-params [:request :default :limit]
    :description "Ring handler for GET /api/execute/:id."
    :parent :json-handler
    :args {:data :_get-execution}}
@@ -744,6 +746,7 @@
           :applied :_cancel-exec-applied}}
 
   {:name :cancel-execution-handler
+   :lambda-params [:request :default :limit]
    :description "Ring handler for POST /api/execute/:id/cancel."
    :parent :json-handler
    :args {:data :_cancel-execution}}
@@ -965,6 +968,7 @@
           :parsed :_list-exec-parsed}}
 
   {:name :list-executions-handler
+   :lambda-params [:storage-query :fn-id :request]
    :description "Ring handler for GET /api/executions."
    :parent :json-handler
    :args {:data :_list-executions-by-fn}}
@@ -987,6 +991,7 @@
                  :_reconcile-services-apply]}}
 
   {:name :reconcile-services-handler
+   :lambda-params [:request]
    :description "Ring handler for POST /api/services/reconcile."
    :parent :json-handler
    :args {:data :_reconcile-services}}
@@ -1181,6 +1186,7 @@
           :names :_list-services-fn-names}}
 
   {:name :list-services-handler
+   :lambda-params []
    :description "Ring handler for GET /api/services."
    :parent :json-handler
    :args {:data :_list-services-data}}
@@ -2507,6 +2513,7 @@
    :args {:hiccup :_partial-service-popover-body}}
 
   {:name :_partial-service-popover-handler
+   :lambda-params [:storage-query :request]
    :description "Ring handler for `GET /partials/service-popover?fn-id=X` — returns the popover body as `text/html`. JS swaps the response into the popover host and binds save/delete/close handlers via `.service-popover-*-btn` selectors + `data-existing-service-id` attrs the partial emits."
    :parent :html-ok-response
    :args {:body :_partial-service-popover-html}}]}

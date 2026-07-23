@@ -325,15 +325,20 @@
    (compile + cache), so a freshly-created branch with services
    pays the compile cost on first reconcile."
   [base-ctx svc]
-  (or (when-let [router (br/current-router)]
-        (when-let [branch-id (:branch-id svc)]
-          (try
-            (br/ctx-for router branch-id)
-            (catch Exception e
-              (log/warn e "per-branch ctx build failed — falling back to base"
-                        {:service-id (:id svc) :branch-id branch-id})
-              nil))))
-      base-ctx))
+  (if-let [branch-id (and (br/current-router) (:branch-id svc))]
+    (try
+      (br/ctx-for (br/current-router) branch-id)
+      (catch Exception e
+        ;; Do NOT fall back to base: the service declared THAT
+        ;; branch, and running it against base silently executes a
+        ;; different branch's fn versions. Skip this pass — the
+        ;; level-triggered periodic tick retries the start once the
+        ;; branch ctx builds (same crash-failover semantics services
+        ;; already rely on).
+        (log/error e "per-branch ctx build failed — service start SKIPPED this pass (will retry on next tick)"
+                   {:service-id (:id svc) :branch-id branch-id})
+        ::branch-ctx-failed))
+    base-ctx))
 
 
 (defn reconcile-once!
@@ -425,6 +430,7 @@
        (doseq [sid to-start]
          (let [svc (get enabled-by-id sid)
                svc-ctx (ctx-for-service ctx svc)
+               branch-ctx-failed? (= ::branch-ctx-failed svc-ctx)
                ;; `:per-pod` services (listeners behind a load balancer) skip
                ;; the lock entirely — every pod runs its own (pool-size nil).
                ;; `:singleton` races for slot 0 (pool-size 1); `:pool` races for
@@ -436,6 +442,16 @@
                       (acquire-pool-slot! lock-conn sid pool-size))
                acquired? (or (not lock-gated?) (some? slot) (nil? lock-conn))]
            (cond
+             ;; Branch ctx unavailable — error already logged; leave
+             ;; the row un-started so the periodic tick retries. Any
+             ;; acquired slot is NOT held for a start we didn't make.
+             branch-ctx-failed?
+             (when (some? slot)
+               (try (pg-lock/release-slot! lock-conn sid slot)
+                    (catch Exception e
+                      (log/warn e "advisory lock release failed — continuing"
+                                {:service-id sid :slot slot}))))
+
              acquired?
              (let [entry (start-service! svc-ctx svc start-opts)
                    ;; Record :branch-id so stop time can tell which branch this

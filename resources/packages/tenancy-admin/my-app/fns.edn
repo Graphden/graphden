@@ -37,6 +37,7 @@
    :args {:value :_my-app-handler-do}}
 
   {:name :_my-app-handler-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/my-app/handler — self-serve set the tenant's app handler."
    :parent :html-ok-response
    :args {:body :_my-app-handler-text}}
@@ -76,6 +77,7 @@
    :args {:value :_verify-domain-do}}
 
   {:name :_verify-domain-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/my-app/verify-domain — self-serve verify the tenant's custom domain."
    :parent :html-ok-response
    :args {:body :_verify-domain-text}}

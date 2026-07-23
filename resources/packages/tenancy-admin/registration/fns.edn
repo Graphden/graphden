@@ -81,6 +81,7 @@
    :args {:value :_org-create-id}}
 
   {:name :_org-create-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/orgs — registers the org and returns its new id as text/html."
    :parent :html-ok-response
    :args {:body :_org-create-id-text}}
@@ -160,6 +161,7 @@
    :args {:value :_token-create-id}}
 
   {:name :_token-create-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/tokens — mints the token and returns its new id as text/html."
    :parent :html-ok-response
    :args {:body :_token-create-id-text}}
@@ -223,6 +225,7 @@
    :args {:value :_domain-create-id}}
 
   {:name :_domain-create-handler
+   :lambda-params [:request :limit]
    :description "Ring handler for POST /api/domains — registers the (unverified) domain and returns its new id as text/html."
    :parent :html-ok-response
    :args {:body :_domain-create-id-text}}
@@ -319,6 +322,7 @@
    :args {:value :_org-handler-do}}
 
   {:name :_org-handler-handler
+   :lambda-params [:default :request :limit]
    :description "Ring handler for POST /api/orgs/handler — sets the org's app handler, returns the updated row as text/html."
    :parent :html-ok-response
    :args {:body :_org-handler-result-text}}
@@ -406,6 +410,7 @@
    :args {:value :_org-mode-do}}
 
   {:name :_org-mode-handler
+   :lambda-params [:default :request :limit]
    :description "Ring handler for POST /api/orgs/execution-mode — flips the org's execution mode, returns the updated row as text/html."
    :parent :html-ok-response
    :args {:body :_org-mode-result-text}}

@@ -149,6 +149,32 @@
     (is (nil? (vf/pick-form-fn [] :int)))))
 
 
+(deftest pick-form-fn-marker-typed-slot-test
+  ;; A hide-result marker type dispatches to the secret-binding
+  ;; widget via a VECTOR registry key — [:secret :any] accepts any
+  ;; [:secret T] leaf and outranks the :any fallback. The editor JS
+  ;; routes purely on the widget name in the response; no tag names
+  ;; live client-side.
+  (let [reg [[:text "_form-text"] [:any "_form-json"]
+             [[:secret :any] "_form-secret-binding"]]]
+    (is (= "_form-secret-binding" (vf/pick-form-fn reg [:secret :text]))
+        "marker leaf picks the widget row over :any")
+    (is (= "_form-text" (vf/pick-form-fn reg :text))
+        "plain text unaffected")))
+
+
+(deftest registry-pairs-vector-type-keys-parse-test
+  ;; The graph registry rows are JSONB-round-tripped strings; a
+  ;; VECTOR first element becomes a structural keyword vector.
+  (with-redefs [graphden.executor.interface/execute-by-name
+                (fn [_ _ _]
+                  [["text" "_form-text"]
+                   [["secret" "any"] "_form-secret-binding"]])]
+    (is (= [[:text "_form-text"]
+            [[:secret :any] "_form-secret-binding"]]
+           (registry-pairs nil)))))
+
+
 (deftest pick-form-fn-js-source-prefers-textarea-over-text-input-test
   ;; Block 3.3 — when a slot declares `:js-source`, the registry's
   ;; `js-source -> _form-js-source` entry must outrank the wider

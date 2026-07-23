@@ -446,11 +446,12 @@
              ;; the row un-started so the periodic tick retries. Any
              ;; acquired slot is NOT held for a start we didn't make.
              branch-ctx-failed?
-             (when (some? slot)
-               (try (pg-lock/release-slot! lock-conn sid slot)
-                    (catch Exception e
-                      (log/warn e "advisory lock release failed — continuing"
-                                {:service-id sid :slot slot}))))
+             (do (swap! not-our-lock conj sid)
+                 (when (some? slot)
+                   (try (pg-lock/release-slot! lock-conn sid slot)
+                        (catch Exception e
+                          (log/warn e "advisory lock release failed — continuing"
+                                    {:service-id sid :slot slot})))))
 
              acquired?
              (let [entry (start-service! svc-ctx svc start-opts)

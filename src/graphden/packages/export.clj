@@ -70,6 +70,7 @@
     [clojure.string :as str]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
+    [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs])
   (:import
     (graphden.versioning.storage.core
@@ -129,6 +130,30 @@
                (edn-keyword-ns? (:namespace-id f)))
         (keyword (:namespace-id f) n)
         (keyword n)))))
+
+
+(def ^:private rich-type-of-id-fn
+  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
+
+
+(defn- hidden-resolver?
+  "Is `resolver-fn-id` a resolver whose registered RETURN carries a
+   hide-result marker (`:vault-get` → `[:secret :text]`, or any future
+   graph-declared marker)? Keyed by ID through the registry — the old
+   name comparison (`= :vault-get (ref-kw …)`) broke the moment ANY
+   namespace defined a same-named composed fn: `ref-kw` qualifies
+   duplicated bares, the `=` missed, and the secret binding was
+   emitted as a generic resolver form that `strip-secret-paths` and
+   the `:secrets` manifest never saw — leaking vault topology into
+   shared bundles while the header claimed `:secret-paths-included?
+   false`. nil-safe: unknown/absent registry entries → false (the
+   generic resolver emission is correct for non-hidden resolvers)."
+  [resolver-fn-id]
+  (boolean
+    (when resolver-fn-id
+      (some-> (@rich-type-of-id-fn resolver-fn-id)
+              :return
+              types/contains-hide-result-marker?))))
 
 
 (defn- slots-of
@@ -316,11 +341,9 @@
   [b ctx]
   (let [type-ref (when (:type-override-fn-id b)
                    (id->type-ref (:type-override-fn-id b) ctx))
-        ;; vault-get-resolved bindings ARE secret-paths — the dedicated
-        ;; wire key keeps the strip/manifest warn-policy seeing them (a
-        ;; `{:resolver :vault-get}` emission would slip past
-        ;; strip-secret-paths and leak the vault topology).
-        secret-path? (= :vault-get (ref-kw (:resolver-fn-id b) ctx))]
+        ;; Hidden-resolver bindings ARE secret-paths — the dedicated
+        ;; wire key keeps the strip/manifest warn-policy seeing them.
+        secret-path? (hidden-resolver? (:resolver-fn-id b))]
     (cond-> {}
       (:ref-fn-id b)
       (assoc :ref (ref-kw (:ref-fn-id b) ctx))
@@ -358,14 +381,14 @@
         (cond-> {:append items}
           (:list-closed b) (assoc :closed true)))
 
-      ;; vault-get-resolved binding (or the legacy :override-kind
-      ;; marker): the stored `:value` is the OpenBao/vault PATH the
-      ;; executor derefs at run time, not a literal. Emit the dedicated
-      ;; `{:secret-path …}` form so the strip/manifest warn-policy sees
-      ;; it and re-parse restores the vault-get resolver — the plain
-      ;; `{:value …}` form would silently turn the secret into a
-      ;; literal string holding the path (broken AND path-disclosing).
-      (= :vault-get (ref-kw (:resolver-fn-id b) ctx))
+      ;; Hidden-resolver binding: the stored `:value` is the
+      ;; OpenBao/vault PATH the executor derefs at run time, not a
+      ;; literal. Emit the dedicated `{:secret-path …}` form so the
+      ;; strip/manifest warn-policy sees it and re-parse restores the
+      ;; vault-get resolver — the plain `{:value …}` form would
+      ;; silently turn the secret into a literal string holding the
+      ;; path (broken AND path-disclosing).
+      (hidden-resolver? (:resolver-fn-id b))
       (cond-> {:secret-path (:value b)}
         (some? (:required b)) (assoc :required (:required b)))
 

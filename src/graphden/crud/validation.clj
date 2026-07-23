@@ -545,11 +545,20 @@
               branch (sp/read-entity storage :branch branch-id)
               fn-id (:id data)
               foreign-branch-ids
-              (fn [entity]
+              ;; LATEST-per-(row, branch), tombstones dropped: the raw
+              ;; version-table scan counted a foreign branch that had
+              ;; DELETED the fn (its version rows survive with
+              ;; :deleted-at set) as live divergence — permanently
+              ;; blocking the reparent on long-lived DBs. Same
+              ;; resolve-aware pattern as check-fn-name-collision!.
+              (fn [entity id-field]
                 (into #{}
-                      (comp (map :branch-id)
+                      (comp (remove :deleted-at)
+                            (map :branch-id)
                             (remove #(= branch-id %)))
-                      (sp/query-entities storage entity {:fn-id fn-id})))]
+                      (sp/query-latest-per-group storage entity
+                                                 {:fn-id fn-id}
+                                                 [id-field :branch-id])))]
           (cond
             (some? (:base-branch-id branch))
             {:reason (str "Changing a fn's parents affects EVERY branch "
@@ -558,9 +567,11 @@
                           "branch — switch to the root branch to re-parent.")}
 
             :else
-            (let [foreign (into (foreign-branch-ids :fn-version)
-                                (concat (foreign-branch-ids :binding-version)
-                                        (foreign-branch-ids :fn-slot-version)))]
+            (let [foreign (into (foreign-branch-ids :fn-version :fn-id)
+                                (concat (foreign-branch-ids :binding-version
+                                                            :binding-id)
+                                        (foreign-branch-ids :fn-slot-version
+                                                            :fn-slot-id)))]
               (when (seq foreign)
                 (let [names (into []
                                   (keep #(some-> (sp/read-entity storage :branch %)

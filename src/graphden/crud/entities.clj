@@ -384,7 +384,9 @@
     ;; executor's lifetime — small per-entry but on a long-running
     ;; prod instance it adds up to a real GC-pressure source.
     (when (and (= et :fn) (:name snapshot))
-      (registry/unregister-rich-type! (keyword (:name snapshot))))
+      ;; Row id threaded so the drop is keyed by THIS identity — a
+      ;; same-named duplicate (stale-identity class) keeps its entry.
+      (registry/unregister-rich-type! (keyword (:name snapshot)) id))
     (invalidate! ctx storage et snapshot)
     ;; NOTIFY the full pre-read `snapshot` (not a bare `{:id id}`): sibling
     ;; pods' `affected-fn-ids` needs the row's FKs (`:binding-id` / `:fn-id`)

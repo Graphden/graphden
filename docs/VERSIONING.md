@@ -272,11 +272,13 @@ change unless BOTH hold:
   branches — merge or delete them first).
 
 Parent-PRESERVING updates and non-versioned storages are unaffected.
-This is deliberately option (б) of the two coherent designs — the
-alternative (а), versioning the parent-set itself (an ordered array on
-`fn-version` + version-aware reverse-parent queries), stays open in
-[ADR-identity-model.md](adr/ADR-identity-model.md)'s companion notes if
-branch-local inheritance experiments ever become a requirement.
+This is option (б) of the two coherent designs, now DECIDED as the
+permanent semantic — the alternative (а), versioning the parent-set
+itself, is rejected (the parent-set defines the slot closure, and the
+closure is identity; branch-varying closures would re-architect
+fn-slot/MI/free-args and put version resolution on the compile hot
+path). Full rationale + the copy-on-write revisit door:
+[ADR-parent-set-identity.md](adr/ADR-parent-set-identity.md).
 
 ### `:fn-version` ≠ "functional behaviour"
 

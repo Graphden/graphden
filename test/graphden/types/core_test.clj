@@ -1012,6 +1012,25 @@
           (t/unregister-type-alias! :qual-probe))))))
 
 
+(deftest alias-ambiguity-fires-for-versioned-ns-owners
+  ;; Audit-3 regression: a version-materialized (`@`) namespace can't
+  ;; register a qualified keyword, and the old bookkeeping only
+  ;; tracked owners WITH qualified names — so a collision involving a
+  ;; versioned package silently last-write-won. Owners are now
+  ;; tracked unconditionally; the bare name throws either way.
+  (binding [t/*type-aliases-override* nil]
+    (let [owner-a (random-uuid)
+          owner-b (random-uuid)]
+      (try
+        (t/register-type-alias! :vns-probe :text owner-a :aa.mod/vns-probe)
+        ;; versioned-ns owner — no EDN-safe qualified form (nil)
+        (t/register-type-alias! :vns-probe :int owner-b nil)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ambiguous"
+              (t/resolve-alias :vns-probe)))
+        (finally
+          (t/unregister-type-alias! :vns-probe))))))
+
+
 (deftest alias-ambiguity-skipped-in-override-contexts
   ;; Isolated (override-bound) registries do their own bookkeeping-free
   ;; registration — a test fixture re-registering a name must not trip

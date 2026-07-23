@@ -437,10 +437,18 @@
                  ;; `:secret`) runs on the API write path, not here;
                  ;; the type-check sweep still rejects a secret-typed
                  ;; ref flowing into a plain slot.
+                 ;; `{:secret-path "kv/path"}` — sugar for the generic
+                 ;; resolver binding with `:vault-get` (audit-2 stage 1
+                 ;; of the :override-kind retirement: fresh syncs write
+                 ;; the resolver form; the enum column stops being
+                 ;; produced and goes read-compat only).
                  has-secret-path?
                  (assoc :value secret-path
                         :value-present true
-                        :override-kind :secret-path)
+                        :resolver-fn-id
+                        (or (resolve-ref-id name->id :vault-get)
+                            (throw (ex-info "{:secret-path …} needs the :vault-get resolver — is the web/vault package in the sync set?"
+                                            {:type :packages/vault-get-missing}))))
 
                  ;; `{:resolver :vault-get :value "kv/path"}` — generic
                  ;; value-resolver binding: the stored :value is the
@@ -605,7 +613,11 @@
    :value nil
    :value-present false
    :ref-fn-id nil
-   :override-kind :fixed
+   ;; :override-kind deliberately ABSENT (nil): the enum is retired
+   ;; (audit-2 stage 1) — :fixed discriminated nothing (superseded by
+   ;; :terminal), :default was write-only, :secret-path became the
+   ;; :vault-get resolver form.
+   :override-kind nil
    :type-override-fn-id nil
    :resolver-fn-id nil
    :description nil

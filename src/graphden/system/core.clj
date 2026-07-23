@@ -669,6 +669,36 @@
 ;; Fn Entities
 ;; =============================================================================
 
+(defn migrate-secret-path-bindings!
+  "One-time, idempotent data migration (audit-2 stage 1 of the
+   `:override-kind` retirement): every binding still carrying the
+   legacy `:override-kind :secret-path` marker WITHOUT a
+   `:resolver-fn-id` gets pointed at the `:vault-get` resolver — the
+   generic mechanism the legacy marker was the special case of.
+   Root-branch scope through whatever storage the boot hands us; the
+   executor keeps reading BOTH shapes until stage 2 retires the
+   column, so an unmigrated branch row stays executable. No-op when
+   the vault package isn't loaded or nothing matches."
+  [storage]
+  (try
+    (when-let [vault-get-id (:id (first (sp/query-entities
+                                          storage :fn {:name "vault-get"})))]
+      (let [legacy (into []
+                         (remove :resolver-fn-id)
+                         (sp/query-entities storage :binding
+                                            {:override-kind :secret-path}))]
+        (when (seq legacy)
+          (doseq [b legacy]
+            (sp/update-entity storage :binding (:id b)
+                              {:resolver-fn-id vault-get-id}))
+          (log/info "Migrated legacy :secret-path bindings to :vault-get resolver"
+                    {:count (count legacy)}))))
+    (catch Exception e
+      ;; Loud but non-fatal: the legacy READ path still executes these
+      ;; rows; the next boot retries.
+      (log/error e "secret-path → resolver migration failed — legacy read path still active"))))
+
+
 (defmethod ig/init-key :exec/fn-entities
   [_ {:keys [storage packages base-fns skip-allowlist-gate?]}]
   (log/info "Creating fn entities...")
@@ -676,6 +706,7 @@
               storage packages base-fns
               {:skip-allowlist-gate? skip-allowlist-gate?})]
     (log/info "Fn entities created:" (count fns))
+    (migrate-secret-path-bindings! storage)
     fns))
 
 

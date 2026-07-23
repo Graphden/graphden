@@ -316,16 +316,24 @@
   [b ctx]
   (let [type-ref (when (:type-override-fn-id b)
                    (id->type-ref (:type-override-fn-id b) ctx))
-        secret-path? (= :secret-path (:override-kind b))]
+        secret-path? (or (= :secret-path (:override-kind b))
+                         ;; Post-retirement rows carry the generic
+                         ;; resolver form; vault-get-resolved bindings
+                         ;; ARE secret-paths — same dedicated wire key
+                         ;; so the strip/manifest warn-policy keeps
+                         ;; seeing them (a `{:resolver :vault-get}`
+                         ;; emission would slip past strip-secret-paths
+                         ;; and leak the vault topology).
+                         (= :vault-get (ref-kw (:resolver-fn-id b) ctx)))]
     (cond-> {}
       (:ref-fn-id b)
       (assoc :ref (ref-kw (:ref-fn-id b) ctx))
-      ;; A `:secret-path` binding's stored `:value` is the VAULT PATH,
-      ;; not a literal — emit the dedicated `:secret-path` key so
-      ;; re-parse restores `:override-kind :secret-path` instead of
-      ;; degrading the binding to a plain literal carrying the path.
+      ;; A secret binding's stored `:value` is the VAULT PATH, not a
+      ;; literal — emit the dedicated `:secret-path` key so re-parse
+      ;; restores the vault-get resolver instead of degrading the
+      ;; binding to a plain literal carrying the path.
       secret-path? (assoc :secret-path (:value b))
-      (:resolver-fn-id b)
+      (and (:resolver-fn-id b) (not secret-path?))
       (assoc :resolver (ref-kw (:resolver-fn-id b) ctx))
       (and (:value-present b) (not secret-path?)) (assoc :value (:value b))
       (:list-append b) (assoc :append (binding-items b ctx))
@@ -354,23 +362,25 @@
         (cond-> {:append items}
           (:list-closed b) (assoc :closed true)))
 
-      ;; generic resolver binding: emit `{:resolver <name> :value V}` so
-      ;; re-parse restores `:resolver-fn-id` (mirror of the secret-path
-      ;; round-trip fix below — the plain `{:value …}` form would
-      ;; degrade the binding to a literal).
+      ;; vault-get-resolved binding (or the legacy :override-kind
+      ;; marker): the stored `:value` is the OpenBao/vault PATH the
+      ;; executor derefs at run time, not a literal. Emit the dedicated
+      ;; `{:secret-path …}` form so the strip/manifest warn-policy sees
+      ;; it and re-parse restores the vault-get resolver — the plain
+      ;; `{:value …}` form would silently turn the secret into a
+      ;; literal string holding the path (broken AND path-disclosing).
+      (or (= :secret-path (:override-kind b))
+          (= :vault-get (ref-kw (:resolver-fn-id b) ctx)))
+      (cond-> {:secret-path (:value b)}
+        (some? (:required b)) (assoc :required (:required b)))
+
+      ;; generic (non-hidden) resolver binding: emit
+      ;; `{:resolver <name> :value V}` so re-parse restores
+      ;; `:resolver-fn-id` — the plain `{:value …}` form would degrade
+      ;; the binding to a literal.
       (:resolver-fn-id b)
       (cond-> {:resolver (ref-kw (:resolver-fn-id b) ctx)
                :value (:value b)}
-        (some? (:required b)) (assoc :required (:required b)))
-
-      ;; secret-path binding: the stored `:value` is the OpenBao/vault
-      ;; PATH the executor derefs at run time, not a literal. Emit the
-      ;; dedicated `{:secret-path …}` form so re-parse restores
-      ;; `:override-kind :secret-path` — the plain `{:value …}` form
-      ;; would silently turn the secret into a literal string holding
-      ;; the path (broken AND path-disclosing) on round-trip.
-      (= :secret-path (:override-kind b))
-      (cond-> {:secret-path (:value b)}
         (some? (:required b)) (assoc :required (:required b)))
 
       ;; ref binding (optionally with a type-override / required marker)

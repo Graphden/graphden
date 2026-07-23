@@ -33,6 +33,21 @@
       UUID)))
 
 
+(defn- vault-get-fn-id
+  "Row id of the `:vault-get` base-fn — the generic resolver every
+   secret binding references (`:override-kind :secret-path` retired,
+   audit-2 stage 1). Resolved by NAME through the request's storage so
+   editor DBs with index-reused ids stay correct; throws when the
+   vault package isn't installed (a secret binding without its
+   resolver would be an unexecutable row)."
+  [ctx]
+  (let [storage (request/require-storage ctx)
+        row (first (sp/query-entities storage :fn {:name "vault-get"}))]
+    (or (:id row)
+        (throw (ex-info ":vault-get base-fn not found — is the web/vault package installed?"
+                        {:type :secrets/vault-get-missing})))))
+
+
 (defn- log-rollback-failure
   "Log (don't silence) a failed compensation step. Rollback steps must
    not throw — a re-throw inside the outer `catch` block would mask the
@@ -288,7 +303,7 @@
        :fn-id fn-id
        :slot-id path-slot-id
        :value path
-       :override-kind :secret-path}
+       :resolver-fn-id (vault-get-fn-id ctx)}
       ctx)
     (swap! journal conj [:storage-delete :binding binding-id])
     ;; Vault only after the row exists (loser never reaches here).
@@ -405,7 +420,7 @@
        :fn-id fn-id
        :slot-id slot-id
        :value path
-       :override-kind :secret-path}
+       :resolver-fn-id (vault-get-fn-id ctx)}
       ctx)
     (swap! journal conj [:storage-delete :binding binding-id])
     {:ok true

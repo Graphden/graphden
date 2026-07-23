@@ -21,6 +21,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.core :as sys]
     [graphden.tenancy.context :as tctx]))
 
 
@@ -110,6 +111,12 @@
                                   :return-type [:secret :text]
                                   :effects #{:io}
                                   :tags #{:secret-shape :admin-only-vault}})
+    ;; The generic resolver the writers now reference
+    ;; (`:override-kind :secret-path` retired — audit-2 stage 1):
+    ;; `crud.secrets` resolves `:vault-get`'s row id by name at write
+    ;; time and refuses to create an unexecutable secret binding
+    ;; without it.
+    (setup/create-base-fn! storage "vault-get" :text)
     {:secret-leaf sl :secret-leaf-slot sl-slot}))
 
 
@@ -207,10 +214,13 @@
                 (is (some? fn-row))
                 (is (= "_test" (:name fn-row)))
                 (is (= [(:id secret-leaf)] (vec (:parent-ids fn-row))))
-                (testing ":override-kind :secret-path binding on the leaf slot"
+                (testing "vault-get RESOLVER binding on the leaf slot
+                          (the retired :override-kind marker is no
+                          longer written — audit-2 stage 1)"
                   (is (= 1 (count bindings)))
                   (is (= "test/value" (:value (first bindings))))
-                  (is (= :secret-path (:override-kind (first bindings))))
+                  (is (nil? (:override-kind (first bindings))))
+                  (is (some? (:resolver-fn-id (first bindings))))
                   (is (= (:id secret-leaf-slot) (:slot-id (first bindings))))))))))
       (finally (sp/close storage)))))
 
@@ -456,4 +466,30 @@
                                    c (:id secret) {})]
           (is (not ok))
           (is (re-find #"value" error))))
+      (finally (sp/close storage)))))
+
+
+(deftest migrate-secret-path-bindings-test
+  ;; Audit-2 stage 1 of the :override-kind retirement — boot converts
+  ;; legacy :secret-path rows to the :vault-get resolver form,
+  ;; idempotently; rows already carrying a resolver are untouched.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [{:keys [secret-leaf secret-leaf-slot]} (seed-secret-leaf! storage)
+            vg-id (:id (first (sp/query-entities storage :fn {:name "vault-get"})))
+            legacy (sp/create-entity storage :binding
+                                     {:fn-id (:id secret-leaf)
+                                      :slot-id (:id secret-leaf-slot)
+                                      :value "kv/legacy"
+                                      :value-present true
+                                      :override-kind :secret-path})]
+        (is (some? vg-id) "seed provides the resolver row")
+        (sys/migrate-secret-path-bindings! storage)
+        (is (= vg-id (:resolver-fn-id
+                       (sp/read-entity storage :binding (:id legacy))))
+            "legacy row now points at the vault-get resolver")
+        (testing "idempotent — second run changes nothing"
+          (sys/migrate-secret-path-bindings! storage)
+          (is (= vg-id (:resolver-fn-id
+                         (sp/read-entity storage :binding (:id legacy)))))))
       (finally (sp/close storage)))))

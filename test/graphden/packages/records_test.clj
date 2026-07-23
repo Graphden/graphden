@@ -174,8 +174,9 @@
     (is (= 2 (count bindings)) "one binding per :args entry")
     (let [fn-row (first fns)]
       (is (= [parent-id] (:parent-ids fn-row))))
-    (testing "bindings are :fixed by default"
-      (is (every? #(= :fixed (:override-kind %)) bindings)))
+    (testing "no :override-kind is written — the enum is retired
+              (:fixed discriminated nothing; :terminal is the seal)"
+      (is (every? #(nil? (:override-kind %)) bindings)))
     (testing "binding values match"
       (let [by-slot (into {} (map (juxt :slot-id :value)) bindings)]
         (is (= #{"Alice" 30} (set (vals by-slot))))))))

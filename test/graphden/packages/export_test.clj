@@ -146,7 +146,8 @@
    form (not the slot's declared type) is what drives the round-trip —
    the `[:secret …]` marker lives in the rich-types registry, which the
    parse/export layer never consults."
-  [{:name :sink :namespace "ex" :args {:password :text :sql :text} :return-type :int}
+  [{:name :vault-get :namespace "ex" :args {:in :text} :return-type :text}
+   {:name :sink :namespace "ex" :args {:password :text :sql :text} :return-type :int}
    {:name :db-call :namespace "ex" :parent :sink
     :args {:password {:secret-path "user-db/password"} :sql {:value "SELECT 1"}}}])
 
@@ -154,13 +155,15 @@
 (deftest roundtrip-secret-path
   (testing "a {:secret-path …} binding survives parse → export → parse"
     (is (roundtrips-exactly? secret-fixture) (pr-str (diff-report secret-fixture))))
-  (testing "parse stores the path under :override-kind :secret-path"
+  (testing "parse stores the path as a :vault-get RESOLVER binding
+            (the retired :override-kind marker is no longer written)"
     (let [recs (parse/parse-module secret-fixture)
           b (first (filter #(and (= :binding (:kind %))
                                  (= "user-db/password" (:value %)))
                            recs))]
       (is (some? b) "binding row with the path exists")
-      (is (= :secret-path (:override-kind b)))
+      (is (nil? (:override-kind b)))
+      (is (some? (:resolver-fn-id b)))
       (is (true? (:value-present b)))))
   (testing "export emits {:secret-path …}, never a {:value <path>} literal"
     (let [out (export/records->fn-defs (parse/parse-module secret-fixture))

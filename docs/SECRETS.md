@@ -382,9 +382,16 @@ each row. The future "Secret flows" history tab can filter on
 The secret lives as a TYPED BINDING, not a separate fn-def shape.
 Three pieces:
 
-- **Schema**: `:secret-path` value in the `:override-kind` enum
-    (`schema/graph/schema.clj`). Persisted alongside the existing
-    `:fixed` / `:default` values.
+- **Schema**: the binding's `:resolver-fn-id` FK pointing at
+    `:vault-get` — the generic value-resolver mechanism
+    (`schema/graph/schema.clj`). The old `:override-kind
+    :secret-path` enum marker is RETIRED (audit-2 stage 1,
+    2026-07-23): writers emit the resolver form only, a boot
+    migration (`system.core/migrate-secret-path-bindings!`)
+    rewrites legacy rows idempotently, and the executor keeps a
+    read-compat branch for not-yet-migrated rows until stage 2
+    drops the column (the enum's other values were dead: `:fixed`
+    superseded by `:terminal`, `:default` write-only).
 
 - **Executor**: `compile/bindings.clj/classify-slot` recognises
     `:override-kind :secret-path` and emits a `:kind :secret-value`

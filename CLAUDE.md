@@ -711,7 +711,7 @@ Base-fn: has Clojure impl, wraps library, ≤ ~20 LOC body. Fn-def: pure composi
 
 ### 6. Naming (short names, context carries meaning)
 
-Names add the **last bit of distinction** — namespace, parent, and arg names convey the rest. Drop affixes the context already says; keep affixes that disambiguate vs a sibling. Verb-at-end (`entity-create`) when prefix-form clashes with a base-fn. Extract a sub-NS when ≥ ~5 fn-defs share a long prefix. Names are validated for **global** uniqueness at sync time, **including locals** (`_*`).
+Names add the **last bit of distinction** — namespace, parent, and arg names convey the rest. Drop affixes the context already says; keep affixes that disambiguate vs a sibling. Verb-at-end (`entity-create`) when prefix-form clashes with a base-fn. Extract a sub-NS when ≥ ~5 fn-defs share a long prefix. Names are unique **per `(namespace, name)` pair** (ADR-identity-model stage 5) — base-fn names stay globally unique (name-keyed impls registry); a bare ref to a name defined in several namespaces must be qualified (`:other.ns/name`) or sync throws `:packages/ambiguous-ref`.
 
 Before renaming, grep:
 

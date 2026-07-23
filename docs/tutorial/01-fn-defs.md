@@ -17,7 +17,11 @@ and explain each part of it.
 That's a complete fn-def. Three keys:
 
 - **`:name`** — what you'll call this fn elsewhere. Names are
-  globally unique inside a graphden instance.
+  unique **per namespace** (like vars in a Clojure ns): two
+  namespaces may each define `:get-user`, and a bare reference
+  resolves to your own namespace's fn first; referencing a
+  same-named fn elsewhere uses the qualified form
+  (`:other.ns/get-user`).
 - **`:parent`** — the fn this one inherits from. Here `:const`
   is a base function (a built-in primitive) that returns its
   `:x` argument unchanged when executed.

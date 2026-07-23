@@ -438,9 +438,17 @@ Some suffixes survive because they distinguish the fn-def from a sibling that wo
 | `*-handler` (web.crud) | Distinguishes the response builder from the route fn-def of the same logical endpoint. `app.routes.entity-details` (route) vs `web.crud.entity-details-handler` (Ring response builder). |
 | `get-route`, `post-route` (templates) | Marks them as method templates, distinct from concrete routes that *drop* the suffix. The asymmetry — templates have `-route`, leaves don't — is the signal. |
 
-### Globally unique fn names — grep before you rename
+### Per-namespace fn names — grep before you rename
 
-The composition validator enforces globally-unique fn names at sync time (`:fn-composition/duplicate-names`). Even **local** fn-defs (those with a leading `_` whose stored `name` is `nil`) need a unique declared name in `fns.edn`.
+Names are unique **per `(namespace, name)` pair** (ADR-identity-model
+stage 5): two modules may each declare `:get-user`. The sync validator
+rejects a duplicate pair (the pair IS the deterministic fn-id), and
+BASE-FN names additionally stay globally unique (the Clojure impls
+registry is name-keyed). A bare reference to a name that several
+namespaces define must be qualified (`:other.ns/name`) or the sync
+throws `:packages/ambiguous-ref`; your own module's name always wins
+unqualified. Even **local** fn-defs (leading `_`, stored `name=nil`)
+follow the per-namespace rule.
 
 Before shortening a name, check:
 
@@ -479,9 +487,9 @@ Decision rule: if the group has a coherent semantic boundary AND ≥ ~5 members,
 | `*-auth-required-route` templates | 2 | New NS `app.routes.auth`, drop both ends (`post`/`delete`) |
 | `editor-*` in `app.editor` | 9 | Already in the right NS — drop prefix in place |
 
-### Locals (`_*`) still need globally-unique names
+### Locals (`_*`) — same per-namespace rule
 
-Local fn-defs are stored with `name=nil` and don't appear in the sidebar or graph navigation, but their **declared** name in `fns.edn` is validated for uniqueness across the whole loaded package set. Keep their names descriptive enough to avoid clashes:
+Local fn-defs are stored with `name=nil` and don't appear in the sidebar or graph navigation, but their **declared** name in `fns.edn` is validated like any other: unique within their namespace, qualified references required when the bare name is ambiguous across the loaded set. Keep their names descriptive — a same-named local in another module forces qualification on anyone referencing yours:
 
 - ✅ `_health-handler`, `_metrics-handler`, `_favicon-handler` — each carries the endpoint context.
 - ❌ `_handler`, `_body`, `_response` — would clash the moment a second module needs the same shape.

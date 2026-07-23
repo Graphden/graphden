@@ -242,6 +242,56 @@ the context's `:allowed-effects` should include the category.
 - `:field` - Field name
 - `:value` - Raw value that failed to parse
 
+## Compile & Sync Errors (2026-07 additions)
+
+### `:compile/ambiguous-lambda-params`
+
+A callable fn-def bound to a 1-arg HOF slot has several candidate
+call-site parameters and no authored `:lambda-params`. Declare
+`:lambda-params [name …]` on the callable fn-def (`[]` = everything
+captured). The retired inference guess silently mis-wired captured
+callables; the error names every candidate.
+
+### `:compile/invalid-lambda-params`
+
+An authored `:lambda-params` names an arg that is not a free arg of
+the fn (typo guard). The error lists the declared names and the
+actual frees.
+
+### `:compile/unmigrated-secret-path`
+
+A binding still carries the retired `:override-kind :secret-path`
+marker without a `:resolver-fn-id` — the boot migration
+(`system.core/migrate-secret-path-bindings!`) did not run (usually:
+the `web/vault` package isn't in the sync set). Refused at compile so
+the vault PATH is never executed as a literal.
+
+### `:constraint-violation/override-kind-retired`
+
+A binding WRITE carries `:override-kind` — the enum is retired. A
+secret binding is `{:resolver-fn-id <vault-get>}` with the path in
+`:value`; `:terminal` covers sealing. Legacy residue on stored rows
+does NOT trigger this (only an incoming write of the field).
+
+### `:types/ambiguous-alias`
+
+A bare type-alias name is declared by 2+ type-rows in different
+namespaces. Reference the qualified form (`:other.ns/name`) in the
+`:type` position; the error lists the qualified candidates.
+
+### `:packages/ambiguous-ref`
+
+A bare fn reference resolves to several same-named fns across
+namespaces and none is the referencing module's own. Qualify the
+reference (`:other.ns/name`).
+
+### `:secrets/vault-get-missing`
+
+A secret binding is being created but the `:vault-get` resolver
+base-fn is absent from the graph (vault package not installed) — the
+row would be unexecutable.
+
+
 ## Error Handling Example
 
 ```clojure

@@ -202,8 +202,11 @@ them when graphden's integrant lifecycle starts.
 
 - **Cross-package references** — you can ref a fn-def from
   another package by NAME, as long as the package is in your
-  `:depends-on`. The loader resolves names globally at sync
-  time.
+  `:depends-on`. Names are per-namespace: a bare ref resolves
+  when the name is unambiguous across the loaded set (your own
+  module wins); a name defined in several namespaces must be
+  referenced qualified — `:other.ns/name` — or the sync throws
+  `:packages/ambiguous-ref` naming the candidates.
 - **Naming guidelines** — the rules for picking fn-names that
   don't collide and read well. See [docs/PACKAGES.md § Naming](../PACKAGES.md#naming-guidelines).
 - **The `:_admin-secret-create` flag and per-package secret

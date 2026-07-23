@@ -30,9 +30,9 @@
                    (ds/build))]
     (sp/initialize storage schema)
     (testing "the :grant table was created and rows persist"
-      (sp/create-entity storage :grant {:subject-id "alice" :subject "alice" :capability "write" :namespace "acme"})
-      (sp/create-entity storage :grant {:subject-id "alice" :subject "alice" :capability "admin" :namespace "acme.ops"})
-      (sp/create-entity storage :grant {:subject-id "bob" :subject "bob" :capability "read" :namespace "acme"}))
+      (sp/create-entity storage :grant {:subject-id "alice" :capability "write" :namespace "acme"})
+      (sp/create-entity storage :grant {:subject-id "alice" :capability "admin" :namespace "acme.ops"})
+      (sp/create-entity storage :grant {:subject-id "bob" :capability "read" :namespace "acme"}))
     (let [store (grant-schema/storage-grant-store storage)]
       (testing "can? reads the stored grants (capability text → keyword)"
         (is (grant/can? store (subj "alice") :write "acme.team") "parent grant covers descendant")

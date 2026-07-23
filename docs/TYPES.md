@@ -112,6 +112,24 @@ information here"; a type-variable says "the system should track
 this slot's actual type across the composition" — strictly more
 useful at every call site, identical at runtime.
 
+A var-carrying declaration is not just documentation — it IS the
+return-type rule. The checker's declared-signature fallback
+(`signature-return` in `types/check`) fires wherever a root base-fn
+has no hand `:return-type-rule`: it unifies each var-carrying
+declared arg type against the actual type at the site and resolves
+the declared return through the substitution (degrading to the
+static return when nothing binds — the fallback never widens).
+`:coll [:list a] → [:union :null a]` on `:first` is the whole
+narrowing story; the elem-preserving stdlib family
+(`:rest`/`:take`/`:sort`/…) carries no Clojure rules at all. Hand
+`:return-type-rule` fns remain only where the result genuinely
+depends on literal values, union fan-out, or registry callbacks
+(`:get`, `:assoc`, `:merge`, `:if`/`:cond`, arithmetic int-join).
+Marker-taint (`:secret` &c.) is orthogonal: a per-base-fn
+`:taint-propagate? true` registry flag, applied centrally by the
+checker on top of the structural result (see
+[SECRETS.md](SECRETS.md) § Propagation).
+
 `:jsonb` and `:any` are NOT interchangeable: `:jsonb` rejects
 callables (they're not JSON-shaped data), `:any` accepts them. A
 slot that genuinely takes "anything that fits into JSON" should be

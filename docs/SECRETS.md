@@ -77,24 +77,26 @@ Predicates and constructors:
 
 ## Propagation through composition
 
-Each base-fn that touches user content registers a
-`:return-type-rule` next to its `defbase` in `impls.clj`:
+Each base-fn that touches user content opts in with a declarative
+`:taint-propagate? true` flag next to its `defbase` in `impls.clj`:
 
 ```clojure
-:str-upper {:impl str-upper-fn
-            :return-type-rule (types/wrap-with-taint nil)}
+:str-upper {:impl str-upper-fn :taint-propagate? true}
 
-:first     {:impl first-fn
-            :return-type-rule (types/wrap-with-taint first-return-rule)}
+:assoc     {:impl assoc-any-fn
+            :return-type-rule assoc-return-rule
+            :taint-propagate? true}
 ```
 
-`wrap-with-taint` composes an existing structural rule (`first-return-rule`,
-`assoc-return-rule`, etc.) with the `:secret`-propagator: the
-structural rule computes the return shape, then if any input
-carried the marker the result is lifted into `[:secret …]`.
-
-Bare propagator — `(types/wrap-with-taint nil)` — is for base-fns
-that previously had no return-type-rule.
+The checker applies the propagation CENTRALLY (in
+`compute-return-type` and `effective-ref-return-uncached`): the
+structural layer runs first — a hand `:return-type-rule` when one
+exists, else the declared-signature fallback (`signature-return`) —
+then, iff the flag is set and any input carried a marker, the result
+is lifted into `[:secret …]`. A rule fn is purely structural; taint
+can no longer be forgotten when adding one. (The old per-site
+`types/wrap-with-taint` closure-wrapping is gone; the helper remains
+only as the engine primitive `taint-with-secret-if-tainted`.)
 
 `enforce-declared-return!` in `types/check` allows the computed
 return-type to be `[:secret T]` even when the fn-def declared plain
@@ -257,7 +259,7 @@ so a secret flowing into a generic `:any` slot LOSES the marker at
 the type level. This is the documented escape hatch — but in
 practice it's defanged by the T3 audit: every content-passing fn
 with `:any` slots (`:assoc`, `:get`, `:conj`, `:select-keys`,
-`:invoke`, etc.) registers `taint-with-secret-if-tainted`, so the
+`:invoke`, etc.) carries `:taint-propagate? true`, so the
 RESULT type is lifted back into `[:secret …]` and the marker
 round-trips.
 

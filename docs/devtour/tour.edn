@@ -396,6 +396,14 @@
            refinement-on-literal escape hatches. The atomic unit of
            type-checking, tying together `subtype?`, `unify`, and
            `classify-literal`."}
+    {:ns graphden.types.check :defn signature-return
+     :say "The declared-signature engine: when a root base-fn has no hand
+           `:return-type-rule`, the polymorphic declaration itself computes
+           the return — unify each var-carrying declared arg against the
+           actual type at the site, resolve the declared return through the
+           substitution. `:coll [:list a] → [:union :null a]` IS the rule;
+           the hand-written rules that survive are only those reading
+           literal values, union fan-out, or the registry."}
     {:ns graphden.types.check :defn check-fn-def!
      :say "Type-checks a single fn-def against its (single or multiple-
            inheritance) parents: resolve parent slots, run the monotonicity /

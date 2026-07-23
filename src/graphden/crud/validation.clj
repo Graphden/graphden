@@ -525,9 +525,20 @@
    secret-path gate provided). Any API write still carrying the key
    is a stale client — reject with the migration pointer instead of
    silently accepting a field the executor no longer reads."
-  [entity-type entity-data]
+  [storage entity-type entity-data]
   (when (and (= entity-type :binding)
-             (some? (:override-kind entity-data)))
+             (some? (:override-kind entity-data))
+             ;; The update path validates the MERGED post-write view, so
+             ;; LEGACY RESIDUE on the stored row (a not-yet-dropped
+             ;; `:fixed` from before the retirement) must not block an
+             ;; unrelated update — only an INCOMING write of the field
+             ;; (merged value differs from what's already stored)
+             ;; rejects. On create the stored row is nil, so any
+             ;; non-nil value is incoming by definition.
+             (not= (:override-kind entity-data)
+                   (some->> (:id entity-data)
+                            (sp/read-entity storage :binding)
+                            :override-kind)))
     {:reason (str ":override-kind is retired — a secret binding is "
                   "{:resolver-fn-id <vault-get>} with the path in :value; "
                   ":terminal covers sealing. Remove the field from the write.")}))
@@ -643,7 +654,7 @@
               (assoc :type :constraint-violation/terminal-seal))
       (some-> (list-closed-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/list-closed))
-      (some-> (override-kind-retired-rej entity-type entity-data)
+      (some-> (override-kind-retired-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/override-kind-retired))
       (some-> (reparent-cross-branch-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/reparent-cross-branch))

@@ -42,7 +42,15 @@
    resolver would be an unexecutable row)."
   [ctx]
   (let [storage (request/require-storage ctx)
-        row (first (sp/query-entities storage :fn {:name "vault-get"}))]
+        ;; BASE-FN filter (`:return-type-fn-id` set is THE base-fn
+        ;; marker): per-ns names legally allow a same-named COMPOSED fn
+        ;; in any namespace, and `first` of an unordered name query
+        ;; could pick it — stamping every new secret binding with a
+        ;; wrong resolver. Base-fn bare names stay globally unique, so
+        ;; the filtered pick is deterministic.
+        row (first (filter :return-type-fn-id
+                           (sp/query-entities storage :fn
+                                              {:name "vault-get"})))]
     (or (:id row)
         (throw (ex-info ":vault-get base-fn not found — is the web/vault package installed?"
                         {:type :secrets/vault-get-missing})))))

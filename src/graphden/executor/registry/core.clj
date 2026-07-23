@@ -725,22 +725,39 @@
    The thread-local override receives the dissoc when bound; otherwise
    the global atom does. Mirror of `record-rich-types!`'s
    `target-rich-types-atom` write target."
-  [fn-name]
-  (let [drop-entry (fn [reg]
-                     (let [id (get-in reg [:by-name fn-name])
-                           id (when-not (= id :graphden.packages.records.types/ambiguous)
-                                id)
-                           entry (when id (get-in reg [:by-id id]))]
-                       (reduce (fn [r k] (update r :by-name dissoc k))
-                               (update reg :by-id dissoc id)
-                               (if entry
-                                 (index-keys-for (:name entry) (:namespace entry))
-                                 [fn-name]))))]
-    (swap! (target-rich-types-atom) drop-entry)
-    (when-let [org (current-tenant-org)]
-      (swap! (target-per-org-rich-atom) update org
-             (fn [slice] (when slice (drop-entry slice))))))
-  nil)
+  ([fn-name] (unregister-rich-type! fn-name nil))
+  ([fn-name row-id]
+   (let [drop-entry (fn [reg]
+                      ;; Prefer the ROW id (the delete-path caller has
+                      ;; it): with duplicate same-name identities in a
+                      ;; long-lived DB, the name index points at ONE of
+                      ;; them — keying the drop by name could unregister
+                      ;; the SURVIVOR's entry while the deleted row's
+                      ;; :by-id entry lived on. Name arity kept for
+                      ;; callers without a row (test convenience).
+                      (let [id (or (when (contains? (:by-id reg) row-id)
+                                     row-id)
+                                   (let [nid (get-in reg [:by-name fn-name])]
+                                     (when-not (= nid :graphden.packages.records.types/ambiguous)
+                                       nid)))
+                            entry (when id (get-in reg [:by-id id]))
+                            ;; Only scrub name-index keys when they
+                            ;; actually point at the entry being
+                            ;; dropped — a same-named survivor keeps
+                            ;; its index.
+                            name-keys (if entry
+                                        (filterv #(= id (get-in reg [:by-name %]))
+                                                 (index-keys-for (:name entry)
+                                                                 (:namespace entry)))
+                                        [fn-name])]
+                        (reduce (fn [r k] (update r :by-name dissoc k))
+                                (update reg :by-id dissoc id)
+                                name-keys)))]
+     (swap! (target-rich-types-atom) drop-entry)
+     (when-let [org (current-tenant-org)]
+       (swap! (target-per-org-rich-atom) update org
+              (fn [slice] (when slice (drop-entry slice)))))
+     nil)))
 
 
 (defn restore-rich-types!

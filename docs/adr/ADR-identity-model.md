@@ -110,6 +110,12 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
   last-write for duplicated type names with the stage-2 owner warning
   — full per-ns alias resolution rides on a future context-aware
   `resolve-alias` if duplicated type names become common practice.
-- **Stage 6 — UI disambiguation.** Search/deep-links show the
+- **Stage 6 — UI disambiguation: DONE (2026-07-23).** The sidebar
+  search renders results inside the namespace TREE, so duplicated
+  names are visually distinct by construction; `resolveFnByName`
+  accepts qualified `ns.path/name` input, and a bare name matching
+  several namespaces console-warns with the qualified candidates
+  (first match returned so pre-duplication deep-links keep working).
+  Original sketch (kept for context): search/deep-links show the
   namespace when a bare name is ambiguous (matches the "hide
   namespaces until needed" editor philosophy).

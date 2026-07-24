@@ -38,7 +38,7 @@ jobs:
       packages: write
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16.11
         env:
           POSTGRES_DB: graphden
           POSTGRES_USER: graphden

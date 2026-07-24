@@ -44,7 +44,7 @@
 
 (defn- start-postgres!
   [^Network network]
-  (doto (PostgreSQLContainer. "postgres:16-alpine")
+  (doto (PostgreSQLContainer. "postgres:16.11-alpine")
     (PostgreSQLContainer/.withDatabaseName "graphden")
     (PostgreSQLContainer/.withUsername "graphden")
     (PostgreSQLContainer/.withPassword "graphden")

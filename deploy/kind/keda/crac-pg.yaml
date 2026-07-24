@@ -13,7 +13,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:16
+          image: postgres:16.11
           env:
             - { name: POSTGRES_DB, value: graphden }
             - { name: POSTGRES_USER, value: graphden }

@@ -90,7 +90,7 @@
    resolve. Aliased on the network as `postgres` (matches
    `JDBC_URL=jdbc:postgresql://postgres:5432/graphden`)."
   [^Network network]
-  (doto (PostgreSQLContainer. "postgres:16-alpine")
+  (doto (PostgreSQLContainer. "postgres:16.11-alpine")
     (PostgreSQLContainer/.withDatabaseName "graphden")
     (PostgreSQLContainer/.withUsername "graphden")
     (PostgreSQLContainer/.withPassword "graphden")
@@ -105,7 +105,7 @@
    reaches via `:sql-query` / vault-pulled creds. Aliased as
    `user-postgres` to match the openbao seed entries."
   [^Network network]
-  (doto (PostgreSQLContainer. "postgres:16-alpine")
+  (doto (PostgreSQLContainer. "postgres:16.11-alpine")
     (PostgreSQLContainer/.withDatabaseName "userdb")
     (PostgreSQLContainer/.withUsername "userapp")
     (PostgreSQLContainer/.withPassword "userpass")
@@ -118,7 +118,7 @@
   "OpenBao dev mode — in-memory KV v2, single root token. Mirrors
    the demo's `graphden-openbao` service down to the wait-strategy."
   [^Network network]
-  (doto (GenericContainer. "quay.io/openbao/openbao:latest")
+  (doto (GenericContainer. "quay.io/openbao/openbao:2.5.4")
     (GenericContainer/.withCommand
       (into-array String ["server" "-dev"
                           "-dev-root-token-id=root"

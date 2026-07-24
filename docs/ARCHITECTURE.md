@@ -41,7 +41,7 @@ purposeful set:
 - **binding** — per-`(fn-id, slot-id)` overlay carrying any of:
   `value`, `ref-fn-id`, `rename-to`, `type-override-fn-id`,
   `terminal`, `list-append`, `list-closed`, `description`,
-  `override-kind`. Closer-fn-wins via inheritance walk.
+  `resolver-fn-id`. Closer-fn-wins via inheritance walk.
 - **binding-list-item** — sequence content under a list-typed
   binding, ordered by `position`.
 
@@ -255,7 +255,7 @@ Storage-layer graph resolution caps walks via
 | terminal            bool NULL  -- seal slot from descendants|
 | list-append         bool NULL  -- extend parent's chain    |
 | list-closed         bool NULL  -- forbid further append    |
-| override-kind       enum<override-kind> NULL               |
+| resolver-fn-id      uuid FK→fn NULL                        |
 | UNIQUE(fn-id, slot-id)                                     |
 +-----------------------------------------------------------+
 
@@ -295,7 +295,7 @@ Versioned entities (per `graphden.versioning.storage.resolution/entity-config`):
 |---|---|---|
 | `fn` | `fn-version` | `name`, `description`, `constraint`, `base-fn-id`, `element-fn-id`, `return-type-fn-id`, `anonymous-hash`, `expects-effects` |
 | `fn-slot` | `fn-slot-version` | `fn-id`, `slot-id`, `position` |
-| `binding` | `binding-version` | `fn-id`, `slot-id`, `value`, `value-present`, `ref-fn-id`, `override-kind`, `type-override-fn-id`, `description`, `terminal`, `required`, `list-append`, `list-closed` |
+| `binding` | `binding-version` | `fn-id`, `slot-id`, `value`, `value-present`, `ref-fn-id`, `resolver-fn-id`, `type-override-fn-id`, `description`, `terminal`, `required`, `list-append`, `list-closed` |
 | `binding-list-item` | `binding-list-item-version` | `binding-id`, `position`, `value`, `ref-fn-id`, `literal` |
 
 `slot` is intentionally not versioned — name+type is the slot's

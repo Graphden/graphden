@@ -185,24 +185,23 @@ secret-tainted, it can ONLY land in slots that are also
 typed `[:secret …]`. Plain `:text` sinks (like a log statement
 or a response body) are sync-time errors.
 
-### Per-base-fn `:return-type-rule`
+### Per-base-fn `:taint-propagate?`
 
 For base-fns that handle user data (e.g. `:str-concat`,
-`:get`), the rule for propagating taint is declared at the
-impl-side via `:return-type-rule`:
+`:get`), taint propagation is a declarative FLAG at the
+impl-side registration — `:taint-propagate? true` — applied
+centrally by the type-checker: if ANY input carries `[:secret T]`
+(or any hide-result marker), the return is lifted into the
+marker too. So `(str-concat "Hello " username)` where
+`username` is secret produces a secret string. Base-fns whose
+RETURN is inherently secret (`:vault-get`) simply declare
+`[:secret :text]` as their return type.
 
-- `taint-with-secret-if-tainted` — if ANY arg is `[:secret T]`,
-  the return is `[:secret T']`. So `(str-concat "Hello "
-  username)` where `username` is secret produces a secret
-  string.
-- `wrap-with-taint` — return is always `[:secret T]` (used by
-  vault-getters: anything that comes out is secret).
-
-The rules live in each base-fn's `impls.clj` map (see
-`docs/SECRETS.md` for the audit of which base-fns propagate).
-You don't write them; library authors do. As a fn-def author,
-you just see the chip turn `[:secret :text]` and know "this
-value is now tainted."
+The flags live in each base-fn's `impls.clj` map (see
+`docs/SECRETS.md` § Propagation for the audit of which base-fns
+propagate). You don't write them; library authors do. As a
+fn-def author, you just see the chip turn `[:secret :text]` and
+know "this value is now tainted."
 
 ## The executor hides secret returns
 
@@ -234,8 +233,11 @@ admin flow:
 2. Form asks for name, vault path, value, description.
 3. Submit writes:
    - The secret VALUE to OpenBao at the given path.
-   - A fn-def parented from `:secret-leaf` with a `:secret-path`
-     binding (override-kind `:secret-path`) carrying the vault path.
+   - A fn-def parented from `:secret-leaf` with a **resolver
+     binding** — `:resolver-fn-id` pointing at `:vault-get`, the
+     vault path stored in the binding's `:value` (authoring form:
+     `{:resolver :vault-get :value "kv/path"}`, or the
+     `{:secret-path "kv/path"}` sugar).
 4. Other fn-defs ref the new secret-leaf fn-def. At execute
    time, the executor reads the vault path from OpenBao,
    binds the value to the slot, runs the rest of the graph.

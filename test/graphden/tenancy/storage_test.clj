@@ -226,7 +226,7 @@
   ;; grants. The platform (public org) reads them.
   (let [s (ts/org-scoped-storage (fake))]
     (tc/with-org tc/public-org
-                 (sp/create-entity s :grant {:id 1 :subject "alice"})
+                 (sp/create-entity s :grant {:id (random-uuid) :subject-id "alice"})
                  (sp/create-entity s :service {:id 2 :name "svc"})
                  (sp/create-entity s :domain {:id 3 :hostname "app.acme.com"}))
     (testing "a tenant sees nothing of the privileged entities"

@@ -42,7 +42,7 @@ existing base-fns, not to ask for a new primitive.
 ## 3. The fn-def map — every key
 
 ```clojure
-{:name       :my-fn            ; keyword, globally unique. Omit → anonymous (rare; you want names).
+{:name       :my-fn            ; keyword, unique per (namespace, name). Omit → anonymous (rare; you want names).
  :namespace  "app.orders"      ; optional dotted string; groups fns. Omit → top level.
  :parent     :base-or-fn       ; inherit this fn's slots. (or :parents [:a :b] for two axes — rare)
  :args       {:slot-name ...}  ; bind / customise inherited slots (see §4)

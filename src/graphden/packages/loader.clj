@@ -49,6 +49,7 @@
     [clojure.tools.logging :as log]
     [clojure.tools.reader :as treader]
     [clojure.tools.reader.reader-types :as treader-types]
+    [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]))
 
@@ -58,11 +59,12 @@
 ;; =============================================================================
 
 (defn- read-resource-edn
-  "Reads and parses EDN from a classpath resource."
+  "Reads and parses EDN from a classpath resource. `#graphden/ref`
+   wire refs (records.wire) decode back to their keywords."
   [path]
   (when-let [resource (io/resource path)]
     (with-open [rdr (java.io.PushbackReader. (io/reader resource))]
-      (edn/read rdr))))
+      (edn/read {:readers wire/wire-readers} rdr))))
 
 
 (defn- read-resource-edn-with-meta
@@ -72,11 +74,15 @@
    messages so users see `file:line` instead of just `:my-fn`.
 
    Slightly slower than `clojure.edn/read` because tools.reader
-   tracks source positions; called only at startup so it's fine."
+   tracks source positions; called only at startup so it's fine.
+   `#graphden/ref` wire refs decode via `*data-readers*` — a
+   re-imported whole-graph bundle dropped into a package tree reads
+   the same as hand-authored EDN."
   [path]
   (when-let [resource (io/resource path)]
     (let [rdr (treader-types/source-logging-push-back-reader (slurp resource))]
-      (treader/read {:eof nil} rdr))))
+      (binding [treader/*data-readers* wire/wire-readers]
+        (treader/read {:eof nil} rdr)))))
 
 
 (defn- load-package-meta

@@ -502,7 +502,13 @@ version input covers update/rollback.)
   because fn-ids are deterministic from `(namespace, name)`, syncing the bundle
   onto a booted self-hosted install re-writes the platform fn-defs as no-ops and
   only adds the caller's own fns — so no platform-namespace filtering is needed.
-  Tests: `export-test/export-graph-bundle-shape`,
+  Refs that can't be spelled as readable keywords - a duplicated name
+  in a version-materialized `@`-ns or the ROOT (nil) ns - ride the
+  bundle as `#graphden/ref "lib@1-2-0.sub/name"` / `#graphden/ref
+  "/name"` tagged literals (`records.wire`); the package loader and
+  the remote-bundle reader decode them back to the same qualified
+  keywords. Tests: `export-test/export-graph-bundle-shape`,
+  `export-test/{roundtrip-unspellable-ns-duplicates,wire-edn-text-roundtrip}`,
   `registry-test/export-graph-base-fn-and-handler`.
   - The paywall/billing **gate** stays a cloud-control-plane concern (closed
     source, per DISTRIBUTION.md) — the open-core executor just exposes the

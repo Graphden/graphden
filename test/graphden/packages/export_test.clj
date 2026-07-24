@@ -9,6 +9,7 @@
       asserts the exporter reaches a stable fixpoint (the property
       publish / install relies on)."
   (:require
+    [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.deps :as deps]
@@ -18,6 +19,7 @@
     [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.wire :as wire]
     [graphden.types.core :as types]))
 
 
@@ -379,3 +381,52 @@
       (let [out (export/records->fn-defs (parse/parse-module fns))
             caller (first (filter #(= :caller (:name %)) out))]
         (is (= :ns-b/same-name (get-in caller [:args :x])))))))
+
+
+(deftest roundtrip-unspellable-ns-duplicates
+  ;; Duplicated names living in namespaces that can't be spelled as
+  ;; READABLE keyword namespaces: a version-materialized `@`-ns and the
+  ;; ROOT (nil) ns. The exporter still qualifies — `(keyword
+  ;; "lib@1-2-0.sub" n)` / `(keyword "" n)` are legal in-memory values —
+  ;; and the parser resolves them through the always-qualified name→id
+  ;; keys. Pre-fix the exporter fell back to a BARE ref that re-import
+  ;; rejected as ambiguous or mis-resolved.
+  (let [at-ns "lib@1-2-0.sub"
+        fns [{:name :dup-base :namespace "ns-a" :args {:x :any} :return-type :any}
+             {:name :same-name :namespace at-ns :parent :dup-base :args {:x {:value 1}}}
+             {:name :same-name :namespace nil :parent :dup-base :args {:x {:value 2}}}
+             {:name :caller-at :namespace "ns-c" :parent :dup-base
+              :args {:x (keyword at-ns "same-name")}}
+             {:name :caller-root :namespace "ns-c" :parent :dup-base
+              :args {:x (keyword "" "same-name")}}]]
+    (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))
+    (testing "exported refs are the true qualified keywords, never bare"
+      (let [out (export/records->fn-defs (parse/parse-module fns))
+            arg-x (fn [n] (get-in (first (filter #(= n (:name %)) out)) [:args :x]))]
+        (is (= (keyword at-ns "same-name") (arg-x :caller-at)))
+        (is (= (keyword "" "same-name") (arg-x :caller-root)))))))
+
+
+(deftest wire-edn-text-roundtrip
+  ;; The EDN TEXT boundary: `pr-str` of an `@`-qualified or empty-ns
+  ;; keyword is unreadable, so `encode-unreadable-kws` spells them
+  ;; `#graphden/ref` and `wire-readers` decodes back to the SAME
+  ;; keywords. Everything readable passes through untouched.
+  (let [form {:fns [{:name :caller
+                     :parent :dup-base
+                     :args {:a (keyword "lib@1-2-0.sub" "same-name")
+                            :b (keyword "" "same-name")
+                            :c :ns-b/plain-qualified
+                            :d :bare
+                            :e {:ref (keyword "lib@1-2-0.sub" "other")}
+                            :f [(keyword "lib@1-2-0" "in-vector") :bare-2]}}]}
+        text (pr-str (wire/encode-unreadable-kws form))
+        back (edn/read-string {:readers wire/wire-readers} text)]
+    (testing "the printed text carries the tag, not the raw @ keyword"
+      (is (str/includes? text "#graphden/ref \"lib@1-2-0.sub/same-name\""))
+      (is (str/includes? text "#graphden/ref \"/same-name\""))
+      (is (not (str/includes? text ":lib@"))))
+    (testing "reading the text back restores the exact original form"
+      (is (= form back)))
+    (testing "plain EDN read of the text does NOT throw (tag is the only carrier)"
+      (is (some? (edn/read-string {:readers wire/wire-readers} text))))))

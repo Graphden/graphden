@@ -512,7 +512,8 @@
    :title "Packages — the graph's content"
    :status :toured
    :summary "How fns.edn + impls.clj become base-fns and fn-defs; the loader,
-             load order, and the first-party package tree."
+             load order, and the first-party package tree — then the inverse:
+             export, the ref wire form, and the publish/install registry."
    :paths ["src/graphden/packages/" "resources/packages/"]
    :after [:executor]
    :steps
@@ -575,7 +576,48 @@
            build the `core` → `core.arithmetic` parent-child `:ns` entity
            hierarchy, and return `{ns-path → id}` that the fn-def sync hangs the
            live fn rows under."
-     :see [[:executor "sync-fns-to-storage!"]]}]}
+     :see [[:executor "sync-fns-to-storage!"]]}
+
+    ;; --- Export & distribution: the loader's inverse -------------------
+    {:ns graphden.packages.export :defn records->fn-defs
+     :say "The loader's INVERSE: typed graph records back to fns.edn-shaped
+           fn-def maps. Everything distribution-shaped (publish, install,
+           whole-graph download) rides this, and its contract is a fixpoint —
+           `parse(export(parse(x))) == parse(x)` — pinned by the
+           corpus-fixpoint test over the real core/web/app packages. Read it
+           as `process-module` run backwards."}
+    {:ns graphden.packages.export :defn ref-kw
+     :say "How a ref serializes: BARE keyword when the name is unique
+           (canonical minimal form), namespace-QUALIFIED when it's duplicated
+           across the export set. Qualification never falls back to bare — a
+           version-materialized `@`-ns qualifies as `(keyword \"lib@1-2-0.sub\"
+           n)` and the root ns as `(keyword \"\" n)`, both legal in-memory
+           values even though no EDN reader could parse their printed form."}
+    {:ns graphden.packages.records.wire :defn encode-unreadable-kws
+     :say "The EDN-TEXT boundary is the one place those unspellable keywords
+           break, so exactly there they become `#graphden/ref \"lib@…/n\"`
+           tagged literals before `pr-str`; `wire-readers` decodes them back
+           at the package loader and the remote bundle reader. In-memory and
+           JSONB paths keep raw keywords — the storage codec round-trips
+           them."}
+    {:ns graphden.packages.export :defn export-namespace
+     :say "Scoped export: a namespace SUBTREE as a publishable bundle — fns
+           under the root are the package's content, refs pointing OUT of the
+           subtree become its declared `:dependencies` (what install must
+           already have). This is the unit the in-graph registry versions."}
+    {:ns graphden.packages.export :defn strip-secret-paths
+     :say "The share-safety policy: vault paths are STRIPPED from bundles by
+           default (the slot stays a free `[:secret :text]` arg) and the
+           `:secrets` manifest lists what was affected — the publisher sees
+           the warning, the installer gets a `:needs-definition` todo. A
+           bundle is deliberately not a full copy of your secrets."}
+    {:file "resources/packages/app/registry/impls.clj" :defn publish-package-apply
+     :say "Publish lands the bundle IN the graph: an immutable, content-hashed
+           `:package-version` row (name + semver + fns + declared deps).
+           Install is its mirror — `materialize-package-fns` syncs the pinned
+           version's fns into a version-qualified `@`-namespace and writes a
+           `:package-install` pin; update/rollback rewrites refs between
+           versions; fork copies copy-on-write with no pin."}]}
 
   {:id :web
    :title "Web & the editor"

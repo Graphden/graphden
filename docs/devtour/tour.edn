@@ -298,6 +298,27 @@
            follow the same doctrine: `check-fn-name-collision!` just below
            replaced the raw `UNIQUE (namespace_id, name)`, whose soft-deleted
            identities blocked their names forever."}
+    {:ns graphden.versioning.storage.core :defn purgeable-identity-ids
+     :say "Delete has TWO modes, and this guard is the heart of the hard one.
+           User-facing deletes tombstone (a version row with `:deleted-at`, so
+           descendants hide the entity too); sync + rollback hard-delete. A
+           hard delete used to drop only the branch's version rows — the
+           surviving versionless identity became a GHOST that a later re-mint
+           of the same deterministic id revived through the update path,
+           content-equal, invisible on every list read (the 2026-07-20
+           route-vanish incident). Now the identity row goes too, but ONLY when
+           no other branch retains a version and no child identity still
+           references it — per-branch isolation stays intact."}
+    {:ns graphden.versioning.identity-repair :defn repoint-refs!
+     :say "The identity-plane repair primitives for the OTHER ghost source: a
+           package fn's id is `uuid-v5(ns-path, name)`, so a namespace move
+           mints a new id and abandons the old row with every ref still aimed
+           at it. `repoint-refs!` fills refs in place across BOTH planes
+           (identity and every branch's version rows); `purge-fn-subgraph!`
+           below then removes the abandoned subgraph. The sync-time
+           reconciler (`system.core/reconcile-moved-identities!`) runs them
+           after every package sync, and the operator tool
+           `graphden.dev.integrity` delegates to the same two."}
     {:ns graphden.versioning.storage.merge :defn diff-branches
      :say "The branch-symmetric resolved-view diff: gather every entity touched
            on either side's visibility set, resolve both, and report

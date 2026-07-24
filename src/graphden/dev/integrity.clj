@@ -261,67 +261,108 @@
 ;; =============================================================================
 
 (defn repair-stale-identities!
-  "For every stale-identity group: repoint each ref that targets an
-   EXTRA at the CANONICAL row, then soft-delete the extras. `:dry-run?
-   true` (default) only reports the plan. Returns
-   `{:groups n :repointed n :tombstoned n :plan […]}`.
+  "For every stale-identity group: repoint every ref that targets an
+   EXTRA at the CANONICAL row — IN PLACE, PLANE-WIDE (identity rows
+   AND every *-version row on every branch; the field is a plain
+   column fill of the same logical content, so no per-branch version
+   writes are needed) — then delete the extra's whole legacy subgraph
+   (its bindings, list-items, fn-slots, version rows, and finally the
+   fn row) at the base plane.
 
-   Repointing goes through the storage protocol (`update-entity`), so
-   versioned storages write proper version rows; the soft-delete like
-   any editor delete. Run OFF-PEAK: touched fns recompile on the next
-   delta."
+   Why not the CRUD layer: the crud write path validates per-branch
+   semantics for AUTHOR edits; this is a data-plane consistency
+   restoration where the versioned wrapper is exactly wrong — a
+   wrapper update writes version rows on ONE branch, leaving diverging
+   branches pointing at the deleted extra (audit-4 finding; the first
+   repair draft did precisely that, plus a hard identity delete
+   masquerading as a soft one).
+
+   OPERATIONAL CONTRACT (loud): run OFFLINE or restart every executor
+   after — the in-place fills bypass NOTIFY/delta-invalidation by
+   design, so live compiled registries and rich-types keep the old ids
+   until reboot. `:dry-run? true` (default) only reports the plan.
+
+   Returns `{:groups n :repointed n :removed n :dry-run? bool :plan […]}`."
   ([storage] (repair-stale-identities! storage {:dry-run? true}))
   ([storage {:keys [dry-run?] :or {dry-run? true}}]
-   (let [stale (stale-identities storage)
+   (let [base (base-of storage)
+         stale (stale-identities storage)
          extra->canonical (into {}
                                 (for [{:keys [canonical extras]} stale
                                       e extras]
                                   [(:id e) (:id canonical)]))
+         extra-ids (set (keys extra->canonical))
          plan (volatile! [])
-         repoint! (fn [entity row field]
-                    (when-let [target (extra->canonical (get row field))]
-                      (vswap! plan conj {:op :repoint :entity entity
-                                         :id (:id row) :field field
-                                         :from (get row field) :to target})
-                      (when-not dry-run?
-                        (sp/update-entity storage entity (:id row)
-                                          {field target}))))]
+         fill! (fn [entity row field]
+                 (when-let [target (extra->canonical (get row field))]
+                   (vswap! plan conj {:op :repoint :entity entity
+                                      :id (:id row) :field field
+                                      :from (get row field) :to target})
+                   (when-not dry-run?
+                     (sp/update-entity base entity (:id row)
+                                       {field target}))))]
+     ;; --- repoint: identity plane ---
      (doseq [b (all-rows storage :binding)
              f [:ref-fn-id :type-override-fn-id :resolver-fn-id]]
-       (repoint! :binding b f))
+       (fill! :binding b f))
      (doseq [i (all-rows storage :binding-list-item)]
-       (repoint! :binding-list-item i :ref-fn-id))
-     (doseq [s (all-rows storage :slot)]
-       (repoint! :slot s :type-fn-id))
+       (fill! :binding-list-item i :ref-fn-id))
+     (doseq [sl (all-rows storage :slot)]
+       (fill! :slot sl :type-fn-id))
      (doseq [f (all-rows storage :fn)]
        (doseq [fld [:base-fn-id :element-fn-id :return-type-fn-id]]
-         (repoint! :fn f fld))
-       ;; parent-ids is a ref-many — rewrite the whole vector when any
-       ;; member is an extra.
+         (fill! :fn f fld))
        (let [pids (:parent-ids f)]
          (when (some extra->canonical pids)
            (let [pids' (mapv #(get extra->canonical % %) pids)]
              (vswap! plan conj {:op :repoint :entity :fn :id (:id f)
-                                :field :parent-ids
-                                :from pids :to pids'})
+                                :field :parent-ids :from pids :to pids'})
              (when-not dry-run?
-               (sp/update-entity storage :fn (:id f)
-                                 {:parent-ids pids'}))))))
-     (let [tombstoned (volatile! 0)]
-       (doseq [{:keys [extras]} stale
-               e extras]
-         (vswap! plan conj {:op :tombstone :entity :fn :id (:id e)
-                            :name (:name e)})
-         (when-not dry-run?
-           (sp/delete-entity storage :fn (:id e))
-           (vswap! tombstoned inc)))
-       (when-not dry-run?
-         (log/info "integrity repair applied"
-                   {:groups (count stale)
-                    :repointed (count (filter #(= :repoint (:op %)) @plan))
-                    :tombstoned @tombstoned}))
-       {:groups (count stale)
-        :repointed (count (filter #(= :repoint (:op %)) @plan))
-        :tombstoned (count (filter #(= :tombstone (:op %)) @plan))
-        :dry-run? dry-run?
-        :plan @plan}))))
+               (sp/update-entity base :fn (:id f) {:parent-ids pids'}))))))
+     ;; --- repoint: EVERY branch's version rows (a branch-local
+     ;; binding override targeting an extra would dangle otherwise —
+     ;; the write-side twin of the resolved-view blindness) ---
+     (doseq [bv (all-rows storage :binding-version)
+             f [:ref-fn-id :type-override-fn-id :resolver-fn-id]]
+       (fill! :binding-version bv f))
+     (doseq [iv (all-rows storage :binding-list-item-version)]
+       (fill! :binding-list-item-version iv :ref-fn-id))
+     ;; --- remove each extra's whole legacy subgraph ---
+     (letfn [(purge!
+               [entity rows]
+               (doseq [r rows]
+                 (vswap! plan conj {:op :remove :entity entity :id (:id r)})
+                 (when-not dry-run?
+                   (sp/delete-entity base entity (:id r)))))]
+       (doseq [eid extra-ids]
+         (let [own-bindings (filter #(= eid (:fn-id %))
+                                    (all-rows storage :binding))
+               own-binding-ids (set (map :id own-bindings))]
+           (purge! :binding-list-item-version
+                   (filter #(contains? own-binding-ids (:binding-id %))
+                           (all-rows storage :binding-list-item-version)))
+           (purge! :binding-list-item
+                   (filter #(contains? own-binding-ids (:binding-id %))
+                           (all-rows storage :binding-list-item)))
+           (purge! :binding-version
+                   (filter #(contains? own-binding-ids (:binding-id %))
+                           (all-rows storage :binding-version)))
+           (purge! :binding own-bindings)
+           (let [own-fn-slots (filter #(= eid (:fn-id %))
+                                      (all-rows storage :fn-slot))
+                 own-fs-ids (set (map :id own-fn-slots))]
+             (purge! :fn-slot-version
+                     (filter #(contains? own-fs-ids (:fn-slot-id %))
+                             (all-rows storage :fn-slot-version)))
+             (purge! :fn-slot own-fn-slots))
+           (purge! :fn-version (filter #(= eid (:fn-id %))
+                                       (all-rows storage :fn-version)))
+           (purge! :fn [{:id eid}]))))
+     (when-not dry-run?
+       (log/warn "integrity repair applied — RESTART every executor: in-place fills bypass delta-invalidation by design"
+                 {:groups (count stale)}))
+     {:groups (count stale)
+      :repointed (count (filter #(= :repoint (:op %)) @plan))
+      :removed (count (filter #(= :remove (:op %)) @plan))
+      :dry-run? dry-run?
+      :plan @plan})))

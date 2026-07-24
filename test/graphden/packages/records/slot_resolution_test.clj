@@ -260,3 +260,21 @@
               :text-val  {:parent :_x :return-type :text}}]
     (is (= [:base-a :body]
            (sr/resolve-slot-owner :composed :body defs :text-val)))))
+
+
+(deftest build-defs-by-name-drops-colliding-bare-key-test
+  ;; Audit-5: a bare name claimed by two different defs must not
+  ;; last-write-wins — the bare key is REMOVED (conservative "unknown",
+  ;; every consumer stops the walk / skips the check) while the
+  ;; qualified keys stay precise.
+  (let [idx (sr/build-defs-by-name
+              [{:name :dup :namespace "ns-a" :parent :p1}
+               {:name :dup :namespace "ns-b" :parent :p2}
+               {:name :solo :namespace "ns-a" :parent :p3}])]
+    (testing "colliding bare key removed"
+      (is (not (contains? idx :dup))))
+    (testing "qualified keys stay precise"
+      (is (= :p1 (:parent (get idx :ns-a/dup))))
+      (is (= :p2 (:parent (get idx :ns-b/dup)))))
+    (testing "unique bare key untouched"
+      (is (= :p3 (:parent (get idx :solo)))))))

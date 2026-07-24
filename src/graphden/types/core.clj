@@ -168,6 +168,31 @@
     :else            false))
 
 
+(defn unresolved-refs
+  "The keyword refs inside `t` that name NO registered alias — the
+   concrete reason `well-formed?` rejects a body. Diagnostic
+   companion (mirrors `well-formed?`'s walk): the batch registration
+   names these in its skip log so a dangling ref is actionable
+   instead of an opaque `body not well-formed`. A structurally
+   invalid node contributes nothing — `well-formed?` already covers
+   that shape of failure."
+  [t]
+  (cond
+    (or (primitive? t) (type-var? t)) []
+    (keyword? t)     (if (get (aliases-snapshot) t) [] [t])
+    (record-type? t) (mapcat unresolved-refs (vals t))
+    (fn-type? t)     (concat (mapcat unresolved-refs (vals (fn-args t)))
+                             (unresolved-refs (fn-ret t)))
+    (list-type? t)   (unresolved-refs (list-elem t))
+    (map-type? t)    (concat (unresolved-refs (map-key t))
+                             (unresolved-refs (map-val t)))
+    (tuple-type? t)  (mapcat unresolved-refs (tuple-elems t))
+    (refine-type? t) (unresolved-refs (refine-base t))
+    (marker-type? t) (unresolved-refs (marker-inner t))
+    (union-type? t)  (mapcat unresolved-refs (union-members t))
+    :else            []))
+
+
 ;; `contains-secret?` / `taint-with-secret-if-tainted` / `wrap-with-taint`
 ;; live in `graphden.types.core.shapes` and are re-referred into this
 ;; ns above so historical `types/contains-secret?` etc. keep working.
@@ -536,8 +561,13 @@
             (primitives nm)        {:nm nm :body body
                                     :reason (str "name " (pr-str nm)
                                                  " shadows a primitive")}
-            (not (well-formed? body)) {:nm nm :body body
-                                       :reason "body not well-formed"}
+            (not (well-formed? body))
+            {:nm nm :body body
+             :reason (let [dangling (distinct (unresolved-refs body))]
+                       (if (seq dangling)
+                         (str "body not well-formed — unresolved refs "
+                              (pr-str (vec dangling)))
+                         "body not well-formed — invalid structure"))}
             :else                  {:nm nm :body body :ok true}))
         results (binding [*alias-view* scratch]
                   (mapv classify pairs))

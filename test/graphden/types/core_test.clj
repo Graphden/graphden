@@ -1,5 +1,6 @@
 (ns graphden.types.core-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging]
     [graphden.types.core :as t]))
@@ -1085,3 +1086,13 @@
             (t/register-marker! :weird {:monotone? false}))))
     (finally
       (t/unregister-marker! :pii-probe))))
+
+
+(deftest batch-registration-names-the-dangling-ref-test
+  ;; Audit-5: "body not well-formed" alone is un-actionable — the skip
+  ;; reason must name WHICH inner ref dangles.
+  (let [{:keys [failed]} (t/register-type-aliases-batch
+                           [[:audit5-dangling {:field :no-such-type-xyz} nil]])]
+    (is (= 1 (count failed)))
+    (is (str/includes? (:reason (first failed)) ":no-such-type-xyz")
+        "the unresolved inner ref is named in the reason")))

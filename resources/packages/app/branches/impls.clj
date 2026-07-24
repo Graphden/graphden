@@ -207,21 +207,40 @@
     ;; invalidate that. Only reached on SUCCESS: a `:merge-conflict`
     ;; throws out of `vs/merge-branch!` above, so a rejected merge
     ;; invalidates nothing.
-    (let [affected (mrg/merge-affected-fn-ids (branches/base-storage ctx)
-                                              source-branch-id)]
-      (when (seq affected)
-        (exec-ctx/invalidate-graph-cache!
-          (if-let [router (br/current-router)]
-            (br/ctx-for router target-branch-id)
-            ctx)
-          affected)))
-    (try
-      (recon/restart-services-on-branch! ctx recon/running target-branch-id)
-      (catch Exception e
-        ;; Restart is observability-grade — the merge already
-        ;; succeeded; surface the failure but don't fail the API.
-        (log/warn e "post-merge service restart failed"
-                  {:target-branch-id target-branch-id})))
+    ;; The invalidate + service restart run on a DEDICATED thread and
+    ;; the request thread joins it: the merge record is already
+    ;; committed, and an aborted client interrupts the http-kit worker
+    ;; — running these post-commit steps inline would let that
+    ;; interrupt skip them, leaving the target branch serving
+    ;; pre-merge closures until an unrelated recompile (a committed
+    ;; but invisible merge). On the dedicated thread they always
+    ;; finish; an interrupt during join only re-flags the worker.
+    (let [post-commit!
+          (fn []
+            (let [affected (mrg/merge-affected-fn-ids
+                             (branches/base-storage ctx) source-branch-id)]
+              (when (seq affected)
+                (exec-ctx/invalidate-graph-cache!
+                  (if-let [router (br/current-router)]
+                    (br/ctx-for router target-branch-id)
+                    ctx)
+                  affected)))
+            (try
+              (recon/restart-services-on-branch! ctx recon/running
+                                                 target-branch-id)
+              (catch Exception e
+                ;; Restart is observability-grade — the merge already
+                ;; succeeded; surface the failure but don't fail the API.
+                (log/warn e "post-merge service restart failed"
+                          {:target-branch-id target-branch-id}))))
+          t (Thread. ^Runnable post-commit! "merge-post-commit")]
+      (Thread/.start t)
+      (try
+        (Thread/.join t)
+        (catch InterruptedException _
+          (log/warn "client aborted during post-merge invalidation — invalidation continues on its own thread"
+                    {:target-branch-id target-branch-id})
+          (Thread/.interrupt (Thread/currentThread)))))
     ;; Attach the audit log — fns that have a version on the source
     ;; branch but won't surface on the target after merge because
     ;; their effective `:branch-local?` filtered them out at the

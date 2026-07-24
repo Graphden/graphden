@@ -577,6 +577,14 @@
         leftovers
         (for [row (sp/query-entities base :fn {})
               :when (and (:name row)
+                         ;; Synthetic anon rows can never be an authored
+                         ;; MOVE: their name embeds a shape+use-site hash,
+                         ;; so a vanished shape has 0 same-name candidates
+                         ;; by construction — scanning them only floods
+                         ;; the leftover log (hundreds per reduced-set
+                         ;; test bootstrap).
+                         (nil? (:anonymous-hash row))
+                         (not (str/starts-with? (:name row) "_anon-"))
                          (not (contains? synced-ids (:id row))))
               :let [path (some-> (:namespace-id row) ns-path)
                     root (some-> path (str/split #"\.") first)]
@@ -595,12 +603,18 @@
             (idrepair/purge-fn-subgraph! storage (:id row))
             (registry-core/unregister-rich-type! (keyword (:name row))
                                                  (:id row)))
-          (log/warn "package identity leftover NOT auto-reconciled"
-                    {:name (:name row) :id (:id row)
-                     :reason (if (empty? candidates)
-                               :removed-from-package
-                               :ambiguous-move-target)
-                     :candidates (count candidates)}))))
+          (if (empty? candidates)
+            ;; A 0-candidate leftover is a genuine REMOVAL (or a
+            ;; reduced-set test sync) — expected, the author's call,
+            ;; never a move. debug, not operator-warn.
+            (log/debug "package identity leftover: removed from package"
+                       {:name (:name row) :id (:id row)})
+            ;; >1 same-name candidates — a move we cannot resolve
+            ;; safely. THE signal this reconciler exists for.
+            (log/warn "package identity leftover NOT auto-reconciled"
+                      {:name (:name row) :id (:id row)
+                       :reason :ambiguous-move-target
+                       :candidates (count candidates)})))))
     (count leftovers)))
 
 

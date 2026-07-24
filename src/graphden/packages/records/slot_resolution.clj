@@ -460,18 +460,29 @@
    slot resolution. DUAL-keyed (bare + `:ns.path/name` qualified) —
    ambiguous PARENT refs arrive already qualified from
    `normalize-qualified-refs`, so their shape lookups hit the precise
-   key; a bare key under per-ns duplicates is last-write and is only
-   consulted for unique names."
+   key. A bare key claimed by TWO different defs is REMOVED rather
+   than last-write-wins: every consumer treats an absent name as
+   `unknown — stop the walk / skip the check`, which degrades
+   conservatively, while a silent last-write would resolve a bare
+   lookup to whichever same-named neighbour happened to sort last
+   (the same failure class the exporter's `:dup-names` qualification
+   closed). The source corpus has no bare duplicates today; installed
+   packages can mint them any day."
   [module-fn-defs]
-  (reduce
-    (fn [m fd]
-      (if-not (:name fd)
-        m
-        (cond-> (assoc m (:name fd) fd)
-          (:namespace fd)
-          (assoc (keyword (:namespace fd) (name (:name fd))) fd))))
-    {}
-    module-fn-defs))
+  (:m
+    (reduce
+      (fn [{:keys [m claimed] :as acc} fd]
+        (if-not (:name fd)
+          acc
+          (let [bare (:name fd)
+                prior (get claimed bare ::none)
+                dup? (and (not= prior ::none) (not= prior fd))]
+            {:claimed (assoc claimed bare fd)
+             :m (cond-> (if dup? (dissoc m bare) (assoc m bare fd))
+                  (:namespace fd)
+                  (assoc (keyword (:namespace fd) (name bare)) fd))})))
+      {:m {} :claimed {}}
+      module-fn-defs)))
 
 
 (defn ancestor-type-pin

@@ -58,6 +58,7 @@
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
+    [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
@@ -535,6 +536,73 @@
         (set (keys @failures)) @failures))))
 
 
+(defn reconcile-moved-identities!
+  "ROOT FIX for the ghost-identity class (audit-4): a package fn's
+   deterministic id is `uuid-v5(ns-path, name)`, so moving it to
+   another namespace mints a NEW id — and, before this pass, silently
+   ABANDONED the old row with every pre-move ref still pointing at it
+   (the live-demo outage; three downstream rescues patched its
+   symptoms). Heal at the moment of the move instead:
+
+   After a package sync, an identity-plane `:fn` row is a MOVE
+   LEFTOVER when ALL hold:
+   - it has a name and its id equals its OWN deterministic derivation
+     (`records/fn-id(row-ns-path, name)`) — i.e. it is a
+     package-world row, never an editor-created one (random ids are
+     NEVER touched);
+   - it is NOT in the just-synced record set;
+   - its ns-path's root segment belongs to a package being synced
+     (partial test bundles must not judge other packages' rows);
+   - EXACTLY ONE just-synced fn carries the same bare name (the
+     unambiguous move target; 0 candidates = genuine package
+     removal, >1 = ambiguous — both logged and left alone).
+
+   For each leftover: repoint every ref (identity + all branch
+   version rows, in place) at the new id, purge the ghost's own
+   subgraph, and drop its registry entry. Runs BEFORE the
+   compiled-registry build, so there is nothing stale to invalidate."
+  [storage packages synced-fn-rows]
+  (let [base (idrepair/base-of storage)
+        package-roots (into #{} (map :name) (:packages packages))
+        synced-ids (into #{} (keep :id) synced-fn-rows)
+        synced-by-name (group-by :name (filter :name synced-fn-rows))
+        ns-rows (sp/query-entities base :ns {})
+        ns-by-id (into {} (map (juxt :id identity)) ns-rows)
+        ns-path (fn ns-path [nsid]
+                  (when-let [r (ns-by-id nsid)]
+                    (if-let [p (:parent-id r)]
+                      (str (ns-path p) "." (:name r))
+                      (:name r))))
+        leftovers
+        (for [row (sp/query-entities base :fn {})
+              :when (and (:name row)
+                         (not (contains? synced-ids (:id row))))
+              :let [path (some-> (:namespace-id row) ns-path)
+                    root (some-> path (str/split #"\.") first)]
+              :when (and path
+                         (contains? package-roots root)
+                         (= (:id row)
+                            (records/fn-id path (keyword (:name row)))))]
+          row)]
+    (doseq [row leftovers]
+      (let [candidates (get synced-by-name (:name row))]
+        (if (= 1 (count candidates))
+          (let [new-id (:id (first candidates))]
+            (log/info "reconciling moved package identity"
+                      {:name (:name row) :from (:id row) :to new-id})
+            (idrepair/repoint-refs! storage {(:id row) new-id})
+            (idrepair/purge-fn-subgraph! storage (:id row))
+            (registry-core/unregister-rich-type! (keyword (:name row))
+                                                 (:id row)))
+          (log/warn "package identity leftover NOT auto-reconciled"
+                    {:name (:name row) :id (:id row)
+                     :reason (if (empty? candidates)
+                               :removed-from-package
+                               :ambiguous-move-target)
+                     :candidates (count candidates)}))))
+    (count leftovers)))
+
+
 (defn sync-fn-entities-from-packages!
   "Pure side-effects: sync composed fn-defs to storage, snapshot their
    rich-types, run a topological-order type-check sweep. Returns the
@@ -569,7 +637,12 @@
                                     [fn-name (assoc fn-def :name fn-name)])))
                           (:base-fn-defs packages))
          fns (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
-                                                  extra-name->id extra-defs)]
+                                                  extra-name->id extra-defs)
+         ;; ROOT FIX (audit-4): heal namespace-moved package
+         ;; identities at the moment of the move — see the fn
+         ;; docstring. Before the seed/sweep so registry + compile
+         ;; only ever see the healed graph.
+         _ (reconcile-moved-identities! storage packages fns)]
      ;; Snapshot composed fn-defs into the in-memory rich-type registry
      ;; so the editor's `:effects` strip and arg-type hints can resolve
      ;; their declared shape. Two passes:

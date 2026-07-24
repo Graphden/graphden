@@ -38,24 +38,20 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.identity-repair :as idrepair]))
 
 
 ;; =============================================================================
 ;; Detectors
 ;; =============================================================================
 
-(defn- base-of
-  "The IDENTITY-plane storage. A VersionedStorage's query-entities
-   returns the RESOLVED view — which lists only entities carrying a
-   version row on the branch chain and drops tombstones, i.e. it
-   HIDES exactly the stale identity rows and orphan shapes this tool
-   hunts (first live-DB run: 0 stale groups reported while raw SQL
-   showed 3 same-named identities; 674 false orphan-versions from
-   comparing raw version rows against the resolved fn listing).
-   Every detector reads the base plane."
-  [storage]
-  (or (:base-storage storage) storage))
+(def ^:private base-of
+  ;; The IDENTITY-plane storage — shared with the sync-time
+  ;; reconciler. A VersionedStorage's query-entities returns the
+  ;; RESOLVED view, which hides exactly the stale rows this tool
+  ;; hunts (first live-DB run: 0 stale groups vs 3 in raw SQL).
+  idrepair/base-of)
 
 
 (defn- all-rows
@@ -255,21 +251,27 @@
            (into {} (map (fn [[k v]] [k (count v)])) result))))
 
 
+
 ;; =============================================================================
-;; Repair — stale-identity class only (the outage class). Other
-;; classes are inert (orphans) or need per-case judgement.
+;; Repair — stale-identity class only. Delegates to the shared
+;; identity-plane primitives (`graphden.versioning.identity-repair`),
+;; the same ones the sync-time reconciler
+;; (`system.core/reconcile-moved-identities!` — the ROOT fix) uses.
+;; This standalone entry remains the escape hatch for databases that
+;; lived through pre-reconciler versions.
 ;; =============================================================================
 
 (defn repair-stale-identities!
-  "For every stale-identity group: repoint each ref that targets an
-   EXTRA at the CANONICAL row, then soft-delete the extras. `:dry-run?
-   true` (default) only reports the plan. Returns
-   `{:groups n :repointed n :tombstoned n :plan […]}`.
+  "For every stale-identity group: repoint every ref targeting an
+   EXTRA at the CANONICAL row (in place, identity + every branch's
+   version rows — `idrepair/repoint-refs!`), then purge each extra's
+   whole legacy subgraph (`idrepair/purge-fn-subgraph!`).
 
-   Repointing goes through the storage protocol (`update-entity`), so
-   versioned storages write proper version rows; the soft-delete like
-   any editor delete. Run OFF-PEAK: touched fns recompile on the next
-   delta."
+   `:dry-run? true` (default) only reports the plan. OPERATIONAL
+   CONTRACT (loud): run OFFLINE or restart every executor after — the
+   in-place fills bypass NOTIFY/delta-invalidation by design.
+
+   Returns `{:groups n :repointed n :removed n :dry-run? bool :plan […]}`."
   ([storage] (repair-stale-identities! storage {:dry-run? true}))
   ([storage {:keys [dry-run?] :or {dry-run? true}}]
    (let [stale (stale-identities storage)
@@ -278,50 +280,18 @@
                                       e extras]
                                   [(:id e) (:id canonical)]))
          plan (volatile! [])
-         repoint! (fn [entity row field]
-                    (when-let [target (extra->canonical (get row field))]
-                      (vswap! plan conj {:op :repoint :entity entity
-                                         :id (:id row) :field field
-                                         :from (get row field) :to target})
-                      (when-not dry-run?
-                        (sp/update-entity storage entity (:id row)
-                                          {field target}))))]
-     (doseq [b (all-rows storage :binding)
-             f [:ref-fn-id :type-override-fn-id :resolver-fn-id]]
-       (repoint! :binding b f))
-     (doseq [i (all-rows storage :binding-list-item)]
-       (repoint! :binding-list-item i :ref-fn-id))
-     (doseq [s (all-rows storage :slot)]
-       (repoint! :slot s :type-fn-id))
-     (doseq [f (all-rows storage :fn)]
-       (doseq [fld [:base-fn-id :element-fn-id :return-type-fn-id]]
-         (repoint! :fn f fld))
-       ;; parent-ids is a ref-many — rewrite the whole vector when any
-       ;; member is an extra.
-       (let [pids (:parent-ids f)]
-         (when (some extra->canonical pids)
-           (let [pids' (mapv #(get extra->canonical % %) pids)]
-             (vswap! plan conj {:op :repoint :entity :fn :id (:id f)
-                                :field :parent-ids
-                                :from pids :to pids'})
-             (when-not dry-run?
-               (sp/update-entity storage :fn (:id f)
-                                 {:parent-ids pids'}))))))
-     (let [tombstoned (volatile! 0)]
-       (doseq [{:keys [extras]} stale
-               e extras]
-         (vswap! plan conj {:op :tombstone :entity :fn :id (:id e)
-                            :name (:name e)})
-         (when-not dry-run?
-           (sp/delete-entity storage :fn (:id e))
-           (vswap! tombstoned inc)))
-       (when-not dry-run?
-         (log/info "integrity repair applied"
-                   {:groups (count stale)
-                    :repointed (count (filter #(= :repoint (:op %)) @plan))
-                    :tombstoned @tombstoned}))
-       {:groups (count stale)
-        :repointed (count (filter #(= :repoint (:op %)) @plan))
-        :tombstoned (count (filter #(= :tombstone (:op %)) @plan))
-        :dry-run? dry-run?
-        :plan @plan}))))
+         plan! (fn [op] (vswap! plan conj op))
+         repointed (idrepair/repoint-refs! storage extra->canonical
+                                           plan! dry-run?)
+         removed (reduce + 0
+                         (map #(idrepair/purge-fn-subgraph! storage %
+                                                            plan! dry-run?)
+                              (keys extra->canonical)))]
+     (when-not dry-run?
+       (log/warn "integrity repair applied — RESTART every executor: in-place fills bypass delta-invalidation by design"
+                 {:groups (count stale)}))
+     {:groups (count stale)
+      :repointed repointed
+      :removed removed
+      :dry-run? dry-run?
+      :plan @plan})))

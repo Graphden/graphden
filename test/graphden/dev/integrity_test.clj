@@ -64,12 +64,13 @@
         (testing "dry-run plans, changes nothing"
           (let [r (integrity/repair-stale-identities! storage)]
             (is (:dry-run? r))
-            (is (= 1 (:tombstoned r)))
+            (is (= 1 (:groups r)))
+            (is (pos? (:removed r)))
             (is (pos? (:repointed r)))
             (is (= (:id stale)
                    (:ref-fn-id (sp/read-entity storage :binding
                                                (:id stale-ref)))))))
-        (testing "repair repoints the ref and soft-deletes the extra"
+        (testing "repair repoints the ref and removes the extra subgraph"
           (integrity/repair-stale-identities! storage {:dry-run? false})
           (is (= (:id canonical)
                  (:ref-fn-id (sp/read-entity storage :binding

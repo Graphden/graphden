@@ -481,12 +481,12 @@ jobs:
       - name: Run trivy fs (vulnerabilities)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          # Same trivy release bb.edn runs locally (aquasec/trivy:0.58.2)
+          # Same trivy release bb.edn runs locally (aquasec/trivy:0.70.0)
           # — the action otherwise bundles its own, so CI and local could
           # report different findings. The CVE DB itself stays fresh per
           # run (deliberate: new HIGH/CRITICAL on a pinned dep SHOULD
           # red CI even with no diff).
-          version: v0.58.2
+          version: v0.70.0
           scan-type: fs
           severity: HIGH,CRITICAL
           exit-code: '1'
@@ -496,7 +496,7 @@ jobs:
       - name: Run trivy config (Dockerfile misconfig)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          version: v0.58.2
+          version: v0.70.0
           scan-type: config
           severity: HIGH,CRITICAL
           exit-code: '1'

@@ -338,14 +338,14 @@
                   "**/*.md")}
 
   trivy
-  {:doc "Supply-chain CVE + Dockerfile misconfig scan via Docker aquasec/trivy:0.58.2. Caches vulnerability DB in /tmp/trivy-cache."
+  {:doc "Supply-chain CVE + Dockerfile misconfig scan via Docker aquasec/trivy:0.70.0. Caches vulnerability DB in /tmp/trivy-cache."
    :task (let [pwd (System/getenv "PWD")]
            (println "▶ trivy config (Dockerfile misconfig)")
            (p/shell "docker" "run" "--rm"
                     "-v" (str pwd ":/repo")
                     "-v" "/tmp/trivy-cache:/root/.cache/"
                     "-w" "/repo"
-                    "aquasec/trivy:0.58.2"
+                    "aquasec/trivy:0.70.0"
                     "config" "--severity" "HIGH,CRITICAL"
                     "--skip-dirs" "node_modules,target,.tools"
                     ;; Path-scoped, documented misconfig exceptions for the
@@ -358,7 +358,7 @@
                     "-v" (str pwd ":/repo")
                     "-v" "/tmp/trivy-cache:/root/.cache/"
                     "-w" "/repo"
-                    "aquasec/trivy:0.58.2"
+                    "aquasec/trivy:0.70.0"
                     "fs" "--severity" "HIGH,CRITICAL"
                     "--skip-dirs" "node_modules,target,.tools,.playwright-mcp,.git,.lsp"
                     "--exit-code" "1" "--quiet" "."))}

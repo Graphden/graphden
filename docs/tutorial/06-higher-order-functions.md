@@ -162,13 +162,22 @@ Two HOF flavours interact with closure-capture differently:
 
 | Flavour | Examples | Per-call input shape |
 |---|---|---|
-| **Iterating** | `:map`, `:filter`, `:update-vals` | The structural slot is named `:item` (or `:k`, `:v` for maps); the callable's lambda-param is matched by `alpha-equivalent` slot-name unification |
-| **One-shot** | `:future`, `:assoc-fn`, `:invoke` | The structural slot is named `:arg` (a generic placeholder); the callable's lambda-param picks ANY single non-env-bound free arg |
+| **Iterating** | `:map`, `:filter`, `:update-vals` | The structural slot is named `:item` (or `:k`, `:v` for maps); the callable's own same-named arg (or its single unambiguous free) receives the element |
+| **One-shot** | `:future`, `:assoc-fn`, `:invoke` | The structural slot is named `:arg` (a generic placeholder); the callable **declares** its call-site parameters via `:lambda-params` (`[]` = everything captured) |
 
-For one-shot HOFs the dispatch logic discards env-bound names
-(things like `:request` that the closure already provides) so
-the lambda input lands on the actual function input. Without
-that gate, a Ring handler whose ref chain happens to mention
+When the callable has several candidate free args and no
+authored `:lambda-params`, the compile refuses with
+`:compile/ambiguous-lambda-params` naming the candidates — the
+old guessing heuristic is retired (it silently mis-wired
+captured callables). Declare the contract on the callable:
+
+```clojure
+{:name :my-handler
+ :lambda-params [:request]   ; ← per-call inputs, in order
+ ...}
+```
+
+Without that explicitness, a Ring handler whose ref chain happens to mention
 `:request` would have `:request` swallowed as the one-shot
 lambda input — breaking the wrap.
 

@@ -34,6 +34,7 @@
     [graphden.tenancy.deploy :as deploy]
     [graphden.tenancy.domain :as domain]
     [graphden.tenancy.domain-schema :as domain-schema]
+    [graphden.tenancy.grant :as grant]
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.org-schema :as org-schema]
     [graphden.tenancy.storage :as ts]
@@ -327,6 +328,38 @@
             (run! "create-grant" {:subject "eve" :capability "notacap" :namespace "acme"})))
       (is (empty? (filter #(= "notacap" (:capability %))
                           (sp/query-entities storage :grant {})))))))
+
+
+(deftest grant-real-user-end-to-end
+  ;; Audit-3: every other grant test seeds fake subject-ids ("alice"),
+  ;; exercising only the panel's degraded raw-string branch and a
+  ;; principal whose :id matches the fake by construction. This is the
+  ;; missing half: a REAL user row through the REAL writer, asserting
+  ;; (a) the panel joins the username for display, and (b) enforcement
+  ;; passes for the principal login! would mint — cross-checking the
+  ;; two id derivations (create-grant's user-id-by-username vs the
+  ;; principal's (str (:id user))).
+  (let [storage (:storage *ctx*)
+        run! (fn [nm args] (cr/execute *ctx* (fn-id-of storage nm) args))
+        user (users/create-user! *ctx* "e2e-grantee" "pw" "acme")]
+    (run! "create-grant" {:subject "e2e-grantee" :capability "write"
+                          :namespace "acme.app"})
+    (testing "panel Subject cell renders the USERNAME via the user join"
+      (let [handler-id (fn-id-of storage "_partial-grants-admin-handler")
+            body (:body (tc/with-org tc/public-org
+                                     (cr/execute *ctx* handler-id {})))]
+        (is (str/includes? body "e2e-grantee"))
+        (is (not (str/includes? body (str (:id user))))
+            "the raw-id fallback must NOT be the rendered form here")))
+    (testing "enforcement passes for the real principal id"
+      (let [store (grant-schema/storage-grant-store storage)]
+        (is (grant/can? store {:id (str (:id user)) :name "e2e-grantee"}
+                        :write "acme.app"))
+        (is (not (grant/can? store {:id (str (random-uuid))
+                                    :name "e2e-grantee"}
+                             :write "acme.app"))
+            "a different id with the same username is DENIED — matching
+             is id-keyed, not username-keyed")))))
 
 
 (deftest registration-fn-defs-drive-provisioning

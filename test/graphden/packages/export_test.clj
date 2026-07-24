@@ -12,9 +12,11 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.deps :as deps]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.export :as export]
     [graphden.packages.loader :as loader]
+    [graphden.packages.records :as records]
     [graphden.packages.records.parse :as parse]
     [graphden.types.core :as types]))
 
@@ -33,6 +35,14 @@
 (use-fixtures :once
   (fn [t]
     (binding [*storage* (:storage (setup/bootstrap-crud-graph-from-golden!))]
+      ;; The secret-fixture's `ex/vault-get` must be REGISTERED as a
+      ;; hide-result resolver — the export's `hidden-resolver?` keys
+      ;; secret-path emission on the resolver's registered return
+      ;; marker (by ID), not on its name.
+      (registry/record-rich-types!
+        (records/fn-id "ex" :vault-get)
+        :vault-get
+        {:args {:in {:type :text}} :return-type [:secret :text]})
       (t))))
 
 
@@ -147,6 +157,11 @@
    the `[:secret …]` marker lives in the rich-types registry, which the
    parse/export layer never consults."
   [{:name :vault-get :namespace "ex" :args {:in :text} :return-type :text}
+   ;; ^ the row alone isn't enough for the export's hidden-resolver?
+   ;; check — see the fixture-registration fixture below, which
+   ;; records its rich-type with a [:secret :text] return (the export
+   ;; classifies secret-path emission by the resolver's registered
+   ;; hide-result marker, keyed by ID).
    {:name :sink :namespace "ex" :args {:password :text :sql :text} :return-type :int}
    {:name :db-call :namespace "ex" :parent :sink
     :args {:password {:secret-path "user-db/password"} :sql {:value "SELECT 1"}}}])
@@ -172,6 +187,41 @@
              (get-in db-call [:args :password]))
           "the regression this guards: the path silently degrading to a
            plain literal (broken secret + disclosed path) on re-import"))))
+
+
+(deftest secret-path-detection-survives-name-duplication
+  ;; Audit-3 regression: the old detection compared `ref-kw` output to
+  ;; the BARE :vault-get — a same-named composed fn in ANY namespace
+  ;; put "vault-get" into :dup-names, ref-kw qualified it, the `=`
+  ;; missed, and vault PATHS leaked into bundles as generic resolver
+  ;; forms that strip/manifest never saw. Detection is now keyed by
+  ;; the resolver ID's registered hide-result marker.
+  (let [dup-fixture [{:name :vault-get :namespace "ex"
+                      :args {:in :text} :return-type :text}
+                     {:name :sink :namespace "ex"
+                      :args {:password :text :sql :text} :return-type :int}
+                     ;; the name-thief: a same-named COMPOSED fn
+                     {:name :vault-get :namespace "other.ns"
+                      :parent :sink
+                      :args {:password {:value "x"} :sql {:value "y"}}}
+                     {:name :db-call :namespace "ex" :parent :sink
+                      ;; explicit QUALIFIED resolver form — the sugar's
+                      ;; own dup-safety is covered by its canonical-first
+                      ;; resolution; here we pin the EXPORT side.
+                      :args {:password {:resolver :ex/vault-get
+                                        :value "user-db/password"}
+                             :sql {:value "SELECT 1"}}}]
+        out (export/records->fn-defs (parse/parse-module dup-fixture))
+        db-call (first (filter #(= :db-call (:name %)) out))]
+    (testing "the secret binding still emits the dedicated wire key"
+      (is (= {:secret-path "user-db/password"}
+             (get-in db-call [:args :password]))))
+    (testing "strip and manifest still see it"
+      (is (= [{:fn :db-call :arg :password}] (export/secret-path-args out)))
+      (let [stripped (export/strip-secret-paths out)]
+        (is (not (contains? (:args (first (filter #(= :db-call (:name %))
+                                                  stripped)))
+                            :password)))))))
 
 
 (deftest strip-secret-paths-policy

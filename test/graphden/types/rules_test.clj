@@ -6,7 +6,9 @@
    classpath namespaces — so we load the core package once and resolve
    the rule fns from the resulting namespaces."
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as loader]
     [graphden.types.check :as check]
     [graphden.types.core :as t]))
@@ -15,6 +17,24 @@
 ;; Eval the core package's impls.clj resources so their namespaces
 ;; (and the type-rule fns inside them) exist.
 (defonce ^:private _core-loaded (loader/load-packages ["core"]))
+
+
+;; Registry snapshot for the drift guard below — isolated so the
+;; recorded core entries can't leak into sibling test namespaces.
+(use-fixtures :once
+  (fn [t]
+    (binding [t/*type-aliases-override* (atom {})]
+      ;; Aliases first — base-fn arg declarations reference
+      ;; refinement aliases (`:path-segment`, `:non-negative-int` …)
+      ;; that `record-rich-types!` validates. Same two-step as
+      ;; check-test's fixture, both sides thread-isolated.
+      ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+       (:fn-defs _core-loaded))
+      (exec/with-isolated-rich-types
+        (fn []
+          (doseq [[fn-name fn-def] (:base-fn-defs _core-loaded)]
+            (registry/record-rich-types! fn-name fn-def))
+          (t))))))
 
 
 (defn- rule
@@ -74,6 +94,22 @@
    :range    {:return [:list :int] :args {:start :int :end :int :step :int}}
    :repeat   {:return [:list 'a] :args {:count :non-negative-int :item 'a}}
    :const    {:return 'a :args {:value 'a}}})
+
+
+(deftest signature-entries-match-the-loaded-declarations
+  ;; Drift guard (audit-3): `signature-entries` hand-mirrors core
+  ;; fns.edn declarations; without this check a changed declaration
+  ;; keeps the shim green against a STALE map (the mirror-drift class).
+  ;; Registry entries store per-arg rich types under :args and the
+  ;; alias-resolved return under :return.
+  (doseq [[fn-name {:keys [return args]}] signature-entries]
+    (let [entry (registry/rich-type-of fn-name)]
+      (is (some? entry) (str fn-name " is in the loaded registry"))
+      (is (= (t/resolve-alias return) (:return entry))
+          (str fn-name " return matches the declaration"))
+      (doseq [[arg-name t] args]
+        (is (= (t/resolve-alias t) (get-in entry [:args arg-name]))
+            (str fn-name " arg " arg-name " matches"))))))
 
 
 (defn- compute-return-type

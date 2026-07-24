@@ -446,7 +446,14 @@
                  (assoc :value secret-path
                         :value-present true
                         :resolver-fn-id
-                        (or (resolve-ref-id name->id :vault-get)
+                        ;; CANONICAL-first: the sugar means web.vault's
+                        ;; base-fn specifically — a user-composed fn
+                        ;; named `vault-get` in another namespace must
+                        ;; not make the sugar ambiguous (nor hijack
+                        ;; it). Bare fallback covers test fixtures /
+                        ;; exotic sync sets without the package ns.
+                        (or (get name->id :web.vault/vault-get)
+                            (resolve-ref-id name->id :vault-get)
                             (throw (ex-info "{:secret-path …} needs the :vault-get resolver — is the web/vault package in the sync set?"
                                             {:type :packages/vault-get-missing}))))
 

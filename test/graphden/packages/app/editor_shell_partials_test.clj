@@ -18,6 +18,7 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.registry.core :as registry]
     [graphden.test-infra.golden-app :as ga]
     [graphden.types.core :as types]))
 
@@ -173,6 +174,32 @@
         keys* (set (map keyword (keys (get-in table [:args :value]))))]
     (is (= types/known-effect-categories keys*)
         "one row per canonical effect category, no extras")))
+
+
+(deftest every-rule-owner-has-a-narrative
+  ;; Audit-3 drift guard: the narrative roster is hand-maintained; a
+  ;; NEW rule (or a newly-polymorphic base-fn declaration) added
+  ;; without a narrative previously passed both hand-side checks. The
+  ;; golden registry is live here, so derive the owner set the exact
+  ;; way registry/rule-owner-of does — base-fn entries (no
+  ;; :primary-parent) carrying a hand :return-type-rule or a
+  ;; var-carrying :return — and require narrative coverage for each.
+  (let [narratives (->> (io/resource "packages/app/editor/fns.edn")
+                        slurp edn/read-string :fns
+                        (some #(when (= :_rtr-narratives (:name %)) %))
+                        :args :value keys (map keyword) set)
+        owners (into #{}
+                     (keep (fn [[n entry]]
+                             (when (and (nil? (:primary-parent entry))
+                                        (or (:return-type-rule entry)
+                                            (types/type-any? types/type-var?
+                                                             (:return entry))))
+                               n)))
+                     (registry/rich-types-snapshot))]
+    (is (seq owners) "derived owner set is non-empty")
+    (doseq [o owners]
+      (is (contains? narratives o)
+          (str o " owns a return narrowing but has no narrative")))))
 
 
 ;; ============================================================================

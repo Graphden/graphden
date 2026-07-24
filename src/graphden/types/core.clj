@@ -423,10 +423,16 @@
    ;; side-table is GLOBAL-registry bookkeeping only, like
    ;; `alias-owners`.
    (when qualified-name
-     (swap! (aliases-atom) assoc qualified-name t)
-     (when (and owner-fn-id (nil? *type-aliases-override*))
-       (swap! alias-qualified update alias-name
-              (fnil assoc {}) owner-fn-id qualified-name)))
+     (swap! (aliases-atom) assoc qualified-name t))
+   ;; Ambiguity bookkeeping tracks EVERY owner, qualified or not — a
+   ;; version-materialized (`@`) namespace can't register a qualified
+   ;; keyword, but its collision with another owner must still make
+   ;; the bare name throw (the candidates list then names the
+   ;; versioned package by its ns-path string instead of a keyword).
+   (when (and owner-fn-id (nil? *type-aliases-override*))
+     (swap! alias-qualified update alias-name
+            (fnil assoc {}) owner-fn-id
+            (or qualified-name alias-name)))
    alias-name))
 
 

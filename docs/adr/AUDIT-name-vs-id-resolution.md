@@ -168,6 +168,16 @@ resolved `sequence` type-fn-id. LOCAL, cosmetic.
 `fn-ids-with-tag` (→ immediately to ids; gating compares `parent-ids` by
 id). Keying the registry by fn-id is plumbing for nil value — leave.
 
+`crud/secrets.clj` `vault-get-fn-id` — name query, audited 2026-07-24
+and kept DELIBERATELY: the base-fn filter (`:return-type-fn-id` set) makes
+the pick deterministic (base-fn bare names stay globally unique), and the
+per-request storage query stays correct on editor DBs whose row ids don't
+match the package uuid-v5 derivation. The registry alternative
+(`(:fn-id (rich-type-of :vault-get))`) was REJECTED: the tenant per-org
+slice prefers an org's own same-named entry, so a tenant composing a fn
+named `vault-get` would shadow the platform resolver — the storage query
+has no such precedence hazard.
+
 ### CORRECT-BY-ID / boundary (no change)
 
 Versioning resolves by `(entity-name, entity-id, branch-id)` throughout

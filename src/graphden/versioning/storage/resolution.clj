@@ -568,6 +568,32 @@
                   entity-ids)))))
 
 
+(defn ids-without-chain-version
+  "Subset of `ids` (returned as a set) that resolve to NO version on
+   `branch-id`'s chain — merge-aware, exactly the resolver's own
+   visibility rule: a version merged into a chain branch counts, a
+   version living only on an unrelated branch does not. These are the
+   entities the resolved LIST reads never return;
+   `VersionedStorage.update-entities` forces a version for them so a
+   content-equal re-write becomes visible on this branch (the
+   2026-07-20 shrink-regrow incident class — a version on an unrelated
+   branch must NOT satisfy this branch's visibility). Tombstone-winners
+   count as versioned: they resolve, to a deletion, and the update path
+   handles them via its own not-found check."
+  [base-storage entity-name ids branch-id]
+  (if (empty? ids)
+    #{}
+    (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+          {:keys [versions-by-id merges-by-target branch-chain]}
+          (load-merge-aware-cache base-storage version-entity version-id-field
+                                  (vec ids) branch-id)]
+      (into #{}
+            (remove #(some? (resolve-version-from-cache base-storage entity-name
+                                                        versions-by-id merges-by-target
+                                                        % branch-chain)))
+            ids))))
+
+
 ;; === Batch Execution Graph Resolution ===
 ;;
 ;; Optimized algorithm that loads ALL data in 4 queries, then does BFS in memory.

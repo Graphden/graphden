@@ -1368,3 +1368,116 @@
         (is (thrown? clojure.lang.ExceptionInfo
               (sp/update-entity v :binding-list-item orphan-id {:value 7}))))
       (finally (sp/close base)))))
+
+
+;; ============================================================================
+;; Hard delete purges sole-branch identities (ghost-identity prevention)
+;; ============================================================================
+
+(deftest hard-delete-purges-sole-branch-identity-test
+  ;; The 2026-07-20 shrink-regrow class at its root: a sync hard delete
+  ;; used to drop only this branch's version rows, leaving a versionless
+  ;; identity that a later regrow of the same deterministic id revived
+  ;; through the update path — content-equal, no version written,
+  ;; invisible on every list read. Now the identity goes too (no other
+  ;; branch retains a version), so the regrow flows through
+  ;; create-entities and is visible immediately.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "hd")
+            item (sp/create-entity v :binding-list-item
+                                   {:binding-id (:id b) :position 0 :value 1})]
+        (sp/delete-entity v :binding-list-item (:id item))
+        (testing "identity row is gone at the base plane"
+          (is (empty? (sp/read-entities base :binding-list-item [(:id item)]))))
+        (testing "regrow of the SAME id goes through create and is visible"
+          (sp/upsert-entities v :binding-list-item
+                              [{:id (:id item) :binding-id (:id b)
+                                :position 0 :value 1}])
+          (let [rows (sp/query-entities v :binding-list-item
+                                        {:binding-id (:id b)})]
+            (is (= 1 (count rows)))
+            (is (= 1 (:value (first rows)))))))
+      (finally (sp/close base)))))
+
+
+(deftest hard-delete-retains-identity-pinned-by-another-branch-test
+  ;; Per-branch isolation: a feature branch that diverged an item pins
+  ;; the identity row — main's hard delete removes main's versions only,
+  ;; and the feature branch keeps resolving its own version.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "pin")
+            item (sp/create-entity v :binding-list-item
+                                   {:binding-id (:id b) :position 0 :value 1})
+            feature (vs/create-branch! v "hd-pin-feature")
+            vf (vs/switch-branch v (:id feature))]
+        (sp/update-entity vf :binding-list-item (:id item) {:value 42})
+        (sp/delete-entity v :binding-list-item (:id item))
+        (testing "identity survives — the feature branch pins it"
+          (is (= 1 (count (sp/read-entities base :binding-list-item [(:id item)])))))
+        (testing "main no longer resolves the item"
+          (is (empty? (sp/query-entities v :binding-list-item
+                                         {:binding-id (:id b)}))))
+        (testing "feature still resolves its own version"
+          (let [rows (sp/query-entities vf :binding-list-item
+                                        {:binding-id (:id b)})]
+            (is (= 1 (count rows)))
+            (is (= 42 (:value (first rows)))))))
+      (finally (sp/close base)))))
+
+
+(deftest hard-delete-retains-parent-identity-while-child-survives-test
+  ;; A binding whose item identity is pinned by another branch must keep
+  ;; its own identity row too — nothing may dangle. The versionless
+  ;; backstop in update-entities still heals such a binding on the next
+  ;; content-equal write.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "dang")
+            item (sp/create-entity v :binding-list-item
+                                   {:binding-id (:id b) :position 0 :value 1})
+            feature (vs/create-branch! v "hd-dang-feature")
+            vf (vs/switch-branch v (:id feature))]
+        (sp/update-entity vf :binding-list-item (:id item) {:value 2})
+        ;; Leaves first, like reconcile-fn-bodies!: the item's identity
+        ;; is pinned by the feature branch, so it stays…
+        (sp/delete-entity v :binding-list-item (:id item))
+        (is (= 1 (count (sp/read-entities base :binding-list-item [(:id item)]))))
+        ;; …and therefore the parent binding's identity must stay too.
+        (sp/delete-entity v :binding (:id b))
+        (testing "binding identity survives while a child references it"
+          (is (= 1 (count (sp/read-entities base :binding [(:id b)])))))
+        (testing "but main's resolved view no longer shows the binding"
+          (is (empty? (sp/query-entities v :binding {:fn-id (:fn-id b)})))))
+      (finally (sp/close base)))))
+
+
+(deftest versionless-probe-is-chain-scoped-test
+  ;; The versionless backstop must not be satisfied by a version living
+  ;; only on an UNRELATED branch: visibility is per-chain. Pre-fix the
+  ;; probe queried all branches, so an item created on a feature branch
+  ;; stayed invisible on main even after a content-equal main write.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "chain")
+            feature (vs/create-branch! v "probe-feature")
+            vf (vs/switch-branch v (:id feature))
+            item (sp/create-entity vf :binding-list-item
+                                   {:binding-id (:id b) :position 0 :value 5})]
+        (testing "precondition: invisible on main (version only on feature)"
+          (is (empty? (sp/query-entities v :binding-list-item
+                                         {:binding-id (:id b)}))))
+        (testing "content-equal upsert on main forces a main version"
+          (sp/upsert-entities v :binding-list-item
+                              [{:id (:id item) :binding-id (:id b)
+                                :position 0 :value 5}])
+          (let [rows (sp/query-entities v :binding-list-item
+                                        {:binding-id (:id b)})]
+            (is (= 1 (count rows)))
+            (is (= 5 (:value (first rows)))))))
+      (finally (sp/close base)))))

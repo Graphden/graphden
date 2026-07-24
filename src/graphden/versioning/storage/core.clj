@@ -103,6 +103,44 @@
     (some? current)))
 
 
+(def ^:private identity-child-refs
+  "Child identity rows that logically reference an identity row a hard
+   delete may purge (no SQL FKs exist — refs are logical, index-only).
+   An id with surviving children keeps its identity row so nothing
+   dangles; the versionless backstop in `update-entities` still heals
+   it on the next content-equal write. Callers that delete leaves
+   first (`reconcile-fn-bodies!`, the crud rollback cascade) purge
+   cleanly."
+  {:binding [[:binding-list-item :binding-id]]
+   :fn      [[:fn-slot :fn-id] [:binding :fn-id]]})
+
+
+(defn- purgeable-identity-ids
+  "GHOST-IDENTITY prevention (the 2026-07-20 shrink-regrow class): the
+   subset of hard-deleted `ids` whose identity rows can be removed
+   outright — no OTHER branch retains a version row (per-branch
+   isolation: a diverged branch's view must survive this branch's
+   delete), and no child identity row still references them. Removing
+   the identity makes a later re-mint of the same deterministic id
+   flow through `create-entities` — which always writes a version — so
+   the row can never get stuck invisible-on-every-list-read the way a
+   surviving versionless identity does."
+  [base-storage entity-name ids branch-id all-versions version-id-field]
+  (let [other-branch (into #{}
+                           (comp (remove #(= branch-id (:branch-id %)))
+                                 (map version-id-field))
+                           all-versions)
+        candidates (into [] (remove other-branch) ids)
+        retained (when (seq candidates)
+                   (into #{}
+                         (mapcat (fn [[child-entity fk-field]]
+                                   (map fk-field
+                                        (sp/query-entities base-storage child-entity
+                                                           {fk-field candidates}))))
+                         (identity-child-refs entity-name)))]
+    (into [] (remove (or retained #{})) candidates)))
+
+
 (defn- check-list-item-position-collisions!
   "Per-branch resolved-view check for a WHOLE batch: throw if any item in
    `check-seq` resolves to a `(binding-id, position)` already taken by
@@ -422,15 +460,22 @@
       *tombstone-delete?*
       (tombstone-version! base-storage entity-name id branch-id)
 
-      ;; Hard delete (sync / rollback): drop this branch's own version rows.
+      ;; Hard delete (sync / rollback): drop this branch's own version
+      ;; rows, and — when no other branch retains a version — the
+      ;; identity row too, so no versionless ghost survives to swallow
+      ;; a later re-mint of the same deterministic id.
       :else
       (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
-            versions (sp/query-entities base-storage version-entity
-                                        {version-id-field id :branch-id branch-id})
-            deleted (count versions)]
-        (when (pos? deleted)
-          (sp/delete-entities base-storage version-entity (mapv :id versions)))
-        (pos? deleted))))
+            all-versions (sp/query-entities base-storage version-entity
+                                            {version-id-field id})
+            own-versions (filterv #(= branch-id (:branch-id %)) all-versions)
+            purgeable (purgeable-identity-ids base-storage entity-name [id]
+                                              branch-id all-versions version-id-field)]
+        (when (seq own-versions)
+          (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
+        (when (seq purgeable)
+          (sp/delete-entity base-storage entity-name id))
+        (pos? (count own-versions)))))
 
 
   (query-entities
@@ -565,7 +610,7 @@
                          (when current (assoc (merge current data) :id id))))
                      data-seq)))
         ;; Compute merged versions and filter to only changed ones
-        (let [{:keys [version-entity version-id-field version-data-fields] :as config}
+        (let [{:keys [version-entity version-data-fields] :as config}
               (get res/entity-config entity-name)
               timestamp (now)
               ;; An identity row with NO version on the chain resolves to
@@ -578,15 +623,15 @@
               ;; rows that a later sync re-touches. Growing a package list
               ;; through one silently dropped a route from the live demo's
               ;; router (2026-07-20) while a fresh-DB run stayed green.
-              ;; So: force a version for any id that has none, whatever the diff.
-              versionless-ids
-              (if (seq ids)
-                (let [with-versions (into #{}
-                                          (map version-id-field)
-                                          (sp/query-entities base-storage version-entity
-                                                             {version-id-field (vec ids)}))]
-                  (into #{} (remove with-versions) ids))
-                #{})
+              ;; So: force a version for any id that has none, whatever the
+              ;; diff. The hard-delete path now purges a sole-branch identity
+              ;; outright (see `delete-entities` :else), so this is the
+              ;; BACKSTOP for identities another branch still pins — and the
+              ;; probe is chain-scoped + merge-aware for exactly that case: a
+              ;; version living only on an unrelated branch must not satisfy
+              ;; THIS branch's visibility.
+              versionless-ids (res/ids-without-chain-version
+                                base-storage entity-name ids branch-id)
               ;; Build version records for changed entities + versionless ones
               version-records
               (into []
@@ -662,17 +707,26 @@
       (count (filterv #(tombstone-version! base-storage entity-name % branch-id) ids))
 
       :else
-      ;; Batch delete: single query to find all versions, single batch delete
+      ;; Batch hard delete: drop this branch's version rows, and — for
+      ;; ids no other branch retains a version of — the identity rows
+      ;; too (see `purgeable-identity-ids`; the singular `delete-entity`
+      ;; mirrors this).
       (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
-            ;; Single WHERE IN query for all entity versions on this branch
+            ;; Single WHERE IN query for ALL branches' versions — the
+            ;; current branch's are deleted, the others gate the
+            ;; identity purge.
             all-versions (sp/query-entities base-storage version-entity
-                                            {version-id-field (vec ids)
-                                             :branch-id branch-id})
-            version-ids (mapv :id all-versions)
-            ;; Count unique entity-ids that had versions (for return value)
-            deleted-entity-ids (into #{} (map version-id-field) all-versions)]
-        (when (seq version-ids)
-          (sp/delete-entities base-storage version-entity version-ids))
+                                            {version-id-field (vec ids)})
+            own-versions (filterv #(= branch-id (:branch-id %)) all-versions)
+            ;; Count unique entity-ids that had versions on this branch
+            ;; (return-value contract, unchanged)
+            deleted-entity-ids (into #{} (map version-id-field) own-versions)
+            purgeable (purgeable-identity-ids base-storage entity-name (vec ids)
+                                              branch-id all-versions version-id-field)]
+        (when (seq own-versions)
+          (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
+        (when (seq purgeable)
+          (sp/delete-entities base-storage entity-name purgeable))
         (count deleted-entity-ids))))
 
 

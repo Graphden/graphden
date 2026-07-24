@@ -122,7 +122,14 @@
 
    Scoped to `synced-fn-ids` (the fns in THIS batch): user-created
    fns (never part of a package batch) and package fns synced in a
-   different batch are left untouched."
+   different batch are left untouched.
+
+   The deletes ride `VersionedStorage`'s hard-delete path, which also
+   purges the IDENTITY row when no other branch retains a version -
+   so a later regrow of the same deterministic id (list shrink ->
+   regrow across syncs) flows through create-entities and gets a
+   version row instead of reviving a versionless ghost (the
+   2026-07-20 route-vanish incident)."
   [storage synced-fn-ids declared-fn-slots declared-bindings declared-items]
   (when (seq synced-fn-ids)
     (let [declared-fn-slot-ids (into #{} (map :id) declared-fn-slots)

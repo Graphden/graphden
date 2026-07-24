@@ -12,7 +12,8 @@
     [graphden.executor.composition.core :as cc]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records.ids :as ids]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -163,3 +164,51 @@
           (is (= 1 (count (sp/query-entities storage :fn-slot {:fn-id host-id})))
               "the dropped fn-slot was reaped"))
         (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; Shrink → regrow across syncs on VERSIONED storage (2026-07-20 incident)
+;; ============================================================================
+
+(deftest reconcile-shrink-then-regrow-versioned-test
+  ;; The live-demo route-vanish incident: sync 1 declares a 3-item list,
+  ;; sync 2 shrinks it to 1 (reconcile hard-deletes the tail), sync 3
+  ;; regrows it to 3 — the tail items re-mint the SAME deterministic
+  ;; (binding, position) ids. Pre-fix the tail's identity rows survived
+  ;; sync 2 versionless, so sync 3's content-equal upsert diffed to
+  ;; nothing, wrote no version, and the items stayed invisible on every
+  ;; list read (a fresh DB stayed green — no ghosts to revive).
+  (let [storage (setup/create-versioned-test-storage)]
+    (try
+      (let [int-id   (get setup/primitive-fn-ids :int)
+            host-id  (random-uuid)
+            child-id (random-uuid)
+            slot-seq (random-uuid)
+            bind-seq (ids/binding-id child-id slot-seq)
+            item-id  #(ids/binding-list-item-id bind-seq %)
+            item-rec (fn [pos v]
+                       {:kind :binding-list-item :id (item-id pos)
+                        :binding-id bind-seq :position pos :value v})
+            base-recs [(fn-rec host-id "wrv-host" [])
+                       (slot-rec slot-seq "items" int-id)
+                       (fn-slot-rec host-id slot-seq 0)
+                       (fn-rec child-id "wrv-child" [host-id])
+                       {:kind :binding :id bind-seq :fn-id child-id
+                        :slot-id slot-seq :list-append true}]
+            visible #(sort (map :value (sp/query-entities
+                                         storage :binding-list-item
+                                         {:binding-id bind-seq})))]
+        ;; Sync 1 — three items.
+        (cc/write-records!
+          storage (into base-recs [(item-rec 0 10) (item-rec 1 20) (item-rec 2 30)]) {})
+        (is (= [10 20 30] (visible)))
+        ;; Sync 2 — shrink to one; the tail is reconciled away.
+        (cc/write-records! storage (into base-recs [(item-rec 0 10)]) {})
+        (is (= [10] (visible)))
+        ;; Sync 3 — regrow to three; the SAME tail ids come back and
+        ;; must be visible again on the resolved read.
+        (cc/write-records!
+          storage (into base-recs [(item-rec 0 10) (item-rec 1 20) (item-rec 2 30)]) {})
+        (is (= [10 20 30] (visible))
+            "regrown tail items are visible — pre-fix they revived versionless ghosts"))
+      (finally (sp/close (vs/unwrap storage))))))

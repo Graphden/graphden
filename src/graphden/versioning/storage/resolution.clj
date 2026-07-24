@@ -150,9 +150,15 @@
 
 
 (defn- extract-version-data
-  "Extracts data fields from a version record, stripping version metadata."
+  "Extracts data fields from a version record, stripping version
+   metadata. `:deleted-at` is version-plane bookkeeping too (nil on
+   every live version — tombstones never reach this fn): leaving it on
+   a resolved entity leaks it into rows callers later echo into
+   `create-entity`, whose identity-plane INSERT has no such column
+   (the crud rollback replay hit exactly that once hard-deleted
+   identities started being purged)."
   [version-record version-id-field]
-  (dissoc version-record :id :branch-id :created-at version-id-field))
+  (dissoc version-record :id :branch-id :created-at :deleted-at version-id-field))
 
 
 ;; === Core Resolution Algorithm ===
@@ -566,6 +572,32 @@
                         :else [eid (merge identity-rec
                                           (extract-version-data version version-id-field))])))
                   entity-ids)))))
+
+
+(defn ids-without-chain-version
+  "Subset of `ids` (returned as a set) that resolve to NO version on
+   `branch-id`'s chain — merge-aware, exactly the resolver's own
+   visibility rule: a version merged into a chain branch counts, a
+   version living only on an unrelated branch does not. These are the
+   entities the resolved LIST reads never return;
+   `VersionedStorage.update-entities` forces a version for them so a
+   content-equal re-write becomes visible on this branch (the
+   2026-07-20 shrink-regrow incident class — a version on an unrelated
+   branch must NOT satisfy this branch's visibility). Tombstone-winners
+   count as versioned: they resolve, to a deletion, and the update path
+   handles them via its own not-found check."
+  [base-storage entity-name ids branch-id]
+  (if (empty? ids)
+    #{}
+    (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+          {:keys [versions-by-id merges-by-target branch-chain]}
+          (load-merge-aware-cache base-storage version-entity version-id-field
+                                  (vec ids) branch-id)]
+      (into #{}
+            (remove #(some? (resolve-version-from-cache base-storage entity-name
+                                                        versions-by-id merges-by-target
+                                                        % branch-chain)))
+            ids))))
 
 
 ;; === Batch Execution Graph Resolution ===

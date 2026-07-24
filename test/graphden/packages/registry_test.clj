@@ -8,6 +8,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -193,7 +194,10 @@
   (testing "GET /api/export/graph returns the bundle as an application/edn body"
     (let [resp (setup/via-graph *bootstrap* :_export-graph-handler
                                 {:request-method :get})
-          bundle (edn/read-string (:body resp))]
+          ;; Bundle consumers read with `wire/wire-readers` — the live
+          ;; corpus HAS duplicated names in unspellable namespaces, so
+          ;; the body legitimately carries `#graphden/ref` literals.
+          bundle (edn/read-string {:readers wire/wire-readers} (:body resp))]
       (is (= 200 (:status resp)))
       ;; The header map keys come back keyword-ised from the fns.edn literal
       ;; (JSONB roundtrip); the production http adapter stringifies them before

@@ -56,7 +56,7 @@
 
 (def default-postgres-image
   "Default PostgreSQL Docker image for tests."
-  "postgres:16-alpine")
+  "postgres:16.11-alpine")
 
 
 (def ^:private ns-databases-atom

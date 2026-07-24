@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Produce a CRaC checkpoint IN A CONTAINER from the SAME base image the restore
-# image uses (Dockerfile.crac → azul/zulu-openjdk:21-jdk-crac), so every mmap'd
+# image uses (Dockerfile.crac → azul/zulu-openjdk:21-jdk-crac@sha256:8cd487d24471782bb3e98a4368b367dcfe992ce7f01b5703de1ee8bcd74e8baf), so every mmap'd
 # path — the JDK libs, the uberjar, the brotli native lib, the checkpoint dir —
 # matches on restore.
 #
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-BASE_IMAGE="${CRAC_BASE_IMAGE:-azul/zulu-openjdk:21-jdk-crac}"
+BASE_IMAGE="${CRAC_BASE_IMAGE:-azul/zulu-openjdk:21-jdk-crac@sha256:8cd487d24471782bb3e98a4368b367dcfe992ce7f01b5703de1ee8bcd74e8baf}"
 : "${JDBC_URL:?set JDBC_URL to the Postgres the restore image will also use}"
 DB_USERNAME="${DB_USERNAME:-graphden}"
 DB_PASSWORD="${DB_PASSWORD:-graphden}"

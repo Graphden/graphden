@@ -69,7 +69,6 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.6.1
         with:
-          cljstyle: latest
           bb: latest
 
       - name: Check formatting
@@ -362,7 +361,7 @@ jobs:
         run: |
           # shellcheck disable=SC2046
           docker run --rm -v "$PWD:/src" -w /src \
-            koalaman/shellcheck:stable \
+            koalaman/shellcheck:v0.11.0 \
             dev/wtq/wt $(git ls-files '*.sh')
 
   registry-selftest:
@@ -408,7 +407,7 @@ jobs:
       - name: Scan for committed secrets
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo \
-            zricethezav/gitleaks:latest \
+            zricethezav/gitleaks:v8.30.1 \
             detect --no-banner
 
   typos:
@@ -482,6 +481,12 @@ jobs:
       - name: Run trivy fs (vulnerabilities)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          # Same trivy release bb.edn runs locally (aquasec/trivy:0.58.2)
+          # — the action otherwise bundles its own, so CI and local could
+          # report different findings. The CVE DB itself stays fresh per
+          # run (deliberate: new HIGH/CRITICAL on a pinned dep SHOULD
+          # red CI even with no diff).
+          version: v0.58.2
           scan-type: fs
           severity: HIGH,CRITICAL
           exit-code: '1'
@@ -491,6 +496,7 @@ jobs:
       - name: Run trivy config (Dockerfile misconfig)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: v0.58.2
           scan-type: config
           severity: HIGH,CRITICAL
           exit-code: '1'
@@ -516,8 +522,11 @@ jobs:
           bb: latest
 
       - run: npm ci
-      - run: (cd tools/browser-test && npm install --no-save)
-      - run: (cd tools/visual-tests && npm install --no-save)
+      # npm ci — the committed lockfiles ARE the pin; a fresh resolve of
+      # `^`-ranged deps could pull a transitive with a non-allowlisted
+      # license and red this job with no diff.
+      - run: (cd tools/browser-test && npm ci)
+      - run: (cd tools/visual-tests && npm ci)
 
       - name: Run license-check across npm trees
         run: bb license-check

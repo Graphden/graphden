@@ -86,7 +86,7 @@
 (defn -main
   [& _]
   (println "Starting throwaway PG container…")
-  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
+  (let [container (doto (PostgreSQLContainer. "postgres:16.11-alpine")
                     (PostgreSQLContainer/.withStartupAttempts 3))]
     (try
       (PostgreSQLContainer/.start container)

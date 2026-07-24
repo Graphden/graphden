@@ -260,4 +260,3 @@
               :text-val  {:parent :_x :return-type :text}}]
     (is (= [:base-a :body]
            (sr/resolve-slot-owner :composed :body defs :text-val)))))
-

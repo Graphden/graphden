@@ -171,7 +171,8 @@
       (try
         ;; `recon/running` is a process-wide defonce atom — the same
         ;; one the integrant init wired up.
-        (recon/restart-services-depending-on! ctx recon/running seeds)
+        (recon/restart-services-depending-on!
+          ctx recon/running seeds (vcore/current-branch-id storage))
         (catch Exception e
           (log/warn e
                     "post-edit service restart hook failed"

@@ -1481,3 +1481,78 @@
             (is (= 1 (count rows)))
             (is (= 5 (:value (first rows)))))))
       (finally (sp/close base)))))
+
+
+;; ============================================================================
+;; Audit-5: identity-INSERT framework strip + create identity-field diff +
+;; inbound-ref purge guard
+;; ============================================================================
+
+(deftest create-strips-all-version-framework-cols-test
+  ;; The identity INSERT must survive a caller echoing a RAW version row
+  ;; (which carries :branch-id / :created-at / :deleted-at / the
+  ;; version-id-field) — the identity table has none of those columns.
+  ;; Symmetric with prepare-version-record's whitelist on the version side.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "fw")
+            item-id (random-uuid)
+            echoed {:id item-id :binding-id (:id b) :position 0 :value 3
+                    :branch-id (random-uuid) :created-at (java.time.Instant/now)
+                    :deleted-at nil :item-id item-id}]
+        (sp/create-entity v :binding-list-item echoed)
+        (let [rows (sp/query-entities v :binding-list-item
+                                      {:binding-id (:id b)})]
+          (is (= 1 (count rows)))
+          (is (= 3 (:value (first rows))))))
+      (finally (sp/close base)))))
+
+
+(deftest create-with-existing-id-applies-identity-field-diff-test
+  ;; A create hitting an EXISTING identity row used to silently drop a
+  ;; changed identity-plane field; now the diff flows through update.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "idf-fn" :parent-ids []
+                                       :description "h" :branch-local? false})]
+        (sp/create-entity v :fn {:id (:id f) :name "idf-fn" :parent-ids []
+                                 :description "h" :branch-local? true})
+        (is (true? (:branch-local? (sp/read-entity base :fn (:id f))))
+            "identity-plane field change applied instead of silently dropped"))
+      (finally (sp/close base)))))
+
+
+(deftest hard-delete-retains-fn-referenced-by-inbound-refs-test
+  ;; A hard delete of a fn some OTHER row still references must keep the
+  ;; identity (conservative purge) — otherwise the purge silently
+  ;; manufactures the dangling-refs class integrity.clj hunts.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [target (sp/create-entity v :fn {:name "inb-target" :parent-ids []
+                                            :description "h"})
+            b (make-list-binding! v "inb")
+            _ (sp/update-entity v :binding (:id b) {:ref-fn-id (:id target)})]
+        (sp/delete-entity v :fn (:id target))
+        (testing "identity survives — a binding's ref-fn-id points at it"
+          (is (= 1 (count (sp/read-entities base :fn [(:id target)]))))))
+      (finally (sp/close base)))))
+
+
+(deftest hard-delete-retains-fn-referenced-as-parent-test
+  ;; parent-ids is a ref-many junction — the purge guard probes it via
+  ;; query-ref-many-owners.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [parent (sp/create-entity v :fn {:name "par-target" :parent-ids []
+                                            :description "h"})
+            _child (sp/create-entity v :fn {:name "par-child"
+                                            :parent-ids [(:id parent)]
+                                            :description "h"})]
+        (sp/delete-entity v :fn (:id parent))
+        (testing "identity survives — referenced in a child's parent-ids"
+          (is (= 1 (count (sp/read-entities base :fn [(:id parent)]))))))
+      (finally (sp/close base)))))

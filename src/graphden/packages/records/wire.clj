@@ -14,7 +14,7 @@
    In MEMORY and through the JSONB codec both are fine: `(keyword
    \"lib@1-2-0.sub\" \"foo\")` and `(keyword \"\" \"foo\")` are legal
    values, and the codec's `{:_kw \"…\"}` carrier restores them via
-   single-arg `keyword`, which splits on the last `/`. Only the EDN
+   single-arg `keyword`, which splits on the FIRST `/`. Only the EDN
    TEXT boundary breaks — so only it gets a wire form: the tagged
    literal
 
@@ -54,7 +54,7 @@
 
 (defn read-wire-ref
   "Decode the `#graphden/ref` payload back to the keyword it stands
-   for. Single-arg `keyword` splits on the last `/`, so
+   for. Single-arg `keyword` splits on the FIRST `/`, so
    `\"lib@1-2-0.sub/foo\"` → `(keyword \"lib@1-2-0.sub\" \"foo\")` and
    `\"/foo\"` → `(keyword \"\" \"foo\")` — exactly the values the
    exporter started from."

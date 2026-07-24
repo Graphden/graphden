@@ -194,8 +194,25 @@
   kondo
   {:doc "Run clj-kondo [path]"
    :task (let [path (or (first *command-line-args*) all-paths)
-               native? (= 0 (:exit (p/shell {:out :string :err :string :continue true} "which clj-kondo")))]
-           (if native?
+               ;; The deps.edn :kondo alias is THE pinned version (the CI
+               ;; workflow pins the same one). A native binary on PATH is
+               ;; used only when it matches — otherwise a dev box with a
+               ;; brew-installed clj-kondo of any other vintage silently
+               ;; lints with different rules than CI and the gate.
+               pinned (get-in (clojure.edn/read-string (slurp "deps.edn"))
+                              [:aliases :kondo :extra-deps
+                               'clj-kondo/clj-kondo :mvn/version])
+               native? (= 0 (:exit (p/shell {:out :string :err :string :continue true} "which clj-kondo")))
+               native-version (when native?
+                                (some->> (:out (p/shell {:out :string :err :string :continue true}
+                                                        "clj-kondo --version"))
+                                         (re-find (re-pattern "v([0-9.]+)"))
+                                         second))
+               native-ok? (and native? (= native-version pinned))]
+           (when (and native? (not native-ok?))
+             (println (str "kondo: native clj-kondo " native-version
+                           " != pinned " pinned " — using the deps.edn alias")))
+           (if native-ok?
              (p/shell (str "clj-kondo --lint " path))
              (clojure (str "-M:kondo --lint " path))))}
 
@@ -231,7 +248,7 @@
   ;; present; no extra `apt-get install …` lines required.
 
   shellcheck
-  {:doc "Lint every tracked .sh file (plus dev/wtq/wt) via Docker koalaman/shellcheck:stable. Globbed, not a hardcoded list - a NEW shell script is linted the moment it exists."
+  {:doc "Lint every tracked .sh file (plus dev/wtq/wt) via Docker koalaman/shellcheck:v0.11.0. Globbed, not a hardcoded list - a NEW shell script is linted the moment it exists."
    :task (let [skip (re-pattern "(^|/)(node_modules|target|\\.tools|\\.git|\\.playwright-mcp)/")
                sh-files (->> (fs/glob "." "**/*.sh" {:hidden true})
                         (map str)
@@ -240,7 +257,7 @@
            (apply p/shell "docker" "run" "--rm"
                   "-v" (str (System/getenv "PWD") ":/src")
                   "-w" "/src"
-                  "koalaman/shellcheck:stable"
+                  "koalaman/shellcheck:v0.11.0"
                   "dev/wtq/wt"
                   sh-files))}
 
@@ -259,7 +276,7 @@
    :task (p/shell "docker" "run" "--rm"
                   "-v" (str (System/getenv "PWD") ":/repo")
                   "-w" "/repo"
-                  "zricethezav/gitleaks:latest"
+                  "zricethezav/gitleaks:v8.30.1"
                   "detect" "--no-banner" "--no-git"
                   "--config" "/repo/.gitleaks.toml")}
 

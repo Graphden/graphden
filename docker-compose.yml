@@ -14,7 +14,7 @@ services:
   # PostgreSQL database
   # Uses plain PostgreSQL with recursive CTE for graph resolution
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.11-alpine
     container_name: ${GD_INSTANCE:-graphden}-postgres
     # Survive host/daemon restarts — the executor (unless-stopped) crash-
     # loops on `UnknownHostException: postgres` if this stays down.
@@ -40,7 +40,7 @@ services:
   # directly. Lives on a SEPARATE container so the tutorial graph
   # can't accidentally touch graphden's own schema.
   user-postgres:
-    image: postgres:16-alpine
+    image: postgres:16.11-alpine
     container_name: ${GD_INSTANCE:-graphden}-user-postgres
     restart: unless-stopped
     environment:
@@ -64,7 +64,7 @@ services:
   # calls :vault-get on a path; graphden's :vault/client integrant
   # key holds the (infra-only) root token. No user-visible :env reads.
   openbao:
-    image: quay.io/openbao/openbao:latest
+    image: quay.io/openbao/openbao:2.5.4
     container_name: ${GD_INSTANCE:-graphden}-openbao
     # Comes back after a host restart so the executor can reconnect. NOTE:
     # dev-mode is in-memory, so it returns BLANK — secrets need a re-seed

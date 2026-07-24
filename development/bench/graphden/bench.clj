@@ -33,7 +33,7 @@
   (println "\n=== PostgreSQL Storage Benchmarks ===\n")
   (println "Starting PostgreSQL container...")
 
-  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
+  (let [container (doto (PostgreSQLContainer. "postgres:16.11-alpine")
                     (PostgreSQLContainer/.withStartupAttempts 3))]
     (try
       (PostgreSQLContainer/.start container)

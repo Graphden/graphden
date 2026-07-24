@@ -37,7 +37,7 @@
 
 (def default-postgres-image
   "Default PostgreSQL Docker image for tests."
-  "postgres:16-alpine")
+  "postgres:16.11-alpine")
 
 
 (defn get-container-config
@@ -124,7 +124,7 @@
    - container-var: A var to bind the container to (e.g., #'*container*)
    - opts: Optional map with:
      - :use-shared - Use shared container (default: true)
-     - :image - Docker image (default: postgres:16-alpine, only for dedicated)
+     - :image - Docker image (default: postgres:16.11-alpine, only for dedicated)
      - :startup-attempts - Number of retry attempts (default: 3, only for dedicated)
 
    Returns a fixture function suitable for use-fixtures :once.
@@ -191,7 +191,7 @@
    - body: Forms to execute with container available
 
    Options map:
-   - :image - Docker image (default: postgres:16-alpine)
+   - :image - Docker image (default: postgres:16.11-alpine)
    - :startup-attempts - Number of retry attempts (default: 3)
 
    Example:

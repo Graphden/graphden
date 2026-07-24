@@ -45,12 +45,16 @@
                     (api/list-node (cons (api/token-node 'do) body)))
         two-arity-body (wrap-body-using-syms arg-syms body-form
                                              (api/token-node 'ctx))
-        ;; 1-arity has no `ctx` param; bind it to nil so a body that
-        ;; references `ctx` still resolves.
+        ;; 1-arity has no `ctx` param; bind it so a body that
+        ;; references `ctx` still resolves. Bind to an OPAQUE call, not
+        ;; the nil literal: since kondo 2026.07.24 flow analysis
+        ;; constant-folds `(:k nil)` to nil and flags every
+        ;; `(when-let [x (:k ctx)] ...)` impl as :constant-condition.
         one-arity-body (api/list-node
                          (list (api/token-node 'let)
                                (api/vector-node
-                                 [(api/token-node 'ctx) (api/token-node 'nil)])
+                                 [(api/token-node 'ctx)
+                                  (api/list-node (list (api/token-node 'hash-map)))])
                                (wrap-body-using-syms arg-syms body-form
                                                      (api/token-node 'ctx))))
         one-arity (api/list-node

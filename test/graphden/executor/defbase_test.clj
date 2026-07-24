@@ -156,21 +156,27 @@
 (defbase shadow-via-if-let
   "if-let binding shadows the arg in the then-branch."
   [x]
+  ;; The literal binding is the point of the fixture; the constant
+  ;; truthiness is incidental.
+  #_{:clj-kondo/ignore [:constant-condition]}
   (if-let [x :from-if-let] (name x) :unreachable))
 
 
 (defbase shadow-via-when-let
   [x]
+  #_{:clj-kondo/ignore [:constant-condition]}
   (when-let [x :from-when-let] (name x)))
 
 
 (defbase shadow-via-if-some
   [x]
+  #_{:clj-kondo/ignore [:constant-condition]}
   (if-some [x :from-if-some] (name x) :unreachable))
 
 
 (defbase shadow-via-when-some
   [x]
+  #_{:clj-kondo/ignore [:constant-condition]}
   (when-some [x :from-when-some] (name x)))
 
 

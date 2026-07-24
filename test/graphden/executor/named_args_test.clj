@@ -103,6 +103,8 @@
             (exec/execute-with-named-args ctx (:id composed-fn) [:a :b])))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"named-args must be nil or a map"
+            ;; Deliberately wrong-typed arg — the throw IS the assertion.
+            #_{:clj-kondo/ignore [:type-mismatch]}
             (exec/execute-with-named-args ctx (:id composed-fn) 123)))
       (sp/close storage)))
 

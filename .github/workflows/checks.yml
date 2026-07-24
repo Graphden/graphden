@@ -16,9 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # clj-kondo is PINNED to the same version deps.edn's :kondo alias
+      # uses — `latest` here meant a fresh upstream release turned CI red
+      # while every local/gate run (the pinned alias) stayed green
+      # (2026-07-24: new :constant-condition linter did exactly that).
+      # Bump BOTH together.
       - uses: DeLaGuardo/setup-clojure@13.6.1
         with:
-          clj-kondo: latest
+          clj-kondo: '2026.07.24'
           bb: latest
 
       # Delegate: the path set lives ONCE, in bb.edn's `all-paths`. When this

@@ -65,6 +65,36 @@
                :created-at timestamp))))
 
 
+(defn- strip-version-framework-cols
+  "Version-plane bookkeeping must never reach an identity-plane INSERT
+   (the identity table has no such columns). The version INSERT is
+   whitelisted via `prepare-version-record`; this is its symmetric
+   guard for the base row — strips `:branch-id` / `:created-at` /
+   `:deleted-at` / the entity's version-id-field from a row a caller
+   may have echoed from a raw version-row read. None of these is a
+   legitimate identity column on any versioned entity."
+  [entity-name row]
+  (let [{:keys [version-id-field]} (get res/entity-config entity-name)]
+    (cond-> (dissoc row :branch-id :created-at :deleted-at)
+      version-id-field (dissoc version-id-field))))
+
+
+(defn- apply-identity-field-diff!
+  "A create hitting an EXISTING identity row used to silently drop any
+   changed identity-plane field (`:namespace-id`, `:parent-ids`,
+   `:branch-local?`, …) — create treated identity fields as write-once,
+   so behavior diverged on identity presence. Flow the non-versioned
+   diff through the base `update-entity` (which also reconciles
+   ref-many junctions), mirroring what `update-entities` already does.
+   Guarded: an unchanged re-create stays a no-op."
+  [st entity-name id normalized existing version-data-fields]
+  (let [non-versioned (apply dissoc normalized :id version-data-fields)]
+    (when (and (seq non-versioned)
+               (not= non-versioned
+                     (select-keys existing (keys non-versioned))))
+      (sp/update-entity st entity-name id non-versioned))))
+
+
 (defn- create-version-record!
   "Creates a version record in the version table for a versioned entity."
   [base-storage entity-name entity-id branch-id data]
@@ -110,9 +140,38 @@
    dangles; the versionless backstop in `update-entities` still heals
    it on the next content-equal write. Callers that delete leaves
    first (`reconcile-fn-bodies!`, the crud rollback cascade) purge
-   cleanly."
+   cleanly.
+
+   The `:fn` and `:slot` lists include the INBOUND ref families (the
+   same ones `graphden.dev.integrity`'s dangling-refs detector
+   enumerates), not just structural children: today's hard-delete
+   callers are leaf-first so those never retain, but a future caller
+   hard-deleting a still-referenced fn must be met by a conservative
+   keep, not a silently manufactured dangling ref. `:fn.parent-ids`
+   is a ref-many junction, checked separately in
+   `purgeable-identity-ids`.
+
+   VERSION-plane referrers are checked too: a versioned ref field
+   (`binding.ref-fn-id` set by a later update) lives ONLY in version
+   rows — the identity row keeps the create-time NULL — so an
+   identity-plane probe alone would purge a fn that a binding's
+   current version still references."
   {:binding [[:binding-list-item :binding-id]]
-   :fn      [[:fn-slot :fn-id] [:binding :fn-id]]})
+   :slot    [[:fn-slot :slot-id] [:binding :slot-id]
+             [:fn-slot-version :slot-id] [:binding-version :slot-id]]
+   :fn      [[:fn-slot :fn-id] [:binding :fn-id]
+             [:binding :ref-fn-id] [:binding :type-override-fn-id]
+             [:binding :resolver-fn-id]
+             [:binding-list-item :ref-fn-id]
+             [:slot :type-fn-id]
+             [:fn :base-fn-id] [:fn :element-fn-id]
+             [:fn :return-type-fn-id]
+             [:binding-version :ref-fn-id]
+             [:binding-version :type-override-fn-id]
+             [:binding-version :resolver-fn-id]
+             [:binding-list-item-version :ref-fn-id]
+             [:fn-version :base-fn-id] [:fn-version :element-fn-id]
+             [:fn-version :return-type-fn-id]]})
 
 
 (defn- purgeable-identity-ids
@@ -124,7 +183,15 @@
    the identity makes a later re-mint of the same deterministic id
    flow through `create-entities` — which always writes a version — so
    the row can never get stuck invisible-on-every-list-read the way a
-   surviving versionless identity does."
+   surviving versionless identity does.
+
+   Known out-of-scope corner: a NON-descendant branch that merged this
+   branch reads its rows by reference (`merges-by-target`), which no
+   version row on that branch records. A hard delete here already
+   stripped such a row from that merge view before the purge existed
+   (own versions deleted), so the purge only changes the corner's
+   failure shape, not its reachability. Merge-target visibility stays
+   the merge endpoint's concern."
   [base-storage entity-name ids branch-id all-versions version-id-field]
   (let [other-branch (into #{}
                            (comp (remove #(= branch-id (:branch-id %)))
@@ -137,7 +204,18 @@
                                    (map fk-field
                                         (sp/query-entities base-storage child-entity
                                                            {fk-field candidates}))))
-                         (identity-child-refs entity-name)))]
+                         (identity-child-refs entity-name)))
+        ;; `:fn.parent-ids` is a ref-many junction — per-candidate owner
+        ;; probe (hard-delete batches are small: sync stale rows,
+        ;; rollback singles). A fn still referenced as somebody's parent
+        ;; keeps its identity.
+        retained (if (and (= :fn entity-name) (seq candidates))
+                   (into (or retained #{})
+                         (filter (fn [id]
+                                   (seq (sp/query-ref-many-owners
+                                          base-storage :fn :parent-ids id))))
+                         candidates)
+                   retained)]
     (into [] (remove (or retained #{})) candidates)))
 
 
@@ -337,12 +415,13 @@
             (fn [st]
               (check-list-item-position-collision! st branch-id entity-name normalized)
               (check-fn-name-collision! st branch-id entity-name normalized)
-              (let [existing (sp/read-entity st entity-name id)]
-                (when-not existing
-                  ;; Identity-plane INSERT: strip version-plane
-                  ;; bookkeeping a caller may echo from a version-row
-                  ;; read — the identity table has no such column.
-                  (sp/create-entity st entity-name (dissoc normalized :deleted-at)))
+              (let [existing (sp/read-entity st entity-name id)
+                    base-row (strip-version-framework-cols entity-name normalized)]
+                (if existing
+                  (apply-identity-field-diff!
+                    st entity-name id base-row existing
+                    (:version-data-fields (get res/entity-config entity-name)))
+                  (sp/create-entity st entity-name base-row))
                 (let [{:keys [version-id-field version-data-fields]}
                       (get res/entity-config entity-name)
                       current-version (when existing
@@ -559,18 +638,30 @@
                                      :colliding-item-ids (mapv :id (second dupe))})))))
             ids (mapv :id data-with-ids)
             ;; Find which base records don't exist yet
-            existing-ids (set (keys (sp/read-entities base-storage entity-name ids)))
-            new-base-records (vec (remove #(contains? existing-ids (:id %)) data-with-ids))
+            existing-by-id (sp/read-entities base-storage entity-name ids)
+            existing-ids (set (keys existing-by-id))
+            {existing-records true new-base-records false}
+            (group-by #(contains? existing-ids (:id %)) data-with-ids)
             ;; Batch create base records. Identity-plane INSERT: strip
             ;; version-plane bookkeeping a caller may echo from a
             ;; version-row read (the crud rollback replay re-creates
             ;; captured pre-state rows) — the identity table has no
-            ;; such column.
+            ;; such column. Rows whose identity already exists flow
+            ;; their identity-field diffs through update (guarded
+            ;; no-op when unchanged) instead of being silently
+            ;; write-once.
+            config (get res/entity-config entity-name)
             _ (when (seq new-base-records)
                 (sp/create-entities base-storage entity-name
-                                    (mapv #(dissoc % :deleted-at) new-base-records)))
+                                    (mapv #(strip-version-framework-cols entity-name %)
+                                          new-base-records)))
+            _ (doseq [row existing-records]
+                (apply-identity-field-diff!
+                  base-storage entity-name (:id row)
+                  (strip-version-framework-cols entity-name row)
+                  (get existing-by-id (:id row))
+                  (:version-data-fields config)))
             ;; Prepare and batch create version records
-            config (get res/entity-config entity-name)
             timestamp (now)
             version-records (mapv #(prepare-version-record config (:id %) branch-id
                                                            timestamp %)

@@ -61,7 +61,10 @@
    Sets get tagged as `{:_set [...]}` via the same convention — JSON
    loses the set-vs-vector distinction otherwise. Type-system
    constraints like `[:fn args ret #{:io}]` (effect carve-out) need
-   the set preserved through storage.
+   the set preserved through storage. The set carrier shares the same
+   residual ambiguity as `:_kw`: a user 1-key map under `:_set` with a
+   vector value is indistinguishable from an encoded set and reads
+   back as one — accepted on the same rarity grounds.
 
    Map keys are left as-is (cheshire handles key serialisation
    separately)."

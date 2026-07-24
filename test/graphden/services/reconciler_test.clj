@@ -29,7 +29,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as vres]))
 
 
 (use-fixtures :once
@@ -1254,3 +1255,46 @@
       (finally
         (recon/stop-all! pod)
         (sp/close storage)))))
+
+
+(deftest restart-depending-on-scoped-to-branches-seeing-the-edit-test
+  ;; Audit-5: the same fn-id runs on many branches with different
+  ;; version data; a sibling branch whose view didn't change must not
+  ;; be churned. The 4-arity hook restarts an entry only when the
+  ;; edited branch is on the entry's branch CHAIN (itself or an
+  ;; ancestor); the 3-arity stays conservative.
+  (let [storage (create-full-storage)
+        calls-same (atom [])
+        stops-same (atom [])
+        calls-sib (atom [])
+        stops-sib (atom [])
+        {same-composed :composed}
+        (make-trackable-fn! storage "brscope-same" calls-same stops-same)
+        {sib-composed :composed}
+        (make-trackable-fn! storage "brscope-sib" calls-sib stops-sib)
+        edit-branch (random-uuid)
+        sibling-branch (random-uuid)
+        _svc-same (make-service-row! storage (:id same-composed) true edit-branch)
+        _svc-sib (make-service-row! storage (:id sib-composed) true sibling-branch)
+        c (test-ctx storage)
+        running (atom {})
+        dep-fn-id (random-uuid)]
+    (try
+      (br/clear-active-router!)
+      (recon/reconcile-once! c running)
+      (is (= 2 (count @running)))
+      ;; Blast hits BOTH services' fns.
+      (reset! (:compile-deps c)
+              {:reverse-deps {dep-fn-id #{(:id same-composed) (:id sib-composed)}}
+               :forward-deps {}})
+      ;; Chain lookup: the entries' branch rows don't exist in this
+      ;; harness, so stub the chain — each branch is its own root.
+      (with-redefs [vres/collect-branch-chain (fn [_base bid] [bid])]
+        (recon/restart-services-depending-on! c running #{dep-fn-id} edit-branch))
+      (testing "service on the edited branch restarted"
+        (is (= 1 (count @stops-same)))
+        (is (= 2 (count @calls-same)) "initial + post-restart"))
+      (testing "sibling branch untouched — its view didn't change"
+        (is (= [] @stops-sib))
+        (is (= 1 (count @calls-sib)) "initial only"))
+      (finally (br/clear-active-router!) (sp/close storage)))))

@@ -39,7 +39,8 @@
     [graphden.schema.services.schema :as svc-schema]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.branch-router :as br])
+    [graphden.system.branch-router :as br]
+    [graphden.versioning.storage.resolution :as res])
   (:import
     (java.sql
       Connection)))
@@ -558,38 +559,59 @@
    compute the blast radius; services whose fn-id is in that
    radius get stopped + restarted.
 
+   `edit-branch-id` (4-arity) scopes the restart to services whose
+   branch actually SEES the edit: fn-ids are deterministic per
+   `(namespace, name)`, so the same fn-id runs on many branches with
+   different version data — restarting a sibling branch whose view
+   didn't change is pure churn. An entry restarts when the edited
+   branch is on its branch CHAIN (itself or an ancestor); entries
+   without a recorded branch and callers that can't name the edit
+   branch (3-arity) restart conservatively. Merge-driven visibility
+   changes are handled separately by `restart-services-on-branch!`
+   at the merge endpoint.
+
    Returns the `reconcile-once!` result (`:started :stopped
    :not-our-lock`) so the caller can log / observe. No-op when
    compile-deps isn't populated yet (cold start) or when no running
    service is affected."
-  [ctx running-atom changed-fn-ids]
-  ;; `:compile-deps` now holds `{:forward-deps :reverse-deps}` since
-  ;; the incremental-update refactor; only the reverse side matters
-  ;; for the service-restart blast walk.
-  (let [reverse-deps (some-> (:compile-deps ctx) deref :reverse-deps)]
-    (if (or (nil? reverse-deps) (empty? changed-fn-ids))
-      {:started [] :stopped [] :not-our-lock []}
-      ;; Hold `reconcile-monitor` across the stop→release→dissoc phase +
-      ;; the trailing reconcile: it mutates `running` and the non-thread-safe
-      ;; advisory-lock connection, which a concurrent NOTIFY-driven
-      ;; `reconcile-once!` must not race. Reentrant, so the inner
-      ;; reconcile-once! self-lock doesn't deadlock.
-      (locking reconcile-monitor
-        (let [blast (compile-deps/transitive-blast reverse-deps changed-fn-ids)
-              lock-conn (lock-conn-from-ctx ctx)
-              to-restart (->> @running-atom
-                              (filter (fn [[_ entry]]
-                                        (and (map? entry)
-                                             (contains? blast (:fn-id entry)))))
-                              (mapv first))]
-          (doseq [sid to-restart]
-            (stop-and-forget! lock-conn running-atom sid))
-          (when (seq to-restart)
-            (log/info "Stopping" (count to-restart)
-                      "services whose closure depends on edited fn"
-                      {:changed-fn-ids changed-fn-ids
-                       :service-ids to-restart}))
-          (reconcile-once! ctx running-atom))))))
+  ([ctx running-atom changed-fn-ids]
+   (restart-services-depending-on! ctx running-atom changed-fn-ids nil))
+  ([ctx running-atom changed-fn-ids edit-branch-id]
+   ;; `:compile-deps` now holds `{:forward-deps :reverse-deps}` since
+   ;; the incremental-update refactor; only the reverse side matters
+   ;; for the service-restart blast walk.
+   (let [reverse-deps (some-> (:compile-deps ctx) deref :reverse-deps)]
+     (if (or (nil? reverse-deps) (empty? changed-fn-ids))
+       {:started [] :stopped [] :not-our-lock []}
+       ;; Hold `reconcile-monitor` across the stop→release→dissoc phase +
+       ;; the trailing reconcile: it mutates `running` and the non-thread-safe
+       ;; advisory-lock connection, which a concurrent NOTIFY-driven
+       ;; `reconcile-once!` must not race. Reentrant, so the inner
+       ;; reconcile-once! self-lock doesn't deadlock.
+       (locking reconcile-monitor
+         (let [blast (compile-deps/transitive-blast reverse-deps changed-fn-ids)
+               lock-conn (lock-conn-from-ctx ctx)
+               storage (:storage ctx)
+               base (or (:base-storage storage) storage)
+               sees-edit? (fn [entry-branch]
+                            (or (nil? edit-branch-id)
+                                (nil? entry-branch)
+                                (some #(= edit-branch-id %)
+                                      (res/collect-branch-chain base entry-branch))))
+               to-restart (->> @running-atom
+                               (filter (fn [[_ entry]]
+                                         (and (map? entry)
+                                              (contains? blast (:fn-id entry))
+                                              (sees-edit? (:branch-id entry)))))
+                               (mapv first))]
+           (doseq [sid to-restart]
+             (stop-and-forget! lock-conn running-atom sid))
+           (when (seq to-restart)
+             (log/info "Stopping" (count to-restart)
+                       "services whose closure depends on edited fn"
+                       {:changed-fn-ids changed-fn-ids
+                        :service-ids to-restart}))
+           (reconcile-once! ctx running-atom)))))))
 
 
 (defn stop-all!

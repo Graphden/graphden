@@ -251,7 +251,6 @@
            (into {} (map (fn [[k v]] [k (count v)])) result))))
 
 
-
 ;; =============================================================================
 ;; Repair — stale-identity class only. Delegates to the shared
 ;; identity-plane primitives (`graphden.versioning.identity-repair`),

@@ -203,12 +203,13 @@
 
 (defn backfill-auth-subject-ids!
   "One-time, IDEMPOTENT migration for the P1 name→id authz change: for every
-   `:token` / `:grant` row still missing its stable id, resolve the (immutable)
-   username and stamp the id (`:token.user-id` / `:grant.subject-id`). Runs at
-   addon startup so a LIVE DB carrying pre-P1 rows keeps authorizing after the
-   deploy; a no-op on a fresh DB (every row is minted with its id). A row whose
-   username no longer resolves to a user is left as-is (a dead grant / an
-   orphaned token — the delete-user! cascade or expiry reaps it).
+   `:token` row still missing its stable id, resolve the (immutable)
+   username and stamp `:token.user-id`. Runs at addon startup so a LIVE
+   DB carrying pre-P1 rows keeps authorizing after the deploy; a no-op
+   on a fresh DB (every row is minted with its id). The GRANT arm is
+   gone with the `grant.subject` column retirement — a nil-subject-id
+   grant has no username source left; such rows are dead (match no
+   subject) and `dev.integrity` reports them.
 
    Correctness note: filters nil-id rows in memory rather than querying
    `{:user-id nil}` — SQL `= NULL` matches nothing, so a where-clause filter
@@ -219,10 +220,6 @@
                        (some-> (first (sp/query-entities storage :user {:username username}))
                                :id str)))
         tokens (filter #(nil? (:user-id %)) (sp/query-entities storage :token {}))
-        ;; grant.subject is retired — a nil-subject-id grant has no
-        ;; username source left to backfill from; such rows are dead
-        ;; (match no subject) and await manual cleanup.
-        grants []
         stamped (fn [entity id-key name-key rows]
                   (reduce (fn [n row]
                             (if-let [uid (user-id-of (name-key row))]
@@ -230,8 +227,7 @@
                                   (inc n))
                               n))
                           0 rows))]
-    {:tokens-backfilled (stamped :token :user-id :user tokens)
-     :grants-backfilled (stamped :grant :subject-id :subject grants)}))
+    {:tokens-backfilled (stamped :token :user-id :user tokens)}))
 
 
 (defn login!

@@ -8,6 +8,7 @@
    per-ns twins, editor (random-id) rows, or rows of packages outside
    the synced set."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
@@ -22,7 +23,7 @@
   [storage path parent-id]
   (sp/create-entity storage :ns
                     {:id (random-uuid)
-                     :name (last (clojure.string/split path #"\."))
+                     :name (last (str/split path #"\."))
                      :parent-id parent-id}))
 
 

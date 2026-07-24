@@ -7,7 +7,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.dev.integrity :as integrity]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -70,14 +71,67 @@
             (is (= (:id stale)
                    (:ref-fn-id (sp/read-entity storage :binding
                                                (:id stale-ref)))))))
-        (testing "repair repoints the ref and removes the extra subgraph"
+        (testing "repair repoints the ref and removes the extra's subgraph"
           (integrity/repair-stale-identities! storage {:dry-run? false})
           (is (= (:id canonical)
                  (:ref-fn-id (sp/read-entity storage :binding
                                              (:id stale-ref)))))
           (is (empty? (integrity/stale-identities storage))
-              "post-repair the graph is clean")))
+              "post-repair the graph is clean")
+          (is (nil? (sp/read-entity storage :fn (:id stale)))
+              "the extra fn row is gone")))
       (finally (sp/close storage)))))
+
+
+(deftest repair-covers-versioned-branch-overrides
+  ;; Audit-4 regression: the first repair draft wrote through the
+  ;; VERSIONED wrapper — repoints landed as version rows on ONE branch
+  ;; while a diverging branch's own binding-version kept targeting the
+  ;; extra, which was then (hard-)deleted → dangling. Repair now fills
+  ;; identity AND every *-version row in place at the base plane.
+  (let [base (setup/create-test-storage)]
+    (try
+      (let [storage (vs/wrap-with-versioning base "main")
+            canonical (sp/create-entity base :fn
+                                        {:id (random-uuid) :name "vfn"
+                                         :parent-ids []})
+            stale (sp/create-entity base :fn
+                                    {:id (random-uuid) :name "vfn"
+                                     :parent-ids []})
+            owner-base (setup/create-base-fn! base "v-owner")
+            slot (setup/create-slot! base "s" :int)
+            _ (setup/attach-slot! base (:id owner-base) (:id slot) 0)
+            caller (setup/create-composed-fn! base "v-caller"
+                                              (:id owner-base))
+            ;; identity binding at the canonical…
+            bind (sp/create-entity storage :binding
+                                   {:fn-id (:id caller) :slot-id (:id slot)
+                                    :ref-fn-id (:id canonical)})
+            ;; …but a BRANCH's version row overrides the ref to the
+            ;; STALE row (the diverging-branch shape).
+            branch (sp/create-entity base :branch
+                                     {:id (random-uuid) :name "feat"
+                                      :created-at (java.time.Instant/now)
+                                      :base-branch-id
+                                      (:branch-id storage)})
+            _ (sp/create-entity base :binding-version
+                                {:id (random-uuid)
+                                 :binding-id (:id bind)
+                                 :branch-id (:id branch)
+                                 :created-at (java.time.Instant/now)
+                                 :fn-id (:id caller) :slot-id (:id slot)
+                                 :ref-fn-id (:id stale)})]
+        (integrity/repair-stale-identities! storage {:dry-run? false})
+        (testing "the branch's version row is repointed too"
+          (let [bv (first (sp/query-entities base :binding-version
+                                             {:binding-id (:id bind)
+                                              :branch-id (:id branch)}))]
+            (is (= (:id canonical) (:ref-fn-id bv)))))
+        (testing "the extra and its version rows are gone"
+          (is (nil? (sp/read-entity base :fn (:id stale))))
+          (is (empty? (sp/query-entities base :fn-version
+                                         {:fn-id (:id stale)})))))
+      (finally (sp/close base)))))
 
 
 (deftest detects-orphan-families

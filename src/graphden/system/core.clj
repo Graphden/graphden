@@ -568,7 +568,8 @@
         synced-by-name (group-by :name (filter :name synced-fn-rows))
         ns-rows (sp/query-entities base :ns {})
         ns-by-id (into {} (map (juxt :id identity)) ns-rows)
-        ns-path (fn ns-path [nsid]
+        ns-path (fn ns-path
+                  [nsid]
                   (when-let [r (ns-by-id nsid)]
                     (if-let [p (:parent-id r)]
                       (str (ns-path p) "." (:name r))

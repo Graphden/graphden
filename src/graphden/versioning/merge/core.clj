@@ -26,8 +26,17 @@
    on the target — these are the rows that would become visible on
    target after merge."
   [base-storage source-branch-id target-branch-id]
-  (let [source-versions (sp/query-entities base-storage :binding-version
-                                           {:branch-id source-branch-id})
+  (let [;; LATEST-per-binding minus tombstones (audit-4): the raw
+        ;; full-history scan counted a source-side DELETED binding
+        ;; (tombstone version) as a live transfer — falsely blocking
+        ;; the merge of a branch that would only propagate the
+        ;; deletion. Same fix shape as the reparent gate.
+        source-versions (into []
+                              (remove :deleted-at)
+                              (sp/query-latest-per-group
+                                base-storage :binding-version
+                                {:branch-id source-branch-id}
+                                [:binding-id :branch-id]))
         target-versions (sp/query-entities base-storage :binding-version
                                            {:branch-id target-branch-id})
         target-binding-ids (into #{} (map :binding-id) target-versions)]

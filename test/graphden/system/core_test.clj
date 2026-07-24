@@ -111,7 +111,13 @@
 
 (deftest fn-entities-init-test
   (testing "init-key creates fn entities from packages"
-    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns]
+    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns
+                  ;; keyword mock-storage can't answer the moved-
+                  ;; identity reconciler's identity-plane reads —
+                  ;; no-op it (its own behavior is covered by
+                  ;; graphden.system.moved-identity-test).
+                  graphden.system.core/reconcile-moved-identities!
+                  (fn [& _] 0)]
       (let [storage :mock-storage
             packages {:fn-defs [{:name :test-fn :parent :const}
                                 {:name :another-fn :parent :add}]}
@@ -127,7 +133,9 @@
         (is (contains? result :another-fn) "Should contain another-fn"))))
 
   (testing "init-key handles empty fn-defs"
-    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns]
+    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns
+                  graphden.system.core/reconcile-moved-identities!
+                  (fn [& _] 0)]
       (let [opts {:storage :mock :packages {:fn-defs []}
                   :skip-allowlist-gate? true}
             result (ig/init-key :exec/fn-entities opts)]

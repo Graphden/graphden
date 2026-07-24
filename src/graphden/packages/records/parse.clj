@@ -1197,14 +1197,20 @@
                             (let [id (ids/fn-id (:namespace fd) (:name fd))
                                   bare (:name fd)
                                   existing (get m bare)]
-                              (cond-> (assoc m bare
-                                             (if (and existing (not= existing id))
-                                               ambiguous-name
-                                               id))
-                                (:namespace fd)
-                                (assoc (keyword (:namespace fd)
-                                                (name bare))
-                                       id)))))
+                              ;; Qualified key ALWAYS present: string ns
+                              ;; paths as-is (incl. `@`-materialized —
+                              ;; constructible even though unprintable),
+                              ;; ROOT (nil) ns as the empty-ns spelling
+                              ;; `(keyword "" name)`, so a `#graphden/ref
+                              ;; "/name"` wire ref resolves like any
+                              ;; other qualified ref.
+                              (-> (assoc m bare
+                                         (if (and existing (not= existing id))
+                                           ambiguous-name
+                                           id))
+                                  (assoc (keyword (or (:namespace fd) "")
+                                                  (name bare))
+                                         id)))))
                         extra-name->id
                         module-fn-defs)
          module-fn-defs (mapv #(normalize-qualified-refs % pre-name->id) module-fn-defs)
@@ -1232,13 +1238,16 @@
                         (let [id (ids/fn-id (:namespace fd) (:name fd))
                               bare (:name fd)
                               existing (get m bare)]
-                          (cond-> (assoc m bare
-                                         (if (and existing (not= existing id))
-                                           ambiguous-name
-                                           id))
-                            (:namespace fd)
-                            (assoc (keyword (:namespace fd) (name bare))
-                                   id)))))
+                          ;; Same always-qualified keying as
+                          ;; `pre-name->id` above (root ns = empty-ns
+                          ;; spelling).
+                          (-> (assoc m bare
+                                     (if (and existing (not= existing id))
+                                       ambiguous-name
+                                       id))
+                              (assoc (keyword (or (:namespace fd) "")
+                                              (name bare))
+                                     id)))))
                     extra-name->id
                     module-fn-defs)
          defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name module-fn-defs))

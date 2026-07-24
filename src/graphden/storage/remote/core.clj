@@ -27,6 +27,7 @@
   (:require
     [clojure.edn :as edn]
     [clojure.tools.logging :as log]
+    [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
     [org.httpkit.client :as http]))
 
@@ -49,7 +50,8 @@
    and return it keyed by ENTITY NAME: `{:fn [...] :slot [...] :fn-slot [...]
    :binding [...] :binding-list-item [...]}`. Throws on a transport error or
    non-200. `edn/read-string` (not `read`) parses the body — safe, no eval;
-   `#uuid` / `#inst` are native edn tags.
+   `#uuid` / `#inst` are native edn tags, `#graphden/ref` decodes via
+   `records.wire`.
 
    `branch` (nil ⇒ the org's main branch) pins the bootstrap to one branch via
    the same `X-Graphden-Branch` header the editor uses — so a BYO executor can
@@ -66,7 +68,7 @@
      (when (not= 200 (:status resp))
        (throw (ex-info (str "RemoteStorage bootstrap GET returned " (:status resp))
                        {:type :remote-storage/fetch-failed :url url :status (:status resp)})))
-     (let [bundle (edn/read-string (:body resp))]
+     (let [bundle (edn/read-string {:readers wire/wire-readers} (:body resp))]
        (reduce-kv (fn [m bkey entity] (assoc m entity (vec (get bundle bkey))))
                   {}
                   bundle-key->entity)))))

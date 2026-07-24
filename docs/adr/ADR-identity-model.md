@@ -100,7 +100,16 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
     entry (`normalize-qref`): the referencing module's OWN namespace
     wins, else a loud `:packages/ambiguous-ref` demands qualification;
   - the exporter emits qualified refs for duplicated names (round-trip
-    proof: `roundtrip-per-ns-duplicates`);
+    proof: `roundtrip-per-ns-duplicates`). Namespaces that can't be
+    SPELLED as readable keyword namespaces still qualify (2026-07-24):
+    a version-materialized `@`-ns as `(keyword "lib@1-2-0.sub" n)`,
+    the ROOT (nil) ns as `(keyword "" n)` - both legal in-memory/JSONB
+    values; the EDN-TEXT boundary spells them `#graphden/ref
+    "lib@1-2-0.sub/n"` / `#graphden/ref "/n"`
+    (`records.wire/encode-unreadable-kws` on the whole-graph bundle,
+    `wire-readers` at the loader/remote read sites; proof:
+    `roundtrip-unspellable-ns-duplicates`, `wire-edn-text-roundtrip`).
+    The old bare fallback for these corners is gone;
   - the editor path reconstructs QUALIFIED parent/ref names
     (`::ns-path`-annotated rows) so the checker resolves duplicates
     precisely through the dual registry index;

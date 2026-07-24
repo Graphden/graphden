@@ -223,12 +223,18 @@
               id (:id f)
               ns-path (:namespace-id f)
               existing (get m bare)]
+          ;; Qualified key always present — string ns paths as-is,
+          ;; ROOT (nil) ns as the empty-ns spelling `(keyword "" n)`
+          ;; — so `#graphden/ref "/name"` wire refs resolve against
+          ;; already-synced fns like any qualified ref. A UUID
+          ;; namespace-id (rows not run through the path reverser)
+          ;; keeps bare-only keying, as before.
           (cond-> (assoc m bare
                          (if (and existing (not= existing id))
                            records/ambiguous-name
                            id))
-            (string? ns-path)
-            (assoc (keyword ns-path (:name f)) id)))))
+            (or (string? ns-path) (nil? ns-path))
+            (assoc (keyword (or ns-path "") (:name f)) id)))))
     {}
     fns))
 

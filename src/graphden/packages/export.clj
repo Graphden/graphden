@@ -69,6 +69,7 @@
   (:require
     [clojure.string :as str]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs])
@@ -105,30 +106,25 @@
      :items    (group-by :binding-id (:binding-list-item by-kind))}))
 
 
-(defn- edn-keyword-ns?
-  "Can `ns-path` serve as an EDN keyword namespace? Version-qualified
-   materialized namespaces (`web.components@1-2-0`) contain `@`, which
-   the EDN reader rejects in symbols."
-  [ns-path]
-  (boolean (re-matches #"[A-Za-z0-9._-]+" ns-path)))
-
-
 (defn- ref-kw
   "Reference keyword for the fn with `id` — QUALIFIED when its bare
    name is duplicated across the export set (`:dup-names`), bare
-   otherwise (canonical minimal form). A duplicated name whose
-   namespace is NOT EDN-keyword-safe (version-materialized `@`-ns)
-   falls back to the bare form — the pre-existing behaviour for that
-   corner; precise refs into materialized namespaces are re-derived by
-   the installer's own materialize pass, not by bundle re-parse."
+   otherwise (canonical minimal form). Qualification never falls back
+   to bare: a version-materialized `@`-ns duplicate qualifies as
+   `(keyword \"lib@1-2-0.sub\" n)` and a ROOT-ns (nil path) duplicate
+   as `(keyword \"\" n)` — both are legal in-memory/JSONB values; the
+   EDN TEXT boundary spells them `#graphden/ref` (see
+   `records.wire/encode-unreadable-kws`, applied by
+   `export-graph-bundle`). The old bare fallback silently emitted an
+   ambiguous ref that re-import either rejected
+   (`:packages/ambiguous-ref`) or mis-resolved to a same-named
+   neighbour in the referencing module's own namespace."
   [id ctx]
   (let [f (get-in ctx [:fns id])
         n (:name f)]
     (when n
-      (if (and (contains? (:dup-names ctx) n)
-               (string? (:namespace-id f))
-               (edn-keyword-ns? (:namespace-id f)))
-        (keyword (:namespace-id f) n)
+      (if (contains? (:dup-names ctx) n)
+        (keyword (or (:namespace-id f) "") n)
         (keyword n)))))
 
 
@@ -699,10 +695,16 @@
    (let [fns (export-graph storage)
          secrets (secret-path-args fns)
          fns (if include-secret-paths? fns (strip-secret-paths fns))]
-     {:fns fns
-      :namespaces (vec (sort (distinct (keep :namespace fns))))
-      :secrets secrets
-      :secret-paths-included? (boolean include-secret-paths?)})))
+     ;; The bundle is an EDN-TEXT artifact (`pr-str`ed by the route) —
+     ;; refs whose qualification isn't spellable as a readable keyword
+     ;; (`@`-versioned ns, root ns) become `#graphden/ref` tagged
+     ;; literals here. The JSONB publish path (`export-namespace`)
+     ;; keeps raw keywords: its codec round-trips them.
+     (wire/encode-unreadable-kws
+       {:fns fns
+        :namespaces (vec (sort (distinct (keep :namespace fns))))
+        :secrets secrets
+        :secret-paths-included? (boolean include-secret-paths?)}))))
 
 
 ;; =============================================================================

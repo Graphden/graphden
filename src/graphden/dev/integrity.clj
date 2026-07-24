@@ -45,9 +45,22 @@
 ;; Detectors
 ;; =============================================================================
 
+(defn- base-of
+  "The IDENTITY-plane storage. A VersionedStorage's query-entities
+   returns the RESOLVED view — which lists only entities carrying a
+   version row on the branch chain and drops tombstones, i.e. it
+   HIDES exactly the stale identity rows and orphan shapes this tool
+   hunts (first live-DB run: 0 stale groups reported while raw SQL
+   showed 3 same-named identities; 674 false orphan-versions from
+   comparing raw version rows against the resolved fn listing).
+   Every detector reads the base plane."
+  [storage]
+  (or (:base-storage storage) storage))
+
+
 (defn- all-rows
   [storage entity]
-  (sp/query-entities storage entity {}))
+  (sp/query-entities (base-of storage) entity {}))
 
 
 (defn stale-identities
@@ -182,6 +195,42 @@
             :anonymous-hash (:anonymous-hash f)}))))
 
 
+(defn cross-ns-duplicates
+  "Same BARE name across different namespaces — INFO-ONLY: per-ns
+   names make this legal, but the live-demo outage lived exactly here
+   (a namespace-moved fn's old identity under the OLD ns, resolved
+   bindings still pointing at it). No auto-repair — an operator must
+   judge which rows are legitimate per-ns twins and which are ns-move
+   leftovers (the compile-time rescue's warn names the stale ones at
+   runtime; `repair-stale-identities!` handles only same-(ns,name)
+   groups). Reports `[{:name … :rows [{:id :namespace-id
+   :inbound-refs n} …]} …]`."
+  [storage]
+  (let [fns (remove #(nil? (:name %)) (all-rows storage :fn))
+        by-name (group-by :name fns)
+        dups (filter #(> (count (distinct (map :namespace-id (val %)))) 1)
+                     by-name)
+        inbound (volatile! {})
+        count! (fn [id] (when id (vswap! inbound update id (fnil inc 0))))]
+    (when (seq dups)
+      (doseq [b (all-rows storage :binding)]
+        (count! (:ref-fn-id b))
+        (count! (:type-override-fn-id b))
+        (count! (:resolver-fn-id b)))
+      (doseq [i (all-rows storage :binding-list-item)]
+        (count! (:ref-fn-id i)))
+      (doseq [f fns]
+        (doseq [p (:parent-ids f)] (count! p))))
+    (mapv (fn [[nm rows]]
+            {:name nm
+             :rows (mapv (fn [r]
+                           {:id (:id r)
+                            :namespace-id (:namespace-id r)
+                            :inbound-refs (get @inbound (:id r) 0)})
+                         rows)})
+          dups)))
+
+
 (defn orphan-slots
   "Slot rows no fn-slot junction references (never reconciled by
    design; inert, listed for completeness)."
@@ -200,7 +249,8 @@
                 :dangling-refs (dangling-refs storage stale)
                 :orphan-versions (orphan-versions storage)
                 :orphan-anons (orphan-anons storage)
-                :orphan-slots (orphan-slots storage)}]
+                :orphan-slots (orphan-slots storage)
+                :cross-ns-duplicates (cross-ns-duplicates storage)}]
     (assoc result :summary
            (into {} (map (fn [[k v]] [k (count v)])) result))))
 

@@ -312,20 +312,38 @@
         (recur (inc slot))))))
 
 
+(defn- effective-branch-id
+  "The branch `svc` runs on: its own `:branch-id`, or the active
+   router's default branch when the row pre-dates the field / the
+   admin left the branch unset. Normalizing here — the single point
+   desired-state rows enter the reconciler — makes a legacy nil-branch
+   row indistinguishable from an explicit default-branch row, so drift
+   detection and `restart-services-on-branch!` treat them alike
+   (before this, a nil-branch service silently missed the post-merge
+   restart of the default branch). Nil only when no router is
+   registered (tests that bypass branch routing)."
+  [svc]
+  (or (:branch-id svc)
+      (:default-branch-id (br/current-router))))
+
+
 (defn- ctx-for-service
   "Pick the ExecutionContext to start `svc` in. When a branch-router
    is registered (`branch-router/set-active-router!` was called by
    `:exec/branch-router` at init), look up the per-branch ctx for
-   the service's `:branch-id`. Falls back to the reconciler's base
-   `ctx` when no router or no `:branch-id` is set — both apply to
-   tests that bypass the router, and to legacy rows that pre-date
-   the field.
+   the service's effective branch (`effective-branch-id` — the row's
+   `:branch-id`, defaulting to the router's default branch). Falls
+   back to the reconciler's base `ctx` only when no router is
+   registered — tests that bypass the router. For a default-branch
+   service `br/ctx-for` returns the router's seeded entry, which IS
+   the base ctx, so the legacy nil-branch behavior is preserved
+   exactly.
 
    Lazy: `br/ctx-for` builds the per-branch ctx on first request
    (compile + cache), so a freshly-created branch with services
    pays the compile cost on first reconcile."
   [base-ctx svc]
-  (if-let [branch-id (and (br/current-router) (:branch-id svc))]
+  (if-let [branch-id (and (br/current-router) (effective-branch-id svc))]
     (try
       (br/ctx-for (br/current-router) branch-id)
       (catch Exception e
@@ -411,7 +429,8 @@
                                     svc (get enabled-by-id sid)]
                                 (and (map? entry)
                                      (or (not= (:fn-id entry) (:fn-id svc))
-                                         (not= (:branch-id entry) (:branch-id svc))
+                                         (not= (:branch-id entry)
+                                               (effective-branch-id svc))
                                          (not= (:restart-policy entry)
                                                (:restart-policy svc))
                                          (not= (:cardinality entry)
@@ -455,17 +474,20 @@
 
              acquired?
              (let [entry (start-service! svc-ctx svc start-opts)
-                   ;; Record :branch-id so stop time can tell which branch this
+                   ;; Record the EFFECTIVE :branch-id (row's, or the router's
+                   ;; default for legacy nil-branch rows) so stop time and
+                   ;; `restart-services-on-branch!` can tell which branch this
                    ;; run belonged to. :cardinality mirrors the row so drift
                    ;; detection sees an admin flipping it. :locked? = THIS pod
                    ;; holds a slot; :pool-slot = which one (for release +
                    ;; reassert).
+                   eff-branch (effective-branch-id svc)
                    entry' (cond-> (assoc entry
                                          :cardinality (svc-schema/service-cardinality svc)
                                          :pool-size pool-size
                                          :locked? (some? slot)
                                          :pool-slot slot)
-                            (:branch-id svc) (assoc :branch-id (:branch-id svc)))]
+                            eff-branch (assoc :branch-id eff-branch))]
                (swap! running-atom assoc sid entry'))
 
              :else
@@ -486,10 +508,12 @@
    running closures don't observe that on their own.
 
    `running-atom` carries `:branch-id` on each entry (set by
-   `reconcile-once!` from the row's `:branch-id`). Entries without
-   a recorded branch are LEFT ALONE — they were started under the
-   legacy no-branch-id path and the per-branch invalidate isn't
-   relevant to them.
+   `reconcile-once!` from the row's EFFECTIVE branch — a nil-branch
+   row is normalized to the router's default branch, so legacy rows
+   participate in a default-branch restart instead of silently
+   running stale closures). Entries without a recorded branch only
+   occur when no router is registered (tests that bypass branch
+   routing) and are LEFT ALONE.
 
    Returns the `reconcile-once!` result map (`:started :stopped
    :not-our-lock`) so the caller can log / observe."

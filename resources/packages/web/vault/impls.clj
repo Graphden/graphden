@@ -14,9 +14,9 @@
 (defn- require-client!
   "Read `(:vault ctx)`, falling back to the JVM-wide
    `vault/active-client` atom. Mirrors `crud.secrets/require-vault!` —
-   per-branch ctx builds don't carry vault forward (propagating it
-   exposes a separate compile-eager closure-leak), so the JVM-wide
-   atom is the load-bearing path here."
+   per-branch ctx builds don't carry vault forward, and the atom is
+   the authoritative home for a platform-singleton client (one Vault
+   per JVM), so the JVM-wide read is the load-bearing path here."
   [ctx]
   (or (:vault ctx)
       @vault/active-client

@@ -435,9 +435,9 @@
    :return-type :nullable-keyword-map}
 
   {:name :rule-owner-of-name
-   :description "Name of the base-fn whose `:return-type-rule` computed the named fn's return type — the canonical `registry/root-base-fn-name` walk over `:primary-parent`, iff that root carries a rule. nil for unknown names, base-fns, and rule-less chains. Used by `/partials/return-type-rule` and the layout strip-facts annotation."
+   :description "`{:name :fn-id}` of the base-fn whose `:return-type-rule` computed the named fn's return type — the canonical `registry/root-base-fn-name` walk over `:primary-parent`, iff that root carries a rule; `:fn-id` is the registry entry's own id (no name→id graph query). nil for unknown names, base-fns, and rule-less chains. Used by `/partials/return-type-rule`; the layout strip-facts annotation uses the name-only registry walk."
    :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
-   :return-type :nullable-text}
+   :return-type [:union :null {:name :text :fn-id :uuid}]}
 
   {:name :declarable-effect-categories
    :description "Sorted declarable effect-category names — the canonical `types.check/known-effect-categories` set (what sync accepts). Roster of `/partials/expects-effects-form`'s checkboxes."

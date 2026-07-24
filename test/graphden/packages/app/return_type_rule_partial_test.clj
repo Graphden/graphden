@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.registry.core :as registry]
     [graphden.test-infra.golden-app :as ga]))
 
 
@@ -34,8 +35,13 @@
       (is (str/includes? body "provenance-popover-intro"))
       (is (str/includes? body ":assoc")
           "owner attribution names the rule-owning base-fn"))
-    (testing "owner nav-link carries a resolvable data-fn-id"
-      (is (re-find #"data-fn-id=\"[0-9a-f-]{36}\"" body)))
+    (testing "owner nav-link carries the registry entry's own id"
+      ;; The id must be the rule-owner's registry `:fn-id` — served
+      ;; straight off the entry, not re-resolved through a name→id
+      ;; graph query (bare names can be duplicated across namespaces).
+      (let [expected (str (:fn-id (registry/rich-type-of :assoc)))]
+        (is (re-find #"data-fn-id=\"[0-9a-f-]{36}\"" body))
+        (is (str/includes? body (str "data-fn-id=\"" expected "\"")))))
     (testing "narrative prose from :_rtr-narratives"
       (is (str/includes? body "record shape")))
     (testing "Inputs table over :resolved-bindings"

@@ -106,7 +106,7 @@ services spawn).
 | `:restart-policy` | `:restart-policy` | `:always` / `:on-failure` / `:never` — see § Supervisor below.    |
 | `:cardinality`    | `:cardinality`    | `:singleton` / `:per-pod` / `:pool` — how many pods run it at once; see § Cardinality. Nullable; nil ≡ `:singleton` (rows that pre-date the field). |
 | `:pool-size`      | `:int`            | Pod count for `:cardinality :pool` (ignored otherwise). Nullable — a `:pool` row with nil/non-positive size degrades to a singleton. |
-| `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil falls back to the reconciler's base ctx (= main behavior). The editor's ⚙ popover picker defaults to the editor's current branch on create. |
+| `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil is normalized to the router's default branch at reconcile time (`effective-branch-id`), so a legacy nil-branch row behaves exactly like an explicit default-branch row, including the post-merge `restart-services-on-branch!` pass. Without a router (tests) nil falls back to the reconciler's base ctx. The editor's ⚙ popover picker defaults to the editor's current branch on create. |
 
 ### `:restart-policy` enum
 
@@ -203,7 +203,9 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
                  :pool-size        Int | nil (slot count; 1 for singleton)
                  :locked?          Bool
                  :pool-slot        Int | nil (which advisory-lock slot we hold)
-                 :branch-id        :uuid (set only for per-branch rows)
+                 :branch-id        :uuid (effective branch: the row's, or the
+                                          router's default for nil-branch rows;
+                                          absent only when no router is active)
                  :stopper          (fn []) | nil
                  :started-at       Instant
                  :start-attempts   Int

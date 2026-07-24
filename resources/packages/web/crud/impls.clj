@@ -415,14 +415,16 @@
 
 
 (defbase rule-owner-of-name
-  "Atomic library boundary over `registry/rule-owner-of` — the name of
-   the base-fn whose `:return-type-rule` computed the named fn's
-   return type; nil when the fn is unknown, is itself a base-fn, or
-   its root ancestor carries no rule. The walk itself lives next to
+  "Atomic library boundary over `registry/rule-owner-info-of` —
+   `{:name … :fn-id …}` of the base-fn whose `:return-type-rule`
+   computed the named fn's return type; nil when the fn is unknown, is
+   itself a base-fn, or its root ancestor carries no rule. The `:fn-id`
+   comes off the registry entry itself (id-keyed truth), so partials
+   emit nav-links without a name→id graph query. The walk lives next to
    `registry/root-base-fn-name` (single source of truth); the layout
-   strip-facts pass calls the same fn."
+   strip-facts pass calls the name-only `registry/rule-owner-of`."
   [fn-name]
-  (registry/rule-owner-of fn-name))
+  (registry/rule-owner-info-of fn-name))
 
 
 (defbase declarable-effect-categories

@@ -89,12 +89,11 @@
   ;; One `:query-entities` protocol call (versioned-resolved,
   ;; branch-aware). Names are unique per (namespace, name) — a bare
   ;; name CAN exist in several namespaces, so first-row is
-  ;; best-effort for duplicated names (callers here resolve
-  ;; rule-owner BASE-FN names, which stay globally unique among
-  ;; base-fns; a composed duplicate would win only if it shadowed a
-  ;; base-fn's bare name at query order). Used by partials that emit
-  ;; `data-fn-id` nav-links for a fn they only know by name (e.g.
-  ;; the return-type-rule popover's rule-owner link).
+  ;; best-effort for duplicated names. Reserved for resolving names
+  ;; that arrive from OUTSIDE the system (the MCP `read-fn` tool's
+  ;; user-typed name); internal flows that already hold a registry
+  ;; entry carry its `:fn-id` instead (e.g. the return-type-rule
+  ;; popover's rule-owner link rides `:rule-owner-of-name`'s id).
 
   {:name :_fibn-where
    :parent :assoc

@@ -78,10 +78,12 @@
    Reads `(:vault ctx)` first, then falls back to the JVM-wide
    `vault/active-client` atom. The fallback covers per-branch ctx
    builds that don't carry vault forward (branch-router's
-   build-branch-ctx) — propagating it through ctx mutates the
-   secrets fn-graph evaluation in a way that triggers a separate
-   compile-eager closure-leak, so the JVM-wide read is the safer
-   path."
+   build-branch-ctx). The atom is not a workaround: the client is a
+   platform singleton (one Vault per JVM), so the JVM-lifecycle atom
+   is its authoritative home — same design as
+   `branch-router/active-router-global`. Threading it through every
+   per-branch ctx was audited 2026-07 and found safe (compile-eager
+   closures take ctx per-call, capture nothing) but redundant."
   [ctx]
   (or (:vault ctx)
       @vault/active-client

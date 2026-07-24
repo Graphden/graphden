@@ -23,9 +23,11 @@
 ;; init-key at startup, cleared on halt. Read as a fallback when a
 ;; consumer doesn't have a ctx-attached client. Mirrors the
 ;; `system.branch-router/active-router` pattern: shared infrastructure
-;; that doesn't fit per-branch ctx (where propagating it triggers an
-;; unrelated compile-eager closure-leak on the secrets graph) but
-;; logically belongs to the JVM lifecycle anyway — one Vault per JVM.
+;; that logically belongs to the JVM lifecycle — one Vault per JVM, a
+;; platform singleton, so the atom is its authoritative home rather
+;; than a per-branch ctx copy. (An older comment blamed a
+;; "compile-eager closure-leak" for the ctx drop; audited 2026-07 —
+;; closures take ctx per-call and capture nothing, no such leak.)
 (defonce ^{:doc "JVM-wide active vault client `{:address … :token …}` or nil."}
   active-client
   (atom nil))

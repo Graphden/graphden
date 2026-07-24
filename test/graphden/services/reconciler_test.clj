@@ -464,6 +464,42 @@
       (finally (sp/close storage) (br/clear-active-router!)))))
 
 
+(deftest nil-branch-row-normalized-to-default-branch-test
+  ;; A legacy `:service` row with no `:branch-id` runs on the router's
+  ;; default branch. The running entry must record that EFFECTIVE id,
+  ;; so a default-branch `restart-services-on-branch!` (post-merge
+  ;; invalidation) restarts it instead of leaving a stale closure
+  ;; running — before normalization such rows were silently skipped.
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed}
+        (make-trackable-fn! storage "legacy-nil-branch" calls stops)
+        _svc (make-service-row! storage (:id composed) true nil)
+        default-id (random-uuid)
+        c (test-ctx storage)
+        running (atom {})]
+    (try
+      ;; Minimal "router": the reconciler only reads `:default-branch-id`
+      ;; off it; `br/ctx-for` is stubbed to the base ctx — which is what
+      ;; the real router's seeded default-branch entry resolves to anyway.
+      (br/set-active-router! {:default-branch-id default-id})
+      (with-redefs [br/ctx-for (fn [_router branch-id]
+                                 (is (= default-id branch-id)
+                                     "nil-branch row resolves to the default branch ctx")
+                                 c)]
+        (recon/reconcile-once! c running)
+        (testing "running entry records the default branch id"
+          (is (= default-id (-> @running vals first :branch-id))))
+        (testing "default-branch restart picks the legacy row up"
+          (recon/restart-services-on-branch! c running default-id)
+          (is (= 1 (count @stops)) "legacy row was stopped for restart")
+          (is (= 2 (count @calls)) "initial + post-restart")))
+      (finally
+        (br/clear-active-router!)
+        (sp/close storage)))))
+
+
 (deftest start-failure-is-recorded-as-nil-stopper-test
   (testing "if the impl throws on start, the service is still tracked"
     (let [storage (create-full-storage)

@@ -150,9 +150,15 @@
 
 
 (defn- extract-version-data
-  "Extracts data fields from a version record, stripping version metadata."
+  "Extracts data fields from a version record, stripping version
+   metadata. `:deleted-at` is version-plane bookkeeping too (nil on
+   every live version — tombstones never reach this fn): leaving it on
+   a resolved entity leaks it into rows callers later echo into
+   `create-entity`, whose identity-plane INSERT has no such column
+   (the crud rollback replay hit exactly that once hard-deleted
+   identities started being purged)."
   [version-record version-id-field]
-  (dissoc version-record :id :branch-id :created-at version-id-field))
+  (dissoc version-record :id :branch-id :created-at :deleted-at version-id-field))
 
 
 ;; === Core Resolution Algorithm ===

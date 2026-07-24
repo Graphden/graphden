@@ -339,7 +339,10 @@
               (check-fn-name-collision! st branch-id entity-name normalized)
               (let [existing (sp/read-entity st entity-name id)]
                 (when-not existing
-                  (sp/create-entity st entity-name normalized))
+                  ;; Identity-plane INSERT: strip version-plane
+                  ;; bookkeeping a caller may echo from a version-row
+                  ;; read — the identity table has no such column.
+                  (sp/create-entity st entity-name (dissoc normalized :deleted-at)))
                 (let [{:keys [version-id-field version-data-fields]}
                       (get res/entity-config entity-name)
                       current-version (when existing
@@ -558,9 +561,14 @@
             ;; Find which base records don't exist yet
             existing-ids (set (keys (sp/read-entities base-storage entity-name ids)))
             new-base-records (vec (remove #(contains? existing-ids (:id %)) data-with-ids))
-            ;; Batch create base records
+            ;; Batch create base records. Identity-plane INSERT: strip
+            ;; version-plane bookkeeping a caller may echo from a
+            ;; version-row read (the crud rollback replay re-creates
+            ;; captured pre-state rows) — the identity table has no
+            ;; such column.
             _ (when (seq new-base-records)
-                (sp/create-entities base-storage entity-name new-base-records))
+                (sp/create-entities base-storage entity-name
+                                    (mapv #(dissoc % :deleted-at) new-base-records)))
             ;; Prepare and batch create version records
             config (get res/entity-config entity-name)
             timestamp (now)

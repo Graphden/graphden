@@ -654,26 +654,36 @@
           entry))))
 
 
-(defn rule-owner-of
-  "Name (string, no leading colon) of the base-fn that computed
-   `fn-name`'s return type — `root-base-fn-name` over the entry's
+(defn rule-owner-info-of
+  "`{:name … :fn-id …}` of the base-fn that computed `fn-name`'s
+   return type — `root-base-fn-name` over the entry's
    `:primary-parent`, iff that root's entry carries a hand
    `:return-type-rule` OR a var-carrying declared signature (the
    checker's `signature-return` fallback). nil for unknown names,
    base-fns (no `:primary-parent`), and chains whose root has neither
    (a fully concrete declaration — nothing to explain). Rules and
    signatures live only on base-fns (the roots), so \"first ancestor
-   with a rule\" ≡ \"root with a rule\". Consumers: the
-   `:rule-owner-of-name` base-fn behind `/partials/return-type-rule`,
-   and the layout strip-facts pass that tells the editor whether to
-   render the `↳` badge."
+   with a rule\" ≡ \"root with a rule\". The `:fn-id` comes straight
+   off the registry entry (id-keyed truth), so consumers emitting
+   nav-links don't re-resolve the name through a graph query — a bare
+   name can be duplicated across namespaces, the entry's id can't.
+   Consumer: the `:rule-owner-of-name` base-fn behind
+   `/partials/return-type-rule`."
   [fn-name]
   (when fn-name
     (when-let [pp (:primary-parent (rich-type-of (keyword fn-name)))]
       (let [root (root-base-fn-name pp)
             entry (rich-type-of root)]
         (when (or (:return-type-rule entry) (signature-owner? entry))
-          (name root))))))
+          {:name (name root) :fn-id (:fn-id entry)})))))
+
+
+(defn rule-owner-of
+  "Name-only convenience over `rule-owner-info-of` — the layout
+   strip-facts pass gates the `↳` badge on presence and never needs
+   the id."
+  [fn-name]
+  (:name (rule-owner-info-of fn-name)))
 
 
 ;; Memoized per registry-value identity: the types_api layer caches

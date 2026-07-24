@@ -2162,23 +2162,29 @@
   ;; chain; the queried fn-def's immediate parent is often itself a
   ;; fn-def (`:assoc-timestamp → :assoc`). `:rule-owner-of-name`
   ;; (web/crud) is the atomic boundary over the registry's canonical
-  ;; `root-base-fn-name` walk — nil for base-fn cards (no primary
-  ;; parent) and rule-less chains, which collapses the body to the
-  ;; hidden span below.
+  ;; `root-base-fn-name` walk — `{:name :fn-id}` with the id straight
+  ;; off the registry entry (no name→id graph query); nil for base-fn
+  ;; cards (no primary parent) and rule-less chains, which collapses
+  ;; the body to the hidden span below.
 
-  {:name :_rtr-owner-name
+  {:name :_rtr-owner-info
    :parent :rule-owner-of-name
    :args {:fn-name :_rtr-fn-name}}
 
   {:name :_rtr-owner-some?
    :parent :some?
-   :args {:value :_rtr-owner-name}}
+   :args {:value :_rtr-owner-info}}
 
-  ;; Narrowed owner name — every consumer below sits inside the
+  ;; Narrowed owner info — every consumer below sits inside the
   ;; `:_rtr-owner-some?` branch, so the assert never fires.
-  {:name :_rtr-owner-sure
+  {:name :_rtr-owner-info-sure
    :parent :assert-some
-   :args {:value :_rtr-owner-name}}
+   :args {:value :_rtr-owner-info}}
+
+  {:name :_rtr-owner-sure
+   :description "Owner base-fn's bare name (text) off the narrowed info map — feeds the label / title / narrative-key consumers."
+   :parent :get
+   :args {:coll :_rtr-owner-info-sure :key {:value :name} :default nil}}
 
   ;; --- per-rule narrative -----------------------------------------------
   ;; Static prose per rule — the graph-resident successor of the JS
@@ -2267,17 +2273,13 @@
 
   ;; --- owner nav-link ---------------------------------------------------
   ;; `a[data-fn-id]` — the same post-swap contract as the provenance
-  ;; partial: JS binds `selectFn` navigation on it. Falls back to a
-  ;; plain span when the name doesn't resolve to a row (shouldn't
-  ;; happen for registered base-fns; defensive parity with the old JS).
+  ;; partial: JS binds `selectFn` navigation on it. The id rides in on
+  ;; the owner info map (registry entry's own id), so when the owner
+  ;; exists the link always resolves — no defensive plain-span fork.
 
   {:name :_rtr-owner-fn-id
-   :parent :fn-id-by-name
-   :args {:fn-name :_rtr-owner-sure}}
-
-  {:name :_rtr-owner-fn-id-some?
-   :parent :some?
-   :args {:value :_rtr-owner-fn-id}}
+   :parent :get
+   :args {:coll :_rtr-owner-info-sure :key {:value :fn-id} :default nil}}
 
   {:name :_rtr-owner-label
    :parent :str-join
@@ -2303,24 +2305,12 @@
                                 :_rtr-owner-link-title]}}
           :children [:_rtr-owner-label]}}
 
-  {:name :_rtr-owner-plain
-   :parent :hiccup
-   :args {:tag {:value "span"}
-          :attrs {:value {}}
-          :children [:_rtr-owner-label]}}
-
-  {:name :_rtr-owner-link-or-span
-   :parent :if
-   :args {:test :_rtr-owner-fn-id-some?
-          :then :_rtr-owner-link
-          :else :_rtr-owner-plain}}
-
   {:name :_rtr-intro
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "provenance-popover-intro"}}
           :children [{:value "Return type computed by "}
-                     :_rtr-owner-link-or-span
+                     :_rtr-owner-link
                      {:value "'s :return-type-rule"}]}}
 
   ;; --- Inputs table -----------------------------------------------------

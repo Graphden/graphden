@@ -776,6 +776,14 @@ cmd_drop() {
   rm -f "$(ack_file "$name")"
 
   info "Removing worktree $path ..."
+  # FG-5 (audit-7): with -f the ancestry/dirty guards were skipped — say
+  # loudly how many commits are about to be discarded (a detached-HEAD
+  # worktree keeps its commits ONLY on the discarded HEAD).
+  if [ "${force:-0}" = 1 ]; then
+    local n_lost
+    n_lost="$(git -C "$path" rev-list --count "$TARGET..HEAD" 2>/dev/null || echo '?')"
+    [ "$n_lost" = 0 ] || warn "discarding $n_lost commit(s) not on $TARGET"
+  fi
   git -C "$MAIN_WT" worktree remove ${force:+--force} "$path"
   if git -C "$MAIN_WT" branch -D "$branch" 2>/dev/null; then
     ok "✓ deleted $branch"
@@ -838,7 +846,15 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
   # the canonical image and saturate the machine, so only the gate — which holds
   # the queue lock — may start them. We are the gate.
   export WTQ_GATE=1
-  local branch; branch="$(branch_of "$wt")"
+  # FG-1 (audit-7): a detached-HEAD worktree makes branch_of return the
+  # literal "HEAD", and `merge --ff-only HEAD` in MAIN_WT is a silent
+  # no-op — every phase green, RESULT=GREEN, develop unmoved (the
+  # 2026-07-25 incident). symbolic-ref FAILS on detached HEAD, which is
+  # exactly the loud refusal we want.
+  local head_ref
+  head_ref="$(git -C "$wt" symbolic-ref -q HEAD)"     || { echo "ABORT: $wt HEAD is detached — refusing to gate (the ff-only land would be a silent no-op). Re-attach: git -C $wt checkout <feature-branch>"; return 3; }
+  local branch="${head_ref#refs/heads/}"
+  [ -n "$branch" ] && [ "$branch" != "HEAD" ]     || { echo "ABORT: could not resolve a real branch for $wt"; return 3; }
   local ts; ts="$(date +%Y%m%d-%H%M%S)"
   local name; name="$(basename "$wt")"
   local log="$LOG_DIR/$name-$ts.log"
@@ -1005,8 +1021,20 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 
     step "land: fast-forward $TARGET -> $branch"
     # feature now contains $TARGET as ancestor (we just merged it in) and
-    # the lock guarantees $TARGET has not moved -> ff is always possible.
+    # the queue lock keeps other GATES off $TARGET (wt new / manual
+    # commits are outside it — the postcondition below catches those
+    # loudly too).
+    # FG-2 (audit-7): "the ff didn't fail" is NOT "it landed" — a no-op
+    # ff (already-ancestor ref, or HEAD per FG-1) exits 0. The invariant
+    # that makes RESULT=GREEN honest is: $TARGET became the EXACT sha
+    # the suites validated.
+    local land_before land_want land_after
+    land_before="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+    land_want="$(git -C "$wt" rev-parse HEAD)"
     git -C "$MAIN_WT" merge --ff-only "$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
+    land_after="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+    [ "$land_after" = "$land_want" ]       || { echo "FAIL(false-green guard): $TARGET is $land_after but the tested tip was $land_want — develop did NOT advance to the validated build"; return 1; }
+    [ "$land_after" != "$land_before" ]       || { echo "FAIL(false-green guard): $TARGET unchanged ($land_before) — the ff was a no-op, nothing landed"; return 1; }
     # No-push is honored from EITHER the env var (this invocation) or the
     # persistent queue marker (every gate on this machine). The env var
     # alone was misleading: gate A's "LOCALLY only" was true for A, but
@@ -1027,7 +1055,7 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     if [ "${built_candidate:-0}" = 1 ]; then
       step "promote the candidate to $CANONICAL_IMAGE"
       docker tag "$CANDIDATE_IMAGE" "$CANONICAL_IMAGE" \
-        || { echo "FAIL: could not promote the candidate image"; return 1; }
+        || { echo "FAIL(post-land): $TARGET ADVANCED but the canonical tag was NOT promoted — demo/tag stale, fix manually; do NOT naively re-run the gate"; return 4; }
       echo "ok"
     fi
 
@@ -1040,9 +1068,9 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     step "advance the $TARGET instance onto the landed image"
     if [ "$deploy" = 1 ]; then
       echo "(--deploy: dropping the $TARGET schema first — the branch changes it)"
-      ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL: instance-reset (LANDED, but the demo is stale)"; return 1; }
+      ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL(post-land): instance-reset (LANDED, but the demo is stale)"; return 4; }
     else
-      ( cd "$MAIN_WT" && bb instance-up ) || { echo "FAIL: instance-up (LANDED, but the demo is stale)"; return 1; }
+      ( cd "$MAIN_WT" && bb instance-up ) || { echo "FAIL(post-land): instance-up (LANDED, but the demo is stale)"; return 4; }
     fi
 
     step "gc: reclaim the executor layers this build superseded"
@@ -1121,6 +1149,7 @@ cmd_merge() {
     0) verdict=GREEN;    msg="✓ landed. You can now:  bb wt drop $nm" ;;
     2) verdict=CONFLICT; msg="↩ merge conflict — resolve, commit, re-run 'bb wt merge'." ;;
     3) verdict=PRECOND;  msg="↩ precondition failed (dirty tree / unacknowledged rule change) — see log above." ;;
+    4) verdict=LANDED_STALE; msg="⚠ LANDED on $TARGET, but a post-land step (promote/deploy) failed — develop moved; fix the demo/tag manually, do NOT re-run the gate." ;;
     *) verdict=FAIL;     msg="✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
   esac
   printf '%s\t%s\t%s\n' "$verdict" "$rc" "$branch" > "$RESULT_DIR/$nm"   # agents/`wt status` read this

@@ -1239,7 +1239,7 @@
      the one running it. Every pod gets the event; at most one owns the
      future, the rest no-op."
   [ctx]
-  (fn [{:keys [kind op id branch-id] :as event}]
+  (fn [{:keys [kind op id branch-id epochs] :as event}]
     (try
       (case kind
         ;; Retry-free: a start failure isn't retried inline (which would sleep
@@ -1248,11 +1248,14 @@
         :service   (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
         :fn        (when (= op :invalidate)
                      (invalidate-from-notify! ctx id branch-id)
-                     ;; Delta applied — advance this pod's epoch
-                     ;; watermark so the lazy fetch-time heal doesn't
-                     ;; re-clear it (see note-graph-epoch-current!'s
-                     ;; docstring for the accepted residual race).
-                     (br/note-graph-epoch-current! (:storage ctx)))
+                     ;; Delta applied — mark the writer's exact bump
+                     ;; values COVERED so the lazy epoch validation
+                     ;; doesn't heal over what this event just did.
+                     ;; Old-format events without epochs mark nothing:
+                     ;; the gap stays visible and costs one coarse
+                     ;; heal — safe, never wrong.
+                     (when (seq epochs)
+                       (br/note-graph-epoch-covered! (:storage ctx) epochs)))
         :execution (when (and (= op :cancel) (not (str/blank? id)))
                      (persist/cancel-local! (java.util.UUID/fromString id)))
         nil)

@@ -10,6 +10,7 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.services.reconciler :as recon]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.system.branch-router :as br]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]))
@@ -218,7 +219,8 @@
     ;; pre-merge closures until an unrelated recompile (a committed
     ;; but invisible merge). On the dedicated thread they always
     ;; finish; an interrupt during join only re-flags the worker.
-    (let [post-commit!
+    (let [merge-bumps (some-> epoch/*request-bump-log* deref seq vec)
+          post-commit!
           (fn []
             (let [affected (mrg/merge-affected-fn-ids
                              (branches/base-storage ctx) source-branch-id)]
@@ -236,9 +238,12 @@
                 ;; succeeded; surface the failure but don't fail the API.
                 (log/warn e "post-merge service restart failed"
                           {:target-branch-id target-branch-id})))
-            ;; Eager work done — advance the epoch watermark past this
-            ;; merge's bump so the lazy heal doesn't re-clear it.
-            (br/note-graph-epoch-validated! (request/require-storage ctx)))
+            ;; Eager work done — mark this merge's bumps applied.
+            ;; `merge-bumps` was captured on the REQUEST thread: dynamic
+            ;; bindings don't convey to a raw Thread, so the 1-arity
+            ;; (request-log-draining) note would see nothing here.
+            (br/note-graph-epoch-validated!
+              (request/require-storage ctx) merge-bumps))
           t (Thread. ^Runnable post-commit! "merge-post-commit")]
       (Thread/.start t)
       (try

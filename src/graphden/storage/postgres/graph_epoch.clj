@@ -56,13 +56,31 @@
 
 
 (defn attach-state
-  "Give a storage handle its own last-bump state: the newest bumped
-   value AND when it happened (the heal grace-period reads the
-   timestamp). Harmless on non-Postgres handles (atoms stay at 0)."
+  "Give a storage handle its own epoch LEDGER: a sorted-map of every
+   locally-bumped value → {:at ms :noted? bool}, plus a sorted-set of
+   foreign epochs covered via NOTIFY. The router's validation
+   classifies each epoch in (watermark, global] against these — the
+   scalar max-advance watermark of the first design silently skipped
+   past interleaved foreign epochs whose NOTIFY was lost (audit-7
+   FINDING 1). Harmless on non-Postgres handles (structures stay
+   empty)."
   [storage]
   (assoc storage
-         :graph-epoch-last (atom 0)
-         :graph-epoch-last-at (atom 0)))
+         :graph-epoch-local (atom (sorted-map))
+         :graph-epoch-covered (atom (sorted-set))))
+
+
+(def ^:dynamic *request-bump-log*
+  "Per-REQUEST log of the exact bump values this request produced —
+   bound by the HTTP boundary (web/http `http-server`), read+cleared
+   by the eager-invalidation tail's `note!`. Request-scoped binding
+   (not a ThreadLocal): an aborted request unwinds the binding, its
+   bumps stay un-noted in the ledger, and the grace-expiry heal covers
+   them — a reused pool thread can never mark a dead request's bumps
+   as applied. nil outside a request (background writers never note;
+   their bumps heal after grace, which for boot-time writers is
+   absorbed by the router's creation-time watermark seed)."
+  nil)
 
 
 (def ^:private degraded-warned (atom false))
@@ -90,30 +108,78 @@
         (let [v (some-> (jdbc/execute-one!
                           pool [(str "SELECT nextval('" sequence-name "')")])
                         vals first)]
-          (when-let [a (:graph-epoch-last storage)]
-            (swap! a max v))
-          (when-let [t (:graph-epoch-last-at storage)]
-            (reset! t (System/currentTimeMillis)))
+          (when (and v (:graph-epoch-local storage))
+            (swap! (:graph-epoch-local storage)
+                   assoc v {:at (System/currentTimeMillis) :noted? false})
+            (when *request-bump-log*
+              (swap! *request-bump-log* conj v)))
           v)
         (catch Exception e (warn-once e) nil)))))
 
 
-(defn last-bumped
-  "The newest epoch THIS handle's writes produced — the value eager
-   invalidation paths mark as validated. 0 when nothing was bumped."
-  [storage]
-  (or (some-> (:graph-epoch-last storage) deref) 0))
+(defn note-applied!
+  "Mark bump values as APPLIED (their eager invalidation completed).
+   With explicit `vs`, marks those; without, drains the request's
+   `*request-bump-log*`. Never touches the watermark — advancing is
+   the validator's job, and only when the whole (watermark, global]
+   range is accounted for."
+  ([storage]
+   (when *request-bump-log*
+     (let [vs @*request-bump-log*]
+       (reset! *request-bump-log* [])
+       (note-applied! storage vs))))
+  ([storage vs]
+   (when-let [ledger (:graph-epoch-local storage)]
+     (when (seq vs)
+       (swap! ledger
+              (fn [m]
+                (reduce (fn [acc v]
+                          (if (contains? acc v)
+                            (assoc-in acc [v :noted?] true)
+                            acc))
+                        m vs)))))))
 
 
-(defn last-bumped-at
-  "Wall-clock ms of this handle's newest bump. The router's heal skips
-   while a LOCAL write is inside its grace window: the eager
-   invalidation for that write is normally still in flight, and
-   healing over it would full-clear on every write of a busy suite
-   (the e2e gate demonstrated exactly that). An aborted eager path
-   simply heals after the grace expires."
-  [storage]
-  (or (some-> (:graph-epoch-last-at storage) deref) 0))
+(defn cover-foreign!
+  "Mark foreign epochs as covered — a sibling's NOTIFY carried the
+   writer's bump values and the delta was applied locally."
+  [storage vs]
+  (when-let [covered (:graph-epoch-covered storage)]
+    (when (seq vs)
+      (swap! covered into vs))))
+
+
+(defn classify-range
+  "For each epoch in (w, global]: `:foreign` (not ours, not covered —
+   heal now), `:aborted` (ours, un-noted, older than `grace-ms` —
+   eager path died, heal now), `:pending` (ours, un-noted, young —
+   eager in flight, wait), `:applied` (ours-noted or covered).
+   Returns the set of statuses present. Ranges wider than 512 return
+   #{:foreign} outright — one coarse heal beats walking an unbounded
+   gap."
+  [storage w global grace-ms]
+  (if (> (- global w) 512)
+    #{:foreign}
+    (let [local @(:graph-epoch-local storage)
+          covered @(:graph-epoch-covered storage)
+          now (System/currentTimeMillis)]
+      (into #{}
+            (map (fn [e]
+                   (if-let [{:keys [at noted?]} (get local e)]
+                     (cond noted? :applied
+                           (> (- now at) grace-ms) :aborted
+                           :else :pending)
+                     (if (contains? covered e) :applied :foreign))))
+            (range (inc w) (inc global))))))
+
+
+(defn prune!
+  "Drop ledger + covered entries ≤ the advanced watermark."
+  [storage w]
+  (when-let [ledger (:graph-epoch-local storage)]
+    (swap! ledger (fn [m] (into (sorted-map) (subseq m > w)))))
+  (when-let [covered (:graph-epoch-covered storage)]
+    (swap! covered (fn [s] (into (sorted-set) (subseq s > w))))))
 
 
 (defn current

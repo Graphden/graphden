@@ -325,11 +325,31 @@
 ;; `note-graph-epoch-validated!` after finishing so their own writes
 ;; never trigger the heal.
 
-(defonce ^{:doc "Pod-wide watermark: the newest epoch whose effects
-  are known to be applied to this pod's caches (via eager invalidate,
-  NOTIFY handling, or a heal)."}
-  validated-graph-epoch
-  (atom 0))
+(defonce ^{:doc "Pod-wide epoch state: {:w watermark :read {:value :at}}.
+  :w = the newest epoch through which EVERY effect is known applied to
+  this pod's caches; :read = the TTL-cached global sequence read.
+  Advancing :w requires the whole (w, global] range to be accounted
+  for by the handle's ledger (audit-7 FINDING 1: the old scalar
+  max-advance silently skipped past interleaved foreign epochs whose
+  NOTIFY was lost). Tests isolate via *epoch-state-override* (wired
+  into the parallel plugin's isolation-vars)."}
+  global-epoch-state
+  (atom {:w 0 :read {:value nil :at 0}}))
+
+
+(def ^:dynamic *epoch-state-override* nil)
+
+
+(defn epoch-state-seed
+  "Fresh per-thread epoch state for the parallel test plugin's
+   isolation binding."
+  []
+  {:w 0 :read {:value nil :at 0}})
+
+
+(defn- epoch-state
+  []
+  (or *epoch-state-override* global-epoch-state))
 
 
 (def ^:dynamic *epoch-check-ttl-ms*
@@ -340,83 +360,114 @@
 
 
 (def ^:dynamic *epoch-heal-grace-ms*
-  "How long after a LOCAL bump the heal holds off. The bump precedes
-   the write, and the eager invalidate + watermark note run after the
-   write on the same thread — healing inside that window would
-   full-clear on every write of a busy suite (the e2e gate proved
-   it). An aborted eager path heals once the grace expires; a purely
-   FOREIGN missed write (no recent local bump) heals immediately."
+  "How long an UN-NOTED local bump may age before it is treated as an
+   aborted eager path and healed. This no longer suppresses healing of
+   FOREIGN gaps — a missed sibling write heals immediately regardless
+   of local write activity (the first design's 10s blanket suppression
+   was the amplifier that let local notes bury foreign epochs)."
   10000)
 
 
-(defonce ^:private epoch-read-cache (atom {:value nil :at 0}))
-
-
 (defn note-graph-epoch-validated!
-  "Mark this pod's caches as consistent with the newest epoch THIS
-   handle's writes produced (the exact bump value — never a fresh
-   read, so a concurrent sibling's bump can't be skipped past).
-   Called by the eager invalidation tails; forgetting a call site is
-   harmless (a spurious heal), never wrong."
-  [storage]
-  (let [base (or (:base-storage storage) storage)]
-    (swap! validated-graph-epoch max (epoch/last-bumped base))))
+  "Eager-invalidation tail: mark this request's bumps APPLIED in the
+   handle ledger (drains `epoch/*request-bump-log*`; 2-arity takes
+   explicit values for off-thread tails like the merge post-commit).
+   Never advances the watermark — the validator does, and only when
+   the whole range is accounted for. Forgetting a call site ages the
+   bump past grace and costs one spurious heal, never a wrong result."
+  ([storage]
+   (epoch/note-applied! (or (:base-storage storage) storage)))
+  ([storage vs]
+   (epoch/note-applied! (or (:base-storage storage) storage) vs)))
 
 
-(defn note-graph-epoch-current!
-  "NOTIFY-handler variant: a sibling pod just APPLIED a writer's delta
-   but has no local record of the writer's bump value — advance to a
-   fresh global read. Residual race (a concurrent third write whose
-   bump this read includes but whose NOTIFY is lost would be skipped)
-   requires two simultaneous independent failures inside a millisecond
-   window and is healed by the next epoch bump; accepted + documented."
-  [storage]
-  (let [base (or (:base-storage storage) storage)]
-    (when-let [v (epoch/current base)]
-      (swap! validated-graph-epoch max v))))
+(defn note-graph-epoch-covered!
+  "NOTIFY-handler tail: the sibling's event carried the writer's exact
+   bump values and the delta was applied locally — mark them covered."
+  [storage vs]
+  (epoch/cover-foreign! (or (:base-storage storage) storage) vs))
 
 
 (defn- global-epoch-cached
   [base-storage]
-  (let [now (System/currentTimeMillis)
-        {:keys [value at]} @epoch-read-cache]
+  (let [state (epoch-state)
+        now (System/currentTimeMillis)
+        {:keys [value at]} (:read @state)]
     (if (and value (< (- now at) *epoch-check-ttl-ms*))
       value
-      (when-let [v (epoch/current base-storage)]
-        (reset! epoch-read-cache {:value v :at now})
+      (let [v (epoch/current base-storage)]
+        ;; nil (degraded / missing sequence) is cached too — without
+        ;; this a degraded DB pays a failing SELECT per request.
+        (swap! state assoc :read {:value v :at now})
         v))))
 
 
+(defonce ^:private epoch-heal-monitor (Object.))
+
+
 (defn- heal-stale-ctxs!
-  "The epoch moved past our watermark and no eager path claimed it:
-   someone's write reached the DB without this pod applying its
-   invalidation. Full-invalidate every cached ctx (rare path — the
-   eager delta machinery handles the common case) and advance the
-   watermark so the heal runs once per missed write burst."
-  [{:keys [handlers]} global]
-  (let [prev @validated-graph-epoch]
-    (when (and (compare-and-set! validated-graph-epoch prev (max prev global))
-               (< prev global))
-      (counters/count! :epoch/heal)
-      (log/info "graph-epoch heal: cached ctxs invalidated"
-                {:validated prev :global global})
-      (doseq [[_ entry] @handlers]
-        (when-let [c (:ctx entry)]
-          (ctx/invalidate-graph-cache! c))))))
+  "An epoch in (w, global] is neither locally-noted nor NOTIFY-covered:
+   somebody's write reached the DB without this pod applying its
+   invalidation. Full-invalidate cached ctxs — BASE FIRST (the
+   graph-identical fast path copies the base registry by value, so
+   base must be clean before any concurrent copy), then the snapshot,
+   then a RE-snapshot for entries installed mid-heal. Serialized on a
+   monitor so two heals can't interleave; the watermark advances to
+   `global` only after the sweep."
+  [{:keys [handlers default-branch-id]} base global]
+  (locking epoch-heal-monitor
+    (let [state (epoch-state)]
+      (when (> global (:w @state))
+        (counters/count! :epoch/heal)
+        (log/info "graph-epoch heal: cached ctxs invalidated"
+                  {:validated (:w @state) :global global})
+        (let [snap @handlers
+              invalidate! (fn [entry] (some-> (:ctx entry) ctx/invalidate-graph-cache!))]
+          (some-> (get snap default-branch-id) invalidate!)
+          (doseq [[bid entry] snap]
+            (when (not= bid default-branch-id) (invalidate! entry)))
+          ;; Entries installed while the doseq ran copied base either
+          ;; before the clear (stale copy) or after (fresh); sweep them
+          ;; too — over-invalidation on the fresh ones is harmless.
+          (doseq [[bid entry] @handlers]
+            (when-not (contains? snap bid) (invalidate! entry))))
+        (epoch/prune! base global)
+        (swap! state assoc :w global)))))
 
 
 (defn- validate-graph-epoch!
-  "Fetch-time check: compare the (TTL-cached) global epoch against the
-   pod watermark; heal on mismatch. nil epoch (no pool / sequence not
-   yet created) skips — cannot validate, eager paths remain the only
-   mechanism, which is exactly the pre-epoch behavior."
+  "Fetch-time check. Classify every epoch in (w, global] against the
+   handle ledger: a FOREIGN gap or an ABORTED local bump heals now; a
+   fully applied range advances the watermark; young un-noted local
+   bumps wait (their eager invalidate is in flight). A global BELOW
+   the watermark means the sequence regressed (DB restore under a
+   live JVM) — reseed + heal rather than going silently dead. nil
+   global (no pool / missing sequence) skips: cannot validate, eager
+   paths remain the only mechanism — the pre-epoch behavior."
   [{:keys [base-ctx] :as router}]
-  (let [base (vs/unwrap (:storage base-ctx))]
+  (let [base (vs/unwrap (:storage base-ctx))
+        state (epoch-state)]
     (when-let [global (global-epoch-cached base)]
-      (when (and (> global @validated-graph-epoch)
-                 (> (- (System/currentTimeMillis) (epoch/last-bumped-at base))
-                    *epoch-heal-grace-ms*))
-        (heal-stale-ctxs! router global)))))
+      (let [w (:w @state)]
+        (cond
+          (< global w)
+          (do (log/warn "graph-epoch regression — sequence restarted below the watermark; reseeding + healing"
+                        {:watermark w :global global})
+              (swap! state assoc :w -1)
+              (heal-stale-ctxs! router base global))
+
+          (> global w)
+          (let [statuses (epoch/classify-range base w global *epoch-heal-grace-ms*)]
+            (cond
+              (or (:foreign statuses) (:aborted statuses))
+              (heal-stale-ctxs! router base global)
+
+              (:pending statuses)
+              nil ; eager invalidations in flight — check again next TTL
+
+              :else ; everything applied/covered — advance without healing
+              (do (epoch/prune! base global)
+                  (swap! state update :w max global)))))))))
 
 
 (defn handler-for
@@ -616,7 +667,8 @@
        ;; The default ctx was just built from the CURRENT graph — seed
        ;; the epoch watermark so the first request doesn't spuriously
        ;; heal over boot-sync bumps the build already absorbed.
-       (swap! validated-graph-epoch max (or (epoch/current (vs/unwrap (:storage base-ctx))) 0))
+       (swap! (epoch-state) update :w max
+              (or (epoch/current (vs/unwrap (:storage base-ctx))) 0))
        (log/info "Branch router ready" {:default-branch-id default-branch-id
                                         :handler-fn-name handler-fn-name
                                         :max-size (or max-size

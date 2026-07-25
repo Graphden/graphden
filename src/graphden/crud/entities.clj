@@ -22,6 +22,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
     [graphden.services.reconciler :as recon]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.versioning.branch-local :as branch-local]
@@ -236,10 +237,14 @@
             ;; branch, and a nil-valued key is a different map from an
             ;; absent one — `parse-payload` omits it on the way back for
             ;; the same reason.
+            ;; The request's exact epoch bumps ride the event so the
+            ;; receiving pod can mark them covered (4th payload slot).
+            epochs (some-> epoch/*request-bump-log* deref seq vec)
             event (fn [id]
                     (cond-> {:kind :fn :op :invalidate :id id}
                       branch-id (assoc :branch-id branch-id)
-                      org-id (assoc :org-id org-id)))]
+                      org-id (assoc :org-id org-id)
+                      epochs (assoc :epochs epochs)))]
         ;; The same three-way answer the local path takes, because a pod receives
         ;; its OWN notify: an empty-id event means "full clear" to the listener,
         ;; so emitting one for a write that changed no closure would undo the

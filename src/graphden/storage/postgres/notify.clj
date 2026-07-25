@@ -70,23 +70,35 @@
   (when (string? payload)
     (let [parts (str/split payload #":" 3)]
       (when (= 3 (count parts))
-        (let [[id branch-id org-id] (str/split (nth parts 2) #"\|" 3)]
+        (let [[id branch-id org-id epochs] (str/split (nth parts 2) #"\|" 4)]
           (cond-> {:kind (keyword (nth parts 0))
                    :op (keyword (nth parts 1))
                    :id (or id "")}
             (not (str/blank? branch-id)) (assoc :branch-id branch-id)
-            (not (str/blank? org-id)) (assoc :org-id org-id)))))))
+            (not (str/blank? org-id)) (assoc :org-id org-id)
+            ;; 4th slot (audit-7): the writer's exact graph-epoch bump
+            ;; values, comma-joined — the receiving pod marks them
+            ;; COVERED so its lazy epoch validation doesn't heal over a
+            ;; delta this very event already applied. Older payloads
+            ;; omit the slot → no coverage → one coarse heal, safe.
+            (not (str/blank? epochs))
+            (assoc :epochs (into []
+                                 (keep #(try (Long/parseLong %)
+                                             (catch NumberFormatException _ nil)))
+                                 (str/split epochs #",")))))))))
 
 
 (defn format-payload
-  "Inverse of `parse-payload`. The org slot forces the (possibly empty)
-   branch slot to be present so the positions line up."
-  [{:keys [kind op id branch-id org-id]}]
-  (str (name kind) ":" (name op) ":" (or id "")
-       (cond
-         org-id (str "|" (or branch-id "") "|" org-id)
-         branch-id (str "|" branch-id)
-         :else "")))
+  "Inverse of `parse-payload`. Later slots force earlier (possibly
+   empty) ones to be present so the positions line up."
+  [{:keys [kind op id branch-id org-id epochs]}]
+  (let [ep (when (seq epochs) (str/join "," epochs))]
+    (str (name kind) ":" (name op) ":" (or id "")
+         (cond
+           ep (str "|" (or branch-id "") "|" (or org-id "") "|" ep)
+           org-id (str "|" (or branch-id "") "|" org-id)
+           branch-id (str "|" branch-id)
+           :else ""))))
 
 
 ;; =============================================================================

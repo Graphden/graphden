@@ -22,6 +22,7 @@
     [clojure.java.io :as io]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [org.httpkit.server :as http-kit])
   (:import
     (com.aayushatharva.brotli4j
@@ -219,7 +220,17 @@
   ;; this call. The returned stopper kills it; service registry's
   ;; validate-create requires :process for service-eligibility.
   (cr/record-effect! :process)
-  (http-kit/run-server handler {:port port}))
+  ;; Request-scoped graph-epoch bump log (library-adapter boundary
+  ;; plumbing, not composition): every write inside this request logs
+  ;; its bump; the eager-invalidation tail drains + notes it. An
+  ;; aborted request unwinds the binding, its bumps age un-noted, and
+  ;; the router's grace-expiry heal covers them — a reused pool thread
+  ;; can never note a dead request's bumps.
+  (http-kit/run-server
+    (fn [req]
+      (binding [epoch/*request-bump-log* (atom [])]
+        (handler req)))
+    {:port port}))
 
 
 (defbase http-stop

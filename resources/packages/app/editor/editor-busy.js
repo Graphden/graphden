@@ -84,4 +84,22 @@ function isOpInflight(opKey) {
 }
 
 window.withBusy = withBusy;
+
+// One-shot visible warning on the same bottom-centre banner — for
+// conditions the user must SEE (ambiguous name resolution picking a
+// first-match), where a console.warn is DevTools-only. Auto-hides;
+// an in-flight busy op repaints over it naturally.
+function showTransientWarning(text, ms) {
+  const el = ensureBanner();
+  el.textContent = text;
+  el.classList.add('visible', 'warning');
+  setTimeout(() => {
+    if (inflightOps.size === 0) {
+      el.classList.remove('visible');
+      el.textContent = '';
+    }
+    el.classList.remove('warning');
+  }, ms || 6000);
+}
+window.showTransientWarning = showTransientWarning;
 window.isOpInflight = isOpInflight;

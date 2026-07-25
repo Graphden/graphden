@@ -596,6 +596,30 @@ function validateLiteralAgainstType(parsed, expected) {
     return { ok: true, message: 'OK' };
   }
   expected = expanded;
+  // Marker head ([:secret T] and any registered marker like [:pii T])
+  // wraps an inner type; validate the LITERAL against the inner —
+  // mirrors types.core marker-inner. Recognized structurally: a
+  // 2-element vector whose head is a keyword-name string that is NOT
+  // one of the structural constructors below.
+  if (Array.isArray(expected) && expected.length === 2
+      && typeof expected[0] === 'string'
+      && !['union', 'refine', 'list', 'map', 'fn', 'variant',
+           'tuple'].includes(expected[0])) {
+    const inner = validateLiteralAgainstType(parsed, expected[1]);
+    return inner.ok
+      ? { ok: true, message: inner.message ? inner.message + ' [' + expected[0] + ']' : '' }
+      : inner;
+  }
+  // Variant — desugars to a union of tagged records server-side; the
+  // scalar popover can only check membership when branches are
+  // primitive-ish, so try each payload branch like a union.
+  if (Array.isArray(expected) && expected[0] === 'variant') {
+    for (let i = 2; i < expected.length; i += 2) {
+      const r = validateLiteralAgainstType(parsed, expected[i]);
+      if (r.ok) return { ok: true, message: 'OK (variant branch)' };
+    }
+    return { ok: true, message: '' }; // structural — defer to server
+  }
   // Union — try each branch, pass if any accepts.
   if (Array.isArray(expected) && expected[0] === 'union') {
     const branches = expected.slice(1);

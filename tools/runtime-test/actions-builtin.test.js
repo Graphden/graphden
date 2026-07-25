@@ -202,10 +202,13 @@ test('navigate no-op when data-href missing', () => {
 })();
 
 (async () => {
-  // Non-OK response → console.error, no swap.
-  console.log(' submit-form non-OK response is reported, no swap');
+  // Non-OK response → the server's rendered error body is SWAPPED in
+  // (audit-7: silently-inert buttons hid every validation rejection
+  // from user pages); a blank body gets a minimal inline notice.
+  console.log(' submit-form non-OK response surfaces the error');
   const ctx = loadActions({
-    fetch: async () => ({ ok: false, status: 500, text: async () => '' }),
+    fetch: async () => ({ ok: false, status: 422,
+                          text: async () => '<p class="error">Name taken.</p>' }),
   });
   const form = makeElement('form');
   form.attributes.action = '/x';
@@ -213,7 +216,20 @@ test('navigate no-op when data-href missing', () => {
   form.appendChild(btn);
   await ctx.getActionHandler('submit-form')(btn,
     { preventDefault() {}, stopPropagation() {} });
-  assert(form.innerHTML === '', 'form unchanged on non-OK');
+  assert(form.innerHTML.includes('Name taken.'),
+         'error body swapped into the form on non-OK');
+
+  const ctx2 = loadActions({
+    fetch: async () => ({ ok: false, status: 500, text: async () => '' }),
+  });
+  const form2 = makeElement('form');
+  form2.attributes.action = '/x';
+  const btn2 = makeElement('button', { 'data-action': 'submit-form' });
+  form2.appendChild(btn2);
+  await ctx2.getActionHandler('submit-form')(btn2,
+    { preventDefault() {}, stopPropagation() {} });
+  assert(form2.innerHTML.includes('HTTP 500'),
+         'blank error body gets a minimal inline notice');
 })();
 
 // =============================================================================

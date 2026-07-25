@@ -244,8 +244,10 @@ function openFnPicker(opts) {
     // A server-sourced typed candidate carries a name but no id yet
     // (it may be outside the loaded set) — resolve it by name on pick.
     if (!fn && !c.id && c.name && typeof resolveFnByName === 'function') {
-      const simple = c.name.includes('.') ? c.name.slice(c.name.lastIndexOf('.') + 1) : c.name;
-      try { fn = await resolveFnByName(simple); } catch (_) { /* fall through */ }
+      // Pass the candidate's name WHOLE — the resolver handles
+      // qualified (slash or legacy dotted) and bare forms; stripping
+      // to the last segment defeated disambiguation for duplicates.
+      try { fn = await resolveFnByName(c.name); } catch (_) { /* fall through */ }
     }
     closeFnPicker();
     if (typeof opts.onPick === 'function') {

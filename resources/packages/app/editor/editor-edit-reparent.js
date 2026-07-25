@@ -136,6 +136,8 @@ function compatibleMIParentInfo(targetFnId, currentParentIds) {
 // CASCADE — orphan bindings + parent-ids PUT
 // =============================================================================
 
+let _lastCascadeError = null;
+
 async function performReparentCascade(fnId, newParentIds) {
   if (!lookups?.bindingsByFn) return false;
   // 1. Walk current bindings on this fn. A binding is orphaned when
@@ -165,8 +167,11 @@ async function performReparentCascade(fnId, newParentIds) {
     try {
       const r = await authMutate('DELETE',
                                  API.api_entities_type_id('binding', b.id));
-      if (!r?.ok) return false;
-    } catch (_) { return false; }
+      if (!r?.ok) {
+        _lastCascadeError = await extractResponseError(r);
+        return false;
+      }
+    } catch (e) { _lastCascadeError = e?.message || null; return false; }
   }
 
   // 3. PUT new parent-ids on the fn itself. Empty list is encoded as
@@ -182,8 +187,11 @@ async function performReparentCascade(fnId, newParentIds) {
     const r = await authMutate('PUT',
                                API.api_entities_type_id('fn', fnId),
                                body);
-    if (!r?.ok) return false;
-  } catch (_) { return false; }
+    if (!r?.ok) {
+      _lastCascadeError = await extractResponseError(r);
+      return false;
+    }
+  } catch (e) { _lastCascadeError = e?.message || null; return false; }
 
   return true;
 }
@@ -202,8 +210,14 @@ async function _runCascadeWithBusy(fn, newParentIds, opLabel) {
     ? await withBusy(opKey, opLabel + ' ' + display + '…', work)
     : await work();
   if (!ok) {
-    alert('Re-parent failed — check the network log; some changes may '
-          + 'be partial. Re-saving will retry idempotently.');
+    // Surface the backend's actual rejection reason (409 write-rej
+    // bodies: cross-branch guard, resolver guard, free-args guard) —
+    // the generic alert hid exactly the text that tells the user what
+    // to change.
+    const why = _lastCascadeError ? '\n\nServer said: ' + _lastCascadeError : '';
+    alert('Re-parent failed — some changes may be partial; re-saving '
+          + 'retries idempotently.' + why);
+    _lastCascadeError = null;
   }
   return ok;
 }

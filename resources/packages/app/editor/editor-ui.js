@@ -69,12 +69,13 @@ async function selectFnByName(name, updateHistory = true) {
   if (!fn && lookups) {
     fn = (graphData.fns || []).find(f => getQualifiedFnName(f) === name);
   }
-  // Slow path: resolve by name via the server. A qualified name resolves on
-  // its last segment (the globally-unique fn name).
+  // Slow path: resolve by name via the server. The resolver itself
+  // understands slash-qualified (ns.path/name, incl. the root "/foo"
+  // spelling), legacy dotted, and bare forms — stripping to the last
+  // segment here used to defeat disambiguation for duplicated names.
   if (!fn && typeof resolveFnByName === 'function') {
-    const simple = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
     try {
-      const resolved = await resolveFnByName(simple);
+      const resolved = await resolveFnByName(name);
       if (resolved) fn = resolved;
     } catch (err) {
       // eslint-disable-next-line no-console

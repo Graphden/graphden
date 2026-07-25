@@ -33,7 +33,9 @@ async function primeSecretLeafId() {
   if (_primedSecretLeafId) return _primedSecretLeafId;
   if (typeof resolveFnByName !== 'function') return null;
   try {
-    const fn = await resolveFnByName('secret-leaf');
+    // Qualified: a user fn named `secret-leaf` in another namespace
+    // must not shadow the platform one (per-namespace names).
+    const fn = await resolveFnByName('web.vault/secret-leaf');
     if (fn?.id) {
       _primedSecretLeafId = fn.id;
       // Repaint so 🔒 badges / secret classification appear now that the

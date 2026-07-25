@@ -83,14 +83,22 @@ async function _runSubmitForm(btn, e) {
     console.error('submit-form fetch failed:', err?.message);
     return;
   }
-  if (!res.ok) {
-    console.error('submit-form: server returned', res.status);
-    return;
-  }
   const html = await res.text();
   const targetSel = btn.dataset.target;
   const target = targetSel ? document.querySelector(targetSel) : form;
   if (!target) return;
+  if (!res.ok) {
+    // A 4xx/5xx body is the server's rendered error (often the form
+    // re-rendered with validation messages) — swap it in so the user
+    // SEES the rejection instead of a silently-inert button. A blank
+    // body gets a minimal inline notice.
+    console.error('submit-form: server returned', res.status);
+    target.innerHTML = html && html.trim()
+      ? html
+      : '<p class="error">Request failed (HTTP ' + res.status + ').</p>';
+    if (typeof bindActionDispatch === 'function') bindActionDispatch(target);
+    return;
+  }
   target.innerHTML = html;
   if (typeof bindActionDispatch === 'function') bindActionDispatch(target);
 }

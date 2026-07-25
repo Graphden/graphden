@@ -116,10 +116,16 @@ window.searchFns = searchFns;
 // resolution, base-fn links, secret-leaf, etc.
 async function resolveFnByName(name) {
   if (!name) return null;
+  // slash >= 0: the backend's ROOT-namespace spelling is "/foo"
+  // (empty ns before the slash) — `> 0` used to misread it as a
+  // bare name "/foo" that matches nothing. wantNs === '' now
+  // legitimately means "the root namespace".
   const slash = name.indexOf('/');
-  const wantNs = slash > 0 ? name.slice(0, slash) : null;
-  const bare = slash > 0 ? name.slice(slash + 1) : name;
+  const wantNs = slash >= 0 ? name.slice(0, slash) : null;
+  const bare = slash >= 0 ? name.slice(slash + 1) : name;
   const nsPathOf = (f) => {
+    // '' (not null) for a root-ns fn, so wantNs === '' can match it.
+    if (f['namespace-id'] == null) return '';
     const p = lookups?.nsPathMap?.get(f['namespace-id']);
     return p || null;
   };
@@ -136,16 +142,32 @@ async function resolveFnByName(name) {
     if (hits.length === 0) return null;
     if (hits.length > 1) {
       const qual = hits.map(f => (nsPathOf(f) || '?') + '/' + f.name);
-      console.warn('resolveFnByName: "' + bare + '" is ambiguous across '
-                   + 'namespaces — qualify the reference. Candidates: '
-                   + qual.join(', '));
+      const msg = '"' + bare + '" exists in several namespaces — picked '
+                  + qual[0] + '. Qualify as ns.path/name to pin. '
+                  + 'Candidates: ' + qual.join(', ');
+      // eslint-disable-next-line no-console
+      console.warn('resolveFnByName: ' + msg);
+      if (typeof window.showTransientWarning === 'function') {
+        window.showTransientWarning('Ambiguous name: ' + msg, 8000);
+      }
     }
     return hits[0];
   };
   const cached = pick(matches(_knownFns.values()));
   if (cached) return cached;
   const { fns } = await searchFns(bare);
-  return pick(matches(fns));
+  const found = pick(matches(fns));
+  if (found) return found;
+  // Legacy dotted-qualified input ("a.b.foo" — the old hash form, or
+  // a dotted candidate label): retry as qualified "a.b/foo", then as
+  // the bare last segment.
+  if (slash < 0 && name.includes('.')) {
+    const cut = name.lastIndexOf('.');
+    const q = await resolveFnByName(name.slice(0, cut) + '/' + name.slice(cut + 1));
+    if (q) return q;
+    return resolveFnByName(name.slice(cut + 1));
+  }
+  return null;
 }
 window.resolveFnByName = resolveFnByName;
 

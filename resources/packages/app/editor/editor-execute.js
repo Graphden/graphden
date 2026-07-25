@@ -280,8 +280,8 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
       }
     }
     appendRuntimeEffectsStrip(resultHostEl,
-                              body['runtime-effects'],
-                              body['declared-effects']);
+                              body?.['runtime-effects'],
+                              body?.['declared-effects']);
   } catch (e) {
     resultHostEl.textContent = '';
     resultHostEl.appendChild(renderErrorPane('Network error: ' + e.message));

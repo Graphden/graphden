@@ -2746,6 +2746,15 @@ textarea.arg-value-edit-input {
   pointer-events: none;
 }
 .editor-busy-banner.visible { display: inline-flex; }
+
+/* One-shot warning variant (showTransientWarning) — same banner
+   element, amber border + text, no spinner. */
+.editor-busy-banner.warning {
+  border-color: var(--warning-fg);
+  color: var(--warning-fg);
+}
+
+.editor-busy-banner.warning::before { display: none; }
 .editor-busy-banner::before {
   content: '';
   width: 12px; height: 12px;

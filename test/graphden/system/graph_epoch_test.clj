@@ -6,7 +6,7 @@
    note (the FINDING-1 regression is pinned here)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.context :as ctx]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -103,8 +103,9 @@
     (try
       (binding [br/*epoch-state-override* (fresh-state)
                 br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [ctx/invalidate-graph-cache! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "f1" :parent-ids [] :description "h"})
@@ -133,8 +134,9 @@
     (try
       (binding [br/*epoch-state-override* (fresh-state)
                 br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [ctx/invalidate-graph-cache! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "pend" :parent-ids [] :description "h"})
@@ -155,9 +157,10 @@
     (try
       (binding [br/*epoch-state-override* (fresh-state)
                 br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
                 br/*epoch-heal-grace-ms* 0
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [ctx/invalidate-graph-cache! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "abt" :parent-ids [] :description "h"})
@@ -176,8 +179,9 @@
     (try
       (binding [br/*epoch-state-override* (fresh-state)
                 br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [ctx/invalidate-graph-cache! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})
                 foreign (foreign-bump! base)]
@@ -197,8 +201,9 @@
     (try
       (binding [br/*epoch-state-override* state
                 br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [ctx/invalidate-graph-cache! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "rgr" :parent-ids [] :description "h"})

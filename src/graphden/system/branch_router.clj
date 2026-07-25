@@ -405,34 +405,61 @@
 (defonce ^:private epoch-heal-monitor (Object.))
 
 
+(def ^:dynamic *epoch-heal-sync?*
+  "Test hook: run the heal's rebuild work inline instead of on the
+   background thread, so assertions don't race it."
+  false)
+
+
 (defn- heal-stale-ctxs!
   "An epoch in (w, global] is neither locally-noted nor NOTIFY-covered:
    somebody's write reached the DB without this pod applying its
-   invalidation. Full-invalidate cached ctxs — BASE FIRST (the
-   graph-identical fast path copies the base registry by value, so
-   base must be clean before any concurrent copy), then the snapshot,
+   invalidation.
+
+   STALE-WHILE-REVALIDATE: rebuild each cached ctx on a BACKGROUND
+   thread instead of nil-ing its registry — `cr/rebuild!` reads the
+   graph fresh, compiles, and only then swaps the atoms, so requests
+   keep serving the (stale) registry for the rebuild's duration
+   instead of queueing behind a ~50s cold compile. The first heal
+   design full-cleared, and one heal mid-e2e took /health down past
+   its 60s ceiling — availability must survive the freshness
+   backstop. Staleness is bounded by one rebuild.
+
+   BASE FIRST (the graph-identical fast path copies the base registry
+   by value — after base swaps, copies are fresh), then the snapshot,
    then a RE-snapshot for entries installed mid-heal. Serialized on a
-   monitor so two heals can't interleave; the watermark advances to
-   `global` only after the sweep."
+   monitor so two heals can't interleave. The watermark advances
+   immediately — the heal is now in flight and a re-trigger would
+   only duplicate it."
   [{:keys [handlers default-branch-id]} base global]
   (locking epoch-heal-monitor
     (let [state (epoch-state)]
       (when (> global (:w @state))
         (counters/count! :epoch/heal)
-        (log/info "graph-epoch heal: cached ctxs invalidated"
+        (log/info "graph-epoch heal: background rebuild of cached ctxs"
                   {:validated (:w @state) :global global})
-        (let [snap @handlers
-              invalidate! (fn [entry] (some-> (:ctx entry) ctx/invalidate-graph-cache!))]
-          (some-> (get snap default-branch-id) invalidate!)
-          (doseq [[bid entry] snap]
-            (when (not= bid default-branch-id) (invalidate! entry)))
-          ;; Entries installed while the doseq ran copied base either
-          ;; before the clear (stale copy) or after (fresh); sweep them
-          ;; too — over-invalidation on the fresh ones is harmless.
-          (doseq [[bid entry] @handlers]
-            (when-not (contains? snap bid) (invalidate! entry))))
         (epoch/prune! base global)
-        (swap! state assoc :w global)))))
+        (swap! state assoc :w global)
+        (let [snap @handlers
+              refresh! (fn [entry]
+                         (when-let [c (:ctx entry)]
+                           (try (cr/rebuild! c)
+                                (catch Exception e
+                                  (log/warn e "graph-epoch heal: ctx rebuild failed")))))
+              work (fn []
+                     (some-> (get snap default-branch-id) refresh!)
+                     (doseq [[bid entry] snap]
+                       (when (not= bid default-branch-id) (refresh! entry)))
+                     ;; Entries installed while the rebuilds ran may have
+                     ;; copied the pre-swap base — refresh them too
+                     ;; (over-refresh of a fresh one is harmless).
+                     (doseq [[bid entry] @handlers]
+                       (when-not (contains? snap bid) (refresh! entry))))
+              t (Thread. ^Runnable work "graph-epoch-heal")]
+          (if *epoch-heal-sync?*
+            (work)
+            (do (Thread/.setDaemon t true)
+                (Thread/.start t))))))))
 
 
 (defn- validate-graph-epoch!

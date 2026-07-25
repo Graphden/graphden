@@ -56,10 +56,13 @@
 
 
 (defn attach-state
-  "Give a storage handle its own last-bump atom. Harmless on
-   non-Postgres handles (the atom just stays at 0)."
+  "Give a storage handle its own last-bump state: the newest bumped
+   value AND when it happened (the heal grace-period reads the
+   timestamp). Harmless on non-Postgres handles (atoms stay at 0)."
   [storage]
-  (assoc storage :graph-epoch-last (atom 0)))
+  (assoc storage
+         :graph-epoch-last (atom 0)
+         :graph-epoch-last-at (atom 0)))
 
 
 (def ^:private degraded-warned (atom false))
@@ -89,6 +92,8 @@
                         vals first)]
           (when-let [a (:graph-epoch-last storage)]
             (swap! a max v))
+          (when-let [t (:graph-epoch-last-at storage)]
+            (reset! t (System/currentTimeMillis)))
           v)
         (catch Exception e (warn-once e) nil)))))
 
@@ -98,6 +103,17 @@
    invalidation paths mark as validated. 0 when nothing was bumped."
   [storage]
   (or (some-> (:graph-epoch-last storage) deref) 0))
+
+
+(defn last-bumped-at
+  "Wall-clock ms of this handle's newest bump. The router's heal skips
+   while a LOCAL write is inside its grace window: the eager
+   invalidation for that write is normally still in flight, and
+   healing over it would full-clear on every write of a busy suite
+   (the e2e gate demonstrated exactly that). An aborted eager path
+   simply heals after the grace expires."
+  [storage]
+  (or (some-> (:graph-epoch-last-at storage) deref) 0))
 
 
 (defn current

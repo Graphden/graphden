@@ -339,6 +339,16 @@
   1000)
 
 
+(def ^:dynamic *epoch-heal-grace-ms*
+  "How long after a LOCAL bump the heal holds off. The bump precedes
+   the write, and the eager invalidate + watermark note run after the
+   write on the same thread — healing inside that window would
+   full-clear on every write of a busy suite (the e2e gate proved
+   it). An aborted eager path heals once the grace expires; a purely
+   FOREIGN missed write (no recent local bump) heals immediately."
+  10000)
+
+
 (defonce ^:private epoch-read-cache (atom {:value nil :at 0}))
 
 
@@ -403,7 +413,9 @@
   [{:keys [base-ctx] :as router}]
   (let [base (vs/unwrap (:storage base-ctx))]
     (when-let [global (global-epoch-cached base)]
-      (when (> global @validated-graph-epoch)
+      (when (and (> global @validated-graph-epoch)
+                 (> (- (System/currentTimeMillis) (epoch/last-bumped-at base))
+                    *epoch-heal-grace-ms*))
         (heal-stale-ctxs! router global)))))
 
 
@@ -601,6 +613,10 @@
                :handler (ring-callable-for-ctx base-ctx handler-fn-id)
                :built-at (java.time.Instant/now)
                :last-used (now-ms)})
+       ;; The default ctx was just built from the CURRENT graph — seed
+       ;; the epoch watermark so the first request doesn't spuriously
+       ;; heal over boot-sync bumps the build already absorbed.
+       (swap! validated-graph-epoch max (or (epoch/current (vs/unwrap (:storage base-ctx))) 0))
        (log/info "Branch router ready" {:default-branch-id default-branch-id
                                         :handler-fn-name handler-fn-name
                                         :max-size (or max-size

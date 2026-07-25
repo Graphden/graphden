@@ -83,7 +83,8 @@
                                                            :handler :h}})
                 :base-ctx {:storage v}}]
     (try
-      (binding [br/*epoch-check-ttl-ms* 0]
+      (binding [br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-grace-ms* 0]
         (with-redefs [ctx/invalidate-graph-cache!
                       (fn [c] (swap! invalidated conj (:tag c)))]
           ;; Simulate a write whose eager path was SKIPPED: the bump
@@ -113,7 +114,8 @@
                                                            :handler :h}})
                 :base-ctx {:storage v}}]
     (try
-      (binding [br/*epoch-check-ttl-ms* 0]
+      (binding [br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-grace-ms* 0]
         (with-redefs [ctx/invalidate-graph-cache!
                       (fn [_] (swap! invalidated inc))]
           (reset! br/validated-graph-epoch 0)

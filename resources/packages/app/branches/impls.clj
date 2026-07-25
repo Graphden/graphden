@@ -249,9 +249,15 @@
       (try
         (Thread/.join t)
         (catch InterruptedException _
+          ;; Do NOT re-interrupt: this is a POOLED http-kit worker, and
+          ;; a re-set flag survives the return to the pool and kills the
+          ;; NEXT request on this thread (audit-7 e2e: a series of
+          ;; aborted merges poisoned enough workers that /health failed
+          ;; for 60s). The post-commit thread finishes regardless; the
+          ;; "preserve interrupt status" idiom is for threads the caller
+          ;; owns, which a pool thread is not.
           (log/warn "client aborted during post-merge invalidation — invalidation continues on its own thread"
-                    {:target-branch-id target-branch-id})
-          (Thread/.interrupt (Thread/currentThread)))))
+                    {:target-branch-id target-branch-id}))))
     ;; Attach the audit log — fns that have a version on the source
     ;; branch but won't surface on the target after merge because
     ;; their effective `:branch-local?` filtered them out at the

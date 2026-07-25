@@ -335,6 +335,15 @@
            visible through resolution, copying no rows — plus any resolution
            overrides. The payoff step tying resolution and conflict detection
            together."}
+    {:ns graphden.storage.postgres.graph-epoch :defn bump!
+     :say "The graph EPOCH — freshness as a comparison, not an
+           imperative. Every graph-shaped write bumps this sequence
+           BEFORE writing; the router's fetch-time check
+           (`validate-graph-epoch!`) heals any cached ctx whose eager
+           invalidation was skipped — a client abort mid-request, a
+           write path with no NOTIFY, a lost NOTIFY. The eager delta
+           machinery and NOTIFY remain pure latency optimizations,
+           which is what their docstrings always claimed."}
     {:ns graphden.system.branch-router :defn build-branch-ctx
      :say "Builds a fresh live `ExecutionContext` whose storage is a
            `VersionedStorage` rewrapped at the requested branch, with its own

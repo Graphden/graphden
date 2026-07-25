@@ -13,6 +13,7 @@
   (:require
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.graph :as graph]
+    [graphden.storage.postgres.graph-epoch :as graph-epoch]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.postgres.junction :as junction]
     [graphden.storage.postgres.metadata :as metadata]
@@ -345,4 +346,5 @@
    - Multiple concurrent reads allowed, writes are exclusive
    - CRUD operations use PostgreSQL's own transaction isolation"
   [opts]
-  (->PostgresStorage (pool/create-pool opts) (atom nil) (ReentrantReadWriteLock.) (atom {})))
+  (graph-epoch/attach-state
+    (->PostgresStorage (pool/create-pool opts) (atom nil) (ReentrantReadWriteLock.) (atom {}))))

@@ -132,6 +132,9 @@
       (catch Exception e
         (log/warn e "post-delete service reconcile failed"
                   {:branch-id branch-id})))
+    ;; Eager work done — advance the epoch watermark past the delete's
+    ;; bump (an aborted request self-heals on the next ctx fetch).
+    (br/note-graph-epoch-validated! (request/require-storage ctx))
     result))
 
 
@@ -232,7 +235,10 @@
                 ;; Restart is observability-grade — the merge already
                 ;; succeeded; surface the failure but don't fail the API.
                 (log/warn e "post-merge service restart failed"
-                          {:target-branch-id target-branch-id}))))
+                          {:target-branch-id target-branch-id})))
+            ;; Eager work done — advance the epoch watermark past this
+            ;; merge's bump so the lazy heal doesn't re-clear it.
+            (br/note-graph-epoch-validated! (request/require-storage ctx)))
           t (Thread. ^Runnable post-commit! "merge-post-commit")]
       (Thread/.start t)
       (try

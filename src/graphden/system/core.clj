@@ -1247,7 +1247,12 @@
         ;; other reconcile trigger) — the periodic tick reconverges instead.
         :service   (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
         :fn        (when (= op :invalidate)
-                     (invalidate-from-notify! ctx id branch-id))
+                     (invalidate-from-notify! ctx id branch-id)
+                     ;; Delta applied — advance this pod's epoch
+                     ;; watermark so the lazy fetch-time heal doesn't
+                     ;; re-clear it (see note-graph-epoch-current!'s
+                     ;; docstring for the accepted residual race).
+                     (br/note-graph-epoch-current! (:storage ctx)))
         :execution (when (and (= op :cancel) (not (str/blank? id)))
                      (persist/cancel-local! (java.util.UUID/fromString id)))
         nil)

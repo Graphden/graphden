@@ -33,6 +33,7 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
@@ -388,6 +389,7 @@
 
   (create-entity
     [_ entity-name data]
+    (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entity base-storage entity-name data)
       ;; Versioned: create full record in base table + version record.
@@ -469,6 +471,7 @@
 
   (update-entity
     [_ entity-name id data]
+    (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entity base-storage entity-name id data)
       ;; Versioned: append new version with merged data (if changed)
@@ -534,6 +537,7 @@
 
   (delete-entity
     [_ entity-name id]
+    (epoch/bump! base-storage entity-name)
     (cond
       (not (res/versioned-entity? entity-name))
       (sp/delete-entity base-storage entity-name id)
@@ -607,6 +611,7 @@
 
   (create-entities
     [_ entity-name data-seq]
+    (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entities base-storage entity-name data-seq)
       ;; Versioned: batch create base records + batch create version records
@@ -681,6 +686,7 @@
 
   (update-entities
     [_ entity-name data-seq]
+    (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entities base-storage entity-name data-seq)
       ;; Batch update: resolve all current versions, compute diffs, batch create versions
@@ -798,6 +804,7 @@
 
   (delete-entities
     [_ entity-name ids]
+    (epoch/bump! base-storage entity-name)
     (cond
       (not (res/versioned-entity? entity-name))
       (sp/delete-entities base-storage entity-name ids)
@@ -947,6 +954,7 @@
    (create-branch! versioned-storage branch-name {}))
   ([versioned-storage branch-name {:keys [base-branch-id]}]
    (let [parent-id (or base-branch-id (:branch-id versioned-storage))]
+     (epoch/bump! (:base-storage versioned-storage) :branch)
      (sp/create-entity (:base-storage versioned-storage) :branch
                        {:id (random-uuid)
                         :name branch-name
@@ -1030,6 +1038,11 @@
   ([versioned-storage source-branch-id]
    (mrg/merge-branch! versioned-storage source-branch-id))
   ([versioned-storage source-branch-id opts]
+   ;; The merge record is written via base storage inside the merge
+   ;; transaction; bump the graph epoch here (bump-before-write) so a
+   ;; committed merge is always visible to the router's lazy epoch
+   ;; validation even when the eager post-commit invalidate is skipped.
+   (epoch/bump! (:base-storage versioned-storage) :branch-merge)
    (mrg/merge-branch! versioned-storage source-branch-id opts)))
 
 
@@ -1096,6 +1109,7 @@
       (when (seq merge-ids)
         (sp/delete-entities base :branch-merge merge-ids)))
     ;; Delete the branch record
+    (epoch/bump! base :branch)
     (sp/delete-entity base :branch branch-id)
     ;; Drop any cached chain that referenced this branch as an
     ;; ancestor — globals survive across CRUD calls and would

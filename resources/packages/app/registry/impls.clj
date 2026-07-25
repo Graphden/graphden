@@ -15,6 +15,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.branch-router :as br]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -272,6 +273,7 @@
     ;; Delta-invalidate: the forked fns (+ dependents) recompile, not the
     ;; whole registry — a full clear here froze constrained instances.
     (exec-ctx/invalidate-graph-cache! ctx forked-ids)
+    (br/note-graph-epoch-validated! (request/require-storage ctx))
     (count fns)))
 
 
@@ -284,6 +286,7 @@
   (cr/record-effect! :db)
   (let [mat-ids (materialize-fns! (request/require-storage ctx) ns-root version fns)]
     (exec-ctx/invalidate-graph-cache! ctx mat-ids)
+    (br/note-graph-epoch-validated! (request/require-storage ctx))
     (count mat-ids)))
 
 
@@ -329,6 +332,7 @@
     ;; whose refs were rewritten (owners) — not the whole registry.
     ;; A full clear here recompiled ~3600 fns and froze the server.
     (exec-ctx/invalidate-graph-cache! ctx (into (set mat-ids) owners))
+    (br/note-graph-epoch-validated! (request/require-storage ctx))
     rewritten))
 
 

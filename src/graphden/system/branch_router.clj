@@ -24,8 +24,10 @@
     [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.tenancy-router :as tr]
+    [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as vmerge]
     [graphden.versioning.storage.resolution :as vres]))
@@ -312,12 +314,106 @@
         entry))))
 
 
+;; === Graph-epoch lazy validation (audit-6) ==================================
+;;
+;; Freshness self-heal: every graph-shaped write bumps a Postgres
+;; sequence BEFORE the write (storage.postgres.graph-epoch). The eager
+;; invalidate + NOTIFY remain latency optimizations; when either is
+;; skipped (client abort on the request thread, a write path with no
+;; NOTIFY, a lost NOTIFY), the router discovers it here — on context
+;; fetch — and invalidates every cached ctx once. Eager paths call
+;; `note-graph-epoch-validated!` after finishing so their own writes
+;; never trigger the heal.
+
+(defonce ^{:doc "Pod-wide watermark: the newest epoch whose effects
+  are known to be applied to this pod's caches (via eager invalidate,
+  NOTIFY handling, or a heal)."}
+  validated-graph-epoch
+  (atom 0))
+
+
+(def ^:dynamic *epoch-check-ttl-ms*
+  "Floor between two sequence reads — bounds the heal's staleness
+   window AND its hot-path cost to one tiny SELECT per TTL. Dynamic so
+   tests can force immediate checks."
+  1000)
+
+
+(defonce ^:private epoch-read-cache (atom {:value nil :at 0}))
+
+
+(defn note-graph-epoch-validated!
+  "Mark this pod's caches as consistent with the newest epoch THIS
+   handle's writes produced (the exact bump value — never a fresh
+   read, so a concurrent sibling's bump can't be skipped past).
+   Called by the eager invalidation tails; forgetting a call site is
+   harmless (a spurious heal), never wrong."
+  [storage]
+  (let [base (or (:base-storage storage) storage)]
+    (swap! validated-graph-epoch max (epoch/last-bumped base))))
+
+
+(defn note-graph-epoch-current!
+  "NOTIFY-handler variant: a sibling pod just APPLIED a writer's delta
+   but has no local record of the writer's bump value — advance to a
+   fresh global read. Residual race (a concurrent third write whose
+   bump this read includes but whose NOTIFY is lost would be skipped)
+   requires two simultaneous independent failures inside a millisecond
+   window and is healed by the next epoch bump; accepted + documented."
+  [storage]
+  (let [base (or (:base-storage storage) storage)]
+    (when-let [v (epoch/current base)]
+      (swap! validated-graph-epoch max v))))
+
+
+(defn- global-epoch-cached
+  [base-storage]
+  (let [now (System/currentTimeMillis)
+        {:keys [value at]} @epoch-read-cache]
+    (if (and value (< (- now at) *epoch-check-ttl-ms*))
+      value
+      (when-let [v (epoch/current base-storage)]
+        (reset! epoch-read-cache {:value v :at now})
+        v))))
+
+
+(defn- heal-stale-ctxs!
+  "The epoch moved past our watermark and no eager path claimed it:
+   someone's write reached the DB without this pod applying its
+   invalidation. Full-invalidate every cached ctx (rare path — the
+   eager delta machinery handles the common case) and advance the
+   watermark so the heal runs once per missed write burst."
+  [{:keys [handlers]} global]
+  (let [prev @validated-graph-epoch]
+    (when (and (compare-and-set! validated-graph-epoch prev (max prev global))
+               (< prev global))
+      (counters/count! :epoch/heal)
+      (log/info "graph-epoch heal: cached ctxs invalidated"
+                {:validated prev :global global})
+      (doseq [[_ entry] @handlers]
+        (when-let [c (:ctx entry)]
+          (ctx/invalidate-graph-cache! c))))))
+
+
+(defn- validate-graph-epoch!
+  "Fetch-time check: compare the (TTL-cached) global epoch against the
+   pod watermark; heal on mismatch. nil epoch (no pool / sequence not
+   yet created) skips — cannot validate, eager paths remain the only
+   mechanism, which is exactly the pre-epoch behavior."
+  [{:keys [base-ctx] :as router}]
+  (let [base (vs/unwrap (:storage base-ctx))]
+    (when-let [global (global-epoch-cached base)]
+      (when (> global @validated-graph-epoch)
+        (heal-stale-ctxs! router global)))))
+
+
 (defn handler-for
   "Return the Ring callable for `branch-id`, building lazily on miss.
    Falls back to the cached default-branch entry when `branch-id` is
    nil or matches the default. Records the access via `touch!` on
    cache hits so the LRU eviction sees the freshest order."
   [{:keys [default-branch-id handlers] :as router} branch-id]
+  (validate-graph-epoch! router)
   (let [effective (or branch-id default-branch-id)
         cached (get @handlers effective)]
     (when (and cached (not= effective default-branch-id))
@@ -330,6 +426,7 @@
    lazily on miss. Useful for CRUD impls that need to call
    `invalidate-graph-cache!` after a write."
   [{:keys [default-branch-id handlers] :as router} branch-id]
+  (validate-graph-epoch! router)
   (let [effective (or branch-id default-branch-id)
         cached (get @handlers effective)]
     (when (and cached (not= effective default-branch-id))

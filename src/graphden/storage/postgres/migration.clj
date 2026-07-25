@@ -6,6 +6,7 @@
     [clojure.tools.logging :as log]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.ddl :as ddl]
+    [graphden.storage.postgres.graph-epoch :as graph-epoch]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.postgres.metadata :as metadata]
     [graphden.storage.postgres.util :as util]
@@ -274,6 +275,7 @@
   (util/check-snake-case-collisions! {:context "enums"} (keys (ds/enums schema)))
 
   (metadata/ensure-metadata-table! ds)
+  (graph-epoch/ensure-sequence! ds)
   (let [metadata-rows (metadata/read-metadata-rows ds)
         old-metadata (metadata/parse-metadata metadata-rows)
         first-init? (nil? old-metadata)

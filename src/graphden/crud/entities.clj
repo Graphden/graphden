@@ -176,7 +176,14 @@
         (catch Exception e
           (log/warn e
                     "post-edit service restart hook failed"
-                    {:entity-type entity-type :seeds seeds}))))))
+                    {:entity-type entity-type :seeds seeds}))))
+    ;; Eager work done — mark the router's epoch watermark with THIS
+    ;; write's bump so the lazy fetch-time heal doesn't re-clear what
+    ;; the delta invalidation above already handled. If this line is
+    ;; never reached (client abort anywhere above), the watermark
+    ;; stays behind and the next context fetch heals — that is the
+    ;; audit-6 self-heal contract.
+    (br/note-graph-epoch-validated! storage)))
 
 
 (def ^:private fn-graph-entity-types

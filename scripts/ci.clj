@@ -231,10 +231,17 @@
     (cond
       (= result ::timeout)
       (do (try (.destroyForcibly (:proc proc)) (catch Exception _ nil))
+          ;; Salvage what the child printed BEFORE the axe: kaocha's
+          ;; dots-so-far name the namespace that was still running,
+          ;; which is the whole diagnosis. Discarding it made a
+          ;; timeout verdict contentless (audit-6).
           (swap! results assoc check-name
                  {:exit -1
-                  :output (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
-                               "Command: " (pr-str cmd))
+                  :output (let [r (deref proc 5000 nil)]
+                            (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
+                                 "Command: " (pr-str cmd)
+                                 (when (:out r) (str "\n--- partial stdout ---\n" (:out r)))
+                                 (when (seq (:err r)) (str "\n--- partial stderr ---\n" (:err r)))))
                   :warnings false
                   :duration-ms duration-ms})
           (swap! status assoc check-name :timeout)

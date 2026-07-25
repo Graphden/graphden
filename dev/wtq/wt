@@ -508,6 +508,9 @@ cmd_gc() {
     fi
   done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^graphden-wt-.+-executor:latest$' || true)
 
+  info "Pruning gate logs older than 30 days ..."
+  find "$LOG_DIR" -type f \( -name '*.log' -o -name '*.resources.csv' \) -mtime +30 -delete 2>/dev/null || true
+
   # Tags from the OLD directory-derived naming (`<worktree>-executor:latest`),
   # left behind by worktrees that predate the explicit GD_IMAGE tag. Never -f:
   # docker refuses to drop an image a container still uses, which is exactly the
@@ -660,6 +663,17 @@ cmd_kickoff() {
 # =====================================================================
 cmd_list() {
   local holder; holder="$(cat "$HOLDER" 2>/dev/null || true)"; [ -n "$holder" ] || holder="—"
+  # A killed gate never reaches its own HOLDER-clear line; liveness-check
+  # the recorded pid so a corpse doesn't hold the queue in every listing
+  # (audit-6: "killed tracker != dead gate" had a sibling — dead pid,
+  # live-looking lock).
+  if [ "$holder" != "—" ]; then
+    local hpid; hpid="$(printf '%s' "$holder" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"
+    if [ -n "$hpid" ] && ! kill -0 "$hpid" 2>/dev/null; then
+      holder="$holder ${YLW}(pid dead — gate crashed; lock auto-released)${RST}"
+      : > "$HOLDER"
+    fi
+  fi
   printf '%sQueue lock:%s %s\n\n' "$BLD" "$RST" "$holder"
   printf '%-20s %-24s %-12s %-9s %s\n' "WORKTREE" "BRANCH" "vs $TARGET" "RESULT" "STATE"
   git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do
@@ -711,9 +725,18 @@ cmd_watch() {
   }
 
   if res_final; then ok "RESULT: $(cat "$res")"; return 0; fi
+  holder_dead() {
+    local h hpid; h="$(cat "$HOLDER" 2>/dev/null || true)"
+    [ -n "$h" ] || return 1
+    hpid="$(printf '%s' "$h" | sed -n 's/.*pid \([0-9]*\).*/\1/p')"
+    [ -n "$hpid" ] && ! kill -0 "$hpid" 2>/dev/null
+  }
   info "watching gate for '$name' — tick every 60s; Ctrl-C stops WATCHING, not the gate"
   while :; do
     if res_final; then ok "RESULT: $(cat "$res")"; return 0; fi
+    if holder_dead && [ ! -f "$res" ]; then
+      die "gate holder pid is dead and no RESULT was written — the gate crashed mid-run; check the newest log and re-run 'wt merge'"
+    fi
     local f now load; now="$(date +%H:%M:%S)"; load="$(cut -d' ' -f1-3 /proc/loadavg)"
     f="$(newest_logs 1 "$name")"
     if [ -n "$f" ]; then
@@ -906,6 +929,11 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       echo "CONFLICT merging $TARGET into $branch — resolve in the worktree, then re-run 'wt merge'."
       return 2
     fi
+    # Files the merge just materialized inherit the caller's umask; the
+    # dockerized non-root linters (shellcheck/hadolint/lychee) can't read
+    # 0600 files and fail the gate on ENVIRONMENT, not code. Same reason
+    # cmd_new chmods after checkout.
+    chmod -R a+rX "$wt" || true
 
     step "scope: what this change needs"
     classify_changes "$wt"
@@ -979,8 +1007,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     # feature now contains $TARGET as ancestor (we just merged it in) and
     # the lock guarantees $TARGET has not moved -> ff is always possible.
     git -C "$MAIN_WT" merge --ff-only "$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
-    if [ "${WTQ_NO_PUSH:-0}" = 1 ]; then
-      echo "(WTQ_NO_PUSH set — $TARGET advanced LOCALLY only; push it yourself)"
+    # No-push is honored from EITHER the env var (this invocation) or the
+    # persistent queue marker (every gate on this machine). The env var
+    # alone was misleading: gate A's "LOCALLY only" was true for A, but
+    # the next gate without the var pushed A's commit along with its own
+    # (develop is shared local state). Touch/remove "$WTQ_DIR/no-push"
+    # to flip the machine-wide default.
+    if [ "${WTQ_NO_PUSH:-0}" = 1 ] || [ -e "$WTQ_DIR/no-push" ]; then
+      echo "(no-push — $TARGET advanced LOCALLY; note: the next push of $TARGET carries this commit too)"
     else
       git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push it yourself)"
     fi

@@ -547,7 +547,10 @@
   test-integration
   {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~14-17 min — measured 841/928/998 s across three landing gates, and the single most expensive thing the gate does (twice e2e). The old ~10-12 min was 40% optimistic."
    :task (do (assert-gate-only! "bb test-integration")
-             (clojure "-M:dev:test -m kaocha.runner :integration"))}
+             ;; documentation reporter: newline-terminated output. The
+             ;; default dots reporter emits one giant unbroken line that
+             ;; makes gate logs un-greppable (audit-6 log-hygiene).
+             (clojure "-M:dev:test -m kaocha.runner :integration --reporter kaocha.report/documentation"))}
 
   test-e2e
   {:doc "Playwright browser-test suite against an ISOLATED ephemeral stack via Testcontainers (postgres + user-postgres + openbao + `graphden-executor:latest`, dynamic host ports, Ryuk reaps everything on JVM exit). Demo on :9002 stays untouched. Requires `bb rebuild` (or `bb deploy`) first so `graphden-executor:latest` is present. ~11 min end to end, measured 656/663/672 s across three landing gates: ~2 min for the stack to come healthy + ~9 min for the suite itself (533-550 s over 56 files). The old ~15-25 min figure for the suite was measured against the DEMO on :9002, where SWEEP_DELAY defaults to 2 s and the container bounces mid-sweep; this stack does neither. See `graphden.dev.e2e-stack`."

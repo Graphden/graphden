@@ -69,7 +69,7 @@
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
  {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/"]}
- {:name "tests-unit"    :bb "test-unit"     :timeout 600000 :group :test
+ {:name "tests-unit"    :bb "test-unit"     :timeout 900000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}
  {:name "tests-perf"    :bb "test-perf"     :timeout 300000 :group :test

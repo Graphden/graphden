@@ -25,6 +25,7 @@
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.util.abort-shield :as shield]
     [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as vcore]))
 
@@ -147,44 +148,48 @@
    doesn't fail the user's CRUD call. No-op when the reconciler
    singleton isn't wired (tests, REPL eval)."
   [ctx storage entity-type entity-data]
-  (when (= entity-type :fn)
-    ;; Cache lives below the VersionedStorage wrapper and is keyed by
-    ;; the BASE storage handle; unwrap before invalidating.
-    (let [base (or (:base-storage storage) storage)]
-      (branch-local/invalidate! base)))
-  ;; The cache holds slot rows, and a `:slot` write now invalidates nothing
-  ;; (see `affected-fn-ids`) — so splice the single row rather than let a reader
-  ;; of the whole graph miss it.
-  (when (= entity-type :slot)
-    (when-let [id (:id entity-data)]
-      (exec-ctx/refresh-slot-in-graph-cache! ctx id)))
-  (let [seeds (affected-fn-ids storage entity-type entity-data)]
-    (if seeds
-      (exec-ctx/invalidate-graph-cache! ctx seeds)
-      (exec-ctx/invalidate-graph-cache! ctx))
-    ;; The write is visible from every branch that inherits from the one
-    ;; we wrote on, and each of those may have its own cached compiled
-    ;; registry on this pod. Sweep them too — `invalidate-graph-cache!`
-    ;; above only touched the ctx the request came in on.
-    (when-let [router (br/current-router)]
-      (br/invalidate-affected-ctxs! router (vcore/current-branch-id storage) seeds))
-    (when (seq seeds)
-      (try
-        ;; `recon/running` is a process-wide defonce atom — the same
-        ;; one the integrant init wired up.
-        (recon/restart-services-depending-on!
-          ctx recon/running seeds (vcore/current-branch-id storage))
-        (catch Exception e
-          (log/warn e
-                    "post-edit service restart hook failed"
-                    {:entity-type entity-type :seeds seeds}))))
-    ;; Eager work done — mark the router's epoch watermark with THIS
-    ;; write's bump so the lazy fetch-time heal doesn't re-clear what
-    ;; the delta invalidation above already handled. If this line is
-    ;; never reached (client abort anywhere above), the watermark
-    ;; stays behind and the next context fetch heals — that is the
-    ;; audit-6 self-heal contract.
-    (br/note-graph-epoch-validated! storage)))
+  ;; Abort-shielded (form path calls this as its own graph node) —
+  ;; see create-entity's note.
+  (shield/run!
+    (fn []
+      (when (= entity-type :fn)
+        ;; Cache lives below the VersionedStorage wrapper and is keyed by
+        ;; the BASE storage handle; unwrap before invalidating.
+        (let [base (or (:base-storage storage) storage)]
+          (branch-local/invalidate! base)))
+      ;; The cache holds slot rows, and a `:slot` write now invalidates nothing
+      ;; (see `affected-fn-ids`) — so splice the single row rather than let a reader
+      ;; of the whole graph miss it.
+      (when (= entity-type :slot)
+        (when-let [id (:id entity-data)]
+          (exec-ctx/refresh-slot-in-graph-cache! ctx id)))
+      (let [seeds (affected-fn-ids storage entity-type entity-data)]
+        (if seeds
+          (exec-ctx/invalidate-graph-cache! ctx seeds)
+          (exec-ctx/invalidate-graph-cache! ctx))
+        ;; The write is visible from every branch that inherits from the one
+        ;; we wrote on, and each of those may have its own cached compiled
+        ;; registry on this pod. Sweep them too — `invalidate-graph-cache!`
+        ;; above only touched the ctx the request came in on.
+        (when-let [router (br/current-router)]
+          (br/invalidate-affected-ctxs! router (vcore/current-branch-id storage) seeds))
+        (when (seq seeds)
+          (try
+            ;; `recon/running` is a process-wide defonce atom — the same
+            ;; one the integrant init wired up.
+            (recon/restart-services-depending-on!
+              ctx recon/running seeds (vcore/current-branch-id storage))
+            (catch Exception e
+              (log/warn e
+                        "post-edit service restart hook failed"
+                        {:entity-type entity-type :seeds seeds}))))
+        ;; Eager work done — mark the router's epoch watermark with THIS
+        ;; write's bump so the lazy fetch-time heal doesn't re-clear what
+        ;; the delta invalidation above already handled. If this line is
+        ;; never reached (client abort anywhere above), the watermark
+        ;; stays behind and the next context fetch heals — that is the
+        ;; audit-6 self-heal contract.
+        (br/note-graph-epoch-validated! storage)))))
 
 
 (def ^:private fn-graph-entity-types
@@ -326,89 +331,107 @@
 
 (defn create-entity
   [entity-type data ctx]
-  (let [storage (request/require-storage ctx)
-        et (keyword entity-type)
-        ;; For :fn create the row may not have an `:id` yet; the
-        ;; cycle check still wants it (parent / FK targets need to
-        ;; know who's "owner"). Synthesize one so the check sees a
-        ;; stable owner — `sp/create-entity` honours a pre-supplied
-        ;; `:id` so the synthesized value is what lands in storage.
-        ;; `:binding` :value-present normalisation lives in
-        ;; `storage/protocol/core/standard-crud-normalize-data`
-        ;; (called from every postgres CRUD entry) so direct
-        ;; `sp/create-entity` users (tests, sync) pick it up too.
-        data' (cond-> data
-                (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))]
-    ;; Capability gate: secret-shaped fn-defs are admin-only — see
-    ;; `secret-leaf-capability-rej` for the rationale. The marker is
-    ;; an in-memory contract between `crud.secrets` and this fn; it
-    ;; never reaches storage.
-    (when (= et :fn)
-      (when-let [rej (secret-leaf-capability-rej storage data')]
-        (throw (ex-info (:reason rej)
-                        {:type (:type rej)
-                         :entity-type et
-                         :data (dissoc data' :_admin-secret-create)}))))
-    (when-let [rej (validation/write-rej storage et data')]
-      (throw (ex-info (:reason rej)
-                      {:type (:type rej)
-                       :entity-type et :data data'})))
-    (let [result (sp/create-entity storage et (dissoc data' :_admin-secret-create))]
-      (invalidate! ctx storage et result)
-      (notify-after-write! ctx storage et :write result)
-      result)))
+  ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
+  ;; completes even if the client disconnects mid-request (see
+  ;; util.abort-shield) - un-noted epochs made every abort cost a
+  ;; background recompile via the graph-epoch heal.
+  (shield/run!
+    (fn []
+      (let [storage (request/require-storage ctx)
+            et (keyword entity-type)
+            ;; For :fn create the row may not have an `:id` yet; the
+            ;; cycle check still wants it (parent / FK targets need to
+            ;; know who's "owner"). Synthesize one so the check sees a
+            ;; stable owner — `sp/create-entity` honours a pre-supplied
+            ;; `:id` so the synthesized value is what lands in storage.
+            ;; `:binding` :value-present normalisation lives in
+            ;; `storage/protocol/core/standard-crud-normalize-data`
+            ;; (called from every postgres CRUD entry) so direct
+            ;; `sp/create-entity` users (tests, sync) pick it up too.
+            data' (cond-> data
+                    (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))]
+        ;; Capability gate: secret-shaped fn-defs are admin-only — see
+        ;; `secret-leaf-capability-rej` for the rationale. The marker is
+        ;; an in-memory contract between `crud.secrets` and this fn; it
+        ;; never reaches storage.
+        (when (= et :fn)
+          (when-let [rej (secret-leaf-capability-rej storage data')]
+            (throw (ex-info (:reason rej)
+                            {:type (:type rej)
+                             :entity-type et
+                             :data (dissoc data' :_admin-secret-create)}))))
+        (when-let [rej (validation/write-rej storage et data')]
+          (throw (ex-info (:reason rej)
+                          {:type (:type rej)
+                           :entity-type et :data data'})))
+        (let [result (sp/create-entity storage et (dissoc data' :_admin-secret-create))]
+          (invalidate! ctx storage et result)
+          (notify-after-write! ctx storage et :write result)
+          result)))))
 
 
 (defn update-entity
   [entity-type id data ctx]
-  (let [storage (request/require-storage ctx)
-        et (keyword entity-type)
-        check-data (assoc data :id id)]
-    (when-let [rej (validation/write-rej storage et check-data)]
-      (throw (ex-info (:reason rej)
-                      {:type (:type rej)
-                       :entity-type et :id id :data data})))
-    (let [result (sp/update-entity storage et id data)]
-      (invalidate! ctx storage et result)
-      (notify-after-write! ctx storage et :write (assoc result :id id))
-      result)))
+  ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
+  ;; completes even if the client disconnects mid-request (see
+  ;; util.abort-shield) - un-noted epochs made every abort cost a
+  ;; background recompile via the graph-epoch heal.
+  (shield/run!
+    (fn []
+      (let [storage (request/require-storage ctx)
+            et (keyword entity-type)
+            check-data (assoc data :id id)]
+        (when-let [rej (validation/write-rej storage et check-data)]
+          (throw (ex-info (:reason rej)
+                          {:type (:type rej)
+                           :entity-type et :id id :data data})))
+        (let [result (sp/update-entity storage et id data)]
+          (invalidate! ctx storage et result)
+          (notify-after-write! ctx storage et :write (assoc result :id id))
+          result)))))
 
 
 (defn delete-entity
   [entity-type id ctx]
-  (let [storage (request/require-storage ctx)
-        et (keyword entity-type)
-        ;; Pre-read so we know the parent fn-id for binding /
-        ;; fn-slot / binding-list-item before the row is gone.
-        ;; For :fn we need the row anyway to drop its
-        ;; rich-types-registry entry by NAME (the registry is keyed
-        ;; on fn-name, not fn-id), so the read pays for itself.
-        snapshot (if (= et :fn)
-                   (or (sp/read-entity storage et id) {:id id})
-                   (sp/read-entity storage et id))]
-    ;; User-facing delete → tombstone (so deleting an inherited entity on a
-    ;; branch actually hides it, not a silent no-op). Sync / rollback deletes
-    ;; keep the default hard-delete.
-    (binding [vcore/*tombstone-delete?* true]
-      (sp/delete-entity storage et id))
-    ;; rich-types-registry entry survives the storage delete unless
-    ;; we explicitly drop it. Without this the registry grows
-    ;; monotonically as fn-defs are created and deleted across an
-    ;; executor's lifetime — small per-entry but on a long-running
-    ;; prod instance it adds up to a real GC-pressure source.
-    (when (and (= et :fn) (:name snapshot))
-      ;; Row id threaded so the drop is keyed by THIS identity — a
-      ;; same-named duplicate (stale-identity class) keeps its entry.
-      (registry/unregister-rich-type! (keyword (:name snapshot)) id))
-    (invalidate! ctx storage et snapshot)
-    ;; NOTIFY the full pre-read `snapshot` (not a bare `{:id id}`): sibling
-    ;; pods' `affected-fn-ids` needs the row's FKs (`:binding-id` / `:fn-id`)
-    ;; to derive the delta seed. A bare id fell through to the empty-seed
-    ;; (full-clear) NOTIFY — and since a pod receives its OWN NOTIFY, every
-    ;; fn-graph delete (incl. a single sequence-item remove) then forced a
-    ;; full compiled-registry rebuild (tens of seconds) on the emitting pod.
-    (notify-after-write! ctx storage et :delete (assoc (or snapshot {}) :id id))
-    true))
+  ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
+  ;; completes even if the client disconnects mid-request (see
+  ;; util.abort-shield) - un-noted epochs made every abort cost a
+  ;; background recompile via the graph-epoch heal.
+  (shield/run!
+    (fn []
+      (let [storage (request/require-storage ctx)
+            et (keyword entity-type)
+            ;; Pre-read so we know the parent fn-id for binding /
+            ;; fn-slot / binding-list-item before the row is gone.
+            ;; For :fn we need the row anyway to drop its
+            ;; rich-types-registry entry by NAME (the registry is keyed
+            ;; on fn-name, not fn-id), so the read pays for itself.
+            snapshot (if (= et :fn)
+                       (or (sp/read-entity storage et id) {:id id})
+                       (sp/read-entity storage et id))]
+        ;; User-facing delete → tombstone (so deleting an inherited entity on a
+        ;; branch actually hides it, not a silent no-op). Sync / rollback deletes
+        ;; keep the default hard-delete.
+        (binding [vcore/*tombstone-delete?* true]
+          (sp/delete-entity storage et id))
+        ;; rich-types-registry entry survives the storage delete unless
+        ;; we explicitly drop it. Without this the registry grows
+        ;; monotonically as fn-defs are created and deleted across an
+        ;; executor's lifetime — small per-entry but on a long-running
+        ;; prod instance it adds up to a real GC-pressure source.
+        (when (and (= et :fn) (:name snapshot))
+          ;; Row id threaded so the drop is keyed by THIS identity — a
+          ;; same-named duplicate (stale-identity class) keeps its entry.
+          (registry/unregister-rich-type! (keyword (:name snapshot)) id))
+        (invalidate! ctx storage et snapshot)
+        ;; NOTIFY the full pre-read `snapshot` (not a bare `{:id id}`): sibling
+        ;; pods' `affected-fn-ids` needs the row's FKs (`:binding-id` / `:fn-id`)
+        ;; to derive the delta seed. A bare id fell through to the empty-seed
+        ;; (full-clear) NOTIFY — and since a pod receives its OWN NOTIFY, every
+        ;; fn-graph delete (incl. a single sequence-item remove) then forced a
+        ;; full compiled-registry rebuild (tens of seconds) on the emitting pod.
+        (notify-after-write! ctx storage et :delete (assoc (or snapshot {}) :id id))
+        true))))
 
 
 (defn- subtree-fn-id-closure

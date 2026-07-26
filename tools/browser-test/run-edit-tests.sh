@@ -243,9 +243,16 @@ for f in $FILES; do
       sleep 10
       wait_for_server || break
     fi
-    if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then passed=1; break; fi
-    rc=$?
-    if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then is_timeout=1; fi
+    if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
+      passed=1
+      break
+    else
+      # Capture node's exit code HERE (inside the else) — after the `fi` it
+      # would read the `if`'s own status, which is 0 for a false condition
+      # with no else, masking a real 124/137 timeout.
+      rc=$?
+      if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then is_timeout=1; fi
+    fi
   done
   if [ "$passed" = 1 ]; then
     PASS=$((PASS+1))

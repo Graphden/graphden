@@ -19,10 +19,12 @@
    request path sets the variable."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.storage.postgres.util :as util]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
-    [next.jdbc :as jdbc])
+    [next.jdbc :as jdbc]
+    [next.jdbc.result-set :as rs])
   (:import
     (java.sql
       Connection
@@ -93,6 +95,63 @@
            :when (table-exists? ds entity)
            stmt (policy-statements entity)]
      (jdbc/execute! ds [stmt]))))
+
+
+(defn rls-role-status
+  "Whether the app's DB role is actually SUBJECT to the RLS policies
+   `enable-rls!` installs. A Postgres SUPERUSER — and any role with
+   BYPASSRLS — ignores RLS entirely (including FORCE), so the policies
+   become a silent no-op: OrgScopedStorage still isolates at the app layer,
+   but the database-level backstop is gone.
+
+   `ds` is a datasource/connection. Returns
+   `{:role :superuser? :bypassrls? :enforced?}` where `:enforced?` is true
+   only when the role is neither a superuser nor BYPASSRLS."
+  [ds]
+  ;; Single query on ONE connection (matters when `ds` is a tx after SET ROLE
+  ;; — the role must hold for the whole read). Unqualified builder so the keys
+  ;; are `:role`/`:superuser`/`:bypassrls` regardless of source-table
+  ;; qualification (pg_roles would otherwise qualify them).
+  (let [row (jdbc/execute-one! ds ["SELECT current_user AS role,
+                                           current_setting('is_superuser') = 'on' AS superuser,
+                                           rolbypassrls AS bypassrls
+                                      FROM pg_roles
+                                     WHERE rolname = current_user"]
+                               {:builder-fn rs/as-unqualified-lower-maps})
+        superuser? (boolean (:superuser row))
+        bypassrls? (boolean (:bypassrls row))]
+    {:role (:role row)
+     :superuser? superuser?
+     :bypassrls? bypassrls?
+     :enforced? (not (or superuser? bypassrls?))}))
+
+
+(defn verify-rls-enforcement!
+  "Check that the connected role is subject to RLS and react to a role that
+   is NOT — a dangerous silent state for a multi-tenant deployment, where the
+   org-isolation policies are installed but inert.
+
+   `strict?` true → throw and fail the boot (recommended for a production
+   multi-tenant deployment); false → log a prominent WARN and continue
+   (OrgScopedStorage still isolates at the app layer — acceptable for a
+   trusted single-tenant / dev install, where the DB role is often the
+   superuser). Returns the `rls-role-status` map."
+  [ds strict?]
+  (let [{:keys [role superuser? bypassrls? enforced?] :as status} (rls-role-status ds)]
+    (when-not enforced?
+      (let [why (if superuser? "a Postgres SUPERUSER" "a BYPASSRLS role")
+            msg (str "RLS policies are installed but INERT: the app connects as \"" role
+                     "\" — " why ", which ignores Row-Level Security (including FORCE). "
+                     "Tenant isolation falls back to OrgScopedStorage (application layer) "
+                     "ONLY; the database-level backstop is gone. For a production "
+                     "multi-tenant deployment, connect as a non-superuser, non-BYPASSRLS "
+                     "role — see docs/DEPLOYMENT.md § non-superuser DB role. "
+                     "Set GRAPHDEN_STRICT_RLS=true to make this a hard boot failure.")]
+        (if strict?
+          (throw (ex-info msg {:type :rls/not-enforced :role role
+                               :superuser? superuser? :bypassrls? bypassrls?}))
+          (log/warn msg))))
+    status))
 
 
 (defn set-current-org!

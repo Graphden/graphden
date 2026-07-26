@@ -72,6 +72,14 @@
   ;; ALTER TABLE / CREATE POLICY have something to attach to. Idempotent.
   (log/info "Installing RLS policies on org-scoped tables")
   (rls/enable-rls! (:pool storage))
+  ;; Verify the app's DB role is actually subject to those policies. A
+  ;; superuser / BYPASSRLS role makes them a silent no-op (RLS is inert;
+  ;; only OrgScopedStorage isolates). WARN by default so a trusted
+  ;; single-tenant / dev install (superuser DB role) still boots;
+  ;; GRAPHDEN_STRICT_RLS=true turns it into a hard boot failure for a
+  ;; production multi-tenant deployment. See docs/DEPLOYMENT.md.
+  (rls/verify-rls-enforcement! (:pool storage)
+                               (= "true" (System/getenv "GRAPHDEN_STRICT_RLS")))
   :enabled)
 
 

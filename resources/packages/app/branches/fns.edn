@@ -1564,7 +1564,7 @@
                                     :entity-id :text
                                     :source-version :jsonb
                                     :target-version :jsonb}]}
-   :args {:keys [{:value :ok} {:value :reason} {:value :http-status} {:value :error}
+   :args {:keys [{:value :ok} {:value :reason} {:value :http-status :literal? true} {:value :error}
                  {:value :target} {:value :source} {:value :conflicts}]
           :vals [{:value false}
                  {:value :merge-conflict}

@@ -1664,7 +1664,15 @@
    :args {:status {:parent :coalesce
                    :args {:value {:parent :get
                                   :args {:coll {:as :result}
-                                         :key {:value :http-status}
+                                         ;; :literal? — the keyword
+                                         ;; collides with the
+                                         ;; :http-status TYPE-ROW name
+                                         ;; and would parse as a
+                                         ;; fn-ref, excluding half the
+                                         ;; app from compile (no impl
+                                         ;; on a type-row).
+                                         :key {:value :http-status
+                                               :literal? true}
                                          :default nil}}
                           :default 400}}
           :reason :_apply-error-msg}}

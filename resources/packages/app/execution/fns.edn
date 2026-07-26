@@ -191,7 +191,7 @@
   {:name :_execute-fn-not-found-rej
    :description "Rejection envelope for the fn-not-found guard. Dynamic — `:error` cites the unresolved anchor."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
                  {:value 404}
@@ -231,7 +231,7 @@
   {:name :_execute-timeout-bad-rej
    :description "Rejection envelope for the timeout-out-of-range guard. Dynamic — `:error-data` cites the bad value."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
                  {:value 400}
@@ -274,7 +274,7 @@
   {:name :_execute-args-too-large-rej
    :description "Rejection envelope for the args-too-large guard."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
                  {:value 413}
@@ -350,7 +350,7 @@
   {:name :_execute-running-as-svc-rej
    :description "Rejection envelope for the already-running-as-service guard."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
                  {:value 409}
@@ -426,7 +426,7 @@
   {:name :_execute-unknown-arg-rej
    :description "Rejection envelope for the unknown-arg guard."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
                  {:value 400}
@@ -537,9 +537,10 @@
   {:name :_execute-malformed-ref-rej
    :description "Rejection envelope for the malformed-ref guard."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
+                 {:value 400}
                  :_execute-malformed-msg
                  :_execute-malformed-ref-rej-data]}}
 
@@ -671,7 +672,7 @@
    :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel. `:return-type` pinned so downstream `:cond` unions of error + success retain precise record shapes (otherwise bare `:zipmap` infers `[:map :any [:union :bool :text]]` and the per-member narrowing in `get-return-rule` opaques out)."
    :parent :zipmap
    :return-type :_error-result-status-shape
-   :args {:keys [:ok :http-status :error]
+   :args {:keys [:ok {:value :http-status :literal? true} :error]
           :vals [false
                  404
                  {:parent :str

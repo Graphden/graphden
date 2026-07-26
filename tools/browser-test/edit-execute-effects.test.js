@@ -212,8 +212,13 @@ async function openExecutePopoverFor(page, fnNameHash) {
         source: body['error-data']?.source,
       };
     });
-    assert(rejection.httpStatus === 200,
-           'wire HTTP status 200 (rejection is application-level, not transport)');
+    // Audit-8 error honesty: a :rejected envelope now rides a REAL
+    // conflict status (409 already-running-as-service); the :failed
+    // variant is a successfully-polled execution — 200.
+    assert((rejection.httpStatus === 409 && rejection.status === 'rejected')
+           || (rejection.httpStatus === 200 && rejection.status === 'failed'),
+           'wire status matches outcome (got ' + rejection.httpStatus
+           + ' / ' + rejection.status + ')');
     // After Phase 1 + :process gate, the running state of :web-server
     // depends on docker startup history. Three valid outcomes:
     //  - :rejected :source :legacy-fallback (legacy fallback alive)

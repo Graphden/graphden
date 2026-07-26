@@ -63,6 +63,25 @@
       (is (not (grant/can? s (subj "ed") :append-list "ns")) ":bind-args ≠ :append-list"))))
 
 
+(deftest write-implies-view-impl
+  ;; view-impl = seeing a fn's internal composition. A :write holder can see
+  ;; internals (you can't edit what you can't see); :admin subsumes it too;
+  ;; but :view-impl stays one-way and :read never reveals internals — that's
+  ;; the edge that lets a subgraph stay hidden from a read-only viewer.
+  (testing ":write / :admin holders satisfy :view-impl in scope"
+    (is (grant/can? store (subj "alice") :view-impl "acme"))
+    (is (grant/can? store (subj "alice") :view-impl "acme.billing"))
+    (is (grant/can? store (subj "bob") :view-impl "acme.team")))
+  (testing ":read does NOT imply :view-impl — internals hidden from a reader"
+    (is (not (grant/can? store (subj "carol") :view-impl "acme"))
+        "carol holds :read at root, yet cannot see internals"))
+  (testing ":view-impl is one-way — it does not imply :write"
+    (let [s (grant/static-grant-store
+              [{:subject-id "vi" :capability :view-impl :namespace "ns"}])]
+      (is (grant/can? s (subj "vi") :view-impl "ns"))
+      (is (not (grant/can? s (subj "vi") :write "ns")) ":view-impl is narrower than :write"))))
+
+
 (deftest can-mutate-coarse-gate
   ;; §4.3 coarse gate: any write-family cap passes; read-only / unknown don't.
   (testing "write-family caps pass"

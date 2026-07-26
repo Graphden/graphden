@@ -16,24 +16,52 @@
 
 
 (def capabilities
-  "The capability vocabulary. `:admin` subsumes the rest within its scope;
-   `:write` subsumes the narrower §4.3 edit caps (`:bind-args`, `:append-list`)
-   — a full writer can do everything they can.
+  "The capability vocabulary — a partial order (see `cap-implications`).
+   `:admin` subsumes everything within its scope; `:write` subsumes the
+   narrower §4.3 edit caps AND `:view-impl` (to edit a fn you must see its
+   internals); `:view-impl` and `:execute` each subsume `:read`.
 
+   - `:read` — discover a fn + see its SIGNATURE (slots, types, return).
+   - `:view-impl` — see a fn's INTERNAL COMPOSITION (its parent chain +
+     bindings — the subgraph). The capability that, when withheld, lets a
+     fn stay executable while its implementation is hidden. Enforced
+     transitively up the parent chain by the graph-read filter.
+   - `:execute` — run the fn (as a black box; no `:view-impl` needed).
    - `:bind-args` — change a binding's `:value`, NOT its ref / type-override /
      structure (restricted editing — §4.3).
    - `:append-list` — add / remove one's own `:binding-list-item` rows, not
      parent / inherited ones."
-  #{:read :write :execute :admin :bind-args :append-list})
+  #{:read :view-impl :write :execute :admin :bind-args :append-list})
+
+
+(def ^:private cap-implications
+  "What holding a capability satisfies — the lattice edges. Reflexive (each
+   cap satisfies itself). This exactly preserves the prior order (`:admin` ⇒
+   everything; `:write` ⇒ the §4.3 edit caps) and adds ONE edge: `:write` ⇒
+   `:view-impl` — a writer can see a fn's internals (you can't edit what you
+   can't see). `:read` stays an INDEPENDENT axis: `:write` does NOT imply
+   `:read` and vice-versa (read/write are grantable separately). So the only
+   check this widens is `:view-impl` for a `:write` holder; every
+   `:read`/`:write`/`:execute` decision is byte-for-byte unchanged.
+
+   `:view-impl` ⇒ `:read` is deliberately NOT wired yet: today discovery /
+   signature reads are open (`request-permitted?`), so nothing checks
+   `can? :read`. When read-gating lands (P0 stage 2) the read edges get
+   revisited alongside the discovery-visibility default."
+  {:admin       #{:read :view-impl :write :execute :admin :bind-args :append-list}
+   :write       #{:view-impl :write :bind-args :append-list}
+   :view-impl   #{:view-impl}
+   :execute     #{:execute}
+   :read        #{:read}
+   :bind-args   #{:bind-args}
+   :append-list #{:append-list}})
 
 
 (defn- cap-implies?
-  "Does holding `held` satisfy a check for `needed`? `:admin` implies all;
-   `:write` implies the narrower edit caps; otherwise exact match."
+  "Does holding `held` satisfy a check for `needed`? Looks up the lattice in
+   `cap-implications`; an unknown held cap satisfies only itself."
   [held needed]
-  (or (= held :admin)
-      (= held needed)
-      (and (= held :write) (contains? #{:bind-args :append-list} needed))))
+  (contains? (get cap-implications held #{held}) needed))
 
 
 (defn- ns-covers?

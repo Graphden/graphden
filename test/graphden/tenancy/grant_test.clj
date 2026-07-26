@@ -12,6 +12,13 @@
   {:id s :name s})
 
 
+(defn- subj-in-org
+  "Identity of user `uid` who belongs to org `org` — an org-subject grant on
+   `org` reaches them."
+  [uid org]
+  {:id uid :name uid :org org})
+
+
 (def ^:private store
   (grant/static-grant-store
     [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme"}
@@ -80,6 +87,24 @@
               [{:subject-id "vi" :capability :view-impl :namespace "ns"}])]
       (is (grant/can? s (subj "vi") :view-impl "ns"))
       (is (not (grant/can? s (subj "vi") :write "ns")) ":view-impl is narrower than :write"))))
+
+
+(deftest org-subject-grants-reach-every-member
+  (let [store (grant/static-grant-store
+                [{:subject-kind "org" :subject-id "acme" :capability :read :namespace "shared"}
+                 {:subject-kind "user" :subject-id "alice" :capability :write :namespace "shared.mine"}])]
+    (testing "an org grant matches ANY member of that org, over the ns subtree"
+      (is (grant/can? store (subj-in-org "alice" "acme") :read "shared"))
+      (is (grant/can? store (subj-in-org "bob" "acme") :read "shared.sub")
+          "a different member gets it too — descendant namespace"))
+    (testing "a member of a DIFFERENT org does not"
+      (is (not (grant/can? store (subj-in-org "carol" "globex") :read "shared"))))
+    (testing "an org grant does not hand one member's USER grant to another"
+      (is (grant/can? store (subj-in-org "alice" "acme") :write "shared.mine"))
+      (is (not (grant/can? store (subj-in-org "bob" "acme") :write "shared.mine"))
+          "bob shares acme but not alice's personal :write"))
+    (testing "a subject with no org is unaffected by the org grant"
+      (is (not (grant/can? store (subj "dave") :read "shared"))))))
 
 
 (deftest can-mutate-coarse-gate

@@ -70,8 +70,8 @@
                   [{:subject-id "alice" :subject "alice" :capability "write" :namespace "acme"}
                    {:subject-id "alice" :subject "alice" :capability "admin" :namespace "acme.ops"}]))]
     (testing "grants-for queries by subject-id + keywordizes the capability"
-      (is (= [{:subject-id "alice" :capability :write :namespace "acme"}
-              {:subject-id "alice" :capability :admin :namespace "acme.ops"}]
+      (is (= [{:subject-kind nil :subject-id "alice" :capability :write :namespace "acme"}
+              {:subject-kind nil :subject-id "alice" :capability :admin :namespace "acme.ops"}]
              (grant/grants-for store (subj "alice")))))
     (testing "can? works over the storage-backed grants"
       (is (grant/can? store (subj "alice") :write "acme.billing") "descendant of acme")

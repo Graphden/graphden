@@ -76,14 +76,17 @@
 
 
 (defn grant-allows?
-  "Does one grant authorize `(subject-id, cap, ns-path)`? Matches the grant's
-   `:subject-id` — the user's STABLE id, NOT the mutable username — capability
-   by `cap-implies?` (`:admin`/`:write` subsumption), and namespace by scope
-   coverage."
-  [{:keys [subject-id capability namespace]} subj-id cap ns-path]
-  (and (= subject-id subj-id)
-       (cap-implies? capability cap)
-       (ns-covers? namespace ns-path)))
+  "Does one grant authorize `(subj, cap, ns-path)`? Matches the grant's subject
+   against `subj` (`{:id :name :org}`) BY KIND — an `\"org\"` grant matches the
+   subject's `:org`, a `\"user\"` grant (or a legacy nil kind) its stable `:id`
+   (NOT the mutable username) — capability by `cap-implies?` (`:admin`/`:write`
+   subsumption), and namespace by scope coverage."
+  [{:keys [subject-kind subject-id capability namespace]} subj cap ns-path]
+  (and (cap-implies? capability cap)
+       (ns-covers? namespace ns-path)
+       (if (= subject-kind "org")
+         (= subject-id (:org subj))
+         (= subject-id (:id subj)))))
 
 
 (defprotocol GrantStore
@@ -101,7 +104,13 @@
 
   GrantStore
 
-  (grants-for [_ subj] (get by-subject-id (:id subj) [])))
+  (grants-for
+    [_ subj]
+    ;; Candidates keyed on either the user id or (when set + distinct) the org
+    ;; id — `grant-allows?` then matches each by kind. Mirrors the storage store.
+    (into (vec (get by-subject-id (:id subj) []))
+          (when (and (:org subj) (not= (:org subj) (:id subj)))
+            (get by-subject-id (:org subj) [])))))
 
 
 (defn static-grant-store
@@ -152,11 +161,14 @@
 
   (grants-for
     [_ subj]
-    (if-let [hit (find @cache (:id subj))]
-      (val hit)
-      (let [g (grants-for base subj)]
-        (swap! cache assoc (:id subj) g)
-        g))))
+    ;; Key on BOTH id and org — a user's grants now depend on its org too
+    ;; (org-subject grants), so the memo must not collide across orgs.
+    (let [k [(:id subj) (:org subj)]]
+      (if-let [hit (find @cache k)]
+        (val hit)
+        (let [g (grants-for base subj)]
+          (swap! cache assoc k g)
+          g)))))
 
 
 (defn memoizing-grant-store
@@ -194,19 +206,20 @@
    `ns-path`, per `store`? Default-deny. Stored-grant matching keys on
    `(:id subj)`; `:name` only feeds the personal-namespace path."
   [store subj capability ns-path]
-  (boolean (some #(grant-allows? % (:id subj) capability ns-path)
+  (boolean (some #(grant-allows? % subj capability ns-path)
                  (grants-for store subj))))
 
 
 (defn subject
   "The grant-subject identity for an auth principal: `{:id user-id :name
-   username}` — the STABLE id keys stored-grant matching, the human name only
+   username :org org-id}` — the STABLE id keys user-subject matching, `:org`
+   keys org-subject matching (a grant to the whole org), the human name only
    builds the personal-namespace path. Returns nil for an UNAUTHENTICATED
    principal (no `:user-id`); callers must treat nil as default-deny and never
    pass it to `grants-for` (a nil id would spuriously match a nil subject-id)."
   [principal]
   (when-let [uid (:user-id principal)]
-    {:id uid :name (:user principal)}))
+    {:id uid :name (:user principal) :org (:org principal)}))
 
 
 (defn authorized?

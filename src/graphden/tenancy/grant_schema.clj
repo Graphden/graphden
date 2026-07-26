@@ -29,6 +29,10 @@
   #uuid "5c8f2a41-6b39-4e7d-8a02-9f1c3b6e0d84")
 
 
+(def ^:private grant-subject-kind-field-uuid
+  #uuid "b3f5d9a1-4c27-4e8b-9f16-2a7c0d63e8b4")
+
+
 (defn extend-builder
   "Add the `:grant` entity — `(subject-id, capability, namespace)`.
    `subject-id` is the STABLE authz key (the user's id) that enforcement
@@ -50,6 +54,13 @@
                                    :nullable? true
                                    :indexed? true}
                       :capability {:uuid grant-capability-field-uuid :type :text}
+                      ;; "user" (the default when nil — legacy rows) or "org":
+                      ;; a grant subject is either a single user (subject-id =
+                      ;; user id) or a whole org (subject-id = org id, matching
+                      ;; every member). Plain text like :capability — no enum.
+                      :subject-kind {:uuid grant-subject-kind-field-uuid
+                                     :type :text
+                                     :nullable? true}
                       :namespace {:uuid grant-namespace-field-uuid
                                   :type :text
                                   :nullable? true}})
@@ -67,12 +78,20 @@
 
   (grants-for
     [_ subj]
-    (mapv (fn [row]
-            {:subject-id (:subject-id row)
-             ;; stored as text → back to the keyword `grant-allows?` compares
-             :capability (keyword (:capability row))
-             :namespace (:namespace row)})
-          (sp/query-entities storage :grant {:subject-id (:id subj)}))))
+    ;; A principal is matched by BOTH its user id and (when set) its org id, so
+    ;; an org-subject grant reaches every member. Fetch candidate rows keyed on
+    ;; either id; `grant/grant-allows?` then matches each row by its kind.
+    (let [ids (cond-> [(:id subj)]
+                (and (:org subj) (not= (:org subj) (:id subj))) (conj (:org subj)))]
+      (into []
+            (comp (mapcat #(sp/query-entities storage :grant {:subject-id %}))
+                  (map (fn [row]
+                         {:subject-kind (:subject-kind row)
+                          :subject-id (:subject-id row)
+                          ;; stored as text → back to the keyword grant-allows? compares
+                          :capability (keyword (:capability row))
+                          :namespace (:namespace row)})))
+            ids))))
 
 
 (defn storage-grant-store

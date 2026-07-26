@@ -258,6 +258,14 @@
   (entities/list-all-graph-entities ctx scope root-id namespace-id q))
 
 
+(defbase strip-hidden-impl
+  [graph]
+  ;; Pure pass-through over the tenancy view-impl seam — identity until the
+  ;; addon installs a filter (single-tenant sees everything). No :db of its
+  ;; own; the installed filter reads grants in the trusted platform ctx.
+  (entities/apply-view-impl-filter graph))
+
+
 (defbase all-rich-types
   []
   ;; Same as `list-all-graph-entities`: `rich-types-with-type-rows` calls
@@ -694,6 +702,7 @@
    :free-arg-slot-map free-arg-slot-map
    :service-blocking-free-args service-blocking-free-args
    :list-all-graph-entities list-all-graph-entities
+   :strip-hidden-impl strip-hidden-impl
    :all-rich-types all-rich-types
    :api-rich-types api-rich-types
    :fn-names-with-tag fn-names-with-tag

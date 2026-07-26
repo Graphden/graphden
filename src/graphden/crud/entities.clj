@@ -507,6 +507,59 @@
      :list-items kept-items}))
 
 
+(defn strip-impl-of
+  "Hide the internal COMPOSITION of the fns whose ids are in `hidden-fn-ids`
+   from a graph dump: blank each hidden fn's `:parent-ids` and drop its
+   bindings + binding-list-items, leaving its SIGNATURE (name / namespace /
+   return-type / fn-slots / slots) intact. The fn stays discoverable and
+   executable — only how it is built is concealed; the executor runs the full
+   graph server-side, so hiding this from a viewer never affects execution.
+
+   Pure: the caller decides which ids are hidden (own-org ownership /
+   `:view-impl` grant — see the tenancy filter). Gracefully no-ops on dump
+   shapes without `:fns` (`:tree` / `:namespace` / `:search`)."
+  [graph hidden-fn-ids]
+  (if (empty? hidden-fn-ids)
+    graph
+    (let [dropped-binding-ids (into #{}
+                                    (comp (filter #(contains? hidden-fn-ids (:fn-id %)))
+                                          (map :id))
+                                    (:bindings graph))]
+      (cond-> graph
+        (:fns graph)        (update :fns
+                                    (fn [fns]
+                                      (mapv #(if (contains? hidden-fn-ids (:id %))
+                                               (assoc % :parent-ids [])
+                                               %)
+                                            fns)))
+        (:bindings graph)   (update :bindings
+                                    (fn [bs]
+                                      (filterv #(not (contains? hidden-fn-ids (:fn-id %))) bs)))
+        (:list-items graph) (update :list-items
+                                    (fn [items]
+                                      (filterv #(not (contains? dropped-binding-ids (:binding-id %)))
+                                               items)))))))
+
+
+;; Seam: a `(fn [graph-dump] -> graph-dump)` the tenancy addon installs to
+;; strip the composition of fns the CURRENT viewer lacks `:view-impl` on —
+;; `strip-impl-of` with the hidden set computed from the request's grants +
+;; org. nil (no addon / single-tenant) = identity, everything visible. Held
+;; in an atom so the addon installs it at init with no compile-time dep from
+;; this layer up into tenancy. (`defonce` takes no docstring — hence the
+;; comment; `defonce` so a namespace reload doesn't wipe the installed filter.)
+(defonce view-impl-filter (atom nil))
+
+
+(defn apply-view-impl-filter
+  "Run the installed `view-impl-filter` over a graph dump; identity when the
+   seam is unset (single-tenant / no tenancy addon)."
+  [graph]
+  (if-let [f @view-impl-filter]
+    (f graph)
+    graph))
+
+
 (def ^:private light-fn-fields
   "The per-fn columns the editor's sidebar / picker / search views
    actually read. Every other column (slots, bindings, and the bulk of

@@ -790,3 +790,38 @@
         ;; Use comp-fn-id so the let-binding isn't dead code.
         (is (some? comp-fn-id)))
       (finally (sp/close storage)))))
+
+
+;; Security-critical: strip-impl-of hides a fn's composition (parent-ids +
+;; bindings) from a viewer without :view-impl, while leaving its signature
+;; visible and every non-hidden fn fully intact. A leak here = a tenant
+;; seeing a public/shared fn's internals. Pure — no DB.
+(deftest strip-impl-of-hides-only-flagged-fns
+  (let [graph {:fns        [{:id "A" :parent-ids ["P"] :name "a"}
+                            {:id "B" :parent-ids ["Q"] :name "b"}]
+               :bindings   [{:id "bA" :fn-id "A" :value 1}
+                            {:id "bB" :fn-id "B" :value 2}]
+               :list-items [{:binding-id "bA" :position 0}
+                            {:binding-id "bB" :position 0}]
+               :fn-slots   [{:fn-id "A" :slot-id "s"}]
+               :slots      [{:id "s" :name "in"}]
+               :namespaces [{:id "n"}]}
+        fn-by (fn [r id] (first (filter #(= id (:id %)) (:fns r))))]
+    (testing "a hidden fn loses parent-ids + bindings + list-items"
+      (let [r (entities/strip-impl-of graph #{"A"})]
+        (is (= [] (:parent-ids (fn-by r "A"))) "hidden fn parent-ids blanked")
+        (is (= ["Q"] (:parent-ids (fn-by r "B"))) "visible fn parent-ids intact")
+        (is (= #{"bB"} (into #{} (map :id) (:bindings r)))
+            "only the hidden fn's bindings dropped")
+        (is (= #{"bB"} (into #{} (map :binding-id) (:list-items r)))
+            "the hidden fn's list-items dropped with its binding")))
+    (testing "the SIGNATURE (fn-slots / slots) and discoverability survive"
+      (let [r (entities/strip-impl-of graph #{"A"})]
+        (is (= (:fn-slots graph) (:fn-slots r)) "fn-slots untouched")
+        (is (= (:slots graph) (:slots r)) "slots untouched")
+        (is (= 2 (count (:fns r))) "both fns still present — discoverable")))
+    (testing "empty hidden-set is identity"
+      (is (= graph (entities/strip-impl-of graph #{}))))
+    (testing "a dump with no :fns (tree / namespace scope) is a graceful no-op"
+      (is (= {:namespaces [] :counts {}}
+             (entities/strip-impl-of {:namespaces [] :counts {}} #{"A"}))))))

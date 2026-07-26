@@ -267,6 +267,13 @@
    :return-type :keyword-map
    :effects #{:db}}
 
+  {:name :strip-hidden-impl
+   :description "Apply the installed view-impl filter to a `/api/graph/entities` dump — strips the internal composition (parent-ids + bindings) of fns the current viewer lacks `:view-impl` on (own-org / grant), leaving each fn's signature. Identity when no tenancy addon is wired (single-tenant sees everything). Pure pass-through base-fn over the `graphden.crud.entities/apply-view-impl-filter` seam; the actual filter fn is installed by the tenancy addon. Compose it over `:list-all-graph-entities` in the graph-read handler."
+   :args {:graph {:type :keyword-map
+                  :description "The graph dump from :list-all-graph-entities."}}
+   :return-type :keyword-map
+   :effects #{}}
+
   {:name :all-rich-types
    :description "Snapshot of the in-memory rich-type registry. Returns `{fn-name {:return type :args {arg-name type}}}` for every base-fn AND composed fn-def the type-checker has processed. FULL — every per-entry field. Internal single-source-of-truth for `/api/types/candidates` (`:_types-candidates-snapshot`); the HTTP wire-shaping (lean bulk / per-fn) lives in `:api-rich-types`."
    :args {}
@@ -4150,11 +4157,12 @@
    :lambda-params [:request]
    :description "Ring handler that returns the graph dump as JSON. `?scope=tree` → `{:namespaces :counts}` (sidebar init). `?scope=namespace&namespace-id=X` → one namespace's light fns (lazy expand). `?scope=search&q=…` → capped name matches (filter / pickers). `?scope=index` → `{:fns :namespaces}` full pull. `?scope=subtree&root-id=X` → subgraph reachable from X. Bound by `app.routes.api-entities`."
    :parent :json-handler
-   :args {:data {:parent :list-all-graph-entities
-                 :args {:scope :_all-entities-scope
-                        :root-id :_all-entities-root-id
-                        :namespace-id :_all-entities-namespace-id
-                        :q :_all-entities-q}}}}
+   :args {:data {:parent :strip-hidden-impl
+                 :args {:graph {:parent :list-all-graph-entities
+                                :args {:scope :_all-entities-scope
+                                       :root-id :_all-entities-root-id
+                                       :namespace-id :_all-entities-namespace-id
+                                       :q :_all-entities-q}}}}}}
 
   {:name :all-rich-types-handler
    :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON: the lean bulk snapshot (heavy on-demand/unused fields omitted, docs/PERF_BUDGETS.md finding K). The former `?fn=<name>` FULL-entry branch died with its one consumer (the return-type-rule popover is a server partial now). Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."

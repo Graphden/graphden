@@ -107,6 +107,36 @@
       (is (= "" (org-on-borrow))))))
 
 
+(deftest verify-rls-enforcement-detects-role-subjection
+  ;; The prod prereq: RLS policies are installed but INERT under a superuser /
+  ;; BYPASSRLS role. `verify-rls-enforcement!` is the boot guard that surfaces
+  ;; that silent state — WARN by default, hard-fail under GRAPHDEN_STRICT_RLS.
+  (let [storage (setup/create-test-storage)
+        ds (:pool storage)]
+    (testing "the default pool role is a superuser → RLS inert, not enforced"
+      (let [{:keys [superuser? enforced?]} (rls/rls-role-status ds)]
+        (is superuser? "the testcontainers default DB role is a superuser")
+        (is (not enforced?) "a superuser is not subject to RLS")))
+    (testing "strict? throws on a non-enforcing role"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"INERT"
+            (rls/verify-rls-enforcement! ds true))))
+    (testing "lenient mode warns and returns the status instead of throwing"
+      (is (false? (:enforced? (rls/verify-rls-enforcement! ds false)))))
+    (testing "a non-superuser, non-BYPASSRLS role IS subject to RLS"
+      (jdbc/execute! ds ["DROP ROLE IF EXISTS graphden_tenant"])
+      (jdbc/execute! ds ["CREATE ROLE graphden_tenant"])
+      (jdbc/with-transaction [tx ds]
+                             (jdbc/execute! tx ["SET ROLE graphden_tenant"])
+                             (let [{:keys [role superuser? bypassrls? enforced?]} (rls/rls-role-status tx)]
+                               (is (= "graphden_tenant" role))
+                               (is (not superuser?))
+                               (is (not bypassrls?))
+                               (is enforced? "a plain role is subject to RLS"))
+                             (is (:enforced? (rls/verify-rls-enforcement! tx true))
+                                 "strict verify does not throw for an enforcing role")
+                             (jdbc/execute! tx ["RESET ROLE"])))))
+
+
 (deftest rls-enabler-init-key-installs-policies-on-every-scoped-table
   (let [storage (setup/create-test-storage)
         ds (:pool storage)

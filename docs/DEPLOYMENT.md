@@ -257,8 +257,16 @@ SELECT name FROM "fn";        -- only acme's rows + public (org_id NULL)
 
 The enforcement itself is covered by `graphden.tenancy.rls-test`
 (`rls-isolates-raw-queries-by-org` connects via a non-superuser `SET ROLE`
-and asserts cross-org rows are invisible) — model an environment check
-on it.
+and asserts cross-org rows are invisible).
+
+**Boot guard.** The `:tenancy/rls-enabler` component checks the app's DB
+role right after installing the policies (`rls/verify-rls-enforcement!`). If
+the app connects as a superuser or a `BYPASSRLS` role — so the policies are
+inert — it logs a prominent `WARN` by default (a trusted single-tenant /
+dev install still boots). Set **`GRAPHDEN_STRICT_RLS=true`** to turn that
+into a hard boot failure (`:rls/not-enforced`) — recommended for a
+production multi-tenant deployment, so a misconfigured role can never
+silently ship with the database-level backstop disabled.
 
 > Without this role switch the deployment is still tenant-isolated by
 > `OrgScopedStorage` at the application layer; you only lose the

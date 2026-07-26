@@ -207,6 +207,16 @@
      even when Chrome is loaded. ExitOnOutOfMemoryError +
      restart-policy handles the rare JVM-side OOM cleanly.
 
+   - `--memory-swap 3g` (== `--memory`) — DISABLES container swap. The 3GB
+     cap alone still let the kernel page the JVM's idle heap out under host
+     cache pressure; when the heavy type-editing test cluster then hit the
+     executor it faulted that heap back from swap — a multi-second stall that
+     timed out the test's 15s `waitForFunction` (root-caused from the gate
+     resource timeline: `swap_used ~2.3GB` during e2e, mem still available).
+     Equal memory/memory-swap pins the heap in RAM; a genuine >3GB burst OOMs
+     cleanly via ExitOnOutOfMemoryError + restart — a discrete, recoverable
+     event, not a swap-stall flake.
+
    - `--publish <host-port>:8080` — pins the host-side port so it
      SURVIVES `--restart=on-failure`. Without this, Docker
      auto-assigns a new host port on every restart (verified
@@ -226,6 +236,11 @@
     (HostConfig/.withRestartPolicy
       host-cfg (RestartPolicy/onFailureRestart (int 3)))
     (HostConfig/.withMemory
+      host-cfg (long (* 3 1024 1024 1024)))
+    ;; == --memory ⇒ no container swap: the executor heap stays resident and
+    ;; never swap-faults mid-request under host cache pressure (see the
+    ;; --memory-swap docstring bullet above).
+    (HostConfig/.withMemorySwap
       host-cfg (long (* 3 1024 1024 1024)))
     (HostConfig/.withPortBindings
       host-cfg

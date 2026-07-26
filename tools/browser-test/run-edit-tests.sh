@@ -221,52 +221,58 @@ for f in $FILES; do
   # cap during slow-server windows even though it eventually would
   # have completed correctly. 5 min preserves the hang-bound
   # contract while reducing false-positive timeouts.
-  # First attempt — common case, finishes here.
-  if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
+  # Up to 3 attempts. A transient GC / slow-server window under the gate's
+  # load (integration's heavy JVM work, heap past ~85% → >5s pauses) can hit
+  # the SAME file on two consecutive tries; a third recovery window catches
+  # that without hiding a real break, which fails all three.
+  #
+  # A test that only passes AFTER a retry is a FLAKE — named LOUDLY in the
+  # summary, never silently swallowed: every root cause found in this suite
+  # (the dead type picker, the empty Run form) first showed up as one failure
+  # a retry hid, and twice the "fix" was raising the timeout the retry masked.
+  # Whether a flake also FAILS the run is a queue-economics knob
+  # (WTQ_FLAKE_STRICT=1): strict mode is multi-agent-pool insurance (one flake
+  # re-runs a serialized gate slot others queue behind); single-agent default
+  # is report-loud, stay green. `passed` (0/1) is read by the leak check below.
+  passed=0
+  rc=0
+  is_timeout=0
+  for attempt in 1 2 3; do
+    if [ "$attempt" -gt 1 ]; then
+      echo "  (attempt $((attempt - 1)) rc=$rc — sleeping 10s, retry $attempt/3)" >&2
+      sleep 10
+      wait_for_server || break
+    fi
+    if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
+      passed=1
+      break
+    else
+      # Capture node's exit code HERE (inside the else) — after the `fi` it
+      # would read the `if`'s own status, which is 0 for a false condition
+      # with no else, masking a real 124/137 timeout.
+      rc=$?
+      if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then is_timeout=1; fi
+    fi
+  done
+  if [ "$passed" = 1 ]; then
     PASS=$((PASS+1))
-  else
-    rc=$?
-    # Retry once after a sleep — suite-tail tests (~test 30+) flake
-    # under JVM GC pressure (>5s pauses in the e2e stack when heap
-    # passes ~85%). A fresh test instance after a recovery window
-    # typically passes. WORST/FAIL only bump on the SECOND failure
-    # so a transient flake doesn't fail the run.
-    is_timeout=0
-    if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then is_timeout=1; fi
-    echo "  (first attempt rc=$rc — sleeping 10s then retrying once)" >&2
-    sleep 10
-    if wait_for_server && timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
-      PASS=$((PASS+1))
-      # A test that fails and then passes is not a CLEAN pass. Every root cause
-      # found in this suite so far — the dead type picker, the empty Run form —
-      # first showed up as exactly this: one failure, swallowed by a retry, the
-      # run still green. Twice the "fix" was to raise the timeout the retry was
-      # hiding. So flakes are always named LOUDLY in the summary — never
-      # silently swallowed.
-      #
-      # Whether a flake also FAILS the run is a queue-economics knob
-      # (WTQ_FLAKE_STRICT=1). Strict mode existed for the multi-agent pool,
-      # where one flake re-runs a ~35-min serialized gate slot that other
-      # agents are queued behind — cheap insurance against a hidden break.
-      # Single-agent, that same policy just burns 35 min of the only worker's
-      # time per transient, so the default is: report loudly, stay green.
+    if [ "$attempt" -gt 1 ]; then
       FLAKED="$FLAKED $f"
       if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
         WORST=1
         FAILED_NAMES="$FAILED_NAMES $f(flaked-passed-on-retry)"
-        echo "  (retry succeeded — FLAKE, and WTQ_FLAKE_STRICT=1 fails this run)" >&2
+        echo "  (passed on attempt $attempt — FLAKE, WTQ_FLAKE_STRICT=1 fails this run)" >&2
       else
-        echo "  (retry succeeded — FLAKE: named in the summary, run stays green)" >&2
+        echo "  (passed on attempt $attempt — FLAKE: named in the summary, run stays green)" >&2
       fi
+    fi
+  else
+    WORST=1
+    FAIL=$((FAIL+1))
+    if [ "$is_timeout" -eq 1 ]; then
+      FAILED_NAMES="$FAILED_NAMES $f(timeout)"
     else
-      rc2=$?
-      WORST=1
-      FAIL=$((FAIL+1))
-      if [ $rc2 -eq 124 ] || [ $rc2 -eq 137 ] || [ $is_timeout -eq 1 ]; then
-        FAILED_NAMES="$FAILED_NAMES $f(timeout)"
-      else
-        FAILED_NAMES="$FAILED_NAMES $f"
-      fi
+      FAILED_NAMES="$FAILED_NAMES $f"
     fi
   fi
   FILE_SECS=$((SECONDS - FILE_START))
@@ -275,7 +281,7 @@ for f in $FILES; do
   NS_AFTER="$(ns_count)"
   CTR_DELTA="$(counters_delta "$CTR_BEFORE" "$(executor_counters)")"
   FN_LEAKED=$(( (FN_AFTER - FN_BEFORE) + (NS_AFTER - NS_BEFORE) ))
-  if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null; then
+  if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null && [ "$passed" = 1 ]; then
     printf '  [%3ds  executor=%s]%s  \033[31mLEAKED %d entities into the graph\033[0m\n' \
       "$FILE_SECS" "$FILE_MEM" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
     LEAKS="$LEAKS$FN_LEAKED	$f
@@ -288,6 +294,14 @@ for f in $FILES; do
     # invariant belongs here, once: a test leaves the graph as it found it.
     WORST=1
     FAILED_NAMES="$FAILED_NAMES $f(leaked-$FN_LEAKED)"
+  elif [ "$FN_LEAKED" -gt 0 ] 2>/dev/null; then
+    # The test already FAILED (aborted / timed out). Rows left behind are
+    # collateral of the abort — the test was killed mid-cleanup — not a
+    # cleanup regression. It is already counted as a fail above, so note it
+    # but do NOT double-red or mis-name it a "leak" (that named a different
+    # innocent file each gate run when a slow window aborted it mid-flow).
+    printf '  [%3ds  executor=%s]%s  (%d entities left by the failed test — abort collateral, not a leak)\n' \
+      "$FILE_SECS" "$FILE_MEM" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
   else
     printf '  [%3ds  executor=%s]%s\n' "$FILE_SECS" "$FILE_MEM" \
       "${CTR_DELTA:+  $CTR_DELTA}"

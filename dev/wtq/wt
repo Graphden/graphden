@@ -992,16 +992,23 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
       || { echo "FAIL: docker build"; return 1; }
 
-    if [ "$NEED_INTEGRATION" = 1 ]; then
-      step "bb test-integration"
-      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
-    fi
-
+    # e2e runs BEFORE integration: the browser suite is timing-sensitive (a
+    # slow-server window trips a test's 10s waitForFunction), and running it
+    # AFTER integration's ~29 min of heavy JVM work left the host under
+    # residual GC / memory pressure — which surfaced as a DIFFERENT innocent
+    # e2e file AbortError-ing (and leaking a row on the abort) each gate run.
+    # On a fresh host the flake window is far narrower. A real e2e break still
+    # fails here first, before integration's ~29 min is spent.
     if [ "$NEED_E2E" = 0 ]; then
       echo; echo "(e2e skipped — see the scope step above)"
     else
       step "bb test-e2e"
       ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+    fi
+
+    if [ "$NEED_INTEGRATION" = 1 ]; then
+      step "bb test-integration"
+      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
     fi
 
     built_candidate=1

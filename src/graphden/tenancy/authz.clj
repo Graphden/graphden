@@ -15,6 +15,7 @@
   (:require
     [clojure.set :as set]
     [clojure.string :as str]
+    [graphden.crud.entities :as entities]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.grant :as grant]))
@@ -29,6 +30,48 @@
     (if-let [row (and id (sp/read-entity storage :ns id))]
       (recur (:parent-id row) (conj segments (:name row)))
       (str/join "." segments))))
+
+
+(defn view-impl-filter
+  "The `graphden.crud.entities/view-impl-filter` seam impl the addon installs:
+   strip the internal composition (parent-ids + bindings) of fns the current
+   viewer lacks `:view-impl` on from a `/api/graph/entities` dump. A fn is
+   shown IN FULL when it is OWNED by the viewer's org (its `:org-id` = the
+   current org — you see your own org's internals) OR the viewer holds
+   `:view-impl` (or a stronger cap, via `cap-implies?`) on its namespace;
+   otherwise its composition is concealed — public / shared fns whose
+   internals the author didn't grant.
+
+   Two whole-dump pass-throughs: the PLATFORM context (`current-org` = the
+   public org — the operator/admin, never a tenant) sees everything, and a
+   dump with no `:fns` (`:tree` scope) has nothing to hide. Runs in the
+   platform handler ctx on the tenant's behalf; `store` is the base grant
+   store, `request-store` picks up the per-request memo."
+  [store storage graph]
+  (let [org (tc/current-org)]
+    (if (or (not (:fns graph)) (= org tc/public-org))
+      graph
+      (let [subj   (grant/subject tc/*current-principal*)
+            rstore (grant/request-store store)
+            hidden (into #{}
+                         (comp
+                           (remove (fn [f]
+                                     (or (= (:org-id f) org)
+                                         (and subj rstore
+                                              (grant/can? rstore subj :view-impl
+                                                          (namespace-path storage (:namespace-id f)))))))
+                           (map :id))
+                         (:fns graph))]
+        (entities/strip-impl-of graph hidden)))))
+
+
+(defn install-view-impl-filter!
+  "Install `view-impl-filter` into the `crud.entities` graph-read seam, closed
+   over the base grant `store` (may be nil — then only own-org fns show their
+   internals) and `storage`. Called by the addon at init so
+   `/api/graph/entities` conceals non-owned fns' internals for tenants."
+  [store storage]
+  (reset! entities/view-impl-filter (partial view-impl-filter store storage)))
 
 
 (defn writable?

@@ -57,6 +57,12 @@
   ;; (§4.2 refinement) — a denied :fn write throws :authz/forbidden, which
   ;; the request-scope maps to 403. Absent → org-scoping + RLS only.
   (let [authorize-write (when grant-store (authz/authorize-writer grant-store base))]
+    ;; Install the read-path view-impl filter into the crud graph-read seam
+    ;; (P0 stage 2b): /api/graph/entities now conceals a fn's internal
+    ;; composition from a viewer who neither owns it (own-org) nor holds a
+    ;; :view-impl grant. Closed over the same base storage + grant-store the
+    ;; write guard uses. Whenever this tenancy storage is wired, the seam is on.
+    (authz/install-view-impl-filter! grant-store base)
     (ts/org-scoped-storage base (or scoped-entities ts/default-scoped-entities) authorize-write)))
 
 

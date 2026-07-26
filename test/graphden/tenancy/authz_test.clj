@@ -78,6 +78,44 @@
                      (is (nil? (guard :fn {:namespace-id "acme"} nil))))))))
 
 
+;; Security-critical (P0 stage 2b): the read-path filter conceals a fn's
+;; internal composition from a viewer who neither owns it (own-org) nor holds
+;; a :view-impl grant. A leak here = a tenant reading a public/shared fn's
+;; parent chain + bindings. `store` above is the ns-store (namespace-path).
+(deftest view-impl-filter-hides-non-owned-internals
+  (let [graph {:fns        [{:id "own" :org-id "acme"   :parent-ids ["p"] :namespace-id "team"}
+                            {:id "pub" :org-id "public" :parent-ids ["q"] :namespace-id "team"}]
+               :bindings   [{:id "b-own" :fn-id "own" :value 1}
+                            {:id "b-pub" :fn-id "pub" :value 2}]
+               :list-items []}
+        parents-of (fn [r id] (:parent-ids (first (filter #(= id (:id %)) (:fns r)))))]
+    (testing "a tenant sees its OWN org's internals, but not a public/shared fn's"
+      (binding [tc/*current-org*       "acme"
+                tc/*current-principal* {:user "u" :user-id "u" :org "acme"}]
+        (let [r (authz/view-impl-filter nil store graph)]
+          (is (= ["p"] (parents-of r "own")) "own-org fn keeps its parent chain")
+          (is (= [] (parents-of r "pub")) "public fn's parent chain concealed")
+          (is (= #{"b-own"} (into #{} (map :id) (:bindings r)))
+              "public fn's bindings dropped, own-org's kept"))))
+    (testing "an explicit :view-impl grant reveals a public fn's internals"
+      (let [grants (grant/static-grant-store
+                     [{:subject-kind "user" :subject-id "u"
+                       :capability :view-impl :namespace "acme.team"}])]
+        (binding [tc/*current-org*       "acme"
+                  tc/*current-principal* {:user "u" :user-id "u" :org "acme"}]
+          (is (= ["q"] (parents-of (authz/view-impl-filter grants store graph) "pub"))
+              "granted :view-impl on the fn's namespace → internals visible"))))
+    (testing "the platform / admin context (public org) sees everything"
+      (binding [tc/*current-org*       tc/public-org
+                tc/*current-principal* {:user "op" :user-id "op" :org tc/public-org}]
+        (is (= graph (authz/view-impl-filter nil store graph)))))
+    (testing "a dump with no :fns (tree scope) passes through untouched"
+      (binding [tc/*current-org*       "acme"
+                tc/*current-principal* {:user "u" :user-id "u" :org "acme"}]
+        (is (= {:namespaces [] :counts {}}
+               (authz/view-impl-filter nil store {:namespaces [] :counts {}})))))))
+
+
 (defn- bind-store
   "Storage resolving :ns, :fn, and :binding read-entity (for binding-write gating)."
   [ns-rows fn-rows binding-rows]

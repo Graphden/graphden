@@ -571,8 +571,13 @@
    reverse-reference counts over the WHOLE graph (see `reverse-ref-index`),
    so the editor's delete/edit gate stays correct once it no longer holds
    a full-fns mirror to count against. Both are omitted (→ 0 client-side)
-   when zero."
-  [:id :name :namespace-id :role :description :constraint
+   when zero.
+
+   `:org-id` rides along so the view-impl filter (tenancy) can tell a
+   viewer's OWN-org fns (internals visible) from public / shared ones
+   (internals hidden) in the light scopes too; it is dropped from the wire
+   when nil (single-tenant) by the `remove nil? val` projection."
+  [:id :name :namespace-id :org-id :role :description :constraint
    :parent-ids :return-type-fn-id
    :used-as-parent-count :used-as-ref-count])
 

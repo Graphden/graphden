@@ -84,9 +84,15 @@
    envelope), not here."
   [branch-name base-branch-id]
   (cr/record-effect! :db)
-  (vs/create-branch! (request/require-storage ctx)
-                     branch-name
-                     {:base-branch-id base-branch-id}))
+  (let [row (vs/create-branch! (request/require-storage ctx)
+                               branch-name
+                               {:base-branch-id base-branch-id})]
+    ;; A fresh branch needs no invalidation (its ctx builds lazily),
+    ;; but the epoch bump must still be NOTED — un-noted it ages past
+    ;; grace and triggers a spurious heal ~10s after every branch
+    ;; creation (audit-7 e2e: recurring mid-suite heals).
+    (br/note-graph-epoch-validated! (request/require-storage ctx))
+    row))
 
 
 ;; =============================================================================

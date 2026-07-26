@@ -364,6 +364,39 @@
     (f)))
 
 
+(defn rebuild-optimistic!
+  "Stale-while-revalidate rebuild for the epoch heal: read + compile
+   OUTSIDE the invalidation lock (concurrent write requests' delta
+   invalidations are NOT blocked behind a ~30s compile — blocking them
+   made clients abort and cascade further heals), then take the lock
+   only for the swap, and swap ONLY IF `unchanged?` still holds — a
+   write that landed mid-compile has already delta-patched the LIVE
+   registry, and clobbering it with our older snapshot would regress
+   read-your-writes. Returns true when the swap happened.
+
+   Alias re-registration runs outside the lock too — it is idempotent
+   and per-name, so a transiently-ahead alias view is harmless."
+  [ctx unchanged?]
+  (counters/count! :registry/rebuild)
+  (let [storage (compile-storage ctx)
+        graph (read-graph storage (:executor-orgs ctx))
+        _ (register-type-aliases-from-db! graph)
+        base-fns (:base-fns ctx)
+        lookups (assoc (l/cached-build-lookups graph)
+                       :base-fns base-fns)
+        _ (prime-always-fresh! (:fns graph))
+        compiled (ce/compile-all lookups)]
+    (call-with-invalidation-lock
+      ctx
+      (fn []
+        (if (unchanged?)
+          (do (reset! (:compiled-registry ctx) compiled)
+              (prime-graph-cache! ctx graph)
+              (prime-compile-deps! ctx graph)
+              true)
+          false)))))
+
+
 (defn rebuild!
   "Rebuild the compiled registry in `ctx` from whatever the slot/
    binding tables currently hold. Also primes `:graph-cache` and

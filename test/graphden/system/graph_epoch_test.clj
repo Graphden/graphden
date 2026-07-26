@@ -105,7 +105,8 @@
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                      cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "f1" :parent-ids [] :description "h"})
@@ -136,7 +137,8 @@
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                      cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "pend" :parent-ids [] :description "h"})
@@ -160,7 +162,8 @@
                 br/*epoch-heal-sync?* true
                 br/*epoch-heal-grace-ms* 0
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                      cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "abt" :parent-ids [] :description "h"})
@@ -181,7 +184,8 @@
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                      cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})
                 foreign (foreign-bump! base)]
@@ -203,7 +207,8 @@
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
                 epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild! (fn [_] (swap! healed inc))]
+        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                      cr/rebuild! (fn [_] (swap! healed inc))]
           (let [router (router-over v {(vs/current-branch-id v)
                                        {:ctx {:x 1} :handler :h}})]
             (sp/create-entity v :fn {:name "rgr" :parent-ids [] :description "h"})

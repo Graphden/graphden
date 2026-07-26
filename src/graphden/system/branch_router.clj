@@ -443,9 +443,24 @@
         (let [snap @handlers
               refresh! (fn [entry]
                          (when-let [c (:ctx entry)]
-                           (try (cr/rebuild! c)
-                                (catch Exception e
-                                  (log/warn e "graph-epoch heal: ctx rebuild failed")))))
+                           (try
+                             ;; Two OPTIMISTIC attempts (compile outside
+                             ;; the lock, swap only if the epoch didn't
+                             ;; move mid-compile — a moved epoch means a
+                             ;; delta already patched the live registry
+                             ;; and our snapshot would clobber it), then
+                             ;; a blocking rebuild as the correctness
+                             ;; fallback under continuous writes.
+                             (loop [attempt 1]
+                               (let [e0 (epoch/current base)
+                                     swapped? (cr/rebuild-optimistic!
+                                                c #(= e0 (epoch/current base)))]
+                                 (when-not swapped?
+                                   (if (< attempt 2)
+                                     (recur (inc attempt))
+                                     (cr/rebuild! c)))))
+                             (catch Exception e
+                               (log/warn e "graph-epoch heal: ctx rebuild failed")))))
               work (fn []
                      (some-> (get snap default-branch-id) refresh!)
                      (doseq [[bid entry] snap]

@@ -51,7 +51,11 @@
                         "abort-shield-")
     ;; Already on a shield thread (nested write pipeline) — run inline.
     (f)
-    (let [^Future fut (ExecutorService/.submit pool ^Callable f)]
+    ;; bound-fn*: raw executor submit does NOT convey dynamic bindings
+    ;; — without it the shield thread saw a nil *request-bump-log*,
+    ;; bumps went unlogged, notes drained nothing, and EVERY shielded
+    ;; write became a heal (run-9: 41 heals).
+    (let [^Future fut (ExecutorService/.submit pool ^Callable (bound-fn* f))]
       (loop []
         (let [r (try
                   {:v (Future/.get fut)}

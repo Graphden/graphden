@@ -178,7 +178,16 @@
    :parent :response-cache-wrap
    :args {:base-handler :_app-encoded}}
 
+  ;; Error boundary is OUTERMOST: whatever any layer below throws —
+  ;; including the cache/encode wraps themselves — becomes its
+  ;; centrally-mapped status + safe JSON body instead of http-kit's
+  ;; type-losing bare 500. See web.errors/:error-boundary-wrap.
+  {:name :_app-error-bounded
+   :description "Full handler chain behind the top-level error boundary — an uncaught throw answers with the centrally-mapped status (graphden.web.errors) and a safe machine-readable body."
+   :parent :error-boundary-wrap
+   :args {:handler :_app-cached}}
+
   {:name :web-server
-   :description "Application root — starts the http-kit server on port 8080 with the full handler wrap chain (cache → encode → realize-body → branch-routed → app)."
+   :description "Application root — starts the http-kit server on port 8080 with the full handler wrap chain (error-boundary → cache → encode → realize-body → branch-routed → app)."
    :parent :http-server
-   :args {:handler :_app-cached :port 8080}}]}
+   :args {:handler :_app-error-bounded :port 8080}}]}

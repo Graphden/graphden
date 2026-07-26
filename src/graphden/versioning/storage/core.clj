@@ -266,15 +266,19 @@
                                               (= position (:position row)))]
                                eid)]
               (when (seq collisions)
-                (throw (ex-info (str "Position " position
-                                     " is already taken in this binding on branch "
-                                     branch-id)
-                                {:type :constraint-violation/position-collision
-                                 :entity-name :binding-list-item
-                                 :binding-id binding-id
-                                 :position position
-                                 :branch-id branch-id
-                                 :colliding-item-ids (vec collisions)}))))))))))
+                ;; Message is USER-facing: no internal branch uuid;
+                ;; carry :reason so response renderers surface the
+                ;; same text (audit-7 error honesty).
+                (let [human (str "Position " position " is already taken "
+                                 "in this binding on the current branch")]
+                  (throw (ex-info human
+                                  {:type :constraint-violation/position-collision
+                                   :reason human
+                                   :entity-name :binding-list-item
+                                   :binding-id binding-id
+                                   :position position
+                                   :branch-id branch-id
+                                   :colliding-item-ids (vec collisions)})))))))))))
 
 
 (defn- check-list-item-position-collision!

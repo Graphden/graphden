@@ -142,6 +142,7 @@
        ;; shared JVM. Reuses the standard rejection envelope.
        {:ok false :status :rejected
         :error "Execution capacity exceeded — retry shortly"
+        :http-status 429
         :error-data {:reason :over-capacity}}
        (let [pre-persisted? need-persist?
              ;; Between `acquire-execution-slot!` and `run-future` (whose

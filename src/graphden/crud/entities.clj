@@ -27,7 +27,8 @@
     [graphden.system.branch-router :as br]
     [graphden.util.abort-shield :as shield]
     [graphden.versioning.branch-local :as branch-local]
-    [graphden.versioning.storage.core :as vcore]))
+    [graphden.versioning.storage.core :as vcore]
+    [graphden.web.errors :as web-errors]))
 
 
 ;; === Affected-fn-id derivation for delta invalidation =======================
@@ -1217,7 +1218,21 @@
            " already exists here — pick a different name")
       (re-find #"(?i)duplicate key" msg)
       (str (name entity-type) " already exists with these fields")
-      :else (or (some-> (ex-data e) :reason) msg
+      ;; Prefer a carried :reason (already user-facing). A generic SQL
+      ;; message is NOT user-facing — raw JDBC text leaked FK names,
+      ;; casts and internal ids into 400 bodies (audit-7). Classify it
+      ;; via the storage error registry and return the category's safe
+      ;; sentence; the raw message goes to the log ref.
+      :else (or (some-> (ex-data e) :reason)
+                (let [category (some-> (ex-data e) :type namespace)
+                      ref (str (random-uuid))]
+                  (log/warn e "create-entity storage error withheld from client"
+                            {:ref ref :entity-type entity-type})
+                  (case category
+                    "validation-error" msg
+                    "constraint-violation" msg
+                    (str "Storage rejected the write (ref " ref
+                         ") — see server log")))
                 (str "Failed to create " type-str)))))
 
 
@@ -1239,13 +1254,17 @@
   (let [cap-rej (when (= entity-type :fn)
                   (secret-leaf-capability-rej storage entity-data))]
     (cond
-      cap-rej {:error (:reason cap-rej)}
+      cap-rej {:error (:reason cap-rej) :http-status 403}
       :else (try
               {:created (:id (sp/create-entity storage entity-type entity-data))}
               (catch Exception e
                 (log/error e "create-entity failed for"
                            entity-type entity-data)
-                {:error (humanise-create-exception e entity-type entity-data type-str)})))))
+                ;; The error's HTTP status comes from the central map —
+                ;; a name/position collision is a 409 CONFLICT, not a
+                ;; malformed 400 (audit-7 error honesty).
+                {:error (humanise-create-exception e entity-type entity-data type-str)
+                 :http-status (web-errors/status-for-ex-data (ex-data e))})))))
 
 
 (defn- forward-rename-slot!
@@ -1330,8 +1349,13 @@
                      (contains? form-data :rename-to))
             (forward-rename-slot! storage form-data entity-data))
           create-result)
-        {:error (or (:error create-result)
-                    (str "Failed to create " type-str))}))))
+        ;; Preserve the error's :http-status (409 collisions, 403
+        ;; capability — the central web.errors mapping) alongside the
+        ;; human message.
+        (cond-> {:error (or (:error create-result)
+                            (str "Failed to create " type-str))}
+          (:http-status create-result)
+          (assoc :http-status (:http-status create-result)))))))
 
 
 (defn apply-update-core

@@ -2,6 +2,53 @@
 
 This document is a reference for the commonly-handled error families in the graphden system — not an exhaustive list (many modules carry their own `:category/specific` types). Errors are thrown as `ExceptionInfo` with a `:type` key in the ex-data map.
 
+## HTTP Status Mapping (audit-8)
+
+`graphden.web.errors/status-for` is the ONE `:type` → HTTP status
+table for the whole surface. The top-level `:error-boundary-wrap`
+(app/server chain, outermost) maps any uncaught throw; handler
+families that build their own envelopes declare `:http-status` at the
+rejection builder and render through `web.errors/:json-envelope-response`
+(the JSON twin of `:html-action-response`). Messages are returned
+verbatim only for author-facing families; everything else gets an
+opaque `:ref` correlated with the server log — on every deployment
+shape, self-hosted included.
+
+| `:type` | Status |
+|---|---|
+| `:not-found`, `:user/not-found`, execute fn-not-found | 404 |
+| `:constraint-violation/fn-name-collision` | 409 |
+| `:constraint-violation/position-collision` | 409 |
+| `:constraint-violation/unique` | 409 |
+| `:merge-conflict` (POST /api/branches/:ref/merge) | 409 |
+| `:user/exists` | 409 |
+| `:user/invalid`, `:grant/invalid-capability`, `:domain/unverified` (tenancy control-plane) | 400 |
+| execute already-running-as-service | 409 |
+| `:authz/forbidden`, `capability/*` (incl. secret-leaf gate) | 403 |
+| execute over-capacity | 429 + `Retry-After` |
+| execute args-too-large (256 KB) | 413 |
+| `:vault/not-configured` | 503 |
+| `validation-error/*`, `constraint-violation/*` (other), `type-check/*`, `packages/*`, `refinement/*`, `execution-error/*`, `graph-error/*`, `secrets/*`, execute rejected (other) | 400 |
+| `branch-router/*` | 404 |
+| unknown / internal | 500 (opaque `:ref`) |
+
+Deliberate exceptions: the MCP route is JSON-RPC (spec-mandated
+HTTP 200 with in-band error objects); a FAILED execution is a
+successful 200 poll (`:status :failed` in the body) — only
+SUBMIT-time rejections carry 4xx; the 5 MB result cap is a 200 with
+`:result-truncated? true` (success with caveat).
+
+Previously-undocumented types now covered by the table:
+`:constraint-violation/reparent-cross-branch` (400),
+`:merge-conflict`, `:vault/not-configured`, `:refinement/violated`,
+`:capability/secret-leaf-restricted`, `:authz/forbidden`,
+`:branch-router/handler-not-found`, `:storage-error/unsupported-opts`
+(500 — internal misuse), `:packages/unresolved-ref`,
+421 `misdirected-request` (off-shard, tenancy), execute
+`:rejected` / `:over-capacity` / `:args-too-large` reasons.
+`web.errors/error-codes-doc drift is pinned by
+`graphden.web.errors-doc-test`.
+
 ## Error Type Naming Convention
 
 Error types follow the pattern `:category/specific-error` where:

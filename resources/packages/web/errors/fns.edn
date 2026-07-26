@@ -1,0 +1,22 @@
+{:namespace "web.errors"
+ :description "The error-honesty seam: one :type → HTTP status mapping (graphden.web.errors) surfaced to the graph — the top-level error boundary wrap and the status lookup response builders bind through."
+ :fns
+ [{:name :error-boundary-wrap
+   :description "Ring wrap — catches anything the inner handler throws and answers with the centrally-mapped status + safe JSON body (message only for author-facing type families; opaque ref otherwise, details in the server log). Wire at the TOP of the app chain; JSON-RPC routes are exempt by spec (they answer 200 with in-band errors and never throw through in normal operation)."
+   :args {:handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
+                    :description "The inner Ring handler to shield."}}
+   :return-type [:fn {:request :ring-request-shape} :ring-response-shape]
+   :expects-effects #{}}
+
+  {:name :error-http-status
+   :description "HTTP status for an error :type (keyword or text) via the central graphden.web.errors/status-for table — 404 not-found, 409 conflicts (name/position/unique/merge), 403 authz, 429 over-capacity, 413 args-too-large, 400 author-error families, 500 unknown."
+   :args {:error-type {:type :keyword-or-text}}
+   :return-type :http-status
+   :expects-effects #{}}
+
+  {:name :json-envelope-response
+   :description "Ring JSON response whose status comes from the envelope's :http-status (default 200, stripped from the body); 429 carries Retry-After. Rejection builders declare their status where they build the envelope — the JSON twin of :html-action-response."
+   :args {:envelope {:type :nullable-keyword-map
+                     :description "The response envelope; :http-status (int, optional) selects the HTTP status. nil renders as an empty 200 body (a nil-returning primitive behind a guard unions :null into the computed type)."}}
+   :return-type :ring-response-shape
+   :expects-effects #{}}]}

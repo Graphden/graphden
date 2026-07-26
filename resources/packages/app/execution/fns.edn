@@ -120,6 +120,7 @@
    :parent :const
    :args {:value {:ok false
                   :status :rejected
+                  :http-status 400
                   :error "Request must carry :fn-id or :fn-name"
                   :error-data {:reason :no-fn}}}}
 
@@ -190,9 +191,10 @@
   {:name :_execute-fn-not-found-rej
    :description "Rejection envelope for the fn-not-found guard. Dynamic — `:error` cites the unresolved anchor."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
+                 {:value 404}
                  :_execute-fn-not-found-msg
                  {:value {:reason :fn-not-found}}]}}
 
@@ -229,9 +231,10 @@
   {:name :_execute-timeout-bad-rej
    :description "Rejection envelope for the timeout-out-of-range guard. Dynamic — `:error-data` cites the bad value."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
+                 {:value 400}
                  {:value ":timeout-ms must be in [1, 60000]"}
                  :_execute-timeout-bad-rej-data]}}
 
@@ -271,9 +274,10 @@
   {:name :_execute-args-too-large-rej
    :description "Rejection envelope for the args-too-large guard."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
+                 {:value 413}
                  {:value ":args size exceeds 262144 bytes"}
                  :_execute-args-too-large-rej-data]}}
 
@@ -346,9 +350,10 @@
   {:name :_execute-running-as-svc-rej
    :description "Rejection envelope for the already-running-as-service guard."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
+                 {:value 409}
                  {:value "Function is already running as a managed service. Disable the service in /api/entities/service or restart it via /api/services/reconcile."}
                  :_execute-running-as-svc-rej-data]}}
 
@@ -421,9 +426,10 @@
   {:name :_execute-unknown-arg-rej
    :description "Rejection envelope for the unknown-arg guard."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status} {:value :error} {:value :error-data}]
           :vals [{:value false}
                  {:value :rejected}
+                 {:value 400}
                  :_execute-unknown-arg-msg
                  :_execute-unknown-arg-rej-data]}}
 
@@ -625,9 +631,9 @@
 
   {:name :execute-handler
    :lambda-params [:storage-query :request]
-   :description "Ring handler for POST /api/execute — wraps `:execute` in a JSON 200 response."
-   :parent :json-handler
-   :args {:data :execute}}
+   :description "Ring handler for POST /api/execute — the envelope's own :http-status drives the response (400 rejected / 404 fn-not-found / 409 running-as-service / 413 args-too-large / 429 over-capacity with Retry-After; accepted and completed runs stay 200 — an EXECUTION failure is a successful poll)."
+   :parent :json-envelope-response
+   :args {:envelope :execute}}
 
   ;; ---------------------------------------------------------------------
   ;; GET /api/execute/:id — read a persisted row
@@ -664,9 +670,10 @@
   {:name :_exec-err-not-found
    :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel. `:return-type` pinned so downstream `:cond` unions of error + success retain precise record shapes (otherwise bare `:zipmap` infers `[:map :any [:union :bool :text]]` and the per-member narrowing in `get-return-rule` opaques out)."
    :parent :zipmap
-   :return-type :_error-result-shape
-   :args {:keys [:ok :error]
+   :return-type :_error-result-status-shape
+   :args {:keys [:ok :http-status :error]
           :vals [false
+                 404
                  {:parent :str
                   :args {:parts ["Execution not found: "
                                  {:parent :get
@@ -713,9 +720,9 @@
 
   {:name :get-execution-handler
    :lambda-params [:request :default :limit]
-   :description "Ring handler for GET /api/execute/:id."
-   :parent :json-handler
-   :args {:data :_get-execution}}
+   :description "Ring handler for GET /api/execute/:id — 404 (via the envelope's :http-status) when the id doesn't resolve; a FAILED execution is still a successful 200 poll."
+   :parent :json-envelope-response
+   :args {:envelope :_get-execution}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/execute/:id/cancel — soft cancel an in-flight execution
@@ -747,9 +754,9 @@
 
   {:name :cancel-execution-handler
    :lambda-params [:request :default :limit]
-   :description "Ring handler for POST /api/execute/:id/cancel."
-   :parent :json-handler
-   :args {:data :_cancel-execution}}
+   :description "Ring handler for POST /api/execute/:id/cancel — 404 via the envelope's :http-status when the id doesn't resolve."
+   :parent :json-envelope-response
+   :args {:envelope :_cancel-execution}}
 
   ;; ---------------------------------------------------------------------
   ;; GET /api/executions?fn-id=X — list recent runs for one fn

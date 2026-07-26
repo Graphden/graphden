@@ -88,6 +88,10 @@
    :description "The `{:ok false :error}` rejection payload returned by every type-API / type-row / value-form validation stage."
    :type {:ok :bool :error :text}}
 
+  {:name :_error-result-status-shape
+   :description "`:_error-result-shape` plus the `:http-status` the envelope-response seam reads (web.errors/:json-envelope-response) — rejection builders that declare their HTTP status pin to this."
+   :type {:ok :bool :error :text :http-status :int}}
+
   {:name :_types-compatible-result-shape
    :description "Output of `:_types-compatible-apply` — the subtype-check verdict. An extra `:reason` is present when not ok (open-record — extra fields are fine)."
    :type {:ok :bool :expected :jsonb :candidate :jsonb}}
@@ -1655,8 +1659,14 @@
    :args {:coll {:as :result} :key {:value :created} :default nil}}
 
   {:name :_create-apply-err-response
+   :description "Error response for the create pipeline — status comes from the result's :http-status (central web.errors mapping: 409 name/position collisions, 403 capability, 500 storage-internal) with 400 as the malformed-input default."
    :parent :html-error-response
-   :args {:status {:value 400}
+   :args {:status {:parent :coalesce
+                   :args {:value {:parent :get
+                                  :args {:coll {:as :result}
+                                         :key {:value :http-status}
+                                         :default nil}}
+                          :default 400}}
           :reason :_apply-error-msg}}
 
   ;; Success: invalidate cache → emit NOTIFY → 200 response. `:do :steps`

@@ -126,12 +126,15 @@
   ;; `_execute-validation` runs without NPE'ing on storage queries.
   ;; A missing `:storage-query` here would surface as 500 (NPE)
   ;; rather than the structured `:rejected` envelope.
-  (testing "POST /api/execute with unknown fn-name → structured rejection"
+  (testing "POST /api/execute with unknown fn-name → structured 404 rejection"
     (let [resp (json-post "/api/execute"
                           {:fn-name "no-such-fn" :args {}})
           body (parse-body resp)]
-      (is (= 200 (:status resp))
-          (str "expected 200 with structured rejection, got " (:status resp)
+      ;; Error honesty (audit-8): logical rejections carry REAL HTTP
+      ;; statuses — an unresolvable fn is a 404, not a 200 the client
+      ;; must body-parse to discover.
+      (is (= 404 (:status resp))
+          (str "expected 404 structured rejection, got " (:status resp)
                " body: " (:body resp)))
       (is (= "rejected" (:status body)))
       (is (false? (:ok body))))))
@@ -152,12 +155,14 @@
 
 (defn- reject-body
   "POST `body-map` to /api/execute and return the parsed rejection map,
-   asserting the transport succeeded (HTTP 200 + structured envelope)."
+   asserting a REAL 4xx status (audit-8 error honesty: rejections are
+   no longer 200s the client must body-parse to discover) alongside
+   the structured envelope."
   [body-map]
   (let [resp (json-post "/api/execute" body-map)
         body (parse-body resp)]
-    (is (= 200 (:status resp))
-        (str "expected 200, got " (:status resp) " body: " (:body resp)))
+    (is (<= 400 (:status resp) 499)
+        (str "expected 4xx, got " (:status resp) " body: " (:body resp)))
     (is (false? (:ok body)))
     (is (= "rejected" (:status body)))
     body))

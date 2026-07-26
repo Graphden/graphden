@@ -1550,6 +1550,7 @@
    :parent :zipmap
    :return-type {:ok :bool
                  :reason :keyword
+                 :http-status :int
                  :error :text
                  :target {:id :nullable-text
                           :name :any
@@ -1563,10 +1564,11 @@
                                     :entity-id :text
                                     :source-version :jsonb
                                     :target-version :jsonb}]}
-   :args {:keys [{:value :ok} {:value :reason} {:value :error}
+   :args {:keys [{:value :ok} {:value :reason} {:value :http-status} {:value :error}
                  {:value :target} {:value :source} {:value :conflicts}]
           :vals [{:value false}
                  {:value :merge-conflict}
+                 {:value 409}
                  {:value "Merge has unresolved conflicts"}
                  {:parent :as-json-branch :args {:branch-row {:as :target}}}
                  {:parent :as-json-branch :args {:branch-row {:as :source}}}
@@ -1617,9 +1619,9 @@
 
   {:name :merge-branch-handler
    :lambda-params [:request :default :limit]
-   :description "Ring handler for POST /api/branches/:ref/merge (auth-required)."
-   :parent :json-handler
-   :args {:data :_merge-branch-data}}
+   :description "Ring handler for POST /api/branches/:ref/merge (auth-required) — a :merge-conflict answers 409 via the envelope's :http-status; the structured conflicts payload rides the body either way."
+   :parent :json-envelope-response
+   :args {:envelope :_merge-branch-data}}
 
   ;; ---------------------------------------------------------------------
   ;; GET /partials/branch-popover — top-bar branch chip popover body.

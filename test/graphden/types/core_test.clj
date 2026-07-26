@@ -973,7 +973,12 @@
           (t/register-type-alias! :collide-probe :text owner-a)
           (testing "same owner re-registering is silent"
             (t/register-type-alias! :collide-probe :text owner-a)
-            (is (empty? (filter #(= :warn (first %)) @warns))))
+            ;; Only THIS test's warn kind — `with-redefs` on the global
+            ;; `log*` also captures unrelated warns from tests running in
+            ;; parallel (e.g. byo-mode reads), which must not count here.
+            (is (empty? (filter #(and (= :warn (first %))
+                                      (re-find #"type-alias collision" (str (second %))))
+                                @warns))))
           (testing "a DIFFERENT owner re-binding the name warns"
             (t/register-type-alias! :collide-probe :int owner-b)
             (is (some #(and (= :warn (first %))

@@ -18,7 +18,10 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.tenancy.demo-gc :as demo-gc]
-    [graphden.tenancy.org-schema :as org-schema])
+    [graphden.tenancy.org-schema :as org-schema]
+    [graphden.versioning.storage.core :as vs]
+    [next.jdbc :as jdbc]
+    [next.jdbc.result-set :as rs])
   (:import
     (java.time
       Instant)))
@@ -86,4 +89,41 @@
     (testing "a not-yet-expired demo org is left for a later sweep"
       (is (= 1 (count (sp/query-entities storage :org {:name "demo-future"})))))
 
+    (sp/close storage)))
+
+
+(defn- count-fn-version-rows
+  "Raw count of `fn_version` rows anchored to a specific fn identity id — so the
+   assertion checks the VERSION rows are gone regardless of whether the identity
+   row (and thus an org-filtered subquery) still exists."
+  [ds fn-id]
+  (-> (jdbc/execute-one! ds ["SELECT count(*) AS n FROM fn_version WHERE fn_id = ?" fn-id]
+                         {:builder-fn rs/as-unqualified-lower-maps})
+      :n))
+
+
+(deftest reaper-purges-the-version-plane-not-just-identity-rows
+  ;; The main test seeds via raw storage (identity rows only), so the version-FK
+  ;; DELETE loop never runs against real `*_version` rows — and a wrong-but-
+  ;; existing FK column (e.g. binding-list-item's shortened `item_id`) would
+  ;; silently ORPHAN version rows without throwing. Here a fn is created through
+  ;; VersionedStorage so `fn_version` rows exist, then we assert the sweep took
+  ;; them, anchored on the fn id (not an org subquery that the identity delete
+  ;; empties anyway).
+  (pth/clean-database-fast! setup/*container*)
+  (let [storage (pg/create-storage (pth/get-container-config setup/*container*))
+        _ (sp/initialize storage (build-schema))
+        versioned (vs/wrap-with-versioning storage)
+        ds (:pool storage)
+        now (Instant/now)
+        past (Instant/.minusSeconds now 3600)]
+    (sp/create-entity storage :org {:name "vdemo" :expires-at past})
+    ;; Created through VersionedStorage → an identity row (org-stamped) PLUS a
+    ;; fn_version row on main.
+    (let [fn-id (:id (sp/create-entity versioned :fn {:name "vfn" :org-id "vdemo"}))]
+      (is (pos? (count-fn-version-rows ds fn-id)) "precondition: version rows exist")
+      (demo-gc/sweep! ds now)
+      (is (empty? (sp/query-entities storage :fn {:name "vfn"})) "identity row gone")
+      (is (zero? (count-fn-version-rows ds fn-id))
+          "the version-plane rows were purged too, not orphaned"))
     (sp/close storage)))

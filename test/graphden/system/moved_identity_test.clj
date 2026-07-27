@@ -13,7 +13,11 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys]))
+    [graphden.system.core :as sys]
+    [graphden.versioning.identity-repair :as ir])
+  (:import
+    (java.time
+      Instant)))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -103,4 +107,33 @@
         (is (= 1 n) "counted as a leftover")
         (is (some? (sp/read-entity storage :fn removed-id))
             "but NOT purged — removal is the author's call, not ours"))
+      (finally (sp/close storage)))))
+
+
+(deftest repoint-refs!-fills-the-version-plane-not-just-identity
+  ;; `repoint-refs!`'s load-bearing claim is that it repoints refs across BOTH
+  ;; planes — identity rows AND every branch's `*-version` rows — because a
+  ;; diverging-branch version ref would otherwise be left pointing at a purged
+  ;; ghost (the broken-graph-on-one-branch class). The other tests seed only
+  ;; identity-plane refs, so a miss on the version plane would pass silently.
+  ;; Here we seed a `:binding-version` row whose `:ref-fn-id` is the ghost (ref
+  ;; columns carry no FK, so arbitrary owner ids suffice) and assert repoint
+  ;; moves it. It also seeds an identity-plane ref, to pin BOTH in one pass.
+  (let [storage (setup/create-test-storage)
+        ghost (random-uuid)
+        new-id (random-uuid)]
+    (try
+      (let [id-plane (sp/create-entity storage :binding
+                                       {:fn-id (random-uuid) :slot-id (random-uuid)
+                                        :ref-fn-id ghost})
+            ver-plane (sp/create-entity storage :binding-version
+                                        {:binding-id (random-uuid) :branch-id (random-uuid)
+                                         :fn-id (random-uuid) :slot-id (random-uuid)
+                                         :ref-fn-id ghost :value-present false
+                                         :created-at (Instant/now)})]
+        (ir/repoint-refs! storage {ghost new-id})
+        (testing "the identity-plane ref is repointed off the ghost"
+          (is (= new-id (:ref-fn-id (sp/read-entity storage :binding (:id id-plane))))))
+        (testing "the VERSION-plane ref is repointed too (the audited gap)"
+          (is (= new-id (:ref-fn-id (sp/read-entity storage :binding-version (:id ver-plane)))))))
       (finally (sp/close storage)))))

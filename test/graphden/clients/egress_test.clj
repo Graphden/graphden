@@ -69,3 +69,23 @@
     (is (= :egress/blocked
            (try (egress/check-target! "not-a-url") nil
                 (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))))
+
+
+(deftest resolve-then-reject-wiring-blocks-a-hostname-that-lands-internal
+  ;; The other cases feed IP LITERALS, which `getByName` parses without a lookup
+  ;; — so they exercise `internal-address?` but NOT the "resolve the host, then
+  ;; reject if any resolved address is internal" wiring that IS the DNS-rebind
+  ;; guard. `localhost` is a real HOSTNAME that resolves (locally, no network) to
+  ;; a loopback address, so it drives exactly that path: the rebind trick of
+  ;; pointing a name at an internal IP must be caught.
+  (testing "check-target! blocks a hostname resolving to an internal IP"
+    (let [ed (try (egress/check-target! "http://localhost:8080/steal")
+                  nil
+                  (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+      (is (= :egress/blocked (:type ed)))
+      (is (= :internal-target (:reason ed))
+          "blocked because the resolved address is internal, not because the URL is malformed")))
+  (testing "resolve-public-ips itself fails closed on a host that lands internal"
+    (is (= :egress/blocked
+           (try (egress/resolve-public-ips "localhost") nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))))

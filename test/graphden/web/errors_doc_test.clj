@@ -52,3 +52,17 @@
       (is (= "You've reached your plan's function limit." (:message b)))))
   (testing "absent type gets an opaque ref"
     (is (some? (:ref (errors/safe-error-body nil "raw jdbc text"))))))
+
+
+(deftest status-for-ex-data-remaps-user-shaped-sql-errors
+  ;; The live entity-write path (crud/entities) routes storage errors through
+  ;; here: a `42xxx` sql-state (undefined column / syntax — the DB rejecting
+  ;; USER-SHAPED input) that would otherwise be an opaque 500 becomes a 400.
+  (testing "an unmapped 42xxx storage error → 400 (actionable), not 500"
+    (is (= 400 (errors/status-for-ex-data {:sql-state "42703"})))   ; undefined column
+    (is (= 400 (errors/status-for-ex-data {:sql-state "42601"}))))  ; syntax error
+  (testing "a non-42xxx failure stays 500 (a real outage is NOT the tenant's fault)"
+    (is (= 500 (errors/status-for-ex-data {:sql-state "57014"})))   ; query cancelled/timeout
+    (is (= 500 (errors/status-for-ex-data {}))))
+  (testing "an explicitly-typed error keeps its mapping even with a 42xxx sql-state"
+    (is (= 404 (errors/status-for-ex-data {:type :not-found :sql-state "42703"})))))

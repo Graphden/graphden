@@ -1,13 +1,14 @@
 (ns ^:serial graphden.tenancy.plan-test
-  "Per-org plan → effect allow-list (task #4). `^:serial` because
-   `install!-wires-the-compile-runtime-seam` resets the process-global
-   `cr/cloud-allowed-effects-resolver` atom for the duration of one test."
+  "Per-org plan → effect allow-list + row-cap (tasks #4, #7). `^:serial` because
+   `install!-wires-the-seams` resets the process-global resolver atoms for the
+   duration of one test."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
-    [graphden.tenancy.plan :as plan]))
+    [graphden.tenancy.plan :as plan]
+    [graphden.tenancy.storage :as ts]))
 
 
 (defn- org-store
@@ -54,13 +55,33 @@
       (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store "nope"))))))
 
 
-(deftest install!-wires-the-compile-runtime-seam
+(deftest over-entity-quota?-never-caps-the-public-org
+  ;; The public / platform org holds the shared core+web+app graph (thousands of
+  ;; fns); it must never resolve a cap. This short-circuits before `fn-count`, so
+  ;; a pool-less stub storage suffices — no PG needed.
+  (let [store (org-store {})]
+    (is (false? (plan/over-entity-quota? store tc/public-org)))
+    (is (false? (plan/over-entity-quota? store nil)))))
+
+
+(deftest install!-wires-the-seams
   (let [store (org-store {"acme" {:name "acme" :plan "network"}})
-        saved @cr/cloud-allowed-effects-resolver]
+        saved-fx @cr/cloud-allowed-effects-resolver
+        saved-q @ts/entity-quota-exceeded?]
     (try
       (plan/install! store)
-      (testing "after install the seam resolves effects per-org"
+      (testing "after install the effect seam resolves per-org"
         (is (contains? (cr/cloud-allowed-effects-for "acme") :network))
         (is (= cr/default-cloud-allowed-effects (cr/cloud-allowed-effects-for "globex"))
             "an unknown org still falls back to free through the seam"))
-      (finally (reset! cr/cloud-allowed-effects-resolver saved)))))
+      (testing "after install the row-cap seam is a live resolver"
+        (is (fn? @ts/entity-quota-exceeded?))
+        (is (false? (@ts/entity-quota-exceeded? tc/public-org))
+            "the seam never caps the public org"))
+      (testing "uninstall clears BOTH seams (lifecycle-bound, no cross-test leak)"
+        (plan/uninstall!)
+        (is (nil? @cr/cloud-allowed-effects-resolver))
+        (is (nil? @ts/entity-quota-exceeded?)))
+      (finally
+        (reset! cr/cloud-allowed-effects-resolver saved-fx)
+        (reset! ts/entity-quota-exceeded? saved-q)))))

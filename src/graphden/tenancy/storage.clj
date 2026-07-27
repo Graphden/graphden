@@ -228,6 +228,28 @@
        (contains? tenant-forbidden-entities entity-name)))
 
 
+;; Row-cap seam (task #7). A `(fn [org] boolean)` — true when `org` already
+;; holds ≥ its plan's `:max-fns`. `graphden.tenancy.plan/install!` sets it
+;; (closed over the platform storage); nil (no addon / single-tenant) = no cap.
+;; Lifecycle-bound by the addon halt so it can't leak a stale storage across
+;; tests in one JVM.
+(defonce entity-quota-exceeded? (atom nil))
+
+
+(defn- enforce-entity-quota!
+  "Reject a tenant `:fn` create that would exceed the org's row-cap. Only `:fn`
+   is gated — the graph's other rows (slots / bindings) scale with fns, so the
+   fn count bounds the whole footprint. The public / platform org is never
+   capped (the installed resolver returns false for it)."
+  [entity-name]
+  (when (= entity-name :fn)
+    (when-let [over? @entity-quota-exceeded?]
+      (let [org (tc/current-org)]
+        (when (over? org)
+          (throw (ex-info (str "org " org " has reached its fn row-cap")
+                          {:type :quota/entity-limit :org org})))))))
+
+
 (defrecord OrgScopedStorage
   [base scoped? authorize-write]
 
@@ -236,6 +258,7 @@
   (create-entity
     [_ entity-name data]
     (guard-write! base authorize-write entity-name data nil)
+    (enforce-entity-quota! entity-name)
     (sp/create-entity base entity-name
                       (cond-> data (scoped? entity-name) stamp)))
 

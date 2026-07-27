@@ -704,6 +704,39 @@ Platform-ctx (`public-org`) остаётся unrestricted. Ограничени�
 ИСПОЛНЕНИЯ пользовательского графа (`default-cloud-allowed-effects` — значение
 *ctx*), а не обёртка вокруг платформенного handler'а.
 
+### 5.1. Отгружено сверх гейта эффектов (baseline hardening) — обновлено 2026-07-27
+
+Три подсистемы **уже реализованы** (не «будущий egress-allowlist», как местами
+выше по тексту раздела):
+
+- **SSRF-egress-guard (baseline, для ВСЕХ network-тенантов).** `clients/egress.clj`:
+  `internal-address?` классифицирует loopback / RFC1918 / CGNAT (100.64/10) /
+  IPv6-ULA (fc00::/7) / link-local (вкл. cloud-metadata 169.254.169.254) /
+  multicast / any-local; `resolve-public-ips` fail-closed (нерезолвимый хост или
+  ЛЮБОЙ внутренний резолв → блок — закрывает и DNS-rebind); `check-target!`
+  зовётся в `web/http-client` перед dial, когда `*allowed-effects*` ограничен
+  (тенант). Это **deny-internal baseline**, а не тариф-allowlist — применяется к
+  любому тенанту, у кого вообще есть `:network` (платный план). **Residual
+  (задокументирован в коде):** dial идёт по HOSTNAME → окно rebind между check и
+  dial закрывается пиннингом на проверенный IP (hardening-follow-up).
+
+- **Row-cap (защита общей БД от абьюза), ДВА потолка.** `tenancy/plan.clj`
+  `plans` = `{:effects :max-fns :max-list-items}` (free 500/50000, network
+  5000/500000, nil = без лимита). Тенант контролирует ДВА независимых вектора
+  роста: `:fn` (слоты/биндинги масштабируются с fns) и `:binding-list-item`
+  (содержимое последовательностей — по строке (+version-строка) на append, НЕ
+  ограничено кол-вом fns). `OrgScopedStorage.create-entity` гейтит создание
+  обоих; превышение → `:quota/entity-limit` (HTTP 429, user-facing текст).
+  **Fail-open:** сбой проверки (DB-блип) не блокирует легитимную запись — квота
+  мягкая abuse-защита, не инвариант. Public/platform org никогда не капается.
+
+- **Ephemeral demo-org + TTL-реапер (`tenancy/demo_gc.clj`).** Демо/trial-org
+  несёт `:org.expires-at`; `:tenancy/demo-gc` (opt-in планировщик, дефолт 1ч)
+  **ХАРД-удаляет** просроченные org'и и ВСЕ их граф-строки одной FK-безопасной
+  транзакцией (version-таблицы по подзапросу на identity.org_id → identity → org).
+  **Инвариант (важно — деструктивно):** постоянная org = `expires-at` NULL,
+  реапер её НИКОГДА не выбирает (реальные тенанты + public — вечны).
+
 ---
 
 ## 6. Монетизация (через систему пакетов — да, реализуемо)

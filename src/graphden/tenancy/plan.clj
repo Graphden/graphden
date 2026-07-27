@@ -9,7 +9,7 @@
    - effects → `compile-runtime/cloud-allowed-effects-resolver`; `crud.fn-execution`
      reads it per execute to set the exec ctx's `:allowed-effects`.
    - quota → `tenancy.storage/entity-quota-exceeded?`; OrgScopedStorage reads it
-     per `:fn` create to reject a tenant over its row-cap.
+     per `:fn` / `:binding-list-item` create to reject a tenant over a ceiling.
    Both only bind for a real tenant org — the platform / public ctx is
    unrestricted and uncapped."
   (:require
@@ -22,15 +22,23 @@
 
 
 (def plans
-  "Plan slug → `{:effects <allow-list> :max-fns <n|nil>}`. `free` is the locked
-   default (`#{:db :state :time :random}`, capped); `network` additionally
-   allows outbound `:network` (external HTTP / SQL, itself guarded by the egress
-   broker — #5) and lifts the row-cap. `:max-fns` nil = uncapped. Extend here as
-   tiers are added (e.g. a `:process` service tier — #6)."
+  "Plan slug → `{:effects <allow-list> :max-fns <n|nil> :max-list-items <n|nil>}`.
+   `free` is the locked default (`#{:db :state :time :random}`); `network`
+   additionally allows outbound `:network` (external HTTP / SQL, itself guarded
+   by the egress broker — #5) and lifts the ceilings. A nil ceiling = uncapped.
+
+   TWO ceilings, because a tenant controls TWO independent DB-growth vectors:
+   `:max-fns` bounds `:fn` rows (slots / bindings scale with fns, so fn-count is
+   their proxy), and `:max-list-items` bounds `:binding-list-item` rows — SEQUENCE
+   content, appended one row (+ one version row) per item, so NOT bounded by fn
+   count. Without the second ceiling a tenant balloons the shared DB with one fn
+   + an unbounded list. Extend here as tiers are added (e.g. a #6 service tier)."
   {"free"    {:effects cr/default-cloud-allowed-effects
-              :max-fns 500}
+              :max-fns 500
+              :max-list-items 50000}
    "network" {:effects (conj cr/default-cloud-allowed-effects :network)
-              :max-fns 5000}})
+              :max-fns 5000
+              :max-list-items 500000}})
 
 
 (def ^:private default-plan
@@ -59,26 +67,43 @@
       cr/default-cloud-allowed-effects))
 
 
+;; The gated GROWTH entities → the `{table, plan-ceiling-key}` they're measured
+;; against. Table names come from this hardcoded map (no injection surface).
+(def ^:private quota-spec
+  {:fn                {:table "fn" :ceiling :max-fns}
+   :binding-list-item {:table "binding_list_item" :ceiling :max-list-items}})
+
+
+(defn entity-count
+  "How many `entity` rows tenant `org` owns — a raw `count(*)`, no row load.
+   `storage` must be (wrap) a PostgresStorage exposing `:pool`; when it doesn't
+   (misconfig), returns nil so the caller fails OPEN (a broken count must never
+   block a tenant's write). nil for an entity outside `quota-spec`."
+  [storage org entity]
+  (when-let [table (:table (get quota-spec entity))]
+    (when-let [ds (:pool storage)]
+      (-> (jdbc/execute-one! ds
+                             [(str "SELECT count(*) AS n FROM \"" table "\" WHERE org_id = ?") org]
+                             {:builder-fn rs/as-unqualified-lower-maps})
+          :n))))
+
+
 (defn fn-count
-  "How many `:fn` identity rows tenant `org` owns — a raw `count(*)`, no row
-   load. `storage` must be (wrap) a PostgresStorage exposing `:pool`; when it
-   doesn't (misconfig), returns nil so the caller fails OPEN (a broken count
-   must not block a tenant's writes)."
+  "Convenience: `:fn` row count for `org` (see `entity-count`)."
   [storage org]
-  (when-let [ds (:pool storage)]
-    (-> (jdbc/execute-one! ds ["SELECT count(*) AS n FROM \"fn\" WHERE org_id = ?" org]
-                           {:builder-fn rs/as-unqualified-lower-maps})
-        :n)))
+  (entity-count storage org :fn))
 
 
 (defn over-entity-quota?
-  "True when tenant `org` already holds ≥ its plan's `:max-fns`. Uncapped plans
-   / the public org / an uncountable storage → false (never over)."
-  [storage org]
+  "True when tenant `org` is at/over its plan ceiling for a GATED `entity`
+   (`:fn` → `:max-fns`, `:binding-list-item` → `:max-list-items`). Uncapped plan
+   / public org / ungated entity / uncountable storage → false (never over)."
+  [storage org entity]
   (boolean
-    (when-let [cap (:max-fns (tenant-plan storage org))]
-      (when-let [n (fn-count storage org)]
-        (>= n cap)))))
+    (when-let [ceiling-key (:ceiling (get quota-spec entity))]
+      (when-let [cap (get (tenant-plan storage org) ceiling-key)]
+        (when-let [n (entity-count storage org entity)]
+          (>= n cap))))))
 
 
 (defn install!

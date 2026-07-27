@@ -60,8 +60,11 @@
   ;; fns); it must never resolve a cap. This short-circuits before `fn-count`, so
   ;; a pool-less stub storage suffices — no PG needed.
   (let [store (org-store {})]
-    (is (false? (plan/over-entity-quota? store tc/public-org)))
-    (is (false? (plan/over-entity-quota? store nil)))))
+    (is (false? (plan/over-entity-quota? store tc/public-org :fn)))
+    (is (false? (plan/over-entity-quota? store tc/public-org :binding-list-item)))
+    (is (false? (plan/over-entity-quota? store nil :fn)))
+    (is (false? (plan/over-entity-quota? store "acme" :slot))
+        "an ungated entity is never over-quota")))
 
 
 (deftest install!-wires-the-seams
@@ -76,7 +79,7 @@
             "an unknown org still falls back to free through the seam"))
       (testing "after install the row-cap seam is a live resolver"
         (is (fn? @ts/entity-quota-exceeded?))
-        (is (false? (@ts/entity-quota-exceeded? tc/public-org))
+        (is (false? (@ts/entity-quota-exceeded? tc/public-org :fn))
             "the seam never caps the public org"))
       (testing "uninstall clears BOTH seams (lifecycle-bound, no cross-test leak)"
         (plan/uninstall!)

@@ -228,21 +228,29 @@
        (contains? tenant-forbidden-entities entity-name)))
 
 
-;; Row-cap seam (task #7). A `(fn [org] boolean)` — true when `org` already
-;; holds ≥ its plan's `:max-fns`. `graphden.tenancy.plan/install!` sets it
-;; (closed over the platform storage); nil (no addon / single-tenant) = no cap.
-;; Lifecycle-bound by the addon halt so it can't leak a stale storage across
-;; tests in one JVM.
+;; Row-cap seam (task #7). A `(fn [org entity-name] boolean)` — true when `org`
+;; is at/over its plan ceiling for that gated entity.
+;; `graphden.tenancy.plan/install!` sets it (closed over the platform storage);
+;; nil (no addon / single-tenant) = no cap. Lifecycle-bound by the addon halt so
+;; it can't leak a stale storage across tests in one JVM.
 (defonce entity-quota-exceeded? (atom nil))
 
 
+;; The tenant-controlled DB-growth entities the create-path gates, → the
+;; user-facing over-limit message. `:fn` and `:binding-list-item` are the two
+;; INDEPENDENT vectors: fns (slots/bindings scale with them) and sequence
+;; content (one row per append, unbounded by fn count). See `plan/plans`.
+(def ^:private quota-messages
+  {:fn "You've reached your plan's function limit. Upgrade your plan to create more functions."
+   :binding-list-item "You've reached your plan's list-size limit. Upgrade your plan to store more list items."})
+
+
 (defn- enforce-entity-quota!
-  "Reject a tenant `:fn` create that would exceed the org's row-cap. Only `:fn`
-   is gated — the graph's other rows (slots / bindings) scale with fns, so the
-   fn count bounds the whole footprint. The public / platform org is never
+  "Reject a tenant create of a GATED growth entity (`:fn` / `:binding-list-item`)
+   that is at/over the org's plan ceiling. The public / platform org is never
    capped (the installed resolver returns false for it)."
   [entity-name]
-  (when (= entity-name :fn)
+  (when-let [msg (get quota-messages entity-name)]
     (when-let [over? @entity-quota-exceeded?]
       (let [org (tc/current-org)
             ;; Fail-open: a quota-check that THROWS (a DB blip, or a stale
@@ -250,15 +258,14 @@
             ;; must never block a legitimate write — the row-cap is soft
             ;; abuse-prevention, not a correctness invariant. Mirrors
             ;; `cr/cloud-allowed-effects-for`'s fail-safe.
-            over (try (boolean (over? org)) (catch Exception _ false))]
+            over (try (boolean (over? org entity-name)) (catch Exception _ false))]
         (when over
           ;; The ex-MESSAGE is the user-facing text: web/errors surfaces it
           ;; verbatim because `:quota` is a message-visible family (NOT the org
           ;; name — that would leak). `:type` maps to HTTP 429. `:reason`
           ;; mirrors it for any consumer that prefers a carried reason.
-          (let [msg "You've reached your plan's function limit. Upgrade your plan to create more functions."]
-            (throw (ex-info msg
-                            {:type :quota/entity-limit :org org :reason msg}))))))))
+          (throw (ex-info msg
+                          {:type :quota/entity-limit :org org :entity entity-name :reason msg})))))))
 
 
 (defrecord OrgScopedStorage

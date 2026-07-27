@@ -54,20 +54,26 @@
       (is (= 2 (plan/fn-count storage "acme")))
       (is (zero? (plan/fn-count storage "other"))))
 
-    (testing "over-entity-quota? is false well under the free-tier cap"
-      ;; no :org row → the free-tier default plan (cap 500); 2 ≪ 500.
-      (is (false? (plan/over-entity-quota? storage "acme"))))
+    (testing "over-entity-quota? is false well under the free-tier ceilings"
+      ;; no :org row → the free-tier default plan (fn 500 / list-item 50000).
+      (is (false? (plan/over-entity-quota? storage "acme" :fn)))          ; 2 ≪ 500
+      (is (zero? (plan/entity-count storage "acme" :binding-list-item)))
+      (is (false? (plan/over-entity-quota? storage "acme" :binding-list-item))))
 
-    (testing "create-entity rejects a tenant :fn over the cap, but not the public org or a non-:fn write"
+    (testing "create-entity gates BOTH growth vectors over the cap (fn AND list-item — B2), sparing public + ungated writes"
       (let [saved @ts/entity-quota-exceeded?]
         (try
-          ;; Seam says ONLY "acme" is over.
-          (reset! ts/entity-quota-exceeded? (fn [org] (= org "acme")))
+          ;; Seam says "acme" is over for EVERY gated entity.
+          (reset! ts/entity-quota-exceeded? (fn [org _entity] (= org "acme")))
           (binding [tc/*current-org* "acme"]
             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"plan's function limit"
                   (sp/create-entity scoped :fn {:name "acme-c"})))
-            (is (= 2 (plan/fn-count storage "acme")) "the rejected create wrote nothing")
-            ;; a non-:fn write by the capped org is NOT gated
+            (is (= 2 (plan/fn-count storage "acme")) "the rejected fn create wrote nothing")
+            ;; B2: a list-item append by a capped org is now rejected too (enforce
+            ;; fires before the insert, so a minimal row suffices to trip it).
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"list-size limit"
+                  (sp/create-entity scoped :binding-list-item {:position 0})))
+            ;; a non-gated write (a namespace) by the capped org still passes
             (is (some? (sp/create-entity scoped :ns {:name "acme-ns"}))))
           ;; the public / platform org is never capped
           (binding [tc/*current-org* tc/public-org]

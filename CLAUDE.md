@@ -618,9 +618,12 @@ src/graphden/
 │                       #   packer, churn-min rebalancer, control-loop (sustained
 │                       #   hysteresis), directed cell-command transport,
 │                       #   DNS-SRV discovery. Driven by :exec/fleet-controller.
-├── tenancy/            # Multi-tenant router, users, grants, RLS
+├── tenancy/            # Multi-tenant router, users, grants, RLS, plan/tier +
+│                       #   quota row-cap (plan.clj), ephemeral-org TTL reaper
+│                       #   (demo_gc.clj)
 ├── auth/               # Pluggable auth-provider seam
-├── clients/            # External clients (vault / OpenBao)
+├── clients/            # External clients (vault / OpenBao) + SSRF egress guard
+│                       #   (egress.clj — deny-internal classifier for tenant :network)
 ├── util/               # Small shared helpers (backoff — reconnect policy)
 ├── system/             # Integrant lifecycle management
 │   ├── interface.clj   # start!, stop!, read-config

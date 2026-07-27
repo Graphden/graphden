@@ -200,7 +200,7 @@ than text-diffs.
    control-flow-as-data, the tool workflow, naming/style, and the cloud
    effect budget. The MCP server serves it verbatim at the
    `graphden://ai-context` resource by reading the classpath copy
-   (`resources/packages/app/mcp/ai-context.md`), kept byte-identical by
+   (`resources/packages/mcp/mcp/ai-context.md`), kept byte-identical by
    `mcp-doc-sync-test`. Distinct from `CLAUDE.md` (developer guidance) —
    this teaches *user* fn-def authoring.
 

@@ -455,10 +455,10 @@
    :args {:result :_mcp-resources-catalog}}
 
   {:name :_mcp-ai-context-text
-   :description "The AI-author guide (Block 9.3) — read from the classpath so the served resource IS docs/AI_CONTEXT.md, never a hand-kept copy of it (the .md at resources/packages/app/mcp/ai-context.md is that file, kept identical by mcp-ai-context-doc-in-sync-test). Static platform content, like the editor's CSS/JS assets, so the `:io` read rides the same unrestricted platform face."
+   :description "The AI-author guide (Block 9.3) — read from the classpath so the served resource IS docs/AI_CONTEXT.md, never a hand-kept copy of it (the .md at resources/packages/mcp/mcp/ai-context.md is that file, kept identical by mcp-ai-context-doc-in-sync-test). Static platform content, like the editor's CSS/JS assets, so the `:io` read rides the same unrestricted platform face."
    :parent :read-resource
    :return-type :text
-   :args {:path "packages/app/mcp/ai-context.md"}}
+   :args {:path "packages/mcp/mcp/ai-context.md"}}
 
   {:name :_mcp-resource-uri
    :parent :get
@@ -509,4 +509,20 @@
   {:name :mcp-route
    :description "POST /mcp — the MCP endpoint (JSON-RPC 2.0, stateless streamable-HTTP). Auth-required: the bearer is the user's normal graphden token, so every AI tool call carries exactly that user's rights."
    :parent :post
-   :args {:path "/mcp" :handler :_mcp-dispatch}}]}
+   :args {:path "/mcp" :handler :_mcp-dispatch}}
+
+  ;; Route-collection seam: this package's routes as a fall-through
+  ;; `:router-or-nil`, installed into the JVM-wide route collection by the
+  ;; `:mcp/router-install` init-key at boot (mirrors the tenancy addon's
+  ;; `:tenancy-router`). `app` no longer references `:mcp-route`, so when
+  ;; `"mcp"` is omitted from :package-names this router is simply never
+  ;; built/installed and `/mcp` 404s while the rest of the app is unaffected.
+  {:name :_mcp-routes
+   :description "The mcp package's route list — the single `/mcp` endpoint."
+   :parent :list
+   :args {:items [:mcp-route]}}
+
+  {:name :mcp-router
+   :description "Fall-through reitit router over `:_mcp-routes` — returns nil on no-match (`:router-or-nil`) so the route-collection seam falls through to the main app router for any non-`/mcp` path."
+   :parent :router-or-nil
+   :args {:routes :_mcp-routes}}]}

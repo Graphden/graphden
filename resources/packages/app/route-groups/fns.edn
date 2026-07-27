@@ -53,5 +53,4 @@
                   :health
                   :metrics
                   :version
-                  :api-routes
-                  :mcp-route]}}]}
+                  :api-routes]}}]}

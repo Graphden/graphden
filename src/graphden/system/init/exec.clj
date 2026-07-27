@@ -12,6 +12,7 @@
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
     [graphden.clients.vault :as vault]
+    [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.fleet.command :as fleet-command]
@@ -21,6 +22,7 @@
     [graphden.system.api-url-drift :as api-url-drift]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
+    [graphden.system.route-collection :as rc]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
@@ -300,6 +302,41 @@
 
 (defmethod ig/halt-key! :exec/api-routes-js-cache [_ _]
   (api-routes-js/clear-cache!))
+
+
+;; =============================================================================
+;; Optional-package route installers (route-collection seam)
+;; =============================================================================
+;;
+;; First-party OPTIONAL packages (`mcp`, `registry`) contribute their routes
+;; through the route collection (graphden.system.route-collection) instead of
+;; being hard-listed in app's `:all` — so a deployment can drop the package
+;; from `:package-names` and the app still boots. Each installer is TOLERANT:
+;; if the package was omitted its router fn-def isn't synced to storage, so the
+;; presence check misses and the installer no-ops. The init-keys are wired in
+;; the base config (system-*.edn) with an ordering ref on `:exec/api-routes-js-
+;; cache`, so the core-only `window.API` builds first and each installer then
+;; rebuilds the union — mirrors how the tenancy addon installs `:tenancy`.
+
+(defn- install-optional-router!
+  "If `router-fn-name` is present (its package loaded), compile it into a
+   fall-through router, install it under `key` in the route collection, and
+   rebuild `window.API` from the core router ∪ the whole collection. Absent
+   package → clean no-op. Returns `:installed` or nil."
+  [context key router-fn-name]
+  (when (fn-lookup/query-fn-by-name (:storage context) router-fn-name true)
+    (log/info "Installing optional route-collection router:" key)
+    (rc/install-router! key (exec/execute-by-name context router-fn-name {}))
+    (api-routes-js/rebuild-window-api! (exec/execute-by-name context "_router" {}))
+    :installed))
+
+
+(defmethod ig/init-key :mcp/router-install [_ {:keys [context]}]
+  (install-optional-router! context :mcp "mcp-router"))
+
+
+(defmethod ig/halt-key! :mcp/router-install [_ _]
+  (rc/remove-router! :mcp))
 
 
 ;; =============================================================================

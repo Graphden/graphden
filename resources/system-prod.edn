@@ -58,7 +58,9 @@
  ;; prod"); it ships 174 pedagogical fn-defs that bloat the prod
  ;; DB + namespace tree without serving any runtime feature.
  :app/packages
- {:package-names ["core" "storage" "web" "app-base" "app"]}
+ ;; `mcp` is OPTIONAL — drop it here to omit the `/mcp` AI endpoint; the app
+ ;; still boots (app no longer references mcp's route).
+ {:package-names ["core" "storage" "web" "app-base" "app" "mcp"]}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned
@@ -153,6 +155,15 @@
  :exec/api-routes-js-cache
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
+
+ ;; Optional-package route installer (route-collection seam). Installs the
+ ;; `mcp` package's `/mcp` router when that package is loaded; a clean no-op
+ ;; when `"mcp"` is dropped from :package-names. `:_after` forces it to run
+ ;; AFTER the core-only window.API cache so its rebuild (core ∪ collection)
+ ;; isn't overwritten — same edge the tenancy addon uses.
+ :mcp/router-install
+ {:context #ig/ref :exec/context
+  :_after #ig/ref :exec/api-routes-js-cache}
 
  ;; Service registry: seeds packages' `:services` declarations into the
  ;; `:service` table (idempotent — deterministic ids), then reads

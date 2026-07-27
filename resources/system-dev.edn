@@ -35,7 +35,7 @@
 
  ;; Load packages from resources/packages/
  :app/packages
- {:package-names ["core" "storage" "web" "app-base" "app" "examples"]}
+ {:package-names ["core" "storage" "web" "app-base" "app" "mcp" "examples"]}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned
@@ -86,6 +86,12 @@
  :exec/api-routes-js-cache
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
+
+ ;; Optional-package route installer (see system-prod.edn). No-op when `mcp`
+ ;; is dropped from :package-names.
+ :mcp/router-install
+ {:context #ig/ref :exec/context
+  :_after #ig/ref :exec/api-routes-js-cache}
 
  ;; Service registry — see system-prod.edn for the full rationale.
  :exec/service-reconciler

@@ -1,0 +1,13 @@
+{:name "mcp"
+ :version "1.0.0"
+ :description "Optional MCP endpoint package — the JSON-RPC 2.0 `/mcp` tool surface an external AI drives (fn-def sync, execute, branch/diff, graph read). Extracted from `app` so a deployment that does not want to expose an AI endpoint can omit `\"mcp\"` from :package-names and the app still boots; its route installs via the route-collection seam (`:mcp/router-install`), so `app` no longer references it."
+ ;; Sits ABOVE `app`: the MCP tools compose app's execution / branch /
+ ;; lookup fn-defs (`:fn-id-by-name`, `:resolve-branch-ref`, `:_execute-*`,
+ ;; `:_create-branch-*`), plus the `app-base` auth route template `:post`.
+ ;; `app` does NOT depend on `mcp` (the `:mcp-route` ref was removed from
+ ;; app's `:all`), so the edge is one-way and dropping `mcp` is safe.
+ ;; The fn `:namespace` stays `app.mcp` and the impls ns stays
+ ;; `graphden.packages.app.mcp.impls` — identity is uuid-v5(namespace,name),
+ ;; so moving only the directory leaves every id + ref byte-identical.
+ :dependencies ["core" "web" "app"]
+ :modules ["mcp"]}

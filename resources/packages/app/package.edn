@@ -11,7 +11,7 @@
  ;; (`app.common` / `app.routes.*`) are unchanged, so app's own routes
  ;; still resolve them by name exactly as before.
  :dependencies ["core" "web" "storage" "app-base"]
- :modules ["lookups" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "mcp" "route-groups" "server"]
+ :modules ["lookups" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "route-groups" "server"]
  ;; `:per-pod` — every executor pod must bind its own HTTP port. A
  ;; `:singleton` listener would leave every pod but the advisory-lock
  ;; winner without a listener, so a load balancer would see one healthy

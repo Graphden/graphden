@@ -219,6 +219,31 @@
       (is (<= 1 (count (:packages result)))))))
 
 
+(deftest optional-packages-are-omittable-test
+  ;; Guards the optionality contract: `mcp` (and, once extracted, `registry`)
+  ;; are top-level packages that install their routes via the route-collection
+  ;; seam, so `app` must NOT reference them. Loading `["core" "web" "app-base"
+  ;; "app"]` (no mcp) must resolve the dep graph WITHOUT pulling mcp, and app's
+  ;; router bundle (`:all`) must be present without mcp's route. If someone
+  ;; re-adds `:mcp-route` to app's `:all`, booting a deployment that omitted
+  ;; `"mcp"` would fail with an unknown-ref at sync — this catches it early.
+  (let [without (loader/load-packages ["core" "web" "app-base" "app"])
+        pkgs (set (map :name (:packages without)))
+        names (into #{} (keep :name) (:fn-defs without))]
+    (testing "app loads without mcp"
+      (is (not (contains? pkgs "mcp")) "mcp not pulled by app")
+      (is (contains? names :all) "app's route bundle is present without mcp"))
+    (testing "app does not reference mcp's fn-defs"
+      (is (not (contains? names :mcp-route)))
+      (is (not (contains? names :mcp-router))))
+    (testing "adding mcp brings its router back"
+      (let [with (into #{} (keep :name)
+                       (:fn-defs (loader/load-packages
+                                   ["core" "web" "app-base" "app" "mcp"])))]
+        (is (contains? with :mcp-route))
+        (is (contains? with :mcp-router))))))
+
+
 ;; =============================================================================
 ;; load-module-fns — both `fns.edn` shapes (vector legacy vs {:namespace :fns})
 ;; =============================================================================

@@ -9,7 +9,10 @@
     [graphden.test-infra.golden-app :as ga]))
 
 
-(use-fixtures :once (ga/fixture (ns-name *ns*)))
+;; mcp is its own package now (extracted from `app`, installed via the
+;; route-collection seam), so `app` no longer pulls it — bootstrap the golden
+;; WITH "mcp" so `:_mcp-dispatch` + its ref closure are present.
+(use-fixtures :once (ga/fixture (ns-name *ns*) ["core" "web" "app" "mcp"]))
 
 
 (defn- rpc!

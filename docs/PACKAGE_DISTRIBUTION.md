@@ -771,6 +771,19 @@ exists — § 6.3 — but the default first-party backend co-evolves with schema
 versioning / executor, so it stays in-tree); a non-Postgres backend is external
 work in the *consumer's* addon, not a monorepo split.
 
+Also deliberately kept in the `app` package (NOT moved to `examples`, despite
+looking like demo content): **`app/contact-demo`** — the `/demo/contact` page.
+It is the canonical NON-TRIVIAL app-namespace FIXTURE the distribution machinery
+is tested against end-to-end: `packages/export_test` + `packages/registry_test`
+export / publish / install / fork `app.contact-demo` through the shared
+`core+web+app` golden; the `edit-packages-panel` e2e publishes it from the
+browser; and `tools/browser-test/contact-demo-smoke.js` is the live-route smoke
+for the components + `submit-form` dispatcher pipeline. It ships as a small demo
+AND doubles as that cross-pyramid fixture — moving it to `examples` would fork
+the fixture from the golden those tests build and drag the whole (heavy)
+examples package into their bootstrap. So the demo route is intentional and the
+smoke depends on it; it stays.
+
 ---
 
 ## 16. Cloud assembly = self-hosted core + private addons

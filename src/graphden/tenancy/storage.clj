@@ -244,10 +244,21 @@
   [entity-name]
   (when (= entity-name :fn)
     (when-let [over? @entity-quota-exceeded?]
-      (let [org (tc/current-org)]
-        (when (over? org)
-          (throw (ex-info (str "org " org " has reached its fn row-cap")
-                          {:type :quota/entity-limit :org org})))))))
+      (let [org (tc/current-org)
+            ;; Fail-open: a quota-check that THROWS (a DB blip, or a stale
+            ;; resolver another test's init-key left in the process-global atom)
+            ;; must never block a legitimate write — the row-cap is soft
+            ;; abuse-prevention, not a correctness invariant. Mirrors
+            ;; `cr/cloud-allowed-effects-for`'s fail-safe.
+            over (try (boolean (over? org)) (catch Exception _ false))]
+        (when over
+          ;; The ex-MESSAGE is the user-facing text: web/errors surfaces it
+          ;; verbatim because `:quota` is a message-visible family (NOT the org
+          ;; name — that would leak). `:type` maps to HTTP 429. `:reason`
+          ;; mirrors it for any consumer that prefers a carried reason.
+          (let [msg "You've reached your plan's function limit. Upgrade your plan to create more functions."]
+            (throw (ex-info msg
+                            {:type :quota/entity-limit :org org :reason msg}))))))))
 
 
 (defrecord OrgScopedStorage

@@ -26,6 +26,7 @@ shape, self-hosted included.
 | execute already-running-as-service | 409 |
 | `:authz/forbidden`, `capability/*` (incl. secret-leaf gate) | 403 |
 | execute over-capacity | 429 + `Retry-After` |
+| `:quota/entity-limit` (tenant fn row-cap, #7) | 429 |
 | execute args-too-large (256 KB) | 413 |
 | `:vault/not-configured` | 503 |
 | `validation-error/*`, `constraint-violation/*` (other), `type-check/*`, `packages/*`, `refinement/*`, `execution-error/*`, `graph-error/*`, `secrets/*`, execute rejected (other) | 400 |

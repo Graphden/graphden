@@ -25,6 +25,7 @@
     (is (= 409 (errors/status-for :merge-conflict)))
     (is (= 409 (errors/status-for :constraint-violation/fn-name-collision)))
     (is (= 429 (errors/status-for :execution/over-capacity)))
+    (is (= 429 (errors/status-for :quota/entity-limit)))
     (is (= 413 (errors/status-for :execution/args-too-large)))
     (is (= 503 (errors/status-for :vault/not-configured))))
   (testing "family fallbacks cover new members automatically"
@@ -45,5 +46,9 @@
     (let [b (errors/safe-error-body :org/scoped-storage "SELECT boom FROM secret")]
       (is (some? (:ref b)))
       (is (not (str/includes? (:message b) "SELECT")))))
+  (testing "the :quota family is author-facing — the row-cap message reaches the user"
+    (let [b (errors/safe-error-body :quota/entity-limit "You've reached your plan's function limit.")]
+      (is (nil? (:ref b)))
+      (is (= "You've reached your plan's function limit." (:message b)))))
   (testing "absent type gets an opaque ref"
     (is (some? (:ref (errors/safe-error-body nil "raw jdbc text"))))))

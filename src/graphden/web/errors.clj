@@ -44,6 +44,7 @@
    :authz/forbidden 403
    ;; capacity / size
    :execution/over-capacity 429
+   :quota/entity-limit 429
    :execution/args-too-large 413
    ;; server-side configuration absent
    :vault/not-configured 503
@@ -75,7 +76,7 @@
   #{"validation-error" "constraint-violation" "type-check" "packages"
     "refinement" "capability" "execution" "execution-error"
     "graph-error" "secrets" "authz" "user" "grant" "domain"
-    "merge-conflict" "not-found" "vault"})
+    "merge-conflict" "not-found" "vault" "quota"})
 
 
 (defn status-for

@@ -64,7 +64,7 @@
           ;; Seam says ONLY "acme" is over.
           (reset! ts/entity-quota-exceeded? (fn [org] (= org "acme")))
           (binding [tc/*current-org* "acme"]
-            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"row-cap"
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"plan's function limit"
                   (sp/create-entity scoped :fn {:name "acme-c"})))
             (is (= 2 (plan/fn-count storage "acme")) "the rejected create wrote nothing")
             ;; a non-:fn write by the capped org is NOT gated

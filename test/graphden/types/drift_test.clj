@@ -35,7 +35,7 @@
     ;; doesn't trip `validate-arg-type!` during the per-test reseed.
     ;; Same pattern as `check_test`'s :each fixture.
     (types-core/clear-aliases!)
-    ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+    ((requiring-resolve 'graphden.packages.sync/register-type-aliases!)
      (:fn-defs (loader/load-packages ["core"])))
     (test-fn))
   (fn [t]

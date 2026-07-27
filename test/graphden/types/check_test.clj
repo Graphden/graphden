@@ -58,7 +58,7 @@
     ;; `:list` / `:map` / record `:type {…}`) so the per-test
     ;; `record-rich-types!` reseed doesn't reject any return-type
     ;; that names a `core/refinements`-declared alias.
-    ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+    ((requiring-resolve 'graphden.packages.sync/register-type-aliases!)
      (:fn-defs (loader/load-packages ["core"])))
     (test-fn))
   (fn [t]

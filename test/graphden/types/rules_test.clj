@@ -28,7 +28,7 @@
       ;; refinement aliases (`:path-segment`, `:non-negative-int` …)
       ;; that `record-rich-types!` validates. Same two-step as
       ;; check-test's fixture, both sides thread-isolated.
-      ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+      ((requiring-resolve 'graphden.packages.sync/register-type-aliases!)
        (:fn-defs _core-loaded))
       (exec/with-isolated-rich-types
         (fn []

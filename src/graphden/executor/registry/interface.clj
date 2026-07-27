@@ -106,7 +106,7 @@
        ;; step the validation in `sync-defs-to-storage!` rejects the
        ;; alias keyword as "unknown return type". Mirrors the
        ;; production `system/core` init path.
-       ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+       ((requiring-resolve 'graphden.packages.sync/register-type-aliases!)
         (:fn-defs packages))
        (sync-defs-to-storage! storage base-fn-defs {} all-name->id)
        storage)

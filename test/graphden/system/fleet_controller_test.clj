@@ -1,6 +1,6 @@
 (ns graphden.system.fleet-controller-test
   "Leader-gate GLUE for `:exec/fleet-controller` (`fleet-controller-tick!` in
-   `graphden.system.core`). The pure decision (`plan-tick` / `run-tick!`) is
+   `graphden.system.init.fleet`). The pure decision (`plan-tick` / `run-tick!`) is
    covered in `graphden.fleet.*`; this covers the integrant-side gating the fleet
    tests can't reach — only the advisory-lock holder ticks, a non-leader resets
    its sustained-imbalance streak so a failover starts clean, and a thrown tick is
@@ -10,10 +10,10 @@
     [graphden.fleet.control-loop :as fleet-loop]
     [graphden.fleet.discovery :as fleet-discovery]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
-    [graphden.system.core :as sys]))
+    [graphden.system.init.fleet :as fleet]))
 
 
-(def ^:private tick! #'sys/fleet-controller-tick!)
+(def ^:private tick! #'fleet/fleet-controller-tick!)
 
 
 (defn- ctx

@@ -33,6 +33,7 @@
     [graphden.executor.registry :as registry]
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.records :as records]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -43,7 +44,6 @@
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys]
     [graphden.test-infra.shared-container :as sc]
     [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]
@@ -129,8 +129,8 @@
                                 (records/boot-primitive-records)))
       (let [versioned (vs/wrap-with-versioning storage "main")]
         (binding [registry/*registry-override* nil]
-          (sys/bootstrap-from-packages! versioned packages
-                                        {:skip-type-check? true})))
+          (pkg-sync/bootstrap-from-packages! versioned packages
+                                             {:skip-type-check? true})))
       (finally
         (sp/close storage)))))
 
@@ -213,8 +213,8 @@
                                    ;; Golden clone is already synced; this re-sync is
                                    ;; idempotent — we run it only to reach the sweep,
                                    ;; which populates the bound override.
-                                   (sys/bootstrap-from-packages! versioned packages
-                                                                 {:skip-type-check? false})
+                                   (pkg-sync/bootstrap-from-packages! versioned packages
+                                                                      {:skip-type-check? false})
                                    @registry-core/*rich-types-override*)]
                     (swap! swept-state assoc k captured)
                     captured)
@@ -238,7 +238,7 @@
   [storage packages]
   (assert (some? registry-core/*rich-types-override*)
           "bootstrap-with-cached-sweep! must run inside with-isolated-rich-types")
-  (sys/bootstrap-from-packages! storage packages {:skip-type-check? true})
+  (pkg-sync/bootstrap-from-packages! storage packages {:skip-type-check? true})
   (reset! registry-core/*rich-types-override* (ensure-swept-rich-types! packages))
   nil)
 

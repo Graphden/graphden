@@ -44,7 +44,7 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.system.core :as sys]
+    [graphden.system.init.cleanup :as cleanup]
     [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc]))
@@ -857,7 +857,7 @@
                                  (java.time.Instant/parse "2026-05-20T11:00:00Z")
                                  (java.time.Instant/parse "2026-05-20T11:00:01Z"))]
     (try
-      (sys/sweep-executions! storage now)
+      (cleanup/sweep-executions! storage now)
       (is (nil? (sp/read-entity storage :fn-execution old-id))
           "succeeded row > 7d gone")
       (is (some? (sp/read-entity storage :fn-execution fresh-id))
@@ -876,7 +876,7 @@
                                  (java.time.Instant/parse "2026-05-10T11:00:00Z")
                                  (java.time.Instant/parse "2026-05-10T11:00:01Z"))]
     (try
-      (sys/sweep-executions! storage now)
+      (cleanup/sweep-executions! storage now)
       (is (nil? (sp/read-entity storage :fn-execution old-id))
           "failed row > 30d gone")
       (is (some? (sp/read-entity storage :fn-execution fresh-id))
@@ -904,7 +904,7 @@
         (let [row (sp/read-entity storage :fn-execution (:id zombie-row))]
           (is (#{:pending "pending"} (:status row))
               (str "pre-sweep status = " (pr-str (:status row))))))
-      (sys/sweep-executions! storage now)
+      (cleanup/sweep-executions! storage now)
       (testing "zombie pending → cancelled (NOT deleted)"
         (let [row (sp/read-entity storage :fn-execution (:id zombie-row))]
           (is (some? row) "row still exists")

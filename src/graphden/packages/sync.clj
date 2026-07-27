@@ -1,0 +1,552 @@
+(ns graphden.packages.sync
+  "Package → storage synchronisation: the non-wiring concern lifted out
+   of `graphden.system.core`. Given the loaded package set, this walks
+   the fn-defs and:
+
+   - pre-computes deterministic fn-ids (`compute-all-fn-name-ids`),
+   - registers structural type-aliases + markers (`register-type-aliases!`),
+   - registers base-fn impls + rows (`register-base-fns-from-packages!`),
+   - syncs composed fn-defs, heals namespace-moved identities
+     (`reconcile-moved-identities!`), snapshots rich-types, and runs the
+     topological type-check sweep (`sync-fn-entities-from-packages!`).
+
+   `bootstrap-from-packages!` composes the two syncs for out-of-band
+   (test) callers; the production `:exec/base-fns` + `:exec/fn-entities`
+   integrant init-keys (in `graphden.system.init.packages`) call the same
+   helpers, so any drift stays localized here.
+
+   Extracted verbatim from system.core — no behaviour change. Kept under
+   `packages/` (not `system/`) because it is package-domain logic, not
+   integrant lifecycle wiring."
+  (:require
+    [clojure.string :as str]
+    [clojure.tools.logging :as log]
+    [graphden.executor.composition.deps :as deps]
+    [graphden.executor.composition.interface :as fn-composition]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry-core]
+    [graphden.executor.registry.interface :as registry]
+    [graphden.packages.loader :as pkg]
+    [graphden.packages.records :as records]
+    [graphden.packages.records.parse :as records-parse]
+    [graphden.services.port-check :as port-check]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.check :as types-check]
+    [graphden.types.check.narrowing :as types-narrowing]
+    [graphden.types.core :as types]
+    [graphden.versioning.identity-repair :as idrepair]))
+
+
+(defn compute-all-fn-name-ids
+  "Pre-compute deterministic fn-ids for every named def across the
+   loaded packages — base-fns + composed fn-defs (incl. `:fn-type`
+   declarations) combined. Threaded into both syncs so cross-module
+   references (e.g. a base-fn's `:return-type` pointing at a type-row
+   in another module) resolve.
+
+   `:fn-type` declarations get the standard `(fn-id ns name)`
+   deterministic UUID — they now produce real fn-rows whose
+   `:constraint` carries the structural `[:fn args ret]` shape
+   (mirrors how unions / variants stash their payload). Pre-fix this
+   path aliased them to `primitive-fn-id :fn`, leaving every
+   `:return-type :http-server-handle`-style reference pointing at the
+   bare-`:fn` row and erasing the structural shape from storage."
+  [packages]
+  (let [base-pairs (keep (fn [[fn-name fn-def]]
+                           (when fn-name
+                             [fn-name (records/fn-id (:namespace fn-def) fn-name)]))
+                         (:base-fn-defs packages))
+        fn-def-pairs (keep (fn [fd]
+                             (when-let [n (:name fd)]
+                               [n (records/fn-id (:namespace fd) n)]))
+                           (:fn-defs packages))]
+    (into {} (concat base-pairs fn-def-pairs))))
+
+
+(defn register-type-aliases!
+  "Walk every fn-def that declares a structural type (refinement,
+   record, list, union, fn-type) and register it as a type-alias so
+   the type-checker's `resolve-alias` can expand the keyword when it
+   appears as a `:type` reference in another fn-def. Without this,
+   `:http-server :args {:port :port}` would store the bare keyword
+   and a downstream literal like `{:port 8080}` would trigger a
+   bogus `:int ⊆ :port` primitive subtype check.
+
+   Two passes — the second resolves now that all top-level names
+   are known. This lets `:ring-handler` reference `:ring-request`
+   regardless of declaration order in fns.edn.
+
+   Registration tries each alias even if some fail validation
+   (e.g. references an unknown type) — the second pass usually
+   resolves those. Genuine errors surface later through the
+   type-checker on first use."
+  [fn-defs]
+  ;; Marker-type declarations register FIRST — a marker tag must be
+  ;; known before any alias body (or slot type) using `[<tag> T]` is
+  ;; validated by `well-formed?`. `{:name :pii :marker {:hide-result?
+  ;; bool}}` — the graph-declared instance of the seeded `:secret`
+  ;; (types.core.shapes/register-marker!).
+  (doseq [fd fn-defs
+          :when (:marker fd)]
+    (try (types/register-marker! (:name fd) (:marker fd))
+         (catch Exception e
+           (log/warn e "register-marker! failed for" (:name fd)))))
+  (let [alias-body
+        (fn [fd]
+          (cond
+            (:refine fd)
+            (let [{:keys [base constraint]} (:refine fd)]
+              (when base [:refine base (or constraint [:any])]))
+
+            (and (:type fd) (map? (:type fd)))
+            (:type fd)
+
+            (:list fd)
+            [:list (:list fd)]
+
+            (:union fd)
+            (into [:union] (:union fd))
+
+            ;; Homogeneous map alias — `:map {:key K :value V}` is sugar
+            ;; for the structural `[:map K V]`. Without this branch the
+            ;; alias-body fn ignored the declaration and downstream slot
+            ;; references (`:list-entities :where :_storage-where-map`)
+            ;; saw a bare keyword the alias registry didn't know about,
+            ;; so the type-checker treated it as opaque and a literal
+            ;; `{:value {}}` failed against it. See
+            ;; `docs/TYPE_CHECK_BACKLOG.md` § "Re-audit (2026-06-07)".
+            (and (:map fd) (map? (:map fd)))
+            (let [{:keys [key value]} (:map fd)]
+              (when (and key value) [:map key value]))
+
+            ;; `:variant [:tag1 T1 :tag2 T2 …]` desugars to a union of
+            ;; tag-pinned records (see types/desugar-variant). Without
+            ;; this branch the EDN-declared `:result-text`,
+            ;; `:result-int`, `:validation` aliases never reached
+            ;; `register-type-alias!` and the type-checker treated
+            ;; them as unknown keywords — defeating the whole point
+            ;; of a variant declaration.
+            (:variant fd)
+            (types/desugar-variant (:variant fd))
+
+            (:fn-type fd)
+            (let [[args ret] (:fn-type fd)]
+              [:fn (or args {}) ret])))
+        edn-ns? (fn [ns-path]
+                  ;; Version-materialized namespaces
+                  ;; (`web.components@1-2-0`) contain `@` — invalid in
+                  ;; a keyword ns, so those rows register bare-only
+                  ;; (mirrors export's `edn-keyword-ns?`).
+                  (boolean (and ns-path
+                                (re-matches #"[A-Za-z0-9._-]+" ns-path))))
+        candidates (for [fd fn-defs
+                         :when (:name fd)
+                         :let [body (alias-body fd)]
+                         :when body]
+                     ;; Owner id = the type-row's deterministic sync id —
+                     ;; feeds the cross-owner collision diagnostic. The
+                     ;; QUALIFIED `:ns.path/name` variant registers
+                     ;; alongside the bare name: per-ns names may
+                     ;; legally repeat, and when they do the bare form
+                     ;; goes ambiguous (resolve-alias throws) while the
+                     ;; qualified forms stay precise.
+                     [(:name fd) body (records/fn-id (:namespace fd) (:name fd))
+                      (when (edn-ns? (:namespace fd))
+                        (keyword (:namespace fd) (name (:name fd))))])
+        try-once
+        (fn [pending]
+          ;; Returns the subset of [name body] pairs whose validation
+          ;; still fails — caller iterates until fixed point.
+          (reduce
+            (fn [still-pending [nm body owner qualified]]
+              (try (types/register-type-alias! nm body owner qualified)
+                   still-pending
+                   (catch Exception _
+                     (conj still-pending [nm body owner qualified]))))
+            []
+            pending))]
+    ;; Iterate to fixed point — each pass widens `aliases-snapshot`,
+    ;; which `well-formed?` consults for inner-keyword refs. Bound
+    ;; the loop count so a true cycle (or a body referencing an
+    ;; unknown type) terminates instead of spinning.
+    (loop [pending candidates, iter 0]
+      (let [next-pending (try-once pending)]
+        (cond
+          (empty? next-pending) nil
+          (or (= (count next-pending) (count pending))
+              (>= iter 8))
+          (doseq [[nm _] next-pending]
+            (log/warn "register-type-alias! failed for" nm
+                      "— body references an unknown type"))
+          :else (recur next-pending (inc iter)))))))
+
+
+(defn- validate-no-name-collisions!
+  "Per-ns names (ADR-identity-model.md stage 5) — two guards remain:
+
+   1. `(namespace, name)` must be UNIQUE across base-fns AND composed
+      fn-defs: the pair IS the deterministic `records/fn-id`, so a
+      duplicate silently upserts over the other row at sync (parent-ids
+      replacing a base-fn's return-type marker while the impl registry
+      still holds the impl) with no error.
+   2. BASE-FN bare names must be unique among base-fns regardless of
+      namespace: the Clojure impls registry
+      (`exec/register-base-fn!`) is name-keyed — two same-named impls
+      in different namespaces would clobber each other's Clojure fn.
+
+   Same-named composed fn-defs in DIFFERENT namespaces are LEGAL —
+   ambiguous bare references rewrite to qualified form at parse entry
+   (`normalize-qualified-refs`) or fail loud demanding qualification.
+   Anonymous defs (name = nil) are content-hash-deduped and excluded."
+  [packages]
+  (let [base-pairs (map (fn [[n d]] [(:namespace d) n]) (:base-fn-defs packages))
+        def-pairs  (keep (fn [d] (when (:name d) [(:namespace d) (:name d)]))
+                         (:fn-defs packages))
+        pair-dups (->> (concat base-pairs def-pairs)
+                       frequencies
+                       (keep (fn [[p c]] (when (> c 1) p)))
+                       vec)
+        base-name-dups (->> (map second base-pairs)
+                            frequencies
+                            (keep (fn [[n c]] (when (> c 1) n)))
+                            vec)]
+    (when (seq pair-dups)
+      (throw (ex-info (str "Colliding (namespace, name) pairs: "
+                           (pr-str pair-dups)
+                           " — the pair IS the deterministic fn-id; a "
+                           "duplicate silently overwrites the other row at sync.")
+                      {:type :packages/fn-name-collision
+                       :colliding-pairs pair-dups})))
+    (when (seq base-name-dups)
+      (throw (ex-info (str "Colliding BASE-FN names across namespaces: "
+                           (pr-str base-name-dups)
+                           " — the Clojure impls registry is name-keyed; "
+                           "base-fn names must stay globally unique.")
+                      {:type :packages/base-fn-name-collision
+                       :colliding-names base-name-dups})))))
+
+
+(defn register-base-fns-from-packages!
+  "Pure side-effects: sync namespaces, register type-aliases, register
+   base-fn impls in the global registry, sync base-fn rows to storage.
+   `extra-base-fns` is an optional map of `{fn-name → impl}` merged on
+   top of the package impls (test overrides). Returns
+   `{:ns-id-map :all-name->id :base-fns}` so callers can thread the
+   resolved name→id map into a subsequent
+   `sync-fn-entities-from-packages!` call.
+
+   Shared by the production `:exec/base-fns` integrant init-key and the
+   out-of-band `bootstrap-from-packages!` test helper."
+  ([storage packages]
+   (register-base-fns-from-packages! storage packages nil))
+  ([storage packages extra-base-fns]
+   ;; Fail loud BEFORE any DB write if a base-fn and a fn-def share a name.
+   (validate-no-name-collisions! packages)
+   (let [base-fn-defs (:base-fn-defs packages)
+         ;; Sync namespace entities first (creates ns hierarchy in DB)
+         ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
+                                         (:ns-descriptions packages))
+         ;; Full name→id map covering base-fns + composed fn-defs so
+         ;; either sync can resolve a reference into the other set.
+         all-name->id (compute-all-fn-name-ids packages)
+         ;; Map of {fn-name → impl} threaded through to `:exec/context`
+         ;; via integrant — sidesteps the process-global registry so
+         ;; concurrent test-scope start! calls can't race on the atom.
+         ;; `extra-base-fns` is merged on top of package impls. Same
+         ;; map is also pushed into the global registry for back-compat
+         ;; with direct `exec/get-base-fn` / REPL callers.
+         base-fns-map (merge (registry/compute-base-fns-map base-fn-defs)
+                             extra-base-fns)]
+     (registry/sync-primitives! storage)
+     ;; Register refinement type-aliases BEFORE base-fn rich-type
+     ;; recording so `:http-server :args {:port :port}` stores the
+     ;; structural `[:refine :int …]` form, not the bare keyword.
+     (register-type-aliases! (:fn-defs packages))
+     (doseq [[fn-name impl] base-fns-map]
+       (exec/register-base-fn! fn-name impl))
+     (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)
+     {:ns-id-map ns-id-map
+      :all-name->id all-name->id
+      :base-fns base-fns-map})))
+
+
+(defn- run-type-check-sweep!
+  "Topological-order type-check sweep across `expanded-fn-defs`.
+
+   - **Pass 1** isolates each fn-def's per-fn check; failures populate
+     the registry with whatever rich-type the partial run could
+     produce and get DEBUG-logged.
+   - **Pass 2/3** rebuilds caller-narrowings (Phase α') + ref-return
+     overrides (Phase #170) over the topologically-sorted list and
+     re-runs each fn-def with both bound — that fixpoint replaces
+     pass 1's isolation view; the FINAL failure set is what the
+     allowlist gates against.
+   - Sweep summary WARN runs when any fn-def failed (DEBUG-logged
+     per-fn).
+   - **Allowlist gate** — `types-check/allowed-type-check-failures`
+     enumerates the known-failing fn-defs (closed over time as the
+     type system gains expressiveness). Any failure NOT in the
+     allowlist is a regression; any allowlisted name that's NO LONGER
+     failing must be removed from the allowlist. Throws at sync time
+     so CI catches both. `skip-allowlist-gate?` opts a test bootstrap
+     out — useful when loading a SUBSET of production packages."
+  [expanded-fn-defs skip-allowlist-gate?]
+  (let [sorted (deps/topological-sort expanded-fn-defs)
+        failures (atom {})]
+    (doseq [fd sorted]
+      (try (types-check/check-fn-def! fd)
+           (catch Exception e
+             (swap! failures assoc (:name fd) (ex-message e))
+             (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                        (ex-message e)))))
+    (let [narrowings (types-narrowing/build-caller-narrowings sorted)
+          overrides  (types-narrowing/build-ref-return-overrides sorted)]
+      (reset! failures {})
+      (doseq [fd sorted]
+        (try (types-narrowing/check-fn-def-with-narrowings! fd narrowings overrides)
+             (catch Exception e
+               (swap! failures assoc (:name fd) (ex-message e))
+               (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                          (ex-message e))))))
+    (when (pos? (count @failures))
+      (log/warn "Type-check sweep: " (count @failures)
+                "fn-defs failed (DEBUG-logged) — runtime unaffected,"
+                " editor effect/return strips may be missing for those names —"
+                " docs/TYPE_CHECK_BACKLOG.md"))
+    (when-not skip-allowlist-gate?
+      (types-check/assert-sweep-failures-match-allowlist!
+        (set (keys @failures)) @failures))))
+
+
+(defn reconcile-moved-identities!
+  "ROOT FIX for the ghost-identity class (audit-4): a package fn's
+   deterministic id is `uuid-v5(ns-path, name)`, so moving it to
+   another namespace mints a NEW id — and, before this pass, silently
+   ABANDONED the old row with every pre-move ref still pointing at it
+   (the live-demo outage; three downstream rescues patched its
+   symptoms). Heal at the moment of the move instead:
+
+   After a package sync, an identity-plane `:fn` row is a MOVE
+   LEFTOVER when ALL hold:
+   - it has a name and its id equals its OWN deterministic derivation
+     (`records/fn-id(row-ns-path, name)`) — i.e. it is a
+     package-world row, never an editor-created one (random ids are
+     NEVER touched);
+   - it is NOT in the just-synced record set;
+   - its ns-path's root segment belongs to a package being synced
+     (partial test bundles must not judge other packages' rows);
+   - EXACTLY ONE just-synced fn carries the same bare name (the
+     unambiguous move target; 0 candidates = genuine package
+     removal, >1 = ambiguous — both logged and left alone).
+
+   For each leftover: repoint every ref (identity + all branch
+   version rows, in place) at the new id, purge the ghost's own
+   subgraph, and drop its registry entry. Runs BEFORE the
+   compiled-registry build, so there is nothing stale to invalidate."
+  [storage packages synced-fn-rows]
+  (let [base (idrepair/base-of storage)
+        package-roots (into #{} (map :name) (:packages packages))
+        synced-ids (into #{} (keep :id) synced-fn-rows)
+        synced-by-name (group-by :name (filter :name synced-fn-rows))
+        ns-rows (sp/query-entities base :ns {})
+        ns-by-id (into {} (map (juxt :id identity)) ns-rows)
+        ns-path (fn ns-path
+                  [nsid]
+                  (when-let [r (ns-by-id nsid)]
+                    (if-let [p (:parent-id r)]
+                      (str (ns-path p) "." (:name r))
+                      (:name r))))
+        leftovers
+        (for [row (sp/query-entities base :fn {})
+              :when (and (:name row)
+                         ;; Synthetic anon rows can never be an authored
+                         ;; MOVE: their name embeds a shape+use-site hash,
+                         ;; so a vanished shape has 0 same-name candidates
+                         ;; by construction — scanning them only floods
+                         ;; the leftover log (hundreds per reduced-set
+                         ;; test bootstrap).
+                         (nil? (:anonymous-hash row))
+                         (not (str/starts-with? (:name row) "_anon-"))
+                         (not (contains? synced-ids (:id row))))
+              :let [path (some-> (:namespace-id row) ns-path)
+                    root (some-> path (str/split #"\.") first)]
+              :when (and path
+                         (contains? package-roots root)
+                         (= (:id row)
+                            (records/fn-id path (keyword (:name row)))))]
+          row)]
+    (doseq [row leftovers]
+      (let [candidates (get synced-by-name (:name row))]
+        (if (= 1 (count candidates))
+          (let [new-id (:id (first candidates))]
+            (log/info "reconciling moved package identity"
+                      {:name (:name row) :from (:id row) :to new-id})
+            (idrepair/repoint-refs! storage {(:id row) new-id})
+            (idrepair/purge-fn-subgraph! storage (:id row))
+            (registry-core/unregister-rich-type! (keyword (:name row))
+                                                 (:id row)))
+          (if (empty? candidates)
+            ;; A 0-candidate leftover is a genuine REMOVAL (or a
+            ;; reduced-set test sync) — expected, the author's call,
+            ;; never a move. debug, not operator-warn.
+            (log/debug "package identity leftover: removed from package"
+                       {:name (:name row) :id (:id row)})
+            ;; >1 same-name candidates — a move we cannot resolve
+            ;; safely. THE signal this reconciler exists for.
+            (log/warn "package identity leftover NOT auto-reconciled"
+                      {:name (:name row) :id (:id row)
+                       :reason :ambiguous-move-target
+                       :candidates (count candidates)})))))
+    (count leftovers)))
+
+
+(defn sync-fn-entities-from-packages!
+  "Pure side-effects: sync composed fn-defs to storage, snapshot their
+   rich-types, run a topological-order type-check sweep. Returns the
+   created fn-rows. `base-fns-info` is the result of
+   `register-base-fns-from-packages!` — its `:ns-id-map` and
+   `:all-name->id` are forwarded to the compose layer so cross-set
+   references (base-fn `:return-type` naming a fn-def-declared type-row)
+   resolve.
+
+   Shared by the production `:exec/fn-entities` integrant init-key and
+   the out-of-band `bootstrap-from-packages!` test helper.
+
+   `:skip-type-check?` — when truthy, runs only the storage-sync +
+   seed-rich-types passes; skips the heavy topological type-check
+   sweep at the end. Tests that don't exercise the type-API
+   endpoints can opt in to save ~15 s of bootstrap per ns. The
+   editor type strips / `/api/types/*` endpoints depend on the
+   sweep, so production NEVER skips."
+  ([storage packages base-fns-info]
+   (sync-fn-entities-from-packages! storage packages base-fns-info nil))
+  ([storage packages base-fns-info
+    {:keys [skip-type-check? skip-allowlist-gate?]}]
+   (let [fn-defs (:fn-defs packages)
+         ns-id-map (or (:ns-id-map base-fns-info) {})
+         extra-name->id (or (:all-name->id base-fns-info) {})
+         ;; Hand the base-fn defs into the composed-fn sync so the slot
+         ;; resolver sees their `:args` declarations — without these,
+         ;; bindings on slots owned by base-fns wouldn't resolve.
+         extra-defs (into {}
+                          (keep (fn [[fn-name fn-def]]
+                                  (when fn-name
+                                    [fn-name (assoc fn-def :name fn-name)])))
+                          (:base-fn-defs packages))
+         fns (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
+                                                  extra-name->id extra-defs)
+         ;; ROOT FIX (audit-4): heal namespace-moved package
+         ;; identities at the moment of the move — see the fn
+         ;; docstring. Before the seed/sweep so registry + compile
+         ;; only ever see the healed graph.
+         _ (reconcile-moved-identities! storage packages fns)]
+     ;; Snapshot composed fn-defs into the in-memory rich-type registry
+     ;; so the editor's `:effects` strip and arg-type hints can resolve
+     ;; their declared shape. Two passes:
+     ;;
+     ;; 1. Seed each fn-def's declared shape (return + args + declared
+     ;;    `:effects`). Without this, `check-all-defs!` would fail to
+     ;;    resolve refs to peer fn-defs whose entries don't exist yet.
+     ;; 2. Run the full type-checker so `:effects` propagate transitively
+     ;;    through every parent + ref edge — that's what powers the
+     ;;    editor's effects-strip showing the union of every category
+     ;;    a fn-def TRANSITIVELY pulls in. Wrap in try/catch: a single
+     ;;    fn-def's type-mismatch shouldn't block server startup.
+     ;; Refinement aliases are registered earlier in `:exec/base-fns` so
+     ;; base-fn arg types (`:port`, `:user-port`, …) resolve to their
+     ;; structural form during the base-fn rich-type pass.
+     ;; record-rich-types! validates arg `:type` declarations — those
+     ;; only exist on base-fn-style fn-defs (rare here; composed fn-defs
+     ;; use `:args` for parent BINDINGS, not declarations). Try-each so a
+     ;; few mis-shaped entries don't kill the seed pass; check-all-defs!
+     ;; below recovers the proper computed types via type-inference anyway.
+     (doseq [fd fn-defs]
+       (when-let [fn-name (:name fd)]
+         (try (registry-core/record-rich-types! fn-name fd)
+              (catch Exception e
+                ;; Mis-shaped entries are recoverable by the type-check
+                ;; sweep below — don't block startup, but DEBUG-log so
+                ;; the per-fn cause is available when chasing a
+                ;; downstream sweep failure.
+                (log/debug e "Seed-pass record-rich-types! failed for"
+                           fn-name)))))
+     ;; Type-check in dependency (topological) order: every fn-def is
+     ;; checked AFTER the parents and refs it reads, so a SINGLE sweep
+     ;; reaches the fixpoint — `check-fn-def!` always sees its
+     ;; dependencies' final rich-types, never a stale seed. This is
+     ;; what eliminates the order-dependent under-convergence a fixed
+     ;; pass count over arbitrary order suffered (a deep chain it
+     ;; couldn't propagate, leaving composed fn-defs absent or
+     ;; mis-typed). A fn-def that throws here is genuinely absent from
+     ;; the rich-type registry — the editor would miss its effect strip
+     ;; / computed return — so the per-failure detail is logged at
+     ;; DEBUG and a single summary WARN runs at the end. Per-fn-def
+     ;; WARNs were too noisy in prod startup logs (~22 baseline
+     ;; entries from `:router-result` / `:merge-in` / friends whose
+     ;; producer-of-callable shape the typchecker can't unify yet —
+     ;; runtime behaviour is correct, the editor just doesn't get a
+     ;; computed return-type for those slots). DEBUG keeps the signal
+     ;; available; the summary count makes regressions visible.
+     ;; Inline `{:parent :X :args …}` anon fn-defs appear in arg-binding
+     ;; position throughout `branches/`, `secrets/`, and `execution/`
+     ;; packages. The parser's storage-sync pass lifts each into a
+     ;; synthetic named `_anon-<hash>` fn-def — so storage / runtime
+     ;; see the expanded form — but the type-check sweep reads the
+     ;; ORIGINAL EDN, which still carries the literal map. Without
+     ;; pre-expansion the sweep classifies each inline anon as a
+     ;; record-type literal and fails 20+ bindings against slots that
+     ;; expect the parent's structural return type (eg. `:ref` against
+     ;; `[:union :null :text]`, `:string` against predicates).
+     ;;
+     ;; Run the same `expand-inline-anons-in-module` pass on the
+     ;; type-check input so the sweep sees the synthetic refs.
+     (let [expanded-fn-defs (records-parse/expand-inline-anons-in-module fn-defs)]
+       ;; Re-seed rich-types so synthetic anons get a registry entry too.
+       (doseq [fd expanded-fn-defs]
+         (when-let [fn-name (:name fd)]
+           (try (registry-core/record-rich-types! fn-name fd)
+                (catch Exception e
+                  (log/debug e "Re-seed record-rich-types! failed for" fn-name)))))
+       (when-not skip-type-check?
+         (run-type-check-sweep! expanded-fn-defs skip-allowlist-gate?)
+         ;; Port-collision scan — runs against the expanded fn-def
+         ;; set so synthetic anons that bind `:port` get inspected
+         ;; too. Logs a WARN per colliding port; doesn't fail
+         ;; bootstrap because the OS still tells the truth at
+         ;; reconcile time. Catches admin-misconfig (two web-server
+         ;; fn-defs both bound to :port 8080) BEFORE any service is
+         ;; even created — earlier than `:start-failed-at`.
+         (port-check/warn-on-collisions! expanded-fn-defs)))
+     fns)))
+
+
+;; =============================================================================
+;; Test-friendly bootstrap (out-of-band)
+;; =============================================================================
+;;
+;; Replicates the `:exec/base-fns` + `:exec/fn-entities` init-key chain
+;; without integrant. Tests that exercise graph-level handlers
+;; (`/api/entities/*` via `:process-create-entity` &c.) call this once
+;; from a `:once` fixture to populate storage + registry + type-aliases.
+;;
+;; Returns `{:ns-id-map :all-name->id :base-fns :fn-rows}` so callers
+;; can resolve fn-ids by name without re-querying storage.
+
+(defn bootstrap-from-packages!
+  "Bootstrap `storage` from the named `package-names` (default
+   [\"core\" \"web\"]). Calls the same `register-base-fns-from-packages!`
+   + `sync-fn-entities-from-packages!` helpers the production
+   `:exec/base-fns` + `:exec/fn-entities` init-keys use, so any drift
+   between bootstrap and production stays localized to those two
+   helpers. Safe to call once per test JVM lifetime against a clean
+   storage. Idempotent against the global type-alias / base-fn-impl
+   registries (re-registers them)."
+  ([storage]
+   (bootstrap-from-packages! storage ["core" "web"] nil))
+  ([storage package-names]
+   (bootstrap-from-packages! storage package-names nil))
+  ([storage package-names opts]
+   (let [packages (pkg/load-packages package-names)
+         base-fns-info (register-base-fns-from-packages! storage packages)
+         fns (sync-fn-entities-from-packages! storage packages base-fns-info opts)]
+     (assoc base-fns-info :fn-rows fns))))

@@ -26,8 +26,8 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys]))
+    [graphden.packages.sync :as pkg-sync]
+    [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -38,10 +38,10 @@
     (try
       ;; Sweep ON, allowlist gate ON — an un-allowlisted type-check
       ;; failure anywhere in the superset throws here.
-      (sys/bootstrap-from-packages! storage
-                                    ["core" "storage" "web" "app"
-                                     "tenancy-admin"]
-                                    {:skip-type-check? false})
+      (pkg-sync/bootstrap-from-packages! storage
+                                         ["core" "storage" "web" "app"
+                                          "tenancy-admin"]
+                                         {:skip-type-check? false})
       (let [ctx (exec/create-context {:storage storage})]
         ;; Eager compile of EVERY fn — the production
         ;; `:exec/compiled-registry` path. Ambiguous lambda-params,

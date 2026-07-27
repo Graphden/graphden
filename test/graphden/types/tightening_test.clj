@@ -35,7 +35,7 @@
   []
   (types/clear-aliases!)
   (let [register-type-aliases!
-        @(requiring-resolve 'graphden.system.core/register-type-aliases!)]
+        @(requiring-resolve 'graphden.packages.sync/register-type-aliases!)]
     (register-type-aliases! (:fn-defs loaded))))
 
 

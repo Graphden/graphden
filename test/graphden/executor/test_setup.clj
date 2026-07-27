@@ -16,6 +16,7 @@
     [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -27,7 +28,6 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.system.core :as sys]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.test-infra.shared-container :as sc]
     [graphden.versioning.storage.core :as vs])
@@ -382,8 +382,8 @@
    ;; (compile, execute, lazy semantics, branch routing) doesn't
    ;; depend on the sweep — `record-rich-types!`'s seed pass is
    ;; enough for compile-eager's `ref-produces-callable?`.
-   (let [bootstrap (sys/bootstrap-from-packages! storage package-names
-                                                 {:skip-type-check? true})
+   (let [bootstrap (pkg-sync/bootstrap-from-packages! storage package-names
+                                                      {:skip-type-check? true})
          ctx (exec/create-context {:storage storage})]
      (cr/rebuild! ctx)
      (assoc bootstrap :storage storage :ctx ctx))))

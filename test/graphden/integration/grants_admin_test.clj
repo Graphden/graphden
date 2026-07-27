@@ -21,9 +21,9 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
-    [graphden.system.core :as sys]
     [graphden.system.tenancy-router :as tr]))
 
 
@@ -45,8 +45,8 @@
              ;; `tenancy-admin` set (faas_app bootstraps it with type-check OFF),
              ;; so a cached snapshot would have no sibling to amortize against —
              ;; it'd pay an extra golden-clone + sweep for nothing. Sweep inline.
-             _ (sys/bootstrap-from-packages! storage ["core" "web" "app" "tenancy-admin"]
-                                             {:skip-type-check? false})
+             _ (pkg-sync/bootstrap-from-packages! storage ["core" "web" "app" "tenancy-admin"]
+                                                  {:skip-type-check? false})
              ctx (exec/create-context
                    {:storage storage
                     :auth-provider (auth/single-token-provider test-auth-token)})

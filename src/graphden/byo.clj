@@ -27,10 +27,10 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as pkg]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.remote.core :as remote]
     [graphden.storage.remote.sse :as remote-sse]
-    [graphden.system.core :as sys]
     [graphden.tenancy.context :as tc]
     [org.httpkit.server :as hk]))
 
@@ -59,7 +59,7 @@
   [packages extra-base-fns]
   (let [base-fns-map (merge (registry/compute-base-fns-map (:base-fn-defs packages))
                             extra-base-fns)]
-    (sys/register-type-aliases! (:fn-defs packages))
+    (pkg-sync/register-type-aliases! (:fn-defs packages))
     (doseq [[fn-name impl] base-fns-map]
       (exec/register-base-fn! fn-name impl))
     base-fns-map))

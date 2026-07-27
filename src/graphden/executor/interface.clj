@@ -171,7 +171,7 @@
    `f` to a thread-local atom, leaving the process-global
    `rich-types-registry` untouched. Use on ns'es that BOOTSTRAP
    their own packages (e.g. integration tests calling
-   `sys/bootstrap-from-packages!`), so a contaminator entry from
+   `graphden.packages.sync/bootstrap-from-packages!`), so a contaminator entry from
    a sibling NS-thread can't crash compile-eager mid-test.
 
    Earlier symptom (without this fixture, or with the prior

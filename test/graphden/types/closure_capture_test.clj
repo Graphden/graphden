@@ -558,7 +558,7 @@
     ;; `record-rich-types!` walks base-fn arg-specs — otherwise a
     ;; base-fn whose `:type` is an alias keyword like `[:list
     ;; :path-segment]` trips `validate-arg-type!`.
-    ((requiring-resolve 'graphden.system.core/register-type-aliases!) fn-defs)
+    ((requiring-resolve 'graphden.packages.sync/register-type-aliases!) fn-defs)
     (registry/register-base-fns! base-fn-defs)
     (doseq [[nm fd] base-fn-defs]
       (registry/record-rich-types! nm fd))

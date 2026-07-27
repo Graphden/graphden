@@ -14,6 +14,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -26,7 +27,6 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
-    [graphden.system.core :as sys]
     [graphden.system.tenancy-router :as tr]
     [graphden.tenancy.app-router :as app]
     [graphden.tenancy.auth :as tauth]
@@ -92,7 +92,7 @@
              ;; seam, §6) — it carries the grants panel + `:list-grants` /
              ;; `:tenancy-router`, which moved out of core `app`. Bootstrapped
              ;; here because this fixture IS the addon-active harness.
-             _ (sys/bootstrap-from-packages! storage ["core" "web" "app" "tenancy-admin"] {:skip-type-check? true})
+             _ (pkg-sync/bootstrap-from-packages! storage ["core" "web" "app" "tenancy-admin"] {:skip-type-check? true})
              ;; Mirror prod's ctx shape (§4 Design B): the privileged
              ;; structural-read storage so the registry compiles org-agnostically
              ;; (every org's fns), with isolation held at runtime by `:storage`.

@@ -1,5 +1,5 @@
 (ns graphden.system.moved-identity-test
-  "The sync-time ghost reconciler (`sys/reconcile-moved-identities!`)
+  "The sync-time ghost reconciler (`pkg-sync/reconcile-moved-identities!`)
    — the ROOT fix for the namespace-move ghost class. Storage is
    seeded as the POST-round-2-sync state: the old deterministic-id
    row (round 1, ns `pkga.mail`) survives with a ref still pointing
@@ -12,8 +12,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys]
     [graphden.versioning.identity-repair :as ir])
   (:import
     (java.time
@@ -73,7 +73,7 @@
                                           :name "hand-made"
                                           :namespace-id (:id mail)
                                           :parent-ids []})
-            n (sys/reconcile-moved-identities!
+            n (pkg-sync/reconcile-moved-identities!
                 storage
                 {:packages [{:name "pkga"}]}
                 [new-row])]
@@ -102,7 +102,7 @@
                                 {:id removed-id :name "gone-fn"
                                  :namespace-id (:id m1)
                                  :parent-ids []})
-            n (sys/reconcile-moved-identities!
+            n (pkg-sync/reconcile-moved-identities!
                 storage {:packages [{:name "pkgb"}]} [])]
         (is (= 1 n) "counted as a leftover")
         (is (some? (sp/read-entity storage :fn removed-id))

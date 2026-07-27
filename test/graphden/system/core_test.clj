@@ -8,9 +8,15 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.composition.interface :as fn-composition]
+    [graphden.packages.sync]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
+    ;; `graphden.system.core` still required for its `defmethod` side
+    ;; effects — it loads the `:exec/fn-entities` + `:exec/service-
+    ;; reconciler` init-keys these tests drive via `ig/init-key`.
     [graphden.system.core]
+    [graphden.system.init.cleanup]
+    [graphden.system.init.exec]
     [integrant.core :as ig]))
 
 
@@ -116,7 +122,7 @@
                   ;; identity reconciler's identity-plane reads —
                   ;; no-op it (its own behavior is covered by
                   ;; graphden.system.moved-identity-test).
-                  graphden.system.core/reconcile-moved-identities!
+                  graphden.packages.sync/reconcile-moved-identities!
                   (fn [& _] 0)]
       (let [storage :mock-storage
             packages {:fn-defs [{:name :test-fn :parent :const}
@@ -134,7 +140,7 @@
 
   (testing "init-key handles empty fn-defs"
     (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns
-                  graphden.system.core/reconcile-moved-identities!
+                  graphden.packages.sync/reconcile-moved-identities!
                   (fn [& _] 0)]
       (let [opts {:storage :mock :packages {:fn-defs []}
                   :skip-allowlist-gate? true}
@@ -150,7 +156,7 @@
 ;; =============================================================================
 
 (deftest env-truthy?-test
-  (let [env-truthy? graphden.system.core/env-truthy?]
+  (let [env-truthy? graphden.system.init.exec/env-truthy?]
     (testing "boolean true / false / nil"
       (is (true?  (env-truthy? true)))
       (is (false? (env-truthy? false)))
@@ -175,7 +181,7 @@
 
 
 (deftest as-instant-test
-  (let [as-instant @#'graphden.system.core/as-instant
+  (let [as-instant @#'graphden.system.init.cleanup/as-instant
         target (java.time.Instant/parse "2026-05-21T12:00:00Z")]
     (testing "nil → nil"
       (is (nil? (as-instant nil))))
@@ -212,7 +218,7 @@
                     :fn-defs [{:name "my-composed" :namespace 'app.y}
                               {:name nil :namespace 'app.skip}
                               {:name "other-composed" :namespace 'core.z}]}
-          result (graphden.system.core/compute-all-fn-name-ids packages)]
+          result (graphden.packages.sync/compute-all-fn-name-ids packages)]
       (is (= 3 (count result))
           "1 base + 2 named fn-defs (nil-name fn-def skipped)")
       (is (every? uuid? (vals result))
@@ -223,12 +229,12 @@
 
   (testing "deterministic — same input → same UUIDs across calls"
     (let [packages {:base-fn-defs {} :fn-defs [{:name "x" :namespace 'a}]}
-          r1 (graphden.system.core/compute-all-fn-name-ids packages)
-          r2 (graphden.system.core/compute-all-fn-name-ids packages)]
+          r1 (graphden.packages.sync/compute-all-fn-name-ids packages)
+          r2 (graphden.packages.sync/compute-all-fn-name-ids packages)]
       (is (= r1 r2))))
 
   (testing "empty input → empty map"
-    (is (= {} (graphden.system.core/compute-all-fn-name-ids
+    (is (= {} (graphden.packages.sync/compute-all-fn-name-ids
                 {:base-fn-defs {} :fn-defs []})))))
 
 
@@ -237,7 +243,7 @@
   ;; per-(namespace, name) — the pair IS the deterministic fn-id —
   ;; plus bare-name uniqueness for BASE-FNS only (the Clojure impls
   ;; registry is name-keyed).
-  (let [check @#'graphden.system.core/validate-no-name-collisions!]
+  (let [check @#'graphden.packages.sync/validate-no-name-collisions!]
     (testing "distinct base-fn + fn-def names pass"
       (is (nil? (check {:base-fn-defs {:foo {:namespace "a"}}
                         :fn-defs [{:name :bar :namespace "a"}

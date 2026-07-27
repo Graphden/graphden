@@ -37,6 +37,7 @@
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.authz :as authz]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.demo-gc :as demo-gc]
     [graphden.tenancy.deploy :as deploy]
     [graphden.tenancy.domain :as domain]
     [graphden.tenancy.domain-schema :as domain-schema]
@@ -102,6 +103,19 @@
   (rls/verify-rls-enforcement! (:pool storage)
                                (= "true" (System/getenv "GRAPHDEN_STRICT_RLS")))
   :enabled)
+
+
+(defmethod ig/init-key :tenancy/demo-gc [_ {:keys [storage period-ms]}]
+  ;; Ephemeral-org reaper (task #7): periodically hard-purge orgs whose
+  ;; `:expires-at` has passed. Depends on `:db/postgres` (same `:pool` the RLS
+  ;; enabler uses for raw DDL); a NULL `:expires-at` is never selected, so real
+  ;; tenants + the public org are untouched. Default period one hour, matching
+  ;; `:exec/cleanup-scheduler`.
+  (demo-gc/start-reaper! (:pool storage) (or period-ms (* 60 60 1000))))
+
+
+(defmethod ig/halt-key! :tenancy/demo-gc [_ scheduler]
+  (demo-gc/stop-reaper! scheduler))
 
 
 (defmethod ig/init-key :tenancy/router-install [_ {:keys [context]}]

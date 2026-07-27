@@ -212,6 +212,16 @@
 ;;                  :app-router #ig/ref :tenancy/app-router
 ;;                  :request-scope #ig/ref :tenancy/request-scope}
 ;;
+;; EPHEMERAL-ORG GC (§7 — demo / trial lifecycle) — for a deployment that
+;; provisions throwaway demo orgs (an `:org` row with `:expires-at` = now+TTL),
+;; add the reaper so their data doesn't accumulate. It hard-purges every org
+;; whose `:expires-at` has passed — the org row + all its graph rows — and
+;; NEVER touches a permanent org (`:expires-at` NULL: real tenants + public).
+;; Requires the :org schema spliced (see the PERSISTENT grants block above).
+;; Opt-in, a background cleanup scheduler like :tenancy/session-cleanup:
+;;   :tenancy/demo-gc {:storage #ig/ref :db/postgres}   ; default period 1h
+;;   ;; :period-ms <ms> to tune the sweep cadence.
+;;
 ;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
 ;; fns-channel seam — append to :app/packages without restating the core
 ;; list, so they load ONLY when the addon is active:

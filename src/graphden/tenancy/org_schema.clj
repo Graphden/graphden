@@ -17,6 +17,13 @@
                        platform-managed (tenant-forbidden), so provisioning
                        code sets it, and staying text avoids enum registration
                        through the addon schema seam.
+   - `plan`          — the org's tier slug (task #4); resolves to the effect
+                       allow-list + quota ceilings its graph runs under. nil =
+                       the locked free tier. Text, same platform-managed reason.
+   - `expires-at`    — ephemeral-org expiry (task #7). A demo / trial org sets
+                       `now + TTL`; the `:tenancy/demo-gc` reaper hard-purges the
+                       org + all its rows once it passes. nil = permanent (real
+                       tenants + the public org are never reaped).
 
    Platform-managed: `:org` is in `tenancy.storage/tenant-forbidden-entities`,
    so tenants never read or write the registry directly — they reach their org
@@ -47,6 +54,10 @@
   #uuid "e4a7c012-9b3d-4f81-a6c5-2d8e0f1b73a9")
 
 
+(def ^:private org-expires-at-field-uuid
+  #uuid "8f2b6d10-4e73-4a91-b5c8-1f9a0d3e6c27")
+
+
 (defn extend-builder
   "Add the `:org` entity — `(name, handler-fn-id, execution-mode)` with a
    UNIQUE name."
@@ -67,5 +78,13 @@
                       ;; platform-managed reason as :execution-mode above.
                       :plan {:uuid org-plan-field-uuid
                              :type :text
-                             :nullable? true}})
+                             :nullable? true}
+                      ;; Ephemeral-org expiry (task #7). A demo / trial org sets
+                      ;; this to `now + TTL`; the `:tenancy/demo-gc` reaper hard-
+                      ;; purges the org and ALL its rows once it passes. nil (the
+                      ;; default) = a permanent org, never reaped — so real
+                      ;; tenants and the public org are untouched.
+                      :expires-at {:uuid org-expires-at-field-uuid
+                                   :type :timestamptz
+                                   :nullable? true}})
       (ds/add-constraint :org {:type :unique :fields [:name]})))

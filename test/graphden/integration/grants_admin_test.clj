@@ -3,7 +3,7 @@
 
    The grants panel lives in the addon-only `tenancy-admin` package, compiled
    into `:tenancy-router` and installed into the tenancy-routing singleton
-   (`graphden.system.tenancy-router/active-router`); `br/dispatch` consults it
+   (the `graphden.system.route-collection` seam); `br/dispatch` consults it
    INSIDE its request-scope. Runs in PARALLEL: it mutates the tenancy-router
    singleton, but the parallel plugin isolates `*active-router-override*` (and
    rich-types) per thread, so a sibling never sees that
@@ -24,7 +24,7 @@
     [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
-    [graphden.system.tenancy-router :as tr]))
+    [graphden.system.route-collection :as rc]))
 
 
 (def ^:dynamic *router* nil)
@@ -55,13 +55,13 @@
          (try
            (binding [*router* router *ctx* ctx] (t))
            (finally
-             (tr/clear-active-router!)   ; never leak the singleton to sibling NSs
+             (rc/remove-router! :tenancy)   ; never leak the singleton to sibling NSs
              (sp/close storage)))))))
 
 
 (defn- install-tenancy-router!
   []
-  (tr/set-active-router! (cr/execute-by-name *ctx* "tenancy-router" {})))
+  (rc/install-router! :tenancy (cr/execute-by-name *ctx* "tenancy-router" {})))
 
 
 (defn- get-grants-admin
@@ -76,7 +76,7 @@
 
 
 (deftest grants-route-absent-without-the-addon-router
-  (tr/clear-active-router!)
+  (rc/remove-router! :tenancy)
   (testing "no tenancy router installed → the seam falls through; core has no
             grants route → 404. The single-tenant default has no grants panel."
     (is (= 404 (:status (get-grants-admin))))))
@@ -95,7 +95,7 @@
         (testing "the panel shell still renders"
           (is (str/includes? (:body resp) "grants-admin"))
           (is (str/includes? (:body resp) "Grants")))))
-    (finally (tr/clear-active-router!))))
+    (finally (rc/remove-router! :tenancy))))
 
 
 (deftest grants-admin-requires-auth
@@ -103,4 +103,4 @@
   (try
     (testing "no Bearer → 401 (auth-required route, served by the seam)"
       (is (= 401 (:status (get-grants-admin {})))))
-    (finally (tr/clear-active-router!))))
+    (finally (rc/remove-router! :tenancy))))

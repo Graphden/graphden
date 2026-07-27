@@ -27,7 +27,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
-    [graphden.system.tenancy-router :as tr]
+    [graphden.system.route-collection :as rc]
     [graphden.tenancy.app-router :as app]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
@@ -245,17 +245,17 @@
   ;; covered by `graphden.integration.grants-admin-test`, which is `^:serial`).
   (let [router (cr/execute-by-name *ctx* "tenancy-router" {})]
     (testing "a migrated control-plane path is served by the router"
-      (let [resp (tr/dispatch router {:request-method :get :uri "/partials/grants-admin"})]
+      (let [resp (rc/dispatch router {:request-method :get :uri "/partials/grants-admin"})]
         ;; Matched → a Ring response (200 if authed, 401 from the route's
         ;; auth-required middleware otherwise — either way NON-nil, so the
         ;; seam serves it and does NOT fall through to the main router).
         (is (some? resp) "tenancy router matched /partials/grants-admin")
         (is (integer? (:status resp)) "produced a Ring response")))
     (testing "a non-control-plane path returns nil → fall through to the main router"
-      (is (nil? (tr/dispatch router {:request-method :get :uri "/health"})))
-      (is (nil? (tr/dispatch router {:request-method :get :uri "/api/graph/layout"}))))
+      (is (nil? (rc/dispatch router {:request-method :get :uri "/health"})))
+      (is (nil? (rc/dispatch router {:request-method :get :uri "/api/graph/layout"}))))
     (testing "a nil router (addon absent) → nil (transparent pass-through)"
-      (is (nil? (tr/dispatch nil {:request-method :get :uri "/partials/grants-admin"}))))))
+      (is (nil? (rc/dispatch nil {:request-method :get :uri "/partials/grants-admin"}))))))
 
 
 (deftest grants-panel-is-org-gated

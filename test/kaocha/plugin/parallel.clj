@@ -95,7 +95,7 @@
 ;;     tests don't touch it.
 ;;   - `executor_runtime.core/system` — production singleton.
 ;;
-;;   (`branch-router` + `tenancy-router` active-router are NOT in this
+;;   (`branch-router` active-router + the `route-collection` are NOT in this
 ;;   "tests don't touch" set — `smoke-pass-test` / `grants-admin-test`
 ;;   set them mid-run — so they're isolated below via
 ;;   `*active-router-override*`.)
@@ -155,7 +155,7 @@
     ;; post-merge `fn-by-name` then returns nil). Seeded to `nil` so each
     ;; thread starts router-less and falls back to its own request ctx.
     graphden.system.branch-router/*active-router-override*
-    graphden.system.tenancy-router/*active-router-override*
+    graphden.system.route-collection/*active-collection-override*
     ;; The byo-mode memo. Without isolation a sibling NS-thread caching an org
     ;; as byo (or hosted) leaks into another test that reuses the org name
     ;; (`acme`/`beta`) — e.g. subdomain-test's request-scope 421s an apex
@@ -182,8 +182,8 @@
     graphden.system.branch-router/active-router-isolation-seed
     graphden.system.branch-router/*epoch-state-override*
     graphden.system.branch-router/epoch-state-seed
-    graphden.system.tenancy-router/*active-router-override*
-    graphden.system.tenancy-router/active-router-isolation-seed})
+    graphden.system.route-collection/*active-collection-override*
+    graphden.system.route-collection/active-collection-isolation-seed})
 
 
 (defn- seed-for

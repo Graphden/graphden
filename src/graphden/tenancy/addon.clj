@@ -32,7 +32,7 @@
     [graphden.crud.type-check :as typecheck]
     [graphden.executor.compile-runtime :as cr]
     [graphden.system.api-routes-js :as api-routes-js]
-    [graphden.system.tenancy-router :as tr]
+    [graphden.system.route-collection :as rc]
     [graphden.tenancy.app-router :as app-router]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.authz :as authz]
@@ -122,28 +122,28 @@
   ;; Route-collection seam (PLATFORM_PLAN §6): build the addon's
   ;; control-plane router from its `:tenancy-routes` (the org-admin panels,
   ;; loaded via `:app/packages {:extra-package-names ["tenancy-admin"]}`)
-  ;; and install it into the JVM-wide tenancy-routing singleton. Depends on
-  ;; `:exec/context`, so it runs AFTER the compiled registry is built and
-  ;; `tenancy-router` exists. `graphden.system.branch-router/dispatch`
-  ;; consults the installed router INSIDE its request-scope, so the panels
-  ;; run under `*current-org*` (org-scoped reads). Absent addon → singleton
-  ;; stays nil and the dispatch is a transparent pass-through.
+  ;; and install it into the JVM-wide route collection under `:tenancy`.
+  ;; Depends on `:exec/context`, so it runs AFTER the compiled registry is
+  ;; built and `tenancy-router` exists. `graphden.system.branch-router/dispatch`
+  ;; consults every installed router INSIDE its request-scope, so the panels
+  ;; run under `*current-org*` (org-scoped reads). Absent addon → no `:tenancy`
+  ;; entry and the dispatch is a transparent pass-through.
   (log/info "Installing tenancy control-plane router...")
   (let [router (cr/execute-by-name context "tenancy-router" {})]
-    (tr/set-active-router! router)
+    (rc/install-router! :tenancy router)
     ;; Frontend half of the route-collection seam: contribute the addon's
     ;; `/api/*` routes to `window.API` so editor JS addresses them via
     ;; `window.API.<key>` (no hardcoded literals — the frontend auto-adapts to
-    ;; the addon's routing graph). Regenerate from core `:_router` ∪ the
-    ;; tenancy router; runs AFTER `:exec/api-routes-js-cache` (ig dependency in
-    ;; addon.edn) so the core-only cache doesn't overwrite this.
-    (api-routes-js/install-from-routers!
-      [(cr/execute-by-name context "_router" {}) router])
+    ;; the addon's routing graph). `rebuild-window-api!` regenerates from core
+    ;; `:_router` ∪ the WHOLE collection, so it composes with any other
+    ;; installed router (registry / mcp). Runs AFTER `:exec/api-routes-js-cache`
+    ;; (ig dependency in addon.edn) so the core-only cache doesn't overwrite it.
+    (api-routes-js/rebuild-window-api! (cr/execute-by-name context "_router" {}))
     :installed))
 
 
 (defmethod ig/halt-key! :tenancy/router-install [_ _]
-  (tr/clear-active-router!))
+  (rc/remove-router! :tenancy))
 
 
 (defmethod ig/init-key :tenancy/grant-schema [_ _]

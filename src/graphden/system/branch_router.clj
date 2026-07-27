@@ -26,7 +26,7 @@
     [graphden.executor.context :as ctx]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.tenancy-router :as tr]
+    [graphden.system.route-collection :as rc]
     [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as vmerge]
@@ -786,15 +786,16 @@
         (let [request-scope (:request-scope base-ctx)
               run (fn []
                     ;; Route-collection seam (PLATFORM_PLAN §2.1 / §6): consult
-                    ;; the tenancy control-plane router FIRST, INSIDE the
-                    ;; request-scope so `*current-org*` is bound — the org-admin
-                    ;; panels (grants/users/…) read org-scoped entities, so they
-                    ;; need the same org binding branch resolution does. A
-                    ;; matched control-plane path returns a response; no match
-                    ;; (or no addon installed → nil router) falls through to the
-                    ;; branch-resolution chain. Branch-agnostic by design: the
-                    ;; branch ref is irrelevant to org administration.
-                    (or (tr/dispatch (tr/current-router) request)
+                    ;; every installed fall-through router FIRST, INSIDE the
+                    ;; request-scope so `*current-org*` is bound — the tenancy
+                    ;; org-admin panels (grants/users/…) AND the optional
+                    ;; registry (`/api/packages/installed` reads org/branch-
+                    ;; scoped pins) need the same org binding branch resolution
+                    ;; does. A matched path returns a response; no match (or an
+                    ;; empty collection → no optional package installed) falls
+                    ;; through to the branch-resolution chain. Branch-agnostic
+                    ;; by design: the branch ref is irrelevant to these paths.
+                    (or (rc/dispatch-first request)
                         (let [branch-ref (extract-branch-ref request)
                               branch-id (resolve-branch-id router branch-ref)]
                           (if (and (some? branch-ref) (nil? branch-id))

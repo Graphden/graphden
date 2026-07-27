@@ -25,6 +25,7 @@
    validator that catches stale `/api/*` literals in editor JS."
   (:require
     [clojure.string :as str]
+    [graphden.system.route-collection :as rc]
     [reitit.core :as r]
     [reitit.ring :as ring]))
 
@@ -162,6 +163,17 @@
    and store it in the cache. Idempotent."
   [router]
   (install-from-routers! [router]))
+
+
+(defn rebuild-window-api!
+  "Rebuild `window.API` from `core-router` UNIONED with every router
+   currently installed in the route-collection (tenancy / registry /
+   mcp). Call after any `route-collection/install-router!` so the cache
+   reflects the FULL set — `install-from-routers!` resets (not appends),
+   so each installer must rebuild from the whole collection or the
+   last writer would drop the others' `/api/*` keys. Idempotent."
+  [core-router]
+  (install-from-routers! (cons core-router (vals (rc/current-collection)))))
 
 
 (defn install!

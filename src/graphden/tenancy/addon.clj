@@ -43,6 +43,7 @@
     [graphden.tenancy.grant :as grant]
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.org-schema :as org-schema]
+    [graphden.tenancy.plan :as plan]
     [graphden.tenancy.rls :as rls]
     [graphden.tenancy.storage :as ts]
     [graphden.tenancy.subdomain :as subdomain]
@@ -63,7 +64,21 @@
     ;; :view-impl grant. Closed over the same base storage + grant-store the
     ;; write guard uses. Whenever this tenancy storage is wired, the seam is on.
     (authz/install-view-impl-filter! grant-store base)
+    ;; Install the per-org effect allow-list resolver (task #4): a tenant's
+    ;; submitted graph runs under its plan's effects (free = locked, a paid
+    ;; tier widens it). `base` reads the tenant-forbidden `:org` row
+    ;; unrestricted, on the tenant's behalf.
+    (plan/install! base)
     (ts/org-scoped-storage base (or scoped-entities ts/default-scoped-entities) authorize-write)))
+
+
+(defmethod ig/halt-key! :org/scoped-storage [_ _]
+  ;; Clear the process-global seams this component installed, so they're
+  ;; lifecycle-bound: a stale filter/resolver (closed storage) can't survive
+  ;; into a later system — the cross-test leak that would otherwise let one
+  ;; namespace's addon boot break another's execute in the same JVM.
+  (authz/uninstall-view-impl-filter!)
+  (plan/uninstall!))
 
 
 (defmethod ig/init-key :tenancy/datasource-wrap [_ _]

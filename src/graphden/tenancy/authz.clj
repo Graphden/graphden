@@ -74,6 +74,14 @@
   (reset! entities/view-impl-filter (partial view-impl-filter store storage)))
 
 
+(defn uninstall-view-impl-filter!
+  "Clear the view-impl seam (→ everything visible). Called on tenancy-system
+   halt so the process-global filter is lifecycle-bound and can't leak a stale
+   storage into a later test in the same JVM."
+  []
+  (reset! entities/view-impl-filter nil))
+
+
 (defn writable?
   "May `principal` write the namespace `ns-id` resolves to, per grant
    `store`? nil principal / `:user` → denied."

@@ -43,6 +43,10 @@
   #uuid "71d581e2-cd84-4676-a320-b052e3f25187")
 
 
+(def ^:private org-plan-field-uuid
+  #uuid "e4a7c012-9b3d-4f81-a6c5-2d8e0f1b73a9")
+
+
 (defn extend-builder
   "Add the `:org` entity — `(name, handler-fn-id, execution-mode)` with a
    UNIQUE name."
@@ -55,5 +59,13 @@
                                       :nullable? true}
                       :execution-mode {:uuid org-execution-mode-field-uuid
                                        :type :text
-                                       :nullable? true}})
+                                       :nullable? true}
+                      ;; The org's PLAN / tier (task #4) — resolves to the
+                      ;; effect allow-list its submitted graph runs under (and
+                      ;; the quota ceilings enforced elsewhere). nil reads as
+                      ;; the locked free tier. Text, not an enum, for the same
+                      ;; platform-managed reason as :execution-mode above.
+                      :plan {:uuid org-plan-field-uuid
+                             :type :text
+                             :nullable? true}})
       (ds/add-constraint :org {:type :unique :fields [:name]})))

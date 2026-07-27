@@ -112,7 +112,11 @@
          ;; be gated. Public org ≡ platform / single-tenant → no restriction.
          exec-ctx (cond-> ctx
                     (not= (tc/current-org) tc/public-org)
-                    (assoc :allowed-effects cr/default-cloud-allowed-effects))
+                    ;; Per-org effect allow-list resolved from the org's plan
+                    ;; (task #4) — free stays locked, a paid tier widens it
+                    ;; (e.g. +:network). Falls back to the locked default when
+                    ;; no plan resolver is installed.
+                    (assoc :allowed-effects (cr/cloud-allowed-effects-for (tc/current-org))))
          fn-id (:id fn-row)
          fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
          ;; Cached: this call was ~1.3–1.9 s uncached and runs once per

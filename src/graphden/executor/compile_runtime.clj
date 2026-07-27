@@ -878,6 +878,32 @@
   (set/difference known-effects cloud-forbidden-effects))
 
 
+;; Seam: a `(fn [org] -> allowed-effects-set)` the tenancy addon installs to
+;; resolve a tenant's effect allow-list from its PLAN/tier (task #4) — e.g. a
+;; free org stays on `default-cloud-allowed-effects`, a paid org gets
+;; `:network` too. nil (no addon / single-tenant) or an unknown org → the
+;; locked default, so behaviour is unchanged until a plan widens it. (`defonce`
+;; takes no docstring; `defonce` so a namespace reload keeps the installed fn.)
+(defonce cloud-allowed-effects-resolver (atom nil))
+
+
+(defn cloud-allowed-effects-for
+  "The effect allow-list a tenant `org`'s submitted graph runs under —
+   resolved from its plan via the installed `cloud-allowed-effects-resolver`,
+   falling back to the locked `default-cloud-allowed-effects` when no resolver
+   is installed or it returns nil (free tier / no addon)."
+  [org]
+  (or (when-let [f @cloud-allowed-effects-resolver]
+        ;; Fail-SAFE + fail-SECURE: a resolver that throws (misconfigured, or a
+        ;; stale one left installed against a closed storage) must not crash
+        ;; every tenant execute, and the safe fallback is the LOCKED default —
+        ;; never accidentally widen a tenant's effects because plan lookup
+        ;; broke. In production the resolver is installed once against a live
+        ;; storage and never throws; this only guards against a bad install.
+        (try (f org) (catch Exception _ nil)))
+      default-cloud-allowed-effects))
+
+
 (def cloud-request-allowed-effects
   "The `*allowed-effects*` a TENANT HTTP REQUEST runs under at the handler
    level (bound by `tenancy.addon`). Broader than

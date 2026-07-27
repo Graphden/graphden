@@ -1,6 +1,7 @@
 (ns graphden.packages.web.http-client.impls
   "Outgoing HTTP client base function — http-kit client wrapper."
   (:require
+    [graphden.clients.egress :as egress]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [org.httpkit.client :as http]))
@@ -31,6 +32,14 @@
   "Shared get-impl shape — `headers` is the FINAL header map (already
    merged + stringified). Returns the record-shape response."
   [url headers timeout-ms]
+  ;; SSRF guard (task #5): for a RESTRICTED (tenant / cloud) execution only.
+  ;; `*allowed-effects*` is nil for the unrestricted platform ctx, so the
+  ;; platform's own outbound to internal services is never blocked; a tenant
+  ;; that reached here already holds :network (a paid tier — the effect gate
+  ;; blocks free tenants earlier). Reject a target resolving to a non-public /
+  ;; internal / cloud-metadata IP before dialing.
+  (when (some? cr/*allowed-effects*)
+    (egress/check-target! url))
   (let [resp @(http/get url {:headers (or headers {})
                              :timeout (or timeout-ms 10000)
                              :as :text})

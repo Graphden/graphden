@@ -1,0 +1,13 @@
+{:name "app-base"
+ :version "1.0.0"
+ :description "App-server foundation: the reitit route-building vocabulary (generic `:route` / `:route-with-middleware`, the per-method templates, and the auth-required presets) plus small shared response helpers (`:assoc-status`, health). Split out of `app` so consumers that only need the route templates — the tenancy addon, the registry — do not have to depend on the whole editor package."
+ ;; Only core (`:assoc` / `:list`) and web (`:auth-required-middleware`,
+ ;; response matrix) — deliberately NO `app` dependency, so this is a
+ ;; genuine lower layer `app` (and addons) build ON, not a relabel.
+ ;; The fn `:namespace`s stay `app.common` / `app.routes.method` /
+ ;; `app.routes.auth` unchanged: identity is `uuid-v5(namespace, name)`,
+ ;; so moving only the package DIRECTORY leaves every id + every ref
+ ;; resolution byte-identical — no remint, no `:post`/`:delete`
+ ;; collision-resolution change.
+ :dependencies ["core" "web"]
+ :modules ["common" "routes-method" "routes-auth"]}

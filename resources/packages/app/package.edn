@@ -4,8 +4,14 @@
  ;; `storage` is required because consumer fn-defs
  ;; (`:_list-services-rows`, …) query the DB via the direct
  ;; `:pg-query` + `:decode-row` primitives from the `storage/pg` module.
- :dependencies ["core" "web" "storage"]
- :modules ["common" "lookups" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "routes-auth" "mcp" "route-groups" "server"]
+ ;; `app-base` holds the route-building vocabulary (`:route`, the method
+ ;; + auth route templates, `app.common` helpers) this package's routes
+ ;; compose on — extracted so the tenancy addon / registry can reach
+ ;; them without depending on the whole editor. The fn `:namespace`s
+ ;; (`app.common` / `app.routes.*`) are unchanged, so app's own routes
+ ;; still resolve them by name exactly as before.
+ :dependencies ["core" "web" "storage" "app-base"]
+ :modules ["lookups" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "mcp" "route-groups" "server"]
  ;; `:per-pod` — every executor pod must bind its own HTTP port. A
  ;; `:singleton` listener would leave every pod but the advisory-lock
  ;; winner without a listener, so a load balancer would see one healthy

@@ -1,9 +1,12 @@
 {:name "tenancy-admin"
  :version "1.0.0"
  :description "Tenancy addon control-plane UI — org-admin panels served via the route-collection seam. Loaded ONLY when the addon is active (`:extra-package-names`); references the addon's `:grant`/`:org`/… entities, so its base-fns throw without the addon schema."
- ;; Depends on `app` for the route templates (`:get-auth-required`, `:post`)
- ;; and HTML primitives, on `web` for `:router-or-nil`, on `core` for the
- ;; hiccup/collection primitives. `app` does NOT depend on this package —
- ;; the dependency is one-way, so core syncs without the addon.
- :dependencies ["core" "web" "app"]
+ ;; Depends on `app-base` for the auth route templates
+ ;; (`:get-auth-required`, `:post`, `:post-route`, `:delete`) — its ONLY
+ ;; former reason to depend on `app`; on `web` for `:router-or-nil` +
+ ;; HTML/response primitives, on `core` for the hiccup/collection
+ ;; primitives. No dependency on the editor package `app` anymore, so the
+ ;; addon control-plane loads without pulling the editor UI. `app-base`
+ ;; does NOT depend on this package — the dependency stays one-way.
+ :dependencies ["core" "web" "app-base"]
  :modules ["grants" "users" "registration" "my-app" "auth" "router"]}

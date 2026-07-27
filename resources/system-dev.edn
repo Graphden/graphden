@@ -35,7 +35,7 @@
 
  ;; Load packages from resources/packages/
  :app/packages
- {:package-names ["core" "storage" "web" "app" "examples"]}
+ {:package-names ["core" "storage" "web" "app-base" "app" "examples"]}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned

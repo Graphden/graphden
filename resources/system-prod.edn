@@ -58,7 +58,7 @@
  ;; prod"); it ships 174 pedagogical fn-defs that bloat the prod
  ;; DB + namespace tree without serving any runtime feature.
  :app/packages
- {:package-names ["core" "storage" "web" "app"]}
+ {:package-names ["core" "storage" "web" "app-base" "app"]}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned

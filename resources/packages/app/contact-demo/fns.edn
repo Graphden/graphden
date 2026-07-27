@@ -15,6 +15,13 @@
 ;; "Wave at me" button demonstrates the `:dispatch-custom`
 ;; escape hatch — inline JS body evaluated on click with
 ;; `btn`, `event`, `host` in scope.
+;;
+;; DELIBERATELY in the `app` package (not `examples`): besides the demo,
+;; this is the canonical non-trivial app-namespace FIXTURE the distribution
+;; tests run against — export_test / registry_test publish/install/fork
+;; `app.contact-demo` via the core+web+app golden, the edit-packages-panel
+;; e2e publishes it, and contact-demo-smoke.js smokes this live route.
+;; See docs/PACKAGE_DISTRIBUTION.md § 15.1 ("Also deliberately kept…").
 
 
 {:namespace "app.contact-demo"

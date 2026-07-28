@@ -49,21 +49,22 @@ The shape lets composition happen entirely at the data layer: a
 composed fn is "a `parent-ids` plus zero or more bindings on the
 inherited slots." No runtime arg injection.
 
-**Example: an `add-10` that pre-fills the first number:**
+**Example: an `add-10` that seeds the number list with `10`:**
 
 ```
-fn add  (base-fn, parent-ids: [], return-type-fn-id: int)
-slot s-a  (name: "a", type-fn-id: int)
-slot s-b  (name: "b", type-fn-id: int)
-fn-slot {fn-id: add, slot-id: s-a, position: 0}
-fn-slot {fn-id: add, slot-id: s-b, position: 1}
+fn add  (base-fn, parent-ids: [], return-type-fn-id: numeric)
+slot s-nums  (name: "nums", type-fn-id: [list numeric])
+fn-slot {fn-id: add, slot-id: s-nums, position: 0}
 
 fn add-10  (parent-ids: [add])
-binding {fn-id: add-10, slot-id: s-a, value: 10}
-;; s-b is not bound — it surfaces as `add-10`'s free input
+binding {fn-id: add-10, slot-id: s-nums, list-append: true}
+binding-list-item {binding-id: <the add-10 binding>, position: 0, value: 10}
+;; :nums is seeded with [10]; a caller may extend the chain or override
 ```
 
-Calling `(execute ctx add-10-id {:b 5})` runs `add` with `a=10, b=5`.
+Calling `(execute ctx add-10-id {})` runs `add` with `nums = [10]` → `10`.
+(`:add` takes a single `:nums` list, not two scalar args — arithmetic
+base-fns are variadic over `:nums`.)
 
 Constraints are extracted into an explicit protocol; each storage
 implementation MUST enforce them at write time.
@@ -85,16 +86,19 @@ implementation MUST enforce them at write time.
      references."))
 ```
 
-### Schema-level constraints
+### Uniqueness constraints
 
-These hold by virtue of `UNIQUE` keys in the entity definitions:
+Two are schema-level `UNIQUE` keys; two are per-branch **resolved-view**
+checks enforced by `VersionedStorage` — the base identity row is
+cross-branch and soft-deleted identities persist, so a raw `UNIQUE` on
+them was retired:
 
-| Entity | Unique key |
-|---|---|
-| `fn` | `name` (NULL allowed for anonymous / local fns) |
-| `fn-slot` | `(fn-id, slot-id)` |
-| `binding` | `(fn-id, slot-id)` |
-| `binding-list-item` | `(binding-id, position)` |
+| Entity | Unique key | Enforced by |
+|---|---|---|
+| `fn-slot` | `(fn-id, slot-id)` | schema `UNIQUE` |
+| `binding` | `(fn-id, slot-id)` | schema `UNIQUE` |
+| `fn` | `(namespace-id, name)` | resolved-view (`check-fn-name-collision!`) |
+| `binding-list-item` | `(binding-id, position)` | resolved-view (`check-list-item-position-collision!`) |
 
 ### Implementation per backend
 
@@ -214,7 +218,7 @@ Storage-layer graph resolution caps walks via
 | anonymous-hash      text NULL    -- dedup key              |
 | constraint          jsonb NULL   -- :refine predicate      |
 | description         text NULL                              |
-| UNIQUE(name)                                               |
+| (namespace-id, name) unique per branch — resolved-view     |
 +-----------------------------------------------------------+
                   |
                   | many-to-many through fn-slot
@@ -437,12 +441,14 @@ create a composed fn per site:
 
 ```
 fn add-10-20  (parent-ids: [add])
-binding {slot s-a, value 10}
-binding {slot s-b, value 20}
+binding {slot s-nums, list-append: true}
+binding-list-item {position 0, value 10}
+binding-list-item {position 1, value 20}
 
 fn add-30-40  (parent-ids: [add])
-binding {slot s-a, value 30}
-binding {slot s-b, value 40}
+binding {slot s-nums, list-append: true}
+binding-list-item {position 0, value 30}
+binding-list-item {position 1, value 40}
 ```
 
 All variation lives in the data — the executor stays generic.
@@ -459,21 +465,25 @@ library call). They're declared in `package/module/impls.clj` with
 
 ```clojure
 (defbase const
-  "Constant fn — ignores input, returns x."
-  {:args {:x :any} :return-type :fn}
-  (fn [_] x))
+  "Constant fn — returns :value unchanged."
+  [value]
+  value)
 
 (defbase assoc-fn
-  {:args {:m :jsonb :k :text :v :any} :return-type :jsonb}
-  (assoc m k v))
+  [map key value]
+  (assoc (or map {}) key value))
 ```
+
+The `defbase` arg-syms name the args declared in `fns.edn` (`:value`;
+`:map`/`:key`/`:value`) and arrive already-resolved; types live in
+`fns.edn`, not in the `defbase` form.
 
 **Fn-defs** are pure data compositions in `fns.edn`:
 
 ```clojure
 {:name :hello-handler
  :parent :const
- :args {:x {:status 200 :body "Hello"}}}
+ :args {:value {:status 200 :body "Hello"}}}
 
 {:name :web-server
  :parent :http-server
@@ -489,8 +499,8 @@ Bindings reference other fns via `binding.ref-fn-id`. EDN sugar:
 
 ```clojure
 ;; HOF: slot type is :fn → executor passes :double-fn's id
-{:name :double-all :parent :map-fn
- :args {:f :double-fn :coll [1 2 3]}}
+{:name :double-all :parent :map
+ :args {:func :double-fn :coll [1 2 3]}}
 
 ;; Non-HOF: slot type isn't :fn → executor runs :router-fn,
 ;; uses its result

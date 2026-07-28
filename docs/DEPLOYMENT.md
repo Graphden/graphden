@@ -184,8 +184,9 @@ Set on hosted pods that participate in the dynamic fleet. The Helm chart wires a
 | `GRAPHDEN_APP_HANDLER_FN` | `_app-ring-response` | Name of the org's app-handler fn to run per request |
 | `GRAPHDEN_PORT` | `8080` | HTTP port to serve on |
 
-There is no env-configurable execution max-depth or handler timeout (the
-per-request bounds are fixed constants).
+There is no env-configurable execution max-depth, but the per-execution
+wall-clock deadline **is** tunable via `GRAPHDEN_MAX_EXECUTION_WALL_MS`
+(default `300000` = 5 min).
 
 ## Database Setup
 

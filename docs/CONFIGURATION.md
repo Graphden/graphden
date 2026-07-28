@@ -29,7 +29,7 @@ below start in dependency order:
        ↓
 :db/notify-listener    → Dedicated PG conn LISTENing on `graphden_events`
 :db/service-locks      → Dedicated PG conn for advisory locks
-:app/packages          → Loads resources/packages/ (core / storage / web / app)
+:app/packages          → Loads resources/packages/ (core / storage / web / app-base / app / registry / mcp)
        ↓
 :exec/base-fns         → Base-function registry (Clojure impls)
 :exec/fn-entities      → Syncs fn-defs into storage
@@ -112,11 +112,14 @@ Packages are loaded from `resources/packages/`. Configure which
 packages to load:
 
 ```clojure
-:app/packages {:package-names ["core" "storage" "web" "app"]}
+:app/packages {:package-names ["core" "storage" "web" "app-base" "app" "registry" "mcp"]}
 ```
 
-Production loads `["core" "storage" "web" "app"]`. Dev/test also load
-`"examples"` (pedagogical fn-defs that must never ship to prod).
+Production loads `["core" "storage" "web" "app-base" "app" "registry" "mcp"]`
+(`registry`/`mcp` are optional — drop either and the app still boots). Dev
+additionally loads `"examples"` (pedagogical fn-defs that must never ship to
+prod). The **test** system has no `:app/packages` key at all — it wires the
+executor directly without loading the app packages.
 
 ## Component Configuration
 
@@ -217,7 +220,7 @@ here.
 
 ```clojure
 :app/packages
-{:package-names ["core" "storage" "web" "app"]}
+{:package-names ["core" "storage" "web" "app-base" "app" "registry" "mcp"]}
 ```
 
 ### `:exec/base-fns`
@@ -388,7 +391,7 @@ picker has content out of the box.
 
 ## Environment Variables
 
-These are the only environment variables the production config reads:
+The production config reads these via `#env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -402,8 +405,20 @@ These are the only environment variables the production config reads:
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |
+| `GRAPHDEN_SSE_PORT` | *(unset ⇒ SSE relay off)* | Port for the cross-executor invalidation SSE relay (`:sse/relay`) |
+| `GRAPHDEN_EXECUTOR_ORGS` | *(unset ⇒ all orgs)* | Org-shard predicate for this executor |
+| `GRAPHDEN_BYO_EXECUTOR` | *(empty)* | Truthy marks this pod a BYO executor |
+| `GRAPHDEN_EXECUTOR_ID` | *(empty)* | Fleet identity; set enables `:exec/fleet-controller` |
+| `GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS` | `30000` | Fleet placement-controller tick period (ms) |
 
-There is no env-configurable execution max-depth or timeout. The dev
+(Deployment-specific fleet/BYO knobs read directly via `System/getenv` —
+`GRAPHDEN_MAX_CONCURRENT_EXECUTIONS`, `GRAPHDEN_FLEET_*`, the BYO vars — are
+covered in [DEPLOYMENT.md](DEPLOYMENT.md), [SCALING.md](SCALING.md), and
+[FLEET_DEPLOY.md](FLEET_DEPLOY.md).)
+
+There is no env-configurable execution max-depth, but the per-execution
+wall-clock deadline **is** tunable via `GRAPHDEN_MAX_EXECUTION_WALL_MS`
+(default `300000` = 5 min; read in `crud/fn_execution/persist.clj`). The dev
 config (`system-dev.edn`) reads DB settings from the `GRAPHDEN_`-prefixed
 variants (`GRAPHDEN_JDBC_URL`, `GRAPHDEN_DB_USER`,
 `GRAPHDEN_DB_PASSWORD`) and defaults to port `5434`.
@@ -460,7 +475,9 @@ variants (`GRAPHDEN_JDBC_URL`, `GRAPHDEN_DB_USER`,
 
 ## Adding Custom Components
 
-1. Define `init-key` method in `graphden.system.core`:
+1. Define an `init-key` method in one of the `graphden.system.init.*`
+   namespaces (`graphden.system.core` is now only a loader that `:require`s
+   them for their `defmethod` side effects):
 
 ```clojure
 (defmethod ig/init-key :my/component [_ config]

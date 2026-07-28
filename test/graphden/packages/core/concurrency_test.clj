@@ -11,7 +11,8 @@
    defbase-generated symbols become reachable WITHOUT a normal
    require — same path the runtime takes."
   (:require
-    [clojure.test :refer [deftest is testing use-fixtures]]))
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.compile-runtime :as cr]))
 
 
 (def ^:dynamic *impls* nil)
@@ -366,3 +367,42 @@
       (is (= :future (:parent schedule-def))
           ":schedule's single parent IS :future — the effect propagates by
            inheritance, no per-derivative re-declaration needed"))))
+
+
+;; ============================================================================
+;; :future binding conveyance (task #6) — the effect gate crosses the thread
+;; boundary, so a tenant service's worker stays sandboxed
+;; ============================================================================
+
+(deftest future-conveys-allowed-effects-into-the-spawned-thread-test
+  (testing "a :future spawned under a restricted *allowed-effects* runs its
+            body under that SAME restriction — record-effect! in the worker
+            thread throws for a forbidden category, so a tenant service can't
+            escape the effect gate by spawning a thread"
+    (let [result (promise)
+          body-fn (fn []
+                    (deliver result
+                             (try (cr/record-effect! :network) :no-throw
+                                  (catch clojure.lang.ExceptionInfo e
+                                    (:type (ex-data e))))))]
+      ;; :process is allowed (so `:future` may spawn) but :network is NOT —
+      ;; the worker must inherit THAT restriction across the thread boundary.
+      (binding [cr/*allowed-effects* #{:db :process}]
+        ((impl-of :future) {:body (delay body-fn)} nil))
+      (is (= :execution/forbidden-effect (deref result 2000 :timeout))
+          "the gate crossed the thread boundary — worker rejected :network"))))
+
+
+(deftest future-platform-thread-stays-unrestricted-test
+  (testing "a platform :future (nil *allowed-effects*) is UNRESTRICTED in its
+            worker, exactly as before — the platform's own background work is
+            never gated"
+    (let [result (promise)
+          body-fn (fn []
+                    (deliver result
+                             (try (cr/record-effect! :network) :allowed
+                                  (catch Exception _ :threw))))]
+      ;; *allowed-effects* unbound (nil) → no gate
+      ((impl-of :future) {:body (delay body-fn)} nil)
+      (is (= :allowed (deref result 2000 :timeout))
+          "no restriction in scope → worker runs :network freely"))))

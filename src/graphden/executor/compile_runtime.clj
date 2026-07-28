@@ -815,6 +815,39 @@
   nil)
 
 
+;; --- Background-thread binding conveyance (task #6) ---------------------------
+;;
+;; `:future` (and the service workers built on it) run their body in a FRESH
+;; thread, which does NOT inherit the caller's dynamic bindings. Without this,
+;; a tenant service escapes the effect gate the moment it spawns its worker —
+;; `*allowed-effects*` reverts to nil (unrestricted) in the new thread. Any
+;; layer registers the vars that MUST cross the thread boundary; `future-fn`
+;; captures + re-establishes them. Kept HERE (not in tenancy) so
+;; core/concurrency stays tenancy-free — tenancy adds `*current-org*` at load.
+;; `*effect-trace*` / `*cancel-check*` are DELIBERATELY not conveyed: they are
+;; per-top-level-request state, not a persistent worker's.
+
+(defonce ^:private conveyed-dynamic-vars (atom #{#'*allowed-effects*}))
+
+
+(defn register-conveyed-var!
+  "Register dynamic Var `v` for conveyance into background (`:future`) threads.
+   Idempotent."
+  [v]
+  (swap! conveyed-dynamic-vars conj v))
+
+
+(defn capture-conveyed-bindings
+  "Snapshot every conveyed var's CURRENT value → `{var value}`, for
+   re-establishing in a spawned thread via `with-bindings`. Call at spawn time,
+   on the parent thread."
+  []
+  (persistent!
+    (reduce (fn [acc v] (assoc! acc v (deref v)))
+            (transient {})
+            @conveyed-dynamic-vars)))
+
+
 (def ^:dynamic *execute-authorized*
   "True once the ctx's `:execute-guard` (the tenancy addon's per-namespace
    execute check, PLATFORM_PLAN §4.2) has run for THIS top-level execute, so

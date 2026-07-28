@@ -70,6 +70,12 @@
     ;; tier widens it). `base` reads the tenant-forbidden `:org` row
     ;; unrestricted, on the tenant's behalf.
     (plan/install! base)
+    ;; Convey `*current-org*` into background (`:future`) threads alongside the
+    ;; effect gate (task #6), so a tenant SERVICE's worker thread stays both
+    ;; org-scoped AND effect-gated. Idempotent; `*allowed-effects*` is conveyed
+    ;; by core already. Only registered when the addon is present — a single-
+    ;; tenant deploy conveys nothing tenancy-specific.
+    (cr/register-conveyed-var! #'tc/*current-org*)
     (ts/org-scoped-storage base (or scoped-entities ts/default-scoped-entities) authorize-write)))
 
 

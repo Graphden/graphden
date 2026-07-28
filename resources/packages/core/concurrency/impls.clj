@@ -71,11 +71,17 @@
 (defbase future-fn
   [body]
   (cr/record-effect! :process)
-  (let [thread (Thread.
+  ;; Capture the conveyed dynamic bindings (the effect gate + org context) on
+  ;; THIS thread and re-establish them inside the worker, so a tenant service's
+  ;; ongoing work stays sandboxed instead of reverting to unrestricted in the
+  ;; fresh thread (task #6). A platform future captures nil → unrestricted, as
+  ;; before.
+  (let [conveyed (cr/capture-conveyed-bindings)
+        thread (Thread.
                  ^Runnable
                  (fn []
                    (try
-                     (body)
+                     (with-bindings conveyed (body))
                      (catch InterruptedException _ nil)
                      (catch Exception e
                        (log/warn e "future body threw"))))

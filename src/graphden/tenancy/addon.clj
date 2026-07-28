@@ -29,6 +29,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
+    [graphden.clients.egress :as egress]
     [graphden.crud.type-check :as typecheck]
     [graphden.executor.compile-runtime :as cr]
     [graphden.system.api-routes-js :as api-routes-js]
@@ -54,7 +55,29 @@
     [integrant.core :as ig]))
 
 
-(defmethod ig/init-key :org/scoped-storage [_ {:keys [base scoped-entities grant-store]}]
+(defn- install-egress-caps!
+  "Install the per-org egress rate-limit + response byte-cap seams (task #5b),
+   closed over `cfg`. Both fire only for a restricted (tenant) ctx — the
+   http-client hook guards on `*allowed-effects*`. Defaults: 600 outbound
+   calls / minute / org, 10 MiB response body."
+  [{:keys [rate-max-per-min rate-window-ms max-response-bytes]}]
+  (let [rate-max (or rate-max-per-min 600)]
+    (reset! egress/egress-rate-limiter
+            (when (pos? rate-max)
+              (let [limiter (users/make-rate-limiter rate-max (or rate-window-ms 60000))]
+                ;; org-agnostic signature; the org keying lives HERE so the
+                ;; clients-layer egress ns never depends on tenancy.
+                (fn [] (limiter (tc/current-org))))))
+    (reset! egress/max-response-bytes (or max-response-bytes (* 10 1024 1024)))))
+
+
+(defn- uninstall-egress-caps!
+  []
+  (reset! egress/egress-rate-limiter nil)
+  (reset! egress/max-response-bytes nil))
+
+
+(defmethod ig/init-key :org/scoped-storage [_ {:keys [base scoped-entities grant-store egress-caps]}]
   ;; `grant-store` (optional) turns on per-target-namespace write enforcement
   ;; (§4.2 refinement) — a denied :fn write throws :authz/forbidden, which
   ;; the request-scope maps to 403. Absent → org-scoping + RLS only.
@@ -92,6 +115,9 @@
                             cr/*allowed-effects* (cr/cloud-allowed-effects-for org)]
                     (thunk))
                   (thunk)))))
+    ;; Per-org egress rate-limit + response byte-cap (task #5b) — bounds HOW MUCH
+    ;; a paid (`:network`) tenant may pull, on top of check-target!'s WHERE.
+    (install-egress-caps! (or egress-caps {}))
     (ts/org-scoped-storage base (or scoped-entities ts/default-scoped-entities) authorize-write)))
 
 
@@ -102,7 +128,8 @@
   ;; namespace's addon boot break another's execute in the same JVM.
   (authz/uninstall-view-impl-filter!)
   (reset! cr/service-execution-scope nil)
-  (plan/uninstall!))
+  (plan/uninstall!)
+  (uninstall-egress-caps!))
 
 
 (defmethod ig/init-key :tenancy/datasource-wrap [_ _]

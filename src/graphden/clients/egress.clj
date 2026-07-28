@@ -92,3 +92,61 @@
                       {:type :egress/blocked :url url :reason :no-host})))
     (resolve-public-ips host)
     nil))
+
+
+;; --- Per-org egress rate-limit + response byte-cap (task #5b) -----------------
+;;
+;; `check-target!` (above) is SSRF — it says WHERE a tenant may dial. These two
+;; seams bound HOW MUCH: how often, and how big a response. They are installed by
+;; the tenancy addon (closed over the plan/config); nil = unlimited (the pure
+;; SSRF classifier stays usable single-tenant). Layering stays clean — the org
+;; keying lives in the installed closure, so this clients-layer ns never depends
+;; on tenancy. Both only fire for a RESTRICTED (tenant/cloud) execution — the
+;; http-client hook guards on `*allowed-effects*`.
+
+(defonce ^{:doc "Installed by the addon: `(fn [] → bool)` — false ⇒ the current
+                 tenant is over its per-org egress rate. nil ⇒ unlimited."}
+  egress-rate-limiter
+  (atom nil))
+
+
+(defonce ^{:doc "Installed by the addon: max bytes a tenant egress RESPONSE body
+                 may carry (a long), enforced by a bounded streaming read in the
+                 http-client. nil ⇒ uncapped."}
+  max-response-bytes
+  (atom nil))
+
+
+(defn check-egress-rate!
+  "Throw `:egress/rate-limited` when the installed per-org limiter denies this
+   tenant's outbound call. No-op when no limiter is installed (single-tenant /
+   unrestricted). Call BEFORE dialing, alongside `check-target!`."
+  []
+  (when-let [limiter @egress-rate-limiter]
+    (when-not (limiter)
+      (throw (ex-info "egress blocked: per-org outbound rate limit exceeded"
+                      {:type :egress/rate-limited :reason :rate-exceeded})))))
+
+
+(defn read-capped-string!
+  "Read `input-stream` to a UTF-8 string, but no more than `@max-response-bytes`.
+   Throws `:egress/response-too-large` the moment the body would exceed the cap —
+   a STREAMING bound, so an oversize response is never fully buffered. When no cap
+   is installed, reads the whole stream. Always closes the stream."
+  [^java.io.InputStream input-stream]
+  (let [cap @max-response-bytes]
+    (with-open [in input-stream
+                out (java.io.ByteArrayOutputStream.)]
+      (let [buf (byte-array 8192)]
+        (loop [total 0]
+          (let [n (java.io.InputStream/.read in buf)]
+            (if (neg? n)
+              (String. (java.io.ByteArrayOutputStream/.toByteArray out) "UTF-8")
+              (let [total' (+ total n)]
+                (when (and cap (> total' cap))
+                  (throw (ex-info (str "egress blocked: response body exceeds the "
+                                       cap "-byte cap")
+                                  {:type :egress/response-too-large
+                                   :reason :body-too-large :cap cap})))
+                (java.io.ByteArrayOutputStream/.write out buf 0 n)
+                (recur total')))))))))

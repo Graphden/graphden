@@ -82,6 +82,23 @@
 ;; Pure: diff-desired
 ;; ============================================================================
 
+(deftest service-in-shard?-keeps-tenant-services-on-their-own-shard-test
+  (testing "a PLATFORM service (no :org-id) runs on every pod — any shard"
+    (is (true? (recon/service-in-shard? nil {:id 1})))
+    (is (true? (recon/service-in-shard? #{"public" "acme"} {:id 1})))
+    (is (true? (recon/service-in-shard? (fn [_] false) {:id 1}))))
+  (testing "a TENANT service runs ONLY where the shard explicitly names its org"
+    ;; nil shard = compile-all shared pod → must NOT run a tenant service
+    (is (false? (recon/service-in-shard? nil {:id 2 :org-id "acme"})))
+    ;; a set shard that names the org → runs
+    (is (true? (recon/service-in-shard? #{"public" "acme"} {:id 2 :org-id "acme"})))
+    ;; a set shard that does NOT name the org → does not run
+    (is (false? (recon/service-in-shard? #{"public" "beta"} {:id 2 :org-id "acme"})))
+    ;; a hash-shard predicate fn is honoured
+    (is (true? (recon/service-in-shard? #(= "acme" %) {:id 2 :org-id "acme"})))
+    (is (false? (recon/service-in-shard? #(= "beta" %) {:id 2 :org-id "acme"})))))
+
+
 (deftest diff-desired-test
   (testing "empty inputs → empty diff"
     (is (= {:to-start [] :to-stop []}

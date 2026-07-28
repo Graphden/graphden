@@ -127,6 +127,57 @@ cell if that pod hasn't primed its `:forward-deps` yet).
 3. A stale/absent placement falls back to `421 Misdirected` — the rare backstop,
    not the mechanism.
 
+## Dedicated tenant shard (task #6 / FLEET_RFC §7.1)
+
+A paying tenant on the `dedicated` plan runs **persistent services** (cron,
+`:schedule`, always-on listeners). The effect gate sandboxes *what* a service
+does, but not its CPU / heap / threads, and the JVM has no per-thread heap cap —
+so a persistent tenant service is only safe on a runtime the tenant does not
+share. The shared fleet deliberately co-locates orgs (the packer spreads cells
+for load, not isolation), so the resource boundary is a **dedicated shard**: a
+small pod set that serves exactly `public + that-org`, under tight cgroup limits.
+No new mechanism — it composes `:executor-orgs` (SCALING.md § Sharding) with the
+chart's `resources.limits`. The reconciler enforces the other half: a tenant
+service (`:org-id` set) starts **only** on a pod whose `:executor-orgs` shard
+names its org, never on a shared compile-all pod (`services/reconciler.clj`
+`service-in-shard?`), so the dedicated pod is the *only* place the tenant's
+services run.
+
+To provision org `acme`:
+
+1. **Flip the plan.** Set `acme`'s `:org` row `:plan` to `dedicated` (via the
+   operator provisioning path — `tenancy.plan/plans` reads it). Until then,
+   `/api/orgs/services/create` 403s the tenant (`:service/tier-required`).
+2. **Deploy its dedicated release** — its own StatefulSet, sharded to `acme` and
+   cgroup-bounded (set BOTH `cpu` and `memory` limits — the memory cap stops an
+   OOM taking the node, the CPU cap stops a busy-loop starving it):
+
+   ```bash
+   helm install graphden-acme deploy/helm/graphden \
+     --set executorOrgs="public,acme" \
+     --set replicaCount=1 \
+     --set resources.requests.cpu=250m --set resources.requests.memory=512Mi \
+     --set resources.limits.cpu=1 --set resources.limits.memory=1Gi \
+     --set database.jdbcUrl=jdbc:postgresql://…/graphden \
+     --set secrets.authToken=… --set secrets.internalToken=… --set secrets.dbPassword=…
+   ```
+
+   It shares the same Postgres as the fleet (one graph, one `:service` table);
+   `executorOrgs` scopes what THIS release compiles + runs. `replicaCount>1` runs
+   a `:singleton` service once (advisory-lock arbitrated) and a `:per-pod`
+   listener on each — same semantics as the shared fleet.
+3. **Route `acme`'s traffic** (`acme.graphden.app` and its `/api/*`) to this
+   release's Service. A misroute to the shared fleet answers `421` — the backstop,
+   not the routing.
+
+Result: `acme`'s services — created from the editor or `POST
+/api/orgs/services/create` — run **only** on this pod set, sandboxed by the
+effect gate AND bounded by the cgroup. The shared fleet never starts them.
+
+**Still open (topology-dependent, not shipped):** the tenant's editor lists its
+services' DESIRED state only; cross-pod runtime status (running / failed) and a
+tenant-mode browser e2e need this dedicated stack live and are deferred to it.
+
 ## Local verification with kind
 
 The chart + fleet mechanics were validated end-to-end on a local

@@ -372,6 +372,24 @@
     base-ctx))
 
 
+(defn service-in-shard?
+  "Whether THIS pod's reconciler should run `svc`, given the pod's
+   `:executor-orgs` shard (task #6 / FLEET_RFC §7.1). A PLATFORM service (no
+   `:org-id` — web-server, vault, cron; seeded at boot, never org-stamped) runs
+   on EVERY pod. A TENANT service (`:org-id` set) runs ONLY on a pod whose shard
+   EXPLICITLY names its org — NOT on a compile-all (`nil` shard) pod.
+
+   Without this, a shared pod (which compiles every org's graph) would start a
+   dedicated tenant's service on shared, cgroup-unbounded hardware — defeating
+   the whole point of the dedicated shard. `executor-orgs` is nil (self-hosted /
+   shared default), a set, or a hash-shard fn; a set / fn is called as a
+   predicate, and nil short-circuits tenant services to false."
+  [executor-orgs svc]
+  (if-let [org (:org-id svc)]
+    (boolean (and executor-orgs (executor-orgs org)))
+    true))
+
+
 (defn reconcile-once!
   "One pass: read enabled `:service` rows, compute diff vs
    `running-atom`'s contents, start missing + stop removed. Mutates
@@ -425,7 +443,11 @@
      (swap! running-atom (fn [m] (into {} (remove (fn [[_ v]] (= ::not-our-lock v))) m)))
      (let [storage (:storage ctx)
            lock-conn (lock-conn-from-ctx ctx)
-           enabled-services (vec (sp/query-entities storage :service {:enabled? true}))
+           ;; Shard filter (task #6): drop tenant services whose org this pod
+           ;; doesn't serve, so a dedicated tenant's services run only on its
+           ;; own cgroup-limited pod, never on a shared compile-all pod.
+           enabled-services (filterv #(service-in-shard? (:executor-orgs ctx) %)
+                                     (sp/query-entities storage :service {:enabled? true}))
            enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
            running          @running-atom
            {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)

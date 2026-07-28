@@ -20,6 +20,12 @@ data:
   {{- with .Values.fleet.maxMoves }}
   GRAPHDEN_FLEET_MAX_MOVES: {{ . | quote }}
   {{- end }}
+  {{- with .Values.executorOrgs }}
+  # Dedicated-shard org membership (docs/FLEET_DEPLOY.md § Dedicated tenant
+  # shard). Emitted only when set; unset ≡ compile the whole graph, which is
+  # what `system-prod.edn`'s `#or [#env GRAPHDEN_EXECUTOR_ORGS nil]` reads.
+  GRAPHDEN_EXECUTOR_ORGS: {{ . | quote }}
+  {{- end }}
   {{- if .Values.vault.enabled }}
   VAULT_ADDR: {{ .Values.vault.address | quote }}
   {{- end }}

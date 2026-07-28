@@ -12,6 +12,17 @@ replicaCount: 3
 # The container port the executor listens on (Dockerfile fixes it at 8080).
 port: 8080
 
+# Org shard for THIS release (docs/SCALING.md § Sharding, docs/FLEET_DEPLOY.md
+# § Dedicated tenant shard). Comma-separated org slugs: a pod compiles + serves
+# ONLY these orgs (plus the always-present NULL-org platform packages) and 421s
+# anything off-shard. Empty (default) = compile the whole graph — the
+# self-hosted / shared-fleet behaviour. Set to "public,<org>" to make this
+# release a DEDICATED shard for one paying tenant (task #6 / FLEET_RFC §7.1);
+# pair it with tight `resources.limits` (cpu AND memory) so that tenant's
+# persistent services are cgroup-bounded on their own pod — the effect gate
+# limits WHAT they do, the cgroup limits HOW MUCH.
+executorOrgs: ""
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""

@@ -56,7 +56,7 @@ Each free-arg of a wrapped fn-graph belongs to ONE of two categories:
 | **call-site** | Listed in the parent slot's structural `[:fn {args-shape} ret]` type | At each invocation, the executor passes the arg |
 | **captured** | Free-arg NOT in `args-shape` | At wrap time, executor captures the binding-chain |
 
-For `:map :fn [:fn {:item a} b]`:
+For `:map :func [:fn {:item a} b]`:
 
 - `:item` is in `args-shape` → call-site (passed per element)
 - Any other free-arg of the wrapped fn-graph → captured
@@ -178,7 +178,7 @@ dispatcher. It reads the slot's structural shape (via
   keep `:request` in their params.
 - **2+-arg slot** (`[:fn {:a A :b B} ret]`) → sub free args matching
   slot's structural names. Map-callable; covers
-  `:wrap-middleware :handler` (`{:request _ :next-handler _}`).
+  `:middleware :body` (`{:request _ :next-handler _}`).
 - **Bare `:fn` keyword constraint** → REJECTED at compile time. Every
   HOF slot must declare its callable shape structurally as
   `[:fn {ARGS} RET]` — gives the type-checker something to constrain
@@ -199,7 +199,7 @@ and `:future`'s impl `(body)` would throw `ArityException` at runtime
  :args {:item :_some-default}}      ; ← binds `:item` (the call-site arg!)
 ```
 
-`:map`'s `:fn` slot declares `:item` as call-site. Admin bound `:item`
+`:map`'s `:func` slot declares `:item` as call-site. Admin bound `:item`
 to `:_some-default`. What wins at invocation?
 
 **Rule:** call-site arg WINS over captured / bound. `:map`'s impl
@@ -344,7 +344,7 @@ No regressions expected for the existing HOF use cases. Specifically:
 
 - **Wrap site** — the location where `hof-callable` wraps a fn-graph
   into a Clojure callable. Typically inside a parent fn's binding
-  resolution (e.g. `:map`'s `:fn` slot).
+  resolution (e.g. `:map`'s `:func` slot).
 - **Call site** — the location where the wrapped callable is invoked.
   Inside the parent fn's impl (e.g. `(clojure.core/map fn coll)`).
 - **Captured binding** — the binding-chain entry that resolves a

@@ -3,7 +3,7 @@
 **Goal**: by the end of this lesson you can read the **Grants**
 panel, add and revoke a grant, and predict which editor
 operations a given user can perform — because you'll know the
-six capabilities, how namespace scope works, and where the
+seven capabilities, how namespace scope works, and where the
 checks actually fire.
 
 **Concepts introduced**: the `:grant` entity, the capability
@@ -20,24 +20,31 @@ descendants (a grant on `acme` covers `acme.billing.invoices`;
 a blank namespace is a root grant covering everything), and
 some capabilities imply others.
 
-## The six capabilities
+## The seven capabilities
 
 The closed vocabulary (anything else is rejected at create time
 with a 400):
 
 | Capability | Lets the subject… |
 |---|---|
-| `read` | read fns in the namespace |
+| `read` | discover a fn + see its SIGNATURE (slots, types, return) |
+| `view-impl` | see a fn's INTERNAL COMPOSITION (parent chain + bindings) — withhold it and the fn stays executable but its impl is hidden |
 | `write` | create / move / edit fns there |
 | `execute` | run fns there |
 | `admin` | everything above, within the scope |
 | `bind-args` | edit only a binding's VALUE (not structure) |
 | `append-list` | append items to list-typed bindings |
 
-Implication: `admin` implies all of them; `write` implies the
-two narrow edit caps (`bind-args`, `append-list`). The narrow
+Implication: `admin` implies all of them; `write` implies
+`view-impl` (you can't edit a fn you can't see) plus the two
+narrow edit caps (`bind-args`, `append-list`). The narrow
 caps exist so you can hand someone "tune the parameters of my
 app" without handing them "restructure my app".
+
+(The panel's capability `<select>` deliberately offers only six
+of these — every one except `view-impl`, which is set through the
+graph-read filter rather than picked by hand — but the
+`POST /api/grants` API accepts all seven.)
 
 One freebie needs no grant row at all: every user implicitly
 holds `admin` over their **personal namespace**
@@ -73,14 +80,16 @@ bob     | execute    | acme          |  ×
 ```
 
 Below it, the add form: a `subject` text input, a capability
-`<select>` (the six values above), a `namespace` input, and
-**+ Add grant** (`POST /api/grants`).
+`<select>` (the six pickable values — every capability except
+`view-impl`), a `namespace` input, and **+ Add grant**
+(`POST /api/grants`).
 
 One subtlety worth knowing: the form takes a *username*, but
 enforcement keys on the user's stable id — the create handler
-resolves the name at write time and stores both. Typo the
-username and you get a "dead" grant that displays fine but
-matches no one; it doesn't throw.
+resolves the name to that id at write time and stores only the
+id (the username is re-joined from the user row for display).
+Typo the username and you get a "dead" grant that matches no one
+— its subject cell renders blank — but it doesn't throw.
 
 Revoke is the row's `×` (confirm: *"Delete this grant?"*) —
 this one goes through the generic entity endpoint

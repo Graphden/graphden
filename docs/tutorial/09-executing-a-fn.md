@@ -68,6 +68,7 @@ Every fn carries a set of effects it transitively touches
 | `:time` | Reads wall-clock time |
 | `:random` | Non-deterministic input |
 | `:process` | Spawns supervised background work (service-eligibility marker) |
+| `:state` | Mutates in-graph state (`:swap` / `:reset` on a `:cell` / `:atom`) |
 | `:raw-sql` | Raw SQL escape hatches (`:pg-query` & co) that bypass the storage protocol |
 
 When you open the run popover for a fn with EFFECTS, it shows
@@ -159,13 +160,13 @@ the result directly.
 Poll status:
 
 ```bash
-curl http://localhost:8080/api/executions/<id> ...
+curl http://localhost:8080/api/execute/<id> ...
 ```
 
 Cancel:
 
 ```bash
-curl -X POST http://localhost:8080/api/executions/<id>/cancel ...
+curl -X POST http://localhost:8080/api/execute/<id>/cancel ...
 ```
 
 The shape of `:result` mirrors the in-memory return value —

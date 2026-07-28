@@ -10,7 +10,7 @@ leaking into non-secret sinks.
 marker, `taint propagation`, `return-type-rule`, `executor hide
 on :secret`.
 
-## The eight effect categories
+## The nine effect categories
 
 ```
 :db        Reads or writes graphden's storage
@@ -20,6 +20,7 @@ on :secret`.
 :time      Reads wall-clock time
 :random    Non-deterministic input
 :process   Spawns supervised background work (service-eligibility marker)
+:state     Mutates in-graph state (`:swap` / `:reset` on a `:cell` / `:atom`)
 :raw-sql   Arbitrary SQL bypassing org-scoped storage (cloud-blocked)
 ```
 
@@ -44,12 +45,12 @@ Base-fns DECLARE their effects in `fns.edn`:
 
 ```edn
 {:name :pg-query
- :args {:sql {:type :text}}
- :return-type :jsonb
- :effects #{:db}}
+ :args {:hsql {:type :keyword-map}}   ; a HoneySQL map, not raw text
+ :return-type [:list :text-keyed-map]
+ :effects #{:db :raw-sql}}
 
 {:name :sha256-hex
- :args {:input {:type :bytes}}
+ :args {:s {:type :text}}
  :return-type :text
  :effects #{}}   ; pure
 ```
@@ -61,13 +62,13 @@ their bindings. So:
 ```edn
 {:name :user-query
  :parent :pg-query
- :args  {:sql "SELECT id, name FROM users"}}
+ :args  {:hsql {:select [:id :name] :from :users}}}
 ```
 
 `:user-query`'s computed effects are `:pg-query`'s effects:
-`#{:db}`. If `:user-query` also ref'd `:current-time-ms`
+`#{:db :raw-sql}`. If `:user-query` also ref'd `:current-time-ms`
 (which has `:effects #{:time}`), the computed set would be
-`#{:db :time}`.
+`#{:db :raw-sql :time}`.
 
 The editor's effects-strip on each fn-card shows the computed
 set as colored chips — one per category.
@@ -80,8 +81,8 @@ their fn to have:
 ```edn
 {:name :user-query
  :parent :pg-query
- :args  {:sql "SELECT id, name FROM users"}
- :expects-effects #{:db}}
+ :args  {:hsql {:select [:id :name] :from :users}}
+ :expects-effects #{:db :raw-sql}}
 ```
 
 The type-checker compares declared vs computed and surfaces
@@ -113,7 +114,8 @@ selected fn). Clicking it opens a small server-rendered form:
   this fn") and **explicit contract** ("Drift checker compares
   computed effects against the ticked set").
 - Under them, one checkbox per declarable category — the full
-  canonical set of eight, including `:process` and `:raw-sql`.
+  canonical set of nine, including `:process`, `:state`, and
+  `:raw-sql`.
   The checkboxes stay disabled until you pick *explicit
   contract*.
 - **Pinned purity**: pick *explicit contract* and tick NOTHING.
@@ -187,12 +189,12 @@ or a response body) are sync-time errors.
 
 ### Per-base-fn `:taint-propagate?`
 
-For base-fns that handle user data (e.g. `:str-concat`,
+For base-fns that handle user data (e.g. `:str`,
 `:get`), taint propagation is a declarative FLAG at the
 impl-side registration — `:taint-propagate? true` — applied
 centrally by the type-checker: if ANY input carries `[:secret T]`
 (or any hide-result marker), the return is lifted into the
-marker too. So `(str-concat "Hello " username)` where
+marker too. So `(str "Hello " username)` where
 `username` is secret produces a secret string. Base-fns whose
 RETURN is inherently secret (`:vault-get`) simply declare
 `[:secret :text]` as their return type.
@@ -263,23 +265,33 @@ The graphden DB never holds the secret value. Only the path.
    the chip strip shows a RED `:env` chip (drift: undeclared).
    The hover-title says "Drift (undeclared)".
 
-3. Find any `:secret-leaf`-parented fn-def. Try ref'ing it
-   from a slot typed `:text`:
+3. Find any `:secret-leaf`-parented fn-def. Try feeding it into
+   a plain `:text` sink that does NOT propagate taint — `:h-raw`,
+   whose `:string` slot is typed `:text`:
 
    ```edn
    {:name :tutorial-secret-leak
-    :parent :str-concat
+    :parent :h-raw
+    :args  {:string :my-secret-leaf}}
+   ```
+
+   Save — the type-checker rejects: `[:secret :text]` ⊄ `:text`
+   for slot `:string`. The error explains the asymmetric
+   subtyping rule.
+
+   Now contrast a taint-*propagating* base-fn. `:str` carries the
+   `:taint-propagate? true` flag, so binding the same secret into
+   it is ACCEPTED:
+
+   ```edn
+   {:name :tutorial-secret-str
+    :parent :str
     :args  {:parts ["token=" :my-secret-leaf]}}
    ```
 
-   Save — type-checker rejects: `[:secret :text]` ⊄ `:text` for
-   slot `:parts.[*]`. The error explains the asymmetric
-   subtyping rule.
-
-   …unless `:str-concat`'s `:return-type-rule` is
-   `taint-with-secret-if-tainted`, in which case the bind passes
-   and the RETURN type becomes `[:secret :text]`. The poison
-   spreads upward — which is the intended behavior.
+   The bind passes — but the RETURN type becomes `[:secret :text]`:
+   the poison spreads upward through the flag instead of leaking
+   out, which is the intended behavior.
 
 ## What we glossed over
 

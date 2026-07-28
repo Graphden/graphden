@@ -16,7 +16,7 @@ When you write:
 ```edn
 {:name :hello-handler
  :parent :const
- :args  {:x "Hello!"}}
+ :args  {:value "Hello!"}}
 ```
 
 …graphden stores `:hello-handler` as a `:fn` row whose
@@ -37,7 +37,7 @@ Two consequences:
 ```edn
 {:name :base
  :parent :const
- :args  {:x {:status 200 :body "ok"}}}
+ :args  {:value {:status 200 :body "ok"}}}
 
 {:name :authed
  :parent :base}
@@ -57,7 +57,7 @@ When the executor runs `:authed`, it walks this chain to find:
 - Which **bindings** apply per slot (the CLOSEST binding to the
   current fn wins).
 
-For `:authed.:x` — `:const` declares the slot, `:base` binds it
+For `:authed.:value` — `:const` declares the slot, `:base` binds it
 to a literal map, `:authed` adds nothing. The closest binding is
 `:base`'s, so `:authed` returns the same map.
 
@@ -66,45 +66,49 @@ If `:authed` had its own binding, that would override:
 ```edn
 {:name :authed-different
  :parent :base
- :args  {:x {:status 401 :body "denied"}}}
+ :args  {:value {:status 401 :body "denied"}}}
 ```
 
 Now `:authed-different` returns the `401` map. Closer wins.
 
 ## Multiple inheritance (MI) — when you'd use it
 
-Sometimes a fn cleanly belongs to two parents at once. Classic
-example: a route handler that BOTH parents from a JSON-response
-template AND from an auth-required mixin.
+Sometimes a fn cleanly belongs to two parents at once — two
+**orthogonal axes** you want to combine. This is exactly how
+graphden builds its HTTP response matrix (see the real
+`web.response` module). One axis sets the status code; the other
+sets the content-type header; a concrete response is the two
+combined:
 
 ```edn
-{:name :json-handler          ; template for JSON responses
- :parent :ring-handler
- :args  {:body {:value {}}}}
+{:name :ok-response           ; STATUS axis: binds :status
+ :parent :ring-response
+ :args  {:status 200}}
 
-{:name :auth-required         ; mixin that wraps the handler in auth
- :parent :ring-handler
- :args  {:guard :require-bearer-token}}
+{:name :json-content-type     ; CONTENT-TYPE axis: binds :headers
+ :parent :ring-response
+ :args  {:headers {"Content-Type" "application/json"}}}
 
-{:name :secure-data-handler
- :parents [:json-handler :auth-required]
- :args  {:body :load-user-data}}
+{:name :json-ok-response      ; combine both axes
+ :parents [:json-content-type :ok-response]}
 ```
 
-`:secure-data-handler` inherits slots from BOTH `:json-handler`
-and `:auth-required`. The inheritance chain becomes a BFS closure:
+`:json-ok-response` inherits slots from BOTH `:json-content-type`
+and `:ok-response`. The inheritance chain becomes a BFS closure:
 
 ```
-:secure-data-handler
+:json-ok-response
    ↓ ↓
-:json-handler  :auth-required
+:json-content-type  :ok-response
        ↓ ↓
-   :ring-handler
+    :ring-response
 ```
 
-Slots from `:json-handler` AND `:auth-required` are both
-exposed at `:secure-data-handler`. Bindings still resolve
-closest-wins.
+This is **diamond inheritance** — both parents themselves inherit
+from `:ring-response`. That's fine here because each axis binds a
+DIFFERENT arg (`:headers` vs `:status`), so there's no conflict;
+the remaining `:body` slot stays unbound and propagates to the
+child as a free argument. Bindings still resolve closest-wins.
 
 ### MI restrictions
 
@@ -134,23 +138,35 @@ you can walk the chain visually.
 
 ## Try it
 
-In the editor:
+In the editor, in a namespace of your choice:
 
 1. Find `:add` (a base function). Its card shows ONE row —
    `:add` has no parents.
-2. Find `:add-10` (a tutorial fn-def parented to `:add` with
-   `:nums = [10]`). Its card shows TWO rows: `:add-10` (with
-   the bound `:nums`) and `:add` below it.
-3. Try writing a MI fn-def:
+2. Create `:add-10`, a fn-def parented to `:add` that seeds the
+   `:nums` list with `10`:
 
    ```edn
-   {:name :tutorial-mi-example
-    :parents [:add :str-concat]
-    :args  {:nums [1 2] :separator ", "}}
+   {:name :add-10
+    :parent :add
+    :args  {:nums [10]}}
    ```
 
-   The card now shows THREE rows. The top is your fn,
-   the next two are `:add` and `:str-concat` in BFS order.
+   Its card shows TWO rows: `:add-10` (with the bound `:nums`)
+   and `:add` below it.
+3. Try writing a multiple-inheritance fn-def over the two real
+   response axes:
+
+   ```edn
+   {:name :tutorial-json-ok
+    :parents [:json-content-type :ok-response]}
+   ```
+
+   The card now branches: your fn on top, the two axes
+   (`:json-content-type` and `:ok-response`) below it, and their
+   shared `:ring-response` ancestor beneath both — the diamond you
+   saw above. Each axis row is clickable, so you can walk into
+   either branch. `:tutorial-json-ok` leaves `:body` free; bind it
+   (e.g. `"{}"`) and Run to get a `200 application/json` response.
 
 ## What we glossed over
 

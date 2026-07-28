@@ -11,7 +11,7 @@ and explain each part of it.
 ```edn
 {:name :hello-handler
  :parent :const
- :args  {:x {:status 200 :body "Hello from Graphden!"}}}
+ :args  {:value {:status 200 :body "Hello from Graphden!"}}}
 ```
 
 That's a complete fn-def. Three keys:
@@ -24,9 +24,9 @@ That's a complete fn-def. Three keys:
   (`:other.ns/get-user`).
 - **`:parent`** — the fn this one inherits from. Here `:const`
   is a base function (a built-in primitive) that returns its
-  `:x` argument unchanged when executed.
+  `:value` argument unchanged when executed.
 - **`:args`** — values that fill in the parent's slots. `:const`
-  exposes one slot called `:x`; we bind it to a map.
+  exposes one slot called `:value`; we bind it to a map.
 
 Executing `:hello-handler` returns the map `{:status 200 :body "Hello from Graphden!"}`.
 
@@ -64,22 +64,22 @@ Now let's compose two:
 ```edn
 {:name :hello-handler
  :parent :const
- :args  {:x {:status 200 :body "Hello!"}}}
+ :args  {:value {:status 200 :body "Hello!"}}}
 
 {:name :hello-route
  :parent :assoc
- :args  {:m {} :k "handler" :v :hello-handler}}
+ :args  {:map {} :key "handler" :value :hello-handler}}
 ```
 
 `:hello-route` parents to `:assoc` — a base function that returns
-`{k v}` merged into `m`. The interesting part: `:v` is bound to
-`:hello-handler` (the keyword form of its name). When
+`{key value}` merged into `map`. The interesting part: `:value` is
+bound to `:hello-handler` (the keyword form of its name). When
 `:hello-route` runs:
 
-1. The executor sees the ref `:hello-handler` in slot `:v`.
-2. It looks at `:assoc`'s slot type for `:v` — not `:fn`-typed.
+1. The executor sees the ref `:hello-handler` in slot `:value`.
+2. It looks at `:assoc`'s slot type for `:value` — not `:fn`-typed.
 3. So it **executes** `:hello-handler` (gets the response map)
-   and uses that as the value of `:v`.
+   and uses that as the value of `:value`.
 
 The same syntax in a `:fn`-typed slot would behave differently —
 the fn-id would be passed unchanged for the parent to invoke. We'll
@@ -92,8 +92,8 @@ In the running editor, in a namespace of your choice (or create
 
 1. Click `+` to add a new fn. Name it `hello-handler`.
 2. Set its parent to `:const`. The editor will show one free arg
-   `:x`.
-3. Click `:x` and bind a literal map: `{:status 200 :body "Hello!"}`.
+   `:value`.
+3. Click `:value` and bind a literal map: `{:status 200 :body "Hello!"}`.
 4. Open the row's `⋯` actions popover and click ▶ Run — you
    should see the map come back.
 

@@ -50,8 +50,7 @@ no input (for `:future`), N times in a loop, etc.
 
 {:name :double
  :parent :mul
- :args  {:a {:as :item}
-         :b 2}}
+ :args  {:nums [{:as :item} 2]}}
 ```
 
 `:double` declares `:item` as its free arg via the `{:as :item}`
@@ -73,7 +72,7 @@ input:
 {:name :future
  :args {:body {:type [:fn {} :any]
                :description "Thunk to run in background."}}
- :return-type :future-handle
+ :return-type [:fn {} :null]   ; a stopper-thunk: call it to interrupt
  :effects #{:process}}
 ```
 
@@ -125,7 +124,7 @@ This is the tricky part. Consider a Ring handler:
 
 {:name :build-user-doc
  :parent :assoc
- :args  {:m {} :k "id" :v :user-id-from-request}}
+ :args  {:map {} :key "id" :value :user-id-from-request}}
 
 {:name :user-id-from-request
  :parent :get
@@ -198,20 +197,20 @@ in your base-fn impl and the dispatch picks the right behavior.
    {:name :tutorial-double-each
     :parent :map
     :args  {:func {:parent :mul
-                   :args {:a {:as :item} :b 2}}
+                   :args {:nums [{:as :item} 2]}}
             :coll [1 2 3]}}
    ```
 
    (`{:parent …}` inline-anonymizes the callback — see lesson
    01 for the named alternative.) Run it. Result: `[2 4 6]`.
 
-3. Try changing `:b` to use a free arg:
+3. Try replacing the constant `2` with a free arg:
 
    ```edn
    {:name :tutorial-multiply-each-by
     :parent :map
     :args  {:func {:parent :mul
-                   :args {:a {:as :item} :b {:as :factor}}}
+                   :args {:nums [{:as :item} {:as :factor}]}}
             :coll [1 2 3]}}
    ```
 

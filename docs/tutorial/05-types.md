@@ -68,10 +68,12 @@ A refinement narrows an existing type with a constraint:
 
 The predicate vocabulary is `[:= v]`, `[:not= v]`, `[:< v]`,
 `[:> v]`, `[:<= v]`, `[:>= v]`, `[:and p1 p2 …]`,
-`[:or p1 p2 …]`, `[:in #{a b c}]`, plus a couple of others
-(see `types.core/refinement-applies?`).
+`[:or p1 p2 …]`, `[:in [a b c]]` (membership in a finite vector),
+`[:matches re]` (regex), plus a couple of others (see
+`types.core/refinement-applies?`).
 
-Refinements chain. `:non-blank-text` is `[:refine :text [:not= ""]]`.
+Refinements chain. `:non-empty-text` is `[:refine :text [:not= ""]]`
+(and `:non-blank-text` is `[:refine :text [:matches "\\S"]]`).
 You can refine again on top of that — the type-checker walks the
 chain.
 

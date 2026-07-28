@@ -38,7 +38,7 @@ Now compose:
 
 {:name :greeting
  :parent :const
- :args  {:x "Hello, world!"}}
+ :args  {:value "Hello, world!"}}
 ```
 
 `:greet-len` BINDS `:string` to a ref `:greeting`. Now the
@@ -54,23 +54,26 @@ This is the load-bearing property. Watch:
 
 ```edn
 {:name :longer-than
- :parent :gt?
- :args  {:a :str-len-of    ; :a slot of :gt? bound to a ref
-         :b {:as :threshold}}}
+ :parent :gt
+ :args  {:nums [:str-len-of        ; nums[0] = the length (a ref)
+                {:as :threshold}]}} ; nums[1] = threshold (free)
 
 {:name :str-len-of
  :parent :str-len
  :args  {}}   ;; :string is left UNBOUND
 ```
 
-What are `:longer-than`'s free args?
+`:gt` compares its `:nums` list pairwise (`nums[0] > nums[1] > …`),
+so this reads "length is greater than threshold". What are
+`:longer-than`'s free args?
 
 - `:str-len-of` has `:string` free (it bound nothing to
   `:str-len.:string`).
-- `:longer-than` refs `:str-len-of`. So `:longer-than`
-  INHERITS the free-ness: `:string` propagates up as a free arg
-  of the caller.
-- `:longer-than` ALSO has `:threshold` (renamed from `:b`).
+- `:longer-than` refs `:str-len-of` as the first list item. So
+  `:longer-than` INHERITS the free-ness: `:string` propagates up
+  as a free arg of the caller.
+- `:longer-than` ALSO has `:threshold` — the second list item,
+  surfaced as a free arg via `:as`.
 
 So `:longer-than`'s public interface is `{:string ... :threshold
 ...}`. Two free args. The editor's free-arg strip at the bottom
@@ -135,9 +138,9 @@ the CALLER:
 {:name :scale-each
  :parent :map
  :args  {:func {:parent :mul
-                :args {:a {:as :item}     ; iteration param
-                       :b {:as :factor}}} ; free → surfaces up
-         :coll {:as :nums}}}              ; free → surfaces up
+                :args {:nums [{:as :item}      ; iteration param
+                              {:as :factor}]}} ; free → surfaces up
+         :coll {:as :nums}}}                   ; free → surfaces up
 ```
 
 `:scale-each`'s free args are `:factor` and `:nums`. The `:item`
@@ -164,16 +167,16 @@ original name was something internal.
 ```edn
 {:name :almost-template
  :parent :assoc
- :args  {:k {:value :foo}}}   ; :k is BOUND to the keyword :foo
+ :args  {:key {:value :foo}}}   ; :key is BOUND to the keyword :foo
 ```
 
 `{:value :foo}` is a literal — the keyword `:foo`. NOT a ref to
-the fn-def named `:foo`. To make `:k` free, use `{:as :foo}`:
+the fn-def named `:foo`. To make `:key` free, use `{:as :foo}`:
 
 ```edn
 {:name :real-template
  :parent :assoc
- :args  {:k {:as :foo}}}      ; :k is FREE, exposed as :foo
+ :args  {:key {:as :foo}}}      ; :key is FREE, exposed as :foo
 ```
 
 Same shape on the wire, completely different semantics. The

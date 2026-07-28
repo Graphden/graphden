@@ -79,7 +79,7 @@ load/evicts cells to match. (When `autoscaling.enabled`, the StatefulSet's
 | `fleet.sustainTicks` | `GRAPHDEN_FLEET_SUSTAIN_TICKS` | Ticks an imbalance must persist before a move fires (time hysteresis) |
 | `fleet.minImprovement` | `GRAPHDEN_FLEET_MIN_IMPROVEMENT` | Magnitude floor — drop a plan that improves imbalance by less (magnitude hysteresis) |
 | `fleet.maxMoves` | `GRAPHDEN_FLEET_MAX_MOVES` | Per-tick cap on rebalance moves |
-| `fleet.overlapWeight` | `GRAPHDEN_FLEET_OVERLAP_WEIGHT` | Overlap-accounting weight (default 0 = pure load balancing). > 0 makes both initial placement and rebalance prefer co-locating cells that share a forward-closure — turn it on when orgs run multiple code-sharing cells |
+| (no `fleet.*` value — inject `GRAPHDEN_FLEET_OVERLAP_WEIGHT` via `extraEnv`) | `GRAPHDEN_FLEET_OVERLAP_WEIGHT` | Overlap-accounting weight (default 0 = pure load balancing). > 0 makes both initial placement and rebalance prefer co-locating cells that share a forward-closure — turn it on when orgs run multiple code-sharing cells. The chart's `fleet:` block only wires the four knobs above; this one is read from the env directly (`init/fleet.clj`) |
 
 Both hysteresis levers exist because a move costs a compile + cache-warm on the
 target — raise `sustainTicks` / `minImprovement` if you see the fleet churning.

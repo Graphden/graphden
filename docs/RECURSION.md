@@ -61,29 +61,34 @@ that references itself through an atom.
 ### Concrete shape
 
 ```edn
-;; Factorial:
+;; Factorial: fact(n) = n * fact(n-1), base fact(0) = 1.
+;; :fix binds BOTH :step and :input; it invokes :step with
+;; {:input <current> :self <1-arg callable>}.
 {:name :fact
  :parent :fix
- :args {:step :_fact-step}}
+ :args {:step :_fact-step
+        :input {:as :n}}}        ; initial value — user supplies :n
 
 {:name :_fact-step
  :parent :if
- :args {:test :_n-zero?
-        :then 1
+ :args {:test :_input-zero?
+        :then 1                  ; base case — does NOT invoke :self
         :else :_recurse-mul}}
 
-{:name :_n-zero? :parent :zero? :args {:n :n}}
+;; the step reads the current iteration value from its :input free arg
+{:name :_input-zero? :parent :zero? :args {:number {:as :input}}}
 
 {:name :_recurse-mul
  :parent :mul
- :args {:nums [:n :_call-self]}}
+ :args {:nums [{:as :input} :_call-self]}}
 
-;; :self is a captured arg supplied by :fix at wrap time
+;; recurse: :invoke the :self callable (:fix supplies it as a free arg)
+;; with the next input, input - 1
 {:name :_call-self
- :parent :call
- :args {:func :self :arg :_n-minus-1}}
+ :parent :invoke
+ :args {:func {:as :self} :arg :_input-minus-1}}
 
-{:name :_n-minus-1 :parent :sub :args {:nums [:n 1]}}
+{:name :_input-minus-1 :parent :sub :args {:nums [{:as :input} 1]}}
 ```
 
 User invokes `:fact :n 5` → returns 120.
@@ -92,19 +97,19 @@ User invokes `:fact :n 5` → returns 120.
 
 ```clojure
 (defbase fix-fn [step input]
-  ;; step is hof-wrapped (closure-capture handles :self propagation).
-  ;; input is the initial call-site value. The wrap captures :self
-  ;; from outer free-args at wrap time; we synthesize it via an
-  ;; atom-closure so the step's callable references the same `f`.
+  ;; step is invoked with {:input <current> :self <1-arg callable>}.
+  ;; :self is a POSITIONAL single-arg callable that re-enters the step
+  ;; with a new input; we synthesize it via an atom-closure so the
+  ;; step's callable references the same `f`.
   (let [self-ref (atom nil)
-        f (fn [args] (step (assoc args :self @self-ref)))]
+        f (fn [next-input] (step {:input next-input :self @self-ref}))]
     (reset! self-ref f)
-    (f {:input input})))
+    (f input)))
 ```
 
-The `:self` arg threads through every iteration: `:_call-self`
-invokes it with the next arg map; `:fix-fn` re-enters the step;
-recursion bounded by `*max-depth*` (default 1000).
+The `:self` callable threads through every iteration: `:_call-self`
+`:invoke`s it with the next input; `fix-fn` re-enters the step;
+recursion bounded by `*max-recursion-depth*` (default 1000).
 
 ### Type signature (MVP)
 
@@ -128,17 +133,18 @@ expansion without infinite-looping (well-studied — see
 For two-way mutual recursion (e.g. `even?` / `odd?`):
 
 ```edn
-{:name :even-odd :parent :fix :args {:step :_eo-step}}
+{:name :even-odd :parent :fix :args {:step :_eo-step :input {:as :n}}}
 
+;; :cond's :clauses is a FLAT alternating seq [test result test result …]
 {:name :_eo-step :parent :cond
- :args {:clauses [{:test :_is-even-call :then :_eo-even-body}
-                  {:test :_is-odd-call  :then :_eo-odd-body}]}}
+ :args {:clauses [:_is-even-call :_eo-even-body
+                  :_is-odd-call  :_eo-odd-body]}}
 
 {:name :_eo-even-body :parent :if
- :args {:test :_n-zero? :then true
+ :args {:test :_input-zero? :then true
         :else :_call-self-with-odd}}
 
-;; etc. — each branch invokes :self with a tagged input
+;; etc. — each branch :invoke's :self with a tagged input
 ```
 
 Awkward but expressible. If mutual recursion becomes a frequent
@@ -165,9 +171,10 @@ approach B.
   `:any` to structurally-recursive? Costs ramp; benefit accrues
   to editor's return-type display and to compile-time arity
   verification.
-+ **`:self` calling convention**: map-callable (current sketch) vs
-  positional? Map is simpler to type-check (no arity ambiguity);
-  positional is closer to Clojure idiom. MVP picks map.
++ **`:self` calling convention**: map-callable vs positional? Map is
+  simpler to type-check (no arity ambiguity); positional is closer to
+  Clojure idiom. **Shipped: positional** — `:self` is a 1-arg callable
+  re-entered via `:invoke :func :self :arg <next>`.
 + **Effects propagation**: `:fix`'s declared effects = the union of
   `:step`'s effects. Type-checker needs to handle the recursive
   effect propagation without infinite loop. Loose MVP: `:fix
@@ -208,7 +215,7 @@ No new base-fn. Recursion is written exactly as you'd expect:
 |---|---|
 | `storage/protocol/constraints.clj` | Relax `validate-no-dependency-cycle-impl` — allow cycles (optionally gated by a `:recursive?` flag on the fn-row). |
 | `executor/composition/deps.clj` | `topological-sort` learns to break cycles by breaking at any node — treats the cycle as a strongly-connected component, picks a root, emits the rest in best-effort order. |
-| `executor/compile.clj` | Every `make-ref-entry` becomes a `(rt/thunk #(let [callee (get all-fns ref-id)] ...))` — lazy registry lookup. Existing `*call-cache*` handles memoization within one invocation; `always-fresh-fn-ids` already bypasses cache for `:time` / `:random`. |
+| `executor/compile_eager.clj` | Every ref-entry builder becomes a `(rt/thunk #(let [callee (get all-fns ref-id)] ...))` — lazy registry lookup. Existing `*call-cache*` handles memoization within one invocation; `always-fresh-fn-ids` already bypasses cache for `:time` / `:random`. |
 | `executor/compile-runtime.clj` `delta-recompile!` | Invalidation across SCC: when a node in a recursive cycle changes, recompile ALL members of the SCC together. The reverse-deps index needs to be SCC-aware. |
 | `types/check.clj` | Type-check learns to handle recursive fn-types without infinite expansion. Same problem as approach A's type-tightening — well-studied PL territory. |
 
@@ -237,7 +244,7 @@ defended by the gain in user ergonomics.
 | Schema migration: add `:recursive?` field on fn-row | 30m |
 | Relax `validate-no-dependency-cycle-impl` for recursive fns | 30m |
 | Rewrite `topological-sort` to handle SCCs | 1h |
-| Rewrite `make-ref-entry` to be lazy for cyclic refs | 1h |
+| Rewrite the ref-entry builder to be lazy for cyclic refs | 1h |
 | Rewrite `delta-recompile!` to handle SCCs | 1h |
 | Type-checker recursive-fn-type handling | 2-3h |
 | Tests + examples + docs | 2h |

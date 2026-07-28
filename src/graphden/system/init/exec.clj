@@ -22,7 +22,6 @@
     [graphden.system.api-url-drift :as api-url-drift]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
-    [graphden.system.route-collection :as rc]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
@@ -220,7 +219,18 @@
 
 (defmethod ig/init-key :exec/branch-router [_ {:keys [context]}]
   (log/info "Initialising branch router...")
-  (let [router (br/create-router context "_app-ring-response")]
+  ;; The OPTIONAL first-party packages (`registry`, `mcp`) contribute their
+  ;; routes through the branch-router's optional-handler slot — served
+  ;; per-branch + invalidation-fresh, the SAME machinery as the main handler.
+  ;; `create-router` resolves each tolerantly: a package dropped from
+  ;; :package-names contributes no handler and its routes 404, while `app`
+  ;; still boots (it never references them). This replaces the route-collection
+  ;; seam for these packages — the seam's boot-frozen router baked their
+  ;; constant-arg data reads and could not thread `:request`/`:storage-query`.
+  (let [router (br/create-router
+                 context "_app-ring-response"
+                 {:optional-handler-fn-names ["_registry-ring-response"
+                                              "_mcp-ring-response"]})]
     (br/set-active-router! router)
     router))
 
@@ -291,60 +301,34 @@
 ;; main editor.js loads, exposing `window.API.<key>` to every
 ;; editor module.
 
+(defn- optional-router-if-present
+  "The compiled router for `router-fn-name` when its (optional) package is
+   loaded, else nil. Used to feed the OPTIONAL packages' `/api/*` route PATHS
+   into `window.API` — the paths are static, so a boot-time build is correct
+   even though the routes are SERVED per-branch (see `:exec/branch-router`)."
+  [context router-fn-name]
+  (when (fn-lookup/query-fn-by-name (:storage context) router-fn-name true)
+    (exec/execute-by-name context router-fn-name {})))
+
+
 (defmethod ig/init-key :exec/api-routes-js-cache
   [_ {:keys [context]}]
   (log/info "Building cached api-routes JS module...")
-  (let [router (exec/execute-by-name context "_router" {})]
-    (api-routes-js/install-from-router! router)
+  ;; window.API is the union of the main `:_router` paths PLUS the OPTIONAL
+  ;; first-party routers' paths (`registry-router` / `mcp-router`) when loaded
+  ;; — so editor JS can probe `window.API.api_packages_installed` to decide
+  ;; whether the registry package is present. Route PATHS are static; the
+  ;; routes themselves are served per-branch by the branch-router.
+  (let [routers (into [(exec/execute-by-name context "_router" {})]
+                      (keep #(optional-router-if-present context %))
+                      ["registry-router" "mcp-router"])]
+    (api-routes-js/install-base-routers! routers)
     (log/info "api-routes JS cache:" (count (api-routes-js/read-cache)) "bytes")
     :ok))
 
 
 (defmethod ig/halt-key! :exec/api-routes-js-cache [_ _]
   (api-routes-js/clear-cache!))
-
-
-;; =============================================================================
-;; Optional-package route installers (route-collection seam)
-;; =============================================================================
-;;
-;; First-party OPTIONAL packages (`mcp`, `registry`) contribute their routes
-;; through the route collection (graphden.system.route-collection) instead of
-;; being hard-listed in app's `:all` — so a deployment can drop the package
-;; from `:package-names` and the app still boots. Each installer is TOLERANT:
-;; if the package was omitted its router fn-def isn't synced to storage, so the
-;; presence check misses and the installer no-ops. The init-keys are wired in
-;; the base config (system-*.edn) with an ordering ref on `:exec/api-routes-js-
-;; cache`, so the core-only `window.API` builds first and each installer then
-;; rebuilds the union — mirrors how the tenancy addon installs `:tenancy`.
-
-(defn- install-optional-router!
-  "If `router-fn-name` is present (its package loaded), compile it into a
-   fall-through router, install it under `key` in the route collection, and
-   rebuild `window.API` from the core router ∪ the whole collection. Absent
-   package → clean no-op. Returns `:installed` or nil."
-  [context key router-fn-name]
-  (when (fn-lookup/query-fn-by-name (:storage context) router-fn-name true)
-    (log/info "Installing optional route-collection router:" key)
-    (rc/install-router! key (exec/execute-by-name context router-fn-name {}))
-    (api-routes-js/rebuild-window-api! (exec/execute-by-name context "_router" {}))
-    :installed))
-
-
-(defmethod ig/init-key :mcp/router-install [_ {:keys [context]}]
-  (install-optional-router! context :mcp "mcp-router"))
-
-
-(defmethod ig/halt-key! :mcp/router-install [_ _]
-  (rc/remove-router! :mcp))
-
-
-(defmethod ig/init-key :registry/router-install [_ {:keys [context]}]
-  (install-optional-router! context :registry "registry-router"))
-
-
-(defmethod ig/halt-key! :registry/router-install [_ _]
-  (rc/remove-router! :registry))
 
 
 ;; =============================================================================

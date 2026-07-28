@@ -143,6 +143,15 @@
   (atom nil))
 
 
+(def ^:private !base-routers
+  "The FIRST-PARTY routers `window.API` is built from — the main `:_router`
+   plus the optional `registry-router` / `mcp-router` (route PATHS are static,
+   even though those packages' routes are SERVED per-branch). Remembered by
+   `install-base-routers!` so a later addon rebuild (`rebuild-window-api!`)
+   can re-union them with the route-collection instead of dropping them."
+  (atom []))
+
+
 (defn install-from-routers!
   "Compute the JS bundle from the UNION of several compiled routers'
    `/api/*` paths and store it. Lets an addon contribute its OWN
@@ -165,15 +174,23 @@
   (install-from-routers! [router]))
 
 
+(defn install-base-routers!
+  "Store the first-party `routers` as the window.API base set AND build the
+   cache from them. Called once by `:exec/api-routes-js-cache`."
+  [routers]
+  (reset! !base-routers routers)
+  (install-from-routers! routers))
+
+
 (defn rebuild-window-api!
-  "Rebuild `window.API` from `core-router` UNIONED with every router
-   currently installed in the route-collection (tenancy / registry /
-   mcp). Call after any `route-collection/install-router!` so the cache
-   reflects the FULL set — `install-from-routers!` resets (not appends),
-   so each installer must rebuild from the whole collection or the
-   last writer would drop the others' `/api/*` keys. Idempotent."
-  [core-router]
-  (install-from-routers! (cons core-router (vals (rc/current-collection)))))
+  "Rebuild `window.API` from the remembered first-party base routers
+   (`:_router` + optional `registry-router` / `mcp-router`) UNIONED with
+   every router currently installed in the route-collection (the tenancy
+   addon). Called by an addon after `route-collection/install-router!` so the
+   cache reflects the FULL set — `install-from-routers!` resets (not appends),
+   so a rebuild that forgot the base routers would drop their `/api/*` keys."
+  []
+  (install-from-routers! (concat @!base-routers (vals (rc/current-collection)))))
 
 
 (defn install!

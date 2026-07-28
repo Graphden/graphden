@@ -158,22 +158,12 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
- ;; Optional-package route installer (route-collection seam). Installs the
- ;; `mcp` package's `/mcp` router when that package is loaded; a clean no-op
- ;; when `"mcp"` is dropped from :package-names. `:_after` forces it to run
- ;; AFTER the core-only window.API cache so its rebuild (core ∪ collection)
- ;; isn't overwritten — same edge the tenancy addon uses.
- :mcp/router-install
- {:context #ig/ref :exec/context
-  :_after #ig/ref :exec/api-routes-js-cache}
-
- ;; Optional-package route installer — the `registry` package's
- ;; `/api/packages/*` + `/api/export/*` + `/partials/packages-panel` routes.
- ;; No-op when `"registry"` is dropped from :package-names (the editor's
- ;; Packages panel then hides itself via a window.API probe).
- :registry/router-install
- {:context #ig/ref :exec/context
-  :_after #ig/ref :exec/api-routes-js-cache}
+ ;; NOTE: the OPTIONAL packages `registry` / `mcp` are NOT wired as separate
+ ;; route installers — the `:exec/branch-router` resolves their per-branch
+ ;; handlers (`_registry-ring-response` / `_mcp-ring-response`) tolerantly and
+ ;; serves them alongside the main handler. Their /api PATHS ride window.API
+ ;; via `:exec/api-routes-js-cache`. Dropping either from :package-names is all
+ ;; it takes to omit them.
 
  ;; Service registry: seeds packages' `:services` declarations into the
  ;; `:service` table (idempotent — deterministic ids), then reads

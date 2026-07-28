@@ -523,6 +523,22 @@
    :args {:items [:mcp-route]}}
 
   {:name :mcp-router
-   :description "Fall-through reitit router over `:_mcp-routes` — returns nil on no-match (`:router-or-nil`) so the route-collection seam falls through to the main app router for any non-`/mcp` path."
+   :description "Fall-through reitit router over `:_mcp-routes` — returns nil on no-match (`:router-or-nil`) so the branch-router falls through to the main app router for any non-`/mcp` path."
    :parent :router-or-nil
-   :args {:routes :_mcp-routes}}]}
+   :args {:routes :_mcp-routes}}
+
+  ;; Per-branch Ring handler — invokes `:mcp-router` on the parsed request,
+  ;; binding `:storage-query :pg-query` (the `:_mcp-dispatch` free arg —
+  ;; `:_mcp-dispatch` is `:lambda-params [:request :storage-query]`). Returns
+  ;; nil on no-match for fall-through. The OPTIONAL analogue of
+  ;; `app.server/_app-ring-response`: the branch-router builds a per-branch
+  ;; closure for it (only when the mcp package is loaded) and consults it
+  ;; BEFORE the main handler, so `/mcp` is served through the SAME per-branch,
+  ;; request-threaded machinery as the main router. The boot-frozen route-
+  ;; collection seam could NOT serve it — with no `:request`/`:storage-query`
+  ;; bound at boot, `:_mcp-dispatch` baked to a constant method-not-found.
+  {:name :_mcp-ring-response
+   :description "Per-branch Ring handler for POST /mcp. Invokes `:mcp-router` on the request with `:storage-query :pg-query` bound; nil on no-match → fall-through to the main app handler. Free arg: `:request`."
+   :parent :router-result
+   :args {:func :mcp-router
+          :storage-query :pg-query}}]}

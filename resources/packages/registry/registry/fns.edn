@@ -1688,6 +1688,21 @@
    :args {:items [:_registry-api-routes :partial-packages-panel]}}
 
   {:name :registry-router
-   :description "Fall-through reitit router over `:_registry-routes` — returns nil on no-match (`:router-or-nil`) so the route-collection seam falls through to the main app router for any non-registry path."
+   :description "Fall-through reitit router over `:_registry-routes` — returns nil on no-match (`:router-or-nil`) so the branch-router falls through to the main app router for any non-registry path."
    :parent :router-or-nil
-   :args {:routes :_registry-routes}}]}
+   :args {:routes :_registry-routes}}
+
+  ;; Per-branch Ring handler — invokes `:registry-router` on the parsed
+  ;; request and returns its result (nil on no-match, for fall-through). This
+  ;; is the OPTIONAL analogue of `app.server/_app-ring-response`: the
+  ;; branch-router builds a per-branch closure for it (only when the registry
+  ;; package is loaded) and consults it BEFORE the main handler, so registry's
+  ;; routes are served through the SAME per-branch, invalidation-fresh
+  ;; machinery as the main router — NOT the boot-frozen route-collection seam
+  ;; (whose baked constant-arg queries served stale data). No `:storage-query`
+  ;; binding needed: registry's handlers query via `:query-entities` (ctx
+  ;; storage), not the injected `:storage-query-call` free arg.
+  {:name :_registry-ring-response
+   :description "Per-branch Ring handler for the registry's `/api/packages/*` + `/api/export/*` + `/partials/packages-panel` routes. Invokes `:registry-router` on the request; nil on no-match → the branch-router falls through to the main app handler. Free arg: `:request`."
+   :parent :router-result
+   :args {:func :registry-router}}]}

@@ -165,6 +165,41 @@
       (closure {:request request} branch-ctx))))
 
 
+(defn- optional-ring-callable-for-ctx
+  "Like `ring-callable-for-ctx` but TOLERANT: returns nil when the closure
+   is absent (an OPTIONAL package's handler this branch doesn't have),
+   instead of throwing. Used for the `registry` / `mcp` per-branch handlers
+   — each is a `:router-or-nil`-backed handler that returns nil on no-match,
+   so a nil result (missing closure OR no route matched) means the caller
+   falls through to the next optional handler / the main handler. Re-reads
+   the registry each call, so a delta-recompile (e.g. after a package
+   publish/install write) is visible without rebuilding the callable — this
+   is exactly the freshness the boot-frozen route-collection seam lacked."
+  [branch-ctx handler-fn-id]
+  (fn [request]
+    (when-let [closure (get (cr/registry branch-ctx) handler-fn-id)]
+      (closure {:request request} branch-ctx))))
+
+
+(defn- compose-branch-handler
+  "The per-branch Ring callable. Consults each OPTIONAL handler (registry /
+   mcp — present only when their package is loaded) in turn; the first
+   non-nil response wins. When none match (all nil → their `:router-or-nil`
+   found no route, or the package isn't loaded), falls through to the MAIN
+   `_app-ring-response` handler. This serves the optional packages' routes
+   through the SAME per-branch, invalidation-fresh, request-threaded
+   machinery as the main router — the requirement the seam could not meet."
+  [branch-ctx handler-fn-id optional-handler-fn-ids]
+  (let [main (ring-callable-for-ctx branch-ctx handler-fn-id)
+        opts (mapv #(optional-ring-callable-for-ctx branch-ctx %)
+                   optional-handler-fn-ids)]
+    (if (seq opts)
+      (fn [request]
+        (or (some (fn [h] (h request)) opts)
+            (main request)))
+      main)))
+
+
 (defn- now-ms
   []
   (System/currentTimeMillis))
@@ -241,7 +276,7 @@
    Slow path: full `rebuild!` for the branch.
 
    No atom writes; caller installs the result."
-  [{:keys [base-ctx handler-fn-id]} branch-id]
+  [{:keys [base-ctx handler-fn-id optional-handler-fn-ids]} branch-id]
   (let [branch-ctx (build-branch-ctx base-ctx branch-id)
         base-storage (vs/unwrap (:storage base-ctx))
         merge-target? (branch-is-merge-target? base-storage branch-id)
@@ -277,7 +312,7 @@
       :else
       (cr/rebuild! branch-ctx))
     {:ctx branch-ctx
-     :handler (ring-callable-for-ctx branch-ctx handler-fn-id)
+     :handler (compose-branch-handler branch-ctx handler-fn-id optional-handler-fn-ids)
      :built-at (java.time.Instant/now)
      :last-used (now-ms)}))
 
@@ -684,9 +719,16 @@
                   oldest non-default entry on overflow."
   ([base-ctx handler-fn-name]
    (create-router base-ctx handler-fn-name nil))
-  ([base-ctx handler-fn-name {:keys [max-size]}]
+  ([base-ctx handler-fn-name {:keys [max-size optional-handler-fn-names]}]
    (let [default-branch-id (vs/current-branch-id (:storage base-ctx))
-         handler-fn-id (resolve-handler-fn-id (:storage base-ctx) handler-fn-name)]
+         handler-fn-id (resolve-handler-fn-id (:storage base-ctx) handler-fn-name)
+         ;; OPTIONAL handlers (`_registry-ring-response` / `_mcp-ring-response`)
+         ;; — resolved TOLERANTLY: keep only those whose fn-def exists (i.e.
+         ;; the package is loaded). A dropped package simply contributes no id,
+         ;; so its routes are never dispatched and `app` still boots.
+         optional-handler-fn-ids (into []
+                                       (keep #(resolve-handler-fn-id (:storage base-ctx) %))
+                                       optional-handler-fn-names)]
      (when-not handler-fn-id
        (throw (ex-info (str "Handler fn-def not found: " handler-fn-name)
                        {:type :branch-router/handler-not-found
@@ -694,6 +736,7 @@
      (let [router (cond-> (->BranchRouter base-ctx default-branch-id
                                           (atom {}) handler-fn-id)
                     true (assoc :ref-cache (atom {})
+                                :optional-handler-fn-ids optional-handler-fn-ids
                                 :build-monitors (java.util.concurrent.ConcurrentHashMap.))
                     max-size (assoc :max-size max-size))]
        ;; Eager seed for the default branch: reuse the base-ctx (which
@@ -703,7 +746,8 @@
        (swap! (:handlers router)
               assoc default-branch-id
               {:ctx base-ctx
-               :handler (ring-callable-for-ctx base-ctx handler-fn-id)
+               :handler (compose-branch-handler base-ctx handler-fn-id
+                                                optional-handler-fn-ids)
                :built-at (java.time.Instant/now)
                :last-used (now-ms)})
        ;; The default ctx was just built from the CURRENT graph — seed

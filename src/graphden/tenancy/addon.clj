@@ -134,11 +134,12 @@
     ;; Frontend half of the route-collection seam: contribute the addon's
     ;; `/api/*` routes to `window.API` so editor JS addresses them via
     ;; `window.API.<key>` (no hardcoded literals — the frontend auto-adapts to
-    ;; the addon's routing graph). `rebuild-window-api!` regenerates from core
-    ;; `:_router` ∪ the WHOLE collection, so it composes with any other
-    ;; installed router (registry / mcp). Runs AFTER `:exec/api-routes-js-cache`
-    ;; (ig dependency in addon.edn) so the core-only cache doesn't overwrite it.
-    (api-routes-js/rebuild-window-api! (cr/execute-by-name context "_router" {}))
+    ;; the addon's routing graph). `rebuild-window-api!` regenerates from the
+    ;; remembered first-party base routers (`:_router` + optional registry/mcp)
+    ;; ∪ the WHOLE route-collection, so it composes with them. Runs AFTER
+    ;; `:exec/api-routes-js-cache` (ig dependency in addon.edn) so the base
+    ;; routers are already remembered.
+    (api-routes-js/rebuild-window-api!)
     :installed))
 
 

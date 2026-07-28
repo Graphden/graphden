@@ -87,15 +87,8 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
- ;; Optional-package route installers (see system-prod.edn). No-op when `mcp`
- ;; / `registry` are dropped from :package-names.
- :mcp/router-install
- {:context #ig/ref :exec/context
-  :_after #ig/ref :exec/api-routes-js-cache}
-
- :registry/router-install
- {:context #ig/ref :exec/context
-  :_after #ig/ref :exec/api-routes-js-cache}
+ ;; OPTIONAL `registry` / `mcp` are served per-branch by `:exec/branch-router`
+ ;; (see system-prod.edn) — no separate route installer.
 
  ;; Service registry — see system-prod.edn for the full rationale.
  :exec/service-reconciler

@@ -95,3 +95,31 @@
       (testing "bool field decoded as boolean"
         (is (true? (:enabled? via-graph))
             ":enabled? true round-trips as a Clojure bool")))))
+
+
+(deftest service-org-id-field-round-trips-through-storage
+  (testing "the tenant-owner :org-id column (task #6) persists + decodes
+            (snake_case org_id → :org-id kebab), and a nil org-id (platform
+            service) reads back nil for backward-compatibility"
+    (let [web-server-fn-id (:id (first (sp/query-entities *storage* :fn
+                                                          {:name "web-server"})))
+          tenant (sp/create-entity *storage* :service
+                                   {:fn-id web-server-fn-id
+                                    :enabled? true
+                                    :restart-policy :always
+                                    :org-id "acme"})
+          platform (sp/create-entity *storage* :service
+                                     {:fn-id web-server-fn-id
+                                      :enabled? false
+                                      :restart-policy :never})]
+      (testing "a stamped org-id survives the write + read"
+        (is (= "acme" (:org-id (sp/read-entity *storage* :service (:id tenant)))))
+        (is (not (contains? (sp/read-entity *storage* :service (:id tenant)) :org_id))
+            "raw snake_case key absent — codec normalised to :org-id"))
+      (testing "a platform service (no org-id) reads back nil, not missing/broken"
+        (is (nil? (:org-id (sp/read-entity *storage* :service (:id platform))))))
+      (testing "the reconciler's global read sees both rows regardless of org
+                (Option B — :service is NOT org-scoped)"
+        (let [ids (into #{} (map :id) (sp/query-entities *storage* :service {}))]
+          (is (contains? ids (:id tenant)))
+          (is (contains? ids (:id platform))))))))

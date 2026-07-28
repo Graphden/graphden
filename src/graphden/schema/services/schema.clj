@@ -224,6 +224,22 @@
   #uuid "c3a8d572-1e4f-4b06-9a25-6f8c4e9d5a31")
 
 
+;; Tenant owner of a tenant-created service (task #6, FLEET_RFC §7.1). NULL ≡
+;; a PLATFORM service (web-server, vault, cron) — the pre-tenancy default, so
+;; every existing row reads as platform and the column needs no backfill.
+;; Unlike `:fn` / `:fn-execution`, `:service` STAYS in
+;; `tenancy.storage/tenant-forbidden-entities` (Option B): the platform
+;; reconciler must read EVERY org's services in one pass, and moving `:service`
+;; into `default-scoped-entities` would hide tenant rows from the platform at
+;; the DB layer (Postgres FORCE ROW LEVEL SECURITY under a non-BYPASSRLS app
+;; role). So this column is NOT auto-stamped by OrgScopedStorage — the tenant
+;; service-create endpoint stamps `(tc/current-org)` explicitly through the base
+;; storage, and the reconciler's `cr/run-service-scoped` seam sandboxes each
+;; service by it.
+(def ^:private service-org-id-field-uuid
+  #uuid "b2e6f1a4-3c7d-4e58-9a1b-6f0c2d8e4b73")
+
+
 ;; =============================================================================
 ;; Schema
 ;; =============================================================================
@@ -264,4 +280,11 @@
                       :branch-id {:uuid service-branch-id-field-uuid
                                   :type :ref
                                   :ref-entity :branch
-                                  :nullable? true}})))
+                                  :nullable? true}
+                      ;; Tenant owner; NULL ≡ platform. Stamped by the tenant
+                      ;; service-create endpoint (task #6), NOT OrgScopedStorage
+                      ;; — `:service` is tenant-forbidden (Option B, see the
+                      ;; field-uuid comment above).
+                      :org-id {:uuid service-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})))

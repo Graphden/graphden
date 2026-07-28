@@ -64,9 +64,15 @@
    they aren't org-isolated, so a tenant touching them escalates out of, or
    enumerates across, the sandbox:
 
-   - `:service` — runs via the reconciler in an UNSANDBOXED ctx (no effect
-     gate), so a tenant deploying an `:http-server` service would escape the
-     cloud effect restrictions (env / io / network / process) entirely.
+   - `:service` — NOT org-scoped by construction (Option B, task #6 /
+     FLEET_RFC §7.1). The reconciler runs each service through the
+     `cr/run-service-scoped` effect sandbox now, so the old escape
+     (unsandboxed `:http-server`) is closed — but `:service` STAYS forbidden
+     because the platform reconciler must read EVERY org's services in one
+     pass, and org-scoping the entity would hide tenant rows from the platform
+     under FORCE ROW LEVEL SECURITY. Tenant services are instead created / listed
+     through dedicated endpoints (base storage, `:org-id`-stamped), gated to the
+     dedicated (own cgroup-limited pod) tier.
    - `:grant`   — write: grant itself `:admin`; read: enumerate every org's
      grants (the grants panel's `:list-grants`).
    - `:domain`  — hijack / enumerate custom-domain → org routing.
@@ -197,8 +203,9 @@
 
    First, the unconditional tenant invariant (independent of any grant store):
    a tenant may not write a `tenant-forbidden-entities` type — this is what
-   keeps a tenant from deploying an unsandboxed `:service` or escalating via
-   `:grant`.
+   keeps a tenant from deploying a `:service` directly (bypassing the
+   dedicated-tier gate + `:org-id` stamp of the service-create endpoint) or
+   escalating via `:grant`.
 
    Then the cross-org edge check (see `reject-cross-org-refs!`), which is
    what lets an executor compile a single org's shard of the graph.

@@ -48,7 +48,7 @@ already bootstraps onto the substrate.
     [`resources/packages/app/server/fns.edn`](../resources/packages/app/server/fns.edn).
   - Its HTTP routes are fn-defs (`:health`, `:version`, `:editor`, …):
     [`resources/packages/app/routes/fns.edn`](../resources/packages/app/routes/fns.edn).
-  - The editor's entire server side is ~540 fn-defs:
+  - The editor's entire server side is ~640 fn-defs:
     [`resources/packages/app/editor/fns.edn`](../resources/packages/app/editor/fns.edn).
   - (Honest boundary: the *engine* below and the editor's *browser* JS are
     text; the application server composed on top is graph.)

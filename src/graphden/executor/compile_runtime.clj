@@ -955,6 +955,35 @@
   (conj default-cloud-allowed-effects :raw-sql))
 
 
+;; Seam: a `(fn [svc thunk] -> result)` the tenancy addon installs so the
+;; service reconciler runs each service INSIDE its org's sandbox — the addon's
+;; fn binds `*current-org*` to the service's `:org-id` and `*allowed-effects*`
+;; to that org's plan effects (`cloud-allowed-effects-for`), so a persistent
+;; tenant service is gated exactly like a request-path execute. Combined with
+;; the future conveyance (`conveyed-dynamic-vars`), the gate reaches the worker
+;; thread the service spawns. nil (no addon / single-tenant) or a PLATFORM
+;; service (nil / public org-id — the addon's fn decides) → the thunk runs
+;; UNRESTRICTED, so the platform's own services (web-server, vault, cron) keep
+;; their full effects. Kept in core (not tenancy) so the reconciler — which is
+;; core — has no tenancy dependency; mirrors `cloud-allowed-effects-resolver`.
+(defonce service-execution-scope (atom nil))
+
+
+(defn run-service-scoped
+  "Run `thunk` — a 0-arg fn that starts ONE service via `execute` — under the
+   installed `service-execution-scope`, or directly when none is installed.
+   The seam decides, by the service's `:org-id`, whether to sandbox: a tenant
+   service is wrapped in its org's effect gate + org context; a platform
+   service (and every service in single-tenant mode) runs unrestricted. A seam
+   that throws propagates (a genuinely misconfigured install must not silently
+   run a service unsandboxed — fail closed, unlike the effects RESOLVER which
+   fails safe to the locked default)."
+  [svc thunk]
+  (if-let [scope @service-execution-scope]
+    (scope svc thunk)
+    (thunk)))
+
+
 (def ^:dynamic *scrub-internal-errors?*
   "When true (bound by `tenancy.addon` for org≠public requests, alongside
    `*allowed-effects*`), failed-execution outcomes surfaced to the client —

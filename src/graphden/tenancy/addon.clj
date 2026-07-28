@@ -76,6 +76,22 @@
     ;; by core already. Only registered when the addon is present — a single-
     ;; tenant deploy conveys nothing tenancy-specific.
     (cr/register-conveyed-var! #'tc/*current-org*)
+    ;; Sandbox each tenant SERVICE by its org (task #6): the reconciler runs
+    ;; every service start through `cr/run-service-scoped`; install the seam
+    ;; that, for a tenant service (`:org-id` set, non-public), binds the org
+    ;; context + its plan's effect gate around the start — so a persistent
+    ;; service is gated exactly like a request-path execute, and the
+    ;; conveyance above carries that gate into any worker thread it spawns. A
+    ;; PLATFORM service (no / public `:org-id`) runs unrestricted, so the
+    ;; platform's own web-server / vault / cron keep their full effects.
+    (reset! cr/service-execution-scope
+            (fn [svc thunk]
+              (let [org (:org-id svc)]
+                (if (and org (not= tc/public-org org))
+                  (binding [tc/*current-org* org
+                            cr/*allowed-effects* (cr/cloud-allowed-effects-for org)]
+                    (thunk))
+                  (thunk)))))
     (ts/org-scoped-storage base (or scoped-entities ts/default-scoped-entities) authorize-write)))
 
 
@@ -85,6 +101,7 @@
   ;; into a later system — the cross-test leak that would otherwise let one
   ;; namespace's addon boot break another's execute in the same JVM.
   (authz/uninstall-view-impl-filter!)
+  (reset! cr/service-execution-scope nil)
   (plan/uninstall!))
 
 

@@ -114,14 +114,26 @@
    service) on success, or the `start-error` sentinel on exception. The fn is
    called synchronously — any startup throw (port-in-use, etc.) is caught.
    Long-running fns block INSIDE the impl, not at this call site (web-server
-   returns a stopper thunk immediately)."
-  [ctx fn-id args svc-id]
-  (try
-    (log/info "service start" svc-id "fn-id" fn-id)
-    (cr/execute ctx fn-id args)
-    (catch Exception e
-      (log/error e "service start failed" svc-id "fn-id" fn-id)
-      start-error)))
+   returns a stopper thunk immediately).
+
+   The `execute` runs inside `cr/run-service-scoped`: for a tenant service
+   (`:org-id` set) the tenancy addon's seam binds the org's effect gate +
+   org context, so a persistent service is sandboxed exactly like a
+   request-path execute — and the future conveyance carries that gate into
+   the worker thread the service spawns. Platform services (no `:org-id`, and
+   every service in single-tenant mode) run unrestricted. Keeping the seam
+   OUTSIDE the try means a startup-time plan violation (a forbidden effect
+   fired synchronously during start) surfaces here as `start-error` — the
+   service simply fails to start rather than running unsandboxed."
+  [ctx svc args]
+  (let [fn-id (:fn-id svc)
+        svc-id (:id svc)]
+    (try
+      (log/info "service start" svc-id "fn-id" fn-id)
+      (cr/run-service-scoped svc (fn [] (cr/execute ctx fn-id args)))
+      (catch Exception e
+        (log/error e "service start failed" svc-id "fn-id" fn-id)
+        start-error))))
 
 
 ;; Supervisor retry tuning. Bounded to keep reconcile-once! responsive
@@ -165,7 +177,7 @@
          policy (:restart-policy svc)
          max-attempts (if (should-retry? policy) (inc max-retries) 1)]
      (loop [attempt 1]
-       (let [stopper (start-service-once! ctx fn-id args (:id svc))]
+       (let [stopper (start-service-once! ctx svc args)]
          (cond
            ;; Success — the fn ran without throwing. Its return is the stopper,
            ;; which may legitimately be nil (fire-and-forget); `stop-service!`

@@ -66,7 +66,7 @@ implementation tasks.
   bundle), `dependencies` (jsonb), `content-hash`, `published-at`. NOT
   versioned (immutable by contract — the publish path rejects re-publishing an
   existing `(name, version)`).
-- **Base-fns + HTTP routes** — `resources/packages/app/registry/{fns.edn,impls.clj}`:
+- **Base-fns + HTTP routes** — `resources/packages/registry/registry/{fns.edn,impls.clj}`:
   `export-namespace`, `publish-package`, `list-package-versions`,
   `fetch-package-version`, `install-package`, wired to
   `POST /api/packages/publish`, `GET /api/packages`,
@@ -296,7 +296,7 @@ as `:namespace` on each fn-def, reconstructed on install).
   platform-only packages get `[]`). `install-package` then pulls those
   packages FIRST, depth-first with a `[name version]` cycle guard — since the
   graph decomposition it is a `:fix` worklist loop of graph fn-defs (the
-  `:_inst-*` chain in `app/registry/fns.edn`) over the base-fn primitives
+  `:_inst-*` chain in `registry/registry/fns.edn`) over the base-fn primitives
   (`:resolve-package-version` / `:missing-package-dependencies` /
   `:package-version-materialized?` / `:materialize-package-fns` /
   `:package-upsert-pin`) — so a package's cross-package refs

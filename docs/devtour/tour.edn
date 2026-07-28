@@ -620,7 +620,7 @@
            `:secrets` manifest lists what was affected — the publisher sees
            the warning, the installer gets a `:needs-definition` todo. A
            bundle is deliberately not a full copy of your secrets."}
-    {:file "resources/packages/app/registry/impls.clj" :defn publish-package-apply
+    {:file "resources/packages/registry/registry/impls.clj" :defn publish-package-apply
      :say "Publish lands the bundle IN the graph: an immutable, content-hashed
            `:package-version` row (name + semver + fns + declared deps).
            Install is its mirror — `materialize-package-fns` syncs the pinned

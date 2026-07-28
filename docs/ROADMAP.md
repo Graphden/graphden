@@ -15,7 +15,7 @@ variants + rich-type registry), the visual graph editor, the REST API
 (`/api/graph/*`, `/api/entities/*`, `/api/sequence/*`, `/api/execute*`), branch
 versioning, the tenancy addon (orgs / users / grants / RLS / effect-gate / FaaS
 — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md)), the package registry
-(`app/registry`), the storage-swap path (storage base-fns `:pg-query` /
+(the `registry` package), the storage-swap path (storage base-fns `:pg-query` /
 `:pg-execute` / `:pg-tx`; API routes are graph fn-defs; the storage protocol is
 injected at the web-server via a `:storage-query` free arg — former Block 1),
 and `:fix` recursion ([RECURSION.md](RECURSION.md)).

@@ -9,10 +9,24 @@
 // endpoint the partial reads is auth-required). NOT tenancy-gated — packages
 // exist in single-tenant too, unlike the Grants/Users admin sections.
 //
-// Globals consumed: isAuthenticated, htmx. Mirrors editor-grants-admin.js.
+// The `registry` package is OPTIONAL (it installs its routes via the route-
+// collection seam). When a deployment omits it, `/partials/packages-panel` and
+// the `/api/packages/*` routes 404 — so gate the whole section on a window.API
+// probe (`api_packages_installed` is present only when registry contributed its
+// routes). Mirrors how buildGrantsAdminSection gates on graphdenTenancyActive().
+//
+// Globals consumed: isAuthenticated, window.API, htmx. Mirrors editor-grants-admin.js.
+
+// True iff the optional `registry` package is loaded — its `/api/packages/*`
+// routes are in window.API only when its router was installed at boot.
+function registryLoaded() {
+  return typeof window.API === 'object' && window.API !== null
+    && typeof window.API.api_packages_installed !== 'undefined';
+}
 
 function buildPackagesSection() {
   if (!isAuthenticated()) return null;
+  if (!registryLoaded()) return null;
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-packages';
   // .ns-children hx-get lazy-loads the server-rendered panel on insert.

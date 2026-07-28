@@ -36,7 +36,11 @@
 
 (use-fixtures :once
   (fn [t]
-    (binding [*storage* (:storage (setup/bootstrap-crud-graph-from-golden!))]
+    ;; registry is its own OPTIONAL package now — bootstrap the golden WITH
+    ;; "registry" so `:export-graph` / `:export-namespace` + their handlers
+    ;; (which this suite exports/publishes) are present.
+    (binding [*storage* (:storage (setup/bootstrap-crud-graph-from-golden!
+                                    "export-test" ["core" "web" "app" "registry" "mcp"]))]
       ;; The secret-fixture's `ex/vault-get` must be REGISTERED as a
       ;; hide-result resolver — the export's `hidden-resolver?` keys
       ;; secret-path emission on the resolver's registered return
@@ -248,7 +252,7 @@
 ;; =============================================================================
 
 (deftest corpus-fixpoint
-  (let [packages (loader/load-packages ["core" "web" "app"])
+  (let [packages (loader/load-packages ["core" "web" "app" "registry" "mcp"])
         all-defs (vec (concat (map (fn [[nm d]] (assoc d :name nm)) (:base-fn-defs packages))
                               (:fn-defs packages)))
         sorted (deps/topological-sort all-defs)

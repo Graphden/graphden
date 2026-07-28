@@ -28,9 +28,9 @@
    :why
    "A second PostgreSQL container means some caller bypassed get-container's double-checked lock. Costs ~3 s and breaks the per-NS logical-DB isolation the whole shared-container design rests on."},
   :fixture/golden-bootstrap
-  {:max 1,
+  {:max 2,
    :why
-   "The golden bootstrap is ~14 s and is cached per JVM x package-set. A second one means a namespace asked for a package set nobody else uses — check its `packages` vector before accepting the cost."},
+   "The golden bootstrap is ~14 s and is cached per JVM x package-set. TWO are expected: the default `[core web app]` golden most suites clone, PLUS ONE `[core web app registry mcp]` golden shared by the suites that exercise the OPTIONAL `registry` / `mcp` packages (registry-test, export-test, mcp-endpoint-test) — `app` no longer pulls those packages, so those suites must ask for the full set. They deliberately share ONE set so it stays a single extra golden. A THIRD means a suite asked for yet another package set nobody else uses — check its `packages` vector before accepting the cost."},
   :fixture/type-check-sweep
   {:max 0,
    :why

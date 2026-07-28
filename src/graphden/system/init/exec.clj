@@ -339,6 +339,14 @@
   (rc/remove-router! :mcp))
 
 
+(defmethod ig/init-key :registry/router-install [_ {:keys [context]}]
+  (install-optional-router! context :registry "registry-router"))
+
+
+(defmethod ig/halt-key! :registry/router-install [_ _]
+  (rc/remove-router! :registry))
+
+
 ;; =============================================================================
 ;; Demo branches (dev only — no-op in prod when `:branches` is absent/empty)
 ;; =============================================================================

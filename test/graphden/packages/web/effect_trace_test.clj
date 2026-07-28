@@ -40,7 +40,10 @@
 
 
 (def ^:private registry-ns
-  (load-impls-ns "packages/app/registry/impls.clj"
+  ;; registry is its own package now — impls moved to packages/registry/registry/;
+  ;; the impls `ns` symbol is unchanged (identity is uuid-v5(namespace,name), and
+  ;; `load-impls-ns` loads by PATH + reads the ns from the file).
+  (load-impls-ns "packages/registry/registry/impls.clj"
                  'graphden.packages.app.registry.impls))
 
 

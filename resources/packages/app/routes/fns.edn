@@ -579,20 +579,11 @@
                   :api-branch-conflicts
                   :api-branch-merge
                   :api-fn-versions
-                  :api-packages-publish
-                  :api-packages-list
-                  :api-packages-fetch
-                  :api-packages-install
-                  :api-packages-update
-                  :api-packages-fork
-                  :api-packages-installed
-                  :api-packages-uninstall
-                  :api-packages-panel-install
-                  :api-packages-panel-update
-                  :api-packages-panel-fork
-                  :api-packages-panel-publish
-                  :api-export-graph
-                  :api-export-graph-rows
+                  ;; The registry's `/api/packages/*` + `/api/export/*` routes
+                  ;; live in the OPTIONAL `registry` package now and install via
+                  ;; the route-collection seam (`:registry/router-install`), so
+                  ;; they are intentionally NOT listed here — this keeps `app`
+                  ;; bootable without the registry package.
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-delete

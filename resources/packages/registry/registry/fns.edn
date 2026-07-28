@@ -1652,4 +1652,42 @@
   {:name :api-packages-panel-publish
    :description "POST /api/packages/panel-publish — form {name, version, ns-root}: export the namespace subtree + publish an immutable :package-version from the editor panel; returns the refreshed panel HTML. Auth-required."
    :parent :post
-   :args {:path "/packages/panel-publish" :handler :_pkg-publish-panel-handler}}]}
+   :args {:path "/packages/panel-publish" :handler :_pkg-publish-panel-handler}}
+
+  ;; Route-collection seam: this package's routes as a fall-through
+  ;; `:router-or-nil`, installed into the JVM-wide route collection by the
+  ;; `:registry/router-install` init-key at boot. `app` no longer lists these
+  ;; routes in its `:api-routes`/`:all`, so when `"registry"` is omitted from
+  ;; :package-names this router is never built and the `/api/packages/*`,
+  ;; `/api/export/*` + `/partials/packages-panel` paths 404 while the rest of
+  ;; the app is unaffected (the editor hides its Packages panel — it probes
+  ;; `window.API` for the registry route). The `["/api" …]` nesting reproduces
+  ;; reitit's prefix walk exactly as app's `:api-routes` did.
+  {:name :_registry-api-routes
+   :description "The registry's `/api/*` endpoints, nested under the `/api` prefix (reitit walks the tree) — packages publish/list/fetch/install/update/fork/installed/uninstall + the panel-* variants + graph/namespace export."
+   :parent :list
+   :args {:items ["/api"
+                  :api-packages-publish
+                  :api-packages-list
+                  :api-packages-fetch
+                  :api-packages-install
+                  :api-packages-update
+                  :api-packages-fork
+                  :api-packages-installed
+                  :api-packages-uninstall
+                  :api-packages-panel-install
+                  :api-packages-panel-update
+                  :api-packages-panel-fork
+                  :api-packages-panel-publish
+                  :api-export-graph
+                  :api-export-graph-rows]}}
+
+  {:name :_registry-routes
+   :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` leaf."
+   :parent :list
+   :args {:items [:_registry-api-routes :partial-packages-panel]}}
+
+  {:name :registry-router
+   :description "Fall-through reitit router over `:_registry-routes` — returns nil on no-match (`:router-or-nil`) so the route-collection seam falls through to the main app router for any non-registry path."
+   :parent :router-or-nil
+   :args {:routes :_registry-routes}}]}

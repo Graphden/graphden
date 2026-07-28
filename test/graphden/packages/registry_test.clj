@@ -17,7 +17,11 @@
 
 (use-fixtures :once
   (fn [t]
-    (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
+    ;; registry is its own OPTIONAL package now (installed via the route-
+    ;; collection seam), so `app` no longer pulls it — bootstrap the golden
+    ;; WITH "registry" so its publish/install/fork/export fn-defs are present.
+    (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!
+                            "registry-test" ["core" "web" "app" "registry" "mcp"])]
       (t))))
 
 

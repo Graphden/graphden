@@ -1,0 +1,14 @@
+{:name "registry"
+ :version "1.0.0"
+ :description "Optional package-registry package — in-graph package publish / install / fork / update-rollback + whole-graph + namespace export. Extracted from `app` so a locked-down deployment can omit `\"registry\"` from :package-names and the app still boots; its `/api/packages/*` + `/api/export/*` + `/partials/packages-panel` routes install via the route-collection seam (`:registry/router-install`), so `app` no longer references them, and the editor's Packages sidebar section is gated on a `window.API` probe."
+ ;; Standalone sibling of `app`: uses ONLY core + web (json/html/response/crud)
+ ;; + storage (branch chain) + the `app-base` auth route templates
+ ;; (`:post`/`:get-auth-required`/`:delete`). It does NOT depend on `app` and
+ ;; `app` does NOT depend on it (the route refs were removed from app's
+ ;; `:api-routes`/`:all`), so the edge is severed both ways and dropping
+ ;; `registry` is safe. The fn `:namespace` stays `app.registry` and the impls
+ ;; ns `graphden.packages.app.registry.impls` is unchanged — identity is
+ ;; uuid-v5(namespace,name), so moving only the directory keeps every id + ref
+ ;; byte-identical.
+ :dependencies ["core" "web" "storage" "app-base"]
+ :modules ["registry"]}

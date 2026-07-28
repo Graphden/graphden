@@ -398,34 +398,38 @@ They should be:
 
 ...it should be a **fn-def** (graph composition), not a base-fn.
 
-**The graph editor UI is built entirely as fn-defs in `resources/packages/app/`:**
+**The graph editor UI is built as fn-defs across the core/web/app
+packages:**
 
 ```edn
-;; In app/common/fns.edn — reusable route building blocks
+;; In web/response/fns.edn — reusable response block (MI over a
+;; content-type axis + a status axis); free arg: :body
 {:name :json-ok-response
- :parent :ok-response
- :args {:headers {"Content-Type" "application/json"}}}
+ :parents [:json-content-type :ok-response]}
 
+;; In app-base/routes-method/fns.edn — a GET route template;
+;; free args: :path :handler
 {:name :get-route
  :parent :route
- :args {:k "get"}}
+ :args {:method "get"}}
 
 ;; In app/editor/fns.edn — editor UI composition
-{:name :editor-page
+{:name :page
  :parent :html-page
  :args {:title "Graphden - Graph Editor"
-        :head :editor-head
-        :body :editor-body
-        :scripts :editor-scripts}}
+        :head :head
+        :body :body
+        :scripts :_editor-scripts}}
+
+;; In app/routes/fns.edn — a concrete route leaf
+{:name :health
+ :parent :get-route
+ :args {:path "/health" :handler :_health-handler}}
 
 ;; In app/server/fns.edn — server composition
-{:name :health-route
- :parent :get-route
- :args {:a "/health" :v :health-handler-fn}}
-
 {:name :web-server
  :parent :http-server
- :args {:handler :router-fn
+ :args {:handler :_app-error-bounded
         :port 8080}}
 ```
 
@@ -596,7 +600,7 @@ This section maps each system component to the principles it serves. Use this to
 | Constraint | Principles Served | How |
 |------------|-------------------|-----|
 | No dependency cycles | Correctness | Prevents infinite loops at write time (binding.ref-fn-id graph) |
-| Schema `UNIQUE` keys | Correctness | fn.name, fn-slot, binding, binding-list-item identity |
+| Uniqueness keys | Correctness | `fn-slot`/`binding` schema `UNIQUE`; `fn (namespace, name)` + `binding-list-item` per-branch resolved-view |
 
 ### Protocol Design Decisions
 

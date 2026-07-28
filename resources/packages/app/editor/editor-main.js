@@ -270,6 +270,9 @@ async function initGraph() {
   // synchronous without a full-fns mirror to scan.
   if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
   updateEntityList(graphData);
+  // Proactive plan-usage badge — the fn count just (re)loaded, so refresh it
+  // after every graph mutation (create / delete / rename all call initGraph).
+  if (typeof refreshQuotaBadge === 'function') refreshQuotaBadge();
   // First-load hash navigation: `#fn-name` in the URL (bookmark,
   // shared link, page reload) must select the fn — `hashchange` /
   // `popstate` only fire on AFTER-load changes, not the initial

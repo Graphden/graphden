@@ -90,6 +90,7 @@
                   "packages/app/editor/editor-grants-admin.js"
                   "packages/app/editor/editor-users-admin.js"
                   "packages/app/editor/editor-packages.js"
+                  "packages/app/editor/editor-quota.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"

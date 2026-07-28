@@ -418,4 +418,35 @@
   {:name :set-org-execution-mode-route
    :description "POST /api/orgs/execution-mode — flip an org between hosted and byo (name, execution-mode). Auth-required; platform-only."
    :parent :post
-   :args {:path "/api/orgs/execution-mode" :handler :_org-mode-handler}}]}
+   :args {:path "/api/orgs/execution-mode" :handler :_org-mode-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; QUOTA USAGE (task #8-frontend) — GET /api/orgs/quota returns the
+  ;; CURRENT org's plan usage vs ceilings, for the editor's proactive
+  ;; "N / cap fns" display. Reads the read-side seam installed by
+  ;; `tenancy.plan/install!`; the handler is org-scoped by `current-org`
+  ;; (like `:list-users`), so it is not a boot-baked constant. nil body
+  ;; outside tenancy / for the public org.
+  ;; ---------------------------------------------------------------------
+  {:name :tenant-quota-status
+   :description "Current org's plan usage vs ceilings — `{:plan :fns {:used :max} :list-items {:used :max}}`, or nil outside tenancy. Reads the installed `tenancy.storage/quota-status-fn` seam for current-org."
+   :args {}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_quota-status
+   :parent :tenant-quota-status}
+
+  {:name :_quota-status-json
+   :parent :to-json-string
+   :args {:data :_quota-status}}
+
+  {:name :_quota-handler
+   :description "Ring handler for GET /api/orgs/quota — the current org's plan usage as JSON."
+   :parent :json-ok-response
+   :args {:body :_quota-status-json}}
+
+  {:name :quota-route
+   :description "GET /api/orgs/quota — the current org's plan usage (fns / list-items used vs cap). Auth-required; org-scoped by current-org."
+   :parent :get-auth-required
+   :args {:path "/api/orgs/quota" :handler :_quota-handler}}]}

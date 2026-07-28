@@ -89,3 +89,50 @@
     (is (= :egress/blocked
            (try (egress/resolve-public-ips "localhost") nil
                 (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))))
+
+
+(deftest check-egress-rate!-honours-the-installed-limiter
+  ;; task #5b: the per-org outbound rate cap. The seam holds an org-agnostic
+  ;; `(fn [] → bool)`; the addon closes org-keying over it.
+  (let [saved @egress/egress-rate-limiter]
+    (try
+      (testing "no limiter installed → no-op (single-tenant / unrestricted)"
+        (reset! egress/egress-rate-limiter nil)
+        (is (nil? (egress/check-egress-rate!))))
+      (testing "limiter allows → no throw"
+        (reset! egress/egress-rate-limiter (constantly true))
+        (is (nil? (egress/check-egress-rate!))))
+      (testing "limiter denies → throws :egress/rate-limited"
+        (reset! egress/egress-rate-limiter (constantly false))
+        (is (= :egress/rate-limited
+               (try (egress/check-egress-rate!) nil
+                    (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))
+      (finally (reset! egress/egress-rate-limiter saved)))))
+
+
+(defn- stream-of
+  ^java.io.InputStream [^String s]
+  (java.io.ByteArrayInputStream. (String/.getBytes s "UTF-8")))
+
+
+(deftest read-capped-string!-bounds-the-response-body
+  ;; task #5b: a STREAMING byte-cap — an oversize body is rejected mid-read,
+  ;; never fully buffered.
+  (let [saved @egress/max-response-bytes]
+    (try
+      (testing "no cap → reads the whole stream"
+        (reset! egress/max-response-bytes nil)
+        (is (= "hello world" (egress/read-capped-string! (stream-of "hello world")))))
+      (testing "under the cap → reads in full"
+        (reset! egress/max-response-bytes 100)
+        (is (= "small" (egress/read-capped-string! (stream-of "small")))))
+      (testing "over the cap → throws :egress/response-too-large"
+        (reset! egress/max-response-bytes 4)
+        (is (= :egress/response-too-large
+               (try (egress/read-capped-string! (stream-of "way too long"))
+                    nil
+                    (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))
+      (testing "exactly at the cap → allowed (boundary)"
+        (reset! egress/max-response-bytes 5)
+        (is (= "12345" (egress/read-capped-string! (stream-of "12345")))))
+      (finally (reset! egress/max-response-bytes saved)))))

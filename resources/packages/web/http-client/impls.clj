@@ -32,29 +32,39 @@
   "Shared get-impl shape — `headers` is the FINAL header map (already
    merged + stringified). Returns the record-shape response."
   [url headers timeout-ms]
-  ;; SSRF guard (task #5): for a RESTRICTED (tenant / cloud) execution only.
-  ;; `*allowed-effects*` is nil for the unrestricted platform ctx, so the
-  ;; platform's own outbound to internal services is never blocked; a tenant
-  ;; that reached here already holds :network (a paid tier — the effect gate
-  ;; blocks free tenants earlier). Reject a target resolving to a non-public /
-  ;; internal / cloud-metadata IP before dialing.
-  (when (some? cr/*allowed-effects*)
-    (egress/check-target! url))
-  (let [resp @(http/get url {:headers (or headers {})
-                             :timeout (or timeout-ms 10000)
-                             :as :text})
-        resp-status (:status resp)
-        resp-headers (:headers resp)
-        resp-body (:body resp)
-        resp-error (:error resp)]
-    (when resp-error
-      (throw (ex-info (str "HTTP GET " url " failed: " (Throwable/.getMessage resp-error))
-                      {:type :http-client/request-failed
-                       :url url
-                       :cause (Throwable/.getMessage resp-error)})))
-    {:status (or resp-status 0)
-     :headers (or (stringify-header-keys resp-headers) {})
-     :body (or resp-body "")}))
+  ;; Egress guards (tasks #5 / #5b): for a RESTRICTED (tenant / cloud) execution
+  ;; only. `*allowed-effects*` is nil for the unrestricted platform ctx, so the
+  ;; platform's own outbound to internal services is never gated; a tenant that
+  ;; reached here already holds :network (a paid tier — the effect gate blocks
+  ;; free tenants earlier). check-target! = SSRF (reject internal / rebinding
+  ;; targets before dialing); check-egress-rate! = the per-org outbound rate cap.
+  (let [restricted? (some? cr/*allowed-effects*)]
+    (when restricted?
+      (egress/check-target! url)
+      (egress/check-egress-rate!))
+    ;; `:as :stream` (not `:text`) so a restricted response is read through the
+    ;; per-org byte-cap — an oversize body is rejected mid-stream, never fully
+    ;; buffered. The platform ctx slurps the stream in full (uncapped).
+    (let [resp @(http/get url {:headers (or headers {})
+                               :timeout (or timeout-ms 10000)
+                               :as :stream})
+          resp-status (:status resp)
+          resp-headers (:headers resp)
+          resp-body (:body resp)
+          resp-error (:error resp)]
+      (when resp-error
+        (when (instance? java.io.InputStream resp-body)
+          (java.io.InputStream/.close ^java.io.InputStream resp-body))
+        (throw (ex-info (str "HTTP GET " url " failed: " (Throwable/.getMessage resp-error))
+                        {:type :http-client/request-failed
+                         :url url
+                         :cause (Throwable/.getMessage resp-error)})))
+      {:status (or resp-status 0)
+       :headers (or (stringify-header-keys resp-headers) {})
+       :body (cond
+               (not (instance? java.io.InputStream resp-body)) (or resp-body "")
+               restricted? (egress/read-capped-string! resp-body) ; tenant → byte-cap
+               :else (slurp resp-body))})))
 
 
 (defbase http-get

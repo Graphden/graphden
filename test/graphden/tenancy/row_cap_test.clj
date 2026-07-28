@@ -81,3 +81,36 @@
           (finally (reset! ts/entity-quota-exceeded? saved)))))
 
     (sp/close storage)))
+
+
+(deftest quota-status-reports-usage-vs-ceilings
+  ;; task #8-frontend: the read-side companion to the row-cap — current usage
+  ;; vs the plan's ceilings, for the editor's proactive "N / cap" display.
+  (pth/clean-database-fast! setup/*container*)
+  (let [storage (pg/create-storage (pth/get-container-config setup/*container*))
+        scoped (ts/org-scoped-storage storage)]
+    (sp/initialize storage (build-schema))
+    (binding [tc/*current-org* "acme"]
+      (sp/create-entity scoped :fn {:name "q-a"})
+      (sp/create-entity scoped :fn {:name "q-b"})
+      (sp/create-entity scoped :fn {:name "q-c"}))
+
+    (testing "reports fn usage against the free-tier default ceilings (no :org row)"
+      (let [status (plan/quota-status storage "acme")]
+        (is (= "free" (:plan status)))
+        (is (= {:used 3 :max 500} (:fns status)))
+        (is (= {:used 0 :max 50000} (:list-items status)))))
+
+    (testing "reflects a paid plan's higher ceilings (:org is tenant-forbidden → written on raw storage)"
+      (sp/create-entity storage :org {:name "acme" :plan "network"})
+      (let [status (plan/quota-status storage "acme")]
+        (is (= "network" (:plan status)))
+        (is (= 3 (get-in status [:fns :used])))
+        (is (= 5000 (get-in status [:fns :max])))
+        (is (= 500000 (get-in status [:list-items :max])))))
+
+    (testing "the public org / no org is uncapped → nil"
+      (is (nil? (plan/quota-status storage tc/public-org)))
+      (is (nil? (plan/quota-status storage nil))))
+
+    (sp/close storage)))

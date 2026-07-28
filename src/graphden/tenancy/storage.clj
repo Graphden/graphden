@@ -236,6 +236,14 @@
 (defonce entity-quota-exceeded? (atom nil))
 
 
+;; Read-side companion to `entity-quota-exceeded?`: `(fn [org] → {:plan …
+;; :fns {:used :max} :list-items {:used :max}})`, for the editor's proactive
+;; usage display (task #8-frontend). `graphden.tenancy.plan/install!` sets it
+;; (closed over the platform storage); nil (no addon) → the endpoint returns
+;; null. Same lifecycle-binding rationale as the cap seam above.
+(defonce quota-status-fn (atom nil))
+
+
 ;; The tenant-controlled DB-growth entities the create-path gates, → the
 ;; user-facing over-limit message. `:fn` and `:binding-list-item` are the two
 ;; INDEPENDENT vectors: fns (slots/bindings scale with them) and sequence

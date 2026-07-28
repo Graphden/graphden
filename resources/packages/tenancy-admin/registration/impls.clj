@@ -13,8 +13,10 @@
    The only Clojure left is the byo-memo drop — one interface call into
    `graphden.tenancy.context` (§3.1)."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.tenancy.storage :as ts]))
 
 
 (defbase invalidate-byo-cache
@@ -24,5 +26,17 @@
   (tc/invalidate-byo-cache! name))
 
 
+(defbase tenant-quota-status
+  "Current org's plan usage vs ceilings, for the editor's proactive display —
+   reads the installed read-side seam (`tenancy.storage/quota-status-fn`) for
+   `current-org`. nil outside tenancy / for the public org. One interface call;
+   the count SQL lives in `tenancy.plan/quota-status`."
+  []
+  (cr/record-effect! :db)
+  (when-let [f @ts/quota-status-fn]
+    (f (tc/current-org))))
+
+
 (def impls
-  {:invalidate-byo-cache invalidate-byo-cache})
+  {:invalidate-byo-cache invalidate-byo-cache
+   :tenant-quota-status tenant-quota-status})

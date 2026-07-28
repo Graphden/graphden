@@ -48,22 +48,72 @@ function hideServicePopover() {
 }
 
 
+// === Tenant mode ===========================================================
+//
+// In a multi-tenant deployment `:service` is tenant-forbidden, so the platform
+// endpoints (`/api/services`, `/api/entities/service`) 403 for a tenant. A
+// dedicated-tier tenant instead manages its services through the org-scoped
+// `/api/orgs/services*` endpoints (create/list/update/delete via the base
+// storage, `:org-id`-gated). We route every service call through those when the
+// tenancy addon is active; the tier check is server-side (create 403s a
+// non-dedicated org with an "upgrade" message the popover surfaces).
+//
+// LIMITATION (honest): the tenant list carries DESIRED state only — the
+// reconciler's runtime `running` map lives on the tenant's dedicated pod, not
+// on the platform handler serving this list, so cross-pod runtime status
+// (running / failed) is not shown to a tenant yet (topology-dependent, deferred
+// with the dedicated-shard provisioning). A tenant badge shows configured vs
+// disabled, never running/failed.
+//
+// `graphdenTenancyActive()` (a capability header) is NOT enough to route: in a
+// multi-tenant deploy the PLATFORM admin (public org) has it too, yet must use
+// the platform endpoints. The reliable tenant signal is the quota plan slug —
+// nil for the public org, a real slug for a tenant — primed once at startup.
+let _tenantPlanTier; // undefined = not primed; null = public/single-tenant; slug otherwise
+
+async function primeTenantPlan() {
+  _tenantPlanTier = null;
+  if (typeof API !== 'object' || typeof API.api_orgs_quota === 'undefined') return;
+  try {
+    const r = await authFetch(API.api_orgs_quota, { method: 'GET' });
+    if (r?.ok) {
+      const q = await r.json();
+      _tenantPlanTier = q?.plan || null; // null body ≡ public org
+    }
+  } catch (_) { /* leave null → platform path; a quota blip must not break services */ }
+}
+
+// A real tenant (org ≠ public) — its services live under `:org-id`, reachable
+// only through `/api/orgs/services*`. The badge/list layer uses this.
+function isRealTenant() { return !!_tenantPlanTier; }
+
+// May MANAGE services: only the dedicated tier (own cgroup-limited pod). The
+// create/edit form + the write routes gate on this; a real-but-not-dedicated
+// tenant gets an upgrade note instead of a form. Server enforces it regardless.
+function tenantServiceMode() { return _tenantPlanTier === 'dedicated'; }
+
+
 // === API helpers ===========================================================
 
 async function fetchServices() {
+  const listUrl = isRealTenant() ? API.api_orgs_services : API.api_services;
   try {
-    const r = await authFetch(API.api_services, { method: 'GET' });
+    const r = await authFetch(listUrl, { method: 'GET' });
     if (!r.ok) {
       if (r.status !== 401) {
         // eslint-disable-next-line no-console
-        console.error(API.api_services + ' HTTP', r.status, r.statusText);
+        console.error(listUrl + ' HTTP', r.status, r.statusText);
       }
       return null;
     }
-    return await r.json();
+    const body = await r.json();
+    // Normalise: the tenant endpoint returns a bare array of desired-state rows;
+    // the platform endpoint returns `{services, running}`. Downstream readers
+    // expect `{services}`, so wrap the tenant array (no runtime `running`).
+    return Array.isArray(body) ? { services: body } : body;
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error(API.api_services + ' fetch threw', err);
+    console.error(listUrl + ' fetch threw', err);
     return null;
   }
 }
@@ -120,13 +170,18 @@ function serviceBadgeState(svc) {
 // with the sidebar filter and per-fn popover so the page pays one
 // HTTP roundtrip total.
 async function loadServicesEager() {
+  // Prime the plan tier BEFORE the first services fetch so `fetchServices`
+  // routes to the tenant vs platform list endpoint correctly (a real tenant's
+  // `/api/services` would 403).
+  await primeTenantPlan();
   await refreshServicesCache();
 }
 
 
 async function saveService(existingId, fnId, data) {
-  // existing service → PUT; new → POST. Form-encoded body — same
-  // shape parse-service-from-form accepts.
+  // existing service → PUT/update; new → POST/create. Form-encoded body — same
+  // shape both the platform `parse-service-from-form` and the tenant seam's
+  // coercion accept.
   const body = new URLSearchParams();
   body.set('fn-id', fnId);
   body.set('enabled?', data.enabled ? 'true' : 'false');
@@ -141,11 +196,21 @@ async function saveService(existingId, fnId, data) {
   // that branch's ExecutionContext. We always emit the key so a PUT
   // can switch a service from "any branch" to "this branch" and back.
   if (data.branchId) body.set('branch-id', data.branchId);
-  const url = existingId
-    ? API.api_entities_type_id('service', existingId)
-    : API.api_entities_type('service');
+  let url;
+  let method = 'POST';
+  if (tenantServiceMode()) {
+    // Tenant routes are all POST form (the bare reitit router can't co-locate
+    // GET+POST, so update/delete have their own paths); the id rides the body.
+    if (existingId) body.set('id', existingId);
+    url = existingId ? API.api_orgs_services_update : API.api_orgs_services_create;
+  } else {
+    url = existingId
+      ? API.api_entities_type_id('service', existingId)
+      : API.api_entities_type('service');
+    method = existingId ? 'PUT' : 'POST';
+  }
   return authFetch(url, {
-    method: existingId ? 'PUT' : 'POST',
+    method,
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: body.toString(),
   });
@@ -153,12 +218,24 @@ async function saveService(existingId, fnId, data) {
 
 
 async function deleteService(serviceId) {
+  if (tenantServiceMode()) {
+    return authFetch(API.api_orgs_services_delete, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({ id: serviceId }).toString(),
+    });
+  }
   return authFetch(API.api_entities_type_id('service', serviceId),
                    {method: 'DELETE'});
 }
 
 
 async function reconcileServices() {
+  // Tenant mode: no manual reconcile. The create/update/delete write fires a
+  // NOTIFY that the tenant's own reconciler (on its dedicated pod) picks up;
+  // the platform `/api/services/reconcile` is not a tenant endpoint. Report
+  // success so the save/delete flow proceeds to its cache-refresh + re-render.
+  if (isRealTenant()) return { ok: true };
   return authFetch(API.api_services_reconcile, {method: 'POST'});
 }
 
@@ -182,10 +259,108 @@ const _servicePopoverCache = new Map();
 
 function invalidateServicePopoverCache() { _servicePopoverCache.clear(); }
 
+
+// Tenant-mode popover body — client-rendered (the server partial reads the
+// tenant-forbidden `:service` and is fleet-complex: cardinality / displacement /
+// advisory-lock gating, none of which apply to a dedicated tenant on its own
+// pod). Deliberately minimal: enabled? + restart-policy + save/delete. Emits the
+// SAME class names + `data-existing-service-id` the server partial does, so the
+// shared `wireServicePopoverHandlers` binds it unchanged — and the absent
+// cardinality / branch / pool-size controls default to singleton / none there.
+function escapeServiceHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
+
+function tenantServicePopoverHtml(fnEntity, svc) {
+  const existingId = escapeServiceHtml(svc?.id || '');
+  const enabled = svc ? !!svc['enabled?'] : true;
+  const policy = svc?.['restart-policy'] || 'always';
+  const name = escapeServiceHtml(fnEntity.name || '(anonymous)');
+  const radio = (val, label) =>
+    '<label><input type="radio" name="service-restart-policy" value="' + val + '"'
+    + (policy === val ? ' checked' : '') + '> ' + label + '</label>';
+  return ''
+    + '<div class="service-popover-header">'
+    +   '<span class="service-popover-title">Service — :' + name + '</span>'
+    +   '<button class="service-popover-close" aria-label="Close">×</button>'
+    + '</div>'
+    + '<div class="service-popover-body">'
+    +   '<label class="service-popover-enabled-row">'
+    +     '<input type="checkbox" class="service-popover-enabled"'
+    +     (enabled ? ' checked' : '') + '> Enabled'
+    +   '</label>'
+    +   '<div class="service-popover-policy" role="radiogroup" aria-label="Restart policy">'
+    +     '<div class="service-popover-policy-label">Restart policy</div>'
+    +     radio('always', 'Always') + radio('on-failure', 'On failure') + radio('never', 'Never')
+    +   '</div>'
+    +   '<p class="service-popover-note">Runs on your dedicated executor. '
+    +     'Live run status is not shown here yet.</p>'
+    + '</div>'
+    + '<div class="service-popover-actions">'
+    +   '<button class="service-popover-save-btn" data-existing-service-id="' + existingId + '">'
+    +     (existingId ? 'Save' : 'Create service') + '</button>'
+    +   (existingId
+        ? '<button class="service-popover-delete-btn" data-existing-service-id="'
+          + existingId + '">Delete</button>'
+        : '')
+    + '</div>';
+}
+
+
+async function showTenantServicePopover(el, fnEntity, anchorEl) {
+  // Fresh desired-state read — the badge cache may be empty/stale, and the
+  // popover must reflect the current row so a save is an update, not a dup.
+  let svc = null;
+  try { await refreshServicesCache(); svc = getServiceForFnId(fnEntity.id); }
+  catch (_) { /* fall through — render the create form */ }
+  el.innerHTML = tenantServicePopoverHtml(fnEntity, svc);
+  wireServicePopoverHandlers(el, fnEntity);
+  if (servicePopoverAnchor && servicePopoverAnchor !== anchorEl) {
+    try { servicePopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}
+  }
+  try { anchorEl.setAttribute('aria-expanded', 'true'); } catch (_) {}
+  el.classList.add('visible');
+  anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
+  servicePopoverAnchor = anchorEl;
+}
+
+
+function showTenantPopoverBody(el, anchorEl, bodyHtml) {
+  el.innerHTML = bodyHtml;
+  const close = el.querySelector('.service-popover-close');
+  if (close) close.addEventListener('click', (e) => { e.stopPropagation(); hideServicePopover(); });
+  if (servicePopoverAnchor && servicePopoverAnchor !== anchorEl) {
+    try { servicePopoverAnchor.setAttribute('aria-expanded', 'false'); } catch (_) {}
+  }
+  try { anchorEl.setAttribute('aria-expanded', 'true'); } catch (_) {}
+  el.classList.add('visible');
+  anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
+  servicePopoverAnchor = anchorEl;
+}
+
+
 async function showServicePopover(fnEntity, anchorEl) {
   if (!fnEntity || !anchorEl) return;
   const el = ensureServicePopoverEl();
   el.textContent = '';
+  if (isRealTenant()) {
+    // A tenant never reaches the platform server partial (it reads the
+    // tenant-forbidden :service). Dedicated tier → the management form; any
+    // other tenant tier → an upgrade note.
+    if (tenantServiceMode()) { await showTenantServicePopover(el, fnEntity, anchorEl); return; }
+    showTenantPopoverBody(el, anchorEl, ''
+      + '<div class="service-popover-header">'
+      +   '<span class="service-popover-title">Service</span>'
+      +   '<button class="service-popover-close" aria-label="Close">×</button>'
+      + '</div>'
+      + '<div class="service-popover-body">'
+      +   '<p class="service-popover-note">Persistent services need the dedicated '
+      +     'plan — they run on your own executor. Upgrade to enable them.</p>'
+      + '</div>');
+    return;
+  }
   let html = _servicePopoverCache.get(fnEntity.id);
   if (html == null) {
     let resp;

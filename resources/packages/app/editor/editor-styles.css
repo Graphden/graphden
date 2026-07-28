@@ -3512,6 +3512,19 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-bottom: 1px solid var(--light-border);
   margin-bottom: 8px; padding-bottom: 4px;
 }
+/* Tenant-mode (client-rendered) body — the platform partial uses its own
+   layout; these style only the minimal dedicated-tenant form. */
+.service-popover-body {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 2px 2px 6px;
+}
+.service-popover-enabled-row {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px;
+}
+.service-popover-note {
+  margin: 0; font-size: 11px; color: var(--muted-fg);
+}
 .service-popover-title {
   font-weight: 600; font-size: 13px;
   color: var(--accent);

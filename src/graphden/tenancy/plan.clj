@@ -216,6 +216,41 @@
     (vec (sp/query-entities storage :service {:org-id org}))))
 
 
+(defn- owned-service!
+  "Read `:service` `service-id` via base and assert tenant `org` OWNS it (its
+   `:org-id` matches). Throws `:authz/forbidden` when the id is unknown, is a
+   PLATFORM service (nil `:org-id`), or belongs to another org — a single opaque
+   error so a tenant can't probe another org's service ids. Returns the row."
+  [storage org service-id]
+  (let [svc (when service-id (sp/read-entity storage :service service-id))]
+    (when (or (nil? svc) (nil? org) (= org tc/public-org) (not= org (:org-id svc)))
+      (throw (ex-info "Service not found."
+                      {:type :authz/forbidden :org org :reason :service/not-owned})))
+    svc))
+
+
+(defn update-tenant-service!
+  "Update a `:service` tenant `org` OWNS (ownership-checked via `owned-service!`),
+   through the platform `storage` (the entity is tenant-forbidden). Only
+   `tenant-service-create-fields` are writable — never `:org-id` (owner is
+   immutable) — so a tenant can retarget the fn / toggle `:enabled?` / change the
+   restart policy but can't reassign the service to another org. `data` is the
+   already-coerced desired config. Returns the updated row."
+  [storage org service-id data]
+  (owned-service! storage org service-id)
+  (sp/update-entity storage :service service-id
+                    (select-keys data tenant-service-create-fields)))
+
+
+(defn delete-tenant-service!
+  "Delete a `:service` tenant `org` OWNS (ownership-checked), through the platform
+   `storage`. Deletion is always allowed for an owned row — even a downgraded org
+   may clean up its services. Returns the delete result."
+  [storage org service-id]
+  (owned-service! storage org service-id)
+  (sp/delete-entity storage :service service-id))
+
+
 (defn install!
   "Install the plan-driven seams (closed over the platform `storage`): the
    effect allow-list resolver (compile-runtime), the row-cap check, the
@@ -227,7 +262,9 @@
   (reset! ts/entity-quota-exceeded? (partial over-entity-quota? storage))
   (reset! ts/quota-status-fn (partial quota-status storage))
   (reset! ts/create-tenant-service-fn (partial create-tenant-service! storage))
-  (reset! ts/list-tenant-services-fn (partial list-tenant-services! storage)))
+  (reset! ts/list-tenant-services-fn (partial list-tenant-services! storage))
+  (reset! ts/update-tenant-service-fn (partial update-tenant-service! storage))
+  (reset! ts/delete-tenant-service-fn (partial delete-tenant-service! storage)))
 
 
 (defn uninstall!
@@ -239,4 +276,6 @@
   (reset! ts/entity-quota-exceeded? nil)
   (reset! ts/quota-status-fn nil)
   (reset! ts/create-tenant-service-fn nil)
-  (reset! ts/list-tenant-services-fn nil))
+  (reset! ts/list-tenant-services-fn nil)
+  (reset! ts/update-tenant-service-fn nil)
+  (reset! ts/delete-tenant-service-fn nil))

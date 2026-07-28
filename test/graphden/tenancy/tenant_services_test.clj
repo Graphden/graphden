@@ -110,3 +110,49 @@
     (testing "the public org / no org → nil (not a tenant view)"
       (is (nil? (plan/list-tenant-services! storage tc/public-org)))
       (is (nil? (plan/list-tenant-services! storage nil))))))
+
+
+(deftest update-tenant-service!-mutates-only-owned-rows-and-never-the-owner
+  (let [{:keys [storage worker-id]} (fresh-storage)
+        mine (sp/create-entity storage :service
+                               {:fn-id worker-id :enabled? true :restart-policy :always :org-id "paid"})
+        others (sp/create-entity storage :service
+                                 {:fn-id worker-id :enabled? true :restart-policy :always :org-id "other"})
+        platform (sp/create-entity storage :service
+                                   {:fn-id worker-id :enabled? true :restart-policy :always})]
+    (testing "an owned service updates the writable fields (but NOT :org-id)"
+      (plan/update-tenant-service! storage "paid" (:id mine)
+                                   {:fn-id worker-id :enabled? false :restart-policy :never
+                                    :org-id "hijack"})
+      (let [row (sp/read-entity storage :service (:id mine))]
+        (is (false? (:enabled? row)))
+        (is (= :never (:restart-policy row)))
+        (is (= "paid" (:org-id row)) ":org-id is immutable — not reassignable")))
+    (testing "another org's service → :authz/forbidden, untouched"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
+            (plan/update-tenant-service! storage "paid" (:id others)
+                                         {:fn-id worker-id :enabled? false :restart-policy :always})))
+      (is (true? (:enabled? (sp/read-entity storage :service (:id others))))))
+    (testing "a PLATFORM service (nil :org-id) → :authz/forbidden"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
+            (plan/update-tenant-service! storage "paid" (:id platform)
+                                         {:fn-id worker-id :enabled? false :restart-policy :always}))))
+    (testing "an unknown id → :authz/forbidden (no existence leak)"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
+            (plan/update-tenant-service! storage "paid" (random-uuid)
+                                         {:fn-id worker-id :restart-policy :always}))))))
+
+
+(deftest delete-tenant-service!-removes-only-owned-rows
+  (let [{:keys [storage worker-id]} (fresh-storage)
+        mine (sp/create-entity storage :service
+                               {:fn-id worker-id :enabled? true :restart-policy :always :org-id "paid"})
+        others (sp/create-entity storage :service
+                                 {:fn-id worker-id :enabled? true :restart-policy :always :org-id "other"})]
+    (testing "another org's service can't be deleted → :authz/forbidden, survives"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
+            (plan/delete-tenant-service! storage "paid" (:id others))))
+      (is (some? (sp/read-entity storage :service (:id others)))))
+    (testing "an owned service is deleted"
+      (plan/delete-tenant-service! storage "paid" (:id mine))
+      (is (nil? (sp/read-entity storage :service (:id mine)))))))

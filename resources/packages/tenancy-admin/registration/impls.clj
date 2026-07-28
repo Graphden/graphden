@@ -78,8 +78,35 @@
     (f (tc/current-org))))
 
 
+(defbase tenant-update-service
+  "Update a `:service` the current tenant org owns via the installed seam
+   (`tenancy.storage/update-tenant-service-fn`, ownership-gated by `:org-id`).
+   `data` is the parsed body — `:id` (the service uuid) + the desired config;
+   coerce both at this HTTP boundary. Returns the updated row (nil outside
+   tenancy)."
+  [data]
+  (cr/record-effect! :db)
+  (when-let [f @ts/update-tenant-service-fn]
+    (f (tc/current-org)
+       (some-> (:id data) str not-empty parse-uuid)
+       (coerce-service-fields data))))
+
+
+(defbase tenant-delete-service
+  "Delete a `:service` the current tenant org owns via the installed seam
+   (`tenancy.storage/delete-tenant-service-fn`, ownership-gated by `:org-id`).
+   `data` is the parsed body carrying `:id` (the service uuid). nil outside
+   tenancy."
+  [data]
+  (cr/record-effect! :db)
+  (when-let [f @ts/delete-tenant-service-fn]
+    (f (tc/current-org) (some-> (:id data) str not-empty parse-uuid))))
+
+
 (def impls
   {:invalidate-byo-cache invalidate-byo-cache
    :tenant-quota-status tenant-quota-status
    :tenant-create-service tenant-create-service
-   :tenant-list-services tenant-list-services})
+   :tenant-list-services tenant-list-services
+   :tenant-update-service tenant-update-service
+   :tenant-delete-service tenant-delete-service})

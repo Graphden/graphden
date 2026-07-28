@@ -264,6 +264,15 @@
 (defonce list-tenant-services-fn (atom nil))
 
 
+;; Update / delete companions (task #6 part 4b). Both ownership-gated by
+;; `:org-id` inside the seam (a tenant may only mutate its own services, never a
+;; platform or sibling-org row). Same install / lifecycle contract as above.
+(defonce update-tenant-service-fn (atom nil))
+
+
+(defonce delete-tenant-service-fn (atom nil))
+
+
 ;; The tenant-controlled DB-growth entities the create-path gates, → the
 ;; user-facing over-limit message. `:fn` and `:binding-list-item` are the two
 ;; INDEPENDENT vectors: fns (slots/bindings scale with them) and sequence

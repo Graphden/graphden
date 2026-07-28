@@ -22,7 +22,8 @@
                   :login-route :signup-route :logout-route :logout-all-route
                   :invite-create-route :invite-signup-route
                   :quota-route
-                  :services-list-route :services-create-route]}}
+                  :services-list-route :services-create-route
+                  :services-update-route :services-delete-route]}}
 
   {:name :tenancy-router
    :description "Fall-through Ring router over `:tenancy-routes` — returns nil on no-match (`:router-or-nil`) so the seam falls through to the main app router for anything that isn't a control-plane path. Installed into the active-router singleton by `:tenancy/router-install` at boot."

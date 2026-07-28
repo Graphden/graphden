@@ -426,6 +426,6 @@ executor routing. Design and known gaps live in [VERSIONING.md](VERSIONING.md).
 ### User and Permission System
 
 Shipped as capability **grants** — `(subject, capability, namespace)` with
-`:admin`/`:write`/`:execute`/`:bind-args`/`:append-list` caps and
-namespace-prefix coverage (deliberately minimal — no roles, no deny rules).
+the seven `:read`/`:view-impl`/`:write`/`:execute`/`:admin`/`:bind-args`/`:append-list`
+caps and namespace-prefix coverage (deliberately minimal — no roles, no deny rules).
 See [PLATFORM_PLAN.md](PLATFORM_PLAN.md) and `graphden.tenancy.grant` / `authz`.

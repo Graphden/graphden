@@ -937,7 +937,9 @@ Platform-ctx (`public-org`) остаётся unrestricted. Ограничени�
        маршрутов). Решение зеркалит branch-router: новый core-пакет
        `web/reitit`-примитив `:router-or-nil` (reitit-роутер, возвращающий
        nil на no-match для fall-through) + singleton
-       `graphden.system.tenancy-router/active-router`. Аддон-пакет
+       `graphden.system.route-collection` (позже переименован из
+       `tenancy-router`; теперь УПОРЯДОЧЕННАЯ коллекция fall-through роутеров).
+       Аддон-пакет
        `tenancy-admin` компилит свои маршруты в `:tenancy-router`
        (`:router-or-nil` над `:tenancy-routes`); init-key
        `:tenancy/router-install` ставит его в singleton ПОСЛЕ `:exec/context`.
@@ -986,6 +988,18 @@ Platform-ctx (`public-org`) остаётся unrestricted. Ограничени�
      route-collection шов И на бэке (tenancy-router), И на фронте (window.API);
      `app/admin` больше нет; фронт авто-подхватывает tenancy-роуты из графа
      роутинга, хардкода путей нет. Single-tenant без аддона их не имеет.
+
+     **Обновление (2026-07-28):** route-collection шов обобщён до УПОРЯДОЧЕННОЙ
+     коллекции (`system/route_collection`, переименован из `tenancy_router`) и
+     остаётся ТОЛЬКО для tenancy. Опциональные first-party пакеты `registry` /
+     `mcp` этот шов НЕ используют: boot-замороженный branch-agnostic роутер
+     запекает константные чтения и не прокидывает `:request`/`:storage-query`,
+     поэтому обслуживать app-HTTP-маршруты не может. Они отдаются **per-branch**
+     через `branch_router` (`:_registry-ring-response` / `:_mcp-ring-response`,
+     резолвятся толерантно). window.API теперь перегенерируется через
+     `install-base-routers!` (главный `:_router` ∪ registry/mcp пути) +
+     `rebuild-window-api!` (∪ коллекция аддона). Подробности — в памяти
+     `project_optional_packages_seam_vs_perbranch`.
      - **HTMX-формы (grants/users)** Client-JS fetch-слой панелей убран:
        create — настоящий `<form hx-post>`, delete — `hx-delete` +
        `hx-swap="delete"` (строка `<tr>` исчезает, ответ не важен), оба прямо в

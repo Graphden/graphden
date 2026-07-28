@@ -585,7 +585,12 @@ docs/                                  # Documentation
 ```
 src/graphden/
 ├── packages/           # Package loader for resources/packages/
-│   └── loader.clj      # load-packages, load-module-fns, load-module-impls
+│   ├── loader.clj      # load-packages, load-module-fns, load-module-impls
+│   └── sync.clj        # package→storage sync (NOT wiring): register-type-
+│                       #   aliases!, sync-fn-entities!, reconcile-moved-
+│                       #   identities!, bootstrap-from-packages! — lifted out
+│                       #   of system/core (the :exec/base-fns + :exec/fn-
+│                       #   entities init-keys are thin shells over it)
 ├── executor/           # Executor, registry, compile pipeline, composition
 │   ├── interface.clj
 │   ├── registry/
@@ -629,7 +634,17 @@ src/graphden/
 │   ├── interface.clj   # start!, stop!, read-config
 │   ├── config.clj      # Aero config loading
 │   ├── sse.clj         # SSE invalidation relay (BYO freshness, per-org fan-out)
-│   └── core.clj        # ig/init-key implementations
+│   ├── core.clj        # THIN loader — :require's init/* for their defmethod
+│   │                   #   side effects (init-keys live there now, not here)
+│   ├── init/           # ig/init-key impls split by concern: storage / packages
+│   │                   #   / exec / services / fleet / cleanup
+│   ├── branch_router.clj  # per-branch ExecutionContext + Ring dispatch; serves
+│   │                       #   the OPTIONAL registry/mcp per-branch handlers
+│   │                       #   (compose-branch-handler) alongside the main one
+│   └── route_collection.clj  # ordered collection of fall-through routers — the
+│                             #   tenancy addon's branch-agnostic seam (renamed
+│                             #   from tenancy_router). NOT used for registry/mcp
+│                             #   (those need per-branch freshness → branch_router)
 ├── executor_runtime/   # Main entry point
 │   └── core.clj        # -main, shutdown hooks
 ├── byo.clj             # BYO executor assembly (RemoteStorage + SSE source +
@@ -663,14 +678,28 @@ resources/packages/     # First-party package definitions (EDN + Clojure impls)
 │   ├── html/
 │   ├── crud/
 │   └── graph/
+├── app-base/           # App-server FOUNDATION: the reitit route-building
+│                       #   vocabulary (`:route` / method + auth route templates,
+│                       #   `app.common` helpers). Deps core+web (NO app dep), so
+│                       #   the tenancy addon / registry reach the templates
+│                       #   without the editor. ns's stay `app.common` /
+│                       #   `app.routes.*` (identity = ns string, not dir).
+├── registry/           # OPTIONAL package — in-graph publish / install / fork /
+│                       #   export. ns stays `app.registry`. Routes served
+│                       #   per-branch via branch_router (`:_registry-ring-
+│                       #   response`), NOT app's `:all`; drop from :package-names
+│                       #   to omit (editor hides Packages panel via window.API).
+├── mcp/                # OPTIONAL package — the `/mcp` JSON-RPC AI endpoint. ns
+│                       #   stays `app.mcp`. Served per-branch (`:_mcp-ring-
+│                       #   response`); drop from :package-names to omit.
 ├── tenancy-admin/      # Org-admin fn-defs (auth, grants, users, registration)
 │                       #   — loaded only when the tenancy addon is wired
-└── app/                # Application server (editor, routes)
-    ├── package.edn     # Has startup-fn: :web-server
-    ├── common/         # Shared fn-defs (routes, responses)
+└── app/                # Application server (editor UI + routes + server chain).
+    ├── package.edn     #   Deps core+web+storage+app-base; startup-fn :web-server.
     ├── editor/         # Editor UI fn-defs + impls
-    ├── registry/       # Package registry: publish / install / fork / export
-    └── server/         # Server composition fn-defs
+    ├── lookups/ execution/ branches/ secrets/ …  # app content
+    ├── routes/ route-groups/  # main router aggregation (no registry/mcp refs)
+    └── server/         # web-server root + the `_app-ring-response` handler chain
 
 external-packages/      # Packages kept OUT of the prod `resources` tree
 ├── mathx/              # External Type-2 (impl+fns) — also its own repo,

@@ -760,7 +760,7 @@ is real; modularity itself comes from packages + protocols/Integrant, in-tree.
 
 | Repo | Kind | How it relates to the monorepo | Access |
 |------|------|--------------------------------|--------|
-| `graphden/graphden` (this) | monorepo | core / web / storage / app-editor / **tenancy-admin** — all co-evolving first-party. Emits the uberjar; can emit a `graphden-core` artifact (Task 7). | private |
+| `graphden/graphden` (this) | monorepo | core / web / storage / **app-base** / app-editor / **registry** / **mcp** / **tenancy-admin** — all co-evolving first-party, in ONE tree. Emits the uberjar; can emit a `graphden-core` artifact (Task 7). | private |
 | `graphden/graphden-mathx` | external Type-2 pkg | pulled IN by git coord (`deps.edn` + `executor-packages.edn`); in-tree copy at `external-packages/mathx` for offline test (§ 5.1). | private |
 | `graphden/graphden-examples` | extracted dev pkg | the pedagogical `examples` package moved OUT; in-tree at `external-packages/examples`, on the classpath only via the `:dev`/`:test` `:extra-paths` (never prod). | private |
 | `graphden/graphden-cloud` | thin consumer | depends on graphden as a **git-dep**, turns the tenancy addon on, adds cloud modules (`usage-metering` …). NOT a fork (§ 16). | private |
@@ -770,6 +770,30 @@ What's NOT extracted, on purpose: the Postgres storage impl (a swap *seam*
 exists — § 6.3 — but the default first-party backend co-evolves with schema /
 versioning / executor, so it stays in-tree); a non-Postgres backend is external
 work in the *consumer's* addon, not a monorepo split.
+
+**In-tree first-party PACKAGE split (still one repo).** The `app` monolith was
+decomposed into cohesive packages *without* a repo split — modularity from
+packages, not repos:
+
+- **`app-base`** — the reitit route-building vocabulary (`:route` /
+  `:route-with-middleware`, the per-method + auth route templates, `app.common`
+  helpers). Deps `core`+`web`, NO `app` dep, so the tenancy addon AND `registry`
+  reach the templates without dragging in the editor. `tenancy-admin` now depends
+  on `app-base`, not `app`.
+- **`registry`** (in-graph publish/install/fork/export) and **`mcp`** (the `/mcp`
+  JSON-RPC AI endpoint) are OPTIONAL top-level packages: drop either from
+  `:package-names` and the app still boots (the editor hides its Packages panel
+  via a `window.API` probe; the endpoints 404). `app`'s router no longer
+  references their routes.
+- Identity is preserved by keeping every fn's `:namespace` string
+  (`app.common` / `app.registry` / `app.mcp`) — identity is `uuid-v5(namespace,
+  name)`, so only the package DIRECTORY moved; ids + refs are byte-identical.
+- **How the optional routes are served** — NOT the route-collection seam (that
+  boot-frozen, branch-agnostic router bakes constant-arg data reads and threads
+  no `:request`, which cannot serve app HTTP routes; it's tenancy-only). Each
+  optional package carries a `:_registry-ring-response` / `:_mcp-ring-response`
+  handler that `graphden.system.branch-router` resolves TOLERANTLY and serves
+  PER-BRANCH (fresh + invalidation-aware) alongside the main handler.
 
 Also deliberately kept in the `app` package (NOT moved to `examples`, despite
 looking like demo content): **`app/contact-demo`** — the `/demo/contact` page.

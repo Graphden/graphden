@@ -87,7 +87,7 @@ implementation tasks.
   `:extra-package-names`. A package placed on the classpath under
   `packages/<name>/` and named in either list is loaded — this is the Type-2
   hook (§ 5).
-- Config list today: `resources/system-dev.edn` → `["core" "storage" "web" "app" "examples"]`.
+- Config list today: `resources/system-dev.edn` → `["core" "storage" "web" "app-base" "app" "registry" "mcp" "examples"]`.
 - **fn-ids are deterministic** on `(namespace, name)` via
   `graphden.packages.records.ids/fn-id`. This is the linchpin for versioned
   materialization (§ 4.2): the same fn name under a different namespace gets a

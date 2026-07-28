@@ -47,7 +47,7 @@ specific names.
 ```clojure
 ;; In impls.clj
 (defbase map-fn [func coll]
-  (mapv func coll))   ; func is called (func item) per element
+  (doall (map func coll)))   ; func is called (func item) per element; SEQ, not mapv→vector
 ```
 
 A user binds their unary fn-graph as `:func`; its one leftover free

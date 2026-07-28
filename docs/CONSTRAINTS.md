@@ -56,7 +56,9 @@ self-refs. End result: **graph-level recursion is structurally
 impossible today** — neither self-ref nor mutual-ref nor any
 parent+ref combination passes both checks. See
 `docs/ARCHITECTURE.md § Part 3 — Recursion and Cycles` for the
-empirical demonstration and the planned `:fix`-based path forward.
+empirical demonstration, and [RECURSION.md](RECURSION.md) for the
+`:fix`-based recursion path (shipped) that adds recursion without a
+graph cycle.
 
 **Error:** `:constraint-violation/dependency-cycle`
 
@@ -89,7 +91,7 @@ is opt-in via fn-slot pointing at the same slot-id).
 
 | Storage | Location |
 |---|---|
-| postgres | `src/graphden/storage/postgres/constraints.clj` (SQL CTE for cycle walk) |
+| all backends | `src/graphden/storage/protocol/constraints.clj` — `validate-no-dependency-cycle-impl` walks `read-entities` results (backend-agnostic in-memory `StorageCRUD` traversal, NOT a SQL CTE); postgres delegates to it |
 
 The `GraphConstraints` extension is wired generically through
 `graphden.storage.protocol.generic-constraints`.

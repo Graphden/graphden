@@ -47,7 +47,7 @@ Previously-undocumented types now covered by the table:
 (500 — internal misuse), `:packages/unresolved-ref`,
 421 `misdirected-request` (off-shard, tenancy), execute
 `:rejected` / `:over-capacity` / `:args-too-large` reasons.
-`web.errors/error-codes-doc drift is pinned by
+Drift between `web.errors/status-for-type` and this doc is pinned by
 `graphden.web.errors-doc-test`.
 
 ## Error Type Naming Convention
@@ -172,7 +172,7 @@ same `(binding-id, position)` in the current branch's resolved view.
 - `:branch-id` - Branch whose live view collides
 - `:colliding-item-ids` - IDs of the items already at that position
 
-### `:constraint-violation/main-branch-undeletable`
+### `:constraint-violation/root-branch-undeletable`
 
 **Component:** versioning (VersionedStorage)
 **Description:** Attempted to delete the `main` branch.
@@ -306,21 +306,6 @@ An authored `:lambda-params` names an arg that is not a free arg of
 the fn (typo guard). The error lists the declared names and the
 actual frees.
 
-### `:compile/unmigrated-secret-path`
-
-A binding still carries the retired `:override-kind :secret-path`
-marker without a `:resolver-fn-id` — the boot migration
-(`system.core/migrate-secret-path-bindings!`) did not run (usually:
-the `web/vault` package isn't in the sync set). Refused at compile so
-the vault PATH is never executed as a literal.
-
-### `:constraint-violation/override-kind-retired`
-
-A binding WRITE carries `:override-kind` — the enum is retired. A
-secret binding is `{:resolver-fn-id <vault-get>}` with the path in
-`:value`; `:terminal` covers sealing. Legacy residue on stored rows
-does NOT trigger this (only an incoming write of the field).
-
 ### `:types/ambiguous-alias`
 
 A bare type-alias name is declared by 2+ type-rows in different
@@ -350,11 +335,11 @@ row would be unexecutable.
   (catch clojure.lang.ExceptionInfo e
     (let [{:keys [type]} (ex-data e)]
       (case type
-        :execution-error/timeout
-        (log/warn "Execution timed out")
-
-        :execution-error/max-depth-exceeded
+        :recursion-error/max-depth-exceeded
         (log/warn "Recursion too deep")
+
+        :execution/forbidden-effect
+        (log/warn "Effect not permitted for this tenant")
 
         :constraint-violation/unique
         (let [{:keys [entity field value]} (ex-data e)]

@@ -366,6 +366,20 @@ body.sidebar-collapsed .sidebar-expand-floating {
 #entity-list .entity-item.selected { background: var(--selected-bg); }
 #entity-list .entity-item .name { font-weight: 400; font-size: 13px; }
 
+/* Proactive per-org plan-usage badge (editor-quota.js, task #8-frontend). */
+.quota-badge {
+  margin: 4px 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--muted-fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-align: center;
+  cursor: default;
+}
+.quota-badge-warn { color: var(--warning-fg); border-color: var(--warning-fg); }
+.quota-badge-full { color: var(--error-fg); border-color: var(--error-fg); font-weight: 700; }
+
 /* Menu header — asymmetric padding pulls the action buttons closer to
    the right edge while keeping the title comfortably indented on the
    left. */

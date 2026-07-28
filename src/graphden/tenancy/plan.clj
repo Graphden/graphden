@@ -106,14 +106,33 @@
           (>= n cap))))))
 
 
+(defn quota-status
+  "Current usage vs plan ceilings for a REAL tenant `org`, for the editor's
+   proactive display: `{:plan <slug> :fns {:used n :max m|nil} :list-items
+   {:used n :max m|nil}}` (a nil `:max` = uncapped on that axis). nil for the
+   public org / no org (uncapped). Reads the tenant-forbidden `:org` row + raw
+   `count(*)`s via the platform `storage`, so it runs in the platform ctx on the
+   tenant's behalf — same seam contract as `over-entity-quota?`."
+  [storage org]
+  (when (and org (not= org tc/public-org))
+    (let [slug (:plan (first (sp/query-entities storage :org {:name org})))
+          plan (get plans slug default-plan)]
+      {:plan (or slug "free")
+       :fns {:used (entity-count storage org :fn)
+             :max (:max-fns plan)}
+       :list-items {:used (entity-count storage org :binding-list-item)
+                    :max (:max-list-items plan)}})))
+
+
 (defn install!
-  "Install both plan-driven seams (closed over the platform `storage`): the
-   effect allow-list resolver (compile-runtime) and the row-cap check
-   (tenancy.storage). `storage` reads the tenant-forbidden `:org` row unrestricted,
-   on the tenant's behalf."
+  "Install the plan-driven seams (closed over the platform `storage`): the
+   effect allow-list resolver (compile-runtime), the row-cap check + the
+   read-side quota-status reader (tenancy.storage). `storage` reads the
+   tenant-forbidden `:org` row unrestricted, on the tenant's behalf."
   [storage]
   (reset! cr/cloud-allowed-effects-resolver (partial allowed-effects-for storage))
-  (reset! ts/entity-quota-exceeded? (partial over-entity-quota? storage)))
+  (reset! ts/entity-quota-exceeded? (partial over-entity-quota? storage))
+  (reset! ts/quota-status-fn (partial quota-status storage)))
 
 
 (defn uninstall!
@@ -122,4 +141,5 @@
    leak a stale storage into a later test in the same JVM."
   []
   (reset! cr/cloud-allowed-effects-resolver nil)
-  (reset! ts/entity-quota-exceeded? nil))
+  (reset! ts/entity-quota-exceeded? nil)
+  (reset! ts/quota-status-fn nil))

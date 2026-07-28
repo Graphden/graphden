@@ -64,12 +64,16 @@ resources/packages/
 ### package.edn Format
 
 ```edn
-{:name "web"
+{:name "app"
  :version "1.0.0"
- :description "Web primitives: HTTP, routing, HTML"
- :dependencies ["core"]
- :modules ["http" "reitit" "html" "crud" "graph"]
- :startup-fn :web-server}  ; Optional
+ :description "Application server: editor UI + routes"
+ :dependencies ["core" "web"]
+ :modules ["editor" "routes" "server"]
+ ;; Optional: desired-state services the package seeds (see SERVICES.md)
+ :services [{:name :default
+             :fn-name :web-server
+             :restart-policy :always
+             :cardinality :per-pod}]}
 ```
 
 | Field | Required | Description |
@@ -79,7 +83,7 @@ resources/packages/
 | `:description` | No | Human-readable description |
 | `:dependencies` | Yes | Packages to load first (see version constraints below) |
 | `:modules` | Yes | List of module directory names |
-| `:startup-fn` | No | Function to execute when system starts |
+| `:services` | No | Package-seeded services — desired-state fns to keep running (see [SERVICES.md](SERVICES.md)) |
 
 **Dependency version constraints.** `:dependencies` accepts either a bare
 name list (any version) or a map of `name → constraint`:
@@ -158,9 +162,10 @@ normalizes the shorthand to the map form.
 **Optional args:**
 
 ```edn
-{:name :filter
- :args {:pred :fn
-        :coll {:type :jsonb :required false}}  ; Optional arg
+{:name :get
+ :args {:coll {:type :any}
+        :key {:type :any}
+        :default {:type :any :required false}}  ; Optional arg
  :return-type :any}
 ```
 
@@ -197,13 +202,13 @@ execution context:
   (:require [graphden.executor.defbase :refer [defbase]]))
 
 (defbase add
-  "Add two numbers."
-  [a b]
-  (+ a b))
+  "Sum a vector of numbers."
+  [nums]
+  (reduce + nums))
 
 (defbase sub
-  [a b]
-  (- a b))
+  [nums]
+  (reduce - nums))
 
 ;; Export map: fn-name → implementation
 (def impls
@@ -235,8 +240,8 @@ execution context:
 ;; Result structure
 {:base-fn-defs {fn-name -> base-fn-def, ...}
  :fn-defs [{:name :foo :parent :bar :args {...}}, ...]
- :packages [{:name "core" ...}, {:name "web" ...}, ...]
- :startup-fn :web-server}
+ :packages [{:name "core" ...}, {:name "web" ...}, ...]}
+;; (package-seeded :services are collected separately — see SERVICES.md)
 ```
 
 ### Loading Process
@@ -252,7 +257,7 @@ execution context:
 ### Integration with System
 
 ```clojure
-;; In system/core.clj (Integrant)
+;; init-key defmethods live in system/init/packages.clj (Integrant)
 
 (defmethod ig/init-key :app/packages [_ {:keys [package-names]}]
   (pkg/load-packages package-names))
@@ -318,6 +323,12 @@ When multiple fn-defs share structure, extract a common ancestor:
 ### 2. Free Arguments Pattern (Argument Propagation)
 
 When a fn-def references another fn-def with unbound arguments, those arguments "propagate up" and become part of the interface:
+
+> The fn/slot names below (`assoc-any`, `pair`, `m`/`k`/`v`, `a`/`b`) are
+> illustrative placeholders chosen to keep the propagation chain readable —
+> they are **not** real base-fns. The real `:assoc` exposes `:map`/`:key`/`:value`
+> and `:get` exposes `:coll`/`:key`/`:default`; substitute those when adapting
+> the pattern.
 
 ```edn
 ;; Base: assoc-any has args {m, k, v}
@@ -521,9 +532,9 @@ Local fn-defs are stored with `name=nil` and don't appear in the sidebar or grap
 1. **Add implementation to `impls.clj`:**
 
 ```clojure
-(defn my-new-fn
-  [{:keys [input options]}]
-  (let [opts (or options {})]
+(defbase my-new-fn
+  [input options]                ; arg-syms match fns.edn; arrive resolved
+  (let [opts (or options {})]    ; :options is :required false → nil when omitted
     ;; Implementation here
     (process input opts)))
 
@@ -561,10 +572,11 @@ mkdir -p resources/packages/{package}/{module}
 1. **Create `fns.edn`:**
 
 ```edn
-;; My new module functions
-[{:name :first-fn
-  :args {:x :any}
-  :return-type :any}]
+{:namespace "{package}.{module}"
+ :description "My new module functions."
+ :fns [{:name :first-fn
+        :args {:x :any}
+        :return-type :any}]}
 ```
 
 1. **Create `impls.clj`** (if has base functions):

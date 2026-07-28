@@ -55,7 +55,7 @@ The type system combines three mechanisms:
 
 1. **Parametric polymorphism with inference** — type variables (`:a`, `:b`) on base-fns, automatically substituted when arguments are bound. Like Haskell's Hindley-Milner, but simpler because graphden fn-defs are not arbitrary programs.
 
-2. **Structural type computation** — for operations like `assoc`, `get-field`, `dissoc`, `merge`, the system computes the output record type from concrete argument values. This is possible because in graphden, keys are typically literals stored in the DB, not runtime variables.
+2. **Structural type computation** — for operations like `assoc`, `get`, `dissoc`, `merge`, the system computes the output record type from concrete argument values. This is possible because in graphden, keys are typically literals stored in the DB, not runtime variables.
 
 3. **Refinement subtypes** — named subtypes with constraints (e.g., `:positive-int`), expressed as regular fn-defs. The system enforces subtype relationships: where a supertype is expected, a subtype is accepted; where a subtype is expected, a supertype is rejected.
 
@@ -169,7 +169,7 @@ User creates/modifies fn-def
          ▼
 ┌─────────────────┐
 │ Type inference   │  Substitute type variables,
-│                  │  apply type-rules for assoc/get-field,
+│                  │  apply type-rules for assoc/get,
 │                  │  compute return-type
 └────────┬────────┘
          ▼
@@ -197,16 +197,16 @@ When a fn that others depend on is modified, dependent fn-defs are re-checked.
 
 ```edn
 {:name :add
- :args {:a {:type :int}, :b {:type :int}}
- :return-type :int}
+ :args {:nums {:type [:list :numeric]}}
+ :return-type :numeric}
 
 {:name :map
- :args {:f {:type {:fn [:a :b]}}, :coll {:type [:list :a]}}
+ :args {:func {:type {:fn [:a :b]}}, :coll {:type [:list :a]}}
  :return-type [:list :b]}
 
 {:name :http-get
  :args {:url {:type :text}}
- :return-type :jsonb}
+ :return-type :jsonb}   ;; illustrative — the real :http-get returns a typed :http-response-shape
 ```
 
 **Users (fn-def creators)** never write types. Types are inferred:
@@ -214,11 +214,11 @@ When a fn that others depend on is modified, dependent fn-defs are re-checked.
 ```edn
 {:name :add-10
  :parent :add
- :args {:a 10}}
+ :args {:nums [10 {:as :b}]}}
 ;; System infers:
-;;   a = 10, type :int, matches expected :int ✓
-;;   b remains free, type :int
-;;   return-type: :int
+;;   nums[0] = 10, type :numeric, matches nums element :numeric ✓
+;;   :b remains free, type :numeric
+;;   return-type: :numeric
 ;; User wrote zero types.
 ```
 
@@ -228,7 +228,7 @@ When a fn that others depend on is modified, dependent fn-defs are re-checked.
 {:name :get-user-api
  :parent :http-get
  :args {:url "https://api.example.com/user"}
- :return-type-override {:name :text, :age :int}}
+ :return-type {:name :text, :age :int}}
 ```
 
 ---
@@ -240,11 +240,11 @@ When a fn that others depend on is modified, dependent fn-defs are re-checked.
 When an arg is bound to a literal value, the system checks that the value's type matches the expected arg type:
 
 ```edn
-{:name :add-10, :parent :add, :args {:a 10}}
-;; 10 is :int, arg :a expects :int → ✓
+{:name :add-10, :parent :add, :args {:nums [10]}}
+;; 10 is :numeric, nums element expects :numeric → ✓
 
-{:name :add-broken, :parent :add, :args {:a "hello"}}
-;; "hello" is :text, arg :a expects :int → ERROR
+{:name :add-broken, :parent :add, :args {:nums ["hello"]}}
+;; "hello" is :text, nums element expects :numeric → ERROR
 ```
 
 ### Ref-id binding
@@ -252,11 +252,11 @@ When an arg is bound to a literal value, the system checks that the value's type
 When an arg is bound via `ref-id`, the system checks that the referenced fn's return type is a subtype of the expected arg type:
 
 ```edn
-{:name :double-age, :parent :add, :args {:a :get-user-age, :b :get-user-age}}
-;; get-user-age returns :int, add expects :int → ✓
+{:name :double-age, :parent :add, :args {:nums [:get-user-age :get-user-age]}}
+;; get-user-age returns :int ⊆ :numeric, nums element expects :numeric → ✓
 
-{:name :broken, :parent :add, :args {:a :get-user-name}}
-;; get-user-name returns :text, add expects :int → ERROR
+{:name :broken, :parent :add, :args {:nums [:get-user-name]}}
+;; get-user-name returns :text, nums element expects :numeric → ERROR
 ```
 
 ### Parametric polymorphism (type variables)
@@ -264,14 +264,14 @@ When an arg is bound via `ref-id`, the system checks that the referenced fn's re
 Type variables on base-fns are unified when arguments are bound:
 
 ```edn
-;; map :: {:f {:fn [:a :b]}, :coll [:list :a]} → [:list :b]
+;; map :: {:func {:fn [:a :b]}, :coll [:list :a]} → [:list :b]
 
-{:name :map-add-10, :parent :map, :args {:f :add-10}}
-;; add-10 :: :int → :int (one free arg of type :int, returns :int)
-;; Unification: :a = :int, :b = :int
-;; Result: map-add-10 :: {:coll [:list :int]} → [:list :int]
+{:name :map-add-10, :parent :map, :args {:func :add-10}}
+;; add-10 :: :numeric → :numeric (one free arg of type :numeric, returns :numeric)
+;; Unification: :a = :numeric, :b = :numeric
+;; Result: map-add-10 :: {:coll [:list :numeric]} → [:list :numeric]
 
-{:name :map-upper, :parent :map, :args {:f :str-upper}}
+{:name :map-upper, :parent :map, :args {:func :str-upper}}
 ;; str-upper :: :text → :text
 ;; Unification: :a = :text, :b = :text
 ;; Result: map-upper :: {:coll [:list :text]} → [:list :text]
@@ -280,11 +280,11 @@ Type variables on base-fns are unified when arguments are bound:
 Error example:
 
 ```edn
-;; filter :: {:f {:fn [:a :bool]}, :coll [:list :a]} → [:list :a]
+;; filter :: {:pred {:fn [:a :bool]}, :coll [:list :a]} → [:list :a]
 
-{:name :broken-filter, :parent :filter, :args {:f :add-10}}
-;; add-10 returns :int, but filter expects :f to return :bool
-;; :int ≠ :bool → ERROR
+{:name :broken-filter, :parent :filter, :args {:pred :add-10}}
+;; add-10 returns :numeric, but filter expects :pred to return :bool
+;; :numeric ≠ :bool → ERROR
 ```
 
 ### Free argument type propagation
@@ -292,23 +292,22 @@ Error example:
 When a fn-def leaves arguments free, their types propagate to callers:
 
 ```edn
-{:name :add-10, :parent :add, :args {:a 10}}
-;; Free args: {:b :int}
-;; Callers of add-10 must provide :b of type :int
+{:name :add-10, :parent :add, :args {:nums [10 {:as :b}]}}
+;; Free args: {:b :numeric}
+;; Callers of add-10 must provide :b of type :numeric
 ```
 
 ---
 
 ## Structural Types (Records)
 
-A record type is defined as a fn-def with parent `:record`:
+A record type is defined as a fn-row with a `:type {field type …}` map:
 
 ```edn
 {:name :message
- :parent :record
- :new-args {:from {:type :text}
-            :text {:type :text}
-            :timestamp {:type :int}}}
+ :type {:from :text
+        :text :text
+        :timestamp :int}}
 
 ;; System computes:
 ;;   return-type = {:from :text, :text :text, :timestamp :int}
@@ -336,43 +335,43 @@ In graphden, argument values are often **concrete literals stored in the DB**. W
 ### assoc
 
 ```
-type-rule: if k is a literal, result = type(m) + {k: type(v)}
-           if k is a ref-id, result = :jsonb (degradation)
+type-rule: if key is a literal, result = type(map) + {key: type(value)}
+           if key is a ref-id, result = :jsonb (degradation)
 ```
 
 Example:
 
 ```edn
-{:name :with-name, :parent :assoc, :args {:m {}, :k "name", :v "Alice"}}
-;; m = {} → type {}
-;; k = "name" (literal, value known)
-;; v = "Alice" → type :text
+{:name :with-name, :parent :assoc, :args {:map {}, :key "name", :value "Alice"}}
+;; map = {} → type {}
+;; key = "name" (literal, value known)
+;; value = "Alice" → type :text
 ;; Result type: {:name :text}
 
-{:name :with-name-and-age, :parent :assoc, :args {:m :with-name, :k "age", :v 30}}
-;; m → :with-name → type {:name :text}
-;; k = "age", v = 30 → :int
+{:name :with-name-and-age, :parent :assoc, :args {:map :with-name, :key "age", :value 30}}
+;; map → :with-name → type {:name :text}
+;; key = "age", value = 30 → :int
 ;; Result type: {:name :text, :age :int}
 ```
 
-### get-field
+### get
 
 ```
-type-rule: if field is a literal and obj has record type,
+type-rule: if key is a literal and coll has record type,
            check field exists, return field type.
-           if field is a ref-id, result = :jsonb (degradation)
+           if key is a ref-id, result = :jsonb (degradation)
 ```
 
 Example:
 
 ```edn
-{:name :get-name, :parent :get-field, :args {:obj :with-name-and-age, :field "name"}}
-;; obj type: {:name :text, :age :int}
-;; field = "name" → exists, type :text ✓
+{:name :get-name, :parent :get, :args {:coll :with-name-and-age, :key "name"}}
+;; coll type: {:name :text, :age :int}
+;; key = "name" → exists, type :text ✓
 ;; Result type: :text
 
-{:name :get-email, :parent :get-field, :args {:obj :with-name-and-age, :field "email"}}
-;; field = "email" → NOT in {:name :text, :age :int}
+{:name :get-email, :parent :get, :args {:coll :with-name-and-age, :key "email"}}
+;; key = "email" → NOT in {:name :text, :age :int}
 ;; ERROR: field "email" not found. Available: name, age
 ```
 
@@ -402,9 +401,9 @@ type-rule: result = type(a) ∪ type(b)
 When a key is a `ref-id` (computed value), the system knows the key's TYPE (`:text`) but not its VALUE. Type-rules that need the value degrade to `:jsonb` with a warning:
 
 ```edn
-{:name :dynamic-get, :parent :get-field,
- :args {:obj :user, :field :compute-field-name}}
-;; field is ref-id → value unknown → cannot check field existence
+{:name :dynamic-get, :parent :get,
+ :args {:coll :user, :key :compute-field-name}}
+;; key is ref-id → value unknown → cannot check field existence
 ;; Result type: :jsonb (with WARNING)
 ```
 
@@ -416,13 +415,12 @@ A refinement type is a named subtype with constraints, expressed as a regular fn
 
 ```edn
 {:name :positive-int
- :parent :refine
- :args {:base-type :int
-        :constraint [:> 0]}}
+ :refine {:base :int
+          :constraint [:> 0]}}
 ;; computed-type: {:subtype-of :int, :constraint [:> 0]}
 ```
 
-`:refine` is a base-fn with a type-rule that establishes the subtype relationship.
+`:refine` is not a base-fn — it's a top-level fn-row key (`:refine {:base T :constraint C}`) that the loader recognises and turns into a refinement type-row establishing the subtype relationship.
 
 ### Usage
 
@@ -431,9 +429,9 @@ A refinement type is a named subtype with constraints, expressed as a regular fn
  :args {:n :positive-int}
  :return-type :float}
 
-;; Passing positive-int where int is expected — OK (subtype)
-{:name :inc-positive, :parent :add, :args {:a :some-positive-value, :b 1}}
-;; :positive-int ⊂ :int → ✓
+;; Passing positive-int where a numeric is expected — OK (subtype)
+{:name :inc-positive, :parent :add, :args {:nums [:some-positive-value 1]}}
+;; :positive-int ⊆ :int ⊆ :numeric → ✓
 
 ;; Passing int where positive-int is expected — ERROR
 {:name :sqrt-any, :parent :sqrt, :args {:n :some-int-value}}
@@ -466,8 +464,8 @@ The system does NOT prove that a value is positive. It forces the programmer to 
 ### Refinement constraints do NOT propagate through arithmetic
 
 ```edn
-{:name :decrement, :parent :sub, :args {:a :some-positive, :b 1}}
-;; Result type: :int (not :positive-int)
+{:name :decrement, :parent :sub, :args {:nums [:some-positive 1]}}
+;; Result type: :numeric (not :positive-int)
 ;; The system does not compute min(positive - 1) = could-be-zero
 ;; This would require an SMT solver — out of scope
 ```
@@ -571,8 +569,8 @@ three composition-only fn-defs over the existing `:get` / `:equal?`:
 
 ```edn
 ;; resources/packages/core/variants/fns.edn
-{:name :variant-tag    :parent :get      :args {:key "tag"}}
-{:name :variant-value  :parent :get      :args {:key "value"}}
+{:name :variant-tag    :parent :get      :args {:key {:value :tag :type :keyword}}}
+{:name :variant-value  :parent :get      :args {:key {:value :value :type :keyword}}}
 {:name :variant-is?    :parent :equal?   :args {:a :variant-tag :b {:as :tag}}}
 ```
 
@@ -651,20 +649,21 @@ the qualified keyword in the `:type` position:
 Version-materialized namespaces (`web.components@1-2-0`) register
 bare-only — `@` is invalid in an EDN keyword namespace.
 
-### Retired aliases — migration note
+### Unknown aliases — migration note
 
-`:nullable-int`, `:nullable-bool`, `:nullable-numeric`, and
-`:nullable-uuid` were retired (commit `b9ec4a80`) — they had zero
-real usage outside their own declaration. If a binding or
-return-type override in a long-lived DB still references one of
-these names, the next clean deploy will fail to resolve it. Fix
-by replacing the reference with the inline form:
+The shipped `:nullable-*` shorthands are `:nullable-text`,
+`:nullable-uuid`, `:nullable-jsonb`, `:nullable-int`, `:nullable-bool`,
+`:nullable-keyword`, and `:nullable-keyword-map` (`core.refinements`).
+Names NOT in that set — e.g. `:nullable-numeric` — do not resolve. If a
+binding or return-type override in a long-lived DB references a name
+that isn't a live alias, the next clean deploy will fail to resolve it.
+Fix by replacing the reference with the inline form:
 
 ```edn
 ;; before
-{:type :nullable-int}
+{:type :nullable-numeric}
 ;; after
-{:type [:union :null :int]}
+{:type [:union :null :numeric]}
 ```
 
 `register-type-aliases!` warns "body references an unknown type"
@@ -875,7 +874,7 @@ Untyped world                    Typed world
                      to-text       │   ├── map, filter, comp
                     ────────►:text │   ├── if, and, or
                                    └───┘
-                                       │    assoc, get-field
+                                       │    assoc, get
                     ◄──────────────────┘  ──────────►
                      to-jsonb              back to jsonb
 ```
@@ -908,9 +907,9 @@ One type definition → static checking at save time + runtime validation at exe
 |-------|---------|
 | Wrong primitive type | `:text` passed where `:int` expected |
 | Wrong HOF signature | `a → int` passed to filter (expects `a → bool`) |
-| Nonexistent record field | `get-field "nme"` on `{:name :text}` |
+| Nonexistent record field | `get "nme"` on `{:name :text}` |
 | Missing required conversion | `:int` passed where `:positive-int` expected |
-| Type mismatch through chain | `get-field "name" → :text → add` (expects `:int`) |
+| Type mismatch through chain | `get "name" → :text → add` (expects `:numeric`) |
 | Incompatible type narrowing | Widening in inheritance chain |
 
 ### Does NOT catch
@@ -919,9 +918,9 @@ One type definition → static checking at save time + runtime validation at exe
 |-------|-----|
 | Invalid JSON structure at runtime | Data arrives at runtime, types check composition |
 | Business logic errors (amount < 0) | Requires SMT solver for arithmetic constraints |
-| Dynamic field names | `get-field` with computed key — value unknown |
+| Dynamic field names | `get` with computed key — value unknown |
 | Network/IO failures | Not a type system concern |
-| Correct field name but wrong data from API | Type system trusts `return-type-override` |
+| Correct field name but wrong data from API | Type system trusts the author's `:return-type` override |
 
 ---
 
@@ -1148,11 +1147,11 @@ blocking on the more lenient sync-time WARN.
 
 **Goal:** type-check record field access.
 
-- `record` base-fn with type-rule computing record type from args
-- Type-rules for `assoc`, `get-field`, `dissoc`, `merge`
+- record type-rows (`:type {field type …}`) computing the record type from fields
+- Type-rules for `assoc`, `get`, `dissoc`, `merge`
 - Record subtyping (more fields ⊂ fewer fields)
 - Degradation to `:jsonb` when keys are computed (ref-id, not literal)
-- `return-type-override` field on fn for boundary declarations
+- `:return-type` override on a fn for boundary declarations
 
 **Catches:** typos in field names, wrong field types, missing fields.
 
@@ -1180,7 +1179,7 @@ blocking on the more lenient sync-time WARN.
 
 **Goal:** taint-style tracking of side effects through composition.
 
-- `:effects #{:io :db :env :time :network :random}` set on each base-fn
+- `:effects #{:io :db :env :time :network :random}` set on each base-fn (later phases added `:process`, `:state`, `:raw-sql` — the full nine are in the Categories table above)
 - Loader normalises legacy `:effectful? true` to `:effects #{:effect}`
 - Composition unions ref-binding effects into the fn-def's set
 - Editor renders colour-coded chips per category
@@ -1249,8 +1248,8 @@ mismatch — same channel, same diagnostic shape.
 the effect constraint set on the *callable* side:
 
 ```edn
-;; map's :func slot — pure-only constraint
-:func {:type [:fn {:item a} b #{}]}
+;; filter's :pred slot — pure-only constraint (map's :func carries NONE)
+:pred {:type [:fn {:item a} :bool #{}]}
 
 ;; an alternate hypothetical "give me an :env-or-pure callable" slot
 :func {:type [:fn {:item a} b #{:env}]}

@@ -67,6 +67,31 @@
         "an ungated entity is never over-quota")))
 
 
+(deftest dedicated-executor?-gates-services-to-the-dedicated-tier
+  ;; The SERVICE gate (task #6, FLEET_RFC §7.1): only the `dedicated` tier — which
+  ;; is provisioned its own cgroup-limited pod — may create services. The shared
+  ;; free/network tiers cannot, because a persistent tenant service is unsafe on a
+  ;; runtime the tenant shares.
+  (let [store (org-store {"paid"    {:name "paid"    :plan "dedicated"}
+                          "acme"    {:name "acme"    :plan "network"}
+                          "globex"  {:name "globex"  :plan nil}
+                          "weird"   {:name "weird"   :plan "bogus"}})]
+    (testing "the dedicated tier grants a dedicated executor + a service allowance"
+      (is (true? (plan/dedicated-executor? store "paid")))
+      (is (= 20 (plan/max-services-for store "paid"))))
+    (testing "the shared paid tier (network) does NOT grant services"
+      (is (false? (plan/dedicated-executor? store "acme")))
+      (is (zero? (plan/max-services-for store "acme"))))
+    (testing "free / unknown / missing slug → no services"
+      (is (false? (plan/dedicated-executor? store "globex")))
+      (is (false? (plan/dedicated-executor? store "weird")))
+      (is (false? (plan/dedicated-executor? store "nope")))
+      (is (zero? (plan/max-services-for store "globex"))))
+    (testing "the public / platform org is not a tenant service gate → false / 0"
+      (is (false? (plan/dedicated-executor? store tc/public-org)))
+      (is (zero? (plan/max-services-for store tc/public-org))))))
+
+
 (deftest install!-wires-the-seams
   (let [store (org-store {"acme" {:name "acme" :plan "network"}})
         saved-fx @cr/cloud-allowed-effects-resolver

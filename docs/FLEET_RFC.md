@@ -314,6 +314,96 @@ Verified against the executor:
 - **Managed serverless (Cloud Run/Fargate)** — same per-service model, less
   cluster ops, more lock-in; doesn't change the control-plane design.
 
+### 7.1 Tenant service isolation — effect gate + dedicated shard + CRaC
+
+A tenant `:service` is a **persistent process** running the tenant's own graph
+(cron/`:schedule`, long-poll bots, always-on listeners). The free tier is a full
+FaaS *without* services precisely because a persistent tenant process raises a
+concern the per-request FaaS path never does: **resource fairness in a shared
+JVM.** This section is the isolation model that makes tenant services safe, and
+the concrete path to enabling them (task #6 parts 2/4).
+
+**Two boundaries, not one.** The effect gate and a resource boundary are
+orthogonal, and a safe tenant service needs both:
+
+| Boundary | Bounds | Status | Mechanism |
+|----------|--------|--------|-----------|
+| **Capability** (authz) | *What* the service may do — `:network`/`:env`/`:io`/… | **SHIPPED** (task #6 parts 1+3) | `cr/*allowed-effects*` per the org's plan, conveyed into the service's worker thread (`conveyed-dynamic-vars`) via `cr/run-service-scoped` |
+| **Resource** (fairness) | *How much* CPU / heap / threads / wall-clock it consumes | **NOT shipped** — the launch gap | OS/cgroup limit on a runtime the tenant does not share with others |
+
+The effect gate is an authz boundary; it does **not** cap CPU, heap, or thread
+count. A `(loop [] (recur))` service pins a core; an unbounded accumulator OOMs
+the shared heap; and — critically — **the JVM has no hard per-thread heap cap**,
+so a malicious tenant can crash a shared pod no matter how the in-process code is
+sandboxed. The honest resource boundary therefore lives **below** the JVM, at the
+OS/container level. And the fleet packer (§6.3) deliberately **spreads cells for
+load, not for isolation** (`fleet/packer.clj`: "spread for load, not for
+isolation") — a shared pod holds a mix of many orgs' cells — so the default fleet
+does not provide this boundary. It must be added as a **placement policy**, not
+new isolation tech.
+
+**Three levels, in order of strength (and cost):**
+
+- **L0 — in-JVM governance (REJECTED for untrusted tenants).** Per-service
+  thread-pool cap + a wall-clock/CPU watchdog that interrupts a runaway service +
+  per-org soft heap accounting. This is best-effort *fairness*, not isolation:
+  with no hard per-thread heap cap, a determined tenant still OOMs the pool.
+  Acceptable only for a **trusted** tenant set, never for open signup.
+
+- **L1 — dedicated resource-limited shard (RECOMMENDED first step; assembles
+  SHIPPED primitives).** Give a paying tenant's service cells their own
+  cgroup-limited pod(s). No new isolation machinery — two shipped primitives
+  compose:
+  - `:executor-orgs` (docs/SCALING.md §Sharding) — a membership predicate on the
+    ExecutionContext. A pod compiles + serves **only** its shard's orgs; the
+    reconciler on that pod starts **only** that shard's services; an off-shard
+    request `421`s. Set `:executor-orgs #{org}` and the pod is that org's
+    dedicated executor.
+  - Helm per-pod `resources.limits` (`deploy/helm/graphden/values.yaml`) — the
+    StatefulSet already carries k8s CPU/memory requests + limits (cgroups).
+
+  Together: run a small StatefulSet whose shard predicate is a single paid org,
+  under tight k8s limits. That org's service cells run **only** there; a runaway
+  or OOM crashes **only that tenant's own pod**, never the shared fleet. Effect
+  gate (shipped) bounds *what*, the cgroup bounds *how much* — that is the safe
+  tenant service. The cost is a warm pod (or small pool) per paid tenant — real
+  infra spend, which is exactly why services are the honest **paid line**.
+
+- **L2 — CRaC per-cell + scale-to-zero (cost optimisation; = T5.3, open).** A
+  warm pod per idle tenant is expensive, and a JVM-per-service is normally
+  unaffordable (~4.5 s package-load, ~655 MB). CRaC (§5.1, shipped: ~41 ms
+  restore from a ~201 MB warm image) makes an isolated per-cell runtime
+  economical: checkpoint the warm image once, restore a fresh cgroup-limited JVM
+  per service cell on demand, park at zero when idle. This is the elegant
+  endgame — dedicated isolation without paying for idle — and it is gated on the
+  scale-to-zero work (§7, §8 Phase 5 T5.3), not on any missing capability.
+
+**Enabling task #6 (safe tenant services) via L1 — concrete checklist:**
+
+1. Plan flag `:dedicated-executor?` (or `:tier :dedicated`) in `tenancy/plan.clj`
+   → only such an org may create a `:service`. Free/shared-tier orgs stay
+   service-less (the FaaS boundary is unchanged).
+2. Provision the dedicated shard: a StatefulSet with `:executor-orgs #{org}` +
+   tight Helm `resources.limits`. This is **config assembly** of shipped
+   primitives (the predicate + the `421` path already run everywhere) plus the
+   ops runbook — no new executor code.
+3. Task #6 parts 2/4 (**Option B**, below) so the tenant can create/list
+   services, capped by plan. `:service` stays in `tenant-forbidden-entities`
+   (the platform reconciler must read every org's services, and moving `:service`
+   into `default-scoped-entities` hides tenant rows from the platform at the DB
+   layer — Postgres `FORCE ROW LEVEL SECURITY` under a non-BYPASSRLS app role, so
+   the base read never sets the org GUC and the RLS policy filters it to
+   `public`). Instead: add an `:org-id` field to `:service`; a tenant creates and
+   lists services through dedicated endpoints that write/read via the **base**
+   (unrestricted) storage, stamping / filtering by `(tc/current-org)` — exactly
+   how `tenancy/plan.clj` reads the tenant-forbidden `:org` — and enforcing a
+   `:max-services` cap. The shipped `cr/run-service-scoped` seam then sandboxes
+   each service by its `:org-id`.
+
+The result: a paid org with `:dedicated-executor?` runs its services on its own
+cgroup-limited pod, where the shipped effect gate and the k8s limit together
+bound both capability and resources.
+
 ## 8. Phased plan (incremental — each phase ships value alone)
 
 - **Phase 0 — foundation.** Live routing map + dynamic membership + internal-forward

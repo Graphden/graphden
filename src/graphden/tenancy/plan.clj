@@ -22,23 +22,44 @@
 
 
 (def plans
-  "Plan slug → `{:effects <allow-list> :max-fns <n|nil> :max-list-items <n|nil>}`.
-   `free` is the locked default (`#{:db :state :time :random}`); `network`
-   additionally allows outbound `:network` (external HTTP / SQL, itself guarded
-   by the egress broker — #5) and lifts the ceilings. A nil ceiling = uncapped.
+  "Plan slug → `{:effects <allow-list> :max-fns <n|nil> :max-list-items <n|nil>
+   :dedicated-executor? <bool> :max-services <n>}`. `free` is the locked default
+   (`#{:db :state :time :random}`); `network` additionally allows outbound
+   `:network` (external HTTP / SQL, itself guarded by the egress broker — #5) and
+   lifts the ceilings; `dedicated` is the SERVICE tier (see below). A nil ceiling
+   = uncapped.
 
-   TWO ceilings, because a tenant controls TWO independent DB-growth vectors:
+   TWO row ceilings, because a tenant controls TWO independent DB-growth vectors:
    `:max-fns` bounds `:fn` rows (slots / bindings scale with fns, so fn-count is
    their proxy), and `:max-list-items` bounds `:binding-list-item` rows — SEQUENCE
    content, appended one row (+ one version row) per item, so NOT bounded by fn
    count. Without the second ceiling a tenant balloons the shared DB with one fn
-   + an unbounded list. Extend here as tiers are added (e.g. a #6 service tier)."
-  {"free"    {:effects cr/default-cloud-allowed-effects
-              :max-fns 500
-              :max-list-items 50000}
-   "network" {:effects (conj cr/default-cloud-allowed-effects :network)
-              :max-fns 5000
-              :max-list-items 500000}})
+   + an unbounded list.
+
+   `:dedicated-executor?` is the SERVICE gate (task #6, FLEET_RFC §7.1). A tenant
+   `:service` is a PERSISTENT process running the tenant's own graph; the shipped
+   effect gate bounds WHAT it does but NOT its CPU/heap/threads, and the JVM has
+   no hard per-thread heap cap — so a continuous tenant service is only safe on a
+   runtime the tenant does not share (a cgroup-limited `:executor-orgs #{org}`
+   pod). The shared `free`/`network` tiers therefore set `:dedicated-executor?
+   false` (no services); only `dedicated` — provisioned its own limited pod —
+   sets it true and grants a `:max-services` allowance. Extend here as tiers are
+   added."
+  {"free"      {:effects cr/default-cloud-allowed-effects
+                :max-fns 500
+                :max-list-items 50000
+                :dedicated-executor? false
+                :max-services 0}
+   "network"   {:effects (conj cr/default-cloud-allowed-effects :network)
+                :max-fns 5000
+                :max-list-items 500000
+                :dedicated-executor? false
+                :max-services 0}
+   "dedicated" {:effects (conj cr/default-cloud-allowed-effects :network)
+                :max-fns 5000
+                :max-list-items 500000
+                :dedicated-executor? true
+                :max-services 20}})
 
 
 (def ^:private default-plan
@@ -65,6 +86,26 @@
   [storage org]
   (or (:effects (tenant-plan storage org))
       cr/default-cloud-allowed-effects))
+
+
+(defn dedicated-executor?
+  "True when tenant `org`'s plan grants a DEDICATED (cgroup-limited) executor —
+   the prerequisite for creating a `:service` (task #6, FLEET_RFC §7.1). A
+   persistent tenant service runs continuous tenant code, which is only safe on a
+   runtime the tenant doesn't share; the shared `free`/`network` tiers return
+   false, so tenant service creation stays gated to the `dedicated` tier. Public
+   org / no org → false (the platform provisions its own services out-of-band, not
+   through this tenant gate)."
+  [storage org]
+  (boolean (:dedicated-executor? (tenant-plan storage org))))
+
+
+(defn max-services-for
+  "The number of `:service` rows tenant `org`'s plan allows (0 on the shared
+   tiers). The create-path cap (task #6 part 4) reads this once `:service`
+   carries an `:org-id`. Public org / no org → 0 (not a tenant service gate)."
+  [storage org]
+  (or (:max-services (tenant-plan storage org)) 0))
 
 
 ;; The gated GROWTH entities → the `{table, plan-ceiling-key}` they're measured

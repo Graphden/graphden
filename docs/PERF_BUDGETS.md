@@ -78,11 +78,11 @@ The invariants that are gated today:
 | Counter | Max | Catches |
 |---------|-----|---------|
 | `:fixture/container-boot` | 1 | a caller bypassing the shared container (~3 s each) |
-| `:fixture/golden-bootstrap` | 1 | a namespace inventing a new package set (~14 s) |
+| `:fixture/golden-bootstrap` | 2 | a namespace inventing a new package set (~14 s each); two are expected — `[core web app]` + `[core web app registry mcp]` |
 | `:fixture/type-check-sweep` | 0 | the ~40 s sweep leaking into the unit suite |
 | `:registry/delta-fell-back-to-rebuild` | 0 | a delta silently becoming a full rebuild |
-| `:sql/graph-entities-tree` | 3 | the sidebar's first paint reading rows it doesn't paint |
-| `:sql/create-fn` | 18 | the write path re-reading what it already had |
+| `:sql/graph-entities-tree` | 1 | the sidebar's first paint reading rows it doesn't paint |
+| `:sql/create-fn` | 20 | the write path re-reading what it already had |
 
 ## How the SQL is counted
 
@@ -384,10 +384,10 @@ Read together with the counts, this says things neither can say alone:
 
 | Scenario | Queries | Round-trip-equivalents of time |
 |----------|---------|-------------------------------|
-| `graph-entities-tree` | 3 | **22** |
-| `create-fn` | 18 | **4065** |
+| `graph-entities-tree` | 1 | **29.26** |
+| `create-fn` | 20 | **2009.28** |
 
-Creating one `:fn` issues 18 queries and costs four thousand round trips' worth
+Creating one `:fn` issues 20 queries and costs ~two thousand round trips' worth
 of time. The time is not in the SQL — it is in the compile, exactly as PERF_NOTES
 describes ("477 ms of its 918 ms"). The count says the database is fine; the
 trend says the work is elsewhere.

@@ -5,8 +5,10 @@ function graphs in the Graphden editor. Internal data shape:
 `derive-fn-slot-views` flattens (fn × slot) views into "arg row"
 records that feed every walker; lookups are slot-id-keyed
 (`bindings`, `parent-bound-terminals`, `covered-slots`,
-`child-covered-sources-for-fn`). See
-`resources/packages/app/layout/impls.clj` for the implementation.
+`child-covered-sources-for-fn`). See `src/graphden/layout/`
+(`data.clj` / `graph.clj` / `builder_helpers.clj`) for the
+implementation — `resources/packages/app/layout/impls.clj` is only the
+thin `defbase` boundary that calls into it.
 
 ## Overview
 
@@ -628,17 +630,18 @@ all other nodes move relative to it. This prevents disorienting jumps.
 
 **Anchor selection priority:**
 
-1. Explicit `anchorFnId` — set by expansion click or preview hover/clear
-2. Preview node — first key in `previewLevel` map
+1. Explicit `anchorNodeId` — set by expansion click or preview hover/clear
+2. Preview node — a key in the `previewState` map
 3. None — graph fits to viewport
 
-**Critical timing:** `anchorFnId` and old position must be captured BEFORE the async
-`fetchBackendLayout()` call, because callers clear `anchorFnId` synchronously after
-calling `renderGraph()` (which is async). After fetch completes, the saved anchor
-position is used to compute the offset applied to all new positions.
+**Critical timing:** `anchorNodeId` and old position must be captured BEFORE the async
+`fetchBackendLayout()` call (`editor-render.js` grabs `capturedAnchorNodeId`), because
+callers clear `anchorNodeId` synchronously after calling `renderGraph()` (which is
+async). After fetch completes, the saved anchor position is used to compute the offset
+applied to all new positions.
 
-**Preview anchor:** Both `setPreviewLevel` (hover) and its clear (mouseleave) set
-`anchorFnId` before calling `renderGraph`. Without this, clearing a preview would
+**Preview anchor:** Both `applyHoverSpec` (hover) and `clearPreview` (mouseleave) set
+`anchorNodeId` before calling `renderGraph`. Without this, clearing a preview would
 cause the graph to jump back to unanchored position, then the node re-enters focus,
 re-triggering preview — creating an infinite animation loop.
 
@@ -664,6 +667,7 @@ When layout problems occur:
 
 ## Related Files
 
-- `resources/packages/app/layout/impls.clj` - Implementation
+- `src/graphden/layout/` - The layout algorithm (`data.clj`, `graph.clj`, `builder_helpers.clj`, … — `derive-fn-slot-views`, `process-fn`, `collect-expanded-args`, etc.)
+- `resources/packages/app/layout/impls.clj` - Thin `defbase` boundary (`_load-graph-cached`, `_layout-build-apply`, …) that calls into the algorithm above
 - `test/graphden/layout/` - Layout tests
 - `tools/browser-test/` - Visual browser tests

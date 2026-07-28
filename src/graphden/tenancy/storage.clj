@@ -251,6 +251,19 @@
 (defonce quota-status-fn (atom nil))
 
 
+;; Tenant service create / list seams (task #6 part 4). `:service` is
+;; tenant-forbidden (Option B — see `tenant-forbidden-entities`), so a tenant
+;; can't create / list it through this decorator; these seams let the tenant-
+;; facing endpoints do it via the platform base storage, gated on the org's plan
+;; (dedicated tier + `:max-services` cap) and `:org-id`-stamped / -filtered.
+;; `graphden.tenancy.plan/install!` sets them (closed over base); nil (no addon)
+;; → the endpoints no-op. Same lifecycle-binding rationale as the seams above.
+(defonce create-tenant-service-fn (atom nil))
+
+
+(defonce list-tenant-services-fn (atom nil))
+
+
 ;; The tenant-controlled DB-growth entities the create-path gates, → the
 ;; user-facing over-limit message. `:fn` and `:binding-list-item` are the two
 ;; INDEPENDENT vectors: fns (slots/bindings scale with them) and sequence

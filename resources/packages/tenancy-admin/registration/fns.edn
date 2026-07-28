@@ -449,4 +449,64 @@
   {:name :quota-route
    :description "GET /api/orgs/quota — the current org's plan usage (fns / list-items used vs cap). Auth-required; org-scoped by current-org."
    :parent :get-auth-required
-   :args {:path "/api/orgs/quota" :handler :_quota-handler}}]}
+   :args {:path "/api/orgs/quota" :handler :_quota-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; TENANT SERVICES (task #6 part 4 / FLEET_RFC §7.1) — a DEDICATED-tier
+  ;; org creates + lists its own persistent services. `:service` is
+  ;; tenant-forbidden (Option B), so both go through the base-storage seams
+  ;; installed by `tenancy.plan/install!`; the create seam gates on the
+  ;; dedicated tier + `:max-services` cap and stamps `:org-id`, the list seam
+  ;; filters by `:org-id`. Org-scoped by current-org (not boot-baked).
+  ;; ---------------------------------------------------------------------
+  {:name :tenant-list-services
+   :description "The current org's own :service rows (filtered by :org-id) via the installed `tenancy.storage/list-tenant-services-fn` seam. nil outside tenancy / for the public org."
+   :args {}
+   :return-type [:union :null [:list :keyword-map]]
+   :effects #{:db}}
+
+  {:name :_services-list
+   :parent :tenant-list-services}
+
+  {:name :_services-list-json
+   :parent :to-json-string
+   :args {:data :_services-list}}
+
+  {:name :_services-list-handler
+   :description "Ring handler for GET /api/orgs/services — the current org's services as JSON."
+   :parent :json-ok-response
+   :args {:body :_services-list-json}}
+
+  {:name :services-list-route
+   :description "GET /api/orgs/services — the current tenant org's services. Auth-required; org-scoped by current-org."
+   :parent :get-auth-required
+   :args {:path "/api/orgs/services" :handler :_services-list-handler}}
+
+  {:name :tenant-create-service
+   :description "Create a :service owned by the current org via the installed `tenancy.storage/create-tenant-service-fn` seam (dedicated-tier + :max-services gated, :org-id-stamped). `data` = the parsed request body; the impl coerces its string values. Returns the created row, or nil outside tenancy."
+   :args {:data {:type :keyword-map
+                 :description "Parsed request body — :fn-id (required), :restart-policy, :enabled?, :cardinality, :branch-id."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_svc-create-form
+   :parent :parse-form-body-kw}
+
+  {:name :_svc-create-do
+   :parent :tenant-create-service
+   :args {:data :_svc-create-form}}
+
+  {:name :_svc-create-json
+   :parent :to-json-string
+   :args {:data :_svc-create-do}}
+
+  {:name :_svc-create-handler
+   :lambda-params [:request :limit]
+   :description "Ring handler for POST /api/orgs/services — create a service for the current org, return the created row as JSON."
+   :parent :json-ok-response
+   :args {:body :_svc-create-json}}
+
+  {:name :services-create-route
+   :description "POST /api/orgs/services/create — create a :service for the current tenant org (dedicated-tier + :max-services gated). Auth-required; org-scoped by current-org. A distinct path from the GET list (the bare reitit router rejects same-path GET+POST)."
+   :parent :post
+   :args {:path "/api/orgs/services/create" :handler :_svc-create-handler}}]}

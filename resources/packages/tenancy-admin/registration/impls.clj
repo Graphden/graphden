@@ -37,6 +37,49 @@
     (f (tc/current-org))))
 
 
+(defn- coerce-service-fields
+  "Adapt the request's parsed body (`parse-form-body-kw` → keyword keys, string
+   values) into the typed `:service` shape the create seam writes: `:fn-id` /
+   `:branch-id` → UUID, `:restart-policy` / `:cardinality` → keyword, `:enabled?`
+   → bool, `:pool-size` → long. Blank / missing optional fields drop out;
+   `:enabled?` defaults true and `:restart-policy` defaults `:always`. Pure
+   boundary coercion (no storage / composition), so it lives at this HTTP seam."
+  [data]
+  (let [kw (fn [v] (some-> v name not-empty keyword))
+        id (fn [v] (some-> v str not-empty parse-uuid))
+        pool (some-> (:pool-size data) str not-empty parse-long)]
+    (cond-> {:fn-id (id (:fn-id data))
+             :enabled? (not= "false" (str (:enabled? data "true")))
+             :restart-policy (or (kw (:restart-policy data)) :always)}
+      (kw (:cardinality data)) (assoc :cardinality (kw (:cardinality data)))
+      (id (:branch-id data))   (assoc :branch-id (id (:branch-id data)))
+      pool                     (assoc :pool-size pool))))
+
+
+(defbase tenant-create-service
+  "Create a `:service` owned by the current tenant org via the installed seam
+   (`tenancy.storage/create-tenant-service-fn`), which gates on the org's plan
+   (dedicated tier + `:max-services` cap) and stamps `:org-id`. `data` is the
+   request's parsed body; coerce its string values to the typed `:service` shape
+   at this HTTP boundary. Returns the created row (nil outside tenancy)."
+  [data]
+  (cr/record-effect! :db)
+  (when-let [f @ts/create-tenant-service-fn]
+    (f (tc/current-org) (coerce-service-fields data))))
+
+
+(defbase tenant-list-services
+  "The current tenant org's own `:service` rows via the installed seam
+   (`tenancy.storage/list-tenant-services-fn`), filtered by `:org-id`. nil
+   outside tenancy / for the public org."
+  []
+  (cr/record-effect! :db)
+  (when-let [f @ts/list-tenant-services-fn]
+    (f (tc/current-org))))
+
+
 (def impls
   {:invalidate-byo-cache invalidate-byo-cache
-   :tenant-quota-status tenant-quota-status})
+   :tenant-quota-status tenant-quota-status
+   :tenant-create-service tenant-create-service
+   :tenant-list-services tenant-list-services})

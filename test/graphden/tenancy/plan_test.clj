@@ -95,7 +95,9 @@
 (deftest install!-wires-the-seams
   (let [store (org-store {"acme" {:name "acme" :plan "network"}})
         saved-fx @cr/cloud-allowed-effects-resolver
-        saved-q @ts/entity-quota-exceeded?]
+        saved-q @ts/entity-quota-exceeded?
+        saved-create @ts/create-tenant-service-fn
+        saved-list @ts/list-tenant-services-fn]
     (try
       (plan/install! store)
       (testing "after install the effect seam resolves per-org"
@@ -106,10 +108,19 @@
         (is (fn? @ts/entity-quota-exceeded?))
         (is (false? (@ts/entity-quota-exceeded? tc/public-org :fn))
             "the seam never caps the public org"))
-      (testing "uninstall clears BOTH seams (lifecycle-bound, no cross-test leak)"
+      (testing "after install the tenant service create / list seams are live"
+        (is (fn? @ts/create-tenant-service-fn))
+        (is (fn? @ts/list-tenant-services-fn))
+        (is (nil? (@ts/list-tenant-services-fn tc/public-org))
+            "the list seam never returns rows for the public org"))
+      (testing "uninstall clears EVERY seam (lifecycle-bound, no cross-test leak)"
         (plan/uninstall!)
         (is (nil? @cr/cloud-allowed-effects-resolver))
-        (is (nil? @ts/entity-quota-exceeded?)))
+        (is (nil? @ts/entity-quota-exceeded?))
+        (is (nil? @ts/create-tenant-service-fn))
+        (is (nil? @ts/list-tenant-services-fn)))
       (finally
         (reset! cr/cloud-allowed-effects-resolver saved-fx)
-        (reset! ts/entity-quota-exceeded? saved-q)))))
+        (reset! ts/entity-quota-exceeded? saved-q)
+        (reset! ts/create-tenant-service-fn saved-create)
+        (reset! ts/list-tenant-services-fn saved-list)))))

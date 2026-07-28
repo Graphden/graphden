@@ -108,11 +108,17 @@
   (or (:max-services (tenant-plan storage org)) 0))
 
 
-;; The gated GROWTH entities → the `{table, plan-ceiling-key}` they're measured
-;; against. Table names come from this hardcoded map (no injection surface).
+;; The gated entities → the `{table, plan-ceiling-key}` they're measured against.
+;; Table names come from this hardcoded map (no injection surface). `:fn` /
+;; `:binding-list-item` are the ROW-CAP growth vectors (task #7, gated on the
+;; OrgScoped create path). `:service` is the task-#6 count cap — NOT wired into
+;; that create-path gate (it's not in `quota-messages`), only into
+;; `entity-count` / `over-entity-quota?` so `create-tenant-service!` can enforce
+;; `:max-services` off the same `count(*) WHERE org_id` machinery.
 (def ^:private quota-spec
   {:fn                {:table "fn" :ceiling :max-fns}
-   :binding-list-item {:table "binding_list_item" :ceiling :max-list-items}})
+   :binding-list-item {:table "binding_list_item" :ceiling :max-list-items}
+   :service           {:table "service" :ceiling :max-services}})
 
 
 (defn entity-count
@@ -165,22 +171,72 @@
                     :max (:max-list-items plan)}})))
 
 
+;; The `:service` fields a tenant may set on create. `:org-id` is stamped by
+;; `create-tenant-service!` (never taken from the request — that would let a
+;; tenant plant a service under another org); the reconciler-managed
+;; `:cardinality` / `:pool-size` default to a safe singleton when omitted.
+(def ^:private tenant-service-create-fields
+  [:fn-id :enabled? :restart-policy :cardinality :pool-size :branch-id])
+
+
+(defn create-tenant-service!
+  "Create a `:service` OWNED by tenant `org`, via the platform `storage`.
+   `:service` is tenant-forbidden (Option B), so OrgScopedStorage would block a
+   direct tenant write; this stamps `:org-id org` and writes below the decorator.
+
+   Gated (task #6 / FLEET_RFC §7.1): the org's plan must grant a DEDICATED
+   executor (a shared-JVM always-on tenant service is unsafe), and the org must
+   be under its `:max-services` cap. Throws `:authz/forbidden` (no tenant / not a
+   dedicated tier) or `:quota/service-limit` (at cap). `data` is the already-
+   coerced service config; only `tenant-service-create-fields` are honoured and
+   `:org-id` is always the caller's own org."
+  [storage org data]
+  (when (or (nil? org) (= org tc/public-org))
+    (throw (ex-info "Services require an authenticated tenant."
+                    {:type :authz/forbidden :reason :service/no-tenant})))
+  (when-not (dedicated-executor? storage org)
+    (throw (ex-info "Your plan does not include services. Upgrade to a dedicated plan to run persistent services."
+                    {:type :authz/forbidden :org org :reason :service/tier-required})))
+  (when (over-entity-quota? storage org :service)
+    (throw (ex-info "You've reached your plan's service limit. Upgrade your plan to run more services."
+                    {:type :quota/service-limit :org org :reason :service/limit})))
+  (sp/create-entity storage :service
+                    (-> data
+                        (select-keys tenant-service-create-fields)
+                        (assoc :org-id org))))
+
+
+(defn list-tenant-services!
+  "Every `:service` OWNED by tenant `org` (its `:org-id` rows), read via the
+   platform `storage` — the entity is tenant-forbidden, so the tenant reads its
+   own through this seam, filtered by `:org-id` (never seeing another org's or a
+   platform service). Public org / no org → nil."
+  [storage org]
+  (when (and org (not= org tc/public-org))
+    (vec (sp/query-entities storage :service {:org-id org}))))
+
+
 (defn install!
   "Install the plan-driven seams (closed over the platform `storage`): the
-   effect allow-list resolver (compile-runtime), the row-cap check + the
-   read-side quota-status reader (tenancy.storage). `storage` reads the
-   tenant-forbidden `:org` row unrestricted, on the tenant's behalf."
+   effect allow-list resolver (compile-runtime), the row-cap check, the
+   read-side quota-status reader, and the tenant service create/list seams
+   (tenancy.storage). `storage` reads / writes the tenant-forbidden `:org` /
+   `:service` rows unrestricted, on the tenant's behalf."
   [storage]
   (reset! cr/cloud-allowed-effects-resolver (partial allowed-effects-for storage))
   (reset! ts/entity-quota-exceeded? (partial over-entity-quota? storage))
-  (reset! ts/quota-status-fn (partial quota-status storage)))
+  (reset! ts/quota-status-fn (partial quota-status storage))
+  (reset! ts/create-tenant-service-fn (partial create-tenant-service! storage))
+  (reset! ts/list-tenant-services-fn (partial list-tenant-services! storage)))
 
 
 (defn uninstall!
-  "Clear both seams (→ locked default effects, no row-cap). Called on tenancy-
-   system halt so the process-global resolvers are lifecycle-bound and can't
-   leak a stale storage into a later test in the same JVM."
+  "Clear every seam (→ locked default effects, no row-cap, no service ops).
+   Called on tenancy-system halt so the process-global resolvers are lifecycle-
+   bound and can't leak a stale storage into a later test in the same JVM."
   []
   (reset! cr/cloud-allowed-effects-resolver nil)
   (reset! ts/entity-quota-exceeded? nil)
-  (reset! ts/quota-status-fn nil))
+  (reset! ts/quota-status-fn nil)
+  (reset! ts/create-tenant-service-fn nil)
+  (reset! ts/list-tenant-services-fn nil))

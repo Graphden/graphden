@@ -316,7 +316,7 @@
            at it. `repoint-refs!` fills refs in place across BOTH planes
            (identity and every branch's version rows); `purge-fn-subgraph!`
            below then removes the abandoned subgraph. The sync-time
-           reconciler (`system.core/reconcile-moved-identities!`) runs them
+           reconciler (`packages.sync/reconcile-moved-identities!`) runs them
            after every package sync, and the operator tool
            `graphden.dev.integrity` delegates to the same two."}
     {:ns graphden.versioning.storage.merge :defn diff-branches

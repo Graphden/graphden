@@ -1140,10 +1140,9 @@ Base-fns must not contain hardcoded configuration values. Defaults belong in fn-
 
 **Examples:**
 
-- Security headers: from hardcoded map in `http-server` → fn-def arg `:default-headers`
 - Error responses: from hardcoded maps in `router` → fn-defs via MI (`text-error-router`)
-- Default styles: from `cytoscape-container` → explicit required arg `:style`
-- Optional args with defaults: declared in fns.edn with default value, not `(or arg val)` in impl
+- Server port: no `(or port 8080)` in the `http-server` impl — the `:web-server` fn-def binds `:port 8080` explicitly
+- Optional args with defaults: declared in fns.edn with default value (e.g. `:range`'s `:start 0` / `:step 1`), not `(or arg val)` in impl
 
 ### 4. Content → Fn-defs, Not Impls
 
@@ -1151,10 +1150,10 @@ HTML, SVG, CSS, hardcoded strings belong in fn-defs (`:parent :const`), not in i
 
 **Examples:**
 
-- `editor-body` → `:const` fn-def with hiccup structure
-- `favicon-svg-body` → `:const` fn-def
-- CDN URLs → fn-def args (not constants in impl)
-- `dagre-script`, `cytoscape-dagre-script` → `:const` fn-defs
+- editor `:body` → `:const` fn-def with hiccup structure
+- `_favicon-svg-body` → `:const` fn-def
+- CDN URLs → fn-def args (`:with-cdn-script` `:url`, not constants in impl)
+- editor JS bundle paths → `:const` fn-defs (`_editor-script-paths`, `_graphden-runtime-js-paths`)
 
 ### 5. Private Fn-def Naming: `_` Prefix
 

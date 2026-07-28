@@ -19,14 +19,15 @@ Clojure. You **compose existing functions** by declaring data:
 ```clojure
 {:name :add-tax
  :parent :mul
- :args {:factor 1.2}}
+ :args {:nums [{:as :amount} {:value 1.2}]}}
 ```
 
-That is a complete program. `:add-tax` inherits `:mul`'s slots, pins one
-of them (`:factor`) to `1.2`, and leaves the other (`:x`) open — so
-`:add-tax` is "multiply your input by 1.2", callable as a one-argument
-function. There is no function body to write; there is only *which
-function you build on* and *what you bind*.
+That is a complete program. `:add-tax` inherits `:mul`'s single `:nums`
+list slot, pins the second entry of that list to `1.2`, and leaves the
+first entry open as a free arg named `:amount` — so `:add-tax` is
+"multiply your `:amount` by 1.2", callable as a one-argument function.
+There is no function body to write; there is only *which function you
+build on* and *what you bind*.
 
 ## 2. Two kinds of `fn`
 
@@ -60,7 +61,7 @@ name; the VALUE says how to fill it:
 
 | You want | Write | Example |
 |----------|-------|---------|
-| a literal value | the value directly | `{:factor 1.2}`, `{:port 8080}` |
+| a literal value | the value directly | `{:status 200}`, `{:port 8080}` |
 | a **reference** to another fn | its `:name` keyword | `{:handler :my-router}` |
 | a literal keyword (not a ref) | `{:value :kw}` | `{:tag {:value :active}}` |
 | rename the slot as it surfaces | `{:as :new-name}` | `{:x {:as :price}}` |
@@ -159,16 +160,17 @@ Goal: "an order total = sum of line items, plus 20% tax".
  {:name :with-tax
   :namespace "app.orders"
   :parent :mul
-  :args {:factor 1.2}
-  :description "Multiply the running value by 1.2 (20% tax)."}
+  :args {:nums [{:as :amount} {:value 1.2}]}
+  :description "Multiply :amount by 1.2 (20% tax)."}
  {:name :order-total
   :namespace "app.orders"
   :parent :with-tax
-  :args {:x :subtotal}
+  :args {:amount :subtotal}
   :description "Line-item subtotal, taxed."}]}
 ```
 
-Then `execute-fn "order-total" {:nums [10 20 30]}` → `72.0`. `diff-branch`
+Then `execute-fn "order-total" {:nums [10 20 30]}` → `72.0`
+(subtotal `10+20+30 = 60`, then `× 1.2`). `diff-branch`
 shows three fns added-in-target; the human reviews and merges.
 
 ---

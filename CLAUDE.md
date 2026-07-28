@@ -523,8 +523,8 @@ A base-fn impl should ideally be **1-2 lines** of actual logic: call the library
 
 ```clojure
 ;; CORRECT approach
-{:name :editor-styles, :parent :const, :args {:x "CSS here..."}}
-{:name :editor-body, :parent :const, :args {:x [:div ...]}}
+{:name :editor-styles, :parent :const, :args {:value "CSS here..."}}
+{:name :editor-body, :parent :const, :args {:value [:div ...]}}
 {:name :editor-page, :parent :html-page, :args {:title "Editor" :body :editor-body}}
 {:name :editor-router, :parent :router, :args {:routes [...]}}
 {:name :web-server, :parent :http-server, :args {:handler :editor-router :port 8080}}

@@ -223,8 +223,8 @@ Integrant component `:exec/cleanup-scheduler` runs a single
 | `:cancelled` | 7 days   | DELETE                                        |
 | `:pending` > 1 h | (zombie sweep) | Flip to `:cancelled` (NOT delete); next sweep applies the 7-day TTL |
 
-Implementation: `sys/sweep-executions! storage now` (in
-`graphden.system.core`). The `now` argument is injectable so tests
+Implementation: `sweep-executions! storage now` (in
+`graphden.system.init.cleanup`). The `now` argument is injectable so tests
 can verify TTL behaviour without sleeping real time.
 
 ## Editor UI
@@ -269,7 +269,11 @@ Currently instrumented (in `resources/packages/core/system/impls.clj`):
 
 - `:env` → `:env`
 - `:current-time-ms` → `:time`
-- `:read-resource-or-nil`, `:slurp`, `:jvm-version`, `:heap-memory` → `:io`
+- `:read-resource-or-nil`, `:slurp` → `:io`
+
+(`:jvm-version` and `:heap-memory` are fn-def compositions in
+`fns.edn`, not `impls.clj` defbases — their `:io` propagates from
+the JVM/heap primitives they compose.)
 
 Adding instrumentation is a one-liner inside the `defbase` body:
 

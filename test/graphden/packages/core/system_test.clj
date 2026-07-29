@@ -82,3 +82,25 @@
       (impl {:func (delay ticking)} nil)
       (is (= 3 @counter)
           "3 invocations → 3 calls; impl itself doesn't memoise"))))
+
+
+;; ============================================================================
+;; :render-prometheus — metrics map → OpenMetrics/Prometheus text exposition.
+;; ============================================================================
+
+(deftest render-prometheus-formats-numeric-leaves-test
+  (let [impl (impl-of :render-prometheus)]
+    (testing "numeric leaves flatten + prefix graphden_; nested maps join with _"
+      (is (= "graphden_heap_mb 125\ngraphden_counters_registry_rebuild 59"
+             (impl {:m (delay (array-map "heap_mb" 125
+                                         "counters" (array-map "registry_rebuild" 59)))}
+                   nil))))
+    (testing "non-numeric labels (strings) are dropped — samples are numeric"
+      (is (= "graphden_threads 42"
+             (impl {:m (delay (array-map "threads" 42 "hostname" "abc"))} nil))))
+    (testing "keys are sanitised to [a-z0-9_] and lower-cased"
+      (is (= "graphden_os_load_avg 1.5"
+             (impl {:m (delay (array-map "OS load-avg" 1.5))} nil))))
+    (testing "empty / nil map → empty exposition"
+      (is (= "" (impl {:m (delay {})} nil)))
+      (is (= "" (impl {:m (delay nil)} nil))))))

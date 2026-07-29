@@ -31,6 +31,12 @@
    :args {:path "/metrics" :handler :_metrics-handler}
    :expects-effects #{:io :env}}              ; reads JVM state (heap / threads / os) + env (hostname / user)
 
+  {:name :metrics-prometheus
+   :description "GET /metrics/prometheus — the same JVM info + structural counters in OpenMetrics / Prometheus text exposition format, for a Prometheus scrape target."
+   :parent :get-route
+   :args {:path "/metrics/prometheus" :handler :_metrics-prometheus-handler}
+   :expects-effects #{:io :env}}              ; same JVM/env reads as :metrics
+
   {:name :version
    :description "GET /version — `{\"frontend\": \"<hex>\", \"packages\": \"<hex>\", \"backend\": \"<hex>\"}`. Each is a SHA-256 over that section's source files at build time; compare with `bb verify` to confirm which section a deploy actually shipped."
    :parent :get-route

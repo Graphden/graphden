@@ -51,5 +51,6 @@
                   :demo-contact
                   :health
                   :metrics
+                  :metrics-prometheus
                   :version
                   :api-routes]}}]}

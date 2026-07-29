@@ -38,6 +38,16 @@
    :parent :json-ok-response
    :args {:body :_metrics-json-body}}
 
+  ;; Same metrics data, OpenMetrics / Prometheus text exposition (for a scrape
+  ;; target) — served at /metrics/prometheus alongside the JSON /metrics.
+  {:name :_metrics-prometheus-body
+   :parent :render-prometheus
+   :args {:m :_metrics-with-counters}}
+
+  {:name :_metrics-prometheus-handler
+   :parent :text-ok-response
+   :args {:body :_metrics-prometheus-body}}
+
   ;; ============================================================================
   ;; VERSION (deploy verification)
   ;; ============================================================================

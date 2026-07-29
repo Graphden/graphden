@@ -27,7 +27,7 @@
 (def ^:private golden-total
   "Total base-fn count across `package-set`. A change means a base-fn was added
    or removed — review its taint behaviour, then update this number."
-  281)
+  282)
 
 
 (def ^:private golden-tainted

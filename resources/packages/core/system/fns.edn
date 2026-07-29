@@ -212,6 +212,12 @@
    :return-type :jsonb
    :effects #{:io}}                 ; process-global mutable state — varies per call
 
+  {:name :render-prometheus
+   :description "Render a metrics map as an OpenMetrics / Prometheus text exposition — one `graphden_<flattened_key> <number>` line per numeric leaf (nested maps flatten with `_`; non-numeric labels dropped). Pure map → text, the text-exposition counterpart of `:to-json-string`, for a Prometheus scrape target."
+   :args {:m {:type :jsonb :description "Metrics map (the JVM snapshot + structural counters built for /metrics)."}}
+   :return-type :text
+   :effects #{}}
+
   ;; jvm-info composed from atomic base-fns via assoc chain
   {:name :jvm-info
    :description "Aggregate JVM/system snapshot — version, heap, threads, OS."

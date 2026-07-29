@@ -936,12 +936,28 @@
   (testing "empty :and is true; empty :or is false"
     (is (true?  (lit/literal-satisfies-refinement? 0 [:and])))
     (is (false? (lit/literal-satisfies-refinement? 0 [:or]))))
-  (testing "compound with mixed decidable + :unknown"
-    ;; :matches is currently :unknown (regex shape); :and decisive false
-    ;; from the second clause overrides the unknown.
+  (testing "compound with :matches (now decidable) + equality"
+    ;; :matches now decides against a string literal; the :and's decisive
+    ;; false from the second clause still wins.
     (is (false? (lit/literal-satisfies-refinement? "x" [:and [:matches #"."] [:= "y"]])))
-    ;; :or with one true short-circuits to true even if a sibling is unknown
+    ;; :or with one true short-circuits to true.
     (is (true?  (lit/literal-satisfies-refinement? "x" [:or  [:matches #"."] [:= "x"]])))))
+
+
+(deftest literal-satisfies-matches-decides-against-string-literals
+  (testing ":matches decides — Pattern or string rhs, string value"
+    (is (true?  (lit/literal-satisfies-refinement? "abc" [:matches #"^a"])))
+    (is (false? (lit/literal-satisfies-refinement? "xbc" [:matches #"^a"])))
+    ;; string rhs is the form authored in fns.edn (`[:matches "^https?://"]`)
+    (is (true?  (lit/literal-satisfies-refinement? "abc" [:matches "^a"])))
+    (is (true?  (lit/literal-satisfies-refinement? "http://x" [:matches "^https?://"])))
+    (is (false? (lit/literal-satisfies-refinement? "ftp://x" [:matches "^https?://"])))
+    ;; a blank string fails :non-blank-text's `\S` — this is the build-time
+    ;; rejection that was previously deferred to runtime.
+    (is (false? (lit/literal-satisfies-refinement? "   " [:matches "\\S"]))))
+  (testing ":matches defers to :unknown for a non-string value or a bad pattern"
+    (is (= :unknown (lit/literal-satisfies-refinement? 42 [:matches "^a"])))
+    (is (= :unknown (lit/literal-satisfies-refinement? "x" [:matches "("])))))
 
 
 (deftest literal-satisfies-atomic-ops
@@ -964,8 +980,11 @@
     (is (false? (lit/literal-satisfies-refinement? :head [:in [:get :post :put :delete]])))
     (is (true?  (lit/literal-satisfies-refinement? 2 [:in [1 2 3]])))
     (is (false? (lit/literal-satisfies-refinement? 9 [:in [1 2 3]]))))
-  (testing ":matches regex defers (non-statically-decidable)"
-    (is (= :unknown (lit/literal-satisfies-refinement? "abc" [:matches #"."]))))
+  (testing ":matches regex decides against a string literal"
+    (is (true?  (lit/literal-satisfies-refinement? "abc" [:matches #"."])))
+    (is (false? (lit/literal-satisfies-refinement? "abc" [:matches #"^z"])))
+    ;; a non-string value still defers (base-type check handles it)
+    (is (= :unknown (lit/literal-satisfies-refinement? 42 [:matches #"."]))))
   (testing "non-vector / unknown-shape / bad-arity constraints defer"
     (is (= :unknown (lit/literal-satisfies-refinement? 5 nil)))
     (is (= :unknown (lit/literal-satisfies-refinement? 5 [:bogus])))

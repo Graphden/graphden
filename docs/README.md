@@ -19,6 +19,8 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Topic | Doc |
 |---|---|
 | Deploy & configure (self-host) | [DEPLOYMENT.md](DEPLOYMENT.md) · [CONFIGURATION.md](CONFIGURATION.md) |
+| Security & tenant isolation | [SECURITY_MODEL.md](SECURITY_MODEL.md) |
+| Plans & tiers (what each includes) | [PLANS.md](PLANS.md) |
 | Scaling & the executor fleet | [SCALING.md](SCALING.md) · [FLEET_DEPLOY.md](FLEET_DEPLOY.md) |
 | What's shipped vs planned | [ROADMAP.md](ROADMAP.md) |
 | Error codes | [ERROR_CODES.md](ERROR_CODES.md) |

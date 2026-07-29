@@ -138,7 +138,7 @@
   rls/org-aware-datasource)
 
 
-(defmethod ig/init-key :tenancy/rls-enabler [_ {:keys [storage]}]
+(defmethod ig/init-key :tenancy/rls-enabler [_ {:keys [storage strict?]}]
   ;; Install the RLS policies at boot. Depends on `:db/postgres`, whose
   ;; init-key already created the tables (initialize-with-cleanup!), so the
   ;; ALTER TABLE / CREATE POLICY have something to attach to. Idempotent.
@@ -146,12 +146,18 @@
   (rls/enable-rls! (:pool storage))
   ;; Verify the app's DB role is actually subject to those policies. A
   ;; superuser / BYPASSRLS role makes them a silent no-op (RLS is inert;
-  ;; only OrgScopedStorage isolates). WARN by default so a trusted
-  ;; single-tenant / dev install (superuser DB role) still boots;
-  ;; GRAPHDEN_STRICT_RLS=true turns it into a hard boot failure for a
-  ;; production multi-tenant deployment. See docs/DEPLOYMENT.md.
-  (rls/verify-rls-enforcement! (:pool storage)
-                               (= "true" (System/getenv "GRAPHDEN_STRICT_RLS")))
+  ;; only OrgScopedStorage isolates) — a silent cross-tenant hole for a
+  ;; multi-tenant deployment. STRICT BY DEFAULT: fail the boot unless the
+  ;; operator explicitly opts out with GRAPHDEN_STRICT_RLS=false (a trusted
+  ;; single-tenant / dev install on the superuser role). The `:strict?` config
+  ;; key overrides both (tests set it false). NB the guard only fires for a
+  ;; superuser / BYPASSRLS role — a correct non-superuser production role is
+  ;; subject to RLS and passes silently. See docs/DEPLOYMENT.md.
+  (rls/verify-rls-enforcement!
+    (:pool storage)
+    (if (some? strict?)
+      strict?
+      (not= "false" (System/getenv "GRAPHDEN_STRICT_RLS"))))
   :enabled)
 
 

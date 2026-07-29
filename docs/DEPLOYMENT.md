@@ -256,11 +256,13 @@ and asserts cross-org rows are invisible).
 **Boot guard.** The `:tenancy/rls-enabler` component checks the app's DB
 role right after installing the policies (`rls/verify-rls-enforcement!`). If
 the app connects as a superuser or a `BYPASSRLS` role — so the policies are
-inert — it logs a prominent `WARN` by default (a trusted single-tenant /
-dev install still boots). Set **`GRAPHDEN_STRICT_RLS=true`** to turn that
-into a hard boot failure (`:rls/not-enforced`) — recommended for a
-production multi-tenant deployment, so a misconfigured role can never
-silently ship with the database-level backstop disabled.
+inert — it **fails the boot by default** (`:rls/not-enforced`), so a
+misconfigured role can never silently ship with the database-level backstop
+disabled. A trusted single-tenant / dev install that deliberately runs on the
+superuser role can downgrade this to a prominent `WARN` with
+**`GRAPHDEN_STRICT_RLS=false`**. (A correct non-superuser production role is
+subject to RLS and passes this guard silently — the guard only ever fires for
+a superuser / `BYPASSRLS` role.)
 
 > Without this role switch the deployment is still tenant-isolated by
 > `OrgScopedStorage` at the application layer; you only lose the

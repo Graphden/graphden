@@ -131,11 +131,12 @@
    is NOT — a dangerous silent state for a multi-tenant deployment, where the
    org-isolation policies are installed but inert.
 
-   `strict?` true → throw and fail the boot (recommended for a production
-   multi-tenant deployment); false → log a prominent WARN and continue
-   (OrgScopedStorage still isolates at the app layer — acceptable for a
-   trusted single-tenant / dev install, where the DB role is often the
-   superuser). Returns the `rls-role-status` map."
+   `strict?` true → throw and fail the boot (the DEFAULT for a tenancy
+   deployment — a role that isn't RLS-subject is a silent cross-tenant hole);
+   false → log a prominent WARN and continue (OrgScopedStorage still isolates
+   at the app layer — an explicit opt-out for a trusted single-tenant / dev
+   install, where the DB role is often the superuser). Returns the
+   `rls-role-status` map."
   [ds strict?]
   (let [{:keys [role superuser? bypassrls? enforced?] :as status} (rls-role-status ds)]
     (when-not enforced?
@@ -146,7 +147,8 @@
                      "ONLY; the database-level backstop is gone. For a production "
                      "multi-tenant deployment, connect as a non-superuser, non-BYPASSRLS "
                      "role — see docs/DEPLOYMENT.md § non-superuser DB role. "
-                     "Set GRAPHDEN_STRICT_RLS=true to make this a hard boot failure.")]
+                     "This is a hard boot failure by default; set GRAPHDEN_STRICT_RLS=false "
+                     "to downgrade it to a warning (trusted single-tenant / dev).")]
         (if strict?
           (throw (ex-info msg {:type :rls/not-enforced :role role
                                :superuser? superuser? :bypassrls? bypassrls?}))

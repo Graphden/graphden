@@ -145,7 +145,10 @@
         ;; every scoped entity's table exists — incl. branch / fn_execution /
         ;; package_install, not just the graph tables).
         tables (mapv #(str/replace (name %) "-" "_") ts/default-scoped-entities)]
-    (is (= :enabled (ig/init-key :tenancy/rls-enabler {:storage storage}))
+    ;; :strict? false — this test boots the enabler on the testcontainers
+    ;; SUPERUSER role, which is not RLS-subject; the enabler now fails the
+    ;; boot by default on such a role, so opt out explicitly here.
+    (is (= :enabled (ig/init-key :tenancy/rls-enabler {:storage storage :strict? false}))
         "the addon component runs enable-rls! at boot")
     (let [installed (->> (jdbc/execute! ds ["SELECT tablename FROM pg_policies WHERE policyname = 'org_isolation_select'"])
                          (map :pg_policies/tablename)
@@ -156,3 +159,24 @@
     (doseq [t tables]
       (jdbc/execute! ds [(str "ALTER TABLE \"" t "\" NO FORCE ROW LEVEL SECURITY")])
       (jdbc/execute! ds [(str "ALTER TABLE \"" t "\" DISABLE ROW LEVEL SECURITY")]))))
+
+
+(deftest rls-enabler-fails-boot-by-default-on-inert-role
+  ;; Safe default (S2): with no `:strict?` config and no GRAPHDEN_STRICT_RLS
+  ;; opt-out, the enabler must FAIL THE BOOT on a role that isn't RLS-subject
+  ;; (the testcontainers superuser) rather than silently continue with the
+  ;; database-level backstop off. Pins the default so a regression that flips
+  ;; it back to warn-by-default is caught.
+  (let [storage (setup/create-test-storage)
+        ds (:pool storage)
+        tables (mapv #(str/replace (name %) "-" "_") ts/default-scoped-entities)]
+    (try
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"INERT"
+            (ig/init-key :tenancy/rls-enabler {:storage storage}))
+          "default (no :strict?) fails the boot on an inert superuser role")
+      (finally
+        ;; enable-rls! ran (and FORCEd RLS) before verify threw — undo it so a
+        ;; container-sharing sibling ns isn't left constrained.
+        (doseq [t tables]
+          (jdbc/execute! ds [(str "ALTER TABLE \"" t "\" NO FORCE ROW LEVEL SECURITY")])
+          (jdbc/execute! ds [(str "ALTER TABLE \"" t "\" DISABLE ROW LEVEL SECURITY")]))))))

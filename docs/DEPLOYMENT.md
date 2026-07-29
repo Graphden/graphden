@@ -322,7 +322,8 @@ java \
 - [ ] Enable HTTPS via reverse proxy (nginx, traefik)
 - [ ] Configure log aggregation (stdout is JSON-compatible)
 - [ ] Set up monitoring for `/health`
-- [ ] Configure database backups for PostgreSQL
+- [ ] Configure database backups for PostgreSQL — backup strategy, restore,
+      PITR, and PG-HA/failover behaviour are in [OPERATIONS.md](OPERATIONS.md)
 
 ## Troubleshooting
 

@@ -19,6 +19,7 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Topic | Doc |
 |---|---|
 | Deploy & configure (self-host) | [DEPLOYMENT.md](DEPLOYMENT.md) · [CONFIGURATION.md](CONFIGURATION.md) |
+| Day-2 ops — backups, restore, PG-HA, upgrades | [OPERATIONS.md](OPERATIONS.md) |
 | Security & tenant isolation | [SECURITY_MODEL.md](SECURITY_MODEL.md) |
 | Plans & tiers (what each includes) | [PLANS.md](PLANS.md) |
 | Scaling & the executor fleet | [SCALING.md](SCALING.md) · [FLEET_DEPLOY.md](FLEET_DEPLOY.md) |

@@ -7,7 +7,9 @@ restart-policy + branch scoping.
 
 **Concepts introduced**: `service`, `reconciler`, `restart-
 policy`, `:enabled?`, `:process` effect, `:service.branch-id`,
-`:service.cardinality`, service vs `execute`.
+`:service.cardinality`, service vs `execute`, and — on a
+multi-tenant deployment — services as the **dedicated tier**
+(own cgroup-limited pod, effect-sandboxed, `/api/orgs/services*`).
 
 ## Service vs execute
 
@@ -304,6 +306,74 @@ GET /api/services
 The `:running` block carries the in-process atom snapshot:
 `:stopper-set?` (true ⇒ running), `:started-at`,
 `:start-failed-at`, `:start-attempts`, `:branch-id`.
+
+## Services in the cloud (multi-tenant, dedicated tier)
+
+Everything above assumes you own the deployment — your fns, your pods, one
+graph. On a **multi-tenant** graphden (many orgs sharing one platform) services
+work differently, because a persistent service runs *your* code continuously and
+the platform can't let one tenant's runaway loop starve everyone else.
+
+The rule that makes it safe: a persistent tenant service is only offered on a
+**dedicated** runtime.
+
+- **The free / network tiers are a full FaaS *without* services.** You compose
+  fns, deploy a live app at `your-org.graphden.app`, and execute on demand — but
+  a `:service` is off-limits. The `⚙` popover shows an *upgrade* note, and the
+  API answers `403` with `:reason :service/tier-required`. (Under the hood
+  `:service` is a platform-managed entity a shared tenant can't write directly.)
+- **Services are the `dedicated` tier.** A dedicated org runs on its **own** pod
+  set with its own CPU + memory limits, so a persistent service is bounded by
+  that pod's cgroup. Two boundaries, not one: the **effect gate** limits *what*
+  the service may do (its plan's effects), the **cgroup** limits *how much* CPU /
+  memory it burns. That is the honest reason services are the paid line — they
+  cost a dedicated runtime. The dedicated plan grants `:process` (a service
+  spawns a supervised thread) and `:network` on top of the safe defaults;
+  `:raw-sql` stays denied even here, because the dedicated pod shares the
+  platform's Postgres.
+
+### What you do (dedicated tier)
+
+The `⚙` button works the same, but in tenant mode the popover is a **simpler
+form** — just **Enabled** + **Restart policy**. There's no cardinality control:
+your services run on your own single dedicated pod, so the "how many pods" and
+advisory-lock questions above don't arise. Create / edit / delete route to your
+org's own endpoints, the row is stamped with your org id, and the reconciler
+starts it **only** on your dedicated pod — never on a shared one.
+
+Your service runs **sandboxed to your plan's effects**, and that gate now
+follows it into the background thread it spawns. The dedicated plan grants the
+safe defaults plus `:process` and `:network`; a service that reaches for an
+effect it *doesn't* grant — `:raw-sql` (the shared platform Postgres), or the
+host-level `:io` / `:env` — throws `:execution/forbidden-effect` in its own
+worker and fails to start, the same gate a one-shot execute runs under.
+
+```bash
+# create — dedicated tier only; 403 :service/tier-required otherwise
+curl -X POST "$BASE/api/orgs/services/create" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "fn-id=$FN_ID&enabled?=true&restart-policy=always"
+
+# list YOUR org's services (only yours — never another tenant's or the platform's)
+curl "$BASE/api/orgs/services" -H "Authorization: Bearer $TOKEN"
+
+# update / delete carry the service id in the body
+curl -X POST "$BASE/api/orgs/services/delete" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "id=$SERVICE_ID"
+```
+
+### One current limitation
+
+The tenant list shows a service's **desired** state (enabled?, restart-policy)
+but not its live **run** status — the reconciler's running / failed signal lives
+on your dedicated pod, not on the platform endpoint that serves the list, so the
+editor badge reads *configured* / *disabled*, not *running* / *failed*, for now.
+
+Operators provisioning a dedicated tenant (the pod set, the shard, the limits):
+see [docs/FLEET_DEPLOY.md § Dedicated tenant shard](../FLEET_DEPLOY.md).
 
 ## What we glossed over
 

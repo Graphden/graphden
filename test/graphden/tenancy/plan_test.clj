@@ -55,6 +55,20 @@
       (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store "nope"))))))
 
 
+(deftest dedicated-plan-grants-process-so-services-can-actually-run
+  ;; The dedicated tier SELLS services; a service spawns its supervised thread
+  ;; via `:future`, which records `:process`. Without `:process` in the plan the
+  ;; effect gate (`cr/run-service-scoped`) would block every service start — the
+  ;; tier would grant services it can't run. It must NOT grant `:raw-sql` though:
+  ;; the dedicated pod shares the platform Postgres, so raw SQL is cross-tenant.
+  (let [store (org-store {"paid" {:name "paid" :plan "dedicated"}})
+        fx (plan/allowed-effects-for store "paid")]
+    (is (contains? fx :process) "services need :process to spawn")
+    (is (contains? fx :network) "dedicated keeps network's grant")
+    (is (not (contains? fx :raw-sql))
+        "platform DB stays off-limits even on a dedicated pod (shared Postgres)")))
+
+
 (deftest over-entity-quota?-never-caps-the-public-org
   ;; The public / platform org holds the shared core+web+app graph (thousands of
   ;; fns); it must never resolve a cap. This short-circuits before `fn-count`, so

@@ -43,8 +43,13 @@
    runtime the tenant does not share (a cgroup-limited `:executor-orgs #{org}`
    pod). The shared `free`/`network` tiers therefore set `:dedicated-executor?
    false` (no services); only `dedicated` — provisioned its own limited pod —
-   sets it true and grants a `:max-services` allowance. Extend here as tiers are
-   added."
+   sets it true and grants a `:max-services` allowance. It ALSO grants
+   `:process` (on top of `network`'s effects): a service spawns its supervised
+   background thread via `:future`, which records `:process` — without it the
+   effect gate would block every service start, so the tier that SELLS services
+   must allow the effect they need. `:raw-sql` stays forbidden even here — the
+   dedicated pod SHARES the platform Postgres, so raw SQL would be cross-tenant.
+   Extend here as tiers are added."
   {"free"      {:effects cr/default-cloud-allowed-effects
                 :max-fns 500
                 :max-list-items 50000
@@ -55,7 +60,7 @@
                 :max-list-items 500000
                 :dedicated-executor? false
                 :max-services 0}
-   "dedicated" {:effects (conj cr/default-cloud-allowed-effects :network)
+   "dedicated" {:effects (conj cr/default-cloud-allowed-effects :network :process)
                 :max-fns 5000
                 :max-list-items 500000
                 :dedicated-executor? true

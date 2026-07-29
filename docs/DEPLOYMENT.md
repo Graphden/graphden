@@ -270,6 +270,15 @@ a superuser / `BYPASSRLS` role.)
 > for production multi-tenant**, optional for a trusted single-tenant
 > install.
 
+### Resource isolation: shared vs dedicated
+
+RLS + the effect gate isolate tenants by *data* and *capability*, but on the
+**shared** tier co-located tenants share the pod's CPU / heap / threads — a
+noisy or OOMing neighbour can degrade others. Give a tenant a **hard**
+resource boundary with the **dedicated** tier (its own cgroup-limited shard).
+See [SCALING.md § Tenant isolation](SCALING.md) and
+[FLEET_DEPLOY.md § Dedicated tenant shard](FLEET_DEPLOY.md).
+
 ## Health Checks
 
 The server exposes a health endpoint:

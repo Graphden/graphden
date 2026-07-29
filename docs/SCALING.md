@@ -195,6 +195,33 @@ The **public** org (platform / single-tenant) keeps the per-pod atom for its
 per-org cap: it isn't a metered tenant, and its executions are the hot editor
 path we don't add a query to. So single-tenant self-hosted is unchanged.
 
+## Tenant isolation: shared vs dedicated (resource-isolation caveat)
+
+On the **shared** tier many orgs are co-located on one JVM/pod (the packer
+spreads for load, not isolation). Those tenants are isolated by *capability*
+and bounded for *fairness*:
+
+- **Data** — `OrgScopedStorage` + Postgres RLS (strict by default; see
+  [DEPLOYMENT.md § non-superuser DB role](DEPLOYMENT.md)) confine every row to
+  its org.
+- **Capability** — the two-layer effect gate bounds what a tenant graph may
+  *do* (a free tenant can't touch `:network` / `:process` at all).
+- **Fairness** — the fleet-wide per-org execution quota, the per-org egress
+  rate-limit, and the response byte-cap bound how *often* and how *much*.
+
+What the shared tier does **not** give is a hard **resource** boundary: the
+co-located tenants share the pod's CPU, heap, and threads, so a heavy or
+misbehaving neighbour can degrade others (a classic *noisy neighbour*), and a
+per-tenant out-of-memory can restart the pod and drop co-tenants' in-flight
+executions. The wall-clock execution deadline and the per-org quotas blunt
+this, but they do not partition CPU or heap.
+
+A tenant that needs a **hard** resource boundary uses the **dedicated** tier:
+its own `:executor-orgs` shard with cgroup CPU/memory limits, so its load can
+never touch another tenant — see
+[FLEET_DEPLOY.md § Dedicated tenant shard](FLEET_DEPLOY.md). This is why safe
+always-on tenant services are the dedicated (paid) line, not the shared one.
+
 ## External / BYO executor
 
 A customer runs the executor on their OWN hardware, but the graph stays in

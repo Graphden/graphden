@@ -418,10 +418,13 @@ keeps its inline 📍 badge on the same rows.
   LRU work above.
 - The `:exec/branch-router` is unit-tested at the dispatcher level
   (`branch-router-test`: header / query parsing, default fallback,
-  unknown-ref rejection, invalidate) but there's no end-to-end
-  Clojure test exercising the full middleware-through-storage path.
-  Manual curl verification + the
-  `list-executions-isolates-by-branch-version-test` integration
-  test cover the per-branch storage round-trip; a single test that
-  sends a real HTTP request through the wrap into per-branch ctx
-  is still missing.
+  unknown-ref rejection, invalidate). The full middleware-through-storage
+  path — a request through the wrap into a per-branch ExecutionContext and
+  back through the branch's storage view — is covered end-to-end by
+  `graphden.integration.branches-lifecycle-test`: it dispatches through
+  `br/dispatch` (the same closure http-kit feeds real `/api` requests into)
+  with explicit `X-Graphden-Branch` headers, creates a branch, writes a `:fn`
+  on it, and asserts the **isolation split** (the fn resolves under the
+  branch header yet is absent on `main`), then diffs + merges. The socket
+  layer itself (http-kit request parsing over TCP) is exercised separately by
+  the BYO / remote-storage e2e tests and is not a branch-router concern.

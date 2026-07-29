@@ -274,7 +274,8 @@
    Recognised constraints:
      [:>  N]   [:>= N]   [:<  N]   [:<= N]   [:=  N]   [:not= V]
      [:in #{…vs}]                            (membership)
-     [:matches #\"regex\"]                   (text — currently :unknown)
+     [:matches #\"regex\"] / [:matches \"regex\"] (text — decided vs a string
+                                             literal; bad pattern → :unknown)
      [:and c1 c2 …]   [:or c1 c2 …]          (compound — eagerly decided)
    Unknown shapes → `:unknown`."
   [v constraint]
@@ -300,6 +301,20 @@
         :<=    (and (number? v) (number? rhs) (<= v rhs))
         :=     (= v rhs)
         :not=  (not= v rhs)
+        ;; `:matches P` — decide a regex refinement against a string literal
+        ;; at build time (was previously deferred as :unknown, so a bad
+        ;; `:url` / `:non-blank-text` literal slipped through to runtime). `P`
+        ;; is authored as a string in fns.edn (`[:matches "^https?://"]`) but
+        ;; tests/callers may pass a compiled `#"…"` Pattern, so accept both. A
+        ;; non-string value or an uncompilable pattern stays `:unknown` (defer
+        ;; to the runtime validator) rather than risk a false rejection.
+        :matches (let [pat (cond
+                             (instance? java.util.regex.Pattern rhs) rhs
+                             (string? rhs) (try (re-pattern rhs)
+                                                (catch Exception _ nil)))]
+                   (if (and pat (string? v))
+                     (boolean (re-find pat v))
+                     :unknown))
         ;; `:in` operands are authored as either a set or a vector
         ;; (`[:in [:get :post …]]` in app/forms + app/branches). Coerce
         ;; to a set so a valid member isn't spuriously rejected —

@@ -93,9 +93,8 @@ create a namespace cycle back through the versioned-storage stack that
    free-arg implementations (`free-args-via` here vs
    `deep-free-ext-*` in `executor.registry`) with subtly different
    closure-capture / HOF-call-site-subtraction / `value-present`
-   handling. Unifying them is the right end-state (see
-   `REVIEW_FOLLOWUPS.md` #1b) but changes semantics and needs its own
-   test pass. Memoization preserves the exact current output, so it's
+   handling. Unifying them is the right end-state but changes semantics
+   and needs its own test pass. Memoization preserves the exact current output, so it's
    the low-risk first step.
 2. **Delta-clear** using the `:compile-deps` reverse-index. Correct and
    strictly better, but adds complexity for a cost that only lands once

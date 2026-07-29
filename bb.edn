@@ -364,7 +364,7 @@
                     "--exit-code" "1" "--quiet" "."))}
 
   license-check
-  {:doc "Audit npm dep licenses against the allowlist of permissive licenses. Fails on any package outside MIT/BSD/Apache/ISC/CC0/Unlicense family — catches an accidental GPL/AGPL pull before it ships."
+  {:doc "Audit npm dep licenses against the allowlist of permissive licenses. Fails on any package outside MIT/BSD/Apache/ISC/CC0/Unlicense family. NOTE: npm scope ONLY — these are dev/build tooling (biome, commitlint, stylelint, markdownlint) that never ships. The runtime-shipped JVM deps in deps.edn are NOT license-gated here (trivy scans them for CVEs, not licenses); audit those separately before relying on AGPL compatibility."
    :task (let [allow (str/join ";"
                                ["MIT" "ISC" "BSD" "BSD-2-Clause" "BSD-3-Clause"
                                 "Apache-2.0" "CC0-1.0" "Unlicense" "0BSD"

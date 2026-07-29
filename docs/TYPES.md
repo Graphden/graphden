@@ -53,7 +53,7 @@ Non-goals:
 
 The type system combines three mechanisms:
 
-1. **Parametric polymorphism with inference** — type variables (`:a`, `:b`) on base-fns, automatically substituted when arguments are bound. Like Haskell's Hindley-Milner, but simpler because graphden fn-defs are not arbitrary programs.
+1. **Parametric polymorphism with inference** — type variables (`:a`, `:b`) on base-fns, automatically substituted (freshened per use-site) when arguments are bound. This is **rank-1 let-polymorphism only**: the variables live on base-fn signatures, users never write them, and there is no higher-rank or bounded quantification. Loosely Hindley-Milner-flavoured, but far narrower — graphden fn-defs are not arbitrary programs.
 
 2. **Structural type computation** — for operations like `assoc`, `get`, `dissoc`, `merge`, the system computes the output record type from concrete argument values. This is possible because in graphden, keys are typically literals stored in the DB, not runtime variables.
 
@@ -936,6 +936,17 @@ One type definition → static checking at save time + runtime validation at exe
 | Refinement types | No | Runtime | No | **Yes** (save time) | Liquid Haskell | Yes (proofs) |
 | Dependent-like types | No | No | No | **Partial** (literal keys) | No | Yes |
 | Runtime validation | Manual | Schema | Manual | **Auto-generated** | No | No |
+
+> **Soundness posture — read the table honestly.** Graphden's checker is
+> **optional and erased, not sound** — closer to TypeScript / mypy than to
+> Haskell or Idris. `:any` and `:jsonb` are unchecked escape hatches: a value
+> flowing through them is accepted with **no static check and no inserted
+> runtime cast**, so a type the graph "promises" can be violated at runtime
+> with no blame error. The columns above describe *expressiveness* (what can be
+> written and inferred), not a soundness guarantee. Where this doc says a
+> property "holds", read it as *best-effort, enforced at save time where the
+> checker can see it* — see [TYPE_SYSTEM_DECISIONS.md](TYPE_SYSTEM_DECISIONS.md)
+> for the deliberate optimism and why it was chosen over a sound/gradual design.
 
 ---
 

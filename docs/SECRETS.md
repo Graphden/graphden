@@ -8,6 +8,18 @@ like `base64(secret)` and `hash(secret)` are also hidden because the
 TYPE of the result carries the marker, regardless of what the value
 actually is.
 
+> **Scope — read this first.** This is **best-effort taint-tracking, not a
+> proven non-interference / information-flow guarantee.** Concretely: (1)
+> propagation is a per-base-fn opt-in flag (`:taint-propagate?`), so a new
+> content-passing base-fn that forgets it will silently declassify — there is
+> no structural check that every such fn carries it (see the T3 audit below);
+> (2) `[:secret T] ⊆ :any` is TRUE, so a secret flowing into any `:any`-typed
+> slot loses its marker (the escape hatch documented below); (3) covert
+> channels remain open — notably exception messages (`:throw`, see Known
+> limits). Treat this as a strong guard against *accidental* leaks (echoing a
+> secret into the Run pane, a log, or an HTTP body), not as a boundary you can
+> rely on against an adversary who controls the graph.
+
 ## The marker
 
 **Generalized (2026-07-22):** `:secret` is now the SEEDED instance of a

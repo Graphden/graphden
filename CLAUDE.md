@@ -393,7 +393,7 @@ Each `*.test.js` file is a standalone Node script — exit code 0 = PASS,
 
 ## Architecture Overview
 
-Classical Clojure monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.
+Classical Clojure monorepo. Top namespace: `graphden`. Where a module exposes an `interface.clj` (today: `executor/`, `system/`, `executor_runtime/`) that is its public API; most modules have none yet and are reached through their `core.clj` / named namespaces directly. The boundary is a convention, not lint-enforced.
 
 ### Three-Layer Architecture
 
@@ -560,7 +560,9 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 
 ## Code Conventions
 
-- Public API through `interface.clj` only
+- Public API through `interface.clj` **where a module has one** (today ~5 of the
+  modules — `executor/`, `system/`, `executor_runtime/`); the rest expose no
+  façade and are reached through `core.clj` directly. Not lint-enforced.
 - Internal namespaces: `core.clj`, `util.clj`, `constraints.clj`, etc.
 - Error types use canonical `:type` keywords (see [docs/ERROR_CODES.md](docs/ERROR_CODES.md))
 - Dynamic vars for configuration: `*query-timeout-ms*`, `*max-graph-iterations*`
@@ -575,7 +577,7 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 ## File Locations
 
 ```
-src/graphden/<module>/interface.clj    # Public API
+src/graphden/<module>/interface.clj    # Public API (where present — not every module has one)
 test/graphden/<module>/                # Tests
 docs/                                  # Documentation
 ```

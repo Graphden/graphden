@@ -214,8 +214,10 @@ as `fns.edn` (declarations) + `impls.clj` (Clojure impls); dependencies in
 
 ## Documentation
 
-Start here, then follow the map in [CLAUDE.md](CLAUDE.md) (a per-topic
-index of all 45+ docs).
+Start with the **[documentation index](docs/README.md)** — a reader-oriented
+map (evaluate → learn → operate → reference). Contributors working *on* the
+codebase can also follow the per-topic engineering map in
+[CLAUDE.md](CLAUDE.md), which additionally indexes the internal design records.
 
 | Document | For |
 |----------|-----|

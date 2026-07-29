@@ -1,7 +1,21 @@
 # RFC: Dynamic fleet — load-based placement & rebalancing
 
-**Status: Phases 0-3 CORE SHIPPED + verified end-to-end on a kind cluster (§8,
-§12; ops guide in [FLEET_DEPLOY.md](FLEET_DEPLOY.md)).** T4.5 overlap-accounting
+**Status — maturity, honestly:**
+
+| Layer | State | Verified where |
+|---|---|---|
+| Static fleet (org sharding, `421` backstop, per-org quota, advisory-lock singletons, SSE invalidation, BYO) | implemented | single-host multi-process + testcontainers |
+| Dynamic fleet (placement, rebalancing, control loop, discovery) — Phases 0-3 core | implemented | single-host **kind** cluster, in-cluster Postgres (§8, §12) |
+| T4.5 overlap-accounting | implemented, opt-in (`GRAPHDEN_FLEET_OVERLAP_WEIGHT`, default off) | — |
+| CRaC checkpoint / T5.3 scale-to-zero | demonstrated PoC | KEDA+CRaC on kind; CI bake is manual/off-PR |
+
+**Not yet exercised** by anything above: real cross-machine network latency /
+partitions, a real load balancer, and — critically — advisory-lock singleton /
+leader behaviour across a **real Postgres failover**. Read every "SHIPPED"
+below as *code merged and single-host-verified*, **not** *production-hardened
+across machines*. Ops guide: [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
+
+T4.5 overlap-accounting
 is SHIPPED opt-in (`GRAPHDEN_FLEET_OVERLAP_WEIGHT`, default off); still open: the
 per-route split (evidence-gated) and the CRaC-gated pieces (T5.3 scale-to-zero is
 demonstrated on KEDA+CRaC — the CRaC checkpoint CI bake shipped too). The as-built STATIC fleet (org sharding,

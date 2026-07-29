@@ -21,7 +21,7 @@
           :body :text}}
 
   {:name :http-get
-   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. Connect+read timeout via `:timeout-ms` (default 10s). Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `:text-map` so it REFUSES secret-typed values structurally — use `:http-get-with-bearer` for any auth flow that pulls a token from `:vault-get`."
+   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. Connect+read timeout via `:timeout-ms` (default 10s). Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `:text-map` so it REFUSES secret-typed values structurally — use `:http-get-with-authorization` for any auth flow that pulls a token from `:vault-get`."
    :args {:url {:type :text
                 :description "Absolute URL, e.g. `https://httpbin.org/bearer`."}
           :headers {:type :text-map
@@ -49,10 +49,10 @@
   ;; composability (different schemes, custom prefixes, multi-secret
   ;; compositions), because `:str` propagates `[:secret :text]` taint.
   ;;
-  ;; Scheme-specific variants (`:http-get-with-bearer` below,
-  ;; `:http-get-with-token`, `:http-get-with-basic`, …) are pure graph
-  ;; fn-defs parent-ing this primitive. No JAR rebuild for a new
-  ;; scheme — just a new fn-def.
+  ;; Scheme-specific variants (e.g. `:http-get-with-bearer`,
+  ;; `:http-get-with-token`, `:http-get-with-basic`) would be pure graph
+  ;; fn-defs parent-ing this primitive — none ship yet; compose one when a
+  ;; tutorial needs it. No JAR rebuild for a new scheme, just a new fn-def.
   ;; ---------------------------------------------------------------------
   {:name :http-get-with-authorization
    :description "Variant of `:http-get` that takes a secret-typed `:auth-value` (the full `Authorization` header value, e.g. `\"Bearer xxx\"`) and injects it directly into the request headers. The slot's `[:secret :text]` shape IS the secret-flow boundary — secret values never cross a generic `:text-map` slot."

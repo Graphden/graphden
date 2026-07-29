@@ -89,11 +89,11 @@
    generic `[:map :text :text]` slot. The slot-typing IS the
    secret-flow invariant that keeps decomposition safe.
 
-   `:http-get-with-bearer` and any other scheme-specific variant
-   (`:http-get-with-token`, `:http-get-with-basic`, …) are thin
-   graph fn-defs that prepend the scheme keyword to a secret value
-   via `:str` (which propagates `[:secret :text]`) and bind the
-   resulting full auth-value here."
+   A scheme-specific variant (e.g. `:http-get-with-bearer`,
+   `:http-get-with-token`, `:http-get-with-basic`) would be a thin
+   graph fn-def that prepends the scheme keyword to a secret value
+   via `:str` (which propagates `[:secret :text]`) and binds the
+   resulting full auth-value here — none ship yet."
   [url auth-value extra-headers timeout-ms]
   (cr/record-effect! :network)
   (let [extra (or (stringify-header-keys extra-headers) {})

@@ -229,4 +229,4 @@ out.
 
 ## Next
 
-Lesson 05 — Types (planned — see [tutorial/README.md](README.md))
+Lesson 05 — Types ([already written](05-types.md))

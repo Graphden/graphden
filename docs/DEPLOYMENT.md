@@ -21,27 +21,20 @@ clojure -T:build uber
 
 This produces `target/executor-server.jar` containing all dependencies.
 
-#### Private external packages need repo access at build time
+#### External packages resolve at build time
 
 The build resolves every dependency in `deps.edn` **and** every external
 Type-2 package listed in `resources/executor-packages.edn` (see
-[PACKAGE_DISTRIBUTION § 5.1](PACKAGE_DISTRIBUTION.md)). When such a package is
-pulled by a **git coord onto a private repo** — as `mathx`
-(`graphden/graphden-mathx`) is — the build host must be able to read that
-repo, or `clojure -T:build uber` / `bb rebuild` / `bb check` fail to resolve it.
+[PACKAGE_DISTRIBUTION § 5.1](PACKAGE_DISTRIBUTION.md)). The only such package
+today is `mathx` (`graphden/graphden-mathx`), pulled by a **git coord onto a
+public repo over https** — so `clojure -T:build uber` / `bb rebuild` /
+`bb check` resolve it anonymously, with no credentials or ssh-agent.
 
-On a host whose SSH key is passphrase-protected, unlock it once per session
-into an agent so the build can clone non-interactively:
-
-```bash
-eval "$(ssh-agent -s)"        # or point -a at a fixed socket you reuse
-ssh-add ~/.ssh/id_rsa         # enter the passphrase once
-```
-
-`bb test` and `bb dev` do **not** need this — their aliases carry an
-`:override-deps` back onto the in-tree copy, so lint/test stay offline. For
-unattended CI, either make the package repo public or register the build host's
-public key as a **read-only deploy key** on it.
+`bb test` and `bb dev` don't fetch it over the network at all — their aliases
+carry an `:override-deps` back onto the in-tree copy, so lint/test stay
+offline. If you fork `mathx` into a **private** repo, either register the build
+host's public key as a **read-only deploy key** on it, or point the coord at
+your own public mirror.
 
 ### Build Docker Image
 

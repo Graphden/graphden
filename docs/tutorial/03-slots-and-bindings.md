@@ -149,4 +149,4 @@ time — "you can't promise less than your parent did."
 
 ## Next
 
-Lesson 04 — Free arguments (planned — see [tutorial/README.md](README.md))
+Lesson 04 — Free arguments ([already written](04-free-arguments.md))

@@ -49,11 +49,11 @@
   ;; mathx — an EXTERNAL Type-2 (impl+fns) package, loaded by NAME via the
   ;; executor-packages.edn manifest. This is the REAL distribution form: a
   ;; git coord onto the standalone graphden/graphden-mathx repo (Track B).
-  ;; Resolving it needs read access to that (private) repo — on the deploy
-  ;; host that means an ssh-agent holding the host key (see § 12 / DEPLOYMENT).
-  ;; `bb test` / `bb dev` DON'T need that access: the :test + :dev aliases
-  ;; below carry an :override-deps back onto the in-tree copy so lint/test
-  ;; stay hermetic + offline.
+  ;; The repo is PUBLIC and the coord is an https URL, so the build resolves it
+  ;; anonymously — no credentials, no ssh-agent, no deploy key. `bb test` /
+  ;; `bb dev` carry an :override-deps onto the in-tree copy anyway, so lint/test
+  ;; stay offline + hermetic (a speed/determinism convenience, not an access
+  ;; workaround).
   mathx/mathx {:git/url "https://github.com/Graphden/graphden-mathx.git"
                :git/sha "a99354d1d2cae3b36bedca07523bf133921c595d"}}
 
@@ -64,9 +64,9 @@
    ;; kept in-tree under external-packages/ so lint/test stay offline. It rides
    ;; the classpath here (NOT under the prod `resources` path), so a production
    ;; build never carries it.
-   ;; Keep lint/test hermetic for `mathx` too: resolve it from the in-tree copy,
-   ;; NOT the (private) git coord — so `bb test` needs no repo access or
-   ;; ssh-agent. Production build/run uses the git coord (root :deps).
+   ;; Keep lint/test hermetic + offline for `mathx` too: resolve it from the
+   ;; in-tree copy instead of fetching the (public) git coord over the network.
+   ;; Production build/run uses the git coord (root :deps).
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :extra-deps
    {lambdaisland/kaocha {:mvn/version "1.91.1392"}
@@ -114,18 +114,19 @@
 
   :cljstyle
   {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.17.642"}}
-   ;; Same hermetic override as :splint / :watson / :outdated — tool aliases
-   ;; resolve the ROOT :deps, and the private mathx git coord needs SSH that
-   ;; CI has no key for.
+   ;; Same hermetic/offline override as :splint / :watson / :outdated — tool
+   ;; aliases resolve the ROOT :deps, which include the mathx git coord; the
+   ;; override resolves it from the in-tree copy so lint needs no network fetch
+   ;; (the public repo would resolve over https, but offline is faster + deterministic).
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts ["-m" "cljstyle.main"]}
 
   :splint
   {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.24.0"}}
-   ;; Tool aliases resolve the ROOT :deps too, so without this override they
-   ;; try the private `mathx` git coord over SSH — which a CI runner has no
-   ;; key for. Locally it passes on a warm ~/.gitlibs + ssh-agent, so the
-   ;; failure is CI-only and invisible here. Same hermetic override the
+   ;; Tool aliases resolve the ROOT :deps too, which include the mathx git
+   ;; coord. This override resolves it from the in-tree copy so lint needs no
+   ;; network fetch (the repo is public and would resolve over https, but
+   ;; offline is faster + deterministic). Same hermetic override the
    ;; :dev/:test aliases carry.
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts ["-m" "noahtheduke.splint"]}
@@ -138,28 +139,24 @@
   :outdated
   {:extra-deps {com.github.liquidz/antq {:mvn/version "2.11.1276"}}
    ;; The `--exclude` below keeps mathx out of the REPORT; this keeps it out
-   ;; of CLASSPATH RESOLUTION, which antq does first and which needs SSH to
-   ;; the private repo (CI has no key — locally a warm ~/.gitlibs hides it).
+   ;; of CLASSPATH RESOLUTION, which antq does first — resolving it from the
+   ;; in-tree copy so the report needs no network fetch.
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts
    ["-m" "antq.core"
     "--exclude=org.testcontainers/testcontainers"
     "--exclude=org.testcontainers/postgresql"
-    ;; why: `mathx` is a git coord onto a PRIVATE repo pinned to an exact
-    ;; SHA. antq can't read it without an ssh-agent, so it reports
-    ;; "Failed to fetch" and exits 1 — reddening `bb ci` on every branch,
-    ;; forever. Even with credentials the report would be noise: the pin is
-    ;; deliberate (see § mathx above), and moving it is a manifest decision
-    ;; made in `resources/executor-packages.edn`, not a version bump.
+    ;; why: `mathx` is a git coord pinned to an exact SHA. An antq version
+    ;; report on it would be noise: the pin is deliberate (see § mathx above),
+    ;; and moving it is a manifest decision made in
+    ;; `resources/executor-packages.edn`, not a version bump.
     "--exclude=mathx/mathx"]}
 
   :watson
   {:extra-deps {io.github.clj-holmes/clj-watson {:git/tag "v6.1.0" :git/sha "be98e4d"}}
-   ;; Tool aliases resolve the ROOT :deps too, so without this override they
-   ;; try the private `mathx` git coord over SSH — which a CI runner has no
-   ;; key for. Locally it passes on a warm ~/.gitlibs + ssh-agent, so the
-   ;; failure is CI-only and invisible here. Same hermetic override the
-   ;; :dev/:test aliases carry.
+   ;; Tool aliases resolve the ROOT :deps too, which include the mathx git
+   ;; coord. This override resolves it from the in-tree copy so the scan needs
+   ;; no network fetch. Same hermetic override the :dev/:test aliases carry.
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts ["-m" "clj-watson.cli" "scan"]}
 

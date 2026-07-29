@@ -144,23 +144,30 @@ Re-running `migrate-up` is safe (`IF NOT EXISTS`).
 
 ## Step 5 — One poll tick: HTTP call + insert
 
-### 5a. The Authorization header
+### 5a. The Authorization header value (secret-typed)
 
 | Name | parent | Bind |
 |---|---|---|
 | `_auth-header-value` | `:str` | `:parts` = list `["Bearer " :_api-token]` |
-| `_request-headers` | `:assoc-empty` | `:key` = `"Authorization"`, `:value` = ref `:_auth-header-value` |
 
-`_request-headers` now evaluates to
-`{"Authorization": "Bearer fake-token-abc123"}`. The `Bearer` is
-capitalised because that's what `httpbin.org/bearer` checks for —
-the mock API will reject lowercase `bearer` with a 401.
+`:str` propagates the secret taint, so `_auth-header-value` is
+`[:secret :text]` — the full `Authorization` value
+(`"Bearer fake-token-abc123"`). The `Bearer` is capitalised because
+that's what `httpbin.org/bearer` checks for — the mock API rejects
+lowercase `bearer` with a 401.
 
 ### 5b. The HTTP GET
 
+You can't feed the token through `:http-get`'s `:headers` slot: it's
+`:text-map` and **structurally refuses** secret-typed values — that's
+the secret-flow boundary, a secret must never cross a generic map slot.
+Use `:http-get-with-authorization` instead, whose `:auth-value` slot is
+`[:secret :text]` and injects the header internally, so the token never
+crosses a generic `:map`:
+
 | Name | parent | Bind |
 |---|---|---|
-| `_api-response` | `:http-get` | `:url` = `"https://httpbin.org/bearer"`, `:headers` = ref `:_request-headers` |
+| `_api-response` | `:http-get-with-authorization` | `:url` = `"https://httpbin.org/bearer"`, `:auth-value` = ref `:_auth-header-value` |
 
 Run `▶` on it: you should see `{:status 200, :headers {...},
 :body "{...\"authenticated\": true...}"}`.

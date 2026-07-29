@@ -388,4 +388,4 @@ see [docs/FLEET_DEPLOY.md § Dedicated tenant shard](../FLEET_DEPLOY.md).
 
 ## Next
 
-Lesson 11 — Packages (planned — see [tutorial/README.md](README.md))
+Lesson 11 — Packages ([already written](11-packages.md))

@@ -179,4 +179,4 @@ In the editor, in a namespace of your choice:
 
 ## Next
 
-Lesson 03 — Slots and bindings (planned — see [tutorial/README.md](README.md))
+Lesson 03 — Slots and bindings ([already written](03-slots-and-bindings.md))

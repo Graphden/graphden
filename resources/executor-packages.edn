@@ -11,9 +11,10 @@
  [;; External Type-2 package (impl+fns), distributed as the standalone
   ;; graphden/graphden-mathx repo and pulled in by git coord — the real
   ;; distribution form (Track B). build.clj merges this coord into the uberjar
-  ;; basis, so `bb rebuild` clones the package straight from GitHub. Resolving
-  ;; it needs read access to that (private) repo; `bb test`/`bb dev` sidestep
-  ;; that via the :override-deps in deps.edn (see § 12 / DEPLOYMENT).
+  ;; basis, so `bb rebuild` clones the package straight from GitHub. The repo is
+  ;; PUBLIC and the coord is an https URL, so this resolves anonymously — no
+  ;; credentials, no ssh-agent. `bb test`/`bb dev` resolve the in-tree copy via
+  ;; :override-deps in deps.edn for offline hermeticity (see § 12 / DEPLOYMENT).
   {:name "mathx"
    :lib mathx/mathx
    :coord {:git/url "https://github.com/Graphden/graphden-mathx.git"

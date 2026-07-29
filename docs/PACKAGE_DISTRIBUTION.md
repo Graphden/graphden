@@ -351,12 +351,10 @@ the forker's own org — a deliberate act, not the default.
     `bb test` / `bb dev` resolve the identical in-tree copy — **no repo access,
     no ssh-agent, offline**. `external-packages/mathx/` is kept in-tree as the
     override source (and matches the pushed repo at `@a99354d1`).
-  - **Access requirement:** because the repo is **private**, resolving the git
-    coord (i.e. `bb rebuild`, `bb check`, any non-`:test`/`:dev` invocation)
-    needs read access to it. On the deploy host that means an **ssh-agent
-    holding the host key** — `ssh-agent` + `ssh-add ~/.ssh/id_rsa` once per
-    session (see `docs/DEPLOYMENT.md`). Make the repo public, or add the host
-    key as a read-only deploy key, if you want unattended builds.
+  - **Access requirement:** none — the repo is **public** and the coord is an
+    https URL, so `bb rebuild` / `bb check` / any non-`:test`/`:dev` invocation
+    resolves it anonymously, no credentials or ssh-agent. (If you fork it into a
+    private repo, add the build host key as a read-only deploy key.)
   - Tests: `manifest-test/external-mathx-package-loads-impl-and-fn-def` (loader
     layer, offline via override).
   - **`defbase` gotcha proven here:** the macro rewrites every occurrence of an
@@ -761,7 +759,7 @@ is real; modularity itself comes from packages + protocols/Integrant, in-tree.
 | Repo | Kind | How it relates to the monorepo | Access |
 |------|------|--------------------------------|--------|
 | `graphden/graphden` (this) | monorepo | core / web / storage / **app-base** / app-editor / **registry** / **mcp** / **tenancy-admin** — all co-evolving first-party, in ONE tree. Emits the uberjar; can emit a `graphden-core` artifact (Task 7). | private |
-| `graphden/graphden-mathx` | external Type-2 pkg | pulled IN by git coord (`deps.edn` + `executor-packages.edn`); in-tree copy at `external-packages/mathx` for offline test (§ 5.1). | private |
+| `graphden/graphden-mathx` | external Type-2 pkg | pulled IN by git coord (`deps.edn` + `executor-packages.edn`); in-tree copy at `external-packages/mathx` for offline test (§ 5.1). | public |
 | `graphden/graphden-examples` | extracted dev pkg | the pedagogical `examples` package moved OUT; in-tree at `external-packages/examples`, on the classpath only via the `:dev`/`:test` `:extra-paths` (never prod). | private |
 | `graphden/graphden-cloud` | thin consumer | depends on graphden as a **git-dep**, turns the tenancy addon on, adds cloud modules (`usage-metering` …). NOT a fork (§ 16). | private |
 | *future* private cloud modules | closed addons | attach to `graphden-cloud` via `GRAPHDEN_ADDON_CONFIGS` (billing / metering sinks / at-scale routing). | proprietary |

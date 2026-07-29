@@ -94,13 +94,13 @@ them). A running HTTP server is just a composition:
   [;; Constant handler: (fn [_] response)
    {:name :hello-handler-fn
     :parent :const
-    :args {:x {:status 200 :body "Hello from Graphden!"}}}
+    :args {:value {:status 200 :body "Hello from Graphden!"}}}
 
-   ;; Build a route map. :hello-handler-fn is EXECUTED here — assoc's :v
+   ;; Build a route map. :hello-handler-fn is EXECUTED here — assoc's :value
    ;; slot is not :fn-typed, so the executor evaluates the ref.
    {:name :hello-route-data-fn
     :parent :assoc
-    :args {:m {}, :k "handler", :v :hello-handler-fn}}
+    :args {:map {}, :key "handler", :value :hello-handler-fn}}
 
    ;; A router over those routes.
    {:name :router-fn
@@ -127,11 +127,36 @@ Full walkthrough: [ARCHITECTURE.md § Composition](docs/ARCHITECTURE.md#part-6-c
 
 ## Quick start
 
-**Requirements:** Java 21+, Clojure 1.12+, [Babashka](https://github.com/babashka/babashka), Docker (for Postgres + the executor container).
+### Run it
+
+The whole stack runs in Docker (Graphden + its Postgres + a tenant
+Postgres + OpenBao secrets). Building the image needs the Clojure
+toolchain on the host — **Java 21+, Clojure 1.12+,
+[Babashka](https://github.com/babashka/babashka), Docker**. One command
+builds the uberjar + image and brings the stack up:
+
+```bash
+bb rebuild
+```
+
+Then open the editor at **<http://localhost:9002>**.
+
+Auth is **off by default** (`AUTH_TOKEN` is empty, so the editor is open
+— fine for local evaluation). To require a token, set `AUTH_TOKEN=…` in
+`.env` (copy `.env.example`) and `bb rebuild`. Full env-var reference,
+the `docker compose` / production options, and the RLS/non-superuser DB
+setup are in [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+> **Note:** no prebuilt image is published yet, so `docker compose up`
+> alone won't stand up a clean clone — the executor image is built from a
+> jar that `bb rebuild` (or `clojure -T:build uber && docker build …`,
+> see DEPLOYMENT.md) produces first. The `mathx` external package it
+> pulls is a public repo, so the build needs no credentials.
+
+### Develop
 
 ```bash
 bb repl        # REPL with the dev profile
-bb rebuild     # Build uberjar + docker image, restart the executor container
 bb test        # Run the test suite (uses testcontainers for Postgres)
 bb ci          # Full CI: lint (fail-fast) then unit tests; --since <ref> diff-scopes it (coverage: bb coverage)
 bb check       # Clojure linters only (clj-kondo / splint / cljstyle)

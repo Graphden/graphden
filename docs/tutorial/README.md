@@ -44,6 +44,14 @@ New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how
 it's described, it stays ⏳ planned until the gap closes.
 
+## End-to-end worked example
+
+Once you've worked through lessons 01–10,
+[**Building an API-poller**](../TUTORIAL_API_POLL.md) puts it all
+together: a scheduled service that calls an external HTTP API with a
+vault-backed bearer token and writes each result into your own Postgres
+table — built entirely from fn-defs, no Clojure.
+
 ## How to contribute a lesson
 
 A lesson is a short focused walkthrough of **one** concept. Keep:

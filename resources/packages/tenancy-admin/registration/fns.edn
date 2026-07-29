@@ -421,6 +421,119 @@
    :args {:path "/api/orgs/execution-mode" :handler :_org-mode-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; SET ORG PLAN / KILL-SWITCH — POST /api/orgs/plan {name plan}. Sets an
+  ;; org's :plan tier (free / network / dedicated / suspended). "suspended"
+  ;; is the abuse FREEZE: `tenancy.plan/plans` gives it no effects and all
+  ;; row-caps 0, so a suspended tenant can neither run nor create anything;
+  ;; restore by setting its real tier back. Also serves the legit upgrade /
+  ;; downgrade path (the earlier no-self-serve-upgrade gap). Platform-only
+  ;; (`:org` is tenant-forbidden). The slug is validated against the real
+  ;; plans map FIRST (throw :plan/unknown on a typo — a mistyped slug must
+  ;; not silently resolve to free and un-suspend an abuser). Reuses the
+  ;; shared :org-by-name / :_org-row-nil? / :_org-row-id nodes.
+  ;; ---------------------------------------------------------------------
+  {:name :known-plan-slug?
+   :description "True when the text names a real plan tier (checked against `tenancy.plan/plans`, the single source of truth — a typo can't silently resolve to the free default)."
+   :args {:slug {:type :text :description "Candidate plan slug (free / network / dedicated / suspended)."}}
+   :return-type :bool}
+
+  {:name :_org-plan-valid?
+   :parent :known-plan-slug?
+   :args {:slug {:as :plan :type :text}}}
+
+  {:name :_org-plan-data
+   :parent :assoc-empty
+   :args {:key {:value :plan} :value {:as :plan :type :text}}}
+
+  {:name :_org-plan-updated
+   :parent :update-entity
+   :args {:entity-type {:value "org"}
+          :id {:ref :_org-row-id :type :uuid}
+          :data :_org-plan-data}}
+
+  ;; org absent → throw :org/not-found (mirrors set-org-execution-mode).
+  {:name :_org-plan-nf-message
+   :parent :str
+   :args {:parts [{:value "No org named "} {:as :name :type :text}]}}
+
+  {:name :_org-plan-nf-data
+   :parent :assoc
+   :args {:map {:value {:type :org/not-found}}
+          :key {:value :name}
+          :value {:as :name :type :text}}}
+
+  {:name :_org-plan-nf-error
+   :parent :ex-info
+   :args {:message :_org-plan-nf-message :data :_org-plan-nf-data}}
+
+  {:name :_org-plan-nf-throw
+   :parent :throw
+   :args {:exception :_org-plan-nf-error}}
+
+  ;; unknown slug → throw :plan/unknown (fail closed — no silent free-drop).
+  {:name :_org-plan-unknown-message
+   :parent :str
+   :args {:parts [{:value "Unknown plan tier: "} {:as :plan :type :text}]}}
+
+  {:name :_org-plan-unknown-data
+   :parent :assoc
+   :args {:map {:value {:type :plan/unknown}}
+          :key {:value :plan}
+          :value {:as :plan :type :text}}}
+
+  {:name :_org-plan-unknown-error
+   :parent :ex-info
+   :args {:message :_org-plan-unknown-message :data :_org-plan-unknown-data}}
+
+  {:name :_org-plan-unknown-throw
+   :parent :throw
+   :args {:exception :_org-plan-unknown-error}}
+
+  {:name :_org-plan-apply-or-nf
+   :parent :if
+   :args {:test :_org-row-nil?
+          :then :_org-plan-nf-throw
+          :else :_org-plan-updated}}
+
+  {:name :set-org-plan
+   :description "Set an :org's :plan tier (free / network / dedicated / suspended). \"suspended\" is the abuse kill-switch (no effects, all row-caps 0). Validates the slug against `tenancy.plan/plans` FIRST (throw :plan/unknown on a typo — no silent free-drop), then `:org-by-name` → throw :org/not-found when absent, else `:update-entity`. Platform-only; writes the tenant-forbidden :org entity."
+   :parent :if
+   :args {:test :_org-plan-valid?
+          :then :_org-plan-apply-or-nf
+          :else :_org-plan-unknown-throw}
+   :return-type :nullable-keyword-map}
+
+  {:name :_org-plan-form-data
+   :parent :parse-form-body-kw}
+
+  {:name :_org-plan-name
+   :parent :get
+   :args {:coll :_org-plan-form-data :key {:value :name} :default {:value ""}}}
+
+  {:name :_org-plan-value
+   :parent :get
+   :args {:coll :_org-plan-form-data :key {:value :plan} :default {:value ""}}}
+
+  {:name :_org-plan-do
+   :parent :set-org-plan
+   :args {:name :_org-plan-name :plan :_org-plan-value}}
+
+  {:name :_org-plan-result-text
+   :parent :to-str
+   :args {:value :_org-plan-do}}
+
+  {:name :_org-plan-handler
+   :lambda-params [:default :request :limit]
+   :description "Ring handler for POST /api/orgs/plan — sets the org's plan tier, returns the updated row as text/html."
+   :parent :html-ok-response
+   :args {:body :_org-plan-result-text}}
+
+  {:name :set-org-plan-route
+   :description "POST /api/orgs/plan — set an org's plan tier (name, plan); \"suspended\" freezes an abusive tenant, the others upgrade / downgrade. Auth-required; platform-only."
+   :parent :post
+   :args {:path "/api/orgs/plan" :handler :_org-plan-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; QUOTA USAGE (task #8-frontend) — GET /api/orgs/quota returns the
   ;; CURRENT org's plan usage vs ceilings, for the editor's proactive
   ;; "N / cap fns" display. Reads the read-side seam installed by

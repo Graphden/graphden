@@ -49,6 +49,15 @@
    effect gate would block every service start, so the tier that SELLS services
    must allow the effect they need. `:raw-sql` stays forbidden even here — the
    dedicated pod SHARES the platform Postgres, so raw SQL would be cross-tenant.
+
+   `suspended` is the abuse KILL-SWITCH: no effects at all and every row ceiling
+   0, so a suspended org can neither run any effect (execution blocked at the
+   gate: `allowed-effects-for` → `#{}`) nor create any entity (the row-cap
+   rejects even the first: `over-entity-quota?` cap-0 → true). Set an org's
+   `:plan` to `\"suspended\"` (operator, via the platform-only `set-org-plan`
+   route) to freeze a misbehaving tenant near-instantly — this resolver has no
+   memo, so the next request sees it; restore by setting the org's real tier
+   back. Delete is not gated, so a suspended tenant can still clean up its data.
    Extend here as tiers are added."
   {"free"      {:effects cr/default-cloud-allowed-effects
                 :max-fns 500
@@ -64,7 +73,12 @@
                 :max-fns 5000
                 :max-list-items 500000
                 :dedicated-executor? true
-                :max-services 20}})
+                :max-services 20}
+   "suspended" {:effects #{}
+                :max-fns 0
+                :max-list-items 0
+                :dedicated-executor? false
+                :max-services 0}})
 
 
 (def ^:private default-plan

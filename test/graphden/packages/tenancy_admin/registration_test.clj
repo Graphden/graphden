@@ -13,7 +13,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.tenancy.plan :as plan]))
 
 
 (def ^:private impls-path "resources/packages/tenancy-admin/registration/impls.clj")
@@ -50,3 +51,22 @@
                    (org-storage [{:name "acme" :execution-mode "byo"}])
                    "acme"))))
     (tc/invalidate-byo-cache!)))
+
+
+(deftest known-plan-slug?-matches-the-real-tier-set
+  ;; `set-org-plan` gates the write on this base-fn so an operator typo can't
+  ;; silently resolve to the free default (which would break a `"suspended"`
+  ;; kill-switch). It must track `tenancy.plan/plans` exactly — the single
+  ;; source of truth — not a re-encoded copy in the graph.
+  (load-file impls-path)
+  (let [known? @(resolve 'graphden.packages.tenancy-admin.registration.impls/known-plan-slug?)
+        call (fn [slug] (known? {:slug slug} nil))]
+    (testing "every real tier slug is accepted"
+      (doseq [slug (keys plan/plans)]
+        (is (true? (call slug)) (str slug " should be a known plan"))))
+    (testing "the kill-switch slug specifically is known"
+      (is (true? (call "suspended"))))
+    (testing "a typo / unknown slug is rejected (no silent free-drop)"
+      (is (false? (call "suspend")))
+      (is (false? (call "premium")))
+      (is (false? (call ""))))))

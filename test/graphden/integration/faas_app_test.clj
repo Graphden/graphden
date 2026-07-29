@@ -386,7 +386,21 @@
           "the flip is visible immediately — the memo was dropped"))
     (testing ":set-org-execution-mode throws for a bad slug"
       (is (thrown? Exception
-            (run! "set-org-execution-mode" {:name "ghost-org" :execution-mode "byo"}))))))
+            (run! "set-org-execution-mode" {:name "ghost-org" :execution-mode "byo"}))))
+    (testing ":set-org-plan suspends an org (kill-switch) then restores it"
+      (run! "set-org-plan" {:name "prov-org" :plan "suspended"})
+      (is (= "suspended" (:plan (org-row "prov-org"))))
+      (run! "set-org-plan" {:name "prov-org" :plan "network"})
+      (is (= "network" (:plan (org-row "prov-org")))
+          "the same route upgrades / downgrades a paying org"))
+    (testing ":set-org-plan rejects an unknown slug (no silent free-drop)"
+      (is (thrown? Exception
+            (run! "set-org-plan" {:name "prov-org" :plan "premium"})))
+      (is (= "network" (:plan (org-row "prov-org")))
+          "the org's tier is unchanged after a rejected write"))
+    (testing ":set-org-plan throws :org/not-found for a missing org"
+      (is (thrown? Exception
+            (run! "set-org-plan" {:name "ghost-org" :plan "free"}))))))
 
 
 (deftest tenant-cannot-mint-tokens

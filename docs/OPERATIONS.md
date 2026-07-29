@@ -93,6 +93,28 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
 - `GET /metrics` — a JVM + structural-counter snapshot (JSON). For a Prometheus
   scrape target, see the observability notes in [SCALING.md](SCALING.md).
 
+## Suspending an abusive org
+
+To freeze a misbehaving tenant near-instantly, set its plan to `suspended` — no
+effects, all row ceilings 0, so it can neither run nor create anything (it can
+still delete its own data). The route is platform-only (authenticate as the
+platform/operator, not as the tenant):
+
+```bash
+# freeze
+curl -sS -X POST "$BASE/api/orgs/plan" -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  --data-urlencode name=<org-slug> --data-urlencode plan=suspended
+
+# restore (back to its real tier)
+curl -sS -X POST "$BASE/api/orgs/plan" -H "Authorization: Bearer $OPERATOR_TOKEN" \
+  --data-urlencode name=<org-slug> --data-urlencode plan=free
+```
+
+`plan` must be one of `free` / `network` / `dedicated` / `suspended`; an unknown
+slug is rejected rather than silently applied. The change is effective on the
+org's next request (no memo). The same route upgrades / downgrades a paying org.
+See [PLANS.md § Suspending an org](PLANS.md).
+
 ## Your responsibility vs Graphden's
 
 Graphden gives you: idempotent fleet-safe schema migration, self-healing

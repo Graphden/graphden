@@ -31,3 +31,25 @@ Notes:
   platform Postgres, so raw SQL would cross tenants; use the typed storage
   base-fns (`:pg-query` / `:sql-query` / …) instead.
 - **Single-tenant self-host** is unrestricted and uncapped — no tier applies.
+
+## Suspending an org (abuse kill-switch)
+
+`suspended` is a special tier — not something a tenant buys, but an operator's
+throttle-to-zero for a misbehaving org. It grants **no effects at all** and sets
+**every row ceiling to 0**, so a suspended org can neither run any graph
+(execution is blocked at the effect gate) nor create any entity (the row-cap
+rejects even the first write). Deletion stays allowed, so the tenant can still
+clean up its own data.
+
+An operator sets any org's tier — to suspend, to restore, or to upgrade /
+downgrade — through the platform-only route:
+
+```
+POST /api/orgs/plan     (form-encoded: name=<org-slug>&plan=<tier>)
+```
+
+`plan` is one of `free` / `network` / `dedicated` / `suspended`; an unrecognised
+slug is rejected (`:plan/unknown`) so a typo can't silently drop an org to the
+free default. The change takes effect on the org's next request (the resolver is
+not memoised). This route is platform-only — the `:org` entity is tenant-
+forbidden, so a tenant cannot change its own or another org's tier.

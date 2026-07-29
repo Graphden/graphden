@@ -16,7 +16,17 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.plan :as plan]
     [graphden.tenancy.storage :as ts]))
+
+
+(defbase known-plan-slug?
+  "True when `slug` names a real plan tier, checked against `tenancy.plan/plans`
+   — the single source of truth for the tier set. `set-org-plan` uses this to
+   reject an operator typo before the write, so a mistyped slug can't silently
+   resolve to the free default (which would break a `\"suspended\"` kill-switch)."
+  [slug]
+  (contains? plan/plans slug))
 
 
 (defbase invalidate-byo-cache
@@ -104,7 +114,8 @@
 
 
 (def impls
-  {:invalidate-byo-cache invalidate-byo-cache
+  {:known-plan-slug? known-plan-slug?
+   :invalidate-byo-cache invalidate-byo-cache
    :tenant-quota-status tenant-quota-status
    :tenant-create-service tenant-create-service
    :tenant-list-services tenant-list-services

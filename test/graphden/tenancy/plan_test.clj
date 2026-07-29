@@ -106,6 +106,32 @@
       (is (zero? (plan/max-services-for store tc/public-org))))))
 
 
+(deftest suspended-plan-is-the-abuse-kill-switch
+  ;; Setting an org's `:plan` to "suspended" freezes it: no effects at all (so
+  ;; execution is blocked at the gate) and every row ceiling 0 (so no entity can
+  ;; be created). This is the operator's surgical throttle-to-zero for a
+  ;; misbehaving tenant; `set-org-plan` writes the slug, this resolver reads it.
+  ;; The row-cap side (cap 0 → `over-entity-quota?` true for the first write)
+  ;; needs a real PG pool for the `count(*)`, so it is exercised by the row-cap
+  ;; integration suite, not this pool-less unit stub.
+  (let [store (org-store {"frozen" {:name "frozen" :plan "suspended"}})]
+    (testing "the plans map defines suspended as a total lockout"
+      (is (= #{} (:effects (get plan/plans "suspended"))))
+      (is (zero? (:max-fns (get plan/plans "suspended"))))
+      (is (zero? (:max-list-items (get plan/plans "suspended"))))
+      (is (false? (:dedicated-executor? (get plan/plans "suspended"))))
+      (is (zero? (:max-services (get plan/plans "suspended")))))
+    (testing "a suspended org resolves to NO allowed effects (execution frozen)"
+      ;; `#{}` is truthy in Clojure, so `allowed-effects-for`'s `or` returns it
+      ;; rather than falling back to the free default — the freeze is real.
+      (is (= #{} (plan/allowed-effects-for store "frozen")))
+      (is (not (contains? (plan/allowed-effects-for store "frozen") :db))
+          "even the free-tier :db effect is withheld from a suspended org"))
+    (testing "a suspended org gets no services either"
+      (is (false? (plan/dedicated-executor? store "frozen")))
+      (is (zero? (plan/max-services-for store "frozen"))))))
+
+
 (deftest install!-wires-the-seams
   (let [store (org-store {"acme" {:name "acme" :plan "network"}})
         saved-fx @cr/cloud-allowed-effects-resolver

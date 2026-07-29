@@ -18,6 +18,7 @@
                   :delete-user-route :reset-password-route
                   :create-org-route :create-token-route :create-domain-route
                   :set-org-handler-route :set-org-execution-mode-route
+                  :set-org-plan-route
                   :set-my-app-handler-route :verify-my-domain-route
                   :login-route :signup-route :logout-route :logout-all-route
                   :invite-create-route :invite-signup-route

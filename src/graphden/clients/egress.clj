@@ -12,11 +12,12 @@
    trick of pointing a public name at an internal IP. `check-target!` is the
    gate the base-fns call before dialing; it throws `:egress/blocked`.
 
-   NOTE (before the network tier goes GA): `check-target!` validates the
-   resolved IPs but the base-fn still dials by HOSTNAME, so a name that
-   re-resolves to a different IP between the check and the dial is a narrow
-   residual rebind window. Pinning the dial to the validated IP (custom
-   resolver / connect-by-IP + Host header) is the hardening follow-up."
+   `validating-dns` closes the DNS-rebind TOCTOU: it wires `resolve-public-ips`
+   into OkHttp's resolver hook, so a RESTRICTED tenant call resolves-and-
+   validates AT CONNECT TIME and OkHttp dials exactly those validated
+   addresses — there is no second, unvalidated resolution between check and
+   dial. TLS (SNI / Host / cert verification) stays on the hostname. The
+   base-fns build their client with it (see `web/http-client`)."
   (:require
     [clojure.string :as str])
   (:import
@@ -25,7 +26,9 @@
       Inet6Address
       InetAddress
       URI
-      UnknownHostException)))
+      UnknownHostException)
+    (okhttp3
+      Dns)))
 
 
 (defn- cgnat?
@@ -92,6 +95,23 @@
                       {:type :egress/blocked :url url :reason :no-host})))
     (resolve-public-ips host)
     nil))
+
+
+(def validating-dns
+  "An OkHttp `Dns` that resolves a hostname to its PUBLIC addresses only, via
+   `resolve-public-ips` — the SAME validation `check-target!` runs, but applied
+   AT CONNECT TIME. OkHttp dials exactly the addresses this returns while
+   keeping the hostname for SNI / Host / certificate verification, so there is
+   no second, unvalidated resolution: the DNS-rebind TOCTOU is closed. Throws
+   `:egress/blocked` (surfaced by OkHttp as the call failure) when the host
+   resolves to any internal address or can't be resolved. Stateless — one
+   shared instance. Build the RESTRICTED tenant HTTP client with this."
+  (reify Dns
+    (lookup
+      [_ hostname]
+      ;; PersistentVector implements java.util.List<InetAddress>, which is the
+      ;; Dns.lookup contract.
+      (vec (resolve-public-ips hostname)))))
 
 
 ;; --- Per-org egress rate-limit + response byte-cap (task #5b) -----------------

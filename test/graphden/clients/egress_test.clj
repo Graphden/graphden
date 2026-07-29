@@ -9,7 +9,9 @@
     [graphden.clients.egress :as egress])
   (:import
     (java.net
-      InetAddress)))
+      InetAddress)
+    (okhttp3
+      Dns)))
 
 
 (defn- addr
@@ -136,3 +138,17 @@
         (reset! egress/max-response-bytes 5)
         (is (= "12345" (egress/read-capped-string! (stream-of "12345")))))
       (finally (reset! egress/max-response-bytes saved)))))
+
+
+(deftest validating-dns-pins-to-validated-public-addresses
+  ;; The OkHttp `Dns` hook is what closes the rebind TOCTOU: it resolves+
+  ;; validates AT CONNECT TIME, so OkHttp can only ever dial a validated-public
+  ;; address. IP literals parse without any DNS lookup — no network here.
+  (testing "an internal target throws :egress/blocked (no internal connection dialed)"
+    (is (= :egress/blocked
+           (try (Dns/.lookup egress/validating-dns "127.0.0.1") nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))
+  (testing "a public target resolves through to its address, unchanged"
+    (is (= ["8.8.8.8"]
+           (mapv #(InetAddress/.getHostAddress ^InetAddress %)
+                 (Dns/.lookup egress/validating-dns "8.8.8.8"))))))

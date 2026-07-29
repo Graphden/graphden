@@ -263,25 +263,48 @@
 
 ;; === Entry point ===
 
+(def ^:private ^:const migration-advisory-lock-key
+  "Fixed advisory-lock key serializing schema init/migration across a fleet.
+   A hand-picked reserved constant, distinct from the uuid-derived
+   fleet/service/leader advisory keys (those span the full int64 range from a
+   uuid's high bits, so a fixed small key effectively never collides)."
+  409720116)
+
+
 (defn do-initialize
   "Performs schema initialization/migration.
-   All DDL and metadata operations are wrapped in a single transaction
-   to ensure atomicity - either all changes succeed or none do.
-   Logs a summary of changes at info level."
+
+   The whole read → plan → DDL section is serialized ACROSS A FLEET by a
+   transaction-scoped advisory lock. Without it, N pods booting against one DB
+   each run schema DDL concurrently (ACCESS EXCLUSIVE contention / deadlock)
+   AND compute their migration plan against stale pre-DDL state. A pod blocks
+   on `pg_advisory_xact_lock` until it holds the lock, THEN reads the (possibly
+   just-migrated) schema and computes a no-op if a sibling already ran; the
+   lock auto-releases on commit/rollback — no leak on crash, and no extra
+   connection so no pool-size deadlock. Uncontended (single pod) it is ~free.
+
+   All DDL + metadata run in the one transaction — atomic, either all changes
+   succeed or none do. Logs a summary of changes at info level."
   [ds schema]
-  ;; Check for snake_case naming collisions before any DDL
+  ;; Pure pre-checks (no DB) — cheap, keep outside the transaction/lock.
   (util/check-snake-case-collisions! {:context "entities"} (ds/entities schema))
   (run! #(check-entity-field-collisions! schema %) (ds/entities schema))
   (util/check-snake-case-collisions! {:context "enums"} (keys (ds/enums schema)))
 
-  (metadata/ensure-metadata-table! ds)
-  (graph-epoch/ensure-sequence! ds)
-  (let [metadata-rows (metadata/read-metadata-rows ds)
-        old-metadata (metadata/parse-metadata metadata-rows)
-        first-init? (nil? old-metadata)
-        changes (jdbc/with-transaction [tx ds]
-                                       (if first-init?
-                                         (do-first-init! tx schema)
-                                         (do-migration! tx schema old-metadata)))]
+  (let [{:keys [changes first-init?]}
+        (jdbc/with-transaction [tx ds]
+                               ;; Block until this pod holds the fleet migration lock, THEN read
+                               ;; state — so a sibling that migrated first is seen and this pod
+                               ;; computes a no-op instead of re-running first-init against a stale
+                               ;; empty-DB plan.
+                               (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(?)" migration-advisory-lock-key])
+                               (metadata/ensure-metadata-table! tx)
+                               (graph-epoch/ensure-sequence! tx)
+                               (let [old-metadata (metadata/parse-metadata (metadata/read-metadata-rows tx))
+                                     first-init? (nil? old-metadata)]
+                                 {:first-init? first-init?
+                                  :changes (if first-init?
+                                             (do-first-init! tx schema)
+                                             (do-migration! tx schema old-metadata))}))]
     (log-migration-summary changes first-init?)
     changes))

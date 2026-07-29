@@ -343,6 +343,16 @@ function listElementType(slotType, tfn) {
 // when the shape doesn't match a recognised primitive — caller
 // falls back to :any.
 //
+// CONTRACT (why there's no cross-runtime parity guard): this mirror is an
+// ADVISORY, keystroke-speed approximation for instant editor feedback. The
+// SERVER re-validates every write through `check-fn-def!` on save and is the
+// sole authority — so any divergence between this and the backend classifier
+// is at worst a UX annoyance (the chip shows OK/red slightly differently),
+// NEVER an unsound accept. Do not rely on this for correctness. Known-coarser
+// points vs the backend: arrays and objects collapse to `jsonb` here, whereas
+// the server computes structural `[:list T]` / record / `[:map …]` types; and
+// JS `Number.isInteger(2.0)` is true, so `2.0` reads as `int` client-side.
+//
 // Strings starting with `:` (e.g. `":foo"`) are treated as keywords —
 // matches the codec's `preserve-keywords` / `normalize-parsed-json`
 // round-trip convention. A bare string `"foo"` (no `:` prefix) stays

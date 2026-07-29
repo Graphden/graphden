@@ -1,5 +1,10 @@
 # Review follow-ups (branch `review/followups`)
 
+> **🔧 Internal engineering record — not user documentation.** A
+> contributor-facing working ledger, indexed from [CLAUDE.md](../CLAUDE.md) and
+> outside the reader path (see [docs/README.md](README.md)); branch names and
+> "status" notes reflect development history, not user-facing behaviour.
+
 Working ledger for the five items raised in the 2026-07-11 skeptical
 review. Kept on an isolated worktree so it doesn't collide with the
 `feature/dynamic-fleet` work happening in parallel. Anything marked

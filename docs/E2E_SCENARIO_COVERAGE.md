@@ -1,5 +1,9 @@
 # E2E scenario coverage matrix
 
+> **🔧 Internal engineering record — not user documentation.** A
+> contributor-facing coverage matrix, indexed from [CLAUDE.md](../CLAUDE.md) and
+> outside the reader path (see [docs/README.md](README.md)).
+
 Per the project's coverage-measurement philosophy
 ([[feedback_coverage_measurement]]): e2e necessity is measured by
 **user-scenario coverage**, NOT by cloverage line/form percentages.

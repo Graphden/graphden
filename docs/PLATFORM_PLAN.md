@@ -1,5 +1,12 @@
 # PLATFORM_PLAN.md — Пользователи, организации, пакеты, права
 
+> **🔧 Internal design plan (largely Russian) — not the user-facing tenancy
+> reference.** This is the ORIGINAL design/ROADMAP document for the tenancy +
+> packages work; it predates the shipped code and is not kept in step with it.
+> The behaviour that actually shipped lives in the code (`graphden.tenancy.*`)
+> and in the reader docs indexed from [docs/README.md](README.md). Read this
+> only for original design intent and rationale.
+>
 > Статус: **DESIGN / ROADMAP**. Это план, а не описание существующего кода.
 > Ветка реализации: `feature/platform-packages-tenancy`.
 > Цель документа — зафиксировать целостную картину для четырёх переплетённых

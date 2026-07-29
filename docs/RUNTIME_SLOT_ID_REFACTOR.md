@@ -1,5 +1,9 @@
 ## Runtime slot-id-keyed refactor (#104)
 
+> **🔧 Internal engineering record — not user documentation.** A
+> contributor-facing design record, indexed from [CLAUDE.md](../CLAUDE.md) and
+> outside the reader path (see [docs/README.md](README.md)).
+>
 > **Design record.** The hybrid slot-id + name `fa` in §4/§7 is the FINAL
 > runtime design, not a transitional state. This doc is kept as the design
 > rationale for #104 — live code points here (`compile/renames.clj`

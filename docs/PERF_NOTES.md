@@ -1,5 +1,9 @@
 ## Performance investigation notes — executor hot path
 
+> **🔧 Internal engineering record — not user documentation.** A
+> contributor-facing investigation note, indexed from [CLAUDE.md](../CLAUDE.md)
+> and outside the reader path (see [docs/README.md](README.md)).
+
 Not a roadmap. Production endpoints comfortably fit their
 request budgets today. This file holds the diagnosis +
 attempted-fix lessons from the 2026-05 perf investigation,

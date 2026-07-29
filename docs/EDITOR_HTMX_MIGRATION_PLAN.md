@@ -1,5 +1,9 @@
 # Editor HTMX Migration Plan (Option 3)
 
+> **🔧 Internal engineering record — not user documentation.** A
+> contributor-facing migration plan, indexed from [CLAUDE.md](../CLAUDE.md) and
+> outside the reader path (see [docs/README.md](README.md)).
+
 **Status**: Phase A complete (8 commits). Phase B/C deferred per
 post-A re-survey — see the "Post-Phase-A re-scoping" section at
 the bottom.

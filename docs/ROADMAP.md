@@ -14,7 +14,8 @@ http-client), the type system (refinements / records / lists / unions /
 variants + rich-type registry), the visual graph editor, the REST API
 (`/api/graph/*`, `/api/entities/*`, `/api/sequence/*`, `/api/execute*`), branch
 versioning, the tenancy addon (orgs / users / grants / RLS / effect-gate / FaaS
-— see [PLATFORM_PLAN.md](PLATFORM_PLAN.md)), the package registry
+— shipped in `graphden.tenancy.*`; [PLATFORM_PLAN.md](PLATFORM_PLAN.md) is the
+original design plan, not an as-built reference), the package registry
 (the `registry` package), the storage-swap path (storage base-fns `:pg-query` /
 `:pg-execute` / `:pg-tx`; API routes are graph fn-defs; the storage protocol is
 injected at the web-server via a `:storage-query` free arg — former Block 1),
@@ -428,4 +429,5 @@ executor routing. Design and known gaps live in [VERSIONING.md](VERSIONING.md).
 Shipped as capability **grants** — `(subject, capability, namespace)` with
 the seven `:read`/`:view-impl`/`:write`/`:execute`/`:admin`/`:bind-args`/`:append-list`
 caps and namespace-prefix coverage (deliberately minimal — no roles, no deny rules).
-See [PLATFORM_PLAN.md](PLATFORM_PLAN.md) and `graphden.tenancy.grant` / `authz`.
+See `graphden.tenancy.grant` / `authz` for the shipped code;
+[PLATFORM_PLAN.md](PLATFORM_PLAN.md) captures the original design intent.

@@ -1,5 +1,9 @@
 # `^:serial` test reduction — long-form plan
 
+> **🔧 Internal engineering record — not user documentation.** A
+> contributor-facing (parked) work plan, indexed from [CLAUDE.md](../CLAUDE.md)
+> and outside the reader path (see [docs/README.md](README.md)).
+
 **Status**: parked. Real debt, multi-day work, no urgency (`bb ci`
 wall-time 186 s is already 60% below the 459 s pre-parallel baseline
 per `[parallel-test races]`).

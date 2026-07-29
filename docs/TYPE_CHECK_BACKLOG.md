@@ -1,5 +1,9 @@
 # Type-check / type-aliases backlog — historical ledger (CLOSED)
 
+> **🔧 Internal engineering record — not user documentation.** A
+> contributor-facing historical ledger, indexed from [CLAUDE.md](../CLAUDE.md)
+> and outside the reader path (see [docs/README.md](README.md)).
+>
 > **STATUS: CLOSED.** Every item below is DONE; the sweep is at zero
 > (`allowed-type-check-failures` is `#{}`, Phase E hard-gate armed).
 > This file is the per-failure-closure trail from the 2026-05-29 → 2026-06-16

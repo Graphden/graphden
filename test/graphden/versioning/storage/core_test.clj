@@ -1095,6 +1095,47 @@
       (finally (sp/close base)))))
 
 
+(deftest fn-name-concurrent-create-with-parents-serialized-test
+  ;; Same serialization guarantee, but for a fn WITH a non-empty `:parent-ids`.
+  ;; This is the case that exposed the real bug behind the "flaky" sibling above:
+  ;; a `:fn` create with `:ref-many` data (parent-ids) makes `crud/create-entity`
+  ;; open a nested `with-transaction`, which — without `*nested-tx* :ignore` in
+  ;; the lock path — committed the outer transaction early and dropped the
+  ;; `pg_advisory_xact_lock` mid-create, so multiple racing creates all passed
+  ;; the collision check. Guards that the whole locked create stays one atomic,
+  ;; serialized transaction regardless of ref-many junction writes.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [parent (sp/create-entity v :fn {:name "parent-fn" :parent-ids []
+                                            :description "p"})
+            pid (:id parent)
+            n 8
+            results (->> (repeatedly n
+                                     (fn []
+                                       (future
+                                         (try
+                                           (sp/create-entity v :fn
+                                                             {:name "race-child"
+                                                              :parent-ids [pid]
+                                                              :description "c"})
+                                           :ok
+                                           (catch clojure.lang.ExceptionInfo e
+                                             (:type (ex-data e)))))))
+                         doall
+                         (mapv deref))
+            live (sp/query-entities v :fn {:name "race-child"})]
+        (testing "exactly one concurrent create-with-parents landed"
+          (is (= 1 (count (filter #{:ok} results))))
+          (is (= 1 (count live))))
+        (testing "the lander kept its parent edge (junction write survived)"
+          (is (= [pid] (:parent-ids (first live)))))
+        (testing "every loser hit the fn-name collision check"
+          (is (every? #{:constraint-violation/fn-name-collision}
+                      (remove #{:ok} results)))))
+      (finally (sp/close base)))))
+
+
 (deftest list-item-concurrent-same-position-serialized-test
   ;; The per-binding advisory lock serializes concurrent appends to the SAME
   ;; binding, so racing inserts that computed the same position can't both land

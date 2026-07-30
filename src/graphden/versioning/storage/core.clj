@@ -39,7 +39,8 @@
     [graphden.storage.protocol.graph :as graph]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res]
-    [next.jdbc :as jdbc])
+    [next.jdbc :as jdbc]
+    [next.jdbc.transaction :as jdbc-tx])
   (:import
     (java.time
       Instant)))
@@ -459,10 +460,18 @@
                            (str (:binding-id normalized)))
                          (fn-name-lock-key branch-id entity-name normalized))]
         (if (and lock-key (:pool base-storage))
-          (jdbc/with-transaction [tx (:pool base-storage)]
-                                 (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                    lock-key])
-                                 (do-create! (assoc base-storage :pool tx)))
+          ;; `:ignore` so any nested `with-transaction` in the create path
+          ;; (`crud/create-entity` opens one to write `:ref-many` junction rows —
+          ;; e.g. a `:fn`'s `:parent-ids`) runs INLINE on this connection instead
+          ;; of committing early. A nested commit would end THIS transaction and
+          ;; release the `pg_advisory_xact_lock` before the collision check +
+          ;; version insert finished, letting a racing same-name create slip
+          ;; through — the (branch, ns, name) serialization would silently break.
+          (binding [jdbc-tx/*nested-tx* :ignore]
+            (jdbc/with-transaction [tx (:pool base-storage)]
+                                   (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
+                                                      lock-key])
+                                   (do-create! (assoc base-storage :pool tx))))
           (do-create! base-storage)))))
 
 
@@ -532,10 +541,15 @@
               lock-key (when name-write?
                          (fn-name-lock-key branch-id entity-name merged))]
           (if (and lock-key (:pool base-storage))
-            (jdbc/with-transaction [tx (:pool base-storage)]
-                                   (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                      lock-key])
-                                   (do-update! (assoc base-storage :pool tx)))
+            ;; `:ignore` — same reason as the create path: a nested
+            ;; `with-transaction` inside `do-update!` (crud/update-entity opens
+            ;; one to replace `:ref-many` junction rows) must run INLINE, not
+            ;; commit early and drop the fn-name advisory lock mid-update.
+            (binding [jdbc-tx/*nested-tx* :ignore]
+              (jdbc/with-transaction [tx (:pool base-storage)]
+                                     (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
+                                                        lock-key])
+                                     (do-update! (assoc base-storage :pool tx))))
             (do-update! base-storage))))))
 
 

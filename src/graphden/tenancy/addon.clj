@@ -252,7 +252,8 @@
 
 
 (defmethod ig/init-key :tenancy/user-ops
-  [_ {:keys [signup-max-per-min signup-window-ms login-max-per-min login-window-ms]}]
+  [_ {:keys [signup-max-per-min signup-window-ms login-max-per-min login-window-ms
+             demo-signup-enabled?]}]
   ;; User-model seam (§4.1) — `{:create-user … :login … :logout … :signup …}`.
   ;; Wired onto `:exec/context`'s `:user-ops`; the core `:invoke-*` base-fns call
   ;; into it. login! mints a session `:token` (TTL); logout!/logout-all! delete.
@@ -294,7 +295,19 @@
      :invite-redeem (fn [ctx invite u pw request]
                       (if (signup-limiter (users/client-ip request))
                         (users/redeem-invite! ctx invite u pw)
-                        {:rate-limited true}))}))
+                        {:rate-limited true}))
+     ;; Landing-demo provisioning (tier-split): mint an ephemeral ANONYMOUS org
+     ;; + token for an UNAUTHENTICATED visitor. OFF by default — a public,
+     ;; zero-friction row-creating endpoint is an abuse surface, so a deploy
+     ;; must opt in (`demo-signup-enabled?`, env GRAPHDEN_DEMO_SIGNUP). When off,
+     ;; a `{:disabled true}` sentinel → 404. When on, the signup IP limiter
+     ;; throttles it (→ `{:rate-limited true}` → 429); the anonymous tier + the
+     ;; demo TTL bound each demo's blast radius.
+     :demo-start (fn [ctx request]
+                   (cond
+                     (not demo-signup-enabled?) {:disabled true}
+                     (not (signup-limiter (users/client-ip request))) {:rate-limited true}
+                     :else (users/demo-start! ctx)))}))
 
 
 (defmethod ig/init-key :tenancy/session-cleanup [_ {:keys [storage period-ms]}]

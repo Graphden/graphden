@@ -96,7 +96,9 @@
 ;;   {:graphden/require [graphden.tenancy.addon]
 ;;    :tenancy/user-ops {}   ; self-serve signup is per-IP rate-limited
 ;;                          ; (default 20/min; tune :signup-max-per-min /
-;;                          ; :signup-window-ms)
+;;                          ; :signup-window-ms). Add :demo-signup-enabled? true
+;;                          ; to turn on the public POST /api/demo/start
+;;                          ; anonymous-demo endpoint (OFF by default).
 ;;    :auth/storage-token-provider {:storage #ig/ref :db/postgres}
 ;;    :exec/context {:user-ops #ig/ref :tenancy/user-ops
 ;;                   :auth-provider #ig/ref :auth/storage-token-provider}}

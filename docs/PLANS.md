@@ -50,6 +50,25 @@ Notes:
   `:query-entities` family instead.
 - **Single-tenant self-host** is unrestricted and uncapped — no tier applies.
 
+## Starting an anonymous demo
+
+A landing visitor gets an anonymous org through the unauthenticated endpoint:
+
+```
+POST /api/demo/start   →   {"token": "<bearer>", "org": "demo-xxxxxxxx"}
+```
+
+It mints a throwaway `anonymous`-tier org (locked, no network, small ceilings)
+plus a bearer token, and stamps an `:expires-at` so the demo-GC reaper purges
+the whole org after the TTL (`GRAPHDEN_DEMO_TTL_MS`, default 1 h). The visitor
+uses the returned token like any bearer.
+
+This endpoint is **OFF by default** — a public, zero-friction row-creating
+endpoint is an abuse surface. A deploy opts in with
+`:tenancy/user-ops {:demo-signup-enabled? true}`. When off it returns 404; when
+on it is per-IP rate-limited (429 over the window), and the anonymous tier + TTL
+bound each demo's blast radius.
+
 ## Suspending an org (abuse kill-switch)
 
 `suspended` is a special tier — not something a tenant buys, but an operator's

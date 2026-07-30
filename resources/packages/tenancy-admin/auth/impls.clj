@@ -31,6 +31,18 @@
     ((:signup ops) ctx username password org request)))
 
 
+;; Landing-demo provisioning (tier-split): mint an ephemeral ANONYMOUS org +
+;; token for an UNAUTHENTICATED visitor. No addon → nil. The seam is OFF by
+;; default; when off it returns `{:disabled true}`, over-quota `{:rate-limited
+;; true}`, else `{:token <raw> :org <name>}`.
+(defbase invoke-demo-start
+  [request]
+  (when-let [ops (:user-ops ctx)]
+    (when-let [start (:demo-start ops)]
+      (cr/record-effect! :db)
+      (start ctx request))))
+
+
 ;; Mint a single-use invite into the CALLER'S org (LAUNCH_PLAN stage 1.3).
 ;; No addon / unauthenticated / public-org caller / over-quota IP → nil.
 (defbase invoke-invite-create
@@ -75,5 +87,6 @@
    :invoke-logout invoke-logout
    :invoke-logout-all invoke-logout-all
    :invoke-signup invoke-signup
+   :invoke-demo-start invoke-demo-start
    :invoke-invite-create invoke-invite-create
    :invoke-invite-redeem invoke-invite-redeem})

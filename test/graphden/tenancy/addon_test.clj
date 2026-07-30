@@ -384,3 +384,41 @@
         ctx {:auth-provider (org-provider "acme") :request-scope scope}]
     (dotimes [_ 5]
       (is (= 200 (:status (dispatch-status ctx)))))))
+
+
+(deftest demo-start-seam-is-off-by-default
+  ;; Tier-split landing demo: the public provisioning seam MUST be opt-in — a
+  ;; zero-friction row-creating endpoint open to the internet is an abuse
+  ;; surface, so it stays disabled unless a deploy sets :demo-signup-enabled?.
+  (let [db (atom {})
+        mem (reify sp/StorageCRUD
+              (create-entity
+                [_ en data]
+                (let [row (assoc data :id (random-uuid))]
+                  (swap! db update en (fnil conj []) row) row))
+
+              (query-entities
+                [_ en where]
+                (filterv (fn [r] (every? (fn [[k v]] (= (get r k) v)) where)) (get @db en)))
+
+              (query-entities [_ _ _ _] nil)
+
+              (read-entity [_ _ _] nil)
+
+              (update-entity [_ _ _ _] nil)
+
+              (delete-entity [_ _ _] nil)
+
+              (query-latest-per-group [_ _ _ _] nil))
+        ctx {:storage mem}
+        req {:headers {} :remote-addr "10.0.0.9"}]
+    (testing "default → the seam is DISABLED (returns the {:disabled true} sentinel, no write)"
+      (let [ops (ig/init-key :tenancy/user-ops {})]
+        (is (= {:disabled true} ((:demo-start ops) ctx req)))
+        (is (empty? (sp/query-entities mem :org {})) "no org was provisioned")))
+    (testing "enabled → mints an ephemeral anonymous demo org + token"
+      (let [ops (ig/init-key :tenancy/user-ops {:demo-signup-enabled? true})
+            res ((:demo-start ops) ctx req)]
+        (is (string? (:token res)))
+        (is (re-find #"^demo-" (:org res)))
+        (is (= "anonymous" (:plan (first (sp/query-entities mem :org {:name (:org res)})))))))))

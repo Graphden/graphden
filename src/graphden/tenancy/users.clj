@@ -36,6 +36,13 @@
   (* 24 60 60 1000))
 
 
+(def demo-ttl-ms
+  "How long an anonymous landing-demo org + its token live before the demo-gc
+   reaper purges the org (and the token goes inert). Default 1h; env-tunable via
+   `GRAPHDEN_DEMO_TTL_MS`."
+  (or (some-> (System/getenv "GRAPHDEN_DEMO_TTL_MS") parse-long) (* 60 60 1000)))
+
+
 (defn client-ip
   "Best-effort client IP for rate-limiting — the first `X-Forwarded-For` hop
    (trusts a front proxy to set it) or the socket `:remote-addr`."
@@ -331,6 +338,36 @@
                                         :password-hash (hash-password password)
                                         :org org})
                      (login! ctx username password))))))
+
+
+(defn demo-start!
+  "Provision an EPHEMERAL ANONYMOUS demo org + a bearer token for a landing
+   visitor (tier-split): a throwaway org on the locked `anonymous` plan (no
+   network, small ceilings) with an `:expires-at` so the demo-gc reaper purges
+   it after `demo-ttl-ms`. No user / password — the token authenticates as the
+   org itself. Returns `{:token <raw> :org <name>}`; the raw token is shown once
+   (only its SHA-256 is stored, same discipline as sessions / invites). Runs in
+   the platform context. The org name is random, so concurrent calls can't
+   collide; `:plan \"anonymous\"` keeps a demo locked EVEN without this fn (the
+   fail-safe default), but we set it explicitly so the org reads honestly.
+
+   NOT self-gated: this creates rows for an UNAUTHENTICATED caller, so the addon
+   wires it behind an enable flag + a per-IP rate limiter (like `signup!`)."
+  [ctx & _]
+  (let [storage (:storage ctx)
+        org (str "demo-" (subs (str (random-token)) 0 16))
+        raw (random-token)
+        expires (+ (System/currentTimeMillis) demo-ttl-ms)]
+    (tc/with-org tc/public-org
+                 (sp/create-entity storage :org
+                                   {:name org :plan "anonymous" :expires-at expires})
+                 (sp/create-entity storage :token
+                                   {:token-hash (tauth/token-hash raw)
+                                    :user org
+                                    :user-id org
+                                    :org org
+                                    :expires-at expires})
+                 {:token raw :org org})))
 
 
 (def default-invite-ttl-ms

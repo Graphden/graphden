@@ -204,3 +204,28 @@
       (is (nil? (users/redeem-invite! ctx "" "u" "p")))
       (is (nil? (users/redeem-invite! ctx "tok" "" "p")))
       (is (nil? (users/redeem-invite! ctx "tok" "u" ""))))))
+
+
+(deftest demo-start-provisions-an-ephemeral-anonymous-org
+  ;; Tier-split landing demo: an unauthenticated visitor gets a throwaway org on
+  ;; the LOCKED anonymous tier + a working token, reaped after the TTL.
+  (let [storage (mem-storage)
+        ctx {:storage storage}
+        {:keys [token org]} (users/demo-start! ctx)]
+    (testing "mints a raw token + a generated demo org name"
+      (is (string? token))
+      (is (re-find #"^demo-" org) "org name is server-generated (no collision)"))
+    (testing "the org is the LOCKED anonymous tier and carries a TTL (demo-gc reaps it)"
+      (let [row (first (sp/query-entities storage :org {:name org}))]
+        (is (= "anonymous" (:plan row)))
+        (is (some? (:expires-at row)))))
+    (testing "only the token HASH is stored (raw never persisted), scoped to the demo org"
+      (let [row (first (sp/query-entities storage :token {:org org}))]
+        (is (some? row))
+        (is (not= token (:token-hash row)))
+        (is (some? (:expires-at row)))))
+    (testing "the minted token authenticates as the demo org"
+      (let [p (tauth/storage-token-provider storage)
+            auth (ap/authenticate p {:headers {"authorization" (str "Bearer " token)}})]
+        (is (:authenticated? auth))
+        (is (= org (:org auth)))))))

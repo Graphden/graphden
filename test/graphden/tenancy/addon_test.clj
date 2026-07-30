@@ -422,3 +422,21 @@
         (is (string? (:token res)))
         (is (re-find #"^demo-" (:org res)))
         (is (= "anonymous" (:plan (first (sp/query-entities mem :org {:name (:org res)})))))))))
+
+
+(deftest dispatch-realizes-a-streaming-body-for-every-router
+  ;; A form-POST to a tenancy control-plane route (signup / login / org
+  ;; provisioning) reaches the tenancy router BEFORE the app chain's own
+  ;; :realize-request-body step — without dispatch-level realization the
+  ;; handler saw an unread InputStream and parse-form-body silently parsed
+  ;; to {} (live cloud: POST /api/orgs name=… created an org named "").
+  (let [seen (atom nil)
+        router (router-with {} (fn [req] (reset! seen (:body req)) :ok))
+        stream (java.io.ByteArrayInputStream. (String/.getBytes "name=acme" "UTF-8"))]
+    (br/dispatch router {:request-method :post :uri "/x" :headers {}
+                         :query-string nil :body stream})
+    (is (= "name=acme" @seen) "the handler sees a realized String body")
+    (testing "an already-String body passes through untouched"
+      (br/dispatch router {:request-method :post :uri "/x" :headers {}
+                           :query-string nil :body "a=1"})
+      (is (= "a=1" @seen)))))

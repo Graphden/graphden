@@ -13,6 +13,13 @@
   com.github.seancorfield/honeysql {:mvn/version "2.7.1399"}
   com.zaxxer/HikariCP {:mvn/version "7.1.0"}
   cheshire/cheshire {:mvn/version "6.2.0"}
+  ;; Pin jackson to the CVE-patched 2.21.4 (cheshire 6.2.0 pulls 2.21.1, which
+  ;; has HIGH RCE advisories — jackson-databind CVE-2026-54512/54513 via a
+  ;; PolymorphicTypeValidator bypass + jackson-core GHSA-r7wm-3cxj-wff9). A
+  ;; direct dep wins over cheshire's transitive one; 2.21.4 is patch-compatible.
+  ;; Surfaced by `bb trivy`'s JVM classpath scan — keep in sync with it.
+  com.fasterxml.jackson.core/jackson-core {:mvn/version "2.21.4"}
+  com.fasterxml.jackson.core/jackson-databind {:mvn/version "2.21.4"}
   ;; Web
   http-kit/http-kit {:mvn/version "2.8.1"}
   ;; OkHttp — used ONLY for a tenant's RESTRICTED outbound call, where its

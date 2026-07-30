@@ -218,12 +218,14 @@
     (testing "the org is the LOCKED anonymous tier and carries a TTL (demo-gc reaps it)"
       (let [row (first (sp/query-entities storage :org {:name org}))]
         (is (= "anonymous" (:plan row)))
-        (is (some? (:expires-at row)))))
+        (is (instance? java.time.Instant (:expires-at row))
+            ":org.expires-at is a TIMESTAMPTZ column — an epoch-millis long is a live SQL type error")))
     (testing "only the token HASH is stored (raw never persisted), scoped to the demo org"
       (let [row (first (sp/query-entities storage :token {:org org}))]
         (is (some? row))
         (is (not= token (:token-hash row)))
-        (is (some? (:expires-at row)))))
+        (is (number? (:expires-at row))
+            ":token.expires-at is epoch millis, like every session token")))
     (testing "the minted token authenticates as the demo org"
       (let [p (tauth/storage-token-provider storage)
             auth (ap/authenticate p {:headers {"authorization" (str "Bearer " token)}})]

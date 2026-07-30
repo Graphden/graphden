@@ -20,6 +20,8 @@
   (:import
     (java.security
       SecureRandom)
+    (java.time
+      Instant)
     (java.util
       Base64
       Base64$Encoder)
@@ -357,16 +359,21 @@
   (let [storage (:storage ctx)
         org (str "demo-" (subs (str (random-token)) 0 16))
         raw (random-token)
-        expires (+ (System/currentTimeMillis) demo-ttl-ms)]
+        expires-ms (+ (System/currentTimeMillis) demo-ttl-ms)]
     (tc/with-org tc/public-org
+                 ;; :org.expires-at is a TIMESTAMPTZ column (Instant); the
+                 ;; :token row stores epoch MILLIS like every session token
+                 ;; (`login!` / `token-live?` compare numbers). Mixing them up
+                 ;; is a live SQL type error — caught by the cloud E2E smoke.
                  (sp/create-entity storage :org
-                                   {:name org :plan "anonymous" :expires-at expires})
+                                   {:name org :plan "anonymous"
+                                    :expires-at (Instant/ofEpochMilli expires-ms)})
                  (sp/create-entity storage :token
                                    {:token-hash (tauth/token-hash raw)
                                     :user org
                                     :user-id org
                                     :org org
-                                    :expires-at expires})
+                                    :expires-at expires-ms})
                  {:token raw :org org})))
 
 

@@ -391,7 +391,10 @@ window.addEventListener('hashchange', _onHashNav);
 // end of body).
 if (typeof initPrefsEarly === 'function') initPrefsEarly();
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Landing demo entry (?demo=1) — may store a fresh bearer and reload;
+  // in that case skip the rest of the boot (the reload re-runs it authed).
+  if (typeof maybeStartLandingDemo === 'function' && (await maybeStartLandingDemo())) return;
   initPrefsLate();
   initAuthLock();
   if (typeof initBranchSelector === 'function') initBranchSelector();

@@ -26,13 +26,27 @@
    :dedicated-executor? <bool> :max-services <n> :egress-per-min <n|nil>}`.
    `:egress-per-min` is the per-org OUTBOUND-call rate cap (external HTTP / SQL),
    enforced per-pod (the addon installs a windowed limiter over it); nil =
-   uncapped, 0 = deny all outbound (the suspended freeze). It is per-tier so a
-   `free` bot is generous-but-bounded while a paid tier gets headroom. `free` is
-   the locked default
-   (`#{:db :state :time :random}`); `network` additionally allows outbound
-   `:network` (external HTTP / SQL, itself guarded by the egress broker — #5) and
-   lifts the ceilings; `dedicated` is the SERVICE tier (see below). A nil ceiling
-   = uncapped.
+   uncapped, 0 = deny all outbound (the anonymous / suspended freeze). It is
+   per-tier so a `free` bot is generous-but-bounded while a paid tier gets
+   headroom.
+
+   Three access tiers plus the kill-switch:
+   - `anonymous` is the LOCKED landing-demo tier and the fail-safe DEFAULT (an
+     unknown / nil slug resolves here, so a mis-provisioned org can only PLAY
+     with graphs, never reach the network): base effects only
+     (`#{:db :state :time :random}` — NO `:network`), small ceilings, no
+     outbound. Landing demos run as ephemeral anonymous orgs (reaped by
+     `demo-gc`); the demo-org creation sets this slug.
+   - `free` is the REGISTERED-but-unpaid tier: base effects PLUS metered
+     `:network`, so a signed-up user CAN build a personal Telegram bot, persist
+     a few hundred records, and connect to their OWN external DB (`web/sql`) —
+     all bounded by the egress rate cap + the SSRF / platform-DB egress guard
+     (#5) so it can't DDoS or reach the platform's internals. `signup!` stamps
+     this slug. Its `:network` is the SAME grant as `network`; the tiers differ
+     by quota, not capability.
+   - `network` is the paid shared tier: same `:network` capability, far higher
+     ceilings + egress budget.
+   - `dedicated` is the SERVICE tier (see below). A nil ceiling = uncapped.
 
    TWO row ceilings, because a tenant controls TWO independent DB-growth vectors:
    `:max-fns` bounds `:fn` rows (slots / bindings scale with fns, so fn-count is
@@ -64,7 +78,13 @@
    memo, so the next request sees it; restore by setting the org's real tier
    back. Delete is not gated, so a suspended tenant can still clean up its data.
    Extend here as tiers are added."
-  {"free"      {:effects cr/default-cloud-allowed-effects
+  {"anonymous" {:effects cr/default-cloud-allowed-effects
+                :max-fns 200
+                :max-list-items 2000
+                :dedicated-executor? false
+                :max-services 0
+                :egress-per-min 0}
+   "free"      {:effects (conj cr/default-cloud-allowed-effects :network)
                 :max-fns 500
                 :max-list-items 50000
                 :dedicated-executor? false
@@ -92,16 +112,18 @@
 
 (def ^:private default-plan
   "The plan a real tenant with an unknown / nil `:plan` slug falls back to — the
-   locked free tier. The PUBLIC org never resolves a plan (it is uncapped +
-   unrestricted); only real tenant orgs reach here."
-  (get plans "free"))
+   LOCKED `anonymous` tier (fail-safe: a mis-provisioned / un-slugged org gets no
+   network, small ceilings, never the metered `free` grant by accident). The
+   PUBLIC org never resolves a plan (it is uncapped + unrestricted); only real
+   tenant orgs reach here."
+  (get plans "anonymous"))
 
 
 (defn- tenant-plan
   "The plan map for a REAL tenant `org` (nil for the public org / no org), read
    from its `:plan` slug via the platform `storage` (`:org` is tenant-forbidden,
    so this runs in the platform ctx on the tenant's behalf). An unknown / nil
-   slug on a real tenant → the free-tier default."
+   slug on a real tenant → the locked `anonymous` default (fail-safe)."
   [storage org]
   (when (and org (not= org tc/public-org))
     (let [slug (:plan (first (sp/query-entities storage :org {:name org})))]
@@ -201,7 +223,9 @@
   (when (and org (not= org tc/public-org))
     (let [slug (:plan (first (sp/query-entities storage :org {:name org})))
           plan (get plans slug default-plan)]
-      {:plan (or slug "free")
+      ;; Display default matches the resolver default — an un-slugged org is
+      ;; the locked `anonymous` tier, not `free` (which now grants network).
+      {:plan (or slug "anonymous")
        :fns {:used (entity-count storage org :fn)
              :max (:max-fns plan)}
        :list-items {:used (entity-count storage org :binding-list-item)

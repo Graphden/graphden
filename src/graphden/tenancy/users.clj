@@ -320,7 +320,12 @@
                      ;; New org + its first user. The UNIQUE constraints on
                      ;; :org.name / :user.username are the real guard against a
                      ;; concurrent duplicate; the checks above are for the UX.
-                     (sp/create-entity storage :org {:name org})
+                     ;; `:plan "free"` = the REGISTERED tier (metered :network +
+                     ;; own external DB); the locked `anonymous` default is only
+                     ;; for landing demos, so a self-serve signup opts into
+                     ;; `free` explicitly (tier-split). Paid upgrades go through
+                     ;; the operator `set-org-plan` route.
+                     (sp/create-entity storage :org {:name org :plan "free"})
                      (sp/create-entity storage :user
                                        {:username username
                                         :password-hash (hash-password password)

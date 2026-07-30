@@ -578,12 +578,12 @@
    :args {:value {"db"      "Reads or writes storage (database / persistent state)."
                   "env"     "Reads environment variables."
                   "io"      "Reads or writes files / classpath resources."
-                  "network" "Makes outbound HTTP / network calls."
+                  "network" "Makes outbound HTTP / network calls, including connecting to your OWN external database (:sql-query / :sql-exec). Guarded by the SSRF egress broker (no internal / platform targets) and a per-tier rate + response-size cap. Granted on the free / network / dedicated tiers."
                   "state"   "Mutates in-memory shared state (:cell atoms via :swap / :reset). Process-local — lost on restart, not shared across pods."
                   "time"    "Uses wall-clock time — call returns a different value over time."
                   "random"  "Generates random or otherwise non-deterministic values."
                   "process" "Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service."
-                  "raw-sql" "Runs arbitrary SQL that bypasses the org-scoped, access-checked storage layer (raw `:pg-query` / `:pg-execute` / `:pg-tx`, or `:sql-query` / `:sql-exec` against an external datasource). Blocked for cloud / tenant graphs — use the org-scoped `:query-entities` family instead."}}}
+                  "raw-sql" "Runs arbitrary SQL against the PLATFORM database, bypassing the org-scoped, access-checked storage layer (raw `:pg-query` / `:pg-execute` / `:pg-tx`). Always blocked for cloud / tenant graphs — it would cross tenants; use the org-scoped `:query-entities` family instead. (Connecting to your OWN external database via `:sql-query` / `:sql-exec` is the `network` effect, not this.)"}}}
 
   {:name :_partial-effect-name
    :description "Read the `effect` query-string parameter from the inbound request. Empty string when absent so downstream lookups fall to the default."

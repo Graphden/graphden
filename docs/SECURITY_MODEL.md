@@ -32,9 +32,11 @@ so a gap in one does not by itself cross tenants:
    ([DEPLOYMENT.md § non-superuser DB role](DEPLOYMENT.md)).
 3. **Capability gate (effects)** — every base-fn declares its side effects
    (`db` / `network` / `io` / `process` / …); a two-layer effect gate bounds
-   what a tenant graph may *do*, by tier. The free tier allows only
-   `db` / `state` / `time` / `random`; `network`, `process`, and `raw-sql` are
-   withheld ([PLANS.md](PLANS.md)).
+   what a tenant graph may *do*, by tier. The locked `anonymous` (demo) tier
+   allows only `db` / `state` / `time` / `random`; the registered `free` tier
+   and up add metered `network` (outbound HTTP + your own external DB, egress-
+   guarded); `process` is dedicated-tier only; `raw-sql` (arbitrary SQL on the
+   *platform* database) is never granted to any tenant ([PLANS.md](PLANS.md)).
 4. **Fairness quotas** — per-org row caps (fns, list items), a fleet-wide
    concurrent-execution cap, an outbound egress rate-limit and response
    byte-cap, and a wall-clock execution deadline.

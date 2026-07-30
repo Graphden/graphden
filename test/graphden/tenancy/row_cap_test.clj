@@ -54,9 +54,10 @@
       (is (= 2 (plan/fn-count storage "acme")))
       (is (zero? (plan/fn-count storage "other"))))
 
-    (testing "over-entity-quota? is false well under the free-tier ceilings"
-      ;; no :org row → the free-tier default plan (fn 500 / list-item 50000).
-      (is (false? (plan/over-entity-quota? storage "acme" :fn)))          ; 2 ≪ 500
+    (testing "over-entity-quota? is false well under the default-tier ceilings"
+      ;; no :org row → the locked `anonymous` default plan (fn 200 / list-item
+      ;; 2000 — the fail-safe tier for an un-provisioned org).
+      (is (false? (plan/over-entity-quota? storage "acme" :fn)))          ; 2 ≪ 200
       (is (zero? (plan/entity-count storage "acme" :binding-list-item)))
       (is (false? (plan/over-entity-quota? storage "acme" :binding-list-item))))
 
@@ -95,11 +96,11 @@
       (sp/create-entity scoped :fn {:name "q-b"})
       (sp/create-entity scoped :fn {:name "q-c"}))
 
-    (testing "reports fn usage against the free-tier default ceilings (no :org row)"
+    (testing "reports fn usage against the anonymous default ceilings (no :org row)"
       (let [status (plan/quota-status storage "acme")]
-        (is (= "free" (:plan status)))
-        (is (= {:used 3 :max 500} (:fns status)))
-        (is (= {:used 0 :max 50000} (:list-items status)))))
+        (is (= "anonymous" (:plan status)))
+        (is (= {:used 3 :max 200} (:fns status)))
+        (is (= {:used 0 :max 2000} (:list-items status)))))
 
     (testing "reflects a paid plan's higher ceilings (:org is tenant-forbidden → written on raw storage)"
       (sp/create-entity storage :org {:name "acme" :plan "network"})

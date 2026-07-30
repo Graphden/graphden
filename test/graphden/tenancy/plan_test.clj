@@ -39,20 +39,29 @@
 
 (deftest allowed-effects-for-resolves-the-org-plan
   (let [store (org-store {"acme"   {:name "acme"   :plan "network"}
+                          "reg"    {:name "reg"    :plan "free"}
+                          "demo"   {:name "demo"   :plan "anonymous"}
                           "globex" {:name "globex" :plan nil}
                           "weird"  {:name "weird"  :plan "bogus"}})]
     (testing "a paid plan widens the effect allow-list with :network"
       (is (= (conj cr/default-cloud-allowed-effects :network)
              (plan/allowed-effects-for store "acme")))
       (is (contains? (plan/allowed-effects-for store "acme") :network)))
-    (testing "nil / unknown plan → the locked free default (no :network)"
+    (testing "the REGISTERED free tier also grants metered :network (bot / own DB)"
+      (is (contains? (plan/allowed-effects-for store "reg") :network)))
+    (testing "the anonymous demo tier is LOCKED — base effects, no :network"
+      (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store "demo")))
+      (is (not (contains? (plan/allowed-effects-for store "demo") :network))))
+    (testing "nil / unknown plan → the locked anonymous default (no :network, fail-safe)"
       (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store "globex")))
       (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store "weird")))
-      (is (not (contains? (plan/allowed-effects-for store "globex") :network))))
-    (testing "the public / platform org is never a tenant → free"
+      (is (not (contains? (plan/allowed-effects-for store "globex") :network)))
+      (is (not (contains? (plan/allowed-effects-for store "weird") :network))))
+    (testing "the public / platform org is never a tenant → base effects"
       (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store tc/public-org))))
-    (testing "a missing org → free"
-      (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store "nope"))))))
+    (testing "a missing org → base effects (no :network)"
+      (is (= cr/default-cloud-allowed-effects (plan/allowed-effects-for store "nope")))
+      (is (not (contains? (plan/allowed-effects-for store "nope") :network))))))
 
 
 (deftest dedicated-plan-grants-process-so-services-can-actually-run
@@ -139,15 +148,17 @@
   ;; (suspended → deny), or nil (uncapped). The addon's egress limiter reads it
   ;; per call.
   (let [store (org-store {"acme"   {:name "acme"   :plan "network"}
+                          "reg"    {:name "reg"    :plan "free"}
                           "paid"   {:name "paid"   :plan "dedicated"}
                           "globex" {:name "globex" :plan nil}
                           "weird"  {:name "weird"  :plan "bogus"}
                           "frozen" {:name "frozen" :plan "suspended"}})]
     (testing "each tier resolves its own cap"
       (is (= 6000 (plan/egress-limit-for store "acme")) "network")
+      (is (= 120 (plan/egress-limit-for store "reg")) "free (registered)")
       (is (nil? (plan/egress-limit-for store "paid")) "dedicated → uncapped")
-      (is (= 120 (plan/egress-limit-for store "globex")) "nil slug → free default")
-      (is (= 120 (plan/egress-limit-for store "weird")) "unknown slug → free default")
+      (is (zero? (plan/egress-limit-for store "globex")) "nil slug → anonymous default → 0")
+      (is (zero? (plan/egress-limit-for store "weird")) "unknown slug → anonymous default → 0")
       (is (zero? (plan/egress-limit-for store "frozen")) "suspended → deny all"))
     (testing "the platform / public org is never egress-capped (nil)"
       (is (nil? (plan/egress-limit-for store tc/public-org)))

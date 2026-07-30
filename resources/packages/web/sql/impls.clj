@@ -12,9 +12,14 @@
    pin the shared executor. The PLATFORM ctx (single-tenant / self-host) dials
    unguarded and uncapped. Both limits are env-tunable.
 
-   Note: today `:raw-sql` (recorded below) is in `cloud-forbidden-effects`, so
-   these base-fns are blocked for a cloud tenant regardless — the guard is the
-   safety floor that lets that block be lifted for a tenant's OWN external DB."
+   Effects: `:db` + `:network` — deliberately NOT `:raw-sql`. `:raw-sql` is the
+   marker for arbitrary SQL against the PLATFORM Postgres (`storage/pg`), which
+   stays cloud-forbidden (cross-tenant). These base-fns dial a caller-supplied
+   EXTERNAL datasource, made safe by the guard above (the SSRF resolver +
+   platform-DB block mean they can only ever reach a validated-public host that
+   is not the platform DB). So they are gated by `:network` alone — a tenant on
+   a tier that grants metered `:network` (`free` / `network` / `dedicated`) may
+   connect to its OWN database; `anonymous` (no `:network`) cannot."
   (:require
     [graphden.clients.egress :as egress]
     [graphden.executor.compile-runtime :as cr]
@@ -60,10 +65,10 @@
   ;; network effect, so the cloud sandbox can gate it (`:db` alone is
   ;; cloud-allowed and would let a restricted graph open arbitrary sockets).
   (cr/record-effect! :network)
-  ;; Arbitrary SQL string against a caller-supplied datasource — the raw
-  ;; escape hatch category `cloud-forbidden-effects` blocks (redundant
-  ;; with `:network` today, but honest: this IS raw SQL).
-  (cr/record-effect! :raw-sql)
+  ;; NOT `:raw-sql` — that marks raw SQL against the PLATFORM Postgres
+  ;; (`storage/pg`), which stays cloud-forbidden. This dials a caller-supplied
+  ;; EXTERNAL datasource made safe by the guard below (SSRF + platform-DB
+  ;; block), so `:network` is the correct gate. See the ns docstring.
   (let [restricted? (guard-restricted! url)
         ds (datasource url user password)
         ;; `params` arrives from the fn-graph as a Clojure vector
@@ -86,8 +91,8 @@
   (cr/record-effect! :db)
   ;; External JDBC connection — outbound network (see `sql-exec`).
   (cr/record-effect! :network)
-  ;; Arbitrary SQL string — raw escape hatch (see `sql-exec`).
-  (cr/record-effect! :raw-sql)
+  ;; NOT `:raw-sql` (see `sql-exec` + the ns docstring) — external datasource,
+  ;; gated by `:network` and made safe by the egress guard below.
   (let [restricted? (guard-restricted! url)
         ds (datasource url user password)
         stmt (into [sql] (or params []))

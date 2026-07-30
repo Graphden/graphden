@@ -8,31 +8,46 @@ Graphden's cloud stratifies tenants into tiers. A tier is a slug on the org
 `licensing@graphden.dev`); this page documents what each tier *includes*, not
 what it costs.
 
-| | Free | Cloud Shared | Cloud Dedicated |
-|---|---|---|---|
-| Effects allowed | `db` `state` `time` `random` | + `network` | + `network` `process` |
-| Outbound HTTP / SQL (`network`) | ✗ | ✓ (egress-guarded, rate + size capped) | ✓ |
-| Outbound calls / min | 120 | 6,000 | ∞ (uncapped) |
-| Max fns | 500 | 5,000 | 5,000 |
-| Max list items | 50,000 | 500,000 | 500,000 |
-| Always-on services | ✗ | ✗ | ✓ (up to 20) |
-| Resource isolation | shared pod | shared pod | dedicated cgroup-limited shard |
-| `raw-sql` | ✗ | ✗ | ✗ |
+| | Anonymous (demo) | Free (registered) | Cloud Shared | Cloud Dedicated |
+|---|---|---|---|---|
+| Effects allowed | `db` `state` `time` `random` | + `network` | + `network` | + `network` `process` |
+| Outbound HTTP (`network`) | ✗ | ✓ (egress-guarded, rate + size capped) | ✓ | ✓ |
+| Connect to your OWN database | ✗ | ✓ (external `:sql-query`/`:sql-exec`) | ✓ | ✓ |
+| Outbound calls / min | 0 | 120 | 6,000 | ∞ (uncapped) |
+| Max fns | 200 | 500 | 5,000 | 5,000 |
+| Max list items | 2,000 | 50,000 | 500,000 | 500,000 |
+| Persistence | ephemeral (reaped) | persistent | persistent | persistent |
+| Always-on services | ✗ | ✗ | ✗ | ✓ (up to 20) |
+| Resource isolation | shared pod | shared pod | shared pod | dedicated cgroup-limited shard |
+| `raw-sql` (platform DB) | ✗ | ✗ | ✗ | ✗ |
 
 Notes:
 
-- **Free** is the locked default; upgrading is a change to the org's `:plan`
-  row (no migration).
+- **Anonymous** is the LOCKED landing-demo tier and the fail-safe default (an
+  un-provisioned / un-slugged org resolves here): no outbound network, small
+  ceilings, ephemeral (reaped by the demo GC). It exists to let someone *try
+  graphs* with nothing to lose.
+- **Free (registered)** is what a signed-up account gets — base effects PLUS
+  metered `:network`, so you can build a personal Telegram bot, keep a few
+  hundred records, and connect to your OWN external database, all within the
+  egress rate + size caps + the SSRF / platform-DB guard. It is not a locked
+  tier; it is a genuinely useful one. Upgrading to a paid tier is a change to
+  the org's `:plan` row (operator `set-org-plan`, no migration).
 - **Outbound `network`** is guarded by the SSRF egress broker plus a per-tier,
   per-org outbound-call rate cap (the "outbound calls / min" row) and a response-
   byte cap — see [SECURITY_MODEL.md](SECURITY_MODEL.md). A suspended org's cap is
   0 (no outbound at all).
+- **Connecting to your own database** uses the external `:sql-query` /
+  `:sql-exec` base-fns; they count as the `network` effect (egress-guarded so
+  they can only reach a validated-public host, never the platform DB or an
+  internal service) — NOT `raw-sql`.
 - **Services** (persistent tenant processes) require the **dedicated** tier: a
   continuous tenant workload needs a hard resource boundary, which only the
   dedicated shard provides — see [SCALING.md § Tenant isolation](SCALING.md).
-- **`raw-sql` is never granted on the cloud** — a tenant pod shares the
-  platform Postgres, so raw SQL would cross tenants; use the typed storage
-  base-fns (`:pg-query` / `:sql-query` / …) instead.
+- **`raw-sql` is never granted on the cloud** — it means arbitrary SQL against
+  the *platform* Postgres (`:pg-query` / `:pg-execute` / `:pg-tx`), which a
+  tenant pod shares, so it would cross tenants; use the org-scoped
+  `:query-entities` family instead.
 - **Single-tenant self-host** is unrestricted and uncapped — no tier applies.
 
 ## Suspending an org (abuse kill-switch)

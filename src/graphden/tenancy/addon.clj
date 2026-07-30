@@ -56,11 +56,15 @@
 
 
 (defn- install-egress-caps!
-  "Install the per-org egress rate-limit + response byte-cap seams (task #5b),
-   closed over `cfg`. Both fire only for a restricted (tenant) ctx — the
-   http-client hook guards on `*allowed-effects*`. Defaults: 600 outbound
-   calls / minute / org, 10 MiB response body."
-  [{:keys [rate-max-per-min rate-window-ms max-response-bytes]}]
+  "Install the per-org egress rate-limit + response byte-cap seams (task #5b)
+   plus the platform-DB target block (external tenant DB — P2), closed over
+   `cfg`. All fire only for a restricted (tenant) ctx — the http-client / sql
+   hooks guard on `*allowed-effects*`. Defaults: 600 outbound calls / minute /
+   org, 10 MiB response body. `:platform-jdbc-url` (the platform's own DB url)
+   blocks a tenant datasource from targeting the platform DB by host — internal
+   platform DBs are already covered by the SSRF resolver, this adds the
+   public-endpoint case; absent → no platform-DB block."
+  [{:keys [rate-max-per-min rate-window-ms max-response-bytes platform-jdbc-url]}]
   (let [rate-max (or rate-max-per-min 600)]
     (reset! egress/egress-rate-limiter
             (when (pos? rate-max)
@@ -68,13 +72,17 @@
                 ;; org-agnostic signature; the org keying lives HERE so the
                 ;; clients-layer egress ns never depends on tenancy.
                 (fn [] (limiter (tc/current-org))))))
-    (reset! egress/max-response-bytes (or max-response-bytes (* 10 1024 1024)))))
+    (reset! egress/max-response-bytes (or max-response-bytes (* 10 1024 1024)))
+    (reset! egress/platform-db-host?
+            (when-let [host (some-> platform-jdbc-url egress/jdbc-host not-empty)]
+              (fn [target-host] (= target-host host))))))
 
 
 (defn- uninstall-egress-caps!
   []
   (reset! egress/egress-rate-limiter nil)
-  (reset! egress/max-response-bytes nil))
+  (reset! egress/max-response-bytes nil)
+  (reset! egress/platform-db-host? nil))
 
 
 (defmethod ig/init-key :org/scoped-storage [_ {:keys [base scoped-entities grant-store egress-caps]}]

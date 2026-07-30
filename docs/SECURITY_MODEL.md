@@ -41,6 +41,11 @@ so a gap in one does not by itself cross tenants:
 5. **Egress guard (SSRF)** — a tenant's outbound network call is validated
    against a fail-closed classifier that rejects internal / private / loopback
    / cloud-metadata targets (and names that resolve to them) before dialing.
+   This covers **both** outbound HTTP and a tenant's connection to its **own
+   external database** (`web/sql`): the JDBC host is checked the same way,
+   the platform's own DB is refused as a target (no cross-tenant reach), and a
+   restricted query runs under a statement **timeout** and server-side **row
+   cap** so a slow or huge query can't pin the shared executor.
 6. **Secret information-flow marker** — values read from the vault are typed
    `[:secret T]`, tracked through composition, and hidden at execution sinks
    (the Run pane). This is **best-effort taint-tracking, not a proven

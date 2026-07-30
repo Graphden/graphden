@@ -19,7 +19,12 @@
 ;; no-op-equivalent until that provider lands.
 {:graphden/require [graphden.tenancy.addon]
 
- :org/scoped-storage {:base #ig/ref :app/storage}
+ ;; :egress-caps.platform-jdbc-url — the platform's OWN DB url (same #env JDBC_URL
+ ;; :db/postgres uses), so a tenant's external-DB datasource (web/sql) can't
+ ;; target the platform database by host (cross-tenant). Internal platform DBs
+ ;; are already blocked by the SSRF resolver; this covers a public endpoint.
+ :org/scoped-storage {:base #ig/ref :app/storage
+                      :egress-caps {:platform-jdbc-url #or [#env JDBC_URL nil]}}
 
  :db/versioned {:base-storage #ig/ref :org/scoped-storage}
 

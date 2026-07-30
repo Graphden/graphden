@@ -97,6 +97,57 @@
     nil))
 
 
+;; --- SQL egress (external tenant database) -----------------------------------
+;;
+;; `web/sql`'s `sql-exec` / `sql-query` dial a caller-supplied JDBC url, so the
+;; SAME SSRF surface as HTTP applies: a tenant must not point a datasource at the
+;; platform's internal network (its own Postgres, cloud metadata, an internal
+;; service on 5432). `check-sql-target!` is the JDBC counterpart of
+;; `check-target!` — it validates the url's host before a connection is opened.
+;; Only the RESTRICTED (tenant) path calls it; a single-tenant / platform ctx
+;; dials unguarded (the sql impls gate on `*allowed-effects*`).
+
+(defonce ^{:doc "Installed by the addon: `(fn [host] → bool)` — true ⇒ `host` is
+                 the PLATFORM's own database, which a tenant datasource must never
+                 target (cross-tenant read). Internal platform DBs are already
+                 covered by `resolve-public-ips` (they resolve to a private
+                 address); this seam additionally blocks a platform DB reachable
+                 on a PUBLIC endpoint (e.g. a managed instance). nil ⇒ no
+                 platform-DB restriction (single-tenant)."}
+  platform-db-host?
+  (atom nil))
+
+
+(defn jdbc-host
+  "Host component of a JDBC url. A `jdbc:` url is opaque to `URI` (the `jdbc:`
+   scheme makes the rest scheme-specific), so strip the `jdbc:` prefix first,
+   then parse `postgresql://host:5432/db` as a URI. nil when no host is present.
+   Public so the addon can derive the platform-DB host for `platform-db-host?`."
+  [url]
+  (let [s (str url)
+        stripped (if (str/starts-with? s "jdbc:") (subs s 5) s)]
+    (try (URI/.getHost (URI. stripped)) (catch Exception _ nil))))
+
+
+(defn check-sql-target!
+  "Gate an outbound JDBC `url` before connecting (RESTRICTED tenant path): parse
+   its host, reject the platform's own DB (installed `platform-db-host?` —
+   cross-tenant), then reject a non-public / rebinding target
+   (`resolve-public-ips`, which also covers an internal platform DB). Throws
+   `:egress/blocked`; returns nil when the target is safe."
+  [url]
+  (let [host (jdbc-host url)]
+    (when (str/blank? host)
+      (throw (ex-info (str "egress blocked: no host in jdbc url " url)
+                      {:type :egress/blocked :url url :reason :no-host})))
+    (when-let [pred @platform-db-host?]
+      (when (pred host)
+        (throw (ex-info "egress blocked: the platform database is not a valid tenant target"
+                        {:type :egress/blocked :host host :reason :platform-db}))))
+    (resolve-public-ips host)
+    nil))
+
+
 (def validating-dns
   "An OkHttp `Dns` that resolves a hostname to its PUBLIC addresses only, via
    `resolve-public-ips` — the SAME validation `check-target!` runs, but applied

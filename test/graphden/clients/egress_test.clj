@@ -93,6 +93,58 @@
                 (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))))
 
 
+(deftest jdbc-host-extracts-the-host-from-a-jdbc-url
+  (testing "a jdbc:postgresql url (opaque to bare URI) parses to its host"
+    (is (= "db.example.com" (egress/jdbc-host "jdbc:postgresql://db.example.com:5432/mydb")))
+    (is (= "8.8.8.8" (egress/jdbc-host "jdbc:postgresql://8.8.8.8:5432/db")))
+    (is (= "my-host" (egress/jdbc-host "jdbc:mysql://my-host/db"))))
+  (testing "no host / unparseable → nil"
+    (is (nil? (egress/jdbc-host "jdbc:h2:mem:test")))
+    (is (nil? (egress/jdbc-host "not-a-url")))
+    (is (nil? (egress/jdbc-host nil)))))
+
+
+(deftest check-sql-target!-gates-jdbc-urls
+  ;; The JDBC counterpart of check-target! — same SSRF surface (a tenant
+  ;; datasource must not reach the platform's internal network), applied before a
+  ;; connection is opened. IP literals parse without a lookup (no network).
+  (testing "a jdbc url whose host is an internal / private IP is blocked"
+    (doseq [u ["jdbc:postgresql://127.0.0.1:5432/x" "jdbc:postgresql://10.0.0.1/x"
+               "jdbc:postgresql://169.254.169.254/x" "jdbc:mysql://192.168.1.1:3306/x"]]
+      (is (= :egress/blocked
+             (try (egress/check-sql-target! u) nil
+                  (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+          (str u " must be blocked"))))
+  (testing "a hostname resolving to an internal IP is blocked (rebind path)"
+    (let [ed (try (egress/check-sql-target! "jdbc:postgresql://localhost:5432/x") nil
+                  (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+      (is (= :egress/blocked (:type ed)))
+      (is (= :internal-target (:reason ed)))))
+  (testing "a jdbc url with no host is blocked"
+    (is (= :egress/blocked
+           (try (egress/check-sql-target! "jdbc:h2:mem:test") nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))
+  (testing "a public-IP jdbc host passes (no DNS — literal)"
+    (is (nil? (egress/check-sql-target! "jdbc:postgresql://8.8.8.8:5432/db")))))
+
+
+(deftest check-sql-target!-blocks-the-platform-db-host
+  ;; Defense-in-depth for a platform DB on a PUBLIC endpoint (an internal one is
+  ;; already blocked by the SSRF resolver): the installed seam rejects a tenant
+  ;; datasource pointed at the platform's own DB host, before resolution.
+  (let [saved @egress/platform-db-host?]
+    (try
+      (reset! egress/platform-db-host? #(= % "8.8.8.8"))
+      (testing "a jdbc url targeting the platform DB host → :platform-db block"
+        (let [ed (try (egress/check-sql-target! "jdbc:postgresql://8.8.8.8:5432/graphden") nil
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+          (is (= :egress/blocked (:type ed)))
+          (is (= :platform-db (:reason ed)))))
+      (testing "a different public host still passes the platform-db check"
+        (is (nil? (egress/check-sql-target! "jdbc:postgresql://1.1.1.1:5432/tenant"))))
+      (finally (reset! egress/platform-db-host? saved)))))
+
+
 (deftest check-egress-rate!-honours-the-installed-limiter
   ;; task #5b: the per-org outbound rate cap. The seam holds an org-agnostic
   ;; `(fn [] → bool)`; the addon closes org-keying over it.

@@ -39,6 +39,7 @@
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written |
 | 16 | [Users — the operator's account panel](16-users-admin.md) | ✅ written |
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written |
+| 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

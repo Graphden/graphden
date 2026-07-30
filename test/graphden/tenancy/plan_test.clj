@@ -165,6 +165,34 @@
       (is (nil? (plan/egress-limit-for store nil))))))
 
 
+(deftest tier-network-effect-gate-end-to-end
+  ;; The capstone of the tier split: with the effect resolver installed, a graph
+  ;; running under an org's RESOLVED `:allowed-effects` may record `:network` on
+  ;; the registered `free` / paid `network` tiers, but the locked `anonymous`
+  ;; demo default (and any un-slugged org) is blocked. Ties the plan resolver to
+  ;; the actual `record-effect!` gate without a container.
+  (let [store (org-store {"reg"  {:name "reg"  :plan "free"}
+                          "paid" {:name "paid" :plan "network"}
+                          "demo" {:name "demo" :plan "anonymous"}})
+        saved @cr/cloud-allowed-effects-resolver
+        gate (fn [org]
+               (binding [cr/*allowed-effects* (cr/cloud-allowed-effects-for org)]
+                 (cr/record-effect! :network) :ran))]
+    (try
+      ;; exactly what `plan/install!` wires for the effect seam — set it alone so
+      ;; the row-cap / service seams are untouched.
+      (reset! cr/cloud-allowed-effects-resolver (partial plan/allowed-effects-for store))
+      (testing "the registered free tier may record :network (bot / own DB)"
+        (is (= :ran (gate "reg"))))
+      (testing "the paid network tier may record :network"
+        (is (= :ran (gate "paid"))))
+      (testing "the locked anonymous demo tier is blocked from :network"
+        (is (thrown? clojure.lang.ExceptionInfo (gate "demo"))))
+      (testing "an un-slugged org falls to anonymous → blocked (fail-safe)"
+        (is (thrown? clojure.lang.ExceptionInfo (gate "nope"))))
+      (finally (reset! cr/cloud-allowed-effects-resolver saved)))))
+
+
 (deftest install!-wires-the-seams
   (let [store (org-store {"acme" {:name "acme" :plan "network"}})
         saved-fx @cr/cloud-allowed-effects-resolver

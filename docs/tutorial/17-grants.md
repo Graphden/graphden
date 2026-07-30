@@ -130,5 +130,5 @@ are the *subjects* of grants, not their administrators.
 
 ## Next
 
-That's the end of the current tutorial. New lessons are added as
-features ship — see [tutorial/README.md](README.md).
+[Lesson 18 — Plans & tiers](18-plans-and-tiers.md): what the cloud
+grants each account, and how an operator changes an org's tier.

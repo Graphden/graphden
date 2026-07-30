@@ -99,3 +99,30 @@
       (reset! captured nil)
       (rs ctx (req "graphden.app" "acme-tok") thunk)
       (is (= "acme" @captured)))))
+
+
+(deftest reserved-labels-never-resolve-to-a-tenant
+  ;; Platform hosts (app.<domain> — the editor/API entry, www, api, …) must
+  ;; fall through like the apex, not route to a tenant org named "app".
+  (let [r (sub/wrap-reserved (sub/identity-org-resolver)
+                             sub/default-reserved-labels)]
+    (testing "reserved labels → nil (platform fall-through)"
+      (doseq [l ["app" "www" "api" "admin" "demo"]]
+        (is (nil? (sub/org-for-subdomain r l)) l)))
+    (testing "ordinary org labels resolve as before"
+      (is (= "acme" (sub/org-for-subdomain r "acme"))))
+    (testing "an empty reserved set disables reservation"
+      (is (= "app" (sub/org-for-subdomain
+                     (sub/wrap-reserved (sub/identity-org-resolver) [])
+                     "app"))))))
+
+
+(deftest reserved-org-name?-gates-self-serve-creation
+  (testing "reserved (case-insensitive) → true"
+    (is (sub/reserved-org-name? "app"))
+    (is (sub/reserved-org-name? "WWW")))
+  (testing "ordinary / nil names pass"
+    (is (not (sub/reserved-org-name? "acme")))
+    (is (not (sub/reserved-org-name? nil)))
+    (is (not (sub/reserved-org-name? "demo-abc123"))
+        "generated demo-<rand> org names are NOT the bare reserved label")))

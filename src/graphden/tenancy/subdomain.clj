@@ -76,6 +76,43 @@
   (->IdentityOrgResolver))
 
 
+(def default-reserved-labels
+  "Subdomain labels the PLATFORM keeps for itself — never resolved to a tenant
+   org, so `app.<base-domain>` serves the editor/API (falls through like the
+   apex) instead of routing to a tenant who registered org \"app\". The same
+   set gates self-serve org creation (`users/signup!`), so the labels can't be
+   squatted either. Operators can widen/replace the set via the
+   `:tenancy/org-resolver` config's `:reserved`."
+  #{"app" "www" "api" "admin" "mail" "smtp" "imap" "static" "assets" "cdn"
+    "docs" "status" "editor" "demo" "vault" "metrics" "grafana"})
+
+
+(defrecord ReservedAwareResolver
+  [reserved inner]
+
+  OrgResolver
+
+  (org-for-subdomain
+    [_ subdomain]
+    (when-not (contains? reserved subdomain)
+      (org-for-subdomain inner subdomain))))
+
+
+(defn wrap-reserved
+  "Wrap an `OrgResolver` so `reserved` labels resolve to nil (→ the request
+   falls through to the platform editor/API, exactly like the apex)."
+  [resolver reserved]
+  (->ReservedAwareResolver (set reserved) resolver))
+
+
+(defn reserved-org-name?
+  "True when `name` is a platform-reserved subdomain label — self-serve org
+   creation must refuse it (a tenant org by this name would either be
+   unreachable or shadow a platform host)."
+  ([name] (reserved-org-name? name default-reserved-labels))
+  ([name reserved] (contains? (set reserved) (some-> name str/lower-case))))
+
+
 (defn org-from-request
   "Resolve the org named by the request's `Host` subdomain, or nil. Nil when
    no resolver is wired, no `base-domain`, the host has no subdomain, or the

@@ -410,15 +410,22 @@
   deploy/verify-domain!)
 
 
-(defmethod ig/init-key :tenancy/org-resolver [_ {:keys [subdomains]}]
+(defmethod ig/init-key :tenancy/org-resolver [_ {:keys [subdomains reserved]}]
   ;; (§3.2) Resolve org from the Host subdomain. Default — IDENTITY: the
   ;; subdomain label IS the org-id (`acme.<base-domain>` → org `acme`), no
   ;; table needed. Pass `:subdomains {…}` only for vanity aliases where a
   ;; subdomain differs from its org-id. Wired into `:tenancy/request-scope`
   ;; with `:base-domain`.
-  (if (seq subdomains)
-    (subdomain/static-org-resolver subdomains)
-    (subdomain/identity-org-resolver)))
+  ;;
+  ;; PLATFORM labels (`app`, `www`, `api`, … — `subdomain/default-reserved-
+  ;; labels`) never resolve to a tenant: `app.<base-domain>` falls through to
+  ;; the editor/API like the apex. Override the set with `:reserved` (a coll;
+  ;; `[]` disables reservation — single-tenant setups that want every label).
+  (subdomain/wrap-reserved
+    (if (seq subdomains)
+      (subdomain/static-org-resolver subdomains)
+      (subdomain/identity-org-resolver))
+    (or reserved subdomain/default-reserved-labels)))
 
 
 (def ^:private rate-limited-response

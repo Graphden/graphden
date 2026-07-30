@@ -16,6 +16,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.subdomain :as subdomain]
     [next.jdbc :as jdbc])
   (:import
     (java.security
@@ -315,8 +316,12 @@
     ;; (effect gate, RLS, per-namespace write guard), so a self-serve
     ;; `org="public"` account would be a full platform-admin — sandbox escape +
     ;; cross-tenant breach. Reject it up front.
+    ;; Reserved platform labels (app / www / api / …) can never become tenant
+    ;; orgs — the org-resolver refuses to route them, and allowing signup would
+    ;; let someone squat a future platform host. Same nil-return as "taken".
     (when (and (not (str/blank? username)) (not (str/blank? password))
-               (not (str/blank? org)) (not= org tc/public-org))
+               (not (str/blank? org)) (not= org tc/public-org)
+               (not (subdomain/reserved-org-name? org)))
       (tc/with-org tc/public-org
                    (when (and (empty? (sp/query-entities storage :user {:username username}))
                               (empty? (sp/query-entities storage :org {:name org}))

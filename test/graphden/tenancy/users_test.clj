@@ -231,3 +231,16 @@
             auth (ap/authenticate p {:headers {"authorization" (str "Bearer " token)}})]
         (is (:authenticated? auth))
         (is (= org (:org auth)))))))
+
+
+(deftest signup-refuses-reserved-org-names
+  ;; app/www/api/… are platform subdomain labels — the org-resolver refuses to
+  ;; route them, so letting signup create such an org would only squat a
+  ;; platform host. Same nil-return as a taken name.
+  (let [storage (mem-storage)
+        ctx {:storage storage}]
+    (is (nil? (users/signup! ctx "alice" "pw" "app")))
+    (is (nil? (users/signup! ctx "alice" "pw" "WWW")) "case-insensitive")
+    (is (empty? (sp/query-entities storage :org {})) "nothing was created")
+    (testing "an ordinary name still signs up"
+      (is (some? (users/signup! ctx "alice" "pw" "acme"))))))

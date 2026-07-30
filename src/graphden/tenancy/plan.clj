@@ -23,7 +23,12 @@
 
 (def plans
   "Plan slug → `{:effects <allow-list> :max-fns <n|nil> :max-list-items <n|nil>
-   :dedicated-executor? <bool> :max-services <n>}`. `free` is the locked default
+   :dedicated-executor? <bool> :max-services <n> :egress-per-min <n|nil>}`.
+   `:egress-per-min` is the per-org OUTBOUND-call rate cap (external HTTP / SQL),
+   enforced per-pod (the addon installs a windowed limiter over it); nil =
+   uncapped, 0 = deny all outbound (the suspended freeze). It is per-tier so a
+   `free` bot is generous-but-bounded while a paid tier gets headroom. `free` is
+   the locked default
    (`#{:db :state :time :random}`); `network` additionally allows outbound
    `:network` (external HTTP / SQL, itself guarded by the egress broker — #5) and
    lifts the ceilings; `dedicated` is the SERVICE tier (see below). A nil ceiling
@@ -63,22 +68,26 @@
                 :max-fns 500
                 :max-list-items 50000
                 :dedicated-executor? false
-                :max-services 0}
+                :max-services 0
+                :egress-per-min 120}
    "network"   {:effects (conj cr/default-cloud-allowed-effects :network)
                 :max-fns 5000
                 :max-list-items 500000
                 :dedicated-executor? false
-                :max-services 0}
+                :max-services 0
+                :egress-per-min 6000}
    "dedicated" {:effects (conj cr/default-cloud-allowed-effects :network :process)
                 :max-fns 5000
                 :max-list-items 500000
                 :dedicated-executor? true
-                :max-services 20}
+                :max-services 20
+                :egress-per-min nil}
    "suspended" {:effects #{}
                 :max-fns 0
                 :max-list-items 0
                 :dedicated-executor? false
-                :max-services 0}})
+                :max-services 0
+                :egress-per-min 0}})
 
 
 (def ^:private default-plan
@@ -125,6 +134,15 @@
    carries an `:org-id`. Public org / no org → 0 (not a tenant service gate)."
   [storage org]
   (or (:max-services (tenant-plan storage org)) 0))
+
+
+(defn egress-limit-for
+  "Tenant `org`'s per-minute OUTBOUND-call cap (external HTTP / SQL) from its
+   plan tier: a positive int (cap), 0 (suspended → deny all), or nil (uncapped).
+   The addon's egress limiter reads this per call. Public org / no org →
+   `tenant-plan` is nil → nil (the platform's own egress is never rate-capped)."
+  [storage org]
+  (:egress-per-min (tenant-plan storage org)))
 
 
 ;; The gated entities → the `{table, plan-ceiling-key}` they're measured against.

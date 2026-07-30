@@ -82,6 +82,37 @@
           (> (count (get new key)) (count (prune (get old key)))))))))
 
 
+(defn make-per-key-limiter
+  "Like `make-rate-limiter`, but the cap is supplied PER CALL — `(fn [key
+   max-attempts] → bool)` — so different keys can carry different limits from one
+   shared window state. Used by the per-ORG egress cap, where each org's limit
+   comes from its plan tier (`plan/egress-limit-for`). Same in-memory fixed-
+   window semantics + atomic test-and-record + idle-key sweep as
+   `make-rate-limiter`."
+  [window-ms]
+  (let [state (atom {})
+        last-prune (atom 0)]
+    (fn [key max-attempts]
+      (let [now (System/currentTimeMillis)
+            cutoff (- now window-ms)]
+        (when (> now (+ @last-prune window-ms))
+          (reset! last-prune now)
+          (swap! state (fn [m]
+                         (persistent!
+                           (reduce-kv (fn [acc k ts]
+                                        (let [r (filterv #(> % cutoff) ts)]
+                                          (if (seq r) (assoc! acc k r) acc)))
+                                      (transient {}) m)))))
+        (let [prune (fn [ts] (filterv #(> % cutoff) ts))
+              [old new] (swap-vals! state
+                                    (fn [m]
+                                      (let [recent (prune (get m key []))]
+                                        (assoc m key (if (< (count recent) max-attempts)
+                                                       (conj recent now)
+                                                       recent)))))]
+          (> (count (get new key)) (count (prune (get old key)))))))))
+
+
 (defn- random-bytes
   ^bytes [n]
   (let [b (byte-array n)]

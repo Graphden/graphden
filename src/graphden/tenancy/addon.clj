@@ -57,25 +57,38 @@
 
 (defn- install-egress-caps!
   "Install the per-org egress rate-limit + response byte-cap seams (task #5b)
-   plus the platform-DB target block (external tenant DB — P2), closed over
-   `cfg`. All fire only for a restricted (tenant) ctx — the http-client / sql
-   hooks guard on `*allowed-effects*`. Defaults: 600 outbound calls / minute /
-   org, 10 MiB response body. `:platform-jdbc-url` (the platform's own DB url)
-   blocks a tenant datasource from targeting the platform DB by host — internal
-   platform DBs are already covered by the SSRF resolver, this adds the
-   public-endpoint case; absent → no platform-DB block."
-  [{:keys [rate-max-per-min rate-window-ms max-response-bytes platform-jdbc-url]}]
-  (let [rate-max (or rate-max-per-min 600)]
+   plus the platform-DB target block (external tenant DB — P2), closed over the
+   platform `base` storage + `cfg`. All fire only for a restricted (tenant) ctx —
+   the http-client / sql hooks guard on `*allowed-effects*`.
+
+   The outbound-CALL rate cap is PER-TIER (P3): the installed limiter reads the
+   current org's `plan/egress-limit-for` per call — nil ⇒ uncapped (a dedicated
+   tier / the platform), 0 ⇒ deny all outbound (the suspended freeze), a positive
+   int ⇒ that many calls / `rate-window-ms` (default 60 s), enforced per-org in a
+   shared in-memory window. In-memory per-pod, like every other rate limit here;
+   orgs are sharded to a holder pod, so per-pod ≈ per-org (see docs/SCALING.md).
+
+   `:max-response-bytes` (default 10 MiB) caps a tenant egress response body.
+   `:platform-jdbc-url` (the platform's own DB url) blocks a tenant datasource
+   from targeting the platform DB by host — internal platform DBs are already
+   covered by the SSRF resolver, this adds the public-endpoint case; absent → no
+   platform-DB block."
+  [base {:keys [rate-window-ms max-response-bytes platform-jdbc-url]}]
+  (let [limiter (users/make-per-key-limiter (or rate-window-ms 60000))]
+    ;; org-agnostic seam signature; the org keying + per-tier cap lookup live
+    ;; HERE so the clients-layer egress ns never depends on tenancy.
     (reset! egress/egress-rate-limiter
-            (when (pos? rate-max)
-              (let [limiter (users/make-rate-limiter rate-max (or rate-window-ms 60000))]
-                ;; org-agnostic signature; the org keying lives HERE so the
-                ;; clients-layer egress ns never depends on tenancy.
-                (fn [] (limiter (tc/current-org))))))
-    (reset! egress/max-response-bytes (or max-response-bytes (* 10 1024 1024)))
-    (reset! egress/platform-db-host?
-            (when-let [host (some-> platform-jdbc-url egress/jdbc-host not-empty)]
-              (fn [target-host] (= target-host host))))))
+            (fn []
+              (let [org (tc/current-org)
+                    lim (plan/egress-limit-for base org)]
+                (cond
+                  (nil? lim) true             ; uncapped tier / platform ctx
+                  (not (pos? lim)) false      ; suspended / 0 → deny all outbound
+                  :else (limiter org lim))))))
+  (reset! egress/max-response-bytes (or max-response-bytes (* 10 1024 1024)))
+  (reset! egress/platform-db-host?
+          (when-let [host (some-> platform-jdbc-url egress/jdbc-host not-empty)]
+            (fn [target-host] (= target-host host)))))
 
 
 (defn- uninstall-egress-caps!
@@ -124,8 +137,9 @@
                     (thunk))
                   (thunk)))))
     ;; Per-org egress rate-limit + response byte-cap (task #5b) — bounds HOW MUCH
-    ;; a paid (`:network`) tenant may pull, on top of check-target!'s WHERE.
-    (install-egress-caps! (or egress-caps {}))
+    ;; a paid (`:network`) tenant may pull, on top of check-target!'s WHERE. The
+    ;; call-rate cap is per-tier (P3), read from `base`'s plan per call.
+    (install-egress-caps! base (or egress-caps {}))
     (ts/org-scoped-storage base (or scoped-entities ts/default-scoped-entities) authorize-write)))
 
 

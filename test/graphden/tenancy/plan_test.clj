@@ -129,7 +129,29 @@
           "even the free-tier :db effect is withheld from a suspended org"))
     (testing "a suspended org gets no services either"
       (is (false? (plan/dedicated-executor? store "frozen")))
-      (is (zero? (plan/max-services-for store "frozen"))))))
+      (is (zero? (plan/max-services-for store "frozen"))))
+    (testing "a suspended org's egress cap is 0 (deny all outbound)"
+      (is (zero? (plan/egress-limit-for store "frozen"))))))
+
+
+(deftest egress-limit-for-resolves-the-per-tier-outbound-cap
+  ;; P3: the per-org outbound-call cap is per-tier — a positive int (cap), 0
+  ;; (suspended → deny), or nil (uncapped). The addon's egress limiter reads it
+  ;; per call.
+  (let [store (org-store {"acme"   {:name "acme"   :plan "network"}
+                          "paid"   {:name "paid"   :plan "dedicated"}
+                          "globex" {:name "globex" :plan nil}
+                          "weird"  {:name "weird"  :plan "bogus"}
+                          "frozen" {:name "frozen" :plan "suspended"}})]
+    (testing "each tier resolves its own cap"
+      (is (= 6000 (plan/egress-limit-for store "acme")) "network")
+      (is (nil? (plan/egress-limit-for store "paid")) "dedicated → uncapped")
+      (is (= 120 (plan/egress-limit-for store "globex")) "nil slug → free default")
+      (is (= 120 (plan/egress-limit-for store "weird")) "unknown slug → free default")
+      (is (zero? (plan/egress-limit-for store "frozen")) "suspended → deny all"))
+    (testing "the platform / public org is never egress-capped (nil)"
+      (is (nil? (plan/egress-limit-for store tc/public-org)))
+      (is (nil? (plan/egress-limit-for store nil))))))
 
 
 (deftest install!-wires-the-seams

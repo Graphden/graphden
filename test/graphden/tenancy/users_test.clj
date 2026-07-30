@@ -47,6 +47,25 @@
     (is (true? (limit "k")) "after the window elapses the key is allowed again")))
 
 
+(deftest per-key-limiter-applies-a-per-call-max
+  ;; P3 egress cap: one shared window, but each key carries its OWN limit
+  ;; (supplied per call) — so a `free` org (low cap) and a `network` org (high
+  ;; cap) share the limiter yet get different budgets.
+  (let [limit (users/make-per-key-limiter 60000)]
+    (testing "each key is bounded by the max passed for it"
+      (is (true? (limit "free-org" 2)))
+      (is (true? (limit "free-org" 2)))
+      (is (false? (limit "free-org" 2)) "free-org is capped at 2"))
+    (testing "a different key with a higher cap keeps going independently"
+      (is (true? (limit "paid-org" 5)))
+      (is (true? (limit "paid-org" 5)))
+      (is (true? (limit "paid-org" 5)))
+      (is (true? (limit "free-org2" 1)))
+      (is (false? (limit "free-org2" 1)) "its own cap of 1 is independent"))
+    (testing "a zero cap denies immediately"
+      (is (false? (limit "suspended-org" 0))))))
+
+
 (deftest client-ip-extraction
   (testing "first X-Forwarded-For hop wins, else :remote-addr, else unknown"
     (is (= "1.2.3.4" (users/client-ip {:headers {"x-forwarded-for" "1.2.3.4, 5.6.7.8"}})))

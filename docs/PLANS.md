@@ -12,6 +12,7 @@ what it costs.
 |---|---|---|---|
 | Effects allowed | `db` `state` `time` `random` | + `network` | + `network` `process` |
 | Outbound HTTP / SQL (`network`) | ✗ | ✓ (egress-guarded, rate + size capped) | ✓ |
+| Outbound calls / min | 120 | 6,000 | ∞ (uncapped) |
 | Max fns | 500 | 5,000 | 5,000 |
 | Max list items | 50,000 | 500,000 | 500,000 |
 | Always-on services | ✗ | ✗ | ✓ (up to 20) |
@@ -22,8 +23,10 @@ Notes:
 
 - **Free** is the locked default; upgrading is a change to the org's `:plan`
   row (no migration).
-- **Outbound `network`** is guarded by the SSRF egress broker plus per-org rate
-  and response-byte caps — see [SECURITY_MODEL.md](SECURITY_MODEL.md).
+- **Outbound `network`** is guarded by the SSRF egress broker plus a per-tier,
+  per-org outbound-call rate cap (the "outbound calls / min" row) and a response-
+  byte cap — see [SECURITY_MODEL.md](SECURITY_MODEL.md). A suspended org's cap is
+  0 (no outbound at all).
 - **Services** (persistent tenant processes) require the **dedicated** tier: a
   continuous tenant workload needs a hard resource boundary, which only the
   dedicated shard provides — see [SCALING.md § Tenant isolation](SCALING.md).

@@ -58,10 +58,14 @@
   :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"]}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}
  {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec
-  ;; `trivy config .` is a RECURSIVE IaC misconfig scan — docker-compose and
-  ;; the deploy/ (kind, helm) manifests are scan targets, not just Dockerfiles.
+  ;; Three passes (see the `trivy` bb task): (1) `config .` — RECURSIVE IaC
+  ;; misconfig over docker-compose + deploy/ (kind, helm), not just Dockerfiles;
+  ;; (2) `fs .` — CVE in the npm lockfiles; (3) `rootfs` over the resolved
+  ;; classpath jars — CVE in the JVM / deps.edn deps (a tools.deps project has
+  ;; no pom.xml, so this is the ONLY pass that sees Java deps). `deps.edn` is in
+  ;; :relevant so a JVM-dep bump re-runs the scan.
   :relevant ["^Dockerfile" "deps\\.edn$" "package(-lock)?\\.json$" "^\\.trivyignore"
-             "^docker-compose" "^deploy/"]}
+             "^docker-compose" "^deploy/" "^bb\\.edn$"]}
  ;; npm-only audit — a deps.edn change must NOT trigger it: the green would
  ;; read as "the new JVM dep's license was vetted", which this task never does.
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec

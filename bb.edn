@@ -338,7 +338,7 @@
                   "**/*.md")}
 
   trivy
-  {:doc "Supply-chain CVE + Dockerfile misconfig scan via Docker aquasec/trivy:0.70.0. Caches vulnerability DB in /tmp/trivy-cache."
+  {:doc "Supply-chain CVE + Dockerfile misconfig scan via Docker aquasec/trivy:0.70.0. Caches vulnerability DB in /tmp/trivy-cache. Three passes: (1) IaC misconfig, (2) npm-lockfile CVE, (3) JVM/deps.edn CVE via the resolved classpath jars."
    :task (let [pwd (System/getenv "PWD")]
            (println "▶ trivy config (Dockerfile misconfig)")
            (p/shell "docker" "run" "--rm"
@@ -353,7 +353,7 @@
                     ;; Not auto-detected — must be passed explicitly.
                     "--ignorefile" ".trivyignore.yaml"
                     "--exit-code" "1" "--quiet" ".")
-           (println "▶ trivy fs (CVE in npm + maven deps)")
+           (println "▶ trivy fs (CVE in npm lockfiles)")
            (p/shell "docker" "run" "--rm"
                     "-v" (str pwd ":/repo")
                     "-v" "/tmp/trivy-cache:/root/.cache/"
@@ -361,7 +361,49 @@
                     "aquasec/trivy:0.70.0"
                     "fs" "--severity" "HIGH,CRITICAL"
                     "--skip-dirs" "node_modules,target,.tools,.playwright-mcp,.git,.lsp"
-                    "--exit-code" "1" "--quiet" "."))}
+                    "--exit-code" "1" "--quiet" ".")
+           ;; JVM CVE scan. This is a tools.deps project — no `pom.xml`, no jars
+           ;; in the tree — so the `fs .` pass above finds ZERO Java deps. Feed
+           ;; trivy the RESOLVED classpath jars instead: each jar carries its
+           ;; `META-INF/.../pom.properties`, so trivy identifies the exact
+           ;; group:artifact:version (full transitive set) and matches CVEs.
+           ;; The prod classpath (`-Spath`, no aliases) = what the uberjar ships.
+           ;; Git-deps resolve to source dirs, not jars, so they aren't covered
+           ;; here (first-party graphden repos — no third-party CVE surface).
+           (println "▶ trivy fs (CVE in JVM / deps.edn deps — resolved classpath jars)")
+           (let [cp (-> (p/sh "clojure" "-Spath") :out str/trim)
+                 jars (->> (str/split cp (re-pattern java.io.File/pathSeparator))
+                           (filter (fn [x] (str/ends-with? x ".jar")))
+                           (filter fs/exists?))
+                 scan-dir (str pwd "/target/dep-scan")]
+             (fs/create-dirs scan-dir)
+             (try
+               ;; Flatten each jar path to a unique name (trivy reads the jar's
+               ;; embedded coordinates, not the filename), so same-named jars
+               ;; from different groups can't collide in the scan dir.
+               (doseq [j jars]
+                 (fs/copy j (str scan-dir "/" (str/replace j (re-pattern "[/.]") "_") ".jar")
+                          {:replace-existing true}))
+               (println "  scanning" (count jars) "resolved jars")
+               ;; `rootfs`, NOT `fs`: trivy's `fs` mode only reads build
+               ;; lockfiles (pom.xml / package-lock.json) — it reports
+               ;; "language-specific files num=0" on a directory of loose jars.
+               ;; The `rootfs` scanner runs the Java `jar` analyzer, which reads
+               ;; each jar's embedded pom.properties (→ group:artifact:version)
+               ;; and matches CVEs. This is the mode that actually sees them.
+               (p/shell "docker" "run" "--rm"
+                        "-v" (str pwd ":/repo")
+                        "-v" "/tmp/trivy-cache:/root/.cache/"
+                        "-w" "/repo"
+                        "aquasec/trivy:0.70.0"
+                        "rootfs" "--severity" "HIGH,CRITICAL"
+                        "--scanners" "vuln"
+                        ;; honour the same documented-exception file as the
+                        ;; config pass, so an accepted / unfixable-transitive
+                        ;; JVM CVE can be listed rather than blocking the gate.
+                        "--ignorefile" ".trivyignore.yaml"
+                        "--exit-code" "1" "--quiet" "/repo/target/dep-scan")
+               (finally (fs/delete-tree scan-dir)))))}
 
   license-check
   {:doc "Audit npm dep licenses against the allowlist of permissive licenses. Fails on any package outside MIT/BSD/Apache/ISC/CC0/Unlicense family. NOTE: npm scope ONLY — these are dev/build tooling (biome, commitlint, stylelint, markdownlint) that never ships. The runtime-shipped JVM deps in deps.edn are NOT license-gated here (trivy scans them for CVEs, not licenses); audit those separately before relying on AGPL compatibility."

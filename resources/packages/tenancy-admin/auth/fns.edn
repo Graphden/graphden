@@ -574,6 +574,101 @@ a:hover{text-decoration:underline}
    :parent :html-ok-response
    :args {:body :_login-page-rendered}}
 
+  ;; ==========================================================================
+  ;; TENANT AUTH-FORM PARTIAL — overrides the core `GET /partials/auth-form`.
+  ;; The route-collection seam consults the tenancy router BEFORE the main app
+  ;; router, so a tenancy deployment serves THESE fields (username + password +
+  ;; org + create-account toggle) and a single-tenant build — which never loads
+  ;; this package — serves the core admin-password-only variant. No hidden
+  ;; markup to un-hide: each deployment ships exactly its own form.
+  ;; ==========================================================================
+  {:name :_tauth-username-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:id "auth-username-input" :type "text" :placeholder "Username"
+                          :autocomplete "username" :class "auth-username-input"}}
+          :children {:value []}}}
+
+  {:name :_tauth-password-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:id "auth-password-input" :type "password" :placeholder "Password"
+                          :autocomplete "current-password"}}
+          :children {:value []}}}
+
+  {:name :_tauth-eye-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "auth-toggle-visibility-btn" :type "button"
+                          :class "auth-toggle-visibility" :tabindex "-1" :title "Show password"}}
+          :children {:value []}}}
+
+  {:name :_tauth-input-wrap
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "auth-input-wrap"}}
+          :children [:_tauth-password-input :_tauth-eye-btn]}}
+
+  {:name :_tauth-org-input
+   :description "New-org field — hidden until the Create-account toggle flips signup mode (editor-auth.js applyAuthMode)."
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:id "auth-org-input" :type "text" :placeholder "New org name"
+                          :autocomplete "off" :class "auth-username-input hidden"}}
+          :children {:value []}}}
+
+  {:name :_tauth-save-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "auth-save-btn" :class "auth-popover-btn"}}
+          :children ["Sign in"]}}
+
+  {:name :_tauth-cancel-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "auth-cancel-btn" :class "auth-popover-btn"}}
+          :children ["Cancel"]}}
+
+  {:name :_tauth-popover-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "auth-popover-row"}}
+          :children [:_tauth-save-btn :_tauth-cancel-btn]}}
+
+  {:name :_tauth-error
+   :description "Error line — also carries the `data-auth-mode` marker editor-auth.js reads to pick the tenant submit path."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:id "auth-error" :class "auth-error hidden"
+                          :data-auth-mode "tenant"}}
+          :children {:value []}}}
+
+  {:name :_tauth-mode-toggle
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:value {:id "auth-mode-toggle" :class "auth-mode-toggle"}}
+          :children ["Create account"]}}
+
+  {:name :_tauth-form-fields
+   :parent :list
+   :args {:items [:_tauth-username-input :_tauth-input-wrap :_tauth-org-input
+                  :_tauth-popover-row :_tauth-error :_tauth-mode-toggle]}}
+
+  {:name :_tauth-form-html
+   :parent :render-hiccup
+   :args {:hiccup :_tauth-form-fields}}
+
+  {:name :_tauth-form-handler
+   :lambda-params []
+   :description "Ring handler for the TENANT GET /partials/auth-form — username/password/org fields as text/html. Unauthenticated (it IS the login form)."
+   :parent :html-ok-response
+   :args {:body :_tauth-form-html}}
+
+  {:name :auth-form-partial-route
+   :description "GET /partials/auth-form (tenant variant) — shadows the core admin-password partial via the route-collection seam."
+   :parent :get-route
+   :args {:path "/partials/auth-form" :handler :_tauth-form-handler}}
+
   ;; UNAUTHENTICATED — `:get-route` (no auth-required middleware): this page IS
   ;; how an unauthenticated visitor authenticates.
   {:name :login-page-route

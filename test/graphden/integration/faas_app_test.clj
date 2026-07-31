@@ -298,6 +298,23 @@
     (is (seq (str/trim (str (:body resp)))) "returns the minted session token")))
 
 
+(deftest tenant-auth-form-partial-shadows-the-core-one
+  ;; The tenancy router serves ITS OWN GET /partials/auth-form (username +
+  ;; password + org + create-account) ahead of the core admin-password-only
+  ;; variant — each deployment ships exactly its own form, nothing hidden.
+  (let [router (cr/execute-by-name *ctx* "tenancy-router" {})
+        resp (rc/dispatch router {:request-method :get :uri "/partials/auth-form"})]
+    (is (some? resp) "tenancy router shadows /partials/auth-form")
+    (is (= 200 (:status resp)))
+    (let [body (str (:body resp))]
+      (is (str/includes? body "auth-username-input") "username field present")
+      (is (str/includes? body "auth-org-input") "org field present")
+      (is (str/includes? body "data-auth-mode=\"tenant\"")
+          "the served form declares the tenant submit mode")
+      (is (not (str/includes? body "Admin password"))
+          "no single-tenant wording in the tenant variant"))))
+
+
 (deftest login-page-serves-the-public-signup-form
   ;; GET /login is the self-serve entry a new cloud visitor needs — an
   ;; UNAUTHENTICATED full HTML page (create-org / sign-in) served by the

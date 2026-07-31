@@ -44,9 +44,16 @@ function clearAuthPassword() {
 
 // Multi-tenant deployments authenticate with username + password against
 // POST /api/login (the §4.1 user model) and store the returned session token
-// as the bearer. Single-tenant uses a bare admin password. The body carries
-// `gd-tenancy` once the first response reports tenancy capabilities.
+// as the bearer. Single-tenant uses a bare admin password.
+//
+// The MODE ARRIVES WITH THE FORM: the served /partials/auth-form variant
+// (core = admin-password only; the tenancy addon shadows the path with the
+// username/org variant) stamps `data-auth-mode` on its error div, captured at
+// mount. Before the fields have mounted (the lock tooltip renders at boot)
+// fall back to the `gd-tenancy` capability class.
+let authServedMode = null; // 'admin' | 'tenant' — read off the mounted partial
 function loginIsTenant() {
+  if (authServedMode) return authServedMode === 'tenant';
   return document.body.classList.contains('gd-tenancy');
 }
 
@@ -213,6 +220,11 @@ async function mountAuthPopoverFields() {
     return false;
   }
   _authFieldsMounted = true;
+
+  // The served variant declares its submit mode (core = "admin"; the tenancy
+  // addon's shadowing partial = "tenant") — see loginIsTenant().
+  const modeEl = popover.querySelector('[data-auth-mode]');
+  authServedMode = modeEl ? modeEl.getAttribute('data-auth-mode') : 'admin';
 
   // The eye button ships empty from the partial — fill its (toggling) SVG here.
   const eyeBtn = document.getElementById('auth-toggle-visibility-btn');

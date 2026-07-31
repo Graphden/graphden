@@ -152,7 +152,14 @@
       (is (not (str/includes? body "<request-method>"))
           "the ring request must NOT leak into the markup")
       (is (not (str/includes? body "reitit.core"))
-          "the router object must NOT leak into the markup"))))
+          "the router object must NOT leak into the markup")
+      ;; SINGLE-TENANT build carries NO tenant markup at all (the tenant
+      ;; variant ships with the tenancy addon, which shadows this path) —
+      ;; the org/username fields must not exist here even hidden.
+      (is (not (str/includes? body "auth-org-input")) "no org field in core")
+      (is (not (str/includes? body "New org name")) "no org placeholder in core")
+      (is (str/includes? body "data-auth-mode=\"admin\"")
+          "the served form declares the admin submit mode"))))
 
 
 (deftest auth-off-serves-protected-routes-openly-test

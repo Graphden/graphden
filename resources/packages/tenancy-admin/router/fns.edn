@@ -20,7 +20,7 @@
                   :set-org-handler-route :set-org-execution-mode-route
                   :set-org-plan-route
                   :set-my-app-handler-route :verify-my-domain-route
-                  :login-page-route
+                  :login-page-route :auth-form-partial-route
                   :login-route :signup-route :demo-start-route
                   :logout-route :logout-all-route
                   :invite-create-route :invite-signup-route

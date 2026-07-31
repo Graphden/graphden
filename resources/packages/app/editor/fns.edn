@@ -692,15 +692,6 @@
   ;; empty — JS fills its SVG (it toggles). Rendered as a `:list` FRAGMENT
   ;; (no wrapper) so the fields stay direct flex children of `.auth-popover`.
   ;; =====================================================================
-  {:name :_auth-username-input
-   :parent :hiccup
-   :args {:tag {:value "input"}
-          :attrs {:value {:id "auth-username-input" :type "text" :placeholder "Username"
-                          :autocomplete "username" :class "auth-username-input hidden"}}
-          ;; VOID element — children pinned empty, or the free
-          ;; :children slot swallows the caller's conveyed args (the ring
-          ;; request rendered INSIDE the input — the popover-garbage bug).
-          :children {:value []}}}
 
   {:name :_auth-password-input
    :parent :hiccup
@@ -725,15 +716,6 @@
    :args {:tag {:value "div"} :attrs {:value {:class "auth-input-wrap"}}
           :children [:_auth-password-input :_auth-eye-btn]}}
 
-  {:name :_auth-org-input
-   :parent :hiccup
-   :args {:tag {:value "input"}
-          :attrs {:value {:id "auth-org-input" :type "text" :placeholder "New org name"
-                          :autocomplete "off" :class "auth-username-input hidden"}}
-          ;; VOID element — children pinned empty, or the free
-          ;; :children slot swallows the caller's conveyed args (the ring
-          ;; request rendered INSIDE the input — the popover-garbage bug).
-          :children {:value []}}}
 
   {:name :_auth-save-btn
    :parent :hiccup
@@ -753,21 +735,20 @@
 
   {:name :_auth-error
    :parent :hiccup
-   :args {:tag {:value "div"} :attrs {:value {:id "auth-error" :class "auth-error hidden"}}
+   :args {:tag {:value "div"} :attrs {:value {:id "auth-error" :class "auth-error hidden"
+                                              :data-auth-mode "admin"}}
           ;; Text set by JS — children pinned empty (free slot leaks conveyed args).
           :children {:value []}}}
 
-  {:name :_auth-mode-toggle
-   :parent :hiccup
-   :args {:tag {:value "a"} :attrs {:value {:id "auth-mode-toggle" :class "auth-mode-toggle hidden"}}
-          ;; Text set by JS — children pinned empty (free slot leaks conveyed args).
-          :children {:value []}}}
 
+  ;; SINGLE-TENANT fields ONLY (admin password). The tenant variant
+  ;; (username + org + create-account) ships WITH the tenancy addon, which
+  ;; overrides this same /partials/auth-form path via the route-collection
+  ;; seam — so a self-hosted build carries no tenant markup at all.
   {:name :_auth-form-fields
-   :description "The auth popover fields as a fragment (rendered directly into `#auth-popover`, staying direct flex children)."
+   :description "The single-tenant auth popover fields (admin password + actions + error) as a fragment (rendered directly into `#auth-popover`, staying direct flex children). The `data-auth-mode` marker on the error div tells editor-auth.js which submit path the served form expects."
    :parent :list
-   :args {:items [:_auth-username-input :_auth-input-wrap :_auth-org-input
-                  :_auth-popover-row :_auth-error :_auth-mode-toggle]}}
+   :args {:items [:_auth-input-wrap :_auth-popover-row :_auth-error]}}
 
   {:name :_auth-form-html
    :parent :render-hiccup

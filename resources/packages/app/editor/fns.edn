@@ -137,12 +137,27 @@
             ;; than the sidebar's heading.
             [:aside {:id "side-menu" :aria-label "Function browser"}
              [:div {:class "menu-header"}
-              [:h2 "Graphden"]
-              ;; Right-side header buttons. `editor-prefs.js` mounts
-              ;; theme + collapse buttons here on DOMContentLoaded;
-              ;; `editor-auth.js` mounts the lock + popover next to
-              ;; them. The "+ New namespace" affordance lives at the
-              ;; bottom of `#entity-list`.
+              ;; Brand row — the λ mark (three nodes + two edges, docs/brand)
+              ;; over `currentColor` so `.menu-logo`'s `color: var(--accent)`
+              ;; themes it (Graphden Blue light / #4D94FF dark) — beside the
+              ;; wordmark.
+              [:div {:class "menu-brand"}
+               [:svg.menu-logo {:viewBox "0 0 32 32" :fill "none"
+                                :width "22" :height "22" :aria-hidden "true"}
+                [:g {:stroke "currentColor" :stroke-width "3" :stroke-linecap "round"}
+                 [:line {:x1 "9" :y1 "6" :x2 "25" :y2 "26"}]
+                 [:line {:x1 "17" :y1 "16" :x2 "8" :y2 "26"}]]
+                [:g {:fill "currentColor"}
+                 [:circle {:cx "9" :cy "6" :r "3"}]
+                 [:circle {:cx "25" :cy "26" :r "3"}]
+                 [:circle {:cx "8" :cy "26" :r "3"}]]]
+               [:h2 "Graphden"]]
+              ;; Toolbar row — its OWN row so a wide branch chip or the
+              ;; staggered JS mounts can't push the title around. `editor-
+              ;; prefs.js` mounts theme + collapse here on DOMContentLoaded;
+              ;; `editor-branches.js` the branch chip; `editor-auth.js` the
+              ;; lock. The "+ New namespace" affordance lives at the bottom
+              ;; of `#entity-list`.
               [:div {:class "menu-header-actions"}
                [:div {:id "prefs-mount"}]
                [:div {:id "branch-mount"}]

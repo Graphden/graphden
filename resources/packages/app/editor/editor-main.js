@@ -406,9 +406,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // eslint-disable-next-line no-console
     console.error('initGraph failed', err);
     const banner = document.createElement('div');
-    banner.style.cssText =
-      'position:fixed;top:0;left:0;right:0;z-index:99999;' +
-      'padding:8px 16px;background:#c0392b;color:#fff;font:14px sans-serif;';
+    banner.className = 'editor-fatal-banner';
     banner.textContent =
       'Editor failed to load graph data. Check network / server logs, then reload.';
     document.body.appendChild(banner);

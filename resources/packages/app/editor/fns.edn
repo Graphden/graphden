@@ -408,7 +408,9 @@
    :args {:hiccup :page}}
 
   {:name :_editor-handler
-   :lambda-params [:default]
+   ;; [] — static page; [:default] was a leaked derived free, and a 1-param
+   ;; shape drops the raw ring request into that slot on the bare-route path.
+   :lambda-params []
    :parent :html-ok-response
    :args {:body :_editor-rendered-page}}
 
@@ -429,7 +431,7 @@
    :args {:value :script}}
 
   {:name :_editor-js-handler
-   :lambda-params [:default]
+   :lambda-params []
    :description "Ring handler for `GET /assets/editor.js` — returns the concatenated editor JS bundle (with `__BUILD_HASH__` substituted) as `application/javascript` with `Cache-Control: public, max-age=31536000, immutable`."
    :parent :immutable-js-ok-response
    :args {:body :_editor-js-body}}
@@ -694,19 +696,29 @@
    :parent :hiccup
    :args {:tag {:value "input"}
           :attrs {:value {:id "auth-username-input" :type "text" :placeholder "Username"
-                          :autocomplete "username" :class "auth-username-input hidden"}}}}
+                          :autocomplete "username" :class "auth-username-input hidden"}}
+          ;; VOID element — children pinned empty, or the free
+          ;; :children slot swallows the caller's conveyed args (the ring
+          ;; request rendered INSIDE the input — the popover-garbage bug).
+          :children {:value []}}}
 
   {:name :_auth-password-input
    :parent :hiccup
    :args {:tag {:value "input"}
           :attrs {:value {:id "auth-password-input" :type "password" :placeholder "Admin password"
-                          :autocomplete "off"}}}}
+                          :autocomplete "off"}}
+          ;; VOID element — children pinned empty, or the free
+          ;; :children slot swallows the caller's conveyed args (the ring
+          ;; request rendered INSIDE the input — the popover-garbage bug).
+          :children {:value []}}}
 
   {:name :_auth-eye-btn
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs {:value {:id "auth-toggle-visibility-btn" :type "button"
-                          :class "auth-toggle-visibility" :tabindex "-1" :title "Show password"}}}}
+                          :class "auth-toggle-visibility" :tabindex "-1" :title "Show password"}}
+          ;; Glyph set by JS — children pinned empty (free slot leaks conveyed args).
+          :children {:value []}}}
 
   {:name :_auth-input-wrap
    :parent :hiccup
@@ -717,7 +729,11 @@
    :parent :hiccup
    :args {:tag {:value "input"}
           :attrs {:value {:id "auth-org-input" :type "text" :placeholder "New org name"
-                          :autocomplete "off" :class "auth-username-input hidden"}}}}
+                          :autocomplete "off" :class "auth-username-input hidden"}}
+          ;; VOID element — children pinned empty, or the free
+          ;; :children slot swallows the caller's conveyed args (the ring
+          ;; request rendered INSIDE the input — the popover-garbage bug).
+          :children {:value []}}}
 
   {:name :_auth-save-btn
    :parent :hiccup
@@ -737,11 +753,15 @@
 
   {:name :_auth-error
    :parent :hiccup
-   :args {:tag {:value "div"} :attrs {:value {:id "auth-error" :class "auth-error hidden"}}}}
+   :args {:tag {:value "div"} :attrs {:value {:id "auth-error" :class "auth-error hidden"}}
+          ;; Text set by JS — children pinned empty (free slot leaks conveyed args).
+          :children {:value []}}}
 
   {:name :_auth-mode-toggle
    :parent :hiccup
-   :args {:tag {:value "a"} :attrs {:value {:id "auth-mode-toggle" :class "auth-mode-toggle hidden"}}}}
+   :args {:tag {:value "a"} :attrs {:value {:id "auth-mode-toggle" :class "auth-mode-toggle hidden"}}
+          ;; Text set by JS — children pinned empty (free slot leaks conveyed args).
+          :children {:value []}}}
 
   {:name :_auth-form-fields
    :description "The auth popover fields as a fragment (rendered directly into `#auth-popover`, staying direct flex children)."
@@ -754,7 +774,11 @@
    :args {:hiccup :_auth-form-fields}}
 
   {:name :_partial-auth-form-handler
-   :lambda-params [:children]
+   ;; [] — the popover fields are STATIC markup; the old [:children] param
+   ;; (a leaked free from the unpinned inputs) made the 1-arg shape-callable
+   ;; drop the whole ring request into :children — rendered INSIDE the
+   ;; inputs as garbage (<request-method>…, the reitit router object).
+   :lambda-params []
    :description "Ring handler for GET /partials/auth-form — the login/signup popover fields as text/html. Unauthenticated (it IS the login form). editor-auth.js mounts it into #auth-popover on first open."
    :parent :html-ok-response
    :args {:body :_auth-form-html}}
@@ -4825,7 +4849,7 @@
    :args {:hiccup :_partial-rfx-strip}}
 
   {:name :_partial-execute-result-effects-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for `GET /partials/execute-result-effects?runtime=db,io&declared=db` — returns the runtime-effects strip hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the result host below the result body."
    :parent :html-ok-response
    :args {:body :_partial-rfx-html}}

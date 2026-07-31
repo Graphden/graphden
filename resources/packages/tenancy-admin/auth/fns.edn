@@ -67,7 +67,7 @@
    :args {:body :_login-token-text}}
 
   {:name :_login-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/login — 200 + the minted session token, or 401 on bad credentials (blank token)."
    :parent :if
    :args {:test :_login-token-blank? :then :_auth-401 :else :_login-200}}
@@ -154,7 +154,7 @@
    :args {:body :_signup-429-body}}
 
   {:name :_signup-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/signup — 429 when rate-limited, else 200 + the new session token, or 401 when signup failed (taken / blank)."
    :parent :if
    :args {:test :_signup-rate-limited? :then :_signup-429 :else :_signup-token-result}}
@@ -328,7 +328,7 @@
    :args {:test :_invite-redeem-token-blank? :then :_auth-401 :else :_invite-redeem-200}}
 
   {:name :_invite-redeem-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/invite-signup — 200 + session token, 401 on bad/expired invite or taken username, 429 over the per-IP limit."
    :parent :if
    :args {:test :_invite-redeem-rate-limited? :then :_signup-429 :else :_invite-redeem-token-result}}
@@ -430,6 +430,12 @@ input:focus{outline:none;border-color:var(--blue-light)}
 .submit{padding:11px;border:none;border-radius:8px;background:linear-gradient(90deg,var(--blue),var(--blue-deep));color:#fff;font:inherit;font-weight:600;cursor:pointer}
 .submit:hover{filter:brightness(1.1)}
 .err{color:#ff8a8a;font-size:.85rem;min-height:1.2em;text-align:center;margin-top:4px}
+.meter{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:-4px}
+.meter i{display:block;height:100%;width:0;border-radius:3px;transition:width .2s,background .2s}
+.meter.weak i{width:33%;background:#e5484d}
+.meter.medium i{width:66%;background:#e0a94a}
+.meter.strong i{width:100%;background:#3fb950}
+.meter-label{font-size:.75rem;color:var(--muted);min-height:1em;margin-top:-6px}
 .hint{color:var(--muted);font-size:.8rem;text-align:center;margin-top:16px}
 a{color:var(--blue-light);text-decoration:none}
 a:hover{text-decoration:underline}
@@ -476,8 +482,31 @@ a:hover{text-decoration:underline}
       })
       .catch(function(){err.textContent='Network error — please try again.';});
   }
+  var pw=document.getElementById('su-pass');
+  var meter=document.getElementById('su-meter');
+  var label=document.getElementById('su-meter-label');
+  function score(v){
+    if(!v)return null;
+    var s=0;
+    if(v.length>=8)s++;
+    if(v.length>=12)s++;
+    if(/[a-z]/.test(v)&&/[A-Z]/.test(v))s++;
+    if(/[0-9]/.test(v))s++;
+    if(/[^A-Za-z0-9]/.test(v))s++;
+    return s<=2?'weak':(s<=3?'medium':'strong');
+  }
+  pw.oninput=function(){
+    var r=score(pw.value);
+    meter.className='meter'+(r?' '+r:'');
+    label.textContent=r?({weak:'Weak password',medium:'Medium password',strong:'Strong password'})[r]:'';
+  };
   document.getElementById('form-login').onsubmit=function(e){submit(this,'/api/login',e);};
-  document.getElementById('form-signup').onsubmit=function(e){submit(this,'/api/signup',e);};
+  document.getElementById('form-signup').onsubmit=function(e){
+    e.preventDefault();
+    if(pw.value.length<8){err.textContent='Password must be at least 8 characters.';return;}
+    if(pw.value!==document.getElementById('su-pass2').value){err.textContent='Passwords do not match.';return;}
+    submit(this,'/api/signup',e);
+  };
 })();
 "}}
 
@@ -520,6 +549,10 @@ a:hover{text-decoration:underline}
             [:input {:id "su-user" :name "username" :autocomplete "username" :required "required"}]
             [:label {:for "su-pass"} "Password"]
             [:input {:id "su-pass" :name "password" :type "password" :autocomplete "new-password" :required "required"}]
+            [:div {:id "su-meter" :class "meter"} [:i]]
+            [:p {:id "su-meter-label" :class "meter-label"}]
+            [:label {:for "su-pass2"} "Confirm password"]
+            [:input {:id "su-pass2" :type "password" :autocomplete "new-password" :required "required"}]
             [:button {:type "submit" :class "submit"} "Create account"]]
            [:p {:id "login-err" :class "err"}]
            [:p {:class "hint"} "Self-hosting? "

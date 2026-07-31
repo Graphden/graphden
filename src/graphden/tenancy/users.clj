@@ -345,7 +345,11 @@
     ;; Reserved platform labels (app / www / api / …) can never become tenant
     ;; orgs — the org-resolver refuses to route them, and allowing signup would
     ;; let someone squat a future platform host. Same nil-return as "taken".
+    ;; Min password length (self-serve only — operator create-user / invite
+    ;; flows set their own policy): 8+ chars, matching the /login page's
+    ;; client-side check so the server is the real gate, not the JS.
     (when (and (not (str/blank? username)) (not (str/blank? password))
+               (>= (count password) 8)
                (not (str/blank? org)) (not= org tc/public-org)
                (not (subdomain/reserved-org-name? org)))
       (tc/with-org tc/public-org

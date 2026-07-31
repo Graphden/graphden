@@ -239,11 +239,14 @@
   ;; platform host. Same nil-return as a taken name.
   (let [storage (mem-storage)
         ctx {:storage storage}]
-    (is (nil? (users/signup! ctx "alice" "pw" "app")))
-    (is (nil? (users/signup! ctx "alice" "pw" "WWW")) "case-insensitive")
+    (is (nil? (users/signup! ctx "alice" "longpass1" "app")))
+    (is (nil? (users/signup! ctx "alice" "longpass1" "WWW")) "case-insensitive")
     (is (empty? (sp/query-entities storage :org {})) "nothing was created")
-    (testing "an ordinary name still signs up"
-      (is (some? (users/signup! ctx "alice" "pw" "acme"))))))
+    (testing "a short password (< 8 chars) is refused"
+      (is (nil? (users/signup! ctx "alice" "short7c" "acme")))
+      (is (empty? (sp/query-entities storage :org {})) "nothing was created"))
+    (testing "an ordinary name + 8-char password still signs up"
+      (is (some? (users/signup! ctx "alice" "longpass1" "acme"))))))
 
 
 (deftest signup-grants-creator-org-admin
@@ -254,7 +257,7 @@
   ;; bounded to their own org, so it's org-admin, not platform-admin.
   (let [storage (mem-storage)
         ctx {:storage storage}
-        {:keys [user org]} (users/signup! ctx "alice" "pw" "acme")]
+        {:keys [user org]} (users/signup! ctx "alice" "longpass1" "acme")]
     (is (= "alice" user))
     (is (= "acme" org))
     (let [u (first (sp/query-entities storage :user {:username "alice"}))

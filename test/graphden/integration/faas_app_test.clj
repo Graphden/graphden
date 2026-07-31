@@ -258,6 +258,46 @@
       (is (nil? (rc/dispatch nil {:request-method :get :uri "/partials/grants-admin"}))))))
 
 
+(deftest signup-over-the-wire-mints-an-org
+  ;; THE LIVE-WIRE PATH: reitit invokes the compiled route handler with the raw
+  ;; ring request (positional), exactly as production does — unlike the other
+  ;; seam tests, which call cr/execute with an explicit {:request …} arg map.
+  ;; Reproduces the launch-day cloud bug ("That username or organization is
+  ;; already taken" for ANY input): the form fields must reach signup! intact.
+  (let [seam-ctx (assoc *ctx* :user-ops {:signup (fn [c u p o & _] (users/signup! c u p o))
+                                         :login (fn [c u p & _] (users/login! c u p))})
+        router (cr/execute-by-name seam-ctx "tenancy-router" {})
+        resp (rc/dispatch router {:request-method :post :uri "/api/signup"
+                                  :headers {"content-type" "application/x-www-form-urlencoded"}
+                                  :body "username=wireuser1&password=wirepw12345&org=wireorg1"
+                                  :query-string nil})]
+    (is (some? resp) "tenancy router matched POST /api/signup")
+    (is (= 200 (:status resp))
+        (str "signup over the wire succeeds; got " (:status resp) " body=" (pr-str (:body resp))))
+    (is (seq (str/trim (str (:body resp)))) "returns the minted session token")
+    (is (= 1 (count (sp/query-entities (:storage *ctx*) :org {:name "wireorg1"})))
+        "the org row was created")))
+
+
+(deftest login-over-the-wire-returns-a-session-token
+  ;; Same live-wire path as signup above, for POST /api/login: the handler
+  ;; declared [:request :limit] and broke identically (fields parsed blank →
+  ;; 401 for VALID credentials). Create the account via the core op, then log
+  ;; in over the wire.
+  (let [_ (tc/with-org tc/public-org
+                       (users/signup! *ctx* "wirelogin1" "wirepw999" "wireloginorg"))
+        seam-ctx (assoc *ctx* :user-ops {:login (fn [c u p & _] (users/login! c u p))})
+        router (cr/execute-by-name seam-ctx "tenancy-router" {})
+        resp (rc/dispatch router {:request-method :post :uri "/api/login"
+                                  :headers {"content-type" "application/x-www-form-urlencoded"}
+                                  :body "username=wirelogin1&password=wirepw999"
+                                  :query-string nil})]
+    (is (= 200 (:status resp))
+        (str "valid credentials log in over the wire; got " (:status resp)
+             " body=" (pr-str (:body resp))))
+    (is (seq (str/trim (str (:body resp)))) "returns the minted session token")))
+
+
 (deftest login-page-serves-the-public-signup-form
   ;; GET /login is the self-serve entry a new cloud visitor needs — an
   ;; UNAUTHENTICATED full HTML page (create-org / sign-in) served by the
@@ -775,7 +815,7 @@
                                          :logout users/logout! :signup users/signup!})
         provider (tauth/storage-token-provider (:storage *ctx*))]
     (testing "a fresh signup creates the org + user and returns a working session token"
-      (let [token (:token (cr/execute seam-ctx signup-id {:username "newbie" :password "pw-new" :org "newco"}))]
+      (let [token (:token (cr/execute seam-ctx signup-id {:username "newbie" :password "pw-newbie1" :org "newco"}))]
         (is (string? token))
         (is (some? (first (sp/query-entities (:storage *ctx*) :org {:name "newco"}))))
         (is (some? (first (sp/query-entities (:storage *ctx*) :user {:username "newbie"}))))

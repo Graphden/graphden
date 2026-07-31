@@ -139,6 +139,22 @@
                "got status=" (:status resp))))))
 
 
+(deftest auth-form-partial-renders-clean-markup-test
+  ;; GET /partials/auth-form is a bare (unauthenticated) route, so its handler
+  ;; is invoked with the RAW ring request. It used to declare :lambda-params
+  ;; [:children] — the 1-arg shape dropped the whole request map into the
+  ;; inputs' free :children slot, rendering <request-method>/<uri>/the reitit
+  ;; router object INSIDE the <input> elements (the popover-garbage bug).
+  (let [resp (get-with-headers "/partials/auth-form" {})]
+    (is (= 200 (:status resp)))
+    (let [body (str (:body resp))]
+      (is (str/includes? body "auth-password-input") "the password field renders")
+      (is (not (str/includes? body "<request-method>"))
+          "the ring request must NOT leak into the markup")
+      (is (not (str/includes? body "reitit.core"))
+          "the router object must NOT leak into the markup"))))
+
+
 (deftest auth-off-serves-protected-routes-openly-test
   ;; PROVIDER-AWARE MIDDLEWARE (B3): with NO `:auth-provider` on the ctx auth is
   ;; OFF, so an auth-required route serves WITHOUT any token instead of 401 —

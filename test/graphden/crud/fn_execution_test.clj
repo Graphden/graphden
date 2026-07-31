@@ -28,6 +28,7 @@
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
+    [graphden.crud.fn-execution.stats :as exec-stats]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -39,6 +40,7 @@
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.schema.services.schema :as svcs]
+    [graphden.schema.stats.schema :as stats-schema]
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
@@ -61,6 +63,10 @@
       ;; (exercised through the graph in the integration suite) —
       ;; fixture mirrors the system/core.clj chain.
       (svcs/extend-builder)
+      ;; :usage-stat — the Phase C1 rollups apply-execute bumps at every
+      ;; terminal transition; without the table each bump degrades to a
+      ;; warn-log and the rollup tests can't roundtrip.
+      (stats-schema/extend-builder)
       (ds/build)))
 
 
@@ -234,6 +240,52 @@
         (testing "no fn-execution row was persisted (pure + ¬persist?)"
           (is (empty? (sp/query-entities storage :fn-execution {})))))
       (finally nil))))
+
+
+(deftest usage-rollup-bump-and-read-roundtrip-test
+  ;; Phase C1: the pre-aggregated :usage-stat counters. bump! upserts one row
+  ;; per (hour, org, fn, status) and increments in place; fn-stats aggregates
+  ;; a trailing window scoped to ONE org; sweep-stats! enforces retention.
+  (let [storage (create-full-storage)
+        pool (:pool @shared-storage)
+        fn-id (random-uuid)
+        now (System/currentTimeMillis)]
+    (testing "three bumps → one aggregate: 2 succeeded + 1 failed, durations summed"
+      (exec-stats/bump! pool {:org nil :fn-id fn-id :status :succeeded :duration-ms 10 :now-ms now})
+      (exec-stats/bump! pool {:org nil :fn-id fn-id :status :succeeded :duration-ms 20 :now-ms now})
+      (exec-stats/bump! pool {:org nil :fn-id fn-id :status :failed :duration-ms 5 :now-ms now})
+      (is (= {:runs 3 :failed 1 :cancelled 0 :duration-ms-sum 35}
+             (exec-stats/fn-stats pool nil fn-id 7))))
+    (testing "org scoping — another org's bumps don't leak into public's read"
+      (exec-stats/bump! pool {:org "acme" :fn-id fn-id :status :succeeded :duration-ms 1 :now-ms now})
+      (is (= 3 (:runs (exec-stats/fn-stats pool nil fn-id 7))) "public unchanged")
+      (is (= 1 (:runs (exec-stats/fn-stats pool "acme" fn-id 7))) "acme sees its own"))
+    (testing "org-stats lists the busiest fns for one org"
+      (let [rows (exec-stats/org-stats pool nil 7 10)]
+        (is (= [fn-id] (mapv :fn-id rows)))
+        (is (= 3 (:runs (first rows))))))
+    (testing "retention sweep deletes old buckets only"
+      (let [old-ms (- now (* 120 24 60 60 1000))]
+        (exec-stats/bump! pool {:org nil :fn-id fn-id :status :succeeded :now-ms old-ms})
+        (is (= 1 (exec-stats/sweep-stats! pool 90)) "exactly the old bucket went")
+        (is (= 3 (:runs (exec-stats/fn-stats pool nil fn-id 7))) "recent rows survive"))
+      (is storage))))
+
+
+(deftest apply-execute-bumps-the-usage-rollup-test
+  ;; End-to-end: a normal apply-execute terminal transition writes the rollup —
+  ;; the ctx carries :pg-storage (the raw pool), mirroring prod.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "rollup")
+        c (assoc (test-ctx storage) :pg-storage @shared-storage)
+        result (apply-and-await!
+                 c {:fn-id (:id composed)
+                    :args {:a 2 :b 3}
+                    :timeout-ms 5000 :persist? false})]
+    (is (= :succeeded (:status result)))
+    (let [stats (exec-stats/fn-stats (:pool @shared-storage) nil (:id composed) 7)]
+      (is (= 1 (:runs stats)) "the inline arm bumped exactly once")
+      (is (zero? (:failed stats))))))
 
 
 (deftest apply-stamps-touched-secret-on-rows-that-feed-side-effecting-sinks-test

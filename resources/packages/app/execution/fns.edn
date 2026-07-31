@@ -689,6 +689,13 @@
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
+  {:name :usage-fn-stats
+   :description "7-day-style usage rollup for one fn from the pre-aggregated `:usage-stat` table — `{:runs :failed :cancelled :avg-ms}`, counts + durations ONLY (never args/results/errors), scoped to the CURRENT org (tenant → own runs; public → platform). Zeros when no rows or no pool."
+   :args {:fn-id {:type :uuid :description "The fn whose executions to aggregate."}
+          :days {:type :int :description "Trailing window in days (e.g. 7)."}}
+   :return-type {:runs :int :failed :int :cancelled :int :avg-ms :int}
+   :effects #{:db}}
+
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
    :args {:id {:type :nullable-uuid :description "Target execution id."}}

@@ -31,7 +31,9 @@
   ;; provider is wired on the ctx and returns a bool. It handles NO caller
   ;; content (no `[:secret …]` input flows through it), so it does NOT declare
   ;; `:taint-propagate?` and stays OUT of `golden-tainted`.
-  283)
+  ;; +1 (284): `:usage-fn-stats` (app.execution) — aggregate rollup read
+  ;; (counts + durations); no caller content passes through → not tainting.
+  284)
 
 
 (def ^:private golden-tainted

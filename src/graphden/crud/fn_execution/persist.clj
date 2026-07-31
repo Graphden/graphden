@@ -18,6 +18,7 @@
     [clojure.set]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.crud.fn-execution.stats :as stats]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
@@ -647,6 +648,19 @@
                    execution-id (vec d) (vec r) (vec widened) (vec unobserved))))))
 
 
+(defn bump-usage!
+  "Rollup increment for one terminal execution (Phase C1). `stats-ctx` is
+   `{:pool raw-datasource :org org-or-nil :start-ms submit-epoch-ms}` (nil →
+   no-op: caller had no pool). Duration = now - start-ms when known."
+  [stats-ctx fn-id status]
+  (when-let [pool (:pool stats-ctx)]
+    (stats/bump! pool {:org (:org stats-ctx)
+                       :fn-id fn-id
+                       :status status
+                       :duration-ms (when-let [t0 (:start-ms stats-ctx)]
+                                      (- (System/currentTimeMillis) (long t0)))})))
+
+
 (defn record-completion!
   "Background handler: when future resolves (success/fail/interrupt),
    write outcome to the row + clean up registry. `trace-atom` is the
@@ -659,38 +673,44 @@
    `:secret`-marked. This is the async-completion path; the sync
    inline-success path in `apply-execute` redacts independently. Both
    write the same shape to the row."
-  [storage execution-id fn-id ^java.util.concurrent.Future fut trace-atom declared-effects]
-  (future
-    (try
-      (let [result @fut
-            runtime-eff (snapshot-runtime-effects trace-atom)]
-        (log-effect-drift! execution-id declared-effects runtime-eff)
-        (write-finished! storage execution-id
-                         (->> (cond-> {:status :succeeded :result result}
-                                runtime-eff (assoc :runtime-effects runtime-eff))
-                              (stamp-touched-secret fn-id)
-                              (redact-outcome fn-id)
-                              (scrub-outcome fn-id))))
-      (catch java.util.concurrent.ExecutionException ee
-        (let [cause (java.util.concurrent.ExecutionException/.getCause ee)
-              runtime-eff (snapshot-runtime-effects trace-atom)]
-          (log-effect-drift! execution-id declared-effects runtime-eff)
-          (if (instance? InterruptedException cause)
-            (write-finished! storage execution-id
-                             (cond-> {:status :cancelled}
-                               runtime-eff (assoc :runtime-effects runtime-eff)))
-            (write-finished! storage execution-id
-                             (->> (cond-> {:status :failed
-                                           :error (or (ex-message cause) (str cause))
-                                           :error-data (when (ex-data cause)
-                                                         (ex-data cause))}
-                                    runtime-eff (assoc :runtime-effects runtime-eff))
-                                  (stamp-touched-secret fn-id)
-                                  (redact-outcome fn-id)
-                                  (scrub-outcome fn-id))))))
-      (catch java.util.concurrent.CancellationException _
-        (write-finished! storage execution-id {:status :cancelled}))
-      (catch Exception e
-        (log/warn e "Unexpected error reaping execution" execution-id))
-      (finally
-        (unregister-future! execution-id)))))
+  ([storage execution-id fn-id fut trace-atom declared-effects]
+   (record-completion! storage execution-id fn-id fut trace-atom declared-effects nil))
+  ([storage execution-id fn-id ^java.util.concurrent.Future fut trace-atom declared-effects stats-ctx]
+   (future
+     (try
+       (let [result @fut
+             runtime-eff (snapshot-runtime-effects trace-atom)]
+         (log-effect-drift! execution-id declared-effects runtime-eff)
+         (write-finished! storage execution-id
+                          (->> (cond-> {:status :succeeded :result result}
+                                 runtime-eff (assoc :runtime-effects runtime-eff))
+                               (stamp-touched-secret fn-id)
+                               (redact-outcome fn-id)
+                               (scrub-outcome fn-id)))
+         (bump-usage! stats-ctx fn-id :succeeded))
+       (catch java.util.concurrent.ExecutionException ee
+         (let [cause (java.util.concurrent.ExecutionException/.getCause ee)
+               runtime-eff (snapshot-runtime-effects trace-atom)]
+           (log-effect-drift! execution-id declared-effects runtime-eff)
+           (if (instance? InterruptedException cause)
+             (do (write-finished! storage execution-id
+                                  (cond-> {:status :cancelled}
+                                    runtime-eff (assoc :runtime-effects runtime-eff)))
+                 (bump-usage! stats-ctx fn-id :cancelled))
+             (do (write-finished! storage execution-id
+                                  (->> (cond-> {:status :failed
+                                                :error (or (ex-message cause) (str cause))
+                                                :error-data (when (ex-data cause)
+                                                              (ex-data cause))}
+                                         runtime-eff (assoc :runtime-effects runtime-eff))
+                                       (stamp-touched-secret fn-id)
+                                       (redact-outcome fn-id)
+                                       (scrub-outcome fn-id)))
+                 (bump-usage! stats-ctx fn-id :failed)))))
+       (catch java.util.concurrent.CancellationException _
+         (write-finished! storage execution-id {:status :cancelled})
+         (bump-usage! stats-ctx fn-id :cancelled))
+       (catch Exception e
+         (log/warn e "Unexpected error reaping execution" execution-id))
+       (finally
+         (unregister-future! execution-id))))))

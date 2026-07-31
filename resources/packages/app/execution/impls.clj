@@ -6,10 +6,12 @@
   (:require
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.crud.fn-execution.stats :as exec-stats]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.services.reconciler :as recon]))
+    [graphden.services.reconciler :as recon]
+    [graphden.tenancy.context :as tc]))
 
 
 (defbase resolve-fn
@@ -148,6 +150,22 @@
 ;; atom is a 1-3-line wrap over the helpers above.
 
 
+(defbase usage-fn-stats
+  [fn-id days]
+  ;; Phase C1 rollup read — counts + durations only (never args/results), so
+  ;; it is privacy-safe for any caller that can see the fn. Scoped to the
+  ;; CURRENT org explicitly (tenant sees their own runs; public/single-tenant
+  ;; sees the platform's). :avg-ms is shaped here (boundary coercion) so the
+  ;; graph consumer needs no divide-by-zero dance. nil pool (bare ctx) → zeros.
+  (let [{:keys [runs failed cancelled duration-ms-sum]
+         :or {runs 0 failed 0 cancelled 0 duration-ms-sum 0}}
+        (exec-stats/fn-stats (:pool (:pg-storage ctx)) (tc/current-org) fn-id days)]
+    {:runs runs
+     :failed failed
+     :cancelled cancelled
+     :avg-ms (if (pos? runs) (quot duration-ms-sum runs) 0)}))
+
+
 (def impls
   {:resolve-fn                 resolve-fn
    :_execute-apply             _execute-apply
@@ -155,4 +173,5 @@
    :cancel-execution!          cancel-execution!
    :resolve-fn-version-id      resolve-fn-version-id
    :_reconcile-services-apply  _reconcile-services-apply
-   :running-entry              running-entry})
+   :running-entry              running-entry
+   :usage-fn-stats usage-fn-stats})

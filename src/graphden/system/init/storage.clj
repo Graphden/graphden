@@ -15,6 +15,7 @@
     [graphden.schema.placement.schema :as placement]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.schema.services.schema :as svcs]
+    [graphden.schema.stats.schema :as stats]
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
@@ -43,6 +44,11 @@
                  ;; Registry artifacts — immutable published package snapshots.
                  ;; Non-versioned (immutable by contract), refs nothing graph-side.
                  (pkgs/extend-builder)
+                 ;; Usage rollups — pre-aggregated per-(hour, org, fn, status)
+                 ;; execution counters (Phase C1 observability). Non-versioned;
+                 ;; mutated only by the upsert-increment in
+                 ;; crud.fn-execution.stats.
+                 (stats/extend-builder)
                  ;; Fleet placement map `(org, entry-fn-id) → executor-id`
                  ;; (docs/FLEET_RFC.md §6.1). Refs :fn (logical). Non-versioned —
                  ;; control-plane routing state that mutates in place.

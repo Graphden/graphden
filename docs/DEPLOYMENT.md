@@ -134,12 +134,32 @@ helm install fleet deploy/helm/graphden \
 | `DB_POOL_SIZE` | `10` | HikariCP connection pool size |
 | `VAULT_ADDR` | *(empty)* | OpenBao / Vault address (unset → `:vault-get` errors) |
 | `VAULT_TOKEN` | *(empty)* | OpenBao / Vault token |
-| `AUTH_TOKEN` | *(empty)* | Single-token auth secret |
+| `AUTH_TOKEN` | *(empty)* | Single-token auth secret — **empty = auth OFF, instance fully open** (see [Authentication](#authentication)) |
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |
 | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS` | `128` | Per-pod cap on concurrent `/api/execute` runs (protects the JVM's executor) |
 | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | `32` | Fleet-wide per-org cap (counts non-terminal `:fn-execution` rows across all pods) |
+
+### Authentication
+
+Auth is **provider-driven and optional**:
+
+- **`AUTH_TOKEN` unset / empty → auth is OFF.** No provider is wired, the
+  auth-required middleware passes everything through, and the instance runs
+  **fully open — no login at all**. This is the intended local /
+  self-hosted-on-your-own-machine mode.
+- **`AUTH_TOKEN` set → single-token auth is ON.** Every graph read and write
+  (`/api/graph/*`, `/api/types*`, CRUD, execute, …) requires
+  `Authorization: Bearer <token>`; the editor prompts for the token. There is
+  no anonymous read-only view.
+- **Tenancy addon active → the addon wires its own storage-token provider**
+  (sessions + API keys in the `:token` table; `POST /api/login`, the public
+  `GET /login` page, self-serve signup). `AUTH_TOKEN` is not used.
+
+> **SECURITY:** "unconfigured" means **open**, not locked. Never expose an
+> instance to an untrusted network without either `AUTH_TOKEN` or the tenancy
+> addon. Deploy checklists below assume a set token.
 
 ### Fleet / sharding (hosted pods — see [SCALING.md](SCALING.md))
 

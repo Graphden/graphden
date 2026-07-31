@@ -33,6 +33,7 @@
 
 
 (def ^:dynamic *router* nil)
+(def ^:dynamic *ctx* nil)
 
 
 (def ^:private test-auth-token "auth-mw-test-token-xyz789")
@@ -54,7 +55,8 @@
              _ (cr/rebuild! ctx)
              router (br/create-router ctx "_app-ring-response")]
          (try
-           (binding [*router* router]
+           (binding [*router* router
+                     *ctx* ctx]
              (t))
            (finally (sp/close storage)))))))
 
@@ -135,3 +137,50 @@
       (is (= 401 (:status resp))
           (str "Basic-scheme rejected (only Bearer accepted); "
                "got status=" (:status resp))))))
+
+
+(deftest auth-form-partial-renders-clean-markup-test
+  ;; GET /partials/auth-form is a bare (unauthenticated) route, so its handler
+  ;; is invoked with the RAW ring request. It used to declare :lambda-params
+  ;; [:children] — the 1-arg shape dropped the whole request map into the
+  ;; inputs' free :children slot, rendering <request-method>/<uri>/the reitit
+  ;; router object INSIDE the <input> elements (the popover-garbage bug).
+  (let [resp (get-with-headers "/partials/auth-form" {})]
+    (is (= 200 (:status resp)))
+    (let [body (str (:body resp))]
+      (is (str/includes? body "auth-password-input") "the password field renders")
+      (is (not (str/includes? body "<request-method>"))
+          "the ring request must NOT leak into the markup")
+      (is (not (str/includes? body "reitit.core"))
+          "the router object must NOT leak into the markup"))))
+
+
+(deftest auth-off-serves-protected-routes-openly-test
+  ;; PROVIDER-AWARE MIDDLEWARE (B3): with NO `:auth-provider` on the ctx auth is
+  ;; OFF, so an auth-required route serves WITHOUT any token instead of 401 —
+  ;; this is what lets a self-hosted instance run with no login at all. Same
+  ;; route, same no-token request as `auth-missing-token-rejected-test` (which
+  ;; gets 401 WITH a provider) — the ONLY difference is the provider's absence.
+  (let [open-router (br/create-router (dissoc *ctx* :auth-provider) "_app-ring-response")
+        resp (br/dispatch open-router {:request-method :get
+                                       :uri "/partials/branch-popover"
+                                       :headers {} :query-string nil :body nil})]
+    (is (= 200 (:status resp))
+        (str "no provider ⇒ auth off ⇒ auth-required route open without a token; "
+             "got status=" (:status resp)))))
+
+
+(deftest graph-view-gated-when-auth-active-test
+  ;; REMOVE THE OPEN VIEW (B3 #3): the full graph dump is auth-required now, so
+  ;; an unauthenticated caller can't read the graph when auth is active. The
+  ;; security sentinel — a regression that reverts /api/graph/entities to an
+  ;; open route (anonymous graph view) fails here. Authenticated still works.
+  (testing "no token ⇒ 401, NOT the graph (open view removed)"
+    (let [resp (get-with-headers "/api/graph/entities" {})]
+      (is (= 401 (:status resp))
+          (str "unauth graph dump is 401, not served; got status=" (:status resp)))))
+  (testing "valid token ⇒ 200 (authed users still read the graph)"
+    (let [resp (get-with-headers "/api/graph/entities"
+                                 {"authorization" (str "Bearer " test-auth-token)})]
+      (is (= 200 (:status resp))
+          (str "authed graph dump returns 200; got status=" (:status resp))))))

@@ -946,11 +946,32 @@
   smoke
   {:doc "Run smoke tests against a running instance: editor page, graph layout (collapsed + expanded), auth challenge. Usage: bb smoke [http://host:port]"
    :requires ([babashka.http-client :as http]
-              [cheshire.core :as json])
+              [cheshire.core :as json]
+              [clojure.java.io :as io]
+              [clojure.string :as str])
    :task
    (let [raw-url (or (first *command-line-args*) "http://localhost:9002")
          base-url (if (str/ends-with? raw-url "/") (subs raw-url 0 (dec (count raw-url))) raw-url)
-         token (System/getenv "AUTH_TOKEN")
+         ;; Read AUTH_TOKEN from the shell env, falling back to `.env` — the
+         ;; SAME source docker-compose substitutes into the instance, so the
+         ;; smoke authenticates as the instance it's probing even when the token
+         ;; lives only in `.env` (the gate's post-land demo advance runs compose
+         ;; off `.env`, but the smoke process's shell env has no AUTH_TOKEN).
+         ;; `bb wt up` worktrees have no `.env` → token blank → the instance is
+         ;; auth-OFF (open) and the empty bearer below is exactly right.
+         token (or (not-empty (System/getenv "AUTH_TOKEN"))
+                   (some-> (let [f (io/file ".env")] (when (.exists f) (slurp f)))
+                           (->> (re-find (re-pattern "(?m)^AUTH_TOKEN=(.+)$")))
+                           second
+                           str/trim
+                           not-empty))
+         ;; The graph-data routes (entities / layout / types / value-form) are
+         ;; auth-required now (the anonymous graph view was removed). Send the
+         ;; bearer on them when a token is known (auth active); with no token
+         ;; auth is OFF and they're open, so an empty opts map works too. The
+         ;; auth/check challenges below deliberately DON'T use this (they assert
+         ;; the 401 path), so keep it off the bare `get*`/`post-json` defaults.
+         auth-opts (if (str/blank? token) {} {:headers {"Authorization" (str "Bearer " token)}})
          results (atom [])
          step (fn [name pred-fn]
                 (let [outcome (try (pred-fn) (catch Throwable e {:ok? false :detail (.getMessage e)}))
@@ -963,10 +984,14 @@
                 (http/get (str base-url path) (merge {:throw false} opts)))
          post-json (fn [path payload & [opts]]
                      (http/post (str base-url path)
-                                (merge {:throw false
-                                        :headers {"Content-Type" "application/json"}
-                                        :body (json/generate-string payload)}
-                                       opts)))]
+                                ;; Merge headers rather than let `opts` (e.g.
+                                ;; auth-opts' Authorization) REPLACE the whole
+                                ;; :headers map and drop Content-Type — that
+                                ;; silently unset the JSON content-type so the
+                                ;; body wasn't parsed ("must include 'expected'").
+                                (-> (merge {:throw false :body (json/generate-string payload)} opts)
+                                    (assoc :headers (merge {"Content-Type" "application/json"}
+                                                           (:headers opts))))))]
      (println (str cyan "Smoke testing " base-url reset))
 
      (step "GET /                          editor page renders"
@@ -998,7 +1023,7 @@
 
      (let [entities-resp (step "GET /api/graph/entities       returns JSON with fns"
                                (fn []
-                                 (let [r (get* "/api/graph/entities")]
+                                 (let [r (get* "/api/graph/entities" auth-opts)]
                                    (cond
                                      (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
                                      :else
@@ -1020,7 +1045,8 @@
                                   (if-not target-id
                                     {:ok? false :detail "couldn't find :web-server fn for layout test"}
                                     (let [r (post-json "/api/graph/layout"
-                                                       {"root-id" target-id "expansions" {}})]
+                                                       {"root-id" target-id "expansions" {}}
+                                                       auth-opts)]
                                       (cond
                                         (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
                                         :else
@@ -1038,7 +1064,8 @@
                        r (post-json "/api/graph/layout"
                                     {"root-id" target-id
                                      "expansions" {root-node-id {"full-depth" 3
-                                                                 "partial-fns" []}}})]
+                                                                 "partial-fns" []}}}
+                                    auth-opts)]
                    (cond
                      (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
                      :else
@@ -1056,7 +1083,7 @@
                                first))]
                  (if-not vb
                    {:ok? false :detail "no value-binding to test"}
-                   (let [r (post-json "/api/value-form" {"binding-id" (:id vb)})
+                   (let [r (post-json "/api/value-form" {"binding-id" (:id vb)} auth-opts)
                          parsed (when (= 200 (:status r))
                                   (json/parse-string (:body r) true))]
                      (cond
@@ -1069,7 +1096,7 @@
      (step "POST /api/types/compatible (int ⊆ int)    → {ok:true}"
            (fn []
              (let [r (post-json "/api/types/compatible"
-                                {"expected" "int" "candidate" "int"})
+                                {"expected" "int" "candidate" "int"} auth-opts)
                    parsed (when (= 200 (:status r))
                             (json/parse-string (:body r) true))]
                (cond
@@ -1080,7 +1107,7 @@
      (step "POST /api/types/compatible (text ⊄ int)  → {ok:false :reason}"
            (fn []
              (let [r (post-json "/api/types/compatible"
-                                {"expected" "int" "candidate" "text"})
+                                {"expected" "int" "candidate" "text"} auth-opts)
                    parsed (when (= 200 (:status r))
                             (json/parse-string (:body r) true))]
                (cond
@@ -1091,7 +1118,7 @@
 
      (step "POST /api/types/candidates (expected=int)  → non-empty candidates"
            (fn []
-             (let [r (post-json "/api/types/candidates" {"expected" "int"})
+             (let [r (post-json "/api/types/candidates" {"expected" "int"} auth-opts)
                    parsed (when (= 200 (:status r))
                             (json/parse-string (:body r) true))]
                (cond
@@ -1101,8 +1128,8 @@
 
      (step "POST /api/types/candidates (effects=[])    → pure subset only"
            (fn []
-             (let [r-all (post-json "/api/types/candidates" {"expected" "int"})
-                   r-pure (post-json "/api/types/candidates" {"expected" "int" "effects" []})
+             (let [r-all (post-json "/api/types/candidates" {"expected" "int"} auth-opts)
+                   r-pure (post-json "/api/types/candidates" {"expected" "int" "effects" []} auth-opts)
                    all-n (some-> r-all :body (json/parse-string true) :count)
                    pure-n (some-> r-pure :body (json/parse-string true) :count)]
                (cond

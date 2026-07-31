@@ -27,7 +27,11 @@
 (def ^:private golden-total
   "Total base-fn count across `package-set`. A change means a base-fn was added
    or removed — review its taint behaviour, then update this number."
-  282)
+  ;; +1 (283): `:auth-active?` (web.ring-adapter) — reads whether an auth
+  ;; provider is wired on the ctx and returns a bool. It handles NO caller
+  ;; content (no `[:secret …]` input flows through it), so it does NOT declare
+  ;; `:taint-propagate?` and stays OUT of `golden-tainted`.
+  283)
 
 
 (def ^:private golden-tainted

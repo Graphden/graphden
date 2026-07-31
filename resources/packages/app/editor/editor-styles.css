@@ -1,30 +1,39 @@
-/* Graph editor CSS styles - monochrome design.
+/* Graph editor CSS styles — Graphden brand palette (docs/brand).
+ * Five brand values: Graphden Blue #0066CC (--accent), Blue Deep #0047A3
+ * (--blue-deep), Ink #0D1117 (--fg / borders / dark ground), Soft Tint
+ * #EEF4FF (--soft-tint / tinted grounds), White. #4D94FF is Blue's
+ * light-on-dark tint (the dark-theme --accent). New brand values are
+ * added as tokens (stylelint strict-value forbids bare hex in rule bodies).
  * Theme variables live on `:root`; `body.theme-dark` overrides. The
  * full sidebar respects `--sidebar-width` so the resize handle and
  * the collapse button can change one number to retheme + relayout. */
 :root {
   --bg: #fff;
-  --fg: #000;
-  --muted-fg: #555;
-  --light-fg: #888;
-  --border: #000;
-  --light-border: #ddd;
-  --input-border: #ccc;
-  --hover-bg: #eee;
-  --selected-bg: #ddd;
-  --sidebar-bg: #fafafa;
-  --header-bg: #000;
-  --header-fg: #fff;
+  --fg: #0d1117;
+  --muted-fg: #57606a;
+  --light-fg: #8b949e;
+  --border: #0d1117;
+  --light-border: #d0d7de;
+  --input-border: #c9d1d9;
+  --hover-bg: #eef4ff;
+  --selected-bg: #dbe7ff;
+  --sidebar-bg: #f5f8ff;
+  --header-bg: #eef4ff;
+  --header-fg: #0d1117;
   --accent: #0066cc;
+  /* Two brand values the old monochrome scheme lacked. */
+  --blue-deep: #0047a3;
+  --soft-tint: #eef4ff;
   /* Graph node ("card") palette — keeps the same visual hierarchy in both
      themes (slightly-raised body + distinct header band + visible outline)
-     instead of inverting to bright gray. */
+     instead of inverting to bright gray. The focused/root card wears a
+     Graphden-Blue title band so the active node reads in brand colour. */
   --card-bg: #fff;
-  --card-fg: #000;
-  --card-border: #000;
-  --card-header-bg: #000;
+  --card-fg: #0d1117;
+  --card-border: #0d1117;
+  --card-header-bg: #0066cc;
   --card-header-fg: #fff;
-  --card-row-highlight: #f0f0f0;
+  --card-row-highlight: #eef4ff;
   /* HOF-captured arg strip — subtle blue tint that survives both themes. */
   --hof-fg: #557;
   --hof-bg: #f4f6fc;
@@ -75,10 +84,14 @@
   --success-fg: #4ade80;
   --error-fg: #ff6b6b;
   --warning-fg: #c47b00;
+  /* Saturated fills: `--on-accent` is legible text over Graphden Blue / any
+     status fill; `--danger-bg` backs the fatal-load banner. */
+  --on-accent: #fff;
+  --danger-bg: #c0392b;
   /* Effect-chip categorical palette — encodes effect KIND (db / network
      / time / …) so the chip background must be the same colour in both
      themes. Chip text is fixed dark since every bg here is bright. */
-  --effect-chip-fg: #0f1011;
+  --effect-chip-fg: #0d1117;
   --effect-chip-db: #5eaaff;
   --effect-chip-env: #c084fc;
   --effect-chip-io: #4ade80;
@@ -90,27 +103,31 @@
   --effect-chip-raw-sql: #f87171;
 }
 body.theme-dark {
-  --bg: #1a1a1a;
-  --fg: #e8e8e8;
-  --muted-fg: #aaa;
-  --light-fg: #888;
-  --border: #888;
-  --light-border: #444;
-  --input-border: #555;
-  --hover-bg: #2a2a2a;
-  --selected-bg: #3a3a3a;
-  --sidebar-bg: #1f1f1f;
-  --header-bg: #2c2c2c;
-  --header-fg: #e8e8e8;
-  --accent: #4d9fff;
-  /* Card body slightly raised vs body bg, header still distinct but not
-     bright; outline subtle so the node frame isn't a glaring white box. */
-  --card-bg: #242424;
-  --card-fg: #e8e8e8;
-  --card-border: #555;
-  --card-header-bg: #3a3a3a;
-  --card-header-fg: #e8e8e8;
-  --card-row-highlight: #2e2e2e;
+  /* Ink #0D1117 is the brand's dark ground. */
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted-fg: #9aa5b1;
+  --light-fg: #7d8695;
+  --border: #30363d;
+  --light-border: #21262d;
+  --input-border: #30363d;
+  --hover-bg: #182130;
+  --selected-bg: #22304a;
+  --sidebar-bg: #10151c;
+  --header-bg: #161b22;
+  --header-fg: #e6edf3;
+  --accent: #4d94ff;
+  --blue-deep: #0047a3;
+  --soft-tint: #182130;
+  /* Card body slightly raised vs Ink body; the focused/root card keeps the
+     Graphden-Blue title band (brand colour reads on dark too); outline
+     subtle so the node frame isn't a glaring box. */
+  --card-bg: #161b22;
+  --card-fg: #e6edf3;
+  --card-border: #30363d;
+  --card-header-bg: #0066cc;
+  --card-header-fg: #fff;
+  --card-row-highlight: #182130;
   --hof-fg: #aab8e8;
   --hof-bg: #1e2030;
   --hof-border: #3a4070;
@@ -130,6 +147,8 @@ body.theme-dark {
   --success-fg: #5be08a;
   --error-fg: #ff7777;
   --warning-fg: #e0a94a;
+  --on-accent: #fff;
+  --danger-bg: #e5484d;
   /* Effect-chip palette stays identical in dark theme — colour encodes
      category, not surface. Chip fg flips to white since dark-theme chips
      could otherwise look washed out against page bg in screenshots. */
@@ -383,11 +402,19 @@ body.sidebar-collapsed .sidebar-expand-floating {
 /* Menu header — asymmetric padding pulls the action buttons closer to
    the right edge while keeping the title comfortably indented on the
    left. */
-.menu-header { padding: 12px 8px 12px 16px; border-bottom: 2px solid var(--border);
+/* Two stacked rows: a brand row (λ mark + wordmark) and a dedicated
+   toolbar row for the JS-mounted actions (prefs / branch / auth). They
+   used to share one space-between row, so a wide branch chip + the
+   staggered JS mounts made the buttons jump at different heights and
+   worse on sidebar resize. Separate rows keep each stable. */
+.menu-header { padding: 12px 8px 10px 16px; border-bottom: 2px solid var(--border);
   background: var(--header-bg); color: var(--header-fg);
-  display: flex; align-items: center; justify-content: space-between; position: relative; }
-.menu-header h2 { font-size: 13px; font-weight: 500; margin: 0; }
-.menu-header-actions { display: inline-flex; align-items: center; gap: 6px; line-height: 0; }
+  display: flex; flex-direction: column; gap: 8px; position: relative; }
+.menu-brand { display: flex; align-items: center; gap: 8px; }
+.menu-logo { flex: 0 0 auto; display: block; color: var(--accent); }
+.menu-header h2 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
+.menu-header-actions { display: flex; flex-wrap: wrap; align-items: center;
+  gap: 6px; min-height: 26px; }
 
 /* Prefs (theme + collapse) buttons — same shape/size as auth lock. */
 #prefs-mount { display: inline-flex; gap: 6px; }
@@ -439,7 +466,12 @@ body.sidebar-collapsed .sidebar-expand-floating {
 /* Username field (multi-tenant login only) sits above the password wrap. */
 .auth-username-input:not(.hidden) { margin-bottom: 6px; }
 /* Login⇄signup toggle (multi-tenant). */
-.auth-mode-toggle { display: block; margin-top: 6px; font-size: 11px; color: var(--accent, #3498db); cursor: pointer; text-decoration: underline; }
+.auth-mode-toggle { display: block; margin-top: 6px; font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; }
+/* Fatal graph-load banner (editor-main.js initGraph catch) — tokenised so
+   it themes with everything else instead of the old inline hardcoded red. */
+.editor-fatal-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+  padding: 8px 16px; background: var(--danger-bg); color: var(--on-accent);
+  font: 14px sans-serif; }
 .auth-input-wrap { position: relative; }
 .auth-input-wrap input { padding-right: 28px; }
 .auth-toggle-visibility {

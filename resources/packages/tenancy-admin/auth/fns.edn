@@ -67,7 +67,7 @@
    :args {:body :_login-token-text}}
 
   {:name :_login-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/login — 200 + the minted session token, or 401 on bad credentials (blank token)."
    :parent :if
    :args {:test :_login-token-blank? :then :_auth-401 :else :_login-200}}
@@ -154,7 +154,7 @@
    :args {:body :_signup-429-body}}
 
   {:name :_signup-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/signup — 429 when rate-limited, else 200 + the new session token, or 401 when signup failed (taken / blank)."
    :parent :if
    :args {:test :_signup-rate-limited? :then :_signup-429 :else :_signup-token-result}}
@@ -328,7 +328,7 @@
    :args {:test :_invite-redeem-token-blank? :then :_auth-401 :else :_invite-redeem-200}}
 
   {:name :_invite-redeem-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/invite-signup — 200 + session token, 401 on bad/expired invite or taken username, 429 over the per-IP limit."
    :parent :if
    :args {:test :_invite-redeem-rate-limited? :then :_signup-429 :else :_invite-redeem-token-result}}
@@ -395,4 +395,188 @@
   {:name :logout-all-route
    :description "POST /api/logout-all — sign out everywhere (delete all the current user's session tokens). Auth-required."
    :parent :post
-   :args {:path "/api/logout-all" :handler :_logout-all-handler}}]}
+   :args {:path "/api/logout-all" :handler :_logout-all-handler}}
+
+  ;; ==========================================================================
+  ;; PUBLIC LOGIN / SIGN-UP PAGE — a full HTML page at GET /login (unauth).
+  ;; The self-serve entry a new cloud visitor needs: sign into an existing org
+  ;; or create a brand-new one. Reuses the existing POST /api/login + /api/signup
+  ;; endpoints; a small inline script stores the returned bearer under the SAME
+  ;; localStorage key the editor reads (`graphden.auth.password`) and redirects
+  ;; to `?next=` (default `/`). Brand-styled inline (tenancy-admin has no `app`
+  ;; dep, so it can't reuse the editor stylesheet); `:html-page` runs
+  ;; `:hiccup-normalize`, which raws the <style>/<script> bodies verbatim.
+  ;; ==========================================================================
+  {:name :_login-page-css
+   :parent :const
+   :args {:value "
+:root{--ink:#0d1117;--panel:#151b26;--blue:#0066cc;--blue-deep:#0047a3;--blue-light:#4d94ff;--line:#222a38;--text:#e6edf3;--muted:#98a2b6}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--text);font:16px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{width:100%;max-width:380px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px}
+.brand{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:4px}
+.brand svg{display:block;color:var(--blue-light)}
+.brand b{font-size:1.4rem;font-weight:700;letter-spacing:.3px}
+.brand b i{color:var(--blue-light);font-style:normal}
+.sub{text-align:center;color:var(--muted);font-size:.92rem;margin-bottom:20px}
+.tabs{display:flex;gap:6px;margin-bottom:18px}
+.tab{flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;font:inherit;font-size:.9rem}
+.tab.active{background:var(--blue);border-color:var(--blue);color:#fff}
+form{display:none;flex-direction:column;gap:12px}
+form.active{display:flex}
+label{font-size:.82rem;color:var(--muted)}
+input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--ink);color:var(--text);font:inherit}
+input:focus{outline:none;border-color:var(--blue-light)}
+.submit{padding:11px;border:none;border-radius:8px;background:linear-gradient(90deg,var(--blue),var(--blue-deep));color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.submit:hover{filter:brightness(1.1)}
+.err{color:#ff8a8a;font-size:.85rem;min-height:1.2em;text-align:center;margin-top:4px}
+.meter{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:-4px}
+.meter i{display:block;height:100%;width:0;border-radius:3px;transition:width .2s,background .2s}
+.meter.weak i{width:33%;background:#e5484d}
+.meter.medium i{width:66%;background:#e0a94a}
+.meter.strong i{width:100%;background:#3fb950}
+.meter-label{font-size:.75rem;color:var(--muted);min-height:1em;margin-top:-6px}
+.hint{color:var(--muted);font-size:.8rem;text-align:center;margin-top:16px}
+a{color:var(--blue-light);text-decoration:none}
+a:hover{text-decoration:underline}
+"}}
+
+  {:name :_login-page-style-node
+   :parent :wrap-style
+   :args {:content :_login-page-css}}
+
+  {:name :_login-page-viewport
+   :parent :const
+   :args {:value [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]}}
+
+  {:name :_login-page-head
+   :parent :list
+   :args {:items [:_login-page-viewport :_login-page-style-node]}}
+
+  {:name :_login-page-js
+   :parent :const
+   :args {:value "
+(function(){
+  var KEY='graphden.auth.password';
+  var next=new URLSearchParams(location.search).get('next')||'/';
+  var err=document.getElementById('login-err');
+  function show(which){
+    ['login','signup'].forEach(function(k){
+      document.getElementById('tab-'+k).classList.toggle('active',k===which);
+      document.getElementById('form-'+k).classList.toggle('active',k===which);
+    });
+    err.textContent='';
+  }
+  document.getElementById('tab-login').onclick=function(){show('login');};
+  document.getElementById('tab-signup').onclick=function(){show('signup');};
+  function submit(form,url,e){
+    e.preventDefault();
+    err.textContent='';
+    var body=new URLSearchParams(new FormData(form)).toString();
+    fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+      .then(function(r){return r.text().then(function(t){return {ok:r.ok,status:r.status,token:(t||'').trim()};});})
+      .then(function(res){
+        if(res.ok&&res.token){localStorage.setItem(KEY,res.token);location.href=next;return;}
+        if(res.status===429){err.textContent='Too many attempts — wait a minute and try again.';return;}
+        err.textContent=(url.indexOf('signup')!==-1)?'That username or organization is already taken.':'Wrong username or password.';
+      })
+      .catch(function(){err.textContent='Network error — please try again.';});
+  }
+  var pw=document.getElementById('su-pass');
+  var meter=document.getElementById('su-meter');
+  var label=document.getElementById('su-meter-label');
+  function score(v){
+    if(!v)return null;
+    var s=0;
+    if(v.length>=8)s++;
+    if(v.length>=12)s++;
+    if(/[a-z]/.test(v)&&/[A-Z]/.test(v))s++;
+    if(/[0-9]/.test(v))s++;
+    if(/[^A-Za-z0-9]/.test(v))s++;
+    return s<=2?'weak':(s<=3?'medium':'strong');
+  }
+  pw.oninput=function(){
+    var r=score(pw.value);
+    meter.className='meter'+(r?' '+r:'');
+    label.textContent=r?({weak:'Weak password',medium:'Medium password',strong:'Strong password'})[r]:'';
+  };
+  document.getElementById('form-login').onsubmit=function(e){submit(this,'/api/login',e);};
+  document.getElementById('form-signup').onsubmit=function(e){
+    e.preventDefault();
+    if(pw.value.length<8){err.textContent='Password must be at least 8 characters.';return;}
+    if(pw.value!==document.getElementById('su-pass2').value){err.textContent='Passwords do not match.';return;}
+    submit(this,'/api/signup',e);
+  };
+})();
+"}}
+
+  {:name :_login-page-script-node
+   :parent :wrap-script
+   :args {:content :_login-page-js}}
+
+  {:name :_login-page-scripts
+   :parent :list
+   :args {:items [:_login-page-script-node]}}
+
+  {:name :_login-page-body
+   :parent :const
+   :args {:value
+          [:div {:class "card"}
+           [:div {:class "brand"}
+            [:svg {:viewBox "0 0 32 32" :fill "none" :width "26" :height "26" :aria-hidden "true"}
+             [:g {:stroke "currentColor" :stroke-width "3" :stroke-linecap "round"}
+              [:line {:x1 "9" :y1 "6" :x2 "25" :y2 "26"}]
+              [:line {:x1 "17" :y1 "16" :x2 "8" :y2 "26"}]]
+             [:g {:fill "currentColor"}
+              [:circle {:cx "9" :cy "6" :r "3"}]
+              [:circle {:cx "25" :cy "26" :r "3"}]
+              [:circle {:cx "8" :cy "26" :r "3"}]]]
+            [:b "graph" [:i "den"]]]
+           [:p {:class "sub"} "Sign in, or create your workspace"]
+           [:div {:class "tabs"}
+            [:button {:id "tab-login" :type "button" :class "tab active"} "Sign in"]
+            [:button {:id "tab-signup" :type "button" :class "tab"} "Create account"]]
+           [:form {:id "form-login" :class "active"}
+            [:label {:for "li-user"} "Username"]
+            [:input {:id "li-user" :name "username" :autocomplete "username" :required "required"}]
+            [:label {:for "li-pass"} "Password"]
+            [:input {:id "li-pass" :name "password" :type "password" :autocomplete "current-password" :required "required"}]
+            [:button {:type "submit" :class "submit"} "Sign in"]]
+           [:form {:id "form-signup"}
+            [:label {:for "su-org"} "Organization name"]
+            [:input {:id "su-org" :name "org" :autocomplete "organization" :required "required"}]
+            [:label {:for "su-user"} "Username"]
+            [:input {:id "su-user" :name "username" :autocomplete "username" :required "required"}]
+            [:label {:for "su-pass"} "Password"]
+            [:input {:id "su-pass" :name "password" :type "password" :autocomplete "new-password" :required "required"}]
+            [:div {:id "su-meter" :class "meter"} [:i]]
+            [:p {:id "su-meter-label" :class "meter-label"}]
+            [:label {:for "su-pass2"} "Confirm password"]
+            [:input {:id "su-pass2" :type "password" :autocomplete "new-password" :required "required"}]
+            [:button {:type "submit" :class "submit"} "Create account"]]
+           [:p {:id "login-err" :class "err"}]
+           [:p {:class "hint"} "Self-hosting? "
+            [:a {:href "https://github.com/Graphden/graphden"} "Run your own"] " — free and uncapped."]]}}
+
+  {:name :_login-page-rendered
+   :description "The /login page rendered to an HTML string — brand-styled sign-in / create-org card with an inline script that stores the bearer + redirects."
+   :parent :render-hiccup
+   :return-type :text
+   :args {:hiccup {:parent :html-page
+                   :args {:title {:value "Graphden — sign in"}
+                          :body :_login-page-body
+                          :head :_login-page-head
+                          :scripts :_login-page-scripts}}}}
+
+  {:name :_login-page-handler
+   :lambda-params []
+   :description "Ring handler for GET /login — the full public login / sign-up page."
+   :parent :html-ok-response
+   :args {:body :_login-page-rendered}}
+
+  ;; UNAUTHENTICATED — `:get-route` (no auth-required middleware): this page IS
+  ;; how an unauthenticated visitor authenticates.
+  {:name :login-page-route
+   :description "GET /login — the public login / create-org page (unauthenticated)."
+   :parent :get-route
+   :args {:path "/login" :handler :_login-page-handler}}]}

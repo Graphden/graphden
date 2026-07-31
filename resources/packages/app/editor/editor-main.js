@@ -243,6 +243,22 @@ async function initGraph() {
       ? loadServicesEager().catch(() => null)
       : null,
   ]);
+  // Auth wall (B3): the graph view is login-gated when auth is active, so an
+  // unauthenticated (or stale-token) boot gets 401 here — send the user to
+  // sign in instead of dying into the red fatal banner. Tenancy deployments
+  // (the capability header on this very 401 set `gd-tenancy` via the fetch
+  // wrap) have the full /login page; single-tenant has no such page, so open
+  // the lock popover instead.
+  if (entResp.status === 401) {
+    clearAuthPassword(); // whatever we sent (or didn't) doesn't authenticate
+    if (document.body.classList.contains('gd-tenancy')) {
+      const next = location.pathname + location.search + location.hash;
+      location.href = '/login?next=' + encodeURIComponent(next);
+    } else if (typeof openAuthPopover === 'function') {
+      void openAuthPopover('Sign in to use the editor'); // fire-and-forget; fields mount async
+    }
+    return;
+  }
   graphData = graphShellFromTree(await entResp.json());
   lookups = buildLookups(graphData);
   if (typeResp?.ok) {
@@ -391,7 +407,10 @@ window.addEventListener('hashchange', _onHashNav);
 // end of body).
 if (typeof initPrefsEarly === 'function') initPrefsEarly();
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Landing demo entry (?demo=1) — may store a fresh bearer and reload;
+  // in that case skip the rest of the boot (the reload re-runs it authed).
+  if (typeof maybeStartLandingDemo === 'function' && (await maybeStartLandingDemo())) return;
   initPrefsLate();
   initAuthLock();
   if (typeof initBranchSelector === 'function') initBranchSelector();
@@ -403,9 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // eslint-disable-next-line no-console
     console.error('initGraph failed', err);
     const banner = document.createElement('div');
-    banner.style.cssText =
-      'position:fixed;top:0;left:0;right:0;z-index:99999;' +
-      'padding:8px 16px;background:#c0392b;color:#fff;font:14px sans-serif;';
+    banner.className = 'editor-fatal-banner';
     banner.textContent =
       'Editor failed to load graph data. Check network / server logs, then reload.';
     document.body.appendChild(banner);

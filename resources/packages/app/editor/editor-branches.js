@@ -120,12 +120,24 @@ window.graphdenTenancyActive = graphdenTenancyActive;
     const isInternal = url.startsWith('/api/') || url.startsWith('/partials/'); // api-url-drift-allow: prefix discriminator, not a URL we fetch
     const branch = getCurrentBranchName();
     let promise;
-    if (!isInternal || branch === DEFAULT_BRANCH) {
+    if (!isInternal) {
       promise = origFetch(input, init);
     } else {
       const opts = Object.assign({}, init || {});
       const headers = new Headers(opts.headers || {});
-      if (!headers.has(BRANCH_HEADER)) headers.set(BRANCH_HEADER, branch);
+      if (branch !== DEFAULT_BRANCH && !headers.has(BRANCH_HEADER)) {
+        headers.set(BRANCH_HEADER, branch);
+      }
+      // Attach the stored bearer to every internal call that doesn't carry
+      // one already (authFetch sets its own → left untouched). The graph-data
+      // reads are auth-required now (the anonymous view was removed), and the
+      // boot path + sidebar lazy loads go through PLAIN fetch — without this,
+      // a signed-in (or landing-demo) session still hit 401 on boot because
+      // only authFetch/HTMX carried the token.
+      const pw = (typeof getAuthPassword === 'function') ? getAuthPassword() : null;
+      if (pw && !headers.has('Authorization')) {
+        headers.set('Authorization', 'Bearer ' + pw);
+      }
       opts.headers = headers;
       promise = origFetch(input, opts);
     }

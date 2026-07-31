@@ -500,6 +500,45 @@ async function submitSignup() {
   }
 }
 
+
+// Landing demo entry (?demo=1): the landing page can't set this origin's
+// localStorage (cross-origin), so it links to the editor with ?demo=1 and the
+// editor itself mints an ephemeral anonymous-tier org via the PUBLIC
+// POST /api/demo/start (present only when a deploy enables it), stores the
+// returned bearer exactly like a login, and reloads on a clean URL. Returns
+// true when a reload was triggered (caller should stop booting). Fails soft:
+// endpoint absent (404 — self-hosted / demo off) or network error → strip the
+// param and boot signed-out as usual.
+async function maybeStartLandingDemo() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has('demo') || getAuthPassword()) return false;
+  const cleanUrl = () => {
+    params.delete('demo');
+    const qs = params.toString();
+    window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+  };
+  // Route key exists only when the deployment enables the demo endpoint
+  // (the tenancy addon merges its routes into window.API). No literal
+  // fallback — the api-url drift guard scans /api/* string literals against
+  // the LIVE router, and a core-only boot doesn't serve this route.
+  const url = window.API && API.api_demo_start;
+  if (!url) { cleanUrl(); return false; }
+  try {
+    const response = await fetch(url, { method: 'POST' });
+    if (response.ok) {
+      const data = await response.json();
+      if (data?.token) {
+        setAuthPassword(data.token);
+        cleanUrl();
+        window.location.reload();
+        return true;
+      }
+    }
+  } catch (_) { /* fall through to signed-out boot */ }
+  cleanUrl();
+  return false;
+}
+
 // Bootstrapped from editor-main.js after DOMContentLoaded.
 window.initAuthLock = initAuthLock;
 window.authFetch = authFetch;

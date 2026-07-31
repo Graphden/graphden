@@ -11,6 +11,7 @@
    tenant-forbidden, and minting tokens / hashing passwords is privileged."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
     [graphden.storage.postgres.util :as pgutil]
     [graphden.storage.protocol.core :as sp]
@@ -300,15 +301,40 @@
   ([ctx username password _request] (login! ctx username password)))
 
 
+(defn- grant-creator-admin!
+  "Bootstrap the org creator as its admin. Writes a GLOBAL `:grant` row
+   (`:grant` is not org-scoped) giving the user `:admin` on the ROOT namespace
+   (nil ≡ every namespace). RLS keeps that bounded to their OWN org —
+   platform/public rows stay read-only to tenants — so it is org-admin, never
+   platform-admin. Without it the creator lands READ-ONLY wherever a grant-store
+   is wired (the cloud): `request-permitted?` finds no grant and denies writes.
+
+   Best-effort: a tenancy deployment that omits the `:grant` schema has no grant
+   enforcement either, so the write throwing there is harmless — log and let
+   signup succeed rather than 500. A throw WITH the schema present (a real
+   failure) leaves the creator read-only, but the warning makes it diagnosable."
+  [storage user-id]
+  (try
+    (sp/create-entity storage :grant
+                      {:subject-id (str user-id)
+                       :subject-kind "user"
+                       :capability "admin"
+                       :namespace nil})
+    (catch Exception e
+      (log/warn e "signup: org-admin grant not created for subject" (str user-id)
+                "— grant enforcement likely disabled (no :grant schema)"))))
+
+
 (defn signup!
   "Self-serve registration (PLATFORM_PLAN §4.1): create a BRAND-NEW org and a
-   user who owns it, then auto-login. The org must be FREE — signup can never
-   join an existing org, so a new account can't reach another tenant's data.
-   Runs in the platform context. Returns `{:token :user :org}` on success, nil
-   on any failure (blank field, or username / org already taken) so the
-   endpoint maps nil → an empty body exactly like login. Open signup; per-IP
-   rate-limiting is applied by the `:user-ops` `:signup` wrapper (the addon),
-   which may pass the request as a trailing arg that this core fn ignores."
+   user who owns it, grant that user :admin over the org, then auto-login. The
+   org must be FREE — signup can never join an existing org, so a new account
+   can't reach another tenant's data. Runs in the platform context. Returns
+   `{:token :user :org}` on success, nil on any failure (blank field, or
+   username / org already taken) so the endpoint maps nil → an empty body
+   exactly like login. Open signup; per-IP rate-limiting is applied by the
+   `:user-ops` `:signup` wrapper (the addon), which may pass the request as a
+   trailing arg that this core fn ignores."
   [ctx username password org & _]
   (let [storage (:storage ctx)]
     ;; `org` must NOT be the platform/public org: every tenancy gate treats
@@ -319,7 +345,11 @@
     ;; Reserved platform labels (app / www / api / …) can never become tenant
     ;; orgs — the org-resolver refuses to route them, and allowing signup would
     ;; let someone squat a future platform host. Same nil-return as "taken".
+    ;; Min password length (self-serve only — operator create-user / invite
+    ;; flows set their own policy): 8+ chars, matching the /login page's
+    ;; client-side check so the server is the real gate, not the JS.
     (when (and (not (str/blank? username)) (not (str/blank? password))
+               (>= (count password) 8)
                (not (str/blank? org)) (not= org tc/public-org)
                (not (subdomain/reserved-org-name? org)))
       (tc/with-org tc/public-org
@@ -340,11 +370,15 @@
                      ;; `free` explicitly (tier-split). Paid upgrades go through
                      ;; the operator `set-org-plan` route.
                      (sp/create-entity storage :org {:name org :plan "free"})
-                     (sp/create-entity storage :user
-                                       {:username username
-                                        :password-hash (hash-password password)
-                                        :org org})
-                     (login! ctx username password))))))
+                     (let [user (sp/create-entity storage :user
+                                                  {:username username
+                                                   :password-hash (hash-password password)
+                                                   :org org})]
+                       ;; The creator owns the org → make them its admin, or
+                       ;; a grant-store deployment (the cloud) would leave them
+                       ;; read-only in the org they just created.
+                       (grant-creator-admin! storage (:id user))
+                       (login! ctx username password)))))))
 
 
 (defn demo-start!

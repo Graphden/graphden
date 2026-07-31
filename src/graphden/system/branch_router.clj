@@ -803,6 +803,19 @@
    misrouting."
   [router request]
   (let [base-ctx (:base-ctx router)
+        ;; Realize a streaming body up front, ONCE for every consumer below —
+        ;; the fleet seam, the FaaS app-router, the tenancy control-plane
+        ;; router AND the editor/API chain all see a String body. The app
+        ;; package's own `:realize-request-body` step stays (idempotent: a
+        ;; String passes through), but it only covered the app chain — a
+        ;; form-POST to a tenancy route (signup / login / org provisioning)
+        ;; reached `parse-form-body` as an unread InputStream and silently
+        ;; parsed to `{}` (live cloud hit this: `POST /api/orgs name=…`
+        ;; created an org named "").
+        request (let [b (:body request)]
+                  (if (instance? java.io.InputStream b)
+                    (assoc request :body (slurp (java.io.InputStreamReader. b "UTF-8")))
+                    request))
         ;; Fleet control-plane seam (docs/FLEET_RFC.md §6.3): the internal
         ;; cell load/evict command (`POST /internal/fleet/cell/...`). Checked
         ;; FIRST — it's infra, org-agnostic, internal-token-gated, and never a

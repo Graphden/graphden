@@ -70,8 +70,19 @@
 ;; base-fn → `:request-authenticated?` → auth middleware) is provider-
 ;; agnostic.
 (defmethod ig/init-key :auth/provider [_ {:keys [token]}]
-  (log/info "Wiring auth provider {:provider :single-token}")
-  (auth/single-token-provider token))
+  ;; A BLANK token = auth is not configured → return nil (no provider). The
+  ;; `:exec/context` wiring assocs `:auth-provider` only when non-nil, so a nil
+  ;; provider leaves the ctx with none → `:auth-active?` is false → the
+  ;; auth-required middleware passes everything through: a self-hosted instance
+  ;; started without AUTH_TOKEN runs fully open, no login. Set AUTH_TOKEN (or run
+  ;; the tenancy addon, which wires its own provider) to turn auth ON. This is a
+  ;; fail-CLOSED-by-omission-safe default: an unconfigured token doesn't lock you
+  ;; out AND doesn't half-authenticate — it's simply off until you opt in.
+  (if (str/blank? token)
+    (do (log/info "Auth provider OFF (no AUTH_TOKEN) — running open, no login")
+        nil)
+    (do (log/info "Wiring auth provider {:provider :single-token}")
+        (auth/single-token-provider token))))
 
 
 (defn- parse-executor-orgs

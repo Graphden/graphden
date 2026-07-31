@@ -984,10 +984,14 @@
                 (http/get (str base-url path) (merge {:throw false} opts)))
          post-json (fn [path payload & [opts]]
                      (http/post (str base-url path)
-                                (merge {:throw false
-                                        :headers {"Content-Type" "application/json"}
-                                        :body (json/generate-string payload)}
-                                       opts)))]
+                                ;; Merge headers rather than let `opts` (e.g.
+                                ;; auth-opts' Authorization) REPLACE the whole
+                                ;; :headers map and drop Content-Type — that
+                                ;; silently unset the JSON content-type so the
+                                ;; body wasn't parsed ("must include 'expected'").
+                                (-> (merge {:throw false :body (json/generate-string payload)} opts)
+                                    (assoc :headers (merge {"Content-Type" "application/json"}
+                                                           (:headers opts))))))]
      (println (str cyan "Smoke testing " base-url reset))
 
      (step "GET /                          editor page renders"

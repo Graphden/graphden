@@ -1137,20 +1137,32 @@
                  (> pure-n all-n) {:ok? false :detail "pure subset must be ≤ all"}
                  :else {:ok? true :detail (str pure-n " pure ≤ " all-n " total")}))))
 
-     (step "GET /api/auth/check (no token)      → 401 challenge"
-           (fn []
-             (let [r (get* "/api/auth/check")]
-               (if (= 401 (:status r))
-                 {:ok? true}
-                 {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
-
-     (step "GET /api/auth/check (wrong token)   → 401 challenge"
-           (fn []
-             (let [r (get* "/api/auth/check"
-                           {:headers {"Authorization" "Bearer this-is-not-the-token"}})]
-               (if (= 401 (:status r))
-                 {:ok? true}
-                 {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
+     ;; Challenge probes are AUTH-MODE-AWARE (B3): with a known token the
+     ;; instance runs auth-ON and must challenge; with none it runs auth-OFF
+     ;; (no provider — e.g. a `bb wt up` worktree stack with no .env) and the
+     ;; same route must serve OPENLY. Both are asserted so a mode regression
+     ;; fails loudly either way.
+     (if token
+       (do
+         (step "GET /api/auth/check (no token)      → 401 challenge"
+               (fn []
+                 (let [r (get* "/api/auth/check")]
+                   (if (= 401 (:status r))
+                     {:ok? true}
+                     {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
+         (step "GET /api/auth/check (wrong token)   → 401 challenge"
+               (fn []
+                 (let [r (get* "/api/auth/check"
+                               {:headers {"Authorization" "Bearer this-is-not-the-token"}})]
+                   (if (= 401 (:status r))
+                     {:ok? true}
+                     {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")})))))
+       (step "GET /api/auth/check (no AUTH_TOKEN)  → 200 (auth off → open)"
+             (fn []
+               (let [r (get* "/api/auth/check")]
+                 (if (= 200 (:status r))
+                   {:ok? true}
+                   {:ok? false :detail (str "HTTP " (:status r) " (expected 200 — auth-off instance must serve openly)")})))))
 
      (when token
        (step "GET /api/auth/check (env AUTH_TOKEN)  → 200 ok"

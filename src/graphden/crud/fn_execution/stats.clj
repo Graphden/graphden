@@ -118,6 +118,28 @@
             {:builder-fn rs/as-unqualified-lower-maps}))))
 
 
+(defn org-totals
+  "Per-ORG totals over the trailing `minutes` — `[{:org :runs :failed} …]`,
+   busiest first. Feeds the built-in error-spike alerter: one row per org that
+   ran anything in the window, counts only (no private data)."
+  [pool minutes]
+  (when pool
+    (mapv (fn [r]
+            {:org (:org_id r)
+             :runs (long (:runs r))
+             :failed (long (:failed r))})
+          (jdbc/execute!
+            pool
+            [(str "SELECT org_id,"
+                  " coalesce(sum(count), 0) AS runs,"
+                  " coalesce(sum(count) FILTER (WHERE status = 'failed'), 0) AS failed"
+                  " FROM \"usage_stat\""
+                  " WHERE bucket_start >= now() - make_interval(mins => ?)"
+                  " GROUP BY org_id ORDER BY runs DESC")
+             (int (or minutes 60))]
+            {:builder-fn rs/as-unqualified-lower-maps}))))
+
+
 (defn sweep-stats!
   "Retention: delete rollup rows older than `retention-days`. Returns the
    deleted count. Called by the cleanup scheduler alongside the execution

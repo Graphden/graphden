@@ -22,6 +22,7 @@
    | service reconciler               | `graphden.system.init.services`   |
    | fleet placement controller       | `graphden.system.init.fleet`      |
    | execution cleanup scheduler      | `graphden.system.init.cleanup`    |
+   | domain alerter (opt-in webhook)  | `graphden.system.init.alerter`    |
    | package→storage sync (non-wiring)| `graphden.packages.sync`          |
 
    Component dependency graph:
@@ -36,6 +37,7 @@
    :exec/service-reconciler → [:exec/context, :app/packages, :exec/compiled-registry]
    :exec/cleanup-scheduler  → [:exec/context]"
   (:require
+    [graphden.system.init.alerter]
     [graphden.system.init.cleanup]
     [graphden.system.init.exec]
     [graphden.system.init.fleet]

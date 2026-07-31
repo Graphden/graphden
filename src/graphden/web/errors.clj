@@ -25,7 +25,8 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
-    [clojure.tools.logging :as log]))
+    [clojure.tools.logging :as log]
+    [graphden.util.counters :as counters]))
 
 
 (def status-for-type
@@ -135,6 +136,9 @@
         type-kw (:type data)
         status (status-for type-kw)
         body (safe-error-body type-kw (Throwable/.getMessage t))]
+    ;; Operational signal for /metrics (Prometheus alerting, C3): a 5xx is a
+    ;; server fault worth paging on; 4xx are client errors, not counted.
+    (when (>= status 500) (counters/count! :http/server-error))
     (if (:ref body)
       (log/error t "unhandled request error" {:ref (:ref body) :type type-kw})
       (log/warn "request error" {:type type-kw :status status

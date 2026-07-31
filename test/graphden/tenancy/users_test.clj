@@ -244,3 +244,24 @@
     (is (empty? (sp/query-entities storage :org {})) "nothing was created")
     (testing "an ordinary name still signs up"
       (is (some? (users/signup! ctx "alice" "pw" "acme"))))))
+
+
+(deftest signup-grants-creator-org-admin
+  ;; The creator OWNS the org, so signup must write a :grant giving the new
+  ;; user :admin on the ROOT namespace (nil ≡ every ns) — otherwise a
+  ;; grant-store deployment (the cloud) finds no grant for them and leaves the
+  ;; org creator read-only in the org they just made. RLS keeps root-admin
+  ;; bounded to their own org, so it's org-admin, not platform-admin.
+  (let [storage (mem-storage)
+        ctx {:storage storage}
+        {:keys [user org]} (users/signup! ctx "alice" "pw" "acme")]
+    (is (= "alice" user))
+    (is (= "acme" org))
+    (let [u (first (sp/query-entities storage :user {:username "alice"}))
+          grants (sp/query-entities storage :grant {:subject-id (str (:id u))})]
+      (is (= 1 (count grants)) "exactly one bootstrap grant for the creator")
+      (let [g (first grants)]
+        (is (= "admin" (:capability g)) "admin capability (implies write/execute)")
+        (is (= "user" (:subject-kind g)) "a user-subject grant, not org-wide")
+        (is (nil? (:namespace g)) "root namespace ⇒ admin over the whole org")
+        (is (= (str (:id u)) (:subject-id g)) "keyed on the STABLE user id")))))

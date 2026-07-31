@@ -95,3 +95,4 @@ is background or text.
 - `gd-avatar-dark.png` — dark avatar, 1024x1024.
 - `gd-avatar-light.png` — light avatar, 1024x1024.
 - `gd-avatar-soft.png` — soft avatar, 1024x1024.
+- `gd-banner-boosty.png` — Boosty cover, 1500x500 (Ink ground, λ mark + wordmark).

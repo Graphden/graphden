@@ -63,14 +63,17 @@
    one. Pure on `base-outcome`; side effects scoped to `ctx`.
 
    `ctx` keys: `:storage` `:row` `:fn-id` `:declared-effects`
-   `:runtime-effects`."
-  [base-outcome {:keys [storage row fn-id declared-effects runtime-effects]}]
+   `:runtime-effects` `:stats` (the Phase C1 rollup ctx, bumped here so the
+   inline arms count exactly once — the async arms bump in
+   `record-completion!`)."
+  [base-outcome {:keys [storage row fn-id declared-effects runtime-effects stats]}]
   (let [outcome (->> (cond-> base-outcome
                        runtime-effects (assoc :runtime-effects runtime-effects))
                      (persist/stamp-touched-secret fn-id)
                      (persist/redact-outcome fn-id)
                      (persist/scrub-outcome fn-id))]
     (persist/log-effect-drift! (some-> row :id) declared-effects runtime-effects)
+    (persist/bump-usage! stats fn-id (:status outcome))
     (when row
       ;; Unregister even if the terminal write throws (DB error) — else
       ;; the futures-registry entry leaks until the pod restarts.
@@ -139,6 +142,13 @@
          ;; atom. `storage` is the org-scoped request storage, so the fleet
          ;; count sees only this org's own rows.
          org (tc/current-org)
+         ;; Rollup context (Phase C1): raw pool + org + submit time — threaded
+         ;; to every terminal transition so `usage-stat` counts each run once,
+         ;; with duration, no matter which arm finishes it. nil pool (bare test
+         ;; ctx) → bumps are no-ops.
+         stats-ctx {:pool (:pool (:pg-storage ctx))
+                    :org org
+                    :start-ms (System/currentTimeMillis)}
          release (persist/acquire-execution-slot! storage org (not= org tc/public-org))]
      (if (nil? release)
        ;; Global or per-org concurrency cap hit — reject WITHOUT creating a
@@ -186,13 +196,13 @@
                      storage fn-version-id declared-eff
                      (:user-id parsed) (:args parsed) free-slots)]
              (persist/register-future! (:id r) fut cancel-flag)
-             (persist/record-completion! storage (:id r) fn-id fut trace declared-eff)
+             (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx)
              {:status :pending :execution-id (str (:id r))})
 
            ;; Timeout AND we pre-persisted — record-completion's tail-future
            ;; fills in :result; client polls our row.
            (= ::pending result)
-           (do (persist/record-completion! storage (:id row) fn-id fut trace declared-eff)
+           (do (persist/record-completion! storage (:id row) fn-id fut trace declared-eff stats-ctx)
                {:status :pending :execution-id (str (:id row))})
 
            ;; Inline failure — write outcome to the row synchronously (if
@@ -207,7 +217,8 @@
                 :error (or (ex-message cause) (str cause))
                 :error-data (ex-data cause)}
                {:storage storage :row row :fn-id fn-id
-                :declared-effects declared-eff :runtime-effects (runtime-eff)}))
+                :declared-effects declared-eff :runtime-effects (runtime-eff)
+                :stats stats-ctx}))
 
            ;; Inline success — same: write synchronously so the GET endpoint
            ;; immediately returns :succeeded, no race window. Redaction
@@ -217,7 +228,8 @@
            (-> (finalize-inline-outcome
                  {:status :succeeded :result result}
                  {:storage storage :row row :fn-id fn-id
-                  :declared-effects declared-eff :runtime-effects (runtime-eff)})
+                  :declared-effects declared-eff :runtime-effects (runtime-eff)
+                  :stats stats-ctx})
                (assoc :declared-effects declared-eff))))))))
 
 

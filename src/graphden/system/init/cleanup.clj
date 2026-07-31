@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.stats :as stats]
     [graphden.storage.protocol.core :as sp]
     [integrant.core :as ig]))
 
@@ -117,7 +118,14 @@
                   ;; for OOM / StackOverflow cases.
                   (try (sweep-executions! storage)
                        (catch Exception e
-                         (log/warn e "execution-cleanup sweep failed"))))
+                         (log/warn e "execution-cleanup sweep failed")))
+                  ;; Usage-rollup retention (Phase C1) — 90d of hourly
+                  ;; buckets; bounded rows, so a daily-ish sweep on the
+                  ;; hourly cadence costs nothing. Pool absent (bare test
+                  ;; ctx) → no-op inside.
+                  (try (stats/sweep-stats! (:pool (:pg-storage context)) 90)
+                       (catch Exception e
+                         (log/warn e "usage-stat retention sweep failed"))))
       period period
       java.util.concurrent.TimeUnit/MILLISECONDS)
     scheduler))

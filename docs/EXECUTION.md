@@ -227,6 +227,25 @@ Implementation: `sweep-executions! storage now` (in
 `graphden.system.init.cleanup`). The `now` argument is injectable so tests
 can verify TTL behaviour without sleeping real time.
 
+## Usage rollups (`:usage-stat`)
+
+Every terminal transition (both inline arms in `apply-execute` and the async
+arms in `record-completion!`) also increments a **pre-aggregated rollup row**:
+one per `(UTC-hour bucket, org, fn, status)` with a run count and summed
+wall-clock duration — via an atomic `INSERT … ON CONFLICT DO UPDATE`
+(`graphden.crud.fn-execution.stats/bump!`, best-effort: a failed bump logs and
+never fails the execution). The table stores **counts and durations only** —
+never args, results, or error text — so it is privacy-safe to aggregate and
+grows with distinct keys, not traffic.
+
+Reads: the `:usage-fn-stats` base-fn (`{:runs :failed :cancelled :avg-ms}`
+for one fn over a trailing window, scoped to the CURRENT org) feeds the
+"7d: N runs · M failed · avg K ms" strip at the top of the editor's
+execute-history panel; `org-stats` (src-level) lists an org's busiest fns for
+operator tooling. Retention: the cleanup scheduler sweeps buckets older than
+90 days (`sweep-stats!`) — trends outlive the raw `:fn-execution` TTLs, which
+is the point.
+
 ## Editor UI
 
 The ▶ button on a fn-card root row (auth-required, visible only to

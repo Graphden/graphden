@@ -3741,12 +3741,43 @@
           :then :_partial-eh-empty-msg
           :else :_partial-eh-list}}
 
+  ;; --- usage-stats strip (Phase C1) — 7-day rollup line above the rows. ---
+  {:name :_peh-stats
+   :description "7-day usage rollup for the panel's fn — `{:runs :failed :cancelled :avg-ms}` from the pre-aggregated `:usage-stat` table (counts + durations only, org-scoped)."
+   :parent :usage-fn-stats
+   :args {:fn-id {:as :fn-id} :days 7}}
+
+  {:name :_peh-stats-runs
+   :parent :get
+   :args {:coll :_peh-stats :key {:value :runs} :default 0}}
+
+  {:name :_peh-stats-failed
+   :parent :get
+   :args {:coll :_peh-stats :key {:value :failed} :default 0}}
+
+  {:name :_peh-stats-avg
+   :parent :get
+   :args {:coll :_peh-stats :key {:value :avg-ms} :default 0}}
+
+  {:name :_peh-stats-text
+   :parent :str
+   :args {:parts [{:value "7d: "} :_peh-stats-runs {:value " runs · "}
+                  :_peh-stats-failed {:value " failed · avg "}
+                  :_peh-stats-avg {:value " ms"}]}}
+
+  {:name :_peh-stats-line
+   :description "The rollup strip rendered above the history rows."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-stats"}}
+          :children [:_peh-stats-text]}}
+
   {:name :_partial-eh-fragment
-   :description "Full execute-history panel hiccup — empty-state OR the list of rows."
+   :description "Full execute-history panel hiccup — the 7-day usage strip, then empty-state OR the list of rows."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-history-panel"}}
-          :children [:_partial-eh-body]}}
+          :children [:_peh-stats-line :_partial-eh-body]}}
 
   {:name :_partial-eh-html
    :parent :render-hiccup

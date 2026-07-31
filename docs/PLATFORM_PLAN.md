@@ -574,6 +574,16 @@ e2e) — не на критическом пути запуска.
 
 ### 4.1. Аутентификация: заменить общий пароль
 
+> **SHIPPED (2026-07-31), state differs from the snapshot below:** auth is
+> provider-driven — blank `AUTH_TOKEN` = NO provider = the instance runs OPEN
+> (self-hosted no-login mode); a set token or the tenancy addon turns auth ON,
+> and then **reads are gated too** (the anonymous graph view is removed; the
+> auth-required middleware is provider-aware). The addon serves a public
+> `GET /login` page (sign-in + create-org, confirm-password + strength meter);
+> `signup!` creates org + first user (8-char password minimum), grants the
+> creator `:admin` on the root namespace (org-scoped by RLS), and auto-logs-in.
+> The paragraph below is kept as the historical starting point.
+
 Сегодня (проверено): единственный `AUTH_TOKEN` (env) как bearer в localStorage,
 никакой модели пользователя; **чтение вообще анонимно**; секреты — все видят все.
 Это полная переделка auth: таблица `user`, сессии/JWT, извлечение

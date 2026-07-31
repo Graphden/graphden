@@ -465,3 +465,31 @@ by their addon/route groups rather than `app.routes` — same pattern.
   Cut-over criterion: ~50+ fn-defs purely for partials, or once
   partials need their own dependencies (currently they reuse
   `app.branches` and `app.execution` chains directly).
+
+### 12. Bare-route handlers: `:lambda-params` must be `[]` or `[:request]`
+
+A route WITHOUT middleware (`:get-route` / `:post-route` parents) hands its
+compiled handler the **raw ring request, positionally** (reitit → the
+shape-callable). Only two shapes thread that correctly:
+
+- `[]` — static response, request ignored.
+- `[:request]` — the 1-arg shape puts the request under `:request`.
+
+Anything else breaks silently at the wire (while `cr/execute` with an explicit
+`{:request …}` map still works — tests must use `rc/dispatch` to see it):
+
+- 2+ params (`[:request :limit]`) → the map-callable treats the ring request
+  AS the lambda-value map → `:request` resolves nil → `parse-form-body`
+  returns `{}` and every field is blank. This is how cloud signup returned
+  "already taken" for every input.
+- 1 param under another name (`[:children]`) → the whole request lands in that
+  slot. This is how the auth popover rendered `<request-method>…` + the reitit
+  router object inside its `<input>`s.
+
+Middlewared routes (`:post` / `:put` / `:get-auth-required`) thread through
+the middleware chain and tolerate wider shapes. Corollary: pin `:children
+{:value []}` on leaf `:hiccup` elements whose text/glyph is set by JS —
+an unpinned `:children` free re-derives and re-breaks the handler shape.
+
+Guarded by `route-handler-shape-guard-test` (unit) + the
+`*-over-the-wire` integration tests — extend those when adding public routes.

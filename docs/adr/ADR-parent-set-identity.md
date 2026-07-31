@@ -1,7 +1,7 @@
 # ADR: the parent-set is structural identity, not versioned state
 
-**Status: decided (2026-07-23). Option (б) — identity + gate — is the
-permanent semantic; option (а) — versioning `:parent-ids` — is
+**Status: decided (2026-07-23). Option (b) — identity + gate — is the
+permanent semantic; option (a) — versioning `:parent-ids` — is
 REJECTED, not deferred.**
 
 ## Context
@@ -17,14 +17,14 @@ edit (audit item 8, 2026-07).
 
 Two coherent designs existed:
 
-- **(а) Version the parent-set** — an ordered `parent-ids` array on
+- **(a) Version the parent-set** — an ordered `parent-ids` array on
   `fn_version`, branch-resolved like bindings, with version-aware
   reverse-parent queries.
-- **(б) Parent-set = structural identity** — the junction stays
+- **(b) Parent-set = structural identity** — the junction stays
   identity-level; a write-time gate makes the desync impossible
   instead of representable.
 
-## Decision: (б)
+## Decision: (b)
 
 The gate already shipped (`validation/reparent-cross-branch-rej`):
 a parent-set change is rejected unless the request branch is the ROOT
@@ -34,7 +34,7 @@ branches — merge or delete them first). Parent-preserving updates and
 non-versioned storages are unaffected. This ADR fixes that gate as the
 *final* semantic rather than a stopgap.
 
-## Why (а) is rejected
+## Why (a) is rejected
 
 1. **The parent-set defines the slot closure, and slots are identity.**
    A composed fn's exposed slots are computed from the `parent-ids`
@@ -54,9 +54,9 @@ non-versioned storages are unaffected. This ADR fixes that gate as the
    that produced a 20-minute checker hang before snapshot-at-bind
    (see the perf ledger). The identity junction is a plain indexed
    read.
-3. **Minimal entities (principle #2).** (а) adds a versioned mirror of
+3. **Minimal entities (principle #2).** (a) adds a versioned mirror of
    a junction, reverse-parent version queries, and merge semantics for
-   parent conflicts. (б) adds one write-time predicate.
+   parent conflicts. (b) adds one write-time predicate.
 4. **The blocked case IS the corrupting case.** The gate only rejects
    re-parents that would desync branches. Re-parenting a fn nobody has
    branch-forked is untouched; converge-then-reparent is the honest

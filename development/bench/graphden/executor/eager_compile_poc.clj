@@ -1,6 +1,6 @@
-;; POC: сравнить current executor vs ideal hand-written eager Clojure closure
-;; на минимальной композиции. Цель: подтвердить что eager compile реально
-;; даёт ~2x от Clojure, а не упрётся в что-то непредвиденное.
+;; POC: compare the current executor vs an ideal hand-written eager Clojure
+;; closure on a minimal composition. Goal: confirm that eager compile really
+;; gives ~2x over Clojure, rather than hitting something unforeseen.
 (require '[graphden.executor.test-setup :as setup])
 (require '[graphden.storage.protocol.postgres-test-helpers :as pth])
 (require '[graphden.executor.interface :as exec])

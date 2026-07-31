@@ -1,116 +1,116 @@
 ---
 name: graphden-packages-quality
-description: Качество `resources/packages/**/{fns.edn,impls.clj}` — узкие типы и type-aliases, минимальные base-fn impls, **аудит ЛЮБЫХ Clojure-helpers в impls (включая private `defn-`, middleware closures, handler wraps — не только `defbase` тела)**, корректное использование именованных vs анонимных fn-defs. Применяй при ЛЮБОМ касании пакетного слоя — даже если правка выглядит как «просто добавил private helper в impls» или «Ring middleware glue», это всё равно пакетный слой и кандидат на graph-decomposition. Также как explicit-проверка существующего ("пройдись по пакетам", "сузь типы", "почисти fns.edn", "проверь impls на лишнюю логику"). Триггеры — фразы вроде "fn-def", "fns.edn", "impls.clj", "base-fn", "private helper", "defn- в impls", "middleware", "ring wrap", "handler closure", "orchestration", "cache wrap", "post-process", "тип слишком широкий", ":jsonb", ":any", "type alias", "длинный union", ":nullable-*", "именованный или анонимный", "extract в helper", "impl содержит логику", "MI vs single-parent", "namespace для fn", "переиспользование fn-def", "доступно для админа", "должно быть конкретным типом". SKIP для: чисто Clojure src/test — кода (→ `graphden-code-quality`), pure REPL-debug гипотез (→ `graphden-repl`), frontend (.js/.css) — отдельный скилл.
+description: Quality of `resources/packages/**/{fns.edn,impls.clj}` — narrow types and type-aliases, minimal base-fn impls, **audit of ANY Clojure helpers in impls (including private `defn-`, middleware closures, handler wraps — not only `defbase` bodies)**, correct use of named vs anonymous fn-defs. Apply on ANY touch of the package layer — even if the edit looks like "just added a private helper to impls" or "Ring middleware glue", it is still the package layer and a candidate for graph-decomposition. Also as an explicit check of existing code ("go through the packages", "narrow the types", "clean up fns.edn", "check impls for extra logic"). Triggers — phrases like "fn-def", "fns.edn", "impls.clj", "base-fn", "private helper", "defn- in impls", "middleware", "ring wrap", "handler closure", "orchestration", "cache wrap", "post-process", "type too wide", ":jsonb", ":any", "type alias", "long union", ":nullable-*", "named or anonymous", "extract into helper", "impl contains logic", "MI vs single-parent", "namespace for fn", "fn-def reuse", "available to admin", "should be a concrete type". SKIP for: pure Clojure src/test code (→ `graphden-code-quality`), pure REPL-debug hypotheses (→ `graphden-repl`), frontend (.js/.css) — a separate skill.
 ---
 
-# graphden-packages-quality — типы, impls, fn-defs в `resources/packages/`
+# graphden-packages-quality — types, impls, fn-defs in `resources/packages/`
 
-Задача этого скилла: **держать пакетный слой Graphden в форме, в которой
-он остаётся объяснимым внешнему контрибьютору** — узкие типы, named-and-
-reused aliases, минимальные base-fn impls (вся композиция в графе), и
-правильное использование named vs anonymous fn-defs.
+The goal of this skill: **keep the Graphden package layer in a shape in which
+it stays explainable to an external contributor** — narrow types, named-and-
+reused aliases, minimal base-fn impls (all composition in the graph), and
+correct use of named vs anonymous fn-defs.
 
-Этот скилл — общий вход. Для деталей он делегирует:
+This skill is the common entry point. For details it delegates:
 
-- **`graphden-fn-refactor`** — декомпозиция больших / неатомарных
-  base-fn impl. Применяется И для нового кода (новые impls тоже должны
-  быть атомарными), И для аудита существующих.
-- **`graphden-fn-design`** — naming rules для fn-defs (`_`-private vs
-  public, MI vs single parent, namespaces, `:const`-обёртки). Применяется
-  И для нового кода, И для аудита существующих.
-- **`graphden-code-quality`** — Clojure-сторона (src/), если правка
-  тащит за собой src-изменения.
+- **`graphden-fn-refactor`** — decomposition of large / non-atomic
+  base-fn impls. Applies BOTH to new code (new impls must also
+  be atomic) AND to auditing existing ones.
+- **`graphden-fn-design`** — naming rules for fn-defs (`_`-private vs
+  public, MI vs single parent, namespaces, `:const` wrappers). Applies
+  BOTH to new code AND to auditing existing ones.
+- **`graphden-code-quality`** — the Clojure side (src/), if an edit
+  drags src changes along with it.
 
-Этот файл добавляет **специфичные пакетному слою правила**, которых нет
-в делегатах: type-narrowing, type-aliasing, и порядок проверки.
+This file adds **rules specific to the package layer** that are absent
+in the delegates: type-narrowing, type-aliasing, and the check order.
 
-**Применять и при письме нового кода, и как explicit-проверку
-существующего.** Если новый fn-def / type / impl проходит этот скилл с
-первого захода — не придётся возвращаться. Если зовут «проверь типы» /
-«почисти пакет» — это explicit-rerun по тому же списку.
+**Apply both when writing new code and as an explicit check of
+existing code.** If a new fn-def / type / impl passes this skill on
+the first pass — you won't have to come back. If you're asked to "check the types" /
+"clean up the package" — that's an explicit rerun over the same list.
 
-## 0. Sanity checks перед началом
+## 0. Sanity checks before starting
 
 ```bash
-# Должны быть нулями. Если красное — закрывай ДО рефакторинга.
+# Must be zeros. If red — close it BEFORE refactoring.
 bb check                   # lint
 clojure -M:dev tools/reachability_audit.clj | grep -E 'Unreachable COMPOSED|^$' -A1 | head -10
 ```
 
-В REPL (`graphden-repl` skill) — для проверки гипотезы по
-текущему живому графу:
+In the REPL (`graphden-repl` skill) — for checking a hypothesis against the
+current live graph:
 
 ```clojure
 (types/resolve-alias :nullable-text)      ; => [:union :null :text]
 (registry/rich-type-of :my-fn)            ; => {:return … :args … :effects …}
 ```
 
-## 1. Типы должны быть максимально узкими
+## 1. Types should be as narrow as possible
 
-**Anti-pattern**: писать `:jsonb` или `:any` в slot type, когда реальный
-контракт — конкретный record / refinement / union. Широкий тип ломает:
+**Anti-pattern**: writing `:jsonb` or `:any` in a slot type, when the real
+contract is a concrete record / refinement / union. A wide type breaks:
 
-1. **Type-checker не видит ошибки** — `:jsonb` принимает что угодно
-   jsonb-shaped; реальный mismatch обнаружится в runtime.
-2. **Editor не показывает правильный type-chip** — пользователь не
-   видит чего слот ждёт.
-3. **`form-picker` (`/api/value-form`) не предлагает правильный widget**
-   — `:jsonb` → generic JSON editor; `:port` → number-input с range
+1. **The type-checker doesn't see errors** — `:jsonb` accepts anything
+   jsonb-shaped; the real mismatch surfaces at runtime.
+2. **The editor doesn't show the right type-chip** — the user doesn't
+   see what the slot expects.
+3. **`form-picker` (`/api/value-form`) doesn't offer the right widget**
+   — `:jsonb` → generic JSON editor; `:port` → number-input with range
    validation.
 
-### 1.1 Что сужать в первую очередь
+### 1.1 What to narrow first
 
-| Симптом | Реплейс |
+| Symptom | Replacement |
 |---|---|
-| `:jsonb` под record-shape вход | inline `{:k1 T1 :k2 T2}` или named record type-row |
-| `:jsonb` под map-shape вход | `[:map K V]` (`:keyword-map`, `:text-keyed-map`, `:text-map`) |
-| `:jsonb` под list | `[:list T]` |
-| `:any` под callable | `:fn` (HOF-wrap) или `[:fn args ret]` (структурный) |
-| `:any` под уже-готовое значение | конкретный type-row или `:jsonb` если действительно jsonb-shaped |
-| `:int` под HTTP-port | `:port` или `:user-port` (refinement) |
-| `:text` под URL | `:url` (refinement) |
-| `:text` под required-non-blank | `:non-blank-text` |
+| `:jsonb` for a record-shape input | inline `{:k1 T1 :k2 T2}` or a named record type-row |
+| `:jsonb` for a map-shape input | `[:map K V]` (`:keyword-map`, `:text-keyed-map`, `:text-map`) |
+| `:jsonb` for a list | `[:list T]` |
+| `:any` for a callable | `:fn` (HOF-wrap) or `[:fn args ret]` (structural) |
+| `:any` for an already-built value | a concrete type-row or `:jsonb` if it really is jsonb-shaped |
+| `:int` for an HTTP port | `:port` or `:user-port` (refinement) |
+| `:text` for a URL | `:url` (refinement) |
+| `:text` for required-non-blank | `:non-blank-text` |
 
-**Когда `:jsonb` / `:any` ОПРАВДАН**:
+**When `:jsonb` / `:any` IS justified**:
 
-- `:jsonb` — действительно произвольный JSON-shaped payload (e.g. user-
+- `:jsonb` — a genuinely arbitrary JSON-shaped payload (e.g. user-
   supplied request body before parsing).
-- `:any` — escape hatch для уже-готовой Clojure-функции (НЕ для
-  callable, для уже-built fn-value) или для passthrough-семантики
-  (`:const :value` — приведёт обратно через rule).
+- `:any` — an escape hatch for an already-built Clojure function (NOT for
+  a callable, but for an already-built fn-value) or for passthrough
+  semantics (`:const :value` — coerced back via a rule).
 
-### 1.2 Как искать кандидатов на сужение
+### 1.2 How to find narrowing candidates
 
 ```bash
-# `:jsonb` в slot types — посмотри каждое use-site:
+# `:jsonb` in slot types — look at every use-site:
 grep -rE ':type :jsonb|"jsonb"' resources/packages --include='*.edn' | head -20
 
-# `:any` в slot types — то же:
+# `:any` in slot types — same:
 grep -rE ':type :any' resources/packages --include='*.edn' | head -20
 
-# `[:union :null …]` длиннее одной строки — кандидат на alias:
+# `[:union :null …]` longer than one line — an alias candidate:
 grep -rEn '\[:union :null :[a-z]' resources/packages --include='*.edn' | head -10
 ```
 
-Для каждого случая — спросить:
+For each case — ask:
 
-1. Что реально читает этот слот в runtime?
-2. Может ли значение быть нарушающим (record вместо int)?
-3. Есть ли реальный известный тип? Если да — сузить.
+1. What does this slot actually read at runtime?
+2. Could the value be a violation (a record instead of an int)?
+3. Is there a real known type? If yes — narrow it.
 
-## 2. Type aliases — повторяющиеся shape'ы получают имя
+## 2. Type aliases — recurring shapes get a name
 
-**Правило**: если **одна и та же структурная форма** (`[:union :null
-:text]` / `[:map :keyword :any]` / т.п.) появляется в **5+ местах**
-по пакетам — она заслуживает name и переиспользования.
+**Rule**: if **the same structural form** (`[:union :null
+:text]` / `[:map :keyword :any]` / etc.) appears in **5+ places**
+across the packages — it deserves a name and reuse.
 
-### 2.1 Готовый набор aliases
+### 2.1 The ready-made set of aliases
 
-Все живут в `resources/packages/core/refinements/fns.edn`:
+They all live in `resources/packages/core/refinements/fns.edn`:
 
-| Alias | Структура | Зачем |
+| Alias | Structure | Why |
 |---|---|---|
-| `:nullable-text` | `[:union :null :text]` | 37+ inline sites до aliasing |
+| `:nullable-text` | `[:union :null :text]` | 37+ inline sites before aliasing |
 | `:nullable-uuid` | `[:union :null :uuid]` | 24+ sites |
 | `:nullable-jsonb` | `[:union :null :jsonb]` | 6+ sites |
 | `:nullable-int` | `[:union :null :int]` | sequence-position, optional limits |
@@ -127,119 +127,119 @@ grep -rEn '\[:union :null :[a-z]' resources/packages --include='*.edn' | head -1
 | `:percent` (`0..100`) / `:probability` (`0..1`) | refinements on `:numeric` | bounded numerics |
 | `:non-empty-text` / `:non-blank-text` / `:url` | refinements on `:text` | text invariants |
 
-Refinements (`:_refinement-narrow` template) дают runtime check —
-`:ensure-positive-int :args {:value 42}` → `42` или throw
+Refinements (the `:_refinement-narrow` template) give a runtime check —
+`:ensure-positive-int :args {:value 42}` → `42` or throws
 `:refinement/violated`.
 
-### 2.2 Когда вводить новый alias
+### 2.2 When to introduce a new alias
 
-**ДА** (имя оправдано):
+**YES** (a name is justified):
 
-- ≥ 5 use-site'ов одинаковой структурной формы.
-- Семантическое имя добавляет смысл (`:port` лучше `[:int {:constraint
+- ≥ 5 use-sites of the same structural form.
+- A semantic name adds meaning (`:port` is better than `[:int {:constraint
   [:and [:>= 1] [:<= 65535]]}]`).
-- Reuse внутри одного домена (HTTP-related shapes, secret-flow shapes).
-- **Decoded entity-row shape с фиксированной схемой** (`:fn-row-shape`,
-  `:branch-version-row-shape`, `:vault-metadata-shape`) — имя
-  документирует ИСТОЧНИК данных, даже на ОДНОМ callsite. См. § 2.2.1.
+- Reuse within a single domain (HTTP-related shapes, secret-flow shapes).
+- **A decoded entity-row shape with a fixed schema** (`:fn-row-shape`,
+  `:branch-version-row-shape`, `:vault-metadata-shape`) — the name
+  documents the SOURCE of the data, even at a SINGLE callsite. See § 2.2.1.
 
-**НЕТ** (alias не нужен):
+**NO** (an alias isn't needed):
 
-- 1-2 use-site'а **анонимной** структурной формы — inline form
-  проще читать (`{:keys [name id]}` vs `:_some-result-shape`).
-- «На всякий случай назовём» — засоряет alias-неймспейс.
-- Aliasing внутри одной fn-def — это inline composite type (см.
-  `graphden-fn-design` §3), не alias.
+- 1-2 use-sites of an **anonymous** structural form — the inline form
+  is easier to read (`{:keys [name id]}` vs `:_some-result-shape`).
+- "Let's name it just in case" — it clutters the alias namespace.
+- Aliasing within a single fn-def — that's an inline composite type (see
+  `graphden-fn-design` §3), not an alias.
 
-### 2.2.1 Single-use alias — НЕ удалять автоматически
+### 2.2.1 Single-use alias — do NOT remove automatically
 
-**Важно для аудитов:** правило «≥ 5 use-site'ов» применяется ТОЛЬКО
-к решению «вводить ли новый alias». Уже-существующий single-use alias
-**не подлежит автоматическому inlining'у** — его имя несёт информацию,
-которую inline-shape потерял бы.
+**Important for audits:** the "≥ 5 use-sites" rule applies ONLY
+to the decision of "whether to introduce a new alias". An already-existing single-use alias
+is **not subject to automatic inlining** — its name carries information
+that the inline shape would lose.
 
-Концретно:
+Concretely:
 
 - `:_resolve-binding-versions-decode :return-type :binding-version-row-shape`
-  читается за секунду — «эта функция декодирует строку binding-version».
-- Inline-вариант (`:return-type {:id :uuid :binding-id :uuid :branch-id :uuid
+  reads in a second — "this function decodes a binding-version row".
+- The inline variant (`:return-type {:id :uuid :binding-id :uuid :branch-id :uuid
   :fn-id :uuid :slot-id :uuid :value :nullable-jsonb :value-present
-  [:union :null :bool] :ref-fn-id :nullable-uuid ...}`) — 13 строк,
-  читателю надо вспомнить что это binding-version.
+  [:union :null :bool] :ref-fn-id :nullable-uuid ...}`) — 13 lines,
+  and the reader has to recall that this is a binding-version.
 
-Альфа-имя = бесплатная документация типа. Stripping ради «правила
-5+» режет смысл, не сложность.
+An alpha name = free type documentation. Stripping it for the sake of "the
+5+ rule" cuts meaning, not complexity.
 
-**Когда single-use alias РЕАЛЬНО можно убрать:**
+**When a single-use alias CAN genuinely be removed:**
 
-- Если имя синтетическое (`:_some-step1-result`) без доменного смысла —
-  это scaffolding, не alias. Inline в callsite.
-- Если shape настолько проста (1-2 поля) что имя добавляет шума, не
-  смысла (`:_count-result {:count :int}` → лучше inline).
-- Если alias дублирует другой уже-существующий с тем же shape — merge.
+- If the name is synthetic (`:_some-step1-result`) with no domain meaning —
+  it's scaffolding, not an alias. Inline it at the callsite.
+- If the shape is so simple (1-2 fields) that the name adds noise, not
+  meaning (`:_count-result {:count :int}` → better inlined).
+- If the alias duplicates another already-existing one with the same shape — merge.
 
-Иначе single-use named shape — это **type documentation**, и она
-дешёвая. Оставляй.
+Otherwise a single-use named shape is **type documentation**, and it's
+cheap. Leave it.
 
-### 2.3 Куда положить новый alias
+### 2.3 Where to put a new alias
 
-| Группа | Файл |
+| Group | File |
 |---|---|
 | Generic shapes (`:nullable-*`, `:keyword-map`) | `core/refinements/fns.edn` |
 | HTTP-specific shapes (`:ring-request-shape`, `:ring-response-shape`) | `web/ring-adapter/fns.edn` |
-| Domain-specific shapes (`:security-headers-shape`) | соответствующий пакет |
-| Refinement narrowers (`:ensure-X`) | вместе с alias, в `core/refinements/fns.edn` |
+| Domain-specific shapes (`:security-headers-shape`) | the corresponding package |
+| Refinement narrowers (`:ensure-X`) | together with the alias, in `core/refinements/fns.edn` |
 
-При добавлении alias **обнови comment-блок** в начале секции с
-актуальным call-site count (источник истины для «> 5 inline sites»).
+When adding an alias **update the comment block** at the start of the section with
+the current call-site count (the source of truth for "> 5 inline sites").
 
-### 2.4 Sync-time gotcha — type-aliases должны быть зарегистрированы ДО parsing'а
+### 2.4 Sync-time gotcha — type-aliases must be registered BEFORE parsing
 
-Сейчас `initialize-with-base-fns!` вызывает `register-type-aliases!`
-через `requiring-resolve` перед base-fn validation. Если ввёл новый
-alias и base-fn ссылается на него в `:return-type` — sync должен
-зарегистрировать alias ПЕРЕД tем как валидировать base-fn'ы.
+Currently `initialize-with-base-fns!` calls `register-type-aliases!`
+via `requiring-resolve` before base-fn validation. If you introduce a new
+alias and a base-fn references it in `:return-type` — sync must
+register the alias BEFORE it validates the base-fns.
 
-Это handled by `system/core/register-type-aliases!`. Не нужно ничего
-дополнительно делать **если alias живёт в `core/refinements/`**
-(оно load'ится первым). Если — внутри `web/`/`app/` — может быть
-load-order issue; обычно решается тем, что мы делаем alias в `core`.
+This is handled by `system/core/register-type-aliases!`. You don't need to do
+anything extra **if the alias lives in `core/refinements/`**
+(it loads first). If it's inside `web/`/`app/` — there may be a
+load-order issue; usually resolved by putting the alias in `core`.
 
-## 3. base-fn impls — минимальность
+## 3. base-fn impls — minimality
 
-**Делегирует `graphden-fn-refactor`** (§3 user-composability test, §4
-рецепт декомпозиции). Кратко:
+**Delegates to `graphden-fn-refactor`** (§3 user-composability test, §4
+decomposition recipe). In brief:
 
-- **Один прямой library/Java-вызов** + boundary-coercion → OK.
-- **Executor-ядро** (`if`/`cond`/`try`/`atom`/`future`/`sleep`/`=`) → OK.
-- **Алгоритм с инвариантом** (journalled-txn с rollback, cycle-guarded
+- **A single direct library/Java call** + boundary-coercion → OK.
+- **Executor core** (`if`/`cond`/`try`/`atom`/`future`/`sleep`/`=`) → OK.
+- **An algorithm with an invariant** (journalled-txn with rollback, cycle-guarded
   recursion) → OK.
-- **Всё остальное** — композиция, переехать в `fns.edn`.
+- **Everything else** — composition, move it into `fns.edn`.
 
-### 3.1 Доп-критерий для НОВЫХ impls (этот скилл, не fn-refactor)
+### 3.1 Extra criterion for NEW impls (this skill, not fn-refactor)
 
-При написании **нового** impl: всегда спрашивай user-composability
-test ПЕРЕД написанием.
+When writing a **new** impl: always ask the user-composability
+test BEFORE writing.
 
-> Если пользователь Graphden'а захочет варьировать ОДИН из шагов моей
-> новой impl — придётся ли ему писать новый Clojure-impl?
+> If a Graphden user wants to vary ONE of the steps of my
+> new impl — will they have to write a new Clojure impl?
 
-Если ДА — switch'ай на decompose-from-scratch, не «начну с большой
-impl, потом распилим». Получится дешевле.
+If YES — switch to decompose-from-scratch, not "I'll start with a big
+impl, then split it up". It comes out cheaper.
 
-### 3.2 Sanity checks для impl
+### 3.2 Sanity checks for an impl
 
 ```clojure
-;; В REPL:
+;; In the REPL:
 (:impl @(resolve 'graphden.packages.core.logic.impls/equal?-fn))
-;; → #object[...] — функция
+;; → #object[...] — a function
 
-;; Тело — ровно одна или две стороки реального кода?
-;; Если distinct cond/case/let — кандидат на распил.
+;; Is the body exactly one or two lines of real code?
+;; If there's a distinct cond/case/let — a split candidate.
 ```
 
 ```bash
-# Длинные defbase в impls.clj — кандидаты на §1 fn-refactor:
+# Long defbase in impls.clj — candidates for §1 fn-refactor:
 python3 << 'EOF'
 import re, os
 for root, _, files in os.walk('/root/projects/graphden/resources/packages'):
@@ -257,30 +257,30 @@ for root, _, files in os.walk('/root/projects/graphden/resources/packages'):
 EOF
 ```
 
-≥ 20 строк defbase — пройди по `graphden-fn-refactor` §3-§4. Каждое
-обоснование «не режу» — explicit (§1.5 fn-refactor).
+≥ 20 lines of defbase — go through `graphden-fn-refactor` §3-§4. Every
+"I'm not splitting" justification — explicit (§1.5 fn-refactor).
 
-### 3.3 Скрытая композиция в private helpers (не только в `defbase`)
+### 3.3 Hidden composition in private helpers (not only in `defbase`)
 
-**Самая частая дыра:** ты добавляешь `(defn- foo …)` в `impls.clj` для
-«склейки» (Ring middleware, cache wrap, multi-step orchestration). С
-точки зрения существующих чек-листов это не `defbase`, не fn-def, не
-тип — формально проскальзывает. Но семантически это **композиция,
-которой место в графе**.
+**The most common hole:** you add a `(defn- foo …)` to `impls.clj` for
+"glue" (Ring middleware, cache wrap, multi-step orchestration). From
+the standpoint of the existing checklists it isn't a `defbase`, isn't a fn-def, isn't a
+type — formally it slips through. But semantically it's **composition
+that belongs in the graph**.
 
-Симптомы (любой ≥ 1 — повод остановиться):
+Symptoms (any ≥ 1 — a reason to stop):
 
-| Симптом | Что это значит |
+| Symptom | What it means |
 |---|---|
-| `defn-` возвращает `(fn [req] …)` (closure-handler) | Wrap-style middleware — должен быть fn-def через `:if`/`:call`/`:cond` (паттерн `:branch-routing-wrap` в `web/branch-router/fns.edn`). |
-| `defn-` оркеструет ≥ 3 шага: `(let [a (step1 …) b (step2 a) …] (final …))` | Это композиция. Каждый шаг — кандидат в base-fn, склейка — fn-def. |
-| `defn-` имеет ветвление по условию response/request shape (`if-let`, `cond` по headers, `when` по content-type) | Условная логика принадлежит графу (`:if`/`:cond` over predicate base-fns). Pure runtime branching — единственное исключение. |
-| `defn-` мутирует state (`swap!`/`reset!`/`alter`) И принимает данные с request-side | Mutation — нормально в impls (state живёт там), НО доступ к ней должен быть через узкие base-fn'ы (`*-get`, `*-put!`), а решение «когда читать / когда писать» — в fn-def. |
-| `defn-` использует фразу «orchestrate», «process», «pipeline», «wrap», «chain» в имени или docstring | Семантический маркер композиции. |
-| `defn-` вызывается из `defbase` body как «удобный helper» | Если базовый impl делегирует в helper — composition уже скрыта. Извлеки helper в отдельный base-fn (или серию base-fn'ов) и склей через fn-def. |
+| `defn-` returns `(fn [req] …)` (closure-handler) | Wrap-style middleware — should be a fn-def via `:if`/`:call`/`:cond` (the `:branch-routing-wrap` pattern in `web/branch-router/fns.edn`). |
+| `defn-` orchestrates ≥ 3 steps: `(let [a (step1 …) b (step2 a) …] (final …))` | This is composition. Each step is a base-fn candidate, the glue is a fn-def. |
+| `defn-` branches on a response/request shape condition (`if-let`, `cond` over headers, `when` over content-type) | Conditional logic belongs in the graph (`:if`/`:cond` over predicate base-fns). Pure runtime branching is the only exception. |
+| `defn-` mutates state (`swap!`/`reset!`/`alter`) AND takes data from the request side | Mutation is fine in impls (state lives there), BUT access to it should be through narrow base-fns (`*-get`, `*-put!`), and the decision of "when to read / when to write" — in a fn-def. |
+| `defn-` uses the phrase "orchestrate", "process", "pipeline", "wrap", "chain" in its name or docstring | A semantic marker of composition. |
+| `defn-` is called from a `defbase` body as a "convenience helper" | If a base impl delegates to a helper — composition is already hidden. Extract the helper into a separate base-fn (or a series of base-fns) and glue it via a fn-def. |
 
 ```bash
-# Find every private helper in impls.clj — каждый > 10 lines проверь:
+# Find every private helper in impls.clj — check each > 10 lines:
 python3 << 'EOF'
 import re, os
 for root, _, files in os.walk('/root/projects/graphden/resources/packages'):
@@ -300,23 +300,23 @@ EOF
 ```
 
 ```bash
-# Closure-returning helpers (wraps/middleware) — почти всегда композиция:
+# Closure-returning helpers (wraps/middleware) — almost always composition:
 grep -rEn '^\(defn-?\s+\S+.*\n.*\(fn\s+\[req' resources/packages --include='impls.clj' | head
-# Pipeline helpers с тремя+ шагами:
+# Pipeline helpers with three+ steps:
 grep -rEnB1 '\(->>\s+\S+\s+\S+\s+\S+\s+\S+' resources/packages --include='impls.clj' | head
-# Имена с маркерами оркестрации:
+# Names with orchestration markers:
 grep -rEn '^\(defn-?\s+(\S*orchestr|\S*pipeline|\S*-wrap|run-handler|process-\S+|chain-)' resources/packages --include='impls.clj'
 ```
 
-**Рефактор-рецепт:**
+**Refactor recipe:**
 
-1. **Расщепи** private helper на 2-N узких base-fn'ов — каждый делает
-   один шаг (cache lookup, encode-body, header-attach, etc.). Их impl —
-   одна-две строки.
-2. **Объяви** каждый base-fn в `fns.edn` рядом — типы аргументов,
-   возврат, effects.
-3. **Склей** их в graph wrap через `:if` / `:cond` / `:call` —
-   эталонный пример `:branch-routing-wrap` в
+1. **Split** the private helper into 2-N narrow base-fns — each does
+   one step (cache lookup, encode-body, header-attach, etc.). Their impl —
+   one or two lines.
+2. **Declare** each base-fn in `fns.edn` alongside — argument types,
+   return, effects.
+3. **Glue** them into a graph wrap via `:if` / `:cond` / `:call` —
+   the reference example is `:branch-routing-wrap` in
    `resources/packages/web/branch-router/fns.edn`:
 
    ```edn
@@ -328,167 +328,167 @@ grep -rEn '^\(defn-?\s+(\S*orchestr|\S*pipeline|\S*-wrap|run-handler|process-\S+
            :base-handler {:type [:fn …] :description "…"}}}
    ```
 
-4. **Удали** старый private helper. Composition теперь видна.
-5. **Перекройся тестом** на graph-уровне — handler chain через wrap
-   должен работать end-to-end (smoke + integration suite).
+4. **Delete** the old private helper. Composition is now visible.
+5. **Cover with a test** at the graph level — the handler chain through the wrap
+   should work end-to-end (smoke + integration suite).
 
-**Когда private helper в impls OK:**
+**When a private helper in impls is OK:**
 
-- Тонкая boundary-coercion для library-call (`String/.getBytes`,
-  `(java.io.InputStream/.read …)`, etc.) внутри одного base-fn.
-- Один-выражение helper (≤ 3 строки), нет ветвления, нет state.
-- Internal state-management для одной atomic примитивы (FIFO
-  eviction inside a cache-put base-fn — но если eviction-decision
-  зависит от данных request, она в графе).
+- Thin boundary-coercion for a library call (`String/.getBytes`,
+  `(java.io.InputStream/.read …)`, etc.) inside a single base-fn.
+- A one-expression helper (≤ 3 lines), no branching, no state.
+- Internal state-management for a single atomic primitive (FIFO
+  eviction inside a cache-put base-fn — but if the eviction decision
+  depends on request data, it goes in the graph).
 
 ## 4. fn-defs — named vs anonymous
 
-**Делегирует `graphden-fn-design`** (§1 public vs `_`-private, §2 auto-
+**Delegates to `graphden-fn-design`** (§1 public vs `_`-private, §2 auto-
 name, §3 inline composite, §5 MI vs single-parent, §6 namespaces, §7
-decomposition). Кратко:
+decomposition). In brief:
 
-- **Public name (без `_`)** — fn переиспользуется (≥ 2 use-site сегодня
-  или планируется), или это узнаваемая доменная сущность.
-- **`_`-private** — одна use-site, имя не несёт смысла вне родителя.
-- **Inline composite** (`:input {:k T}` / `:type {:k T}`) — анонимный
-  record-shape; shape-deduped через `anonymous-hash`.
-- **MI (`:parents [a b]`)** — ортогональные slot-наборы (mix-in trait),
-  не «склейка behavior».
+- **Public name (no `_`)** — the fn is reused (≥ 2 use-sites today
+  or planned), or it's a recognizable domain entity.
+- **`_`-private** — a single use-site, the name carries no meaning outside the parent.
+- **Inline composite** (`:input {:k T}` / `:type {:k T}`) — an anonymous
+  record-shape; shape-deduped via `anonymous-hash`.
+- **MI (`:parents [a b]`)** — orthogonal slot sets (mix-in trait),
+  not "behavior glue".
 
-### 4.1 Доп-критерий для НОВЫХ fn-defs (этот скилл, не fn-design)
+### 4.1 Extra criterion for NEW fn-defs (this skill, not fn-design)
 
-При написании **нового** fn-def: спрашивай ПЕРЕД именованием.
+When writing a **new** fn-def: ask BEFORE naming.
 
-**Правило 1 (when name is required)**: дать explicit-public-name —
-обязательно если:
+**Rule 1 (when name is required)**: give an explicit public name —
+required if:
 
-- Узнаваемая доменная сущность (`web-server`, `json-ok-response`).
-- Уже планируется ≥ 2 use-site (явно сейчас или в roadmap).
-- Будет export'нуто из пакета (consumer'ы из других пакетов).
+- A recognizable domain entity (`web-server`, `json-ok-response`).
+- ≥ 2 use-sites are already planned (explicitly now or in the roadmap).
+- It will be exported from the package (consumers from other packages).
 
-**Правило 2 (when `_`-private suffices)**: `_`-private name — когда
-один use-site + имя «звучит» только рядом с родителем. Это
-эквивалент Clojure'овского `defn-`.
+**Rule 2 (when `_`-private suffices)**: a `_`-private name — when
+there's a single use-site + the name "sounds" only next to the parent. It's
+the equivalent of Clojure's `defn-`.
 
-**Правило 3 (when anonymous suffices)**: inline `{:parent :X :args
-{:value …}}` — когда нужна разовая literal-wrapping одного use-site,
-и `_`-name был бы синтетический («step1»). Это эквивалент Clojure'
-овского `let`.
+**Rule 3 (when anonymous suffices)**: inline `{:parent :X :args
+{:value …}}` — when you need a one-off literal-wrapping at a single use-site,
+and a `_`-name would be synthetic ("step1"). It's the equivalent of Clojure's
+`let`.
 
-**Anti-pattern**: дать public name «на всякий случай». Засоряет
-namespace + sidebar. → Делай `_`-private; promote'нем когда reuse
-появится.
+**Anti-pattern**: giving a public name "just in case". It clutters the
+namespace + sidebar. → Make it `_`-private; we'll promote it when reuse
+appears.
 
-### 4.1.1 Single-use `_`-private fn-defs — НЕ inline'ить автоматически
+### 4.1.1 Single-use `_`-private fn-defs — do NOT inline automatically
 
-Зеркало § 2.2.1 для **fn-defs**. Когда аудит видит цепочку из 20-30
-`_private-prefix-*` fn-defs где каждый использован один раз — это НЕ
-автоматический повод inline'ить их в anonymous `{:parent :X :args …}`.
+The mirror of § 2.2.1 for **fn-defs**. When an audit sees a chain of 20-30
+`_private-prefix-*` fn-defs where each is used once — that's NOT
+an automatic reason to inline them into anonymous `{:parent :X :args …}`.
 
-Имена шагов — это **документация порядка преобразований**, даже без
+The step names are **documentation of the transformation order**, even without
 reuse:
 
-- `:_partial-mismatch-prov-tier-source-fn-id-text` → говорит читателю
-  «это stringified fn-id для HTML data-attr». Inline-вариант
-  `{:parent :to-str :args {:value {:parent :get :args {…}}}}` внутри
-  большой `:hiccup`-сборки прячет интент в безымянное вложение.
-- `:_partial-mismatch-prov-tier-has-source?` → boolean check с
-  читаемым именем; inline `{:parent :some? :args {:value …}}` теряет
-  «эта ветка зависит от факта source присутствует».
-- `:_partial-mismatch-prov-tier-row-built` → собранная hiccup-строка;
-  имя seam-марк что «это конечная row, прячется только под
-  conditional».
+- `:_partial-mismatch-prov-tier-source-fn-id-text` → tells the reader
+  "this is a stringified fn-id for an HTML data-attr". The inline variant
+  `{:parent :to-str :args {:value {:parent :get :args {…}}}}` inside a
+  large `:hiccup` assembly hides the intent in an anonymous nesting.
+- `:_partial-mismatch-prov-tier-has-source?` → a boolean check with a
+  readable name; the inline `{:parent :some? :args {:value …}}` loses
+  "this branch depends on the fact that the source is present".
+- `:_partial-mismatch-prov-tier-row-built` → the assembled hiccup row;
+  the name is a seam-mark that "this is the final row, hidden only under
+  a conditional".
 
-**Когда single-use `_`-private реально inline'ить:**
+**When a single-use `_`-private is really worth inlining:**
 
-- Имя ПОЛНОСТЬЮ синтетическое (`:_step1`, `:_tmp`, `:_inner`) — это
-  scaffolding, у которого нет смыслового содержания.
-- Wrapping тривиален и единственное использование в SOSEDNEM fn-def
-  (`{:parent :str :args {:value :_x-as-text}}` где `_x-as-text` это
-  `:to-str` от соседа) — да, inline, если читатель в одном месте
-  видит ВСЁ.
-- 1-2-строчный `_`-private который читался бы лучше как `:let`-binding
-  внутри родителя (но fn-graph не поддерживает `:let`, так что это
-  моральная аналогия — реально оставь).
+- The name is FULLY synthetic (`:_step1`, `:_tmp`, `:_inner`) — it's
+  scaffolding with no meaningful content.
+- The wrapping is trivial and the sole use is in a NEIGHBORING fn-def
+  (`{:parent :str :args {:value :_x-as-text}}` where `_x-as-text` is
+  `:to-str` of the neighbor) — yes, inline it, if the reader sees
+  EVERYTHING in one place.
+- A 1-2-line `_`-private that would read better as a `:let` binding
+  inside the parent (but the fn-graph doesn't support `:let`, so this is
+  a moral analogy — actually leave it).
 
-**Иначе** named scaffolding = документация конвейера. § 4.1 правило
-«inline когда `_`-name был бы синтетический («step1»)» — это про
-ОТСУТСТВИЕ доменного имени, а не про «использовано один раз».
-`-fn-id-text` / `-has-source?` / `-row-built` — НЕ синтетические.
+**Otherwise** named scaffolding = pipeline documentation. § 4.1's rule
+"inline when the `_`-name would be synthetic ("step1")" — is about the
+ABSENCE of a domain name, not about "used once".
+`-fn-id-text` / `-has-source?` / `-row-built` — are NOT synthetic.
 
-### 4.2 Sanity checks для fn-defs
+### 4.2 Sanity checks for fn-defs
 
 ```bash
-# Найди fn-def, явно declared, но НЕ зарегистрирован в reachability:
+# Find a fn-def explicitly declared but NOT registered in reachability:
 clojure -M:dev tools/reachability_audit.clj 2>&1 | grep -A50 'Unreachable COMPOSED'
 
-# Может быть:
-# - Прозрачный мёртвый код (удалять).
-# - Dynamic-dispatch false positive (e.g. `:postgres-storage-impl` —
-#   bound runtime). Грепни имя по `src/` — если есть строка-ref,
-#   оставь и добавь комментарий «dynamic dispatch».
+# It could be:
+# - Genuine dead code (delete).
+# - A dynamic-dispatch false positive (e.g. `:postgres-storage-impl` —
+#   bound at runtime). Grep the name across `src/` — if there's a string-ref,
+#   leave it and add a "dynamic dispatch" comment.
 ```
 
 ```bash
-# Имена fn-def'ов глобально уникальны (даже `_`-private). Перед именованием:
+# fn-def names are globally unique (even `_`-private). Before naming:
 grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages/
 ```
 
-### 4.3 Multi-parent (`:parents [A B]`) — правило
+### 4.3 Multi-parent (`:parents [A B]`) — the rule
 
-`graphden-fn-design` §5 даёт три «оправданных» случая (категоризация,
-trait-mixin, refinement). Здесь — более жёсткое **БИНАРНОЕ ПРАВИЛО для
-момента написания**, плюс `bb`-проверяемый sanity-test.
+`graphden-fn-design` §5 gives three "justified" cases (categorization,
+trait-mixin, refinement). Here — a stricter **BINARY RULE for
+the moment of writing**, plus a `bb`-checkable sanity-test.
 
-**Правило (formulated):**
+**The rule (formulated):**
 
-> MI оправдан **тогда и только тогда**, когда каждый родитель
-> представляет **отдельную ось описания** child'а — а не отдельный шаг
-> в его поведении. Каждая ось добавляет НЕ-пересекающийся набор слотов
-> и НЕ-конфликтующий контракт.
+> MI is justified **if and only if** each parent
+> represents a **separate axis of description** of the child — and not a separate step
+> in its behavior. Each axis adds a NON-overlapping set of slots
+> and a NON-conflicting contract.
 
-**Тест осей — «конъюнкция существительных» vs «конъюнкция глаголов»:**
-переведи `(child :parents [A B])` в естественный язык:
+**The axes test — "conjunction of nouns" vs "conjunction of verbs":**
+translate `(child :parents [A B])` into natural language:
 
-- ✅ **Существительные** (this **IS-A** A AND **IS-A** B):
-  - «`:postgres-storage-impl` IS-A `:Storage` (type-row protocol)
-    AND IS-A concrete-impl-with-binding-set (own slots для pg-query
-    binding'ов)». Type-row + impl-shape = две ортогональные оси.
-  - «`:authed-get-route` IS-A `:get-route` (path + handler shape)
-    AND IS-A `:auth-required` (middleware chain)». Маршрут-форма +
+- ✅ **Nouns** (this **IS-A** A AND **IS-A** B):
+  - "`:postgres-storage-impl` IS-A `:Storage` (type-row protocol)
+    AND IS-A a concrete-impl-with-binding-set (own slots for pg-query
+    bindings)". Type-row + impl-shape = two orthogonal axes.
+  - "`:authed-get-route` IS-A `:get-route` (path + handler shape)
+    AND IS-A `:auth-required` (middleware chain)". Route-shape +
     capability-marker.
-  - «`:assoc-handler` IS-A `:assoc-fn` (slot types) AND IS-A
-    `:assoc-empty` (empty-map seed)». Type-shape + initial-value.
-- ❌ **Глаголы** (this **DOES** A AND **DOES** B):
-  - «`:_my-handler` parses AND validates AND writes» — это поведение
-    в три шага, оно собирается через `:if`/`:cond`-скреп +
-    ref-биндинги в `:args` (см. `graphden-fn-refactor` § «handler =
-    parse → validate → apply»), НЕ через MI.
+  - "`:assoc-handler` IS-A `:assoc-fn` (slot types) AND IS-A
+    `:assoc-empty` (empty-map seed)". Type-shape + initial-value.
+- ❌ **Verbs** (this **DOES** A AND **DOES** B):
+  - "`:_my-handler` parses AND validates AND writes" — this is behavior
+    in three steps, it is assembled via `:if`/`:cond` glue +
+    ref-bindings in `:args` (see `graphden-fn-refactor` § "handler =
+    parse → validate → apply"), NOT via MI.
 
-**Бинарный slot-collision тест (то, что sync будет проверять
-автоматически)**: пусть `own-slots(P)` — set of slot-names, которые
-parent `P` ВНОСИТ в своё `:fn-slots`-junction. MI допустим iff:
+**The binary slot-collision test (what sync will check
+automatically)**: let `own-slots(P)` be the set of slot-names that
+parent `P` CONTRIBUTES to its `:fn-slots` junction. MI is permissible iff:
 
 ```
 own-slots(A) ∩ own-slots(B)  ⊆  {slots that child OVERRIDES via :args}
 ```
 
-Если пересечение не покрыто override'ами — sync упадёт на slot-
-collision check (`composition.validation`). Если ты «покрываешь
-override'ами потому что семантически парятся, но я зажму обе» —
-**это смесь**: ты уже не описываешь shape, ты режешь конфликт. В
-таком случае переписывай на single-parent + composition.
+If the intersection isn't covered by overrides — sync will fail on the slot-
+collision check (`composition.validation`). If you're "covering with
+overrides because they compose semantically, but I'll pin both" —
+**that's a mixture**: you're no longer describing a shape, you're papering over a
+conflict. In that case rewrite it as single-parent + composition.
 
-**Эвристика отказа `MI экономит запись»**: если выбор между
-single-parent + 5 ref-биндингов **vs** двух parents без ref-биндингов
-делается ради **краткости** — MI не выбор. MI описывает что child IS,
-не строит behavior через короткий путь.
+**The "MI saves typing" rejection heuristic**: if the choice between
+single-parent + 5 ref-bindings **vs** two parents without ref-bindings
+is made for the sake of **brevity** — MI is not the choice. MI describes what a child IS,
+it doesn't build behavior via a shortcut.
 
-**Sanity check для существующей MI fn-def — через БД** (см. § 5 ниже —
-БД лучше grep'а для этого):
+**Sanity check for an existing MI fn-def — via the DB** (see § 5 below —
+the DB is better than grep for this):
 
 ```clojure
-;; В REPL — реальные slot-имена fn-def'а после MI-merge:
+;; In the REPL — the real slot names of a fn-def after MI-merge:
 (let [fn-id (:id (first (sp/query-entities storage :fn {:name "my-mi-fn"})))]
   (->> (sp/query-entities storage :fn-slot {:fn-id fn-id})
        (map (fn [fs]
@@ -497,65 +497,65 @@ single-parent + 5 ref-биндингов **vs** двух parents без ref-би
                 {:slot-name (:name slot)
                  :slot-type (:name type-fn)
                  :from-parent? (not= (:fn-id fs) fn-id)})))))
-;; Каждый слот должен быть объясним: "это от parent A" / "от parent B"
-;; / "own override". Слот «не пойми откуда» → parent внёс лишнего →
-;; MI не оправдан, разбирай.
+;; Every slot should be explainable: "this is from parent A" / "from parent B"
+;; / "own override". A "no idea where from" slot → a parent contributed extra →
+;; MI isn't justified, break it up.
 ```
 
-**Common MI-в-сегодняшнем-графе примеры** для калибровки чутья:
+**Common MI-in-today's-graph examples** for calibrating your instincts:
 
-| Fn-def | Parents | Почему MI |
+| Fn-def | Parents | Why MI |
 |---|---|---|
-| `:postgres-storage-impl` | `[:Storage]` (singleton) | type-row impl pattern; type-row сам устанавливает protocol-обязательства, child привязывает их к pg-query |
-| `:authed-get-route` | `[:get :auth-required]` | route-shape + middleware (две оси) |
-| `:resolve-versioned-rows` | `[:filter :ResolveVersionedRowsInput]` | поведение filter'а + type-row контракт входа (`:version-id-field` etc.) |
+| `:postgres-storage-impl` | `[:Storage]` (singleton) | type-row impl pattern; the type-row itself sets the protocol obligations, the child binds them to pg-query |
+| `:authed-get-route` | `[:get :auth-required]` | route-shape + middleware (two axes) |
+| `:resolve-versioned-rows` | `[:filter :ResolveVersionedRowsInput]` | filter behavior + the input type-row contract (`:version-id-field` etc.) |
 
-## 5. EDN-grep vs БД-query — методология
+## 5. EDN-grep vs DB-query — methodology
 
-EDN — это **исходник**, БД (после `bb rebuild` / `bb deploy`) — это
-**синхронизованный граф**. У них разный уровень видимости, и для
-разных вопросов правильный инструмент разный.
+EDN is the **source**, the DB (after `bb rebuild` / `bb deploy`) is the
+**synced graph**. They have different levels of visibility, and for
+different questions the right tool differs.
 
-### 5.1 Когда БД лучше grep'а
+### 5.1 When the DB is better than grep
 
-| Вопрос | Почему БД | EDN-grep промахнётся |
+| Question | Why the DB | EDN-grep misses |
 |---|---|---|
-| «Где используется fn-def `X`?» | `:binding :ref-fn-id X` + `:binding-list-item :ref-fn-id X` | EDN не видит synthetic `_anon-*` ref'ы, которые parser создал из inline `{:parent :X …}` форм |
-| «Какие fn-def'ы дублируются по shape?» | `(group-by :anonymous-hash)` — shape-dedup сделан БД-уровне | EDN видит две `{:input {:a :int}}` — но не знает что они shape-deduped в одну fn-row |
-| «Какие slot'ы реально у fn-def `X` после MI?» | `:fn-slot {:fn-id X}` (полный набор после parent BFS) | EDN видит только OWN slots, не унаследованные |
-| «Где используется тип `:jsonb`?» | `(query-entities :slot {:type-fn-id :jsonb-id})` | EDN видит `:type :jsonb` в declarations, но не computed types (когда type-checker вывел shape) |
-| «Какие refinement'ы по факту фигурируют в graph?» | `(query-entities :fn {})` filter by `:base-fn-id` | EDN видит declarations, но не runtime-эффективный набор |
-| «Что у fn-def `X` за computed return-type?» | rich-types registry в JVM — не сериализовано в БД, но из REPL виден | EDN видит DECLARED return-type, не INFERRED |
+| "Where is fn-def `X` used?" | `:binding :ref-fn-id X` + `:binding-list-item :ref-fn-id X` | EDN doesn't see synthetic `_anon-*` refs that the parser created from inline `{:parent :X …}` forms |
+| "Which fn-defs are duplicated by shape?" | `(group-by :anonymous-hash)` — shape-dedup is done at the DB level | EDN sees two `{:input {:a :int}}` — but doesn't know they're shape-deduped into one fn-row |
+| "What slots does fn-def `X` actually have after MI?" | `:fn-slot {:fn-id X}` (the full set after parent BFS) | EDN sees only OWN slots, not inherited ones |
+| "Where is the type `:jsonb` used?" | `(query-entities :slot {:type-fn-id :jsonb-id})` | EDN sees `:type :jsonb` in declarations, but not computed types (when the type-checker inferred a shape) |
+| "Which refinements actually appear in the graph?" | `(query-entities :fn {})` filter by `:base-fn-id` | EDN sees declarations, but not the runtime-effective set |
+| "What's fn-def `X`'s computed return-type?" | the rich-types registry in the JVM — not serialized to the DB, but visible from the REPL | EDN sees the DECLARED return-type, not the INFERRED one |
 
-### 5.2 Когда EDN-grep правильный
+### 5.2 When EDN-grep is right
 
-| Вопрос | Почему EDN |
+| Question | Why EDN |
 |---|---|
-| «Где declared `:type :jsonb`?» (для сужения) | Источник правки — EDN; нужно найти DECLARATIONS, не runtime-эффект |
-| «Где docstring / `:description` упоминает X?» | БД хранит description, но grep по тексту EDN читабельнее |
-| «Куда вписать новую fn-def?» (namespace pick) | Нужно посмотреть как соседи структурированы — EDN с комментариями понятнее БД-dump'а |
-| «Какой shape у inline literal в `:value`?» | Литералы хранятся как JSONB — EDN читать проще |
+| "Where is `:type :jsonb` declared?" (for narrowing) | The source of the edit is EDN; you need to find the DECLARATIONS, not the runtime effect |
+| "Where does a docstring / `:description` mention X?" | The DB stores the description, but grep over the EDN text is more readable |
+| "Where should a new fn-def go?" (namespace pick) | You need to see how the neighbors are structured — EDN with comments is clearer than a DB dump |
+| "What's the shape of an inline literal in `:value`?" | Literals are stored as JSONB — EDN is easier to read |
 
-### 5.3 Идиоматический workflow для поиска / правки
+### 5.3 The idiomatic workflow for finding / editing
 
-1. **Запрос к БД** (REPL `sp/query-entities`, `curl /api/graph/entities`,
-   `pg-query` базовой fn в живом графе). Получи список fn-name'ов /
-   fn-id'ов.
-2. **Грепни по fn-name в EDN** — `grep -rE ":name :the-name\b"
-   resources/packages` чтобы найти исходник.
-3. **Правь EDN**, делай `bb rebuild`.
-4. **Verify через БД** — повтори тот же query и убедись, что результат
-   изменился как ожидалось.
+1. **Query the DB** (REPL `sp/query-entities`, `curl /api/graph/entities`,
+   the `pg-query` base-fn in the live graph). Get the list of fn-names /
+   fn-ids.
+2. **Grep by fn-name in EDN** — `grep -rE ":name :the-name\b"
+   resources/packages` to find the source.
+3. **Edit the EDN**, run `bb rebuild`.
+4. **Verify via the DB** — repeat the same query and make sure the result
+   changed as expected.
 
-### 5.4 Практические запросы
+### 5.4 Practical queries
 
 ```clojure
-;; ── В REPL ────────────────────────────────────────────────────────
-;; Из живой системы (`bb repl` подключился к dev) или через test:
+;; ── In the REPL ───────────────────────────────────────────────────
+;; From the live system (`bb repl` connected to dev) or via a test:
 (require '[graphden.storage.protocol.core :as sp])
 (def storage (-> integrant.repl.state/system :db/versioned))
 
-;; (a) Все ref'ы на :equal? — где и в каком слоте:
+;; (a) All refs to :equal? — where and in which slot:
 (let [equal?-id (:id (first (sp/query-entities storage :fn {:name "equal?"})))]
   (->> (sp/query-entities storage :binding {:ref-fn-id equal?-id})
        (map (fn [b]
@@ -563,43 +563,43 @@ EDN — это **исходник**, БД (после `bb rebuild` / `bb deploy`
                :slot  (-> (sp/read-entity storage :slot (:slot-id b)) :name)}))))
 ;; → [{:owner "_bearer-equals-env?" :slot "a"} …]
 
-;; (b) Все fn-row с одинаковым shape (структурные дубликаты):
+;; (b) All fn-rows with the same shape (structural duplicates):
 (->> (sp/query-entities storage :fn {})
      (filter :anonymous-hash)
      (group-by :anonymous-hash)
      (filter (fn [[_ fns]] (> (count fns) 1))))
-;; → пусто = shape-dedup отработал; иначе — баг в parser'е
+;; → empty = shape-dedup worked; otherwise — a bug in the parser
 
-;; (c) Все slot'ы типа :jsonb (потенциально слишком широкие):
+;; (c) All slots of type :jsonb (potentially too wide):
 (let [jsonb-id (:id (first (sp/query-entities storage :fn {:name "jsonb"})))]
   (->> (sp/query-entities storage :slot {:type-fn-id jsonb-id})
        (map (fn [s]
               {:slot-name (:name s)
                :owners (->> (sp/query-entities storage :fn-slot {:slot-id (:id s)})
                             (map #(-> (sp/read-entity storage :fn (:fn-id %)) :name)))}))))
-;; → группированно по slot-name; смотри лишние widely-shaped declarations
+;; → grouped by slot-name; look for extra widely-shaped declarations
 ```
 
 ```bash
-# ── Через curl + jq ───────────────────────────────────────────────
+# ── Via curl + jq ─────────────────────────────────────────────────
 AUTH=Bearer $AUTH_TOKEN  # if /api/graph/entities is auth-required
 
-# (a) Все fns с заданным name-prefix:
+# (a) All fns with a given name-prefix:
 curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
   | jq '.fns | map(select(.name | startswith("_secret-")))'
 
-# (b) Композированные fn-def'ы, у которых пусто parent-ids — кандидаты
-#     на type-row OR base-fn (по return-type-fn-id отличить):
+# (b) Composed fn-defs with empty parent-ids — candidates
+#     for type-row OR base-fn (distinguish by return-type-fn-id):
 curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
   | jq '.fns | map(select((.parent_ids == null or (.parent_ids | length == 0))
                           and (.return_type_fn_id == null)
                           and (.name != null)))'
-# → type-rows (base-fn'ы имели бы return_type_fn_id; composed имели бы parent_ids)
+# → type-rows (base-fns would have return_type_fn_id; composed would have parent_ids)
 ```
 
 ```clojure
-;; ── Через :pg-query base-fn (если хочется выполнять из самого графа) ──
-;; В REPL:
+;; ── Via the :pg-query base-fn (if you want to run it from the graph itself) ──
+;; In the REPL:
 (exec/execute-by-name *context* "pg-query"
                       {:hsql {:select [:name]
                               :from [:fn]
@@ -607,192 +607,192 @@ curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
                                       [:= :return_type_fn_id nil]
                                       [:is :parent_ids nil]
                                       [:not= :name nil]]}})
-;; → список type-row names
+;; → the list of type-row names
 ```
 
-### 5.5 Когда БД ещё не в нужном состоянии
+### 5.5 When the DB is not yet in the right state
 
-Если вы только что добавили fn-def в EDN, БД его ещё не видит до
-`bb rebuild` / `bb deploy`. Декларативный sync **не удаляет** строки,
-выпавшие из EDN — они копятся в dev-БД. Поэтому:
+If you've just added a fn-def to EDN, the DB doesn't see it yet until
+`bb rebuild` / `bb deploy`. The declarative sync **doesn't remove** rows
+that dropped out of EDN — they accumulate in the dev DB. Therefore:
 
-- Для **поиска мёртвого кода** (что в БД, но не в EDN) — нужен
-  `bb deploy` (truncate + clean sync), не `bb rebuild` (см.
+- For **finding dead code** (what's in the DB but not in EDN) — you need
+  `bb deploy` (truncate + clean sync), not `bb rebuild` (see
   `graphden-fn-refactor` §7).
-- Для **поиска что-в-EDN-но-сломано** — `bb rebuild` достаточен.
-- Для **production-debug** — БД production-сервера, БЕЗ rebuild'а
-  (его делают только при деплое — НИКАКОГО `bb rebuild` против prod).
+- For **finding what's-in-EDN-but-broken** — `bb rebuild` is enough.
+- For **production debugging** — the DB of the production server, WITHOUT a rebuild
+  (which is done only on deploy — NO `bb rebuild` against prod).
 
-## 6. Порядок проверки существующих пакетов
+## 6. The check order for existing packages
 
 ```bash
-# 1. Reachability — есть ли мёртвый код?
+# 1. Reachability — is there dead code?
 clojure -M:dev tools/reachability_audit.clj 2>&1 | grep -A20 'Unreachable COMPOSED'
 
-# 2. Слишком широкие типы в slot declarations:
+# 2. Types too wide in slot declarations:
 grep -rEn ':type :jsonb|:type :any' resources/packages --include='*.edn'
 
-# 3. Длинные inline unions — кандидаты на alias:
+# 3. Long inline unions — alias candidates:
 grep -rEnB1 ':type \[:union :null :' resources/packages --include='*.edn' | head -20
 
-# 4. Длинные base-fn impls — кандидаты на §3 этого скилла:
-# (см. §3.2 выше — Python-script)
+# 4. Long base-fn impls — candidates for §3 of this skill:
+# (see §3.2 above — the Python script)
 
-# 5. anonymous fn-def с явно проставленным `_anon-…` именем — bug:
+# 5. An anonymous fn-def with an explicitly set `_anon-…` name — a bug:
 grep -rE ':name :_anon-' resources/packages --include='*.edn'
 
-# 6. Public-named fn-def с одним use-site — кандидат на `_`-private:
-# (требует analyzed reachability + grep'а по `:parent :X` / `:ref X`;
-#  делается интерактивно, не по checklist'у)
+# 6. A public-named fn-def with a single use-site — a candidate for `_`-private:
+# (requires analyzed reachability + a grep over `:parent :X` / `:ref X`;
+#  done interactively, not by checklist)
 ```
 
-## 7. Тесты для нового / правленого пакета
+## 7. Tests for a new / edited package
 
-**Tests для security-critical fn'ов** (см. `graphden-code-quality` §12)
-— обязательны как regression sentinel.
+**Tests for security-critical fns** (see `graphden-code-quality` §12)
+— mandatory as a regression sentinel.
 
-Пример (этой сессии): `:constant-time-equal?` добавлен → `test/graphden/
-packages/core/logic_test.clj` создан с тестом на:
+Example (from this session): `:constant-time-equal?` added → `test/graphden/
+packages/core/logic_test.clj` created with tests for:
 
 - matching strings → true,
 - non-matching → false (mismatch at first / last / length boundary),
-- nil / non-string → false (отличается от `:equal?` поведения).
+- nil / non-string → false (differs from `:equal?` behavior).
 
-**Pattern**: slurp+eval `impls.clj` через loader's `load-module-impls`
-(см. `concurrency_test.clj` / `logic_test.clj` / `refinements_test.clj`
-для шаблона). Это unit-уровень — не нужен полный bootstrap.
+**Pattern**: slurp+eval `impls.clj` via the loader's `load-module-impls`
+(see `concurrency_test.clj` / `logic_test.clj` / `refinements_test.clj`
+for a template). This is unit-level — no full bootstrap needed.
 
-**Когда unit'а недостаточно** — добавь behavioural тест через
-`bootstrap-crud-graph-from-golden!` (см. `executor/compile-packages-
-test.clj` / `refinements_test.clj`). Драйверит fn-def через executor
-по реально synced graph.
+**When a unit test isn't enough** — add a behavioral test via
+`bootstrap-crud-graph-from-golden!` (see `executor/compile-packages-
+test.clj` / `refinements_test.clj`). It drives the fn-def through the executor
+over a really synced graph.
 
 ## 8. Workflow
 
-### 8.1 Новый base-fn
+### 8.1 A new base-fn
 
-1. Перед написанием — пройди user-composability test (`graphden-fn-
-   refactor` §3) — может, это композиция, а не base-fn.
-2. Если всё-таки base-fn: пиши impl минимально (1-2 строки тела),
-   объяви тип в `fns.edn` (узкий тип, см. §1; alias если повторяется,
-   см. §2).
-3. Если security-critical (любой compare-with-secret, любой `:secret
-   T` потребитель) — пиши test-sentinel (см. §7).
+1. Before writing — go through the user-composability test (`graphden-fn-
+   refactor` §3) — maybe it's composition, not a base-fn.
+2. If it's a base-fn after all: write the impl minimally (1-2 lines of body),
+   declare the type in `fns.edn` (a narrow type, see §1; an alias if it recurs,
+   see §2).
+3. If security-critical (any compare-with-secret, any `:secret
+   T` consumer) — write a test-sentinel (see §7).
 4. `bb rebuild` → `bb verify` → smoke.
 
-### 8.2 Новый fn-def
+### 8.2 A new fn-def
 
-1. Реши: named (public) / `_`-private / inline (см. §4).
-2. Объяви через `:parent <p>` (для одного родителя) или
-   `:parents [a b]` для MI — НО только когда §4.3 binary-test
-   проходит. По умолчанию single-parent + ref-биндинги в `:args`.
-3. Сузь типы slot'ов (см. §1); используй alias если структура
-   повторяется (см. §2).
-4. Если ≥ 4-5 ref-bindings → подумай о decomposition (`graphden-fn-
+1. Decide: named (public) / `_`-private / inline (see §4).
+2. Declare via `:parent <p>` (for a single parent) or
+   `:parents [a b]` for MI — BUT only when the §4.3 binary-test
+   passes. By default single-parent + ref-bindings in `:args`.
+3. Narrow the slot types (see §1); use an alias if the structure
+   recurs (see §2).
+4. If ≥ 4-5 ref-bindings → consider decomposition (`graphden-fn-
    design` §7).
-5. `bb rebuild` → smoke. **Verify через БД** (см. §5.3 шаг 4) —
-   повтори ту же query, что использовалась для поиска, и убедись
-   что результат изменился ожидаемо.
+5. `bb rebuild` → smoke. **Verify via the DB** (see §5.3 step 4) —
+   repeat the same query used for finding, and make sure
+   the result changed as expected.
 
-### 8.3 Audit существующих пакетов
+### 8.3 Auditing existing packages
 
-1. **Baseline** — §0 sanity + reachability audit + список slow tests.
-2. **Сканируй по §6** — сколько кандидатов на каждый вид правки.
-   **Для structural-вопросов используй БД** (см. §5.1), не grep.
-3. **Резюме** перед правками — приоритет: security/correctness >
+1. **Baseline** — §0 sanity + reachability audit + the list of slow tests.
+2. **Scan per §6** — how many candidates for each kind of edit.
+   **For structural questions use the DB** (see §5.1), not grep.
+3. **Summary** before edits — priority: security/correctness >
    widening types > dead code > naming hygiene > alias unification >
-   MI-clean-up.
-4. **Правь per-target, per-commit** — каждое значимое изменение —
-   отдельный commit. Применяй `graphden-code-quality` §13.3 commit
+   MI clean-up.
+4. **Edit per-target, per-commit** — each significant change is a
+   separate commit. Apply `graphden-code-quality` §13.3 commit
    rules.
-5. **`bb rebuild` + `bb verify` + focused tests** после каждого
-   commit'а. **Verify через БД** что правка достигла цели.
-6. **Финальный sweep** — `bb test` или `bb ci`.
+5. **`bb rebuild` + `bb verify` + focused tests** after each
+   commit. **Verify via the DB** that the edit achieved its goal.
+6. **Final sweep** — `bb test` or `bb ci`.
 
-## 9. Анти-паттерны
+## 9. Anti-patterns
 
-- **«Сужу типы» без проверки runtime-семантики.** Slot type'а
-  `:jsonb` → `:keyword-map` — добавь breakpoint / REPL-проверку
-  (см. §5.4): binding'и в самом деле всегда keyword-keyed? Сужать
-  без verify = ломать runtime.
-- **Alias ради alias'а.** Имя нужно только когда оно добавляет
-  СМЫСЛ. `:int-or-text` хуже чем inline `[:union :int :text]` —
-  потому что для тех 2 use-site чтение `[:union :int :text]`
-  понятнее.
-- **`_`-prefix на public-API fn-def.** Если кто-то ссылается из
-  другого пакета — это уже не private. Promote'ни (см.
+- **"I'm narrowing types" without checking the runtime semantics.** A slot type
+  `:jsonb` → `:keyword-map` — add a breakpoint / REPL check
+  (see §5.4): are the bindings really always keyword-keyed? Narrowing
+  without verify = breaking runtime.
+- **An alias for the alias's sake.** A name is needed only when it adds
+  MEANING. `:int-or-text` is worse than inline `[:union :int :text]` —
+  because for those 2 use-sites reading `[:union :int :text]`
+  is clearer.
+- **A `_`-prefix on a public-API fn-def.** If someone references it from
+  another package — it's no longer private. Promote it (see
   `graphden-fn-design` §1).
-- **Inline composite type для одного-use-site, который ВДРУГ был
-  скопипащен в двое-three места.** → Переименуй в `:_some-shape`
-  alias (или regular type-row) и используй по имени. Иначе
-  shape-hash дедупит, но семантика спрятана.
-- **Удаление dead fn-def без grep'а по комментариям.** Имя может
-  быть упомянуто в docstring'е соседней fn-def — комментарий
-  устареет.
-- **«Перепишу всё на refinement'ы»** — `:int → :positive-int`
-  везде. Refinements добавляют runtime check (`:ensure-X` throw on
-  violation); если поток данных не контролируется на входе,
-  получишь runtime crash. Сузай типы там, где входной контракт
-  явный (admin-formy, parsed-bodies); НЕ для transit-types между
-  internal fn'ями.
-- **MI ради «склейки behavior».** «Я хочу что-fn делала и X и Y» —
-  это композиция шагов, не axes-of-shape (см. §4.3). MI описывает
-  что child IS-A, не то что он DOES. Переписывай через `:if`/`:cond`
-  - ref-биндинги.
-- **MI вместо single-parent + ref-биндингов «ради краткости».**
-  Если выбор «двух parents без `:args`» vs «одного parent + 5
-  `:args` биндингов» делается ради компактного fns.edn — это
-  иллюзия экономии. Sync-time slot-collision check ловит часть
-  таких смесей, но не все — некоторые проползают и читатель видит
-  слоты «откуда-то».
-- **Grep по EDN там, где нужна БД.** Поиск «где используется fn-def
-  `X`» через grep по `:parent :X` промахивается на synthetic
-  `_anon-*` refs (parser создал из inline `{:parent :X …}` форм).
-  Аналогично: grep по shape промахивается на `anonymous-hash`-
-  deduped fns. Для structural-вопросов используй БД (см. §5.1).
-- **БД-query без `bb rebuild` после правки EDN.** Декларативный sync
-  привязывает EDN ⇄ БД только при rebuild'е. Правка → ОБЯЗАТЕЛЬНО
-  rebuild → verify через БД. Без rebuild'а query покажет старое
-  состояние, легко поверить «не сработало».
+- **An inline composite type for a single-use-site that SUDDENLY got
+  copy-pasted into two-three places.** → Rename it into a `:_some-shape`
+  alias (or a regular type-row) and use it by name. Otherwise
+  the shape-hash dedups, but the semantics are hidden.
+- **Deleting a dead fn-def without a grep over comments.** The name may
+  be mentioned in a neighboring fn-def's docstring — the comment
+  will go stale.
+- **"I'll rewrite everything with refinements"** — `:int → :positive-int`
+  everywhere. Refinements add a runtime check (`:ensure-X` throw on
+  violation); if the data flow isn't controlled at the input,
+  you'll get a runtime crash. Narrow types where the input contract is
+  explicit (admin forms, parsed bodies); NOT for transit-types between
+  internal fns.
+- **MI for the sake of "behavior glue".** "I want the fn to do both X and Y" —
+  that's step composition, not axes-of-shape (see §4.3). MI describes
+  what the child IS-A, not what it DOES. Rewrite it via `:if`/`:cond` +
+  ref-bindings.
+- **MI instead of single-parent + ref-bindings "for brevity".**
+  If the choice of "two parents without `:args`" vs "one parent + 5
+  `:args` bindings" is made for a compact fns.edn — it's an
+  illusory saving. The sync-time slot-collision check catches some
+  such mixtures, but not all — some slip through and the reader sees
+  slots "from somewhere".
+- **Grep over EDN where the DB is needed.** Searching for "where fn-def
+  `X` is used" via a grep over `:parent :X` misses synthetic
+  `_anon-*` refs (the parser created them from inline `{:parent :X …}` forms).
+  Likewise: a grep over shape misses `anonymous-hash`-
+  deduped fns. For structural questions use the DB (see §5.1).
+- **A DB-query without `bb rebuild` after editing EDN.** The declarative sync
+  binds EDN ⇄ DB only on a rebuild. Edit → MANDATORY
+  rebuild → verify via the DB. Without a rebuild the query will show the old
+  state, easy to believe "it didn't work".
 
-## 10. Связи с другими скиллами
+## 10. Relationships with other skills
 
-- **`graphden-fn-refactor`** — детали по декомпозиции impls (§3 user-
-  composability test, §4 рецепт). Этот скилл вызывает его для
-  конкретики.
-- **`graphden-fn-design`** — детали по naming / MI / namespaces /
-  `:const`-обёртки. Этот скилл вызывает его для конкретики.
-- **`graphden-code-quality`** — Clojure src/ — sister-скилл. Если
-  правка пакета тащит за собой src-change (новая impl нуждается в
-  helper'е в `src/`, или `system/core` нуждается в seeding) —
-  переключайся.
-- **`graphden-repl`** — отладка гипотез по живому графу.
-  Используется ВСЕГДА при правке runtime-важных fn'ов.
+- **`graphden-fn-refactor`** — details on decomposing impls (§3 user-
+  composability test, §4 recipe). This skill calls it for
+  specifics.
+- **`graphden-fn-design`** — details on naming / MI / namespaces /
+  `:const` wrappers. This skill calls it for specifics.
+- **`graphden-code-quality`** — Clojure src/ — a sister skill. If
+  a package edit drags a src change along (a new impl needs a
+  helper in `src/`, or `system/core` needs seeding) —
+  switch over.
+- **`graphden-repl`** — debugging hypotheses against the live graph.
+  ALWAYS used when editing runtime-important fns.
 - **CLAUDE.md** + **docs/PACKAGES.md § Composition Best Practices** —
-  первоисточник проектных принципов. Этот скилл — operational арм.
+  the primary source of the project principles. This skill is the operational arm.
 
-## 11. Что считается «не докопаться» (для пакетного слоя)
+## 11. What counts as "nothing left to dig into" (for the package layer)
 
-Финальный self-check перед закрытием:
+The final self-check before closing:
 
-- [ ] `bb check` зелёный (0 warnings)
-- [ ] `bb rebuild` успешен, `bb verify` показывает синхронные секции
-- [ ] Reachability audit — нет НОВЫХ unreachable composed fn-defs
-- [ ] Все `:jsonb` / `:any` в новых declarations ОБОСНОВАНЫ (§1.1)
-- [ ] Все длинные inline unions либо использованы 1-2 раза, либо
-      получили alias имя (§2.2)
-- [ ] Все новые base-fn impls прошли user-composability test (§3)
-- [ ] Все security-critical impls покрыты regression sentinel'ом
+- [ ] `bb check` green (0 warnings)
+- [ ] `bb rebuild` successful, `bb verify` shows the sections in sync
+- [ ] Reachability audit — no NEW unreachable composed fn-defs
+- [ ] Every `:jsonb` / `:any` in new declarations is JUSTIFIED (§1.1)
+- [ ] Every long inline union is either used 1-2 times, or has
+      received an alias name (§2.2)
+- [ ] Every new base-fn impl passed the user-composability test (§3)
+- [ ] Every security-critical impl is covered by a regression sentinel
       (§7)
-- [ ] Каждая `:parents [A B]` декларация прошла §4.3 binary-test
-      (axes-of-shape, не behavior-mix) И REPL-проверку реальных
-      slot-имён (нет «откуда это?»-слотов)
-- [ ] Для structural-вопросов (use-sites, дубликаты, computed
-      shapes) был использован БД-query (§5.1), не EDN-grep
-- [ ] Каждая значимая правка верифицирована через БД (§5.3 шаг 4) —
-      повторённый query показывает ожидаемое НОВОЕ состояние
-- [ ] Каждый новый named fn-def оправдан reuse'ом или domain-
-      сущностью (§4.1, прав. 1)
-- [ ] Каждый `_`-private fn-def оправдан (§4.1, прав. 2)
-- [ ] Каждый commit — отдельная concept-value-unit (см.
+- [ ] Every `:parents [A B]` declaration passed the §4.3 binary-test
+      (axes-of-shape, not behavior-mix) AND a REPL check of the real
+      slot names (no "where's this from?" slots)
+- [ ] For structural questions (use-sites, duplicates, computed
+      shapes) a DB-query was used (§5.1), not EDN-grep
+- [ ] Every significant edit was verified via the DB (§5.3 step 4) —
+      the repeated query shows the expected NEW state
+- [ ] Every new named fn-def is justified by reuse or a domain
+      entity (§4.1, rule 1)
+- [ ] Every `_`-private fn-def is justified (§4.1, rule 2)
+- [ ] Every commit is a separate concept-value-unit (see
       `graphden-code-quality` §13.3)

@@ -272,8 +272,8 @@ change unless BOTH hold:
   branches — merge or delete them first).
 
 Parent-PRESERVING updates and non-versioned storages are unaffected.
-This is option (б) of the two coherent designs, now DECIDED as the
-permanent semantic — the alternative (а), versioning the parent-set
+This is option (b) of the two coherent designs, now DECIDED as the
+permanent semantic — the alternative (a), versioning the parent-set
 itself, is rejected (the parent-set defines the slot closure, and the
 closure is identity; branch-varying closures would re-architect
 fn-slot/MI/free-args and put version resolution on the compile hot

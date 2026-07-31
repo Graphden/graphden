@@ -634,7 +634,7 @@
 ;; is org-local configuration — so bundles built for sharing (publish,
 ;; whole-graph export) strip the paths BY DEFAULT and carry an explicit
 ;; `:secrets` manifest instead, so neither side learns about the secrets
-;; "незаметно": the exporter sees what was stripped, the importer sees
+;; "silently": the exporter sees what was stripped, the importer sees
 ;; what must be defined. `include-secret-paths?` opts back in for
 ;; org-internal migration (same vault topology on both ends).
 

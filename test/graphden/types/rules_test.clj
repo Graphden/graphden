@@ -738,7 +738,7 @@
 ;; The previous union-based rule was deleted because it fought the
 ;; type-var unification: matching branches now narrow to the shared
 ;; type, mismatched branches now fail at sync time (per the
-;; "защищает от ошибок" goal).
+;; "protect against errors" goal).
 
 
 ;; -----------------------------------------------------------------------------

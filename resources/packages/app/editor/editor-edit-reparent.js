@@ -57,8 +57,8 @@ function _baseFnsOf(fnId) {
 // binding row that actually configures the slot (value, ref-fn-id, or
 // list-append flag). Pure `:rename-to`-only bindings don't count: they
 // just relabel an inherited slot, so a parent that ONLY renames isn't
-// "substantively setting" args (per the user's "не те, которые с
-// разными именами, а реально разные" rule).
+// "substantively setting" args (per the user's "not the ones with
+// different names, but genuinely different" rule).
 function _substantiveBoundSlotIds(fnId) {
   const out = new Set();
   if (!lookups?.bindingsByFn) return out;

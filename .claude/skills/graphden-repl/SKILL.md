@@ -1,45 +1,45 @@
 ---
 name: graphden-repl
-description: REPL-driven workflow for Graphden via the clojure MCP server. Use when debugging or modifying base-fn impls, fn-defs, executor / storage / schema code — to verify behavior in the running nREPL before editing files and rebuilding. Triggers on phrases like "проверь", "почему не работает", "поправь импл", "посмотри что возвращает", "execute fn", "сходи в REPL", or any task that would otherwise require a `bb rebuild` cycle just to test a hypothesis. SKIP for: pure frontend (.js/.css) changes, package.edn dependency edits, Docker/CI config — those don't run inside the JVM REPL.
+description: REPL-driven workflow for Graphden via the clojure MCP server. Use when debugging or modifying base-fn impls, fn-defs, executor / storage / schema code — to verify behavior in the running nREPL before editing files and rebuilding. Triggers on phrases like "check", "why isn't it working", "fix the impl", "see what it returns", "execute fn", "go to the REPL", or any task that would otherwise require a `bb rebuild` cycle just to test a hypothesis. SKIP for: pure frontend (.js/.css) changes, package.edn dependency edits, Docker/CI config — those don't run inside the JVM REPL.
 ---
 
-# graphden-repl — REPL-first для Graphden
+# graphden-repl — REPL-first for Graphden
 
-Задача этого скилла: **сначала проверить гипотезу в живом nREPL, потом править файлы**. Цикл `bb rebuild` (jar + docker + restart, ~30–60 c) нужен только для финального деплоя — не для отладки.
+The purpose of this skill: **first verify the hypothesis in a live nREPL, then edit files**. The `bb rebuild` cycle (jar + docker + restart, ~30–60 s) is only needed for the final deploy — not for debugging.
 
-## 0. Sanity check (один раз в начале сессии)
+## 0. Sanity check (once at the start of a session)
 
 ```clojure
-;; mcp__clojure__list_nrepl_ports → должен показать localhost:<port> (clj) для /root/projects/graphden
-;; затем:
+;; mcp__clojure__list_nrepl_ports → should show localhost:<port> (clj) for /root/projects/graphden
+;; then:
 (System/getProperty "user.dir")  ; => "/root/projects/graphden"
 ```
 
-Если порта нет — попросить пользователя запустить `bb nrepl-bg` (фоновый headless nREPL, пишет `.nrepl-port`).
+If there's no port — ask the user to run `bb nrepl-bg` (background headless nREPL, writes `.nrepl-port`).
 
-## 1. Поднять систему
+## 1. Bring up the system
 
-В REPL загружен `dev`-неймспейс ([development/src/dev.clj](../../development/src/dev.clj)):
+The `dev` namespace ([development/src/dev.clj](../../development/src/dev.clj)) is loaded in the REPL:
 
 ```clojure
-(require 'dev :reload)         ; всегда :reload — иначе можно работать со stale def
-(dev/go)                       ; стартует Integrant-систему с :dev профилем (testcontainers Postgres)
-@integrant.repl.state/system   ; runtime map; nil если не запущена
-(dev/halt)                     ; останов
-(dev/reset)                    ; halt + reload config + go (после правок ig/init-key)
+(require 'dev :reload)         ; always :reload — otherwise you may work with a stale def
+(dev/go)                       ; starts the Integrant system with the :dev profile (testcontainers Postgres)
+@integrant.repl.state/system   ; runtime map; nil if not started
+(dev/halt)                     ; stop
+(dev/reset)                    ; halt + reload config + go (after editing ig/init-key)
 ```
 
-Доступ к компонентам без копаний в map:
+Access to components without digging into the map:
 
 ```clojure
 (dev/storage)   ; :db/versioned — VersionedStorage
-(dev/context)   ; :exec/context — что executor ждёт первым аргументом
-(dev/server)    ; :http/server  — для проверки routes
+(dev/context)   ; :exec/context — what the executor expects as its first argument
+(dev/server)    ; :http/server  — for checking routes
 ```
 
-## 2. Базовые проверки
+## 2. Basic checks
 
-### Выполнить fn по имени
+### Execute a fn by name
 
 ```clojure
 (require '[graphden.executor.interface :as exec])
@@ -47,7 +47,7 @@ description: REPL-driven workflow for Graphden via the clojure MCP server. Use w
 ;; => 15
 ```
 
-### Найти fn-id и посмотреть его args
+### Find a fn-id and inspect its args
 
 ```clojure
 (require '[graphden.storage.protocol.interface :as sp])
@@ -57,60 +57,60 @@ description: REPL-driven workflow for Graphden via the clojure MCP server. Use w
    :args (sp/query-entities s :arg {:fn-id (:id f)})})
 ```
 
-### Получить execution-graph (то, что видит компилятор)
+### Get the execution-graph (what the compiler sees)
 
 ```clojure
 (sp/resolve-execution-graph (dev/storage) fn-id)
 ```
 
-## 3. Тестирование base-fn impls
+## 3. Testing base-fn impls
 
-Самое частое: «работает ли мой `defbase`?». **Не надо** делать `bb rebuild` — `:reload` грузит свежий код:
+The most common one: "does my `defbase` work?". You **don't need** `bb rebuild` — `:reload` loads fresh code:
 
 ```clojure
-;; перезагрузить конкретный impls.clj
+;; reload a specific impls.clj
 (require 'graphden.packages.core.arithmetic.impls :reload)
-;; либо весь loader (читает fns.edn заново при сборке packages map)
+;; or the whole loader (re-reads fns.edn while assembling the packages map)
 (require '[graphden.packages.loader :as pkg] :reload)
 (pkg/load-packages ["core" "web" "app"])
 ;; => {:base-fn-defs {...} :fn-defs [...] :packages [...] :startup-fn :web-server}
 ```
 
-`load-packages` принимает **строки** имён пакетов, не keywords, и сам в БД ничего не пишет — синк делает Integrant init-key `:exec/base-fns`. Самый надёжный способ применить правки `fns.edn` / `defbase` к запущенной системе — `(dev/reset)`: он прогонит init-keys заново, включая синк пакетов в storage.
+`load-packages` takes package names as **strings**, not keywords, and doesn't write anything to the DB itself — the sync is done by the Integrant init-key `:exec/base-fns`. The most reliable way to apply `fns.edn` / `defbase` edits to a running system is `(dev/reset)`: it re-runs the init-keys, including the package sync into storage.
 
-## 4. Проверка гипотез без правки файлов
+## 4. Verifying hypotheses without editing files
 
 ```clojure
-;; В REPL переопределить impl временно:
+;; In the REPL, redefine an impl temporarily:
 (in-ns 'graphden.packages.core.arithmetic.impls)
 (graphden.executor.defbase/defbase add-10 [a b] (+ a b 10))
 (in-ns 'user)
-;; теперь exec/execute-by-name "add-10" вернёт результат с новой логикой
+;; now exec/execute-by-name "add-10" will return a result with the new logic
 ```
 
-Если переопределение **подтверждает** гипотезу — переноси в файл и делай финальный `bb rebuild` для деплоя в Docker.
+If the redefinition **confirms** the hypothesis — port it into the file and do the final `bb rebuild` to deploy into Docker.
 
-## 5. Когда REPL не помогает (нужен `bb rebuild`)
+## 5. When the REPL doesn't help (you need `bb rebuild`)
 
-- Финальный деплой в Docker (без него прод не увидит изменений).
-- Изменения в `.js`/`.css` (фронт берётся из jar — нужен пересбор + `BUILD_TIMESTAMP`).
-- Изменения `deps.edn` / `bb.edn` / `package.edn` зависимостей.
-- Изменения `system.edn` / Aero / Integrant-ключей, которые не подхватываются `dev/reset`.
-- Когда тестируем то, что зависит от пересборки uberjar.
+- Final deploy into Docker (without it, prod won't see the changes).
+- Changes to `.js`/`.css` (the frontend comes from the jar — needs a rebuild + `BUILD_TIMESTAMP`).
+- Changes to `deps.edn` / `bb.edn` / `package.edn` dependencies.
+- Changes to `system.edn` / Aero / Integrant keys that aren't picked up by `dev/reset`.
+- When testing something that depends on rebuilding the uberjar.
 
-Память по теме: **`bb rebuild` после backend-изменений** — это про деплой, не про отладку. Отладка идёт в REPL, `rebuild` запускается **один раз** в конце.
+Related memory: **`bb rebuild` after backend changes** — that's about deploy, not debugging. Debugging happens in the REPL, `rebuild` is run **once** at the end.
 
-## 6. Полезные MCP-инструменты, парные к REPL
+## 6. Useful MCP tools paired with the REPL
 
-- `mcp__clojure__clojure_eval` — основной воркхорс.
-- `mcp__clojure__code_critique` — натравить на готовый кусок перед коммитом.
-- `mcp__clojure__clojure_inspect_project` — быстрый обзор deps/aliases без чтения `deps.edn` руками.
-- `mcp__clojure__clojure_edit` / `clojure_edit_replace_sexp` — структурное редактирование форм; меньше шансов сломать парены, чем `Edit` по строкам.
-- `mcp__clojure__paren_repair` — если всё-таки сломал.
+- `mcp__clojure__clojure_eval` — the main workhorse.
+- `mcp__clojure__code_critique` — sic it on a finished chunk before committing.
+- `mcp__clojure__clojure_inspect_project` — a quick overview of deps/aliases without reading `deps.edn` by hand.
+- `mcp__clojure__clojure_edit` / `clojure_edit_replace_sexp` — structural editing of forms; less chance of breaking parens than `Edit` line by line.
+- `mcp__clojure__paren_repair` — if you did break them after all.
 
-## 7. Анти-паттерны
+## 7. Anti-patterns
 
-- ❌ Запускать `bb test --focus ...` для проверки одной функции — REPL быстрее на порядок.
-- ❌ `bb rebuild` после каждой мелкой правки — REPL и `:reload` для этого и сделаны.
-- ❌ Забывать `:reload` в `require` — будешь ловить призраки прошлой сессии (см. явное напоминание в описании самого `clojure_eval`).
-- ❌ Держать `(dev/go)` запущенным между сменой `:dev` profile / `system.edn` — делай `dev/reset` или `dev/halt` + `dev/go`.
+- ❌ Running `bb test --focus ...` to check a single function — the REPL is an order of magnitude faster.
+- ❌ `bb rebuild` after every small edit — the REPL and `:reload` were made for exactly this.
+- ❌ Forgetting `:reload` in `require` — you'll be chasing ghosts of a previous session (see the explicit reminder in the description of `clojure_eval` itself).
+- ❌ Keeping `(dev/go)` running across a change of `:dev` profile / `system.edn` — do `dev/reset` or `dev/halt` + `dev/go`.

@@ -1,41 +1,41 @@
 ---
 name: graphden-code-quality
-description: Качество Clojure-кода в `src/` и `test/` — DRY, мёртвый код, декомпозиция больших функций/файлов, N+1, безопасность, nil-safety, скорость тестов, разумное покрытие. Применяй при ЛЮБОМ касании Clojure-кода (новый код пишем сразу чисто, чтобы потом не переделывать) И как explicit-проверку существующего кода ("пройдись по проекту", "почисти `src/`", "пройдись ещё раз — что ещё можно улучшить"). Триггеры — фразы вроде "рефакторинг", "почисть", "DRY", "большой файл", "большая функция", "мёртвый код", "дубликаты", "оптимизируй", "N+1", "ускорь тесты", "флака", "test flake", "повысь качество", "security", "альфа-релиз", "перед релизом". SKIP для: чисто frontend-вопросов (.js/.css/.html — отдельные скиллы), вопросов про `fns.edn`/`impls.clj` (→ `graphden-packages-quality`), pure REPL-debug гипотез (→ `graphden-repl`), business-feature implementation.
+description: Quality of Clojure code in `src/` and `test/` — DRY, dead code, decomposition of large functions/files, N+1, security, nil-safety, test speed, sensible coverage. Apply on ANY touch of Clojure code (write new code cleanly right away so you don't have to redo it later) AND as an explicit check of existing code ("go through the project", "clean up `src/`", "go through it again — what else can be improved"). Triggers — phrases like "refactoring", "clean up", "DRY", "large file", "large function", "dead code", "duplicates", "optimize", "N+1", "speed up tests", "flake", "test flake", "improve quality", "security", "alpha release", "before release". SKIP for: pure frontend questions (.js/.css/.html — separate skills), questions about `fns.edn`/`impls.clj` (→ `graphden-packages-quality`), pure REPL-debug hypotheses (→ `graphden-repl`), business-feature implementation.
 ---
 
-# graphden-code-quality — чистый Clojure src/ и test/
+# graphden-code-quality — clean Clojure src/ and test/
 
-Задача этого скилла: **открыть код перед посторонним разработчиком и не
-поморщиться**. Это не «накатывать линтеры до зелёного» (`bb check` всё
-равно прогоняем), а ловить семантические проблемы, которые линтер не
-видит: дубликаты, N+1, простыни-функции, флаки, мёртвый код,
-несимметричные защитные шапки.
+The goal of this skill: **open the code in front of an outside developer and not
+wince**. This is not "run linters until green" (`bb check` we run anyway),
+but catching semantic problems the linter doesn't
+see: duplicates, N+1, wall-of-text functions, flakes, dead code,
+asymmetric guard preambles.
 
-**Применять и при письме нового кода, и как explicit-проверку
-существующего.** Если новый код проходит этот скилл с первого захода —
-не придётся возвращаться. Если зовут «пройдись по проекту» — это
-explicit-rerun по тому же списку.
+**Apply both when writing new code and as an explicit check of
+existing code.** If new code passes this skill on the first pass —
+you won't have to come back. If you're asked to "go through the project" — that's an
+explicit rerun over the same list.
 
-## 0. Sanity checks перед началом — что у нас сейчас
+## 0. Sanity checks before starting — where we are now
 
-Перед тем как править существующее, сними отпечаток:
+Before editing existing code, take a snapshot:
 
 ```bash
-bb check                   # clj-kondo + splint + cljstyle, должен быть 0 warnings
-bb test                    # должны быть зелёные; запомни slowest (kaocha profiling)
-clojure -M:dev tools/reachability_audit.clj  # дерево достижимости fn-defs
+bb check                   # clj-kondo + splint + cljstyle, should be 0 warnings
+bb test                    # should be green; remember the slowest (kaocha profiling)
+clojure -M:dev tools/reachability_audit.clj  # reachability tree of fn-defs
 ```
 
-Если `bb check` уже что-то ругается — закрывай ДО рефакторинга. Чужие
-ошибки потом замаскируют твои.
+If `bb check` already complains about something — close it BEFORE refactoring. Other people's
+errors will later mask yours.
 
-## 1. Декомпозиция больших функций — порог 100 строк
+## 1. Decomposition of large functions — threshold 100 lines
 
-**Функция ≥ 100 строк — обязательная проверка на split.** Не всегда
-обязательно резать (см. §1.5 ниже), но обязательно ОБОСНОВАТЬ
-оставление.
+**A function ≥ 100 lines — mandatory check for a split.** Not always
+necessary to cut (see §1.5 below), but you must JUSTIFY
+leaving it.
 
-### 1.1 Как искать кандидатов
+### 1.1 How to find candidates
 
 ```bash
 python3 << 'EOF'
@@ -56,130 +56,130 @@ for root, _, files in os.walk('/root/projects/graphden/src'):
 EOF
 ```
 
-Регэксп пропускает `defrecord` / `defprotocol` — это правильно, они
-часто содержат много protocol-method declarations, что НЕ refactor target.
+The regexp skips `defrecord` / `defprotocol` — that's correct, they
+often contain many protocol-method declarations, which is NOT a refactor target.
 
-### 1.2 Как резать — правило name-the-phases
+### 1.2 How to cut — the name-the-phases rule
 
-Подходящие швы — это **именуемые фазы** работы функции:
+Suitable seams are the **nameable phases** of the function's work:
 
-| Шов | Признаки |
+| Seam | Signs |
 |---|---|
-| `parse`/`classify` | Разбор сырого входа в структурированную форму |
-| `validate` | Проверки, возвращающие либо go-ahead, либо отказ-маркер |
-| `compute`/`derive` | Чистая трансформация без I/O |
-| `apply`/`write` | Сторонние эффекты (DB-запись, NOTIFY, log) |
-| `finalize`/`respond` | Формирование возвращаемого значения для caller'а |
-| `throw-*!` | Канонический ex-info — выносить если ≥2 каллера |
+| `parse`/`classify` | Parsing raw input into a structured form |
+| `validate` | Checks that return either a go-ahead or a rejection marker |
+| `compute`/`derive` | Pure transformation without I/O |
+| `apply`/`write` | Side effects (DB write, NOTIFY, log) |
+| `finalize`/`respond` | Forming the return value for the caller |
+| `throw-*!` | Canonical ex-info — extract if ≥2 callers |
 
-**Пример (этой сессии)** — `crud/entities/apply-create-core` был 106
-строк = nested let + cond. Распилен на:
+**Example (from this session)** — `crud/entities/apply-create-core` was 106
+lines = nested let + cond. Split into:
 
-- `humanise-create-exception` (16 lines) — формат сообщения
+- `humanise-create-exception` (16 lines) — message format
 - `try-create-or-error` (24 lines) — capability-gate + create-entity wrap
 - `forward-rename-slot!` (10 lines) — Phase 6c side-effect
 - `post-create-type-check-fn-id` (10 lines) — fn-id resolution
 - `verify-post-create-or-rollback!` (20 lines) — type-check + rollback
 - `apply-create-core` (16 lines) — orchestrator
 
-Каждый helper имеет имя, docstring (1-3 lines), независимо читается.
-Сама `apply-create-core` теперь рассказывает story: «create → maybe
-rename-slot → maybe rollback».
+Each helper has a name, a docstring (1-3 lines), reads independently.
+`apply-create-core` itself now tells a story: "create → maybe
+rename-slot → maybe rollback".
 
-### 1.3 Когда у helper'а появляются 6+ параметров
+### 1.3 When a helper ends up with 6+ parameters
 
-Если extracted helper'у приходится передать > 5 аргументов, значит швы
-не там. Варианты:
+If an extracted helper has to be passed > 5 arguments, the seams
+are in the wrong place. Options:
 
-- Объединить связанные параметры в map (`{:storage :ctx :row}` → один
+- Combine related parameters into a map (`{:storage :ctx :row}` → one
   `ctx`-map).
-- Найти другой шов — может, helper включает в себя ещё одну фазу,
-  которая закрывает половину параметров.
+- Find a different seam — maybe the helper includes another phase
+  that covers half the parameters.
 
-### 1.4 Когда НЕ резать — линейный pipeline через `let`
+### 1.4 When NOT to cut — a linear pipeline via `let`
 
-Если функция — линейная цепочка преобразований (`indexes →
-sorted → reduced`), и каждое следующее значение реально нужно
-следующему, дробить на helper'ы делает её ХУЖЕ. Пример:
-`executor/compile/lookups/build-lookups` (104 строки) — это
-linear-let constructing 8 index maps from raw rows. Распил создал
-бы 8 helper'ов с 3-4 параметрами каждый, читаемость упала бы.
+If a function is a linear chain of transformations (`indexes →
+sorted → reduced`), and each next value is genuinely needed by
+the next, splitting into helpers makes it WORSE. Example:
+`executor/compile/lookups/build-lookups` (104 lines) — this is a
+linear-let constructing 8 index maps from raw rows. A split would create
+8 helpers with 3-4 parameters each, readability would drop.
 
-Решение: оставить как один let, но убедиться что каждая binding имеет
-ОСМЫСЛЕННОЕ имя.
+Solution: leave it as one let, but make sure each binding has a
+MEANINGFUL name.
 
-### 1.5 Когда можно оставить большую функцию
+### 1.5 When a large function may be left as is
 
-- Линейный pipeline через `let` (§1.4)
-- `defrecord` / `defprotocol` с protocol-method declarations
+- Linear pipeline via `let` (§1.4)
+- `defrecord` / `defprotocol` with protocol-method declarations
 - Data-heavy definitions (schema declarations, big enum value maps) —
-  `extend-builder`, `value-kinds` и т.п.
-- Алгоритм с инвариантом (`letfn` со взаимной рекурсией, shared
-  cycle-set) — нерезаемое тело алгоритма
+  `extend-builder`, `value-kinds`, etc.
+- Algorithm with an invariant (`letfn` with mutual recursion, shared
+  cycle-set) — an un-cuttable algorithm body
 
-В docstring или в комментарии перед функцией явно сказать почему НЕ
-режем.
+In the docstring or in a comment before the function, explicitly say why we DON'T
+cut.
 
-## 2. Декомпозиция больших файлов — порог 1000 LOC
+## 2. Decomposition of large files — threshold 1000 LOC
 
-**Файл > 1000 строк** — повод задуматься. Не каждый такой файл
-обязательно резать, но проверь:
+**A file > 1000 lines** — a reason to think. Not every such file
+must be cut, but check:
 
-1. Есть ли в файле > 1 темы? Если да — режь по темам.
-2. Есть ли семантически-обособленная группа функций, которой можно
-   дать имя? Если да — выноси в отдельный namespace.
+1. Are there > 1 topic in the file? If so — cut by topic.
+2. Is there a semantically-distinct group of functions that can be
+   given a name? If so — move it into a separate namespace.
 
-**Пример good split** (исторический): `crud/entities.clj` → `crud/
+**Example of a good split** (historical): `crud/entities.clj` → `crud/
 entities.clj` + `crud/request.clj` + `crud/validation.clj` + …
 
-**Не режь файл, если:**
+**Don't cut the file if:**
 
-- Все функции — одна логическая ответственность (`types/check.clj` —
-  type-checker, 2858 LOC, но это ОДИН алгоритм).
-- Декомпозиция оставит много cross-references — плохой knife.
+- All functions are one logical responsibility (`types/check.clj` —
+  type-checker, 2858 LOC, but it's ONE algorithm).
+- Decomposition would leave many cross-references — a bad knife.
 
-## 3. DRY — поиск дубликатов
+## 3. DRY — finding duplicates
 
-### 3.1 Одинаковые блоки `(throw (ex-info …))`
+### 3.1 Identical `(throw (ex-info …))` blocks
 
 ```bash
 grep -rEn 'ex-info\s+\(str\s+"' src --include='*.clj' | head -20
 ```
 
-Если ОДИН и тот же ex-info `:type` бросается из ≥2 мест с одинаковой
-data-shape — лифти в helper `(defn- throw-<X>! [arg] …)`.
+If the SAME ex-info `:type` is thrown from ≥2 places with the same
+data-shape — lift it into a helper `(defn- throw-<X>! [arg] …)`.
 
-Пример (этой сессии): `executor/compile_runtime.clj` бросал
-`:execution-error/fn-not-found` из `execute` и `make-single-arg-
-callable`. Helper `throw-fn-not-found!` снял дубль и упростил
-let-binding: `(or (get reg fn-id) (throw-fn-not-found! fn-id))`.
+Example (from this session): `executor/compile_runtime.clj` threw
+`:execution-error/fn-not-found` from `execute` and `make-single-arg-
+callable`. The helper `throw-fn-not-found!` removed the duplicate and simplified
+the let-binding: `(or (get reg fn-id) (throw-fn-not-found! fn-id))`.
 
-### 3.2 Inline let-bound helper, повторяющийся между двумя ветками cond
+### 3.2 An inline let-bound helper repeated between two cond branches
 
-Если две ветки `cond`/`if` делают `(let [eff (compute-eff) outcome
+If two `cond`/`if` branches do `(let [eff (compute-eff) outcome
 (->> base (stamp-touched-secret …) (redact-outcome …))] (write …)
-(unregister …) outcome)` — это `finalize-X` helper.
+(unregister …) outcome)` — that's a `finalize-X` helper.
 
-Пример: `crud/fn-execution/apply-execute` имел два почти-одинаковых
-финализатора для `:succeeded` и `:failed`. Лифт в
-`finalize-inline-outcome` упростил cond.
+Example: `crud/fn-execution/apply-execute` had two nearly-identical
+finalizers for `:succeeded` and `:failed`. Lifting into
+`finalize-inline-outcome` simplified the cond.
 
-### 3.3 Одинаковая последовательность let-bindings внутри одной функции
+### 3.3 The same sequence of let-bindings within one function
 
-Если внутри одной функции ОДНА и та же тройка `let`-bindings (или
-больше) вычисляется ДВАЖДЫ — это баг или забытый рефакторинг.
+If within one function the SAME triple of `let`-bindings (or
+more) is computed TWICE — it's a bug or a forgotten refactor.
 
-Пример: `types/check/check-fn-def!` вычислял `parent-list +
-type-row-fields + parent-args` дважды — один раз для pre-pass
-валидаторов, второй раз для inference body. Второй блок был полная
-копия первого + одно cosmetic `cond` → `if`. Лифт в общий outer
-`let` снял 12 lines.
+Example: `types/check/check-fn-def!` computed `parent-list +
+type-row-fields + parent-args` twice — once for the pre-pass
+validators, the second time for the inference body. The second block was a full
+copy of the first + one cosmetic `cond` → `if`. Lifting into a shared outer
+`let` removed 12 lines.
 
-### 3.4 Помощник для cond-tree с одинаковой формой результата
+### 3.4 A helper for a cond-tree with the same result shape
 
-Если в большом `(cond …)`-дереве каждая ветка возвращает map с
-одинаковыми ключами (`{:type T :value V}`), а различия только в
-значениях — extract в classifier:
+If in a large `(cond …)` tree each branch returns a map with the
+same keys (`{:type T :value V}`), and the differences are only in the
+values — extract into a classifier:
 
 ```clojure
 (defn- binding-info-entry
@@ -191,67 +191,67 @@ type-row-fields + parent-args` дважды — один раз для pre-pass
     …))
 ```
 
-Пример: `types/check/bindings-info-for-rule` имела 80 lines `cond`
+Example: `types/check/bindings-info-for-rule` had 80 lines of `cond`
 inside an `into {} (map …)`. Extracted `binding-info-entry`.
 
-## 4. Мёртвый код — `tools/reachability_audit.clj`
+## 4. Dead code — `tools/reachability_audit.clj`
 
-Запуск:
+Run:
 
 ```bash
 clojure -M:dev tools/reachability_audit.clj
 ```
 
-Печатает «Unreachable COMPOSED fn-defs» — это кандидаты на удаление.
-Перед удалением **проверь грепом** что имя не используется
-где-то ещё (комментарий, docstring, `requiring-resolve`-строка). Если
-есть только декларативные ссылки — удаляй и оставь комментарий
-«удалено, замещено X» в месте.
+Prints "Unreachable COMPOSED fn-defs" — these are candidates for deletion.
+Before deleting **check with grep** that the name isn't used
+somewhere else (comment, docstring, a `requiring-resolve` string). If
+there are only declarative references — delete and leave a comment
+"deleted, replaced by X" in place.
 
-**Type-rows и base-fn'ы в «Unreachable» — НЕ мёртвый код.** Это
-словарь языка: подмножество используется приложением, остальное
-ждёт пользовательских fn-def'ов.
+**Type-rows and base-fns in "Unreachable" — NOT dead code.** This is
+the language's dictionary: a subset is used by the application, the rest
+awaits user fn-defs.
 
-Для `src/`-кода аналога нет — `clj-kondo --unused-private-vars`
-ловит unused private vars, но не cross-namespace. Если подозрение
-на мёртвый src-код — грепни `(<symbol>` по проекту, отсей
-комментарии.
+For `src/` code there is no equivalent — `clj-kondo --unused-private-vars`
+catches unused private vars, but not cross-namespace. If you suspect
+dead src-code — grep `(<symbol>` across the project, filter out
+comments.
 
-## 5. Сложная / непонятная логика — что искать
+## 5. Complex / unclear logic — what to look for
 
-### 5.1 Глубокий nested let (> 4 уровней)
+### 5.1 Deep nested let (> 4 levels)
 
 ```bash
 grep -rEnB1 'let\s+\[.*\n.*let\s+\[.*\n.*let\s+\[.*\n.*let' src --include='*.clj'
 ```
 
-Если найдено — рассмотри extraction: каждый внутренний `let` обычно
-носит имя «делаю X, потом Y».
+If found — consider extraction: each inner `let` usually
+carries the name "I do X, then Y".
 
-### 5.2 cond-tree с > 6 веток
+### 5.2 cond-tree with > 6 branches
 
-Каждая ветка должна иметь docstring-комментарий, ИЛИ всё дерево
-должно быть простым диспетчем по shape (см. §3.4). Если ни то ни
-другое — это маркер «много неназванных кейсов».
+Each branch should have a docstring comment, OR the whole tree
+should be a simple dispatch by shape (see §3.4). If neither one nor
+the other — it's a marker of "many unnamed cases".
 
-### 5.3 Чрезмерное `(or x y)` для null-handling
+### 5.3 Excessive `(or x y)` for null-handling
 
 ```bash
 grep -rEn '\(or\s+\(\.\S+\s+\S+\)\s+""' src --include='*.clj'
 ```
 
-Здесь часто нужна обёртка `(str (.getMessage e))` — `str` коэрсит
-nil в `""`, а двойной `or` нечитаем.
+Here you often need a `(str (.getMessage e))` wrapper — `str` coerces
+nil to `""`, while a double `or` is unreadable.
 
-### 5.4 Cyclic deps / `requiring-resolve` хаос
+### 5.4 Cyclic deps / `requiring-resolve` chaos
 
 ```bash
 grep -rEn 'requiring-resolve' src --include='*.clj' | wc -l
 ```
 
-`requiring-resolve` — это **valid escape hatch** для размыкания
-циклических зависимостей (executor ↔ registry), но если их > 10
-по проекту — структура зависимостей выкручена.
+`requiring-resolve` is a **valid escape hatch** for breaking
+circular dependencies (executor ↔ registry), but if there are > 10
+across the project — the dependency structure is contorted.
 
 ## 6. N+1 queries — DB-access patterns
 
@@ -263,148 +263,148 @@ echo '=== map over sp/query-entities ==='
 grep -rEn '\(map\s+#\(.*sp/query-entities' src --include='*.clj'
 ```
 
-Если найдено — заменить на batch API:
+If found — replace with a batch API:
 
 - `sp/read-entities` (batch read by ids)
-- `sp/query-entities` с `:id` IN clause
+- `sp/query-entities` with an `:id` IN clause
 
-**Не каждый doseq над `sp/`** — N+1. Если итерация по 4-5 entity-types
-(сам список фиксированный мал) — это не N+1, это итерация по словарю.
+**Not every doseq over `sp/`** is N+1. If the iteration is over 4-5 entity-types
+(the list itself is fixed and small) — it's not N+1, it's iteration over a dictionary.
 
-## 7. Безопасность
+## 7. Security
 
-### 7.1 Сравнение секретов — constant-time
+### 7.1 Comparing secrets — constant-time
 
 ```bash
 grep -rE ':equal\?' resources/packages/web/ring-adapter resources/packages/app
 ```
 
-Bearer-token / HMAC-tag / vault-token сравнение должно идти через
-`:constant-time-equal?` (`MessageDigest/isEqual`), а не `:equal?`
-(`=`). `=` short-circuit'ит на первом несовпадающем байте — timing-
-channel, утечка по одному байту за раунд probing'а.
+Bearer-token / HMAC-tag / vault-token comparison must go through
+`:constant-time-equal?` (`MessageDigest/isEqual`), not `:equal?`
+(`=`). `=` short-circuits on the first mismatched byte — a timing
+channel, a one-byte-per-round leak during probing.
 
-Для нового кода с секретами: всегда используй `:constant-time-equal?`.
+For new code with secrets: always use `:constant-time-equal?`.
 
 ### 7.2 SQL injection / shell injection
 
 ```bash
-grep -rEn '\(jdbc/execute!\s+\w+\s+\(str\s+' src --include='*.clj'  # → должно быть пусто
-grep -rEn 'shell\s+\(str|sh\s+\(str' src --include='*.clj'           # → должно быть пусто
+grep -rEn '\(jdbc/execute!\s+\w+\s+\(str\s+' src --include='*.clj'  # → should be empty
+grep -rEn 'shell\s+\(str|sh\s+\(str' src --include='*.clj'           # → should be empty
 ```
 
-В Graphden HoneySQL покрывает все известные пути; raw `(str ...)` в
-JDBC — повод глубоко покопать.
+In Graphden HoneySQL covers all known paths; a raw `(str ...)` in
+JDBC is a reason to dig deep.
 
-### 7.3 Read-string / eval на user-input
+### 7.3 Read-string / eval on user-input
 
 ```bash
 grep -rEn 'read-string|eval\s+\(' src --include='*.clj'
 ```
 
-`packages/loader.clj`'s `read-string` читает CLASSPATH-resource — OK
-(supply-chain, не runtime). Другие читать не должно.
+`packages/loader.clj`'s `read-string` reads a CLASSPATH-resource — OK
+(supply-chain, not runtime). Others should not read.
 
-### 7.4 SQL — HoneySQL по умолчанию, raw-string только по carve-out
+### 7.4 SQL — HoneySQL by default, raw-string only by carve-out
 
-**Правило**: каждый новый JDBC-запрос строится через `honey.sql/format`
-по data-map'е, не через `(str "SELECT … " var " …")`. Это уже
-сегодня доминирующий стиль в `storage/postgres/*.clj` (90%+ сайтов);
-любой новый raw-string в `src/` — повод обосновать carve-out.
+**Rule**: every new JDBC query is built via `honey.sql/format`
+over a data-map, not via `(str "SELECT … " var " …")`. This is already
+the dominant style today in `storage/postgres/*.clj` (90%+ of sites);
+any new raw-string in `src/` is a reason to justify a carve-out.
 
-**Зачем:**
+**Why:**
 
-- **Safety**: HoneySQL автоматически параметризует значения
-  (`?`-placeholders), исключает identifier-injection через
-  user-supplied table-name. Raw `(str "\"" jt "\"")` требует
-  ручного escape'а — легко забыть.
-- **Composability**: query — data; шаги (where, order-by) могут
-  собираться `cond->` / `merge` без string-concat акробатики.
-- **Consistency**: codebase уже HoneySQL-heavy; новые raw-сайты
-  ломают навигацию и стиль ревью.
-- **Refactor-friendly**: column rename = keyword edit, не grep+sed
-  по SQL-фрагментам.
+- **Safety**: HoneySQL automatically parameterizes values
+  (`?`-placeholders), rules out identifier-injection through a
+  user-supplied table-name. Raw `(str "\"" jt "\"")` requires
+  manual escaping — easy to forget.
+- **Composability**: a query is data; steps (where, order-by) can be
+  assembled with `cond->` / `merge` without string-concat acrobatics.
+- **Consistency**: the codebase is already HoneySQL-heavy; new raw-sites
+  break navigation and review style.
+- **Refactor-friendly**: a column rename = a keyword edit, not grep+sed
+  over SQL fragments.
 
-**Когда raw-string ОПРАВДАН** (carve-outs):
+**When a raw-string IS JUSTIFIED** (carve-outs):
 
-| Carve-out | Пример | Reason |
+| Carve-out | Example | Reason |
 |---|---|---|
-| PG built-in RPC | `SELECT pg_notify(?, ?)`, `pg_try_advisory_lock(?)` | HoneySQL покрытие функций PG-RPC слабое; raw — идиоматично + 1 строка |
-| DDL edges | `CREATE TYPE … AS ENUM (…)`, динамические `CREATE INDEX` имена | HoneySQL DDL coverage частичное; ENUM с runtime-values неудобно |
-| Однострочный SQL без runtime-данных | `"SELECT pg_advisory_unlock_all()"` | Нечего параметризовать; HoneySQL overhead = чистый шум |
+| PG built-in RPC | `SELECT pg_notify(?, ?)`, `pg_try_advisory_lock(?)` | HoneySQL coverage of PG-RPC functions is weak; raw is idiomatic + 1 line |
+| DDL edges | `CREATE TYPE … AS ENUM (…)`, dynamic `CREATE INDEX` names | HoneySQL DDL coverage is partial; ENUM with runtime-values is awkward |
+| One-line SQL without runtime data | `"SELECT pg_advisory_unlock_all()"` | Nothing to parameterize; HoneySQL overhead = pure noise |
 
 **Detection:**
 
 ```bash
-# Raw SQL стрингов с runtime-данными:
+# Raw SQL strings with runtime data:
 grep -rEnB1 '\(str\s+"(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|VALUES|WITH)\b' src --include='*.clj' | head
 
-# JDBC execute с явно-строковым query (без HoneySQL):
+# JDBC execute with an explicit string query (no HoneySQL):
 grep -rEn 'execute!.*\[\s*"(SELECT|INSERT|UPDATE|DELETE)\b' src --include='*.clj' | head
 ```
 
-Каждое попадание — либо carve-out из таблицы выше (с inline-
-комментарием почему), либо migration-кандидат.
+Each hit is either a carve-out from the table above (with an inline
+comment on why), or a migration candidate.
 
 **HoneySQL gotchas:**
 
 - **PG reserved words** (`user`, `order`, `group`, `from`, …) — entity
-  names могут попасть в table-arg. Без quoting `UPDATE user …` упадёт.
-  Решение: `(sql/format … {:quoted true})` для query-builder'ов,
-  принимающих entity-name снаружи. Внутри-storage queries с фиксированными
-  identifier'ами quoting не нужен. См. `build-batch-update-sql` в
+  names may land in the table-arg. Without quoting, `UPDATE user …` will fail.
+  Solution: `(sql/format … {:quoted true})` for query-builders that
+  accept an entity-name from outside. Within-storage queries with fixed
+  identifiers don't need quoting. See `build-batch-update-sql` in
   `storage/postgres/crud.clj`.
-- **Batch INSERT через `jdbc/execute-batch!`** — JDBC API: один SQL
-  template + N param-sets. HoneySQL даёт `[sql & params]`, для
-  execute-batch берётся `(first formatted)` — SQL с `?`-placeholders.
-  Pattern: `insert-junction-sql` в `storage/postgres/junction.clj`.
-- **Per-cell casts в `VALUES (...)`** — для PG-specific type coercion
-  каждой ячейки используй `[:cast value :uuid]`. HoneySQL рендерит как
-  `CAST(? AS UUID)` — семантически идентично `?::uuid`.
-- **Derived table с column-aliases**: `:from [[{:values …}
+- **Batch INSERT via `jdbc/execute-batch!`** — JDBC API: one SQL
+  template + N param-sets. HoneySQL gives `[sql & params]`; for
+  execute-batch take `(first formatted)` — SQL with `?`-placeholders.
+  Pattern: `insert-junction-sql` in `storage/postgres/junction.clj`.
+- **Per-cell casts in `VALUES (...)`** — for PG-specific type coercion
+  of each cell use `[:cast value :uuid]`. HoneySQL renders it as
+  `CAST(? AS UUID)` — semantically identical to `?::uuid`.
+- **Derived table with column-aliases**: `:from [[{:values …}
   [:v {:columns [:id :col1 :col2]}]]]` → `FROM (VALUES …) AS v(id,
   col1, col2)`. Pattern: `build-batch-update-sql`.
 
-**Migration reference** (для аналогичных задач):
+**Migration reference** (for analogous tasks):
 
-- `storage/postgres/junction.clj` (6 raw-сайтов → HoneySQL,
+- `storage/postgres/junction.clj` (6 raw-sites → HoneySQL,
   preserved `execute-batch!`)
 - `storage/postgres/crud.clj build-batch-update-sql` (UPDATE FROM
   VALUES + per-cell casts + RETURNING)
 
-## 8. Nil safety — Throwable/.getMessage и аналоги
+## 8. Nil safety — Throwable/.getMessage and analogues
 
-Java-API контракт: `.getMessage` может вернуть null. Если результат
-идёт в user-facing `:error` / `:reason` / message field — оберни в
+Java-API contract: `.getMessage` may return null. If the result
+goes into a user-facing `:error` / `:reason` / message field — wrap it in
 `str`:
 
 ```clojure
-;; BAD — JSON выдаст null, UI отрендерит "rejected, no reason"
+;; BAD — JSON will emit null, UI renders "rejected, no reason"
 {:reason (Throwable/.getMessage e)}
 
-;; GOOD — пустая строка, UI хотя бы видит что-то
+;; GOOD — an empty string, UI at least sees something
 {:reason (str (Throwable/.getMessage e))}
 ```
 
-Если идёт ВНУТРЬ `(str "prefix " (.getMessage e))` — внешний `str`
-уже коэрсит nil, **inner str избыточен** (splint ругнётся).
+If it goes INTO `(str "prefix " (.getMessage e))` — the outer `str`
+already coerces nil, **the inner str is redundant** (splint will complain).
 
-Та же проверка на `:cause`, `:caused-by` поля. На `ex-data`-payload
-— не критично (`null` сериализуется и парсится корректно).
+The same check for `:cause`, `:caused-by` fields. On an `ex-data` payload
+— not critical (`null` serializes and parses correctly).
 
-## 9. Тесты — флаки и анти-паттерны
+## 9. Tests — flakes and anti-patterns
 
-### 9.1 Фиксированный `Thread/sleep` перед assert — флака под параллельной нагрузкой
+### 9.1 A fixed `Thread/sleep` before an assert — a flake under parallel load
 
 ```bash
 grep -rEn 'Thread/sleep\s+[1-9][0-9]{2,}' test --include='*.clj' | head
 ```
 
-`(Thread/sleep N)` перед `(is (>= @iters K))` или подобной проверкой
-— под parallel-test CPU contention поток может НЕ успеть выполнить
-итерации в N ms, тест ляжет.
+`(Thread/sleep N)` before `(is (>= @iters K))` or a similar check
+— under parallel-test CPU contention the thread may NOT manage to run the
+iterations within N ms, and the test fails.
 
-Заменять на poll-with-deadline:
+Replace with poll-with-deadline:
 
 ```clojure
 (let [deadline (+ (System/currentTimeMillis) 2000)]
@@ -413,19 +413,19 @@ grep -rEn 'Thread/sleep\s+[1-9][0-9]{2,}' test --include='*.clj' | head
     (Thread/sleep 20)))
 ```
 
-### 9.2 `(is true)` / `(is (= 1 1))` — пустые assertions
+### 9.2 `(is true)` / `(is (= 1 1))` — empty assertions
 
 ```bash
 grep -rEnB1 '\(is\s+true\)' test --include='*.clj'
 ```
 
-Если функция «не должна бросать» — её вызов САМ ПО СЕБЕ это проверит
-(если бросит — kaocha сообщит). `(is true)` не добавляет ничего.
+If a function "must not throw" — its call BY ITSELF checks that
+(if it throws — kaocha will report it). `(is true)` adds nothing.
 
-Заменять на observable check: `(is (nil? (get-X)))` после операции
-которая не должна была ничего записать.
+Replace with an observable check: `(is (nil? (get-X)))` after an operation
+that should not have written anything.
 
-### 9.3 Дубликаты тестов между файлами
+### 9.3 Duplicate tests across files
 
 ```bash
 python3 << 'EOF'
@@ -445,16 +445,16 @@ for k, v in names.items():
 EOF
 ```
 
-Истинные дубликаты — две функции тестирующие ОДНО (one is strict
-subset). Удалить subset, оставить superset.
+True duplicates are two functions testing the SAME thing (one is a strict
+subset). Delete the subset, keep the superset.
 
-НЕ дубликат — тесты с одинаковым именем на разные ASPECT'ы
-(`read-config-test` в `interface-test.clj` про unit-семантику,
-`read-config-test` в `executor-runtime/core-test.clj` про
-интеграцию). Их объединять не нужно — каждый покрывает свой
-слой.
+NOT a duplicate — tests with the same name for different ASPECTS
+(`read-config-test` in `interface-test.clj` about unit semantics,
+`read-config-test` in `executor-runtime/core-test.clj` about
+integration). They should not be merged — each covers its own
+layer.
 
-### 9.4 `with-redefs` на non-`^:dynamic` var вне `^:serial` ns
+### 9.4 `with-redefs` on a non-`^:dynamic` var outside a `^:serial` ns
 
 ```bash
 for f in $(grep -rl 'with-redefs' test --include='*.clj'); do
@@ -462,88 +462,88 @@ for f in $(grep -rl 'with-redefs' test --include='*.clj'); do
 done
 ```
 
-`with-redefs` модифицирует root binding (НЕ thread-local). В parallel
-kaocha NS другие потоки видят рекдеф. Если NS не `^:serial`, флаки.
-Решение: либо `^:serial` метa на ns, либо вынести тест в отдельный
-`^:serial`-NS.
+`with-redefs` modifies the root binding (NOT thread-local). In a parallel
+kaocha NS, other threads see the redef. If the NS is not `^:serial`, it flakes.
+Solution: either a `^:serial` meta on the ns, or move the test into a separate
+`^:serial` NS.
 
-### 9.5 Quality of assertions — слабые `(is)` ничего не доказывают
+### 9.5 Quality of assertions — weak `(is)` proves nothing
 
-Скилл §9.1-9.4 ловит ПУСТЫЕ assertions. §9.5+ ловит **зелёные тесты,
-которые проверяют не то что заявляют**.
+The skill §9.1-9.4 catches EMPTY assertions. §9.5+ catches **green tests
+that check something other than what they claim**.
 
 #### 9.5.1 Tautologies — `(is (= X X))`
 
 ```bash
-# (is (= literal literal)) — обе стороны идентичны:
+# (is (= literal literal)) — both sides identical:
 grep -rEn '\(is\s+\(=\s+(:?\w+)\s+\1\s*\)' test --include='*.clj'
 
-# (is (= (f arg) (f arg))) — одинаковый вызов в обе стороны:
+# (is (= (f arg) (f arg))) — the same call on both sides:
 grep -rEn '\(is\s+\(=\s+(\([^)]+\))\s+\1\s*\)' test --include='*.clj'
 ```
 
-Always green, проверяет НИЧЕГО. Удалить или заменить на конкретный
+Always green, checks NOTHING. Delete or replace with a concrete
 expected value.
 
-#### 9.5.2 Лень: `(is (some? …))` / `(is (not= nil …))` где известен expected
+#### 9.5.2 Laziness: `(is (some? …))` / `(is (not= nil …))` where the expected is known
 
 ```bash
-# (is (some? (function-call ...))) — где можно проверить точное значение:
+# (is (some? (function-call ...))) — where the exact value can be checked:
 grep -rEn '\(is\s+\(some\?\s+\(' test --include='*.clj' | head -10
 ```
 
-`(is (some? (read-entity ...)))` зелёный для любого non-nil — НЕ
-гарантирует что данные правильные. `(is (= expected-shape (read-entity
-...)))` ловит regression на shape change.
+`(is (some? (read-entity ...)))` is green for any non-nil — it does NOT
+guarantee the data is correct. `(is (= expected-shape (read-entity
+...)))` catches a regression on a shape change.
 
-**Когда `(some? ...)` оправдан**:
+**When `(some? ...)` is justified**:
 
-- Проверяемое значение — opaque handle (UUID, future, atom) без stable
+- The value being checked is an opaque handle (UUID, future, atom) without a stable
   representation
-- Тест на «не упало» в инициализации (но тогда лучше `(is (nil?
-  (init)))` — observable check)
+- A "didn't blow up" test in initialization (but then better `(is (nil?
+  (init)))` — an observable check)
 
-#### 9.5.3 `(is (thrown? Exception ...))` без класса/regex
+#### 9.5.3 `(is (thrown? Exception ...))` without a class/regex
 
 ```bash
 grep -rEn '\(is\s+\(thrown\?\s+Exception\b' test --include='*.clj' | head -10
 grep -rEn '\(is\s+\(thrown\?\s+Throwable\b' test --include='*.clj' | head -10
 ```
 
-`Exception` ловит ВСЁ — включая `NullPointerException` от опечатки в
-test setup. Заменить:
+`Exception` catches EVERYTHING — including a `NullPointerException` from a typo in
+the test setup. Replace:
 
-- `(is (thrown-with-msg? ClassName #"specific msg" ...))` — точный
-  контракт
-- `(is (thrown? ClassName ...))` — конкретный класс (`ExceptionInfo`,
+- `(is (thrown-with-msg? ClassName #"specific msg" ...))` — an exact
+  contract
+- `(is (thrown? ClassName ...))` — a concrete class (`ExceptionInfo`,
   `ArithmeticException`, etc.)
 
-#### 9.5.4 Логика внутри `(is)` — `loop` / `if` / `cond`
+#### 9.5.4 Logic inside `(is)` — `loop` / `if` / `cond`
 
 ```bash
 grep -rEn '\(is\s+\((loop|if|cond|when|when-let|let)\b' test --include='*.clj' | head -10
 ```
 
 ```clojure
-;; BAD — логика внутри is. Если loop bug'нул, "тест зелёный" может
-;;       значить разные вещи.
+;; BAD — logic inside is. If the loop is buggy, "the test is green" can
+;;       mean different things.
 (is (loop [n 0]
       (if (>= n 100) true (recur (compute n)))))
 
-;; GOOD — логика ДО is, is проверяет результат.
+;; GOOD — logic BEFORE is, is checks the result.
 (let [result (loop [n 0]
                (if (>= n 100) :done (recur (compute n))))]
   (is (= :done result)))
 ```
 
-`when` / `when-let` особенно коварны: они возвращают nil когда
-условие false, и `(is nil)` — это FAIL! Так что `(is (when X Y))` —
-лишний слой.
+`when` / `when-let` are especially treacherous: they return nil when the
+condition is false, and `(is nil)` — that's a FAIL! So `(is (when X Y))` is
+an extra layer.
 
-#### 9.5.5 Множественные `is` в одном `testing` без явной связи
+#### 9.5.5 Multiple `is` in one `testing` without an explicit connection
 
 ```bash
-# `testing` с >3 `is` подряд — кандидат на дробление:
+# `testing` with >3 `is` in a row — a candidate for splitting:
 python3 << 'EOF'
 import re, os
 for root, _, files in os.walk('/root/projects/graphden/test'):
@@ -561,14 +561,14 @@ for root, _, files in os.walk('/root/projects/graphden/test'):
 EOF
 ```
 
-Если в `(testing "X" ...)` есть 4+ `is` НЕ-связанных проверок (разные
-аспекты системы) — failure не показывает что сломалось, и rerun-after-
-fix не понятен. Дроби на отдельные `testing` блоки.
+If in `(testing "X" ...)` there are 4+ UNRELATED `is` checks (different
+aspects of the system) — the failure doesn't show what broke, and a rerun-after-
+fix is unclear. Split into separate `testing` blocks.
 
-#### 9.5.6 Тестируется impl, не contract
+#### 9.5.6 Testing the impl, not the contract
 
-Маркер: тест ссылается на private symbols (`#'ns/private-fn`) или
-проверяет внутренние data structures.
+Marker: the test references private symbols (`#'ns/private-fn`) or
+checks internal data structures.
 
 ```bash
 grep -rEn "#'\S+/_?[a-z]" test --include='*.clj' | head -10
@@ -578,53 +578,53 @@ grep -rEn "#'\S+/_?[a-z]" test --include='*.clj' | head -10
 ;; BAD — testing private impl
 (is (= 42 (#'my.ns/internal-counter-state ctx)))
 
-;; GOOD — testing observable contract
+;; GOOD — testing an observable contract
 (is (= 42 (public-api/get-counter ctx)))
 ```
 
-Tests of private impl ломаются при refactor'ах, которые НЕ ломают
-поведение — это false negative debt.
+Tests of private impl break on refactors that do NOT break
+behavior — this is false-negative debt.
 
-#### 9.5.7 Test names — описывают что проверяется
+#### 9.5.7 Test names — describe what is being checked
 
 ```bash
-# Имена test'ов вида test-1 / my-test / works:
+# Test names of the form test-1 / my-test / works:
 grep -rE '^\(deftest\s+(test-?[0-9]+|my-?test|works?|test|t)\b' test --include='*.clj'
 
-# deftest без -test suffix:
+# deftest without a -test suffix:
 grep -rE '^\(deftest\s+[a-z]\w*[^-][^t]\b' test --include='*.clj' | grep -v '\-test\b' | head -5
 ```
 
-Хорошее имя: `<concept>-<scenario>-test` или `<concept>-<expected-
-behavior>-test`. Пример: `register-base-fns-handles-empty-defs-map-
-test` лучше чем `test-1`.
+A good name: `<concept>-<scenario>-test` or `<concept>-<expected-
+behavior>-test`. Example: `register-base-fns-handles-empty-defs-map-
+test` is better than `test-1`.
 
-#### 9.5.8 Закомментированные тесты
+#### 9.5.8 Commented-out tests
 
 ```bash
 grep -rEn '^\s*;;\s*\(deftest|^\s*\(comment\s+\(deftest' test --include='*.clj' | head -5
 ```
 
-`(comment (deftest ...))` или `;;; (deftest ...)` — забытый код. Либо
-удалить, либо включить (если тест должен работать). Никогда не
-оставлять «на потом» — превращается в перманентный шум.
+`(comment (deftest ...))` or `;;; (deftest ...)` — forgotten code. Either
+delete it, or enable it (if the test should work). Never
+leave it "for later" — it turns into permanent noise.
 
-#### 9.5.9 Inter-test dependencies через global state
+#### 9.5.9 Inter-test dependencies via global state
 
 ```bash
-# defonce / def в test ns — потенциальный shared state:
+# defonce / def in a test ns — potential shared state:
 grep -rEn '^\(defonce\b' test --include='*.clj' | head -5
 grep -rEn '^\(def\s+\^:private\s+\S+\s+\(atom' test --include='*.clj' | head -5
 ```
 
-Тесты, делящие state через `defonce` атомы или global Vars, ломаются
-по порядку выполнения. Каждый test должен начинать с known state —
-через fixture `:each` или явный setup в `let`.
+Tests sharing state via `defonce` atoms or global Vars break
+by execution order. Each test must start from a known state —
+via a `:each` fixture or an explicit setup in `let`.
 
-#### 9.5.10 Over-mocking в integration-тестах
+#### 9.5.10 Over-mocking in integration tests
 
 ```bash
-# Интеграционные тесты с >3 with-redefs:
+# Integration tests with >3 with-redefs:
 python3 << 'EOF'
 import os, re
 for root, _, files in os.walk('/root/projects/graphden/test/graphden/integration'):
@@ -638,224 +638,224 @@ for root, _, files in os.walk('/root/projects/graphden/test/graphden/integration
 EOF
 ```
 
-Integration test с 3+ `with-redefs` — это unit test с заглушками,
-проиграл свой смысл (проверять production-shape). Либо убрать
-mocking, либо переименовать в unit test и переехать в `test/graphden/
+An integration test with 3+ `with-redefs` is a unit test with stubs,
+it has lost its purpose (to check the production-shape). Either remove the
+mocking, or rename it to a unit test and move it to `test/graphden/
 <module>/`.
 
-## 10. Скорость тестов — что реально стоит чинить
+## 10. Test speed — what is actually worth fixing
 
-### 10.1 Heavy fixtures — golden-bootstrap pattern
+### 10.1 Heavy fixtures — the golden-bootstrap pattern
 
-Интеграционные тесты, нуждающиеся в полном package-set'е, должны
-идти через `setup/bootstrap-crud-graph-from-golden!` (TEMPLATE
-clone, ~100ms / NS), не через `setup/bootstrap-crud-graph!`
-(полный sync, 10-14s / NS).
+Integration tests that need the full package-set should
+go through `setup/bootstrap-crud-graph-from-golden!` (TEMPLATE
+clone, ~100ms / NS), not through `setup/bootstrap-crud-graph!`
+(full sync, 10-14s / NS).
 
-Проверка:
+Check:
 
 ```bash
 grep -lE 'bootstrap-crud-graph!' test/graphden -r | xargs grep -L 'from-golden'
 ```
 
-Если найдено — мигрировать на golden, кроме случаев когда тесту
-нужен сам процесс bootstrap (например, тест проверяет sync).
+If found — migrate to golden, except in cases where the test
+needs the bootstrap process itself (for example, a test that checks sync).
 
-### 10.2 Long Thread/sleep в integration-тестах с polling-доступным контрактом
+### 10.2 A long Thread/sleep in integration tests with a polling-accessible contract
 
-Если тест проверяет cron / future / async-flow с фиксированным
-sleep, а у системы есть polling-семантика (deadline + poll) — это
-зря потраченные секунды.
+If a test checks a cron / future / async-flow with a fixed
+sleep, and the system has polling semantics (deadline + poll) — those are
+wasted seconds.
 
-Не каждый sleep можно убрать: «cron `* * * * * ?` срабатывает раз в
-секунду» — 1100ms sleep оправдан, потому что таково ОБЯЗАТЕЛЬСТВО
-cron'а.
+Not every sleep can be removed: "cron `* * * * * ?` fires once a
+second" — an 1100ms sleep is justified, because that's the OBLIGATION
+of the cron.
 
-### 10.3 Configurable poll-timeout для polling-based примитивов
+### 10.3 A configurable poll-timeout for polling-based primitives
 
-Пример: `pg-notify/create-listener` принимает optional
-`:poll-timeout-ms`. Производство — 1000ms (низкий idle-CPU), тесты —
-250ms (быстрый wake-up). Аналогичный паттерн в любом «idle pod
-polls» примитиве.
+Example: `pg-notify/create-listener` accepts an optional
+`:poll-timeout-ms`. Production — 1000ms (low idle-CPU), tests —
+250ms (fast wake-up). An analogous pattern in any "idle pod
+polls" primitive.
 
-## 11. Производительность — не оптимизируй без замера
+## 11. Performance — don't optimize without measuring
 
-Перед оптимизацией:
+Before optimizing:
 
 ```bash
-# Найди slow operation:
-clojure -M:dev:test -m kaocha.runner --focus ...   # kaocha profiling plugin печатает top-slow
+# Find the slow operation:
+clojure -M:dev:test -m kaocha.runner --focus ...   # the kaocha profiling plugin prints top-slow
 ```
 
-Анти-паттерны новой производительности:
+New-performance anti-patterns:
 
-- **Atom-кэш в hot path БЕЗ замера** — мог уменьшить throughput из-за
+- **An atom-cache in a hot path WITHOUT measuring** — it may reduce throughput due to
   contention.
-- **Memoize над функцией с unbounded args** — memory leak.
-- **Eager-load big result set'а** в `(into [])`, когда `lazy-seq`
-  достаточно.
+- **Memoize over a function with unbounded args** — a memory leak.
+- **Eager-loading a big result set** into `(into [])` when a `lazy-seq`
+  is enough.
 
-## 12. Тестовое покрытие — не ради процента
+## 12. Test coverage — not for the sake of a percentage
 
-**Наш baseline уже alpha-grade** (см. `bb coverage` — unit с
-cloverage-инструментацией). Дальше тесты добавлять только когда:
+**Our baseline is already alpha-grade** (see `bb coverage` — unit with
+cloverage instrumentation). Add further tests only when:
 
-1. **Регрессионный sentinel** на критичный invariant (security,
-   versioned-storage merge, executor compile). Пример (этой
-   сессии) — `logic_test.clj` для `:constant-time-equal?` чтобы
-   будущая «оптимизация» не сломала constant-time.
-2. **Покрытие нового сценария** — фича добавила user-visible behavior.
-3. **Reproduce-on-CI существующего бага** — perpetual regression
+1. **A regression sentinel** on a critical invariant (security,
+   versioned-storage merge, executor compile). Example (from this
+   session) — `logic_test.clj` for `:constant-time-equal?` so that a
+   future "optimization" doesn't break constant-time.
+2. **Coverage of a new scenario** — a feature added user-visible behavior.
+3. **Reproduce-on-CI of an existing bug** — a perpetual regression
    guard.
 
-**НЕ добавлять тест:**
+**Do NOT add a test:**
 
-- Чтобы поднять coverage% на defensive `log/warn` в catch — log
-  путь тестировать дорого, regression-риск низкий.
-- Дубликат уже-покрытого пути — см. §9.3.
-- «На всякий случай» без named regression mode.
+- To bump coverage% on a defensive `log/warn` in a catch — the log
+  path is expensive to test, the regression risk is low.
+- A duplicate of an already-covered path — see §9.3.
+- "Just in case" without a named regression mode.
 
-## 13. Workflow — где править и как чекать
+## 13. Workflow — where to edit and how to check
 
-### 13.1 Письмо нового кода
+### 13.1 Writing new code
 
-1. Перед написанием — `bb check` зелёный.
-2. Пишешь модуль — сразу следуя этому скиллу (короткие функции, DRY,
-   ясные имена, nil-safety).
-3. Перед коммитом — `bb check` + focused-тесты touched ns'ов.
+1. Before writing — `bb check` green.
+2. You write the module — following this skill right away (short functions, DRY,
+   clear names, nil-safety).
+3. Before committing — `bb check` + focused tests of the touched ns's.
 
-### 13.2 Проверка существующего кода
+### 13.2 Checking existing code
 
-1. **Baseline** — `bb check`, `bb test`, reachability audit. Запиши
-   что сейчас зелёное, что красное.
-2. **Сканируй по §1-12** — каждый раздел даёт `grep`/`python`-один-
-   лайнер для поиска кандидатов.
-3. **Резюме** перед правками — сколько кандидатов нашлось, какие
-   приоритеты (security > nil-safety > dead code > DRY > splits).
-4. **Правь по приоритету** — на каждое значимое изменение **commit
-   per checkpoint** (рекомендация из CLAUDE.md), не пакетом-простынёй.
-5. **Verify после каждого commit'а** — `bb check` + focused-тесты
-   touched ns'ов.
-6. **Финальный sweep** — `bb test` или `bb ci` (зависит от
+1. **Baseline** — `bb check`, `bb test`, reachability audit. Write down
+   what's green now, what's red.
+2. **Scan per §1-12** — each section gives a `grep`/`python` one-
+   liner for finding candidates.
+3. **Summary** before edits — how many candidates were found, what the
+   priorities are (security > nil-safety > dead code > DRY > splits).
+4. **Edit by priority** — for each significant change **commit
+   per checkpoint** (a recommendation from CLAUDE.md), not in a wall-of-text batch.
+5. **Verify after each commit** — `bb check` + focused tests of the
+   touched ns's.
+6. **Final sweep** — `bb test` or `bb ci` (depends on the
    amount of changes).
 
-### 13.3 Commit rules — каждый коммит — value sam по себе
+### 13.3 Commit rules — each commit is a value in itself
 
-Из round-1 + round-2 сессий:
+From the round-1 + round-2 sessions:
 
-- **Один концептуальный change на commit** — security-fix и DRY-
-  refactor не должны быть в одном commit'е.
-- **Subject ≤ 70 chars** — «refactor(types/check): extract closure-
-  strip + literal-bound throw». Префикс показывает тип: `refactor`,
+- **One conceptual change per commit** — a security-fix and a DRY
+  refactor should not be in one commit.
+- **Subject ≤ 70 chars** — "refactor(types/check): extract closure-
+  strip + literal-bound throw". The prefix shows the type: `refactor`,
   `fix`, `security`, `perf`, `test`, `style`, `docs`.
-- **Body explains WHY** — не WHAT (diff показывает what); WHY = «было
-  X-shape, причина / эффект Y».
-- **Verified-by lines** — какие тесты подтвердили no-regression
+- **Body explains WHY** — not WHAT (the diff shows what); WHY = "it was
+  X-shape, the reason / effect Y".
+- **Verified-by lines** — which tests confirmed no-regression
   (`23 tests / 78 assertions, 0 failures`).
 
-## 14. Анти-паттерны (не делать)
+## 14. Anti-patterns (don't do)
 
-- **Big-bang refactor.** «Распилим все 5 больших файлов одним
-  коммитом» — гарантированно сломаешь что-то незаметно. Per-target,
+- **Big-bang refactor.** "Let's cut all 5 large files in one
+  commit" — you're guaranteed to break something imperceptibly. Per-target,
   per-commit.
-- **Refactor + behavior change в одном коммите.** Refactor = same
-  observable behavior; mixing с фиксом меняет smell-test.
-- **Молчаливый рерайт docstring'а** при extract'е helper'а. Перенос
-  логики ОК; перенос + переформулировка причины — теряется история.
-- **Удаление кода без grep'а по имени.** Имя может встречаться в
-  комментарии — комментарий устареет.
-- **Premature optimization** — добавление кэша / batching без
-  baseline-замера. Кода больше, выигрыша нет.
-- **`bb coverage` после каждой правки.** ~15-19 минут — это
-  периодический audit, не CI-gate. Day-to-day — `bb check` +
-  focused-тесты.
+- **Refactor + behavior change in one commit.** Refactor = same
+  observable behavior; mixing it with a fix changes the smell-test.
+- **A silent rewrite of a docstring** when extracting a helper. Moving
+  the logic is OK; moving + rephrasing the reason loses the history.
+- **Deleting code without a grep on the name.** The name may appear in
+  a comment — the comment will go stale.
+- **Premature optimization** — adding a cache / batching without a
+  baseline measurement. More code, no gain.
+- **`bb coverage` after every edit.** ~15-19 minutes — that's a
+  periodic audit, not a CI-gate. Day-to-day — `bb check` +
+  focused tests.
 
 ## 15. Integration tests — `test/graphden/integration/`
 
-Integration suite сидит в `test/graphden/integration/` (11 NSes на
-момент 2026-07-05). Каждый — `^:integration` meta, идёт через
-shared PG testcontainer + golden-bootstrap. Это самое дорогое
-тестирование (`bb test` integration занимает ~70% wall-time), поэтому
-качество тут критично.
+The integration suite sits in `test/graphden/integration/` (11 NSes as
+of 2026-07-05). Each — `^:integration` meta, goes through a
+shared PG testcontainer + golden-bootstrap. This is the most expensive
+testing (`bb test` integration takes ~70% of wall-time), so
+quality here is critical.
 
-### 15.1 Coverage matrix — какие user-flow ДОЛЖНЫ быть покрыты
+### 15.1 Coverage matrix — which user-flows MUST be covered
 
-Список критических user-flows и их покрытия:
+List of critical user-flows and their coverage:
 
-| User-flow | Integration test | Если нет — risk |
+| User-flow | Integration test | If missing — risk |
 |---|---|---|
-| Server bootstrap (full sys/start-with-overrides!) | `smoke-pass-test` | regression в integrant wiring проходит до prod |
-| `/api/execute` happy path + cancellation + timeout | `execute-http-test` | execute pipeline регрессия не ловится unit'ами |
-| `/api/secrets/*` end-to-end (vault create/rotate/delete) | `secret-flow-test` | vault integration ломается тихо |
-| Cron `:schedule` → service registration → reconciler-driven fire | `cron-schedule-service-test` | cron breakage обнаруживается только в prod |
-| `find-fn-usages` через граф | `find-fn-usages-graph-test` | usage graph regression hides |
-| Storage protocol contract (any backend) | `storage-protocol-poc-test` | future backends не проверены |
+| Server bootstrap (full sys/start-with-overrides!) | `smoke-pass-test` | a regression in integrant wiring reaches prod |
+| `/api/execute` happy path + cancellation + timeout | `execute-http-test` | an execute-pipeline regression isn't caught by units |
+| `/api/secrets/*` end-to-end (vault create/rotate/delete) | `secret-flow-test` | vault integration breaks silently |
+| Cron `:schedule` → service registration → reconciler-driven fire | `cron-schedule-service-test` | cron breakage is discovered only in prod |
+| `find-fn-usages` through the graph | `find-fn-usages-graph-test` | usage-graph regression hides |
+| Storage protocol contract (any backend) | `storage-protocol-poc-test` | future backends aren't checked |
 | **Branches** (create, switch, diff, merge) | `branches-lifecycle-test` | — |
 | **Services** (full reconciler lifecycle for HTTP server) | `http-server-service-lifecycle-test` | — |
 | **Auth middleware** (real bearer-token request → 200 / 401) | `auth-middleware-test` | — |
 | Tenancy (FaaS addon-active harness) | `faas-app-test` | — |
 | Admin grants (per-request-scope router) | `grants-admin-test` | — |
 
-Все критические флоу сейчас покрыты. Для НОВОГО критического флоу: заведи
-integration test (sentinel для regression) ИЛИ явно обоснуй, почему
-unit-level достаточен.
+All critical flows are currently covered. For a NEW critical flow: set up an
+integration test (a sentinel for regression) OR explicitly justify why
+unit-level is sufficient.
 
-### 15.2 Duplication audit — что integration НЕ ДОЛЖЕН делать
+### 15.2 Duplication audit — what integration MUST NOT do
 
-Integration test НЕ дублирует unit test. Сценарий:
+An integration test does not duplicate a unit test. Scenario:
 
-| Слой | Что проверяется | Кому отдать |
+| Layer | What is checked | Where to put it |
 |---|---|---|
 | Unit | Pure logic (parse / validate / format / classify) | `test/graphden/<module>/<file>_test.clj` |
-| Integration через graph | DB write + read через VersionedStorage | `test/graphden/crud/<file>-graph-test.clj` (НЕ `integration/`) |
-| Integration через full system | Полный sys/start-with-overrides! + HTTP roundtrip + cleanup | `test/graphden/integration/` |
+| Integration through the graph | DB write + read through VersionedStorage | `test/graphden/crud/<file>-graph-test.clj` (NOT `integration/`) |
+| Integration through the full system | Full sys/start-with-overrides! + HTTP roundtrip + cleanup | `test/graphden/integration/` |
 
-Если integration test'а можно повторить через `crud/...-graph-test`
-без bootstrap'а full system — это перерасход. Перенести.
+If an integration test can be repeated through `crud/...-graph-test`
+without bootstrapping the full system — it's overkill. Move it.
 
-### 15.3 Производительность integration suite
+### 15.3 Performance of the integration suite
 
 ```bash
 # Total wall time per integration test:
 clojure -M:dev:test -m kaocha.runner --config-file tests.edn :integration --reporter kaocha.report/documentation 2>&1 | tail -30
 ```
 
-Целевые числа:
+Target numbers:
 
-- `smoke-pass-test`: 30-60 s (полный bootstrap + 1 проход)
-- `cron-schedule-service-test`: 60-120 s (включает 1+ s cron-fire)
+- `smoke-pass-test`: 30-60 s (full bootstrap + 1 pass)
+- `cron-schedule-service-test`: 60-120 s (includes a 1+ s cron-fire)
 - `execute-http-test`: < 20 s
 - `secret-flow-test`: < 30 s
 
-Если test > target: либо лишний bootstrap (использовать golden), либо
-лишние `Thread/sleep`, либо реально heavy work — обосновать.
+If a test > target: either an extra bootstrap (use golden), or
+extra `Thread/sleep`s, or genuinely heavy work — justify it.
 
 ```bash
-# Какие integration tests НЕ через golden?
+# Which integration tests are NOT through golden?
 grep -L 'bootstrap-crud-graph-from-golden' test/graphden/integration/*_test.clj 2>/dev/null
 ```
 
-### 15.4 Что должно быть в каждом integration test
+### 15.4 What should be in every integration test
 
-- **Один user-flow per NS** — НЕ ставить 5 несвязанных в одно
-  `^:integration` (один failure кидает всё)
-- **Cleanup gate** — каждый test чистит за собой (либо `:each` fixture
-  c clean-db, либо явный `(finally (sys/stop! system))`)
-- **Sleep по контракту, не по надежде** — `Thread/sleep 1100` для cron
-  оправдан (per-second contract); 5 s «на всякий случай» — нет
-- **Один assert цикл** — `(testing "complete flow" ...)`, НЕ
-  10 раздельных testing с независимыми submission'ами
+- **One user-flow per NS** — do NOT put 5 unrelated ones in one
+  `^:integration` (one failure fails everything)
+- **Cleanup gate** — each test cleans up after itself (either an `:each` fixture
+  with clean-db, or an explicit `(finally (sys/stop! system))`)
+- **Sleep by contract, not by hope** — `Thread/sleep 1100` for cron
+  is justified (per-second contract); 5 s "just in case" — no
+- **One assert cycle** — `(testing "complete flow" ...)`, NOT
+  10 separate testings with independent submissions
 
 ## 16. Browser tests — `tools/browser-test/*.test.js`
 
-Browser suite — 56 Playwright e2e-test'а в `tools/browser-test/`
+The browser suite — 56 Playwright e2e tests in `tools/browser-test/`
 
-- visual-snapshot suite в `tools/visual-tests/`. ~9000 LOC JS,
-покрывают UI flow редактора.
+- the visual-snapshot suite in `tools/visual-tests/`. ~9000 LOC JS,
+covering the editor UI flow.
 
 ### 16.1 Coverage matrix — UI features → test files
 
-Editor `editor-*.js` модули и их e2e покрытие:
+Editor `editor-*.js` modules and their e2e coverage:
 
 | UI module | Coverage | Browser tests |
 |---|---|---|
@@ -873,30 +873,30 @@ Editor `editor-*.js` модули и их e2e покрытие:
 | Free-arg propagation | ✅ | `edit-free-*` (3 tests) |
 | Service popover | ✅ | `edit-service` (2 tests) |
 | Description / tooltip / mismatch | ✅ | `edit-description`, `edit-mismatch` |
-| **Build hash verify** | **❌ gap** | нет browser-теста на `window.BUILD_HASH` после deploy |
-| **Layout edge labels click → expand** | **❌ gap** | сложный flow без e2e cover |
+| **Build hash verify** | **❌ gap** | no browser test on `window.BUILD_HASH` after deploy |
+| **Layout edge labels click → expand** | **❌ gap** | a complex flow without e2e cover |
 | **Visual regression** | ✅ | `tools/visual-tests/*` (separate suite) |
 
-### 16.2 Duplication audit между browser tests
+### 16.2 Duplication audit between browser tests
 
 ```bash
-# Сколько раз каждый prefix tested:
+# How many times each prefix is tested:
 ls /root/projects/graphden/tools/browser-test/*.test.js | xargs -n1 basename | \
   sed -E 's/(edit-[a-z]+|regression|type-system-ui).*/\1/' | sort | uniq -c | sort -rn
 ```
 
-Если у prefix > 5 файлов и все они тестируют похожее API — кандидаты
-на слияние. Пример: 7 `edit-type-*` файлов — но каждый тестирует
-СВОЁ (variant / record / list / record-remove etc.) — это OK,
+If a prefix has > 5 files and they all test a similar API — candidates
+for merging. Example: 7 `edit-type-*` files — but each tests
+ITS OWN thing (variant / record / list / record-remove etc.) — that's OK,
 single-test-per-shape.
 
-**Pattern smell**: два файла с почти-одинаковым setup (>50% same code)
+**Pattern smell**: two files with nearly-identical setup (>50% same code)
 
-- разная assertion — кандидат на параметризацию (одна test-функция, два
-вызова с разными scenario'ами).
+- a different assertion — a candidate for parameterization (one test-function, two
+calls with different scenarios).
 
 ```bash
-# Найди тесты которые открывают тот же initial state:
+# Find tests that open the same initial state:
 grep -lE 'navigateTo.*"web-server"' tools/browser-test/*.test.js | wc -l
 grep -lE 'createComposedFn.*const' tools/browser-test/*.test.js | wc -l
 ```
@@ -904,153 +904,153 @@ grep -lE 'createComposedFn.*const' tools/browser-test/*.test.js | wc -l
 ### 16.3 Performance — total wall time + parallelization
 
 ```bash
-# Сколько файлов = сколько Playwright процессов (если не paralleled):
+# How many files = how many Playwright processes (if not parallelized):
 ls tools/browser-test/*.test.js | wc -l
 echo "Per-test setup cost: chromium launch + page navigation ~ 3-5 s"
 echo "Sequential total: ~50 tests * 30 s avg = 25 min"
 ```
 
-Современные best practices:
+Modern best practices:
 
-- **Shared `browser.newContext()` per file**, не per test (если файл
-  имеет 1 test — ok; если несколько — shared)
-- **Parallel run через `npx playwright test`** (если using `@playwright/
-  test` runner). Сейчас наши файлы — standalone `node *.js` scripts,
-  parallel НЕ работает out of the box → migration target
-- **Visual regression suite — отдельная фаза CI** (не каждый PR)
+- **Shared `browser.newContext()` per file**, not per test (if the file
+  has 1 test — ok; if several — shared)
+- **Parallel run via `npx playwright test`** (if using the `@playwright/
+  test` runner). Right now our files are standalone `node *.js` scripts,
+  parallel does NOT work out of the box → a migration target
+- **Visual regression suite — a separate CI phase** (not every PR)
 
 ### 16.4 Reliability — cleanup, wait strategies, selectors
 
 #### 16.4.1 Cleanup race
 
 ```bash
-# Каждый browser test должен начинать с cleanup:
+# Each browser test should start with cleanup:
 grep -LE 'cleanup\(|deleteFnByName|delete.*before' tools/browser-test/*.test.js | head
 ```
 
-Browser tests параллельно — каждый seed'ит fn-def с unique `RUN_ID`
-(`process.pid + Date.now`). Если cleanup не работает — мусор копится
-в dev-DB → следующий full reset через `bb deploy`.
+Browser tests run in parallel — each seeds a fn-def with a unique `RUN_ID`
+(`process.pid + Date.now`). If cleanup doesn't work — garbage piles up
+in the dev-DB → the next full reset via `bb deploy`.
 
 **Pattern check**: `RUN_ID = '-' + process.pid + '-' + Date.now()` —
-каждый probe-fn должен иметь suffix.
+each probe-fn should have a suffix.
 
 #### 16.4.2 Wait strategies — `waitForSelector` > `page.waitForTimeout`
 
 ```bash
-# page.waitForTimeout — флаки под загрузкой:
+# page.waitForTimeout — flaky under load:
 grep -rEn 'waitForTimeout\s*\(\s*[1-9]' tools/browser-test/*.test.js | head
 ```
 
-Fixed-time waits в browser tests = same as `Thread/sleep` в Clojure
-tests (см. §9.1). Заменять на polling: `page.waitForSelector(...)`,
-`page.waitForFunction(...)`, `await assert(...)` с retry.
+Fixed-time waits in browser tests = same as `Thread/sleep` in Clojure
+tests (see §9.1). Replace with polling: `page.waitForSelector(...)`,
+`page.waitForFunction(...)`, `await assert(...)` with retry.
 
 #### 16.4.3 Brittle selectors — `:nth-child` / class-by-text
 
 ```bash
-# nth-child / nth-of-type — фрагильно к UI rearrangement:
+# nth-child / nth-of-type — fragile to UI rearrangement:
 grep -rEn ':nth-child\(|:nth-of-type\(' tools/browser-test/*.test.js | head
 
-# CSS class by content — может ломаться при theme refactor:
+# CSS class by content — can break on a theme refactor:
 grep -rEn 'querySelector.*\.[\w-]+:has-text' tools/browser-test/*.test.js | head
 ```
 
-Стабильные селекторы (от лучшего к худшему):
+Stable selectors (from best to worst):
 
-1. `data-testid="foo"` — explicit test handle
+1. `data-testid="foo"` — an explicit test handle
 2. `getByRole('button', {name: 'Save'})` — semantic
-3. `text=Save` — content-based (ломается при i18n)
-4. `.css-class` — break on style refactor
-5. `:nth-child(3)` — break on layout change
+3. `text=Save` — content-based (breaks on i18n)
+4. `.css-class` — breaks on a style refactor
+5. `:nth-child(3)` — breaks on a layout change
 
-#### 16.4.4 Auth-token leakage в test output
+#### 16.4.4 Auth-token leakage in test output
 
 ```bash
 # Tokens hardcoded vs env-var:
 grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
-# Должно быть только process.env.AUTH_TOKEN
+# Should be only process.env.AUTH_TOKEN
 ```
 
-### 16.5 Что должно быть в каждом browser test
+### 16.5 What should be in every browser test
 
-- **Header docstring** — что тестирует + run command + exit codes
+- **Header docstring** — what it tests + run command + exit codes
 - **Unique RUN_ID** — `'-' + process.pid + '-' + Date.now().toString(36)`
-- **Cleanup gate** — try/finally + `cleanup(page)` обёртка
-- **Console error listener** — `page.on('console', ...)` ловит UI
-  exception'ы во время теста
-- **Dialog handler** — `page.on('dialog', d => d.accept())` если
-  cleanup может trigger confirm-dialog
-- **Final `process.exit(0|1)`** — exit code определяет PASS / FAIL
-- **No `console.log` после assert success** — output чистый
+- **Cleanup gate** — try/finally + a `cleanup(page)` wrapper
+- **Console error listener** — `page.on('console', ...)` catches UI
+  exceptions during the test
+- **Dialog handler** — `page.on('dialog', d => d.accept())` if
+  cleanup may trigger a confirm-dialog
+- **Final `process.exit(0|1)`** — the exit code determines PASS / FAIL
+- **No `console.log` after assert success** — clean output
 
-## 17. Связи с другими скиллами
+## 17. Connections with other skills
 
-- **`graphden-packages-quality`** — те же принципы для `fns.edn` +
-  `impls.clj` (типы, fn-def naming, минимальные base-fn). Если работа
-  идёт в `resources/packages/` — переключайся.
-- **`graphden-fn-design`** — деталь по naming / namespaces / MI для
-  fn-def. Вызывается `graphden-packages-quality` для конкретики.
-- **`graphden-fn-refactor`** — декомпозиция base-fn impls. Вызывается
-  `graphden-packages-quality` для конкретики.
-- **`graphden-repl`** — отладка гипотезы перед `bb rebuild`.
-  Используется ВСЕГДА когда нужно проверить «что вернёт эта функция
-  сейчас».
-- **CLAUDE.md** — первоисточник проектных принципов. Этот скилл — его
-  operational арм.
+- **`graphden-packages-quality`** — the same principles for `fns.edn` +
+  `impls.clj` (types, fn-def naming, minimal base-fn). If the work
+  is in `resources/packages/` — switch over.
+- **`graphden-fn-design`** — the detail on naming / namespaces / MI for
+  fn-defs. Called by `graphden-packages-quality` for specifics.
+- **`graphden-fn-refactor`** — decomposition of base-fn impls. Called by
+  `graphden-packages-quality` for specifics.
+- **`graphden-repl`** — debugging a hypothesis before `bb rebuild`.
+  Used ALWAYS when you need to check "what this function will return
+  right now".
+- **CLAUDE.md** — the primary source of project principles. This skill is its
+  operational arm.
 
-## 18. Что считается «не докопаться»
+## 18. What counts as "nothing left to nitpick"
 
-Финальный self-check перед закрытием:
+Final self-check before closing:
 
 **Code & lint**
 
-- [ ] `bb check` зелёный (0 warnings)
-- [ ] focused-тесты touched ns'ов зелёные
-- [ ] `bb test` или `bb ci` (в зависимости от scope) зелёный
-- [ ] Reachability audit не показывает новых unreachable (если
-      менял `fns.edn`)
-- [ ] Нет TODO/FIXME/XXX/HACK маркеров без issue link
+- [ ] `bb check` green (0 warnings)
+- [ ] focused tests of touched ns's green
+- [ ] `bb test` or `bb ci` (depending on scope) green
+- [ ] Reachability audit shows no new unreachable (if you
+      changed `fns.edn`)
+- [ ] No TODO/FIXME/XXX/HACK markers without an issue link
 
 **Structure**
 
-- [ ] Каждая функция ≥ 100 LOC ОБОСНОВАНА (см. §1.5) либо распилена
-- [ ] User-facing `:error` / `:reason` поля nil-safe
-- [ ] Каждый секретный compare — constant-time
-- [ ] Каждый новый JDBC-запрос через HoneySQL `sql/format`; raw-string
-      только по carve-out из §7.4 (PG-RPC / DDL edge / нет runtime-данных)
+- [ ] Each function ≥ 100 LOC is JUSTIFIED (see §1.5) or split
+- [ ] User-facing `:error` / `:reason` fields are nil-safe
+- [ ] Each secret compare is constant-time
+- [ ] Each new JDBC query goes through HoneySQL `sql/format`; a raw-string
+      only by carve-out from §7.4 (PG-RPC / DDL edge / no runtime data)
 
 **Unit tests**
 
-- [ ] Нет дубликатных deftests с одинаковыми observable assertion'ами
-- [ ] Каждый sleep в тестах либо оправдан runtime-контрактом, либо
-      заменён на poll-with-deadline
-- [ ] Нет tautological `(is (= X X))` / `(is (some? …))` где есть
-      конкретный expected (§9.5.1-9.5.2)
-- [ ] Нет `(is (thrown? Exception …))` без класса/regex (§9.5.3)
-- [ ] Нет логики (`loop` / `if` / `when`) внутри `(is …)` (§9.5.4)
-- [ ] `testing`-блоки тестируют ОДНУ вещь — не 4+ `is` подряд (§9.5.5)
-- [ ] Нет тестов на private symbols (`#'ns/_internal`) (§9.5.6)
-- [ ] Нет закомментированных deftests (§9.5.8)
+- [ ] No duplicate deftests with the same observable assertions
+- [ ] Each sleep in tests is either justified by a runtime contract, or
+      replaced with poll-with-deadline
+- [ ] No tautological `(is (= X X))` / `(is (some? …))` where there's a
+      concrete expected (§9.5.1-9.5.2)
+- [ ] No `(is (thrown? Exception …))` without a class/regex (§9.5.3)
+- [ ] No logic (`loop` / `if` / `when`) inside `(is …)` (§9.5.4)
+- [ ] `testing` blocks test ONE thing — not 4+ `is` in a row (§9.5.5)
+- [ ] No tests on private symbols (`#'ns/_internal`) (§9.5.6)
+- [ ] No commented-out deftests (§9.5.8)
 
 **Integration tests**
 
-- [ ] Каждый критический user-flow покрыт (§15.1 matrix gaps)
-- [ ] Integration НЕ дублирует unit-test слой (§15.2)
-- [ ] Все integration tests через golden-bootstrap (§15.3)
-- [ ] Один user-flow per NS (§15.4)
+- [ ] Each critical user-flow is covered (§15.1 matrix gaps)
+- [ ] Integration does NOT duplicate the unit-test layer (§15.2)
+- [ ] All integration tests go through golden-bootstrap (§15.3)
+- [ ] One user-flow per NS (§15.4)
 
 **Browser tests**
 
-- [ ] Новый UI feature → новый `*.test.js` ИЛИ explicit «не нужно»
+- [ ] A new UI feature → a new `*.test.js` OR an explicit "not needed"
       (§16.1 matrix)
-- [ ] Cleanup gate в каждом `*.test.js` с RUN_ID (§16.4.1)
-- [ ] Нет `page.waitForTimeout(N)` без обоснования (§16.4.2)
-- [ ] Селекторы — `data-testid` / `getByRole`, не `:nth-child`
+- [ ] Cleanup gate in every `*.test.js` with a RUN_ID (§16.4.1)
+- [ ] No `page.waitForTimeout(N)` without justification (§16.4.2)
+- [ ] Selectors — `data-testid` / `getByRole`, not `:nth-child`
       (§16.4.3)
-- [ ] Auth-token через `process.env`, не hardcoded (§16.4.4)
+- [ ] Auth-token via `process.env`, not hardcoded (§16.4.4)
 
 **Commit hygiene**
 
-- [ ] Каждый commit — отдельная concept-value-unit с verified-by
-      линией в body
+- [ ] Each commit is a separate concept-value-unit with a verified-by
+      line in the body

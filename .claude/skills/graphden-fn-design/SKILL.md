@@ -1,17 +1,17 @@
 ---
 name: graphden-fn-design
-description: Design rules for creating Graphden fn-defs — when to give a fn an explicit public name vs make it private (`_`-prefix), when to use multiple inheritance vs a single parent, when to extract a subgraph into its own private namespace, and how the auto-naming / inline-display rules work. Use when writing or restructuring `fns.edn` entries, splitting a large fn-def, deciding whether to introduce a new helper, or auditing existing definitions for naming hygiene. Triggers on phrases like "как назвать", "анонимный или именованный", "сделать общим", "extract a helper", "куда положить fn", "MI или один родитель", "переиспользование", "приватная функция".
+description: Design rules for creating Graphden fn-defs — when to give a fn an explicit public name vs make it private (`_`-prefix), when to use multiple inheritance vs a single parent, when to extract a subgraph into its own private namespace, and how the auto-naming / inline-display rules work. Use when writing or restructuring `fns.edn` entries, splitting a large fn-def, deciding whether to introduce a new helper, or auditing existing definitions for naming hygiene. Triggers on phrases like "how to name it", "anonymous or named", "make it shared", "extract a helper", "where to put an fn", "MI or a single parent", "reuse", "private function".
 ---
 
-# graphden-fn-design — правила объявления fn-def
+# graphden-fn-design — fn-def declaration rules
 
-Задача скилла: при добавлении / реструктуризации fn-def'ов чётко знать
-**нужно ли явное имя**, **класть ли в private namespace**, **использовать
-MI или нет**, и какие display-последствия вытекают из выбора. Эта
-система — аналог Clojure'овских `defn` / `defn-` / `let` / `letfn`,
-переведённый на graph-storage.
+Purpose of the skill: when adding / restructuring fn-defs, know precisely
+**whether an explicit name is needed**, **whether to put it in a private
+namespace**, **whether to use MI or not**, and what display consequences
+follow from the choice. This system is the analog of Clojure's `defn` /
+`defn-` / `let` / `letfn`, translated onto graph-storage.
 
-## Базовая аналогия с Clojure
+## Basic analogy with Clojure
 
 ```clojure
 ;; Clojure                                  ;; Graphden EDN
@@ -28,93 +28,95 @@ MI или нет**, и какие display-последствия вытекаю�
   {:port p :handler h})                     ;; {:input {:port :int :handler :fn}}
 ```
 
-| Концепт | Clojure | Graphden |
+| Concept | Clojure | Graphden |
 |---|---|---|
-| Public reusable fn | `defn` | `:name :public-name` (без `_`) |
+| Public reusable fn | `defn` | `:name :public-name` (no `_`) |
 | Private helper | `defn-` | `:name :_private-name` (`_`-prefix) |
 | Inline value | `(let [x …] …)` | `{:value x}` binding |
 | Inline composite type | inline map literal | `:input {:k T}` / `:type {:k T}` (anonymous-hash deduped) |
 
-## 1. Public name vs `_`-private — решение в момент написания EDN
+## 1. Public name vs `_`-private — decision at the moment of writing EDN
 
-**Ставь `_`-префикс, если все три условия выполняются:**
+**Add the `_`-prefix if all three conditions hold:**
 
-1. **fn-def нет в API/контракте.** Это деталь реализации какой-то более
-   крупной публичной fn — а не самостоятельная единица.
-2. **Не планируется reuse.** Один use-site сегодня и завтра один.
-3. **Имя само по себе не несёт смысла.** Если без контекста родительского
-   fn-def'а название «не звучит» (`_app-ring-response` понятно только
-   рядом с `web-server`), это маркер `_`.
+1. **The fn-def is not part of an API/contract.** It is an implementation
+   detail of some larger public fn — not a standalone unit.
+2. **No reuse is planned.** One use-site today and one tomorrow.
+3. **The name carries no meaning on its own.** If the name "doesn't sound
+   right" without the context of the parent fn-def (`_app-ring-response`
+   only makes sense next to `web-server`), that is a marker for `_`.
 
-**Имя без префикса — если хотя бы одно из:**
+**A name without a prefix — if at least one of:**
 
-- fn-def переиспользуется (≥ 2 use-site сегодня или планируется завтра).
-- fn-def — узнаваемая сущность доменного словаря (`web-server`,
-  `http-server`, `json-ok-response`).
-- На неё хочется сослаться извне пакета (когда экспортируем).
+- the fn-def is reused (≥ 2 use-sites today or planned for tomorrow).
+- the fn-def is a recognizable entity of the domain vocabulary
+  (`web-server`, `http-server`, `json-ok-response`).
+- you want to reference it from outside the package (when exporting).
 
-**`_`-префикс — это UI-маркер, не отдельная сущность.** Под капотом это
-обычная fn с обычным именем. UI:
+**The `_`-prefix is a UI marker, not a separate entity.** Under the hood it
+is an ordinary fn with an ordinary name. UI:
 
-- скрывает имя на графе (показывает inline в теле родителя при expand);
-- при наводке `i`-tooltip показывает auto-name + опцию rename;
-- в боковом меню `_`-fn'ы спрятаны под фолд / в private-namespace.
+- hides the name on the graph (shows it inline in the parent's body on expand);
+- on hover, the `i`-tooltip shows the auto-name + a rename option;
+- in the sidebar, `_`-fns are hidden under a fold / in a private-namespace.
 
-## 2. Auto-name для private fn — формат
+## 2. Auto-name for a private fn — format
 
-Когда автор НЕ указал имя явно (anonymous fn-def через UI «выделить в
-helper» или импорт legacy-EDN без имени), генерируем стабильно:
+When the author did NOT specify a name explicitly (anonymous fn-def via the
+UI "extract into helper" or a legacy-EDN import without a name), we generate
+it stably:
 
 ```
 auto-name = "_" + <parent-fn-name> + "-" + <slot-name>
 namespace = <parent-fn-namespace>
 ```
 
-Пример: при «выделить в helper» биндинга `:handler` на fn `web-server`
-(namespace `app.server`) → `:_web-server-handler` в namespace
+Example: on "extract into helper" of the `:handler` binding on fn `web-server`
+(namespace `app.server`) → `:_web-server-handler` in namespace
 `app.server`.
 
-**Правило стабильности:** при повторном sync'е того же EDN auto-name
-должно совпадать → детерминированный UUID через `(parent-name,
-slot-name)`. Конфликт имён (тот же auto-name уже занят) → суффикс `-2`,
+**Stability rule:** on a re-sync of the same EDN, the auto-name must
+match → a deterministic UUID via `(parent-name, slot-name)`. A name
+conflict (the same auto-name is already taken) → a suffix `-2`,
 `-3`, …
 
-Этот алгоритм **per-use-site**: два разных места, выделивших одинаковый
-кусок логики, получат **разные** fn-rows. Дедупа нет — это сознательный
-выбор для private fn-defs (у них ссылочная семантика, не value).
+This algorithm is **per-use-site**: two different places that extracted the
+same piece of logic will get **different** fn-rows. There is no dedup — this
+is a deliberate choice for private fn-defs (they have reference semantics,
+not value semantics).
 
-## 3. Inline composite types — другой механизм (shape-dedup)
+## 3. Inline composite types — a different mechanism (shape-dedup)
 
-`:input {:k T}` / `:type {:k T}` объявляют **анонимный composite type**
-(record-shape). Тут наоборот: один и тот же shape в двух местах
-**делит** одну fn-row через `anonymous-hash` UNIQUE constraint.
+`:input {:k T}` / `:type {:k T}` declare an **anonymous composite type**
+(record-shape). Here it is the opposite: the same shape in two places
+**shares** one fn-row via the `anonymous-hash` UNIQUE constraint.
 
 ```edn
 {:name :greet-handler-A
  :input {:user-name :text :greeting :text}}   ; ← shape-hash X
 
 {:name :greet-handler-B
- :input {:user-name :text :greeting :text}}   ; ← тот же shape-hash X → та же fn-row
+ :input {:user-name :text :greeting :text}}   ; ← the same shape-hash X → the same fn-row
 ```
 
-Auto-name для таких rows: `_anon-<shape-hash[0..7]>` в namespace того
-fn-def'а, который их объявил (если их два, выбирается лексикографически
-первый — sync детерминирован).
+The auto-name for such rows: `_anon-<shape-hash[0..7]>` in the namespace of
+the fn-def that declared them (if there are two, the lexicographically first
+one is chosen — sync is deterministic).
 
-**Когда писать inline composite vs `_`-private fn:**
+**When to write an inline composite vs a `_`-private fn:**
 
-| Хочется | Используй |
+| You want | Use |
 |---|---|
-| Описать форму записи (record / тип) | inline composite (`:input` / `:type`) |
-| Описать поведение (граф вычислений) | `_`-private fn-def с `:parent` |
+| Describe the shape of a record (record / type) | inline composite (`:input` / `:type`) |
+| Describe behavior (a computation graph) | `_`-private fn-def with `:parent` |
 
-Composite — это описание значения. Private fn — это описание вычисления.
-Не путать.
+A composite is a description of a value. A private fn is a description of a
+computation. Do not conflate them.
 
 ## 4. Named constants — `:parent :const`
 
-Чтобы дать ИМЯ конкретному значению (security headers, default config,
-fallback responses, и т. п.), пиши fn-def, расширяющий `:const`:
+To give a NAME to a concrete value (security headers, default config,
+fallback responses, etc.), write a fn-def that extends `:const`:
 
 ```edn
 {:name :default-security-headers
@@ -125,227 +127,230 @@ fallback responses, и т. п.), пиши fn-def, расширяющий `:const
                 ...}}}
 ```
 
-`:const :args {:value a} :return-type a` — это identity base-fn,
-буквально «верни своё значение». Extending его с literal в `:value`
-производит fn-graph, который при evaluation возвращает literal.
+`:const :args {:value a} :return-type a` is an identity base-fn,
+literally "return your own value". Extending it with a literal in `:value`
+produces an fn-graph that, on evaluation, returns the literal.
 
-**Это единственная форма для named values.** В schema нет шестой
-категории "named-value" entity kind (см. `src/graphden/schema/graph/
-schema.clj` — fn-row бывает base / composed / record-type / refinement
-/ list-type / primitive, всё). Любая попытка избежать `:const`-обёртки
-требует либо добавления entity kind (#2 violation — minimal entities),
-либо parser sugar, скрывающего эту структуру (#3 violation — explicit
+**This is the only form for named values.** In the schema there is no sixth
+"named-value" entity kind (see `src/graphden/schema/graph/
+schema.clj` — an fn-row is base / composed / record-type / refinement
+/ list-type / primitive, that's all). Any attempt to avoid the `:const`-wrapper
+requires either adding an entity kind (#2 violation — minimal entities),
+or parser sugar that hides this structure (#3 violation — explicit
 over implicit).
 
-Двух-этажная карточка в editor'е (`my-constant / const`) — это
-честное отображение: «это composed fn-def с одним родителем `:const`,
-return равен указанному `:value`». Это не лишняя прослойка, это
-**минимальная необходимая церемония** для того, чтобы значение могло
-быть NAMED и REFERENCED через `{:ref :name}` / bare keyword refs.
+The two-story card in the editor (`my-constant / const`) is an
+honest depiction: "this is a composed fn-def with one parent `:const`,
+whose return equals the given `:value`". It is not a redundant layer, it is
+the **minimal necessary ceremony** for a value to be able to be NAMED and
+REFERENCED via `{:ref :name}` / bare keyword refs.
 
-Когда писать `:return-type T` на named-constant'е: всегда. Без явного
-return-type'а `:const`'s rule вернёт classify-literal'ом выведенный
-тип (`:jsonb` для maps/vectors, `:int` для чисел, и т. д.) — это
-обычно слишком широкий тип. Пин на конкретный record/refinement
-показывает читателю что именно эта константа представляет.
+When to write `:return-type T` on a named constant: always. Without an
+explicit return-type, `:const`'s rule will return the type inferred by
+classify-literal (`:jsonb` for maps/vectors, `:int` for numbers, etc.) — which
+is usually too wide a type. Pinning to a concrete record/refinement
+shows the reader exactly what this constant represents.
 
-## 5. Multiple inheritance — когда оправдано
+## 5. Multiple inheritance — when it is justified
 
-`:parents [:a :b]` (вместо `:parent :a`) — это **mix-in**: fn получает
-slots обоих родителей. Используется в трёх ситуациях:
+`:parents [:a :b]` (instead of `:parent :a`) is a **mix-in**: the fn gets
+the slots of both parents. Used in three situations:
 
-1. **Категоризация поведения через separate concerns.** `:assoc-handler
-   :parents [:assoc-fn :assoc-empty]` — `:assoc-fn` приносит политику
-   типа (slot `:value` имеет тип `:fn`), `:assoc-empty` приносит
-   стартовый состав (пустую запись). Каждый родитель — одна
-   ортогональная характеристика.
-2. **Composition по типу trait'ов.** `:authed-route :parents [:get-route
-   :auth-required]` — `:get-route` даёт structure (`:path`, `:handler`),
-   `:auth-required` подмешивает middleware-стек.
-3. **Refinement без копирования.** Когда уже есть две fn'и `:a` и `:b`,
-   у которых полезно объединить slot-наборы без переписывания.
+1. **Categorizing behavior via separate concerns.** `:assoc-handler
+   :parents [:assoc-fn :assoc-empty]` — `:assoc-fn` brings the type
+   policy (the `:value` slot has type `:fn`), `:assoc-empty` brings the
+   starting content (an empty record). Each parent is one
+   orthogonal characteristic.
+2. **Composition in the style of traits.** `:authed-route :parents [:get-route
+   :auth-required]` — `:get-route` gives the structure (`:path`, `:handler`),
+   `:auth-required` mixes in the middleware stack.
+3. **Refinement without copying.** When you already have two fns `:a` and `:b`
+   whose slot-sets are useful to combine without rewriting.
 
-**MI противопоказано, когда:**
+**MI is contraindicated when:**
 
-- Slot'ы родителей конфликтуют по `(name, type)` — sync будет error'ом.
-  Проверить можно через `bb test` интеграционные тесты или через
+- The parents' slots conflict on `(name, type)` — sync will error.
+  You can check this via `bb test` integration tests or via
   `composition.validation`.
-- Один из родителей сам composed (parents-of-parents) и его slots
-  пересекаются с другим — диамант. Технически работает, но читаемость
-  падает. Лучше выделить общего деда явным `_`-частным фундаментом.
-- «Хочется чтобы fn делала и X и Y» — это плохой повод. MI описывает
-  **shape**, а не behavior-композицию. Behavior-композиция = обычные
-  ref-биндинги внутри `:args`.
+- One of the parents is itself composed (parents-of-parents) and its slots
+  overlap with the other — a diamond. Technically it works, but readability
+  drops. Better to extract a common grandparent as an explicit `_`-private
+  foundation.
+- "I want the fn to do both X and Y" — that is a bad reason. MI describes
+  **shape**, not behavior composition. Behavior composition = ordinary
+  ref-bindings inside `:args`.
 
-**Эвристика:** если после прочтения `:parents [a b]` непонятно, какие
-slots откуда приходят, перепиши на single-parent + `_`-helper.
+**Heuristic:** if after reading `:parents [a b]` it is unclear which
+slots come from where, rewrite it as single-parent + `_`-helper.
 
-## 6. Группировка в namespace — когда выделить отдельный
+## 6. Grouping into a namespace — when to extract a separate one
 
-Каждый fn лежит в namespace (берётся из `:namespace` поля fns.edn-файла).
-Создавай новый namespace, когда:
+Every fn lives in a namespace (taken from the `:namespace` field of the fns.edn file).
+Create a new namespace when:
 
-1. **≥ 5 fn-defs объединены общей темой** (`web.html`, `core.arithmetic`,
-   `app.editor`). Меньше — пихай в существующий.
-2. **Все fn'ы внутри — private (`_`-prefix или planned-private).**
-   Тогда namespace становится «папкой для внутренней реализации» —
-   editor-сайдбар может collapse его по умолчанию.
-3. **Естественный uses-from-elsewhere boundary.** То есть pattern такой:
-   из других пакетов импортируют 2-3 публичные fn'и, а private остаются
-   локальными.
+1. **≥ 5 fn-defs are united by a common theme** (`web.html`, `core.arithmetic`,
+   `app.editor`). Fewer — stuff them into an existing one.
+2. **All fns inside are private (`_`-prefix or planned-private).**
+   Then the namespace becomes a "folder for internal implementation" —
+   the editor sidebar can collapse it by default.
+3. **A natural uses-from-elsewhere boundary.** That is, the pattern is:
+   other packages import 2-3 public fns, while the private ones stay
+   local.
 
-**Не создавай namespace ради:**
+**Do not create a namespace for the sake of:**
 
-- Одной fn (даже сложной) — она просто живёт в существующем.
-- Технического разделения по типу (`utils`, `helpers`) — bikeshed без
-  семантической нагрузки.
+- A single fn (even a complex one) — it just lives in an existing one.
+- A technical split by kind (`utils`, `helpers`) — bikeshedding without
+  semantic load.
 
-**`:private?` flag на namespace** (если ввели) — намекает редактору
-collapse-by-default + новые fn'ы в нём auto-получают `_`-prefix.
-Эквивалентно тому, что каждая fn в нём имела бы `_`. Используй для
-крупных deeply-private модулей (типа `app.server.internal`).
+**A `:private?` flag on the namespace** (if introduced) hints to the editor
+collapse-by-default + new fns in it auto-get the `_`-prefix.
+It is equivalent to every fn in it having a `_`. Use it for
+large deeply-private modules (like `app.server.internal`).
 
-## 7. Decomposition — когда «делить» большую fn
+## 7. Decomposition — when to "split" a large fn
 
-В Clojure'е `(defn big-fn [x] (let [a (...) b (...) c (...)] (...)))` ←
-если let'ов много, выносим в `defn-`. Тот же критерий тут:
+In Clojure `(defn big-fn [x] (let [a (...) b (...) c (...)] (...)))` ←
+if there are many lets, we extract into `defn-`. The same criterion here:
 
-**Делить fn на private helpers, когда:**
+**Split a fn into private helpers when:**
 
-- Тело fn имеет ≥ 4-5 ref-биндингов на разные intermediate-вычисления.
-- При expand'е в редакторе появляется так много узлов, что не
-  читается.
-- Какой-то слой (preprocessing, validation, post-format) семантически
-  обособлен.
+- The fn body has ≥ 4-5 ref-bindings to different intermediate computations.
+- On expand in the editor, so many nodes appear that it becomes
+  unreadable.
+- Some layer (preprocessing, validation, post-format) is semantically
+  distinct.
 
-**Не делить, когда:**
+**Do not split when:**
 
-- 1-2 шага вычислений → inline.
-- Один и тот же shape повторяется → используй inline composite type
-  вместо private fn (точнее по семантике, дедуплицируется).
-- Decomposition не имеет естественной границы — попытка чисто
-  «уменьшить тело» создаст плохо названные `_step1`, `_step2`.
+- 1-2 computation steps → inline.
+- The same shape repeats → use an inline composite type
+  instead of a private fn (more precise semantically, gets deduplicated).
+- Decomposition has no natural boundary — an attempt purely to
+  "shrink the body" would create poorly named `_step1`, `_step2`.
 
-## 8. Display rules — что увидит пользователь
+## 8. Display rules — what the user will see
 
-| Тип fn | Sidebar | На графе при expand | `i`-tooltip |
+| Fn kind | Sidebar | On the graph on expand | `i`-tooltip |
 |---|---|---|---|
-| Public (`name` без `_`) | видна | отдельный узел | имя + namespace + description |
-| Private (`_name`) **с одним use-site** | спрятана / в private ns | **inline в теле родителя** | auto/explicit-name + rename-affordance |
-| Private (`_name`) **с ≥ 2 use-site'ами** | спрятана / в private ns | **отдельный узел** (как public, но имя dimmed / без `_` в лейбле) | то же |
-| Anonymous composite (inline `:input`) | не видна | не показывается отдельно (структура входит в parent's slot list) | `_anon-<hash>` в `i` родителя |
+| Public (`name` without `_`) | visible | separate node | name + namespace + description |
+| Private (`_name`) **with one use-site** | hidden / in private ns | **inline in the parent's body** | auto/explicit-name + rename-affordance |
+| Private (`_name`) **with ≥ 2 use-sites** | hidden / in private ns | **separate node** (like public, but the name dimmed / no `_` in the label) | same |
+| Anonymous composite (inline `:input`) | not visible | not shown separately (the structure is part of the parent's slot list) | `_anon-<hash>` in the parent's `i` |
 
 UI rules:
 
-1. **`_`-prefix или `:private? true`** — это маркер «не API-поверхность» —
-   определяет sidebar-видимость и hidden-prefix-в-лейбле.
-2. **Inline vs отдельный узел** — определяется ОТДЕЛЬНО, по
-   количеству use-site'ов: один = inline (тело родителя), два и
-   больше = отдельный узел (это уже shared subroutine, рисовать N
-   копий тела бессмысленно).
-3. Auto-инлайн только для **named-by-author**-private (т.е. фактически
-   написанных в EDN с `_`-prefix). Auto-named-by-shape (inline composite
-   types через `anonymous-hash`) — display-логика встроена в parent
-   (показ через `:input`/`:type` slots самой fn'и).
+1. **`_`-prefix or `:private? true`** is a marker for "not an API surface" —
+   it determines sidebar visibility and hidden-prefix-in-the-label.
+2. **Inline vs a separate node** is determined SEPARATELY, by
+   the number of use-sites: one = inline (the parent's body), two or
+   more = a separate node (this is already a shared subroutine, drawing N
+   copies of the body is pointless).
+3. Auto-inline only for **named-by-author** private fns (i.e. actually
+   written in EDN with the `_`-prefix). Auto-named-by-shape (inline composite
+   types via `anonymous-hash`) — the display logic is built into the parent
+   (shown through the fn's own `:input`/`:type` slots).
 
-Так концепция «открыть граф = увидеть тело» работает в estественной
-интуиции: open-rate `_`-fn'у с одним use-site — он inline-инлайнится,
-fan-out не происходит. У `_`-fn'и с переиспользованием — отдельный
-узел, но имя тише (без `_`-префикса в лейбле, dim).
+This way the concept "open the graph = see the body" works with natural
+intuition: opening a `_`-fn with one use-site — it gets inlined,
+no fan-out happens. A `_`-fn with reuse gets its own
+node, but the name is quieter (no `_`-prefix in the label, dim).
 
-Если `_`-fn внезапно стала переиспользоваться (1 → 2 use-site'а) —
-display автоматически переключится на «отдельный узел» при следующем
-рендере. Решение per-render, не per-decl.
+If a `_`-fn suddenly becomes reused (1 → 2 use-sites) —
+the display automatically switches to "separate node" on the next
+render. The decision is per-render, not per-decl.
 
 ## 9. Quick decision flowchart
 
 ```
-Хочешь добавить fn-def?
+Want to add an fn-def?
   │
-  ├─ Это форма данных (record / тип значения)?
-  │    └→ inline composite в `:input` / `:type` родителя.
+  ├─ Is it a data shape (record / value type)?
+  │    └→ inline composite in the parent's `:input` / `:type`.
   │
-  ├─ Это поведение, переиспользуется?
-  │    └→ public name (без `_`), в семантически правильный namespace.
+  ├─ Is it behavior that is reused?
+  │    └→ public name (no `_`), in the semantically correct namespace.
   │
-  ├─ Это поведение, один use-site, имя несамостоятельное?
-  │    └→ `_<parent>-<slot>` private name, в namespace родителя.
+  ├─ Is it behavior, one use-site, name not standalone?
+  │    └→ `_<parent>-<slot>` private name, in the parent's namespace.
   │
-  └─ Это shape, используется в N местах с одинаковой структурой?
-       └→ inline composite — anonymous-hash schлопнёт в одну row.
+  └─ Is it a shape used in N places with an identical structure?
+       └→ inline composite — anonymous-hash will collapse it into one row.
 
-Несколько родителей?
-  ├─ Каждый родитель приносит ОРТОГОНАЛЬНЫЙ slot-набор → MI ок.
-  └─ Иначе → single parent + `_`-helper для общего фундамента.
+Multiple parents?
+  ├─ Each parent brings an ORTHOGONAL slot-set → MI is fine.
+  └─ Otherwise → single parent + `_`-helper for the common foundation.
 
-Намечаешь декомпозицию большой fn?
-  ├─ Естественные слои (validation / format / etc) → `_`-helpers.
-  ├─ Один и тот же кусок повторяется → public, не private.
-  └─ Просто хочется уменьшить тело без логического разреза → НЕ делить.
+Planning to decompose a large fn?
+  ├─ Natural layers (validation / format / etc) → `_`-helpers.
+  ├─ The same piece repeats → public, not private.
+  └─ Just want to shrink the body without a logical cut → do NOT split.
 ```
 
 ## 10. Anti-patterns
 
-- **`_`-prefix на public-API fn.** Если кто-то ссылается из другого
-  пакета — это уже не private.
-- **Public name без reuse.** «На всякий случай назовём» — зря засоряет
-  namespace + sidebar. Делай `_`-private.
-- **MI ради feature-mix'а behavior'а.** MI про slot-shape, не про
-  «мне нужно склеить логику A и B». Логика клеится через ref-биндинги
-  в `:args`.
-- **Namespace per fn.** `app.server.web-server` ns с одной fn-def
-  внутри — overhead. Положи в `app.server`.
-- **Auto-name руками.** Не пиши `_anon-3f2a` сам — это служебное имя,
-  оно генерируется. Если хочется явно назвать — назови по-человечески.
-- **Фальшивый полиморфизм при специализации.** Если ты наследуешь
-  generic primitive (`:invoke`, `:if`, `:map`, …) и в твоей fn-def
-  type-variable из родителя перестаёт быть реально полиморфным —
-  закрой его НА ЭТОМ fn-def, не downstream. Слот должен честно
-  объявлять свой контракт; пользователь не должен идти к каллерам
-  читать их `:type`-пины, чтобы понять, чего ждёт `:func`.
+- **`_`-prefix on a public-API fn.** If someone references it from another
+  package — it is no longer private.
+- **A public name without reuse.** "Let's name it just in case" — it needlessly
+  clutters the namespace + sidebar. Make it `_`-private.
+- **MI for the sake of a feature-mix of behavior.** MI is about slot-shape, not
+  about "I need to glue logic A and B". Logic is glued via ref-bindings
+  in `:args`.
+- **Namespace per fn.** An `app.server.web-server` ns with one fn-def
+  inside is overhead. Put it in `app.server`.
+- **Auto-name by hand.** Do not write `_anon-3f2a` yourself — it is an internal
+  name, it is generated. If you want to name it explicitly — name it
+  in a human way.
+- **Fake polymorphism during specialization.** If you inherit a
+  generic primitive (`:invoke`, `:if`, `:map`, …) and in your fn-def the
+  type-variable from the parent stops being genuinely polymorphic —
+  close it ON THIS fn-def, not downstream. The slot must honestly
+  declare its contract; the user should not have to go to the callers
+  to read their `:type`-pins to understand what `:func` expects.
 
-  Type-var остаётся свободным только когда:
-  - **(a)** реально >1 callsite использует его с разными типами
+  A type-var stays free only when:
+  - **(a)** more than 1 callsite genuinely uses it with different types
     (legit polymorphism: `:invoke.return = b`, `:if.return = a`,
-    `:map.return = [:list b]`), ИЛИ
-  - **(b)** это passthrough — `:return-type` совпадает с одним из
-    bound slot-vars и роль fn'а буквально «вернуть что приняли»
+    `:map.return = [:list b]`), OR
+  - **(b)** it is passthrough — `:return-type` matches one of the
+    bound slot-vars and the fn's role is literally "return what you were given"
     (`:const`, `:identity`, `:constantly`).
 
-  Иначе — **(c) fake polymorphism**, закрыть. Пример (исторический):
-  `:router-result :parent :invoke` сначала был `[:fn {:arg :ring-
-  request-shape} b] :return-type b`, а реальный контракт «return =
-  `:ring-response-shape`» висел на downstream-пине
-  `:router-ring-response.m {:type :ring-response-shape}`. Чип на
-  слоте `:func` показывал `→'b`, contract был спрятан. Закрыли:
+  Otherwise — **(c) fake polymorphism**, close it. Example (historical):
+  `:router-result :parent :invoke` was at first `[:fn {:arg :ring-
+  request-shape} b] :return-type b`, while the real contract "return =
+  `:ring-response-shape`" hung on the downstream pin
+  `:router-ring-response.m {:type :ring-response-shape}`. The chip on the
+  `:func` slot showed `→'b`, the contract was hidden. We closed it:
   `:func :type [:fn {:arg :ring-request-shape} :ring-response-shape]
-  :return-type :ring-response-shape`. Чип теперь читает
-  `(arg:ring-request-shape)→ring-response-shape` без походов на
+  :return-type :ring-response-shape`. The chip now reads
+  `(arg:ring-request-shape)→ring-response-shape` without trips to the
   use-site.
 
-  Если же ТЕБЕ нужна generic-версия с другим return-shape — extend
-  primitive (`:invoke`) напрямую, не сужаемого ребёнка.
+  If YOU do need a generic version with a different return-shape — extend
+  the primitive (`:invoke`) directly, not the narrowed child.
 
-## 11. Связи с другими местами
+## 11. Links to other places
 
-- Реализация `_`-prefix UI rules: `editor-overlay-*.js`,
+- Implementation of the `_`-prefix UI rules: `editor-overlay-*.js`,
   `editor-sidebar.js`.
-- Загрузка fn-def'ов из EDN: `src/graphden/packages/loader.clj`.
-- Парсер shape-dedup для inline composite: `src/graphden/packages/records/ids.clj`
-  (`shape-hash`, `anonymous-fn-id`; `records.clj` лишь ре-экспортит `anonymous-fn-id`).
-- Validate-no-duplicate-names + правила naming: `composition.validation`.
-- Live-проверка fn-def'а в REPL: см. `graphden-repl` skill.
+- Loading fn-defs from EDN: `src/graphden/packages/loader.clj`.
+- The shape-dedup parser for inline composites: `src/graphden/packages/records/ids.clj`
+  (`shape-hash`, `anonymous-fn-id`; `records.clj` only re-exports `anonymous-fn-id`).
+- Validate-no-duplicate-names + naming rules: `composition.validation`.
+- Live-checking an fn-def in the REPL: see the `graphden-repl` skill.
 
-## 12. Что планируется (не реализовано прямо сейчас)
+## 12. What is planned (not implemented right now)
 
-- **Export пакета как EDN.** В планах фича: выгрузить пользовательские
-  fn-defs как переносимый пакет. Поэтому **все** fn'ы должны иметь
-  стабильные имена (включая ones, которые сейчас anonymous через
-  shape-dedup) — иначе им неоткуда взяться при импорте на другой инстанс.
-  Auto-naming делает эту фичу подъёмной.
-- **`:private?` flag** на namespace + на отдельных fn-def'ах — UI hint
-  для display rules. Эквивалент `_`-prefix конвенции. Когда введём,
-  выберем одну из двух как канон.
-- **«Выделить в helper»** UI-кнопка в редакторе — берёт inline-биндинг
-  и автоматически создаёт `_<parent>-<slot>` private fn с рефакторингом
-  ссылок.
+- **Export of a package as EDN.** A planned feature: dump user
+  fn-defs as a portable package. That is why **all** fns must have
+  stable names (including ones that are currently anonymous via
+  shape-dedup) — otherwise there would be no way to reconstruct them when
+  importing onto another instance.
+  Auto-naming makes this feature feasible.
+- **A `:private?` flag** on a namespace + on individual fn-defs — a UI hint
+  for the display rules. The equivalent of the `_`-prefix convention. When we
+  introduce it, we will pick one of the two as canonical.
+- **The "extract into helper"** UI button in the editor — takes an inline
+  binding and automatically creates a `_<parent>-<slot>` private fn with
+  reference refactoring.

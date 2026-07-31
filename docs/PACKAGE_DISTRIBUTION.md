@@ -811,8 +811,8 @@ smoke depends on it; it stays.
 ## 16. Cloud assembly = self-hosted core + private addons
 
 Our cloud is not a fork — it is the **same self-hosted core + our addons +
-a restriction policy** (PLATFORM_PLAN § 3.0 ADR: "Cloud vs self-hosted = режим,
-не код. Один бинарник."). Internally we operate the cloud as self-hosted admins
+a restriction policy** (PLATFORM_PLAN § 3.0 ADR: "Cloud vs self-hosted = mode,
+not code. One binary."). Internally we operate the cloud as self-hosted admins
 (platform-admin behind a VPN). Our cloud build is literally the best dogfood of
 Track B (§ 12): a thin project depending on `graphden-core` + the addons.
 

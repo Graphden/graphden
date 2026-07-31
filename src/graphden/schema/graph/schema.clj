@@ -3,19 +3,19 @@
 
    Five entities form the base graph:
    - ns                — namespace (organization, name uniqueness scope).
-   - fn                — единая сущность для функций И типов.
-                         type'ы — fn-rows без impl, специализированные через
-                         base-fn-id (refinement), element-fn-id (list), или
-                         просто несущие fn-slot rows (record / composite).
-   - slot              — атомарная (name, type-fn-id) пара. Шарится между
-                         многими fn'ами через fn-slot junction.
+   - fn                — a single entity for both functions AND types.
+                         types are fn-rows without an impl, specialized via
+                         base-fn-id (refinement), element-fn-id (list), or
+                         simply carrying fn-slot rows (record / composite).
+   - slot              — an atomic (name, type-fn-id) pair. Shared across
+                         many fns through the fn-slot junction.
                          Immutable post-create.
-   - fn-slot           — junction: fn ⊃ slots с порядком.
-                         Описывает 'parameters / fields этой fn'.
-   - binding           — per-fn customization конкретного слота:
+   - fn-slot           — junction: fn ⊃ slots, with order.
+                         Describes 'the parameters / fields of this fn'.
+   - binding           — per-fn customization of a specific slot:
                          value/ref-binding, rename, type-override,
                          terminal seal, list-append/closed flags.
-   - binding-list-item — items для list-typed slot binding'ов
+   - binding-list-item — items for list-typed slot bindings
                          (ordered, indexable).
 
    ## Role determined by field-presence (no `kind` discriminator)
@@ -79,9 +79,9 @@
   (vec (keys value-kind-values)))
 
 
-;; Override-kind enum — policy для binding'а value/ref:
-;;   :fixed       — descendants не могут override этот binding (default).
-;;   :default     — это «дефолт», descendant может полностью заменить.
+;; Override-kind enum — policy for a value/ref binding:
+;;   :fixed       — descendants cannot override this binding (default).
+;;   :default     — this is a "default"; a descendant may fully replace it.
 ;;   :secret-path — binding.value is a vault PATH; the
 ;;                  executor auto-dereferences via clients/vault at
 ;;                  arg-resolution time. The actual secret value
@@ -199,9 +199,9 @@
   #uuid "a9fbce25-cde0-4f8f-855d-65799ca5a747")
 
 
-;; For anonymous composite types (inline `:input {:foo :int}` без name)
-;; — hash от sorted (slot-id, position) пар. UNIQUE INDEX по этому полю
-;; обеспечивает dedup: одинаковая shape → один type-row.
+;; For anonymous composite types (inline `:input {:foo :int}` with no name)
+;; — a hash of the sorted (slot-id, position) pairs. A UNIQUE INDEX on this
+;; field enforces dedup: the same shape → one type-row.
 (def ^:private fn-anonymous-hash-field-uuid
   #uuid "a373c531-1ace-4b62-a9ed-789a83988a21")
 
@@ -653,8 +653,8 @@
       (ds/add-constraint :fn {:type :unique :fields [:anonymous-hash]})
 
       ;; -----------------------------------------------------------------
-      ;; slot: атомарная (name, type) пара.
-      ;; Immutable — изменение типа = создание нового slot.
+      ;; slot: an atomic (name, type) pair.
+      ;; Immutable — changing the type = creating a new slot.
       ;; -----------------------------------------------------------------
       (ds/add-entity :slot slot-entity-uuid
                      {:name {:uuid slot-name-field-uuid
@@ -685,28 +685,28 @@
                                :nullable? true}})
 
       ;; -----------------------------------------------------------------
-      ;; fn-slot: junction many-to-many. fn ⊃ slots с порядком.
-      ;; Описывает 'parameters / fields этой fn'.
+      ;; fn-slot: many-to-many junction. fn ⊃ slots, with order.
+      ;; Describes 'the parameters / fields of this fn'.
       ;; -----------------------------------------------------------------
       (ds/add-entity :fn-slot fn-slot-entity-uuid fn-slot-fields)
       (ds/add-constraint :fn-slot {:type :unique :fields [:fn-id :slot-id]})
 
       ;; -----------------------------------------------------------------
-      ;; binding: per-fn customization конкретного слота.
+      ;; binding: per-fn customization of a specific slot.
       ;; Mutually-exclusive groups:
       ;;   value/ref-binding (value xor ref-fn-id) + override-kind
       ;;   rename (rename-to)
       ;;   type-override (type-override-fn-id)
       ;;   per-level metadata (description, terminal)
       ;;   list-specific markers (list-append, list-closed)
-      ;; Application-side constraint enforces «at most one
-      ;; non-nil from {value, ref-fn-id}».
+      ;; Application-side constraint enforces "at most one
+      ;; non-nil from {value, ref-fn-id}".
       ;; -----------------------------------------------------------------
       (ds/add-entity :binding binding-entity-uuid binding-fields)
       (ds/add-constraint :binding {:type :unique :fields [:fn-id :slot-id]})
 
       ;; -----------------------------------------------------------------
-      ;; binding-list-item: ordered items для list-typed slot binding'ов.
+      ;; binding-list-item: ordered items for list-typed slot bindings.
       ;; -----------------------------------------------------------------
       (ds/add-entity :binding-list-item binding-list-item-entity-uuid
                      binding-list-item-fields)

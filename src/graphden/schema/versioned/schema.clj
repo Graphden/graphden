@@ -11,7 +11,7 @@
    Not versioned (immutable post-create):
    - slot — `(name, type-fn-id)` pair never changes; create new slot
             instead of mutating.
-   - ns   — намespace structure rarely changes; not versioned (matches
+   - ns   — namespace structure rarely changes; not versioned (matches
             existing behavior).
 
    The old `arg-version` entity is **removed** — `arg` itself is gone

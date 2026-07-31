@@ -124,6 +124,11 @@
    :parent :get-auth-required
    :args {:path "/partials/execute-history" :handler :_partial-execute-history-handler}}
 
+  {:name :partial-error-log
+   :description "GET /partials/error-log — the current org's recent failed executions (write-side redacted/scrubbed), newest first. Auth-required; the editor's Errors sidebar section lazy-loads it."
+   :parent :get-auth-required
+   :args {:path "/partials/error-log" :handler :_partial-error-log-handler}}
+
   {:name :partial-branch-diff
    :description "GET /partials/branch-diff?target=X&source=Y — branch-diff body hiccup (3 sections grouped by `:change` + branch-local annotations). JS in `editor-branch-diff.js` owns the modal chrome; this fills the body mount."
    :parent :get-auth-required

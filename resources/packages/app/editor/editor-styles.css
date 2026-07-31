@@ -3902,6 +3902,17 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   max-height: 200px;
   overflow-y: auto;
 }
+/* Phase C2 error-log sidebar section. */
+.error-log-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
+  font-size: 11px; }
+.error-log-fn { color: var(--accent); display: block; }
+.error-log-time { color: var(--light-fg); }
+.error-log-msg { color: var(--error-fg); overflow-wrap: anywhere; }
+.error-log-data { font-size: 10px; white-space: pre-wrap; word-break: break-all;
+  color: var(--muted-fg); margin: 2px 0 0; }
+.error-log-details summary { cursor: pointer; color: var(--muted-fg); font-size: 10px; }
+.error-log-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
+
 /* Phase C1 usage-rollup strip above the history rows. */
 .execute-history-stats { font-size: 11px; color: var(--muted-fg);
   padding: 4px 6px; border-bottom: 1px dashed var(--light-border); }

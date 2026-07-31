@@ -30,6 +30,7 @@
                   :partial-fn-versions
                   :partial-fn-version-executions
                   :partial-execute-history
+                  :partial-error-log
                   :partial-branch-diff
                   :partial-merge-conflicts
                   :partial-execute-result-effects

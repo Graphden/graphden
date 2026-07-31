@@ -608,6 +608,9 @@ function updateEntityList(data) {
   if (!searchMode && typeof buildPackagesSection === 'function') {
     mountAdminSection(list, 'packages', buildPackagesSection);
   }
+  if (!searchMode && typeof buildErrorsSection === 'function') {
+    mountAdminSection(list, 'errors', buildErrorsSection);
+  }
 
   // Top-level namespaces (sorted) — skip any with nothing visible under
   // the current toggles (unless an inline-create is rooted inside).

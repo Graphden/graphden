@@ -244,15 +244,19 @@ async function mountAuthPopoverFields() {
     if (e.key === 'Enter') submitAuth();
     if (e.key === 'Escape') closeAuthPopover();
   });
-  document.getElementById('auth-username-input').addEventListener('keydown', (e) => {
+  // Tenant-only elements exist ONLY when the tenancy addon's shadowing
+  // partial served the form — the core admin-password variant has none, so
+  // every wire-up here is null-guarded (an unguarded getElementById killed
+  // the whole mount on single-tenant).
+  document.getElementById('auth-username-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAuth();
     if (e.key === 'Escape') closeAuthPopover();
   });
-  document.getElementById('auth-org-input').addEventListener('keydown', (e) => {
+  document.getElementById('auth-org-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAuth();
     if (e.key === 'Escape') closeAuthPopover();
   });
-  document.getElementById('auth-mode-toggle').addEventListener('click', (e) => {
+  document.getElementById('auth-mode-toggle')?.addEventListener('click', (e) => {
     e.stopPropagation();
     authSignupMode = !authSignupMode;
     applyAuthMode();

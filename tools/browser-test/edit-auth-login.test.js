@@ -33,8 +33,23 @@ async function freshContext() {
   page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
   await page.goto(BASE + '/');
   await page.waitForSelector('#auth-lock-btn', {timeout: 10000});
-  // Page may auto-open the popover on cold load (some flows do that
-  // for first-time users). Dismiss it to start from a known state.
+  // Wait for the BOOT to settle before normalizing state: on an auth-active
+  // stack a fresh (tokenless) context 401s on the graph load and the editor
+  // AUTO-OPENS the login popover (B3 signed-out UX); on an auth-off stack the
+  // namespace tree loads instead. Waiting on either outcome (instead of
+  // hiding the popover immediately) kills the race where the async 401
+  // handler re-opened it after our dismissal.
+  await page.waitForFunction(
+    () => {
+      const p = document.getElementById('auth-popover');
+      const opened = p && !p.classList.contains('hidden');
+      const treeLoaded = !!document.querySelector('#entity-list .ns-header');
+      return opened || treeLoaded;
+    },
+    null,
+    {timeout: 30000});
+  // Dismiss the auto-opened popover to start phases from the known
+  // closed state (the auto-open itself is asserted implicitly above).
   await page.evaluate(() => {
     const p = document.getElementById('auth-popover');
     if (p) p.classList.add('hidden');

@@ -243,6 +243,22 @@ async function initGraph() {
       ? loadServicesEager().catch(() => null)
       : null,
   ]);
+  // Auth wall (B3): the graph view is login-gated when auth is active, so an
+  // unauthenticated (or stale-token) boot gets 401 here — send the user to
+  // sign in instead of dying into the red fatal banner. Tenancy deployments
+  // (the capability header on this very 401 set `gd-tenancy` via the fetch
+  // wrap) have the full /login page; single-tenant has no such page, so open
+  // the lock popover instead.
+  if (entResp.status === 401) {
+    clearAuthPassword(); // whatever we sent (or didn't) doesn't authenticate
+    if (document.body.classList.contains('gd-tenancy')) {
+      const next = location.pathname + location.search + location.hash;
+      location.href = '/login?next=' + encodeURIComponent(next);
+    } else if (typeof openAuthPopover === 'function') {
+      void openAuthPopover('Sign in to use the editor'); // fire-and-forget; fields mount async
+    }
+    return;
+  }
   graphData = graphShellFromTree(await entResp.json());
   lookups = buildLookups(graphData);
   if (typeResp?.ok) {

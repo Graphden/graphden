@@ -258,6 +258,24 @@
       (is (nil? (rc/dispatch nil {:request-method :get :uri "/partials/grants-admin"}))))))
 
 
+(deftest login-page-serves-the-public-signup-form
+  ;; GET /login is the self-serve entry a new cloud visitor needs — an
+  ;; UNAUTHENTICATED full HTML page (create-org / sign-in) served by the
+  ;; tenancy router. Proves the page fn-defs compile + render end-to-end.
+  (let [router (cr/execute-by-name *ctx* "tenancy-router" {})
+        resp (rc/dispatch router {:request-method :get :uri "/login"})]
+    (is (some? resp) "tenancy router matched GET /login")
+    (is (= 200 (:status resp)) "unauthenticated → 200 (this page IS how you log in)")
+    (let [body (:body resp)]
+      (is (string? body))
+      (is (re-find #"(?i)<form[^>]*id=\"form-signup\"" body) "carries the create-org form")
+      (is (re-find #"name=\"org\"" body) "the org-name field is present")
+      (is (re-find #"/api/signup" body) "wired to the signup endpoint")
+      (is (re-find #"/api/login" body) "wired to the login endpoint")
+      (is (re-find #"graphden\.auth\.password" body)
+          "stores the bearer under the key the editor reads"))))
+
+
 (deftest grants-panel-is-org-gated
   ;; The panel reads `:grant` (a tenant-forbidden entity) via OrgScoped, so
   ;; the platform (public org) sees the rows but a tenant (org ≠ public) gets

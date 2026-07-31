@@ -91,6 +91,7 @@
                   "packages/app/editor/editor-users-admin.js"
                   "packages/app/editor/editor-packages.js"
                   "packages/app/editor/editor-quota.js"
+                  "packages/app/editor/editor-errors.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
@@ -3769,6 +3770,126 @@
    :description "Ring handler for `GET /partials/execute-history?fn-id=X` — returns the history panel hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the panel host and binds Repeat / row-expand handlers post-swap."
    :parent :html-ok-response
    :args {:body :_partial-eh-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; ERROR LOG partial (Phase C2) — GET /partials/error-log. The current
+  ;; org's recent failed executions (write-side redacted/scrubbed), newest
+  ;; first. Fn names link via the editor's native #hash navigation.
+  ;; ---------------------------------------------------------------------
+  {:name :_perr-rows
+   :parent :recent-failures
+   :args {:days 7 :limit 50}}
+
+  {:name :_perr-item-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+
+  {:name :_perr-item-href
+   :parent :str
+   :args {:parts [{:value "#"} :_perr-item-name]}}
+
+  {:name :_perr-item-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "error-log-fn"}}
+          :key {:value :href}
+          :value :_perr-item-href}}
+
+  {:name :_perr-item-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs :_perr-item-link-attrs
+          :children [:_perr-item-name]}}
+
+  {:name :_perr-item-time
+   :parent :get
+   :args {:coll {:as :item} :key {:value :finished-at} :default {:value ""}}}
+
+  {:name :_perr-item-error
+   :parent :get
+   :args {:coll {:as :item} :key {:value :error} :default {:value ""}}}
+
+  {:name :_perr-item-time-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-time"}}
+          :children [:_perr-item-time]}}
+
+  {:name :_perr-item-error-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-msg"}}
+          :children [:_perr-item-error]}}
+
+  {:name :_perr-item-data
+   :parent :get
+   :args {:coll {:as :item} :key {:value :error-data} :default {:value nil}}}
+
+  {:name :_perr-item-data-pre
+   :parent :hiccup
+   :args {:tag {:value "pre"}
+          :attrs {:value {:class "error-log-data"}}
+          :children [:_perr-item-data]}}
+
+  {:name :_perr-item-details
+   :description "Collapsible ex-data (trace context) — rendered only when the row HAS error-data."
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "error-log-details"}}
+          :children [{:value [:summary "details"]} :_perr-item-data-pre]}}
+
+  {:name :_perr-item-data?
+   :parent :some?
+   :args {:value :_perr-item-data}}
+
+  {:name :_perr-item-details-opt
+   :parent :if
+   :args {:test :_perr-item-data?
+          :then :_perr-item-details
+          :else :_hidden-span}}
+
+  {:name :_perr-row
+   :description "One failure row — fn link (native #hash navigation), finish time, scrubbed error text, optional ex-data details."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-row"}}
+          :children [:_perr-item-link :_perr-item-time-div
+                     :_perr-item-error-div :_perr-item-details-opt]}}
+
+  {:name :_perr-rendered-rows
+   :parent :map
+   :args {:func :_perr-row :coll :_perr-rows}}
+
+  {:name :_perr-empty?
+   :parent :empty?
+   :args {:coll :_perr-rows}}
+
+  {:name :_perr-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-empty"}}
+          :children ["No failed runs in the last 7 days."]}}
+
+  {:name :_perr-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-list"}}
+          :children [:_perr-rendered-rows]}}
+
+  {:name :_perr-body
+   :parent :if
+   :args {:test :_perr-empty?
+          :then :_perr-empty-msg
+          :else :_perr-list}}
+
+  {:name :_perr-html
+   :parent :render-hiccup
+   :args {:hiccup :_perr-body}}
+
+  {:name :_partial-error-log-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/error-log — the org's recent failed executions as text/html. Auth-required (route side)."
+   :parent :html-ok-response
+   :args {:body :_perr-html}}
 
   ;; ---------------------------------------------------------------------
   ;; Branch-diff modal — three sections grouped by `:change`:

@@ -130,6 +130,19 @@
       (is (str/includes? body "data-act=\"submit\"")))))
 
 
+(deftest partial-error-log-handler-renders-test
+  ;; Phase C2 — the error-log partial renders end-to-end (fresh DB → the
+  ;; empty state; the row rendering is covered by the fn-execution roundtrip).
+  (testing "GET /partials/error-log renders (empty state on a fresh DB)"
+    (let [response (via :_partial-error-log-handler
+                        {:uri "/partials/error-log"
+                         :request-method :get
+                         :headers {}})
+          body (str (:body response))]
+      (is (= 200 (:status response)))
+      (is (str/includes? body "No failed runs")))))
+
+
 (deftest partial-auth-form-handler-renders-login-fields-test
   (testing "GET /partials/auth-form renders the SINGLE-TENANT popover fields
             (admin password only — the tenant variant ships with the tenancy

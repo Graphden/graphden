@@ -26,6 +26,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging]
     [graphden.crud.fn-execution :as fn-exec]
+    [graphden.crud.fn-execution.errors :as exec-errors]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.fn-execution.stats :as exec-stats]
@@ -286,6 +287,30 @@
     (let [stats (exec-stats/fn-stats (:pool @shared-storage) nil (:id composed) 7)]
       (is (= 1 (:runs stats)) "the inline arm bumped exactly once")
       (is (zero? (:failed stats))))))
+
+
+(deftest recent-failures-lists-the-failed-run-test
+  ;; Phase C2: a failed persisted execution shows up in the org-scoped
+  ;; recent-failures listing with its (write-side scrubbed) error text.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "errlog")
+        c (assoc (test-ctx storage) :pg-storage @shared-storage)
+        ;; :b "boom" → the impl's (+ a b) throws inline → :failed row
+        ;; (persist? true so the row is written even for the inline arm).
+        result (apply-and-await!
+                 c {:fn-id (:id composed)
+                    :args {:a 1 :b "boom"}
+                    :timeout-ms 5000 :persist? true})]
+    (is (= :failed (:status result)))
+    (let [rows (exec-errors/recent-failures (:pool @shared-storage) nil 7 10)]
+      (is (= 1 (count rows)) "exactly the one failure listed")
+      (let [row (first rows)]
+        (is (= (:id composed) (:fn-id row)) "joined back to the LOGICAL fn id")
+        (is (str/includes? (str (:fn-name row)) "my-test-add-errlog")
+            "display name joined from the fn row")
+        (is (seq (str (:error row))) "carries the error text")))
+    (testing "another org's read sees nothing (explicit org filter)"
+      (is (empty? (exec-errors/recent-failures (:pool @shared-storage) "acme" 7 10))))))
 
 
 (deftest apply-stamps-touched-secret-on-rows-that-feed-side-effecting-sinks-test

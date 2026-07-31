@@ -246,6 +246,19 @@ operator tooling. Retention: the cleanup scheduler sweeps buckets older than
 90 days (`sweep-stats!`) — trends outlive the raw `:fn-execution` TTLs, which
 is the point.
 
+## Error log (`GET /partials/error-log`)
+
+The editor's **Errors** sidebar section lists the current org's recent FAILED
+executions (newest first) straight off the `:fn-execution` audit rows — no new
+storage. Privacy holds because the write path already sanitised each row:
+`redact-outcome` hides secret-tainted bodies, `scrub-outcome` replaces
+internal error types with an opaque `ref:` on the cloud. Rows render the fn
+name as a native `#hash` link (the editor's hashchange navigation), the finish
+time, the error text, and a collapsible ex-data block. Backed by the
+`:recent-failures` base-fn (`graphden.crud.fn-execution.errors`) — raw SQL
+with an explicit org filter, 7-day window, 50-row cap. Visibility follows the
+row TTLs (failed rows sweep after 30 days).
+
 ## Editor UI
 
 The ▶ button on a fn-card root row (auth-required, visible only to

@@ -5,6 +5,7 @@
    stage functions read."
   (:require
     [graphden.crud.fn-execution :as fn-exec]
+    [graphden.crud.fn-execution.errors :as exec-errors]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.stats :as exec-stats]
     [graphden.crud.request :as request]
@@ -150,6 +151,13 @@
 ;; atom is a 1-3-line wrap over the helpers above.
 
 
+(defbase recent-failures
+  [days limit]
+  ;; Phase C2 error visibility — the current org's recent FAILED executions
+  ;; (error text/data already write-side redacted + scrubbed), newest first.
+  (exec-errors/recent-failures (:pool (:pg-storage ctx)) (tc/current-org) days limit))
+
+
 (defbase usage-fn-stats
   [fn-id days]
   ;; Phase C1 rollup read — counts + durations only (never args/results), so
@@ -174,4 +182,5 @@
    :resolve-fn-version-id      resolve-fn-version-id
    :_reconcile-services-apply  _reconcile-services-apply
    :running-entry              running-entry
-   :usage-fn-stats usage-fn-stats})
+   :usage-fn-stats usage-fn-stats
+   :recent-failures recent-failures})

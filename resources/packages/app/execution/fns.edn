@@ -689,6 +689,13 @@
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
+  {:name :recent-failures
+   :description "The CURRENT org's most recent failed executions (newest first) from the `:fn-execution` audit rows — `[{:execution-id :fn-id :fn-name :finished-at :error :error-data} …]`. Error text/data were redacted + scrubbed at write time, so every string is already safe for the org that reads it. Empty when no pool / no failures."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
+          :limit {:type :int :description "Row cap (e.g. 50)."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
   {:name :usage-fn-stats
    :description "7-day-style usage rollup for one fn from the pre-aggregated `:usage-stat` table — `{:runs :failed :cancelled :avg-ms}`, counts + durations ONLY (never args/results/errors), scoped to the CURRENT org (tenant → own runs; public → platform). Zeros when no rows or no pool."
    :args {:fn-id {:type :uuid :description "The fn whose executions to aggregate."}

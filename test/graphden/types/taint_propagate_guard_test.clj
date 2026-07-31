@@ -33,7 +33,9 @@
   ;; `:taint-propagate?` and stays OUT of `golden-tainted`.
   ;; +1 (284): `:usage-fn-stats` (app.execution) — aggregate rollup read
   ;; (counts + durations); no caller content passes through → not tainting.
-  284)
+  ;; +1 (285): `:recent-failures` (app.execution) — failed-execution listing;
+  ;; returns write-side-scrubbed rows, no caller content → not tainting.
+  285)
 
 
 (def ^:private golden-tainted

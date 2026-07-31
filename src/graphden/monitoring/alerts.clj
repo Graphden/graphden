@@ -75,3 +75,29 @@
   [alerts]
   (str "⚠️ graphden alert — "
        (str/join "; " (map :message alerts))))
+
+
+(defn alert-request
+  "PURE channel selection — given the delivery `cfg` and a message `text`,
+   return the `{:url … :body <clojure-map>}` to POST, or `nil` when nothing is
+   configured (scheduler stays off).
+
+   Two channels, Telegram taking precedence when its pair is present:
+   - Telegram: `:telegram-token` + `:telegram-chat` → the Bot API
+     `sendMessage` endpoint with `{:chat_id :text}` (Telegram rejects a bare
+     `{text}` — it needs the chat id in-band).
+   - generic webhook: `:webhook-url` → `{:text text}` (Slack / Mattermost /
+     any JSON `{…}` sink).
+
+   Kept pure (no HTTP, no env) so the routing is unit-testable; the scheduler
+   shell does the actual POST."
+  [{:keys [webhook-url telegram-token telegram-chat]} text]
+  (cond
+    (and (not (str/blank? telegram-token)) (not (str/blank? telegram-chat)))
+    {:url (str "https://api.telegram.org/bot" telegram-token "/sendMessage")
+     :body {:chat_id telegram-chat :text text}}
+
+    (not (str/blank? webhook-url))
+    {:url webhook-url :body {:text text}}
+
+    :else nil))

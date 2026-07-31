@@ -203,13 +203,17 @@
  {:context #ig/ref :exec/context
   :period-ms #long #or [#env CLEANUP_PERIOD_MS "3600000"]}
 
- ;; Built-in domain alerter (C3). OPT-IN: dormant unless GRAPHDEN_ALERT_WEBHOOK
- ;; is set — then every ALERT_PERIOD_MS it POSTs per-org error-spike +
- ;; process-wide 5xx alerts to the webhook (Slack/Mattermost/generic {text}).
- ;; The /metrics counters feed an external Prometheus + Alertmanager either way.
+ ;; Built-in domain alerter (C3). OPT-IN: dormant unless a channel is set —
+ ;; then every ALERT_PERIOD_MS it POSTs per-org error-spike + process-wide 5xx
+ ;; alerts. Channel: set GRAPHDEN_ALERT_TELEGRAM_TOKEN + _CHAT for native
+ ;; Telegram (Bot API sendMessage), OR GRAPHDEN_ALERT_WEBHOOK for a generic
+ ;; {text} sink (Slack/Mattermost). Telegram wins if both are set. The /metrics
+ ;; counters feed an external Prometheus + Alertmanager either way.
  :exec/alert-scheduler
  {:context #ig/ref :exec/context
   :webhook-url #or [#env GRAPHDEN_ALERT_WEBHOOK ""]
+  :telegram-token #or [#env GRAPHDEN_ALERT_TELEGRAM_TOKEN ""]
+  :telegram-chat #or [#env GRAPHDEN_ALERT_TELEGRAM_CHAT ""]
   :period-ms #long #or [#env ALERT_PERIOD_MS "300000"]}
 
  ;; Demo branches for the versioning UI. OPT-IN: only seeds when

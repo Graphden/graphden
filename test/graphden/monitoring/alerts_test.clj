@@ -56,3 +56,26 @@
     (is (re-find #"^⚠️ graphden alert" (alerts/summary-text fire)))
     (is (re-find #"acme" (alerts/summary-text fire)))
     (is (re-find #"server errors" (alerts/summary-text fire)))))
+
+
+(deftest alert-request-selects-channel
+  (testing "neither channel configured → nil (scheduler stays off)"
+    (is (nil? (alerts/alert-request {} "hi")))
+    (is (nil? (alerts/alert-request {:webhook-url "" :telegram-token "" :telegram-chat ""} "hi"))))
+  (testing "generic webhook → {text} to the given url"
+    (is (= {:url "https://hook.example/x" :body {:text "hi"}}
+           (alerts/alert-request {:webhook-url "https://hook.example/x"} "hi"))))
+  (testing "Telegram pair → Bot API sendMessage with chat_id in-band"
+    (is (= {:url "https://api.telegram.org/bot123:ABC/sendMessage"
+            :body {:chat_id "-1001" :text "hi"}}
+           (alerts/alert-request {:telegram-token "123:ABC" :telegram-chat "-1001"} "hi"))))
+  (testing "Telegram wins when both channels are present"
+    (is (= "https://api.telegram.org/bot123:ABC/sendMessage"
+           (:url (alerts/alert-request {:webhook-url "https://hook.example/x"
+                                        :telegram-token "123:ABC"
+                                        :telegram-chat "-1001"} "hi")))))
+  (testing "a half-configured Telegram pair falls back to the webhook, else nil"
+    (is (= "https://hook.example/x"
+           (:url (alerts/alert-request {:webhook-url "https://hook.example/x"
+                                        :telegram-token "123:ABC"} "hi"))))
+    (is (nil? (alerts/alert-request {:telegram-token "123:ABC"} "hi")))))

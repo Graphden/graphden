@@ -36,12 +36,12 @@ down) + a compose overlay ship in the cloud deployment repo
 endpoint. This path owns infra-level alerting (availability, latency,
 resource) and needs no graphden config beyond exposing `/metrics`.
 
-### 3b. Built-in: domain alerter (opt-in webhook)
+### 3b. Built-in: domain alerter (opt-in — Telegram or webhook)
 
 For domain conditions Prometheus doesn't naturally see, graphden ships a
-small in-process alerter (`:exec/alert-scheduler`). **Dormant unless
-`GRAPHDEN_ALERT_WEBHOOK` is set.** When set, every `ALERT_PERIOD_MS`
-(default 5 min) it evaluates:
+small in-process alerter (`:exec/alert-scheduler`). **Dormant unless a
+channel is configured** (the Telegram pair or the webhook). When on,
+every `ALERT_PERIOD_MS` (default 5 min) it evaluates:
 
 - **per-org error spike** — an org whose failed/total ratio over the
   last hour is ≥ `error-ratio` (default 0.5) with ≥ `min-runs`
@@ -49,17 +49,31 @@ small in-process alerter (`:exec/alert-scheduler`). **Dormant unless
 - **process-wide 5xx burst** — `server-error` counter delta ≥
   `server-error-min` (default 20) since the last check.
 
-Fired alerts POST as `{"text": "…"}` to the webhook (Slack / Mattermost
-/ any generic-webhook or Telegram relay). A per-key **cooldown**
-(default 1 h) means a sustained incident pages once, not every tick.
-The decision policy is pure (`graphden.monitoring.alerts/decide`,
-unit-tested); the scheduler (`graphden.system.init.alerter`) only does
-the reads + the POST.
+Delivery has two native channels (`graphden.monitoring.alerts/alert-request`
+picks one, Telegram winning if both are set):
+
+- **Telegram** — set `GRAPHDEN_ALERT_TELEGRAM_TOKEN` + `_CHAT` and the
+  alerter POSTs `{chat_id, text}` straight to the Bot API
+  `sendMessage` endpoint. No relay. Create a bot with
+  [@BotFather](https://t.me/BotFather) for the token; get the chat id
+  by messaging the bot then reading
+  `https://api.telegram.org/bot<TOKEN>/getUpdates` (or use a group's
+  numeric `-100…` id).
+- **Generic webhook** — set `GRAPHDEN_ALERT_WEBHOOK` and it POSTs
+  `{"text": "…"}` (Slack / Mattermost / any JSON `{…}` sink).
+
+A per-key **cooldown** (default 1 h) means a sustained incident pages
+once, not every tick. The decision policy AND the channel selection are
+pure (`graphden.monitoring.alerts`, unit-tested); the scheduler
+(`graphden.system.init.alerter`) only does the reads + the POST.
 
 | env | default | meaning |
 |-----|---------|---------|
-| `GRAPHDEN_ALERT_WEBHOOK` | *(empty → alerter off)* | webhook the alerts POST to |
+| `GRAPHDEN_ALERT_TELEGRAM_TOKEN` | *(empty)* | Bot API token — with `_CHAT`, enables native Telegram |
+| `GRAPHDEN_ALERT_TELEGRAM_CHAT` | *(empty)* | target chat id (user or `-100…` group) |
+| `GRAPHDEN_ALERT_WEBHOOK` | *(empty)* | generic `{text}` webhook (used when no Telegram pair) |
 | `ALERT_PERIOD_MS` | `300000` | evaluation cadence |
 
-Tune the thresholds via the `:exec/alert-scheduler` `:config` map if the
-defaults don't fit your traffic.
+The alerter is off only when **no** channel is configured. Tune the
+thresholds via the `:exec/alert-scheduler` `:config` map if the defaults
+don't fit your traffic.

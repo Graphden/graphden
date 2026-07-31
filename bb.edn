@@ -946,14 +946,28 @@
   smoke
   {:doc "Run smoke tests against a running instance: editor page, graph layout (collapsed + expanded), auth challenge. Usage: bb smoke [http://host:port]"
    :requires ([babashka.http-client :as http]
-              [cheshire.core :as json])
+              [cheshire.core :as json]
+              [clojure.java.io :as io]
+              [clojure.string :as str])
    :task
    (let [raw-url (or (first *command-line-args*) "http://localhost:9002")
          base-url (if (str/ends-with? raw-url "/") (subs raw-url 0 (dec (count raw-url))) raw-url)
-         token (System/getenv "AUTH_TOKEN")
+         ;; Read AUTH_TOKEN from the shell env, falling back to `.env` — the
+         ;; SAME source docker-compose substitutes into the instance, so the
+         ;; smoke authenticates as the instance it's probing even when the token
+         ;; lives only in `.env` (the gate's post-land demo advance runs compose
+         ;; off `.env`, but the smoke process's shell env has no AUTH_TOKEN).
+         ;; `bb wt up` worktrees have no `.env` → token blank → the instance is
+         ;; auth-OFF (open) and the empty bearer below is exactly right.
+         token (or (not-empty (System/getenv "AUTH_TOKEN"))
+                   (some-> (let [f (io/file ".env")] (when (.exists f) (slurp f)))
+                           (->> (re-find (re-pattern "(?m)^AUTH_TOKEN=(.+)$")))
+                           second
+                           str/trim
+                           not-empty))
          ;; The graph-data routes (entities / layout / types / value-form) are
          ;; auth-required now (the anonymous graph view was removed). Send the
-         ;; bearer on them when AUTH_TOKEN is set (auth active); with no token
+         ;; bearer on them when a token is known (auth active); with no token
          ;; auth is OFF and they're open, so an empty opts map works too. The
          ;; auth/check challenges below deliberately DON'T use this (they assert
          ;; the 401 path), so keep it off the bare `get*`/`post-json` defaults.

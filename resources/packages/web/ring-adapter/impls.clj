@@ -19,5 +19,18 @@
     {:authenticated? false}))
 
 
+(defbase auth-active?
+  []
+  ;; Whether authentication is turned ON for this deployment: true iff an
+  ;; auth provider is wired (the `auth` addon's single-token provider, or the
+  ;; tenancy addon's storage-token provider). No provider ⇒ auth is OFF ⇒ the
+  ;; auth-required middleware passes everything through (self-hosted "just run
+  ;; it locally, no login"). This is the switch the provider-aware middleware
+  ;; reads so the SAME auth-required routes are gated when auth is on and open
+  ;; when it's off.
+  (some? (:auth-provider ctx)))
+
+
 (def impls
-  {:authenticate-request authenticate-request})
+  {:authenticate-request authenticate-request
+   :auth-active? auth-active?})

@@ -313,14 +313,20 @@
 
   ;; --- /api/graph — graph data API ---
 
+  ;; AUTH-REQUIRED (provider-aware): the full graph dump + layout are the
+  ;; "open view" — gated so an unauthenticated caller can't read the graph when
+  ;; auth is ON (cloud / self-hosted with AUTH_TOKEN). When auth is OFF (no
+  ;; provider) the provider-aware middleware passes them through, so a no-login
+  ;; self-hosted instance still serves them openly. Read access can be re-opened
+  ;; per-namespace via a read grant.
   {:name :api-entities
-   :description "GET /api/graph/entities — full graph dump (every fn, arg, namespace) as JSON."
-   :parent :get-route
+   :description "GET /api/graph/entities — full graph dump (every fn, arg, namespace) as JSON. Auth-required when auth is active (removes the anonymous graph view); open when auth is off."
+   :parent :get-auth-required
    :args {:path "/entities" :handler :all-entities-handler}}
 
   {:name :layout-api
-   :description "POST /api/graph/layout — accepts `{root-id, expansions}`, returns the laid-out graph (nodes + edges + grid positions)."
-   :parent :post-route
+   :description "POST /api/graph/layout — accepts `{root-id, expansions}`, returns the laid-out graph (nodes + edges + grid positions). Auth-required when auth is active; open when auth is off."
+   :parent :post
    :args {:path "/layout" :handler :_layout-api-handler}}
 
   {:name :graph-routes
@@ -331,23 +337,23 @@
   ;; --- /api/types — type-system surface ---
 
   {:name :api-types
-   :description "GET /api/types — snapshot of the in-memory rich-type registry (every fn / fn-def's `:return` + `:args`). Powers editor type hints and external introspection."
-   :parent :get-route
+   :description "GET /api/types — snapshot of the in-memory rich-type registry (every fn / fn-def's `:return` + `:args`). Powers editor type hints and external introspection. Auth-required when auth is active; open when auth is off."
+   :parent :get-auth-required
    :args {:path "" :handler :all-rich-types-handler}}
 
   {:name :api-types-compatible
-   :description "POST /api/types/compatible — single-pair subtype check. Body: `{expected, candidate}` in the JSON shape produced by `/api/types`. Returns `{ok, expected, candidate, reason?}`. UI uses this for type-mismatch explainers without re-implementing `subtype?` in JS."
-   :parent :post-route
+   :description "POST /api/types/compatible — single-pair subtype check. Body: `{expected, candidate}` in the JSON shape produced by `/api/types`. Returns `{ok, expected, candidate, reason?}`. UI uses this for type-mismatch explainers without re-implementing `subtype?` in JS. Auth-required when auth is active; open when auth is off."
+   :parent :post
    :args {:path "/compatible" :handler :types-compatible-handler}}
 
   {:name :api-types-candidates
-   :description "POST /api/types/candidates — enumerate fns whose return type is a subtype of `expected`. Body: `{expected, effects?, name-prefix?}`. Returns `{count, candidates: [{name, return, args, effects}, ...]}` sorted alphabetically. Powers type-aware fn-pickers."
-   :parent :post-route
+   :description "POST /api/types/candidates — enumerate fns whose return type is a subtype of `expected`. Body: `{expected, effects?, name-prefix?}`. Returns `{count, candidates: [{name, return, args, effects}, ...]}` sorted alphabetically. Powers type-aware fn-pickers. Auth-required when auth is active; open when auth is off."
+   :parent :post
    :args {:path "/candidates" :handler :types-candidates-handler}}
 
   {:name :api-types-usages
-   :description "POST /api/types/usages — list every fn that references a given type-row. Body: `{type-fn-id}`. Returns `{count, usages: [{fn-id, fn-name, role, kind, slot-name?}, ...]}`. Powers the inline-expand panel's 'Used by N' navigation."
-   :parent :post-route
+   :description "POST /api/types/usages — list every fn that references a given type-row. Body: `{type-fn-id}`. Returns `{count, usages: [{fn-id, fn-name, role, kind, slot-name?}, ...]}`. Powers the inline-expand panel's 'Used by N' navigation. Auth-required when auth is active; open when auth is off."
+   :parent :post
    :args {:path "/usages" :handler :types-usages-handler}}
 
   {:name :api-types-record
@@ -392,15 +398,15 @@
   ;; --- /api/value-kinds — value_kind schema enum ---
 
   {:name :api-value-kinds
-   :description "GET /api/value-kinds — the `value_kind` schema enum as a JSON array of primitive type-tag strings. The editor's type-pickers fetch this instead of hard-coding the enum."
-   :parent :get-route
+   :description "GET /api/value-kinds — the `value_kind` schema enum as a JSON array of primitive type-tag strings. The editor's type-pickers fetch this instead of hard-coding the enum. Auth-required when auth is active; open when auth is off."
+   :parent :get-auth-required
    :args {:path "/value-kinds" :handler :value-kinds-handler}}
 
   ;; --- /api/value-form — type-aware editor form for a binding/slot ---
 
   {:name :api-value-form
-   :description "POST /api/value-form — JSON body `{binding-id | fn-id+slot-id, item-id?}`. Resolves the slot's effective type, picks the matching form-fn, and returns `{ok, form: <hiccup>, value: <current>}`. The editor renders the hiccup as the value-edit popover."
-   :parent :post-route
+   :description "POST /api/value-form — JSON body `{binding-id | fn-id+slot-id, item-id?}`. Resolves the slot's effective type, picks the matching form-fn, and returns `{ok, form: <hiccup>, value: <current>}`. The editor renders the hiccup as the value-edit popover. Auth-required when auth is active; open when auth is off."
+   :parent :post
    :args {:path "/value-form" :handler :value-form-handler}}
 
   ;; --- /api/execute — submit, poll, cancel fn runs ---

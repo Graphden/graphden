@@ -297,6 +297,11 @@
    :return-type :bool
    :args {:coll :_request-principal :key {:value :authenticated?} :default false}}
 
+  {:name :auth-active?
+   :description "True iff authentication is turned ON for this deployment — i.e. an `:auth-provider` is wired on the context (the `auth` addon's single-token provider, or the tenancy addon's storage-token provider). No provider ⇒ auth OFF ⇒ `:auth-required-middleware` passes everything through, so a self-hosted instance runs with no login. The switch that makes the auth-required routes gate-when-on / open-when-off."
+   :return-type :bool
+   :effects #{}}
+
   ;; 401 response used by auth middleware on failure.
   {:name :_default-auth-fail-body
    :parent :ring-response
@@ -319,14 +324,25 @@
   ;; dispatches.
   ;; =============================================================================
 
-  {:name :_auth-required-body
+  ;; When auth is ACTIVE: authenticated → proceed; otherwise 401.
+  {:name :_auth-enforce
    :parent :if
    :args {:test :request-authenticated?
           :then :proceed
           :else :default-auth-fail-response}}
 
+  ;; Provider-aware gate. `:auth-active?` OFF (no provider wired) ⇒ pass through
+  ;; (self-hosted with no auth package is fully open); ON ⇒ enforce. This lets
+  ;; the SAME auth-required routes be gated on an auth deployment and open on a
+  ;; no-auth one, without a second set of route templates.
+  {:name :_auth-required-body
+   :parent :if
+   :args {:test :auth-active?
+          :then :_auth-enforce
+          :else :proceed}}
+
   {:name :auth-required-middleware
-   :description "Bearer-token auth middleware. When the request's token matches `AUTH_TOKEN`, calls `:proceed` (next handler in the chain); otherwise returns the 401 response directly. Attached per-route via `:middleware [:auth-required-middleware]` in route-data."
+   :description "Provider-aware auth middleware. When auth is ACTIVE (an `:auth-provider` is wired) an authenticated request calls `:proceed` (next handler) and an unauthenticated one gets a 401; when auth is OFF (no provider) it always `:proceed`s — so the same protected routes are gated on an auth deployment and fully open on a no-auth self-hosted one. Attached per-route via `:middleware [:auth-required-middleware]`."
    :parent :middleware
    :args {:name {:value :auth-required}
           :body :_auth-required-body}}

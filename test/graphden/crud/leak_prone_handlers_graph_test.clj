@@ -131,19 +131,27 @@
 
 
 (deftest partial-auth-form-handler-renders-login-fields-test
-  (testing "GET /partials/auth-form renders the login/signup popover fields (a `:list` fragment — direct flex children)"
+  (testing "GET /partials/auth-form renders the SINGLE-TENANT popover fields
+            (admin password only — the tenant variant ships with the tenancy
+            addon, which shadows this path; a `:list` fragment — direct flex
+            children)"
     (let [response (via :_partial-auth-form-handler
                         {:uri "/partials/auth-form"
                          :request-method :get
                          :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
-      (is (str/includes? body "id=\"auth-username-input\""))
       (is (str/includes? body "id=\"auth-password-input\""))
       (is (str/includes? body "id=\"auth-save-btn\""))
       (is (str/includes? body "id=\"auth-cancel-btn\""))
-      (is (str/includes? body "id=\"auth-mode-toggle\""))
       (is (str/includes? body "auth-input-wrap"))
+      (is (str/includes? body "data-auth-mode=\"admin\"")
+          "declares the admin submit mode for editor-auth.js")
+      ;; The core build carries NO tenant markup at all (the whole point of
+      ;; the split): no username, no org, no create-account toggle.
+      (is (not (str/includes? body "auth-username-input")))
+      (is (not (str/includes? body "auth-org-input")))
+      (is (not (str/includes? body "auth-mode-toggle")))
       ;; fragment — no wrapping <div class="auth-form-fields"> element
       (is (not (str/includes? body "auth-form-fields"))))))
 

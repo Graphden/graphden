@@ -224,34 +224,38 @@ would be hidden.
 The asymmetric subtyping from T1 means **any plain `:text` slot on
 a side-effecting base-fn automatically refuses secret-typed inputs
 at sync-time**. That closes the casual exfil path "shove `<secret>`
-into `:http-get/:url` or `:body` of a hand-rolled post".
+into `:http-request/:url` or `:body` of a hand-rolled post".
 
 It ALSO blocks the *legitimate* "secret as auth header" pattern,
 because building `{"Authorization" (str-concat "Bearer " <secret>)}`
 produces a record with a `[:secret :text]` value, which can't flow
-into `[:map :text :text]`-typed `:http-get/:headers` either.
+into the `[:map :text :text]`-typed `:http-request/:headers` either.
 
-The resolution is to provide **secret-aware sibling base-fns** that
-declare the secret-bearing slot directly (`[:secret :text]`) and
-embed the value internally where impl-side trust is the only path:
+The resolution is a **dedicated secret-bearing slot** declared
+directly as accepting `[:secret :text]`, with the impl embedding the
+value internally where impl-side trust is the only path:
 
-| Sink | Secret-aware variant | Slot taking `:secret` |
+| Sink | Slot taking `:secret` | Notes |
 |---|---|---|
-| `:http-get` | `:http-get-with-authorization` | `:auth-value` |
-| `:sql-exec` | `:sql-exec` itself (T6) | `:password` |
-| `:sql-query` | `:sql-query` itself (T6) | `:password` |
-| `:vault-put` | `:vault-put` itself (B) | `:value` |
+| `:http-request` (whole ladder) | `:auth-value` (`[:union :null [:secret :text]]`) | inherited by `:http-get` / `:http-post` / … presets |
+| `:sql-exec` | `:password` (T6) | |
+| `:sql-query` | `:password` (T6) | |
+| `:vault-put` | `:value` (B) | |
 
-The split is intentional: plain `:http-get` stays generic-payload
-(`[:map :text :text]` headers, `:text` url) and refuses any secret
-to compose-leak through it. Users who need auth flow MUST go
-through `:http-get-with-authorization`, which makes the auth-bearing
-slot's type EXPLICIT. The slot accepts the FULL `Authorization`
+On the HTTP ladder the split lives INSIDE the one primitive:
+`:http-request`'s generic `:headers` slot stays `[:map :text :text]`
+and refuses any secret to compose-leak through it, while the
+dedicated `:auth-value` slot accepts `[:secret :text]` structurally
+and the impl injects it as the `Authorization` header at the wire
+boundary (auth wins on key collision). The slot takes the FULL
 header value (scheme included — `"Bearer xxx"`, `"Basic xxx"`,
-`"Token xxx"`, …) so a single sink covers every scheme, with the
-caller composing the scheme prefix at the graph layer
-(`:str` of `"Bearer "` + the secret-typed token preserves the
-`[:secret :text]` taint through the `:auth-value` boundary).
+`"Token xxx"`, …) so one slot covers every scheme, with the caller
+composing the scheme prefix at the graph layer (`:str` of
+`"Bearer "` + the secret-typed token preserves the `[:secret :text]`
+taint into the `:auth-value` boundary). Every per-method preset
+(`:http-get`, `:http-post`, …) inherits both slots unchanged;
+`:http-get-with-authorization` survives as a back-compat rename
+preset (`:headers` re-exposed as `:extra-headers`).
 
 This is the "B: sink-side capability narrowing" pattern. It doesn't
 prevent the impl from then sending the secret over the wire (that's
@@ -259,7 +263,7 @@ the whole point — auth works), but it FORCES every secret-bearing
 sink to declare itself, so adding a new exfil channel is a visible
 code change, not an accidental composition.
 
-`:extra-headers` on `:http-get-with-authorization` stays plain
+`:headers` (and its `:extra-headers` rename) stays plain
 `[:map :text :text]` — a user can't sneak a SECOND secret into the
 headers map under the cover of the legitimate token. Defence-in-
 depth against "one legit auth + one exfil header".
@@ -325,7 +329,7 @@ every share-shaped bundle treats it explicitly:
 1. **Side-effect exfiltration via secret-aware sinks themselves** —
    once a sink declares a `[:secret :text]` slot, it's TRUSTED to
    handle the value responsibly. A malicious impl of
-   `:http-get-with-authorization` could log the token before sending it.
+   `:http-request` could log the token before sending it.
    That's why the secret-aware sink list above is audited — adding
    a new one is a visible code change, not an accidental composition.
    Same trust model as today's `:io` impls: at some point the

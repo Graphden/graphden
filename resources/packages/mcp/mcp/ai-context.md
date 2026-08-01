@@ -33,7 +33,7 @@ build on* and *what you bind*.
 
 | Kind | Shape | You write these? |
 |------|-------|------------------|
-| **base-fn** | wraps ONE Clojure/Java call; has an implementation | No — they're primitives (`:add`, `:if`, `:str`, `:map`, `:get`, `:http-get`, `:pg-query`, …) |
+| **base-fn** | wraps ONE Clojure/Java call; has an implementation | No — they're primitives (`:add`, `:if`, `:str`, `:map`, `:get`, `:http-request`, `:pg-query`, …) |
 | **composed fn (fn-def)** | `:parent` (or `:parents`) + `:args`; NO implementation | **Yes — this is all you write** |
 
 You never write a base-fn. If you find yourself wishing for "a function

@@ -1,69 +1,104 @@
-;; Outgoing HTTP client base function.
+;; Outgoing HTTP — ONE universal base-fn plus a graph-level
+;; specialization LADDER (the same shape the server side uses:
+;; `:route` carries `:method` as data, `:get-route` pins it):
 ;;
-;; Counterpart to web/http (server). Thin wrapper around
-;; org.httpkit.client/get — enough to demonstrate "call an external
-;; API from a fn-graph" and feed the response into downstream
-;; processing (parse-json, get, etc.). POST / PUT / DELETE can be
-;; added later as siblings if a tutorial needs them.
+;;   :http-request            method :http-method-token (ANY protocol
+;;                            token — custom/extension methods welcome)
+;;     └─ :standard-http-request   method NARROWED to :http-method
+;;                                 (the standard set), still free
+;;          ├─ :http-get           method PINNED "get", body pinned nil
+;;          ├─ :http-post          method PINNED "post"
+;;          ├─ :http-put           method PINNED "put"
+;;          ├─ :http-delete        method PINNED "delete"
+;;          └─ :http-patch         method PINNED "patch"
+;;
+;; Need a custom method? Parent `:http-request`. Standard method with
+;; a custom shape? Parent `:standard-http-request` or a per-method
+;; preset. Per-resource fns (a concrete API: pinned url template,
+;; auth from vault, body narrowed to a record) parent the presets —
+;; all further narrowing is ordinary fn-def authoring, no impl work.
+;;
+;; Every security guard (SSRF egress classifier, DNS-pinned dial,
+;; per-org rate cap, response byte-cap) lives in the ONE impl, so no
+;; descendant can specialize past it.
 
 
 {:namespace "web.http-client"
- :description "Outgoing HTTP — GET an external URL with custom headers."
+ :description "Outgoing HTTP — the universal :http-request primitive and its per-method preset ladder."
  :fns
  [;; Return shape: same keys http-kit emits, but stringified at the
   ;; boundary so the fn-graph stays primitive-typed end-to-end. The
   ;; record subtype rule (open) means downstream `:get` of `"body"`
   ;; / `"status"` works directly without an extra adapter.
   {:name :http-response-shape
-   :description "Result of `:http-get` — `{status, headers, body}` mirroring http-kit's response map (headers stringified, body slurped to text)."
+   :description "Result of the :http-request family — `{status, headers, body}` mirroring http-kit's response map (headers stringified, body slurped to text)."
    :type {:status :int
           :headers :text-map
           :body :text}}
 
-  {:name :http-get
-   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. Connect+read timeout via `:timeout-ms` (default 10s). Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `:text-map` so it REFUSES secret-typed values structurally — use `:http-get-with-authorization` for any auth flow that pulls a token from `:vault-get`."
-   :args {:url {:type :text
-                :description "Absolute URL, e.g. `https://httpbin.org/bearer`."}
+  {:name :http-request
+   :description "Universal outbound HTTP request — method carried as DATA (`:http-method-token`, any RFC 9110 token). Returns `{:status :headers :body}` — body slurped to text, headers stringified; non-2xx responses are returned with their actual status so callers can branch. Throws `http-client/request-failed` on transport errors. Prefer the per-method presets (`:http-get`, `:http-post`, …) — a preset node states its intent in the graph; use this root directly only when the method itself is dynamic or non-standard."
+   :args {:method {:type :http-method-token
+                   :description "HTTP request method, lower-case by convention (`\"get\"`, `\"post\"`, custom tokens allowed). The impl upper-cases at the wire boundary."}
+          :url {:type :url
+                :description "Absolute URL, e.g. `https://httpbin.org/anything`."}
           :headers {:type :text-map
                     :value {}
-                    :description "Header map. Keys + values are strings, e.g. `{\"Authorization\" \"bearer …\"}`. Defaults to empty. Plain `:text` values only — secret-typed values are rejected at sync-time."}
+                    :description "Header map. Keys + values are strings. Defaults to empty. Plain `:text` values only — secret-typed values are rejected at sync-time; auth flows go through `:auth-value`."}
+          :body {:type :nullable-text
+                 :value nil
+                 :description "Request body as text (JSON-encode upstream via `:to-json-string`; set the `Content-Type` header alongside). nil = no body (methods that require one on the wire send an empty body)."}
+          :auth-value {:type [:union :null [:secret :text]]
+                       :value nil
+                       :description "Full `Authorization` header value (e.g. `\"Bearer xxx\"`), or nil for unauthenticated requests. The slot accepts `[:secret :text]` structurally — a vault-sourced token never crosses the generic `:headers` map; the impl injects it at the wire boundary (auth wins on key collision)."}
           :timeout-ms {:type :positive-int
                        :value 10000
                        :description "Connect+read timeout in milliseconds. Defaults to 10s."}}
    :return-type :http-response-shape
    :effects #{:network}}
 
-  ;; ---------------------------------------------------------------------
-  ;; :http-get-with-authorization — generalised auth-aware HTTP GET.
-  ;;
-  ;; The secret-flow problem: plain `:http-get`'s `:headers` slot is
-  ;; `:text-map`, which deliberately refuses secret-typed
-  ;; values. That closes the leak path (a literal map can't sneak a
-  ;; secret through a generic shape) but also blocks the legitimate
-  ;; "wire a vault token into the Authorization header" use case.
-  ;;
-  ;; The fix is one base-fn whose `:auth-value` slot is `[:secret
-  ;; :text]` — accepts a secret structurally, injects it into the
-  ;; request headers internally so the secret never crosses a generic
-  ;; `:map` slot. The user can build the auth-value with full graph
-  ;; composability (different schemes, custom prefixes, multi-secret
-  ;; compositions), because `:str` propagates `[:secret :text]` taint.
-  ;;
-  ;; Scheme-specific variants (e.g. `:http-get-with-bearer`,
-  ;; `:http-get-with-token`, `:http-get-with-basic`) would be pure graph
-  ;; fn-defs parent-ing this primitive — none ship yet; compose one when a
-  ;; tutorial needs it. No JAR rebuild for a new scheme, just a new fn-def.
-  ;; ---------------------------------------------------------------------
+  ;; --- The standard-method rung: type-NARROW, slot stays free -----------
+  {:name :standard-http-request
+   :description "`:http-request` with `:method` narrowed to the standard set (`:http-method` — get/post/put/delete/patch/head/options), still free. Parent this when the method is chosen at composition time but not fixed yet (e.g. a `:case` dispatch); parent `:http-request` itself for custom protocol tokens."
+   :parent :http-request
+   :args {:method {:type :http-method}}}
+
+  ;; --- Per-method presets: value-PIN ------------------------------------
+  ;; `:http-get` pins `body nil` too — a GET carrying a body is almost
+  ;; always an authoring error, and the pin makes the mistake
+  ;; inexpressible from this preset (the type system cannot state the
+  ;; method↔body dependency; the pin can).
+  {:name :http-get
+   :description "HTTP GET preset — `:standard-http-request` with the method pinned and no body. Free: `:url`, `:headers`, `:auth-value` (secret-friendly Authorization), `:timeout-ms`."
+   :parent :standard-http-request
+   :args {:method "get"
+          :body {:value nil}}}
+
+  {:name :http-post
+   :description "HTTP POST preset. Free: `:url`, `:body` (text — JSON-encode upstream and set `Content-Type`), `:headers`, `:auth-value`, `:timeout-ms`."
+   :parent :standard-http-request
+   :args {:method "post"}}
+
+  {:name :http-put
+   :description "HTTP PUT preset. Free: `:url`, `:body`, `:headers`, `:auth-value`, `:timeout-ms`."
+   :parent :standard-http-request
+   :args {:method "put"}}
+
+  {:name :http-delete
+   :description "HTTP DELETE preset. Free: `:url`, `:headers`, `:auth-value`, `:timeout-ms`; `:body` stays available (rare but legal on the wire)."
+   :parent :standard-http-request
+   :args {:method "delete"}}
+
+  {:name :http-patch
+   :description "HTTP PATCH preset. Free: `:url`, `:body`, `:headers`, `:auth-value`, `:timeout-ms`."
+   :parent :standard-http-request
+   :args {:method "patch"}}
+
+  ;; --- Back-compat rename preset ----------------------------------------
+  ;; Pre-ladder callers bound `:extra-headers`; keep their surface as a
+  ;; pure rename over the GET preset. `:auth-value` (root slot) is the
+  ;; same arg it always was.
   {:name :http-get-with-authorization
-   :description "Variant of `:http-get` that takes a secret-typed `:auth-value` (the full `Authorization` header value, e.g. `\"Bearer xxx\"`) and injects it directly into the request headers. The slot's `[:secret :text]` shape IS the secret-flow boundary — secret values never cross a generic `:text-map` slot."
-   :args {:url {:type :text :description "Absolute URL."}
-          :auth-value {:type [:secret :text]
-                       :description "Full Authorization header value — scheme keyword (`Bearer`/`Token`/`Basic`/…) included. Slot is `[:secret :text]`, so a secret-typed value (`:vault-get` ref, any `:str`-composed secret) is accepted structurally."}
-          :extra-headers {:type :text-map
-                          :value {}
-                          :description "Additional headers merged BEFORE the Authorization header (auth always wins on key collision). Plain text only — secrets here would leak through the generic `:map` shape."}
-          :timeout-ms {:type :positive-int
-                       :value 10000
-                       :description "Connect+read timeout in milliseconds. Defaults to 10s."}}
-   :return-type :http-response-shape
-   :effects #{:network}}]}
+   :description "Auth-aware HTTP GET — `:http-get` with `:headers` re-exposed as `:extra-headers` (back-compat surface). Bind `:auth-value` with the full Authorization header value; its `[:secret :text]`-accepting slot is the secret-flow boundary — vault tokens never cross a generic `:text-map` slot."
+   :parent :http-get
+   :args {:headers {:as :extra-headers}}}]}

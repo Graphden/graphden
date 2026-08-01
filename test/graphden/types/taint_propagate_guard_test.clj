@@ -39,6 +39,10 @@
   ;; base-fn pair) collapsed into ONE universal `:http-request` primitive
   ;; (method as data; per-method fn-def presets keep the old names). Sinks,
   ;; not taint-propagators, before and after — `golden-tainted` unchanged.
+  ;; ±0 (284): `:sha256-hex` (algorithm-hardcoded) became the `:digest-hex`
+  ;; primitive (algorithm as data; `:sha256-hex` lives on as a fn-def
+  ;; preset). Content-transforming — the propagator flag moves with it:
+  ;; `golden-tainted` swaps :sha256-hex → :digest-hex.
   284)
 
 
@@ -54,7 +58,7 @@
     :gte :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str :range
-    :re-find? :render-hiccup :repeat :rest :reverse :select-keys :sha256-hex
+    :re-find? :render-hiccup :repeat :rest :reverse :select-keys :digest-hex
     :slurp :some? :sort :str :str-contains? :str-join :str-len :str-lower
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
     :str-upper :sub :subs :take :throw :throwable-class-name :throwable-message

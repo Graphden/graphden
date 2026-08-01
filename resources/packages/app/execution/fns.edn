@@ -703,6 +703,29 @@
    :return-type {:runs :int :failed :int :cancelled :int :avg-ms :int}
    :effects #{:db}}
 
+  ;; Org-scoped rollups for the editor's Stats panel — every one reads ONLY
+  ;; counts + durations from `:usage-stat`, always scoped to the CURRENT org
+  ;; (tenant → own workspace; public → platform), so they are privacy-safe by
+  ;; construction (args/results/errors never enter that table).
+  {:name :usage-org-summary
+   :description "Headline rollup for the current org over the trailing `:days` — `{:runs :failed :avg-ms}` (run-weighted average duration). Counts + durations only."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
+   :return-type {:runs :int :failed :int :avg-ms :int}
+   :effects #{:db}}
+
+  {:name :usage-org-daily
+   :description "Per-day series for the current org over the trailing `:days`, oldest first — `[{:day :runs :failed :avg-ms} …]`; days with no runs are omitted. The Stats panel's trend bars."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
+   :return-type [:list {:day :text :runs :int :failed :int :avg-ms :int}]
+   :effects #{:db}}
+
+  {:name :usage-org-fn-stats
+   :description "Busiest fns for the current org over the trailing `:days`, fn name joined for display — `[{:fn-id :fn-name :runs :failed :avg-ms} …]`, busiest first, capped at `:limit`. A since-deleted fn shows its id."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
+          :limit {:type :int :description "Row cap (e.g. 20)."}}
+   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :avg-ms :int}]
+   :effects #{:db}}
+
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
    :args {:id {:type :nullable-uuid :description "Target execution id."}}

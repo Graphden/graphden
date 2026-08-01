@@ -10,9 +10,12 @@ results, or error bodies (those stay in the org-scoped, TTL'd
 Every terminal execution increments a pre-aggregated `:usage-stat` row
 `(hour bucket, org, fn, status)` with a run count + summed duration
 (`graphden.crud.fn-execution.stats/bump!`). Bounded by distinct keys,
-not traffic; 90-day retention. Surfaced as the `7d: N runs · M failed ·
-avg K ms` strip in the editor's execute-history panel
-(`:usage-fn-stats`), and `org-stats` / `org-totals` for tooling. See
+not traffic; 90-day retention. Surfaced three ways: the `7d: N runs
+· M failed · avg K ms` strip in the editor's execute-history panel
+(`:usage-fn-stats`); the editor's **Stats** sidebar section
+(`GET /partials/stats` — org-scoped headline totals, per-day trend
+table, top-fns table; each org sees only its own workspace); and
+`org-stats` / `org-totals` for tooling. See
 [EXECUTION.md § Usage rollups](EXECUTION.md).
 
 ## 2. Error log — recent failures viewer (always on)

@@ -91,6 +91,7 @@
                   "packages/app/editor/editor-users-admin.js"
                   "packages/app/editor/editor-packages.js"
                   "packages/app/editor/editor-quota.js"
+                  "packages/app/editor/editor-stats.js"
                   "packages/app/editor/editor-errors.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"
@@ -3890,6 +3891,185 @@
    :description "Ring handler for GET /partials/error-log — the org's recent failed executions as text/html. Auth-required (route side)."
    :parent :html-ok-response
    :args {:body :_perr-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; STATS partial (Phase C) — GET /partials/stats. The CURRENT org's run
+  ;; statistics over a 7-day window: headline totals, a per-day trend
+  ;; table, and a top-fns table. Every number comes from an org-scoped
+  ;; `:usage-stat` rollup (counts + durations only — never args/results/
+  ;; errors), so a tenant sees exactly their own workspace and nothing of
+  ;; anyone else's. Fn names in the top table are native #hash links.
+  ;; ---------------------------------------------------------------------
+  {:name :_pstats-window-days :parent :const :args {:value 7}}
+
+  {:name :_pstats-summary
+   :parent :usage-org-summary
+   :args {:days :_pstats-window-days}}
+
+  {:name :_pstats-summary-runs
+   :parent :get :args {:coll :_pstats-summary :key {:value :runs} :default {:value 0}}}
+  {:name :_pstats-summary-failed
+   :parent :get :args {:coll :_pstats-summary :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-summary-avg
+   :parent :get :args {:coll :_pstats-summary :key {:value :avg-ms} :default {:value 0}}}
+
+  {:name :_pstats-headline-text
+   :description "`7d: N runs · M failed · avg K ms` — the panel headline."
+   :parent :str
+   :args {:parts [{:value "7d: "} :_pstats-summary-runs {:value " runs · "}
+                  :_pstats-summary-failed {:value " failed · avg "}
+                  :_pstats-summary-avg {:value " ms"}]}}
+
+  {:name :_pstats-headline
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "stats-headline"}}
+          :children [:_pstats-headline-text]}}
+
+  ;; --- Per-day trend table ---------------------------------------------
+  {:name :_pstats-daily
+   :parent :usage-org-daily
+   :args {:days :_pstats-window-days}}
+
+  {:name :_pstats-day-label
+   :parent :get :args {:coll {:as :item} :key {:value :day} :default {:value ""}}}
+  {:name :_pstats-day-runs
+   :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
+  {:name :_pstats-day-failed
+   :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-day-avg
+   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+
+  {:name :_pstats-day-label-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-day"}}
+          :children [:_pstats-day-label]}}
+  {:name :_pstats-day-runs-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-day-runs]}}
+  {:name :_pstats-day-failed-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
+          :children [:_pstats-day-failed]}}
+  {:name :_pstats-day-avg-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-day-avg]}}
+
+  {:name :_pstats-day-row
+   :description "One trend row — `[:tr [:td day] [:td runs] [:td failed] [:td avg]]`."
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :attrs {:value {:class "stats-row"}}
+          :children [:_pstats-day-label-cell :_pstats-day-runs-cell
+                     :_pstats-day-failed-cell :_pstats-day-avg-cell]}}
+
+  {:name :_pstats-day-rows
+   :parent :map :args {:func :_pstats-day-row :coll :_pstats-daily}}
+
+  {:name :_pstats-daily-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "stats-table"}}
+          :children [{:value [:thead [:tr [:th "Day"] [:th "Runs"] [:th "Failed"] [:th "Avg ms"]]]}
+                     :_pstats-day-rows]}}
+
+  {:name :_pstats-daily-empty?
+   :parent :empty? :args {:coll :_pstats-daily}}
+
+  {:name :_pstats-daily-section
+   :parent :if
+   :args {:test :_pstats-daily-empty?
+          :then {:value [:div {:class "stats-empty"} "No runs in the last 7 days."]}
+          :else :_pstats-daily-table}}
+
+  ;; --- Top-fns table ----------------------------------------------------
+  {:name :_pstats-top-fns
+   :parent :usage-org-fn-stats
+   :args {:days :_pstats-window-days :limit {:value 20}}}
+
+  {:name :_pstats-fn-name
+   :parent :get :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+  {:name :_pstats-fn-runs
+   :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
+  {:name :_pstats-fn-failed
+   :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-fn-avg
+   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+
+  {:name :_pstats-fn-href
+   :parent :str :args {:parts [{:value "#"} :_pstats-fn-name]}}
+  {:name :_pstats-fn-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "stats-fn"}} :key {:value :href} :value :_pstats-fn-href}}
+  {:name :_pstats-fn-link
+   :parent :hiccup
+   :args {:tag {:value "a"} :attrs :_pstats-fn-link-attrs :children [:_pstats-fn-name]}}
+  {:name :_pstats-fn-name-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-fn-cell"}}
+          :children [:_pstats-fn-link]}}
+
+  {:name :_pstats-fn-runs-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-fn-runs]}}
+  {:name :_pstats-fn-failed-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
+          :children [:_pstats-fn-failed]}}
+  {:name :_pstats-fn-avg-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-fn-avg]}}
+
+  {:name :_pstats-fn-row
+   :description "One top-fns row — fn link (native #hash nav), runs, failed, avg — each in its own `[:td]`."
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :attrs {:value {:class "stats-row"}}
+          :children [:_pstats-fn-name-cell :_pstats-fn-runs-cell
+                     :_pstats-fn-failed-cell :_pstats-fn-avg-cell]}}
+
+  {:name :_pstats-fn-rows
+   :parent :map :args {:func :_pstats-fn-row :coll :_pstats-top-fns}}
+
+  {:name :_pstats-fn-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "stats-table"}}
+          :children [{:value [:thead [:tr [:th "Function"] [:th "Runs"] [:th "Failed"] [:th "Avg ms"]]]}
+                     :_pstats-fn-rows]}}
+
+  {:name :_pstats-fn-empty?
+   :parent :empty? :args {:coll :_pstats-top-fns}}
+  {:name :_pstats-fn-section
+   :parent :if
+   :args {:test :_pstats-fn-empty?
+          :then {:value [:div {:class "stats-empty"} "No functions have run yet."]}
+          :else :_pstats-fn-table}}
+
+  ;; --- Assembly ---------------------------------------------------------
+  {:name :_pstats-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "stats-panel"}}
+          :children [:_pstats-headline
+                     {:value [:div {:class "stats-subhead"} "By day"]}
+                     :_pstats-daily-section
+                     {:value [:div {:class "stats-subhead"} "Top functions"]}
+                     :_pstats-fn-section]}}
+
+  {:name :_pstats-html
+   :parent :render-hiccup
+   :args {:hiccup :_pstats-body}}
+
+  {:name :_partial-stats-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/stats — the current org's 7-day run statistics as text/html. Auth-required (route side); org-scoped by construction (every rollup base-fn reads the CURRENT org only)."
+   :parent :html-ok-response
+   :args {:body :_pstats-html}}
 
   ;; ---------------------------------------------------------------------
   ;; Branch-diff modal — three sections grouped by `:change`:

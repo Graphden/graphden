@@ -124,6 +124,11 @@
    :parent :get-auth-required
    :args {:path "/partials/execute-history" :handler :_partial-execute-history-handler}}
 
+  {:name :partial-stats
+   :description "GET /partials/stats — the current org's 7-day run statistics (headline totals, per-day trend, top-fns) as text/html. Auth-required; org-scoped by construction. The editor's Stats sidebar section lazy-loads it."
+   :parent :get-auth-required
+   :args {:path "/partials/stats" :handler :_partial-stats-handler}}
+
   {:name :partial-error-log
    :description "GET /partials/error-log — the current org's recent failed executions (write-side redacted/scrubbed), newest first. Auth-required; the editor's Errors sidebar section lazy-loads it."
    :parent :get-auth-required

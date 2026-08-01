@@ -3913,6 +3913,24 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .error-log-details summary { cursor: pointer; color: var(--muted-fg); font-size: 10px; }
 .error-log-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
 
+/* Phase C stats sidebar section — org-scoped run rollups. */
+.stats-panel { padding: 4px 8px 8px; font-size: 11px; }
+.stats-headline { color: var(--light-fg); font-weight: 600; padding: 4px 0 6px; }
+.stats-subhead { color: var(--muted-fg); text-transform: uppercase;
+  letter-spacing: 0.5px; font-size: 10px; margin: 8px 0 2px; }
+.stats-table { width: 100%; border-collapse: collapse; }
+.stats-table th { text-align: right; color: var(--muted-fg); font-weight: 500;
+  font-size: 10px; padding: 2px 4px; border-bottom: 1px solid var(--light-border); }
+.stats-table th:first-child { text-align: left; }
+.stats-row { border-bottom: 1px dashed var(--light-border); }
+.stats-day { color: var(--light-fg); font-variant-numeric: tabular-nums; }
+.stats-fn-cell { overflow-wrap: anywhere; }
+.stats-fn { color: var(--accent); }
+.stats-num { text-align: right; font-variant-numeric: tabular-nums;
+  color: var(--light-fg); padding: 2px 4px; }
+.stats-failed { color: var(--error-fg); }
+.stats-empty { padding: 4px 0; color: var(--muted-fg); }
+
 /* Phase C1 usage-rollup strip above the history rows. */
 .execute-history-stats { font-size: 11px; color: var(--muted-fg);
   padding: 4px 6px; border-bottom: 1px dashed var(--light-border); }

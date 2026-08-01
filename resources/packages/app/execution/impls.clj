@@ -174,6 +174,29 @@
      :avg-ms (if (pos? runs) (quot duration-ms-sum runs) 0)}))
 
 
+(defbase usage-org-summary
+  [days]
+  ;; Phase C — org-scoped headline rollup: total runs / failed / avg-ms over
+  ;; the trailing window. Counts + durations ONLY (no args/results/errors),
+  ;; so it is privacy-safe and always scoped to the CURRENT org (tenant sees
+  ;; their own workspace; public/single-tenant sees the platform). nil pool → zeros.
+  (exec-stats/org-summary (:pool (:pg-storage ctx)) (tc/current-org) days))
+
+
+(defbase usage-org-daily
+  [days]
+  ;; Per-day series for the org over the window — the Stats panel's trend
+  ;; bars. Same org-scoping + privacy contract as `usage-org-summary`.
+  (exec-stats/org-daily (:pool (:pg-storage ctx)) (tc/current-org) days))
+
+
+(defbase usage-org-fn-stats
+  [days limit]
+  ;; Busiest fns for the org over the window, fn NAME joined for display.
+  ;; Same org-scoping + privacy contract; a since-deleted fn shows its id.
+  (exec-stats/org-fn-stats-named (:pool (:pg-storage ctx)) (tc/current-org) days limit))
+
+
 (def impls
   {:resolve-fn                 resolve-fn
    :_execute-apply             _execute-apply
@@ -183,4 +206,7 @@
    :_reconcile-services-apply  _reconcile-services-apply
    :running-entry              running-entry
    :usage-fn-stats usage-fn-stats
+   :usage-org-summary usage-org-summary
+   :usage-org-daily usage-org-daily
+   :usage-org-fn-stats usage-org-fn-stats
    :recent-failures recent-failures})

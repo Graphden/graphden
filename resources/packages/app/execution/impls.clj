@@ -197,6 +197,19 @@
   (exec-stats/org-fn-stats-named (:pool (:pg-storage ctx)) (tc/current-org) days limit))
 
 
+(defbase usage-all-org-stats
+  [days limit]
+  ;; OPERATOR-only cross-org rollup — the platform context (no tenant org
+  ;; bound, or the platform org itself) sees every org's counts; ANY tenant
+  ;; context gets [] so the Stats panel's by-org section simply never renders
+  ;; for them. The guard lives HERE, impl-side, so no graph composition can
+  ;; reach cross-org data from a tenant ctx.
+  (let [org (tc/current-org)]
+    (if (or (nil? org) (= org "public"))
+      (exec-stats/org-all-stats (:pool (:pg-storage ctx)) days limit)
+      [])))
+
+
 (def impls
   {:resolve-fn                 resolve-fn
    :_execute-apply             _execute-apply
@@ -209,4 +222,5 @@
    :usage-org-summary usage-org-summary
    :usage-org-daily usage-org-daily
    :usage-org-fn-stats usage-org-fn-stats
+   :usage-all-org-stats usage-all-org-stats
    :recent-failures recent-failures})

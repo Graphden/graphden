@@ -48,7 +48,10 @@
   ;; reads for the editor's Stats panel. Counts + durations only; NO caller
   ;; content flows through them (same posture as `:usage-fn-stats`) → not
   ;; tainting, `golden-tainted` unchanged.
-  287)
+  ;; +1 (288): `:usage-all-org-stats` (app.execution) — the OPERATOR-only
+  ;; cross-org rollup (tenant ctx gets [] impl-side). Same counts-only
+  ;; posture → not tainting.
+  288)
 
 
 (def ^:private golden-tainted

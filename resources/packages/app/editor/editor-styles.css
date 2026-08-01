@@ -3914,7 +3914,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .error-log-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
 
 /* Phase C stats sidebar section — org-scoped run rollups. */
-.stats-panel { padding: 4px 8px 8px; font-size: 11px; }
+.stats-panel { padding: 4px 8px 8px; font-size: 11px;
+  max-height: 480px; overflow-y: auto; }
 .stats-headline { color: var(--light-fg); font-weight: 600; padding: 4px 0 6px; }
 .stats-subhead { color: var(--muted-fg); text-transform: uppercase;
   letter-spacing: 0.5px; font-size: 10px; margin: 8px 0 2px; }
@@ -3930,6 +3931,18 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--light-fg); padding: 2px 4px; }
 .stats-failed { color: var(--error-fg); }
 .stats-empty { padding: 4px 0; color: var(--muted-fg); }
+.stats-period-bar { display: flex; gap: 4px; margin: 2px 0 6px; }
+.stats-period { font-size: 10px; padding: 2px 8px; border-radius: 3px;
+  border: 1px solid var(--light-border); background: none;
+  color: var(--muted-fg); cursor: pointer; }
+.stats-period:hover { background: var(--hover-bg); color: var(--fg); }
+.stats-period-active { border-color: var(--accent); color: var(--accent); }
+.stats-bar-cell { width: 56px; padding: 2px 4px; }
+.stats-bar { height: 6px; border-radius: 3px; background: var(--hover-bg);
+  overflow: hidden; }
+.stats-bar-fill { height: 100%; border-radius: 3px; background: var(--accent);
+  transition: opacity 0.15s; }
+.stats-org-block { margin-top: 2px; }
 
 /* Phase C1 usage-rollup strip above the history rows. */
 .execute-history-stats { font-size: 11px; color: var(--muted-fg);

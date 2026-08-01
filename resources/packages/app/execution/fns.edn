@@ -714,16 +714,23 @@
    :effects #{:db}}
 
   {:name :usage-org-daily
-   :description "Per-day series for the current org over the trailing `:days`, oldest first — `[{:day :runs :failed :avg-ms} …]`; days with no runs are omitted. The Stats panel's trend bars."
+   :description "Per-day series for the current org over the trailing `:days`, oldest first — `[{:day :runs :failed :avg-ms :runs-pct} …]` (`:runs-pct` = share of the window's busiest day, 0-100 — feeds the panel's CSS bars); days with no runs are omitted."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
-   :return-type [:list {:day :text :runs :int :failed :int :avg-ms :int}]
+   :return-type [:list {:day :text :runs :int :failed :int :avg-ms :int :runs-pct :int}]
    :effects #{:db}}
 
   {:name :usage-org-fn-stats
-   :description "Busiest fns for the current org over the trailing `:days`, fn name joined for display — `[{:fn-id :fn-name :runs :failed :avg-ms} …]`, busiest first, capped at `:limit`. A since-deleted fn shows its id."
+   :description "Busiest fns for the current org over the trailing `:days`, fn name joined for display — `[{:fn-id :fn-name :runs :failed :avg-ms :runs-pct} …]`, busiest first, capped at `:limit`. A since-deleted fn shows its id."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
           :limit {:type :int :description "Row cap (e.g. 20)."}}
-   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :avg-ms :int}]
+   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :avg-ms :int :runs-pct :int}]
+   :effects #{:db}}
+
+  {:name :usage-all-org-stats
+   :description "OPERATOR-only cross-org rollup over the trailing `:days` — `[{:org :runs :failed :avg-ms :runs-pct} …]`, busiest first, capped at `:limit`. Impl-side guard: any TENANT context gets `[]` (only the platform context — no org bound, or the platform org itself — sees cross-org counts); counts + durations only, no private data."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
+          :limit {:type :int :description "Row cap (e.g. 20)."}}
+   :return-type [:list {:org :text :runs :int :failed :int :avg-ms :int :runs-pct :int}]
    :effects #{:db}}
 
   {:name :cancel-execution!

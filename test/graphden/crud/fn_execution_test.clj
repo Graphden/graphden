@@ -270,18 +270,26 @@
              (exec-stats/org-summary pool nil 7)))
       (is (= {:runs 1 :failed 0 :avg-ms 1} (exec-stats/org-summary pool "acme" 7))
           "acme sees only its own"))
-    (testing "org-daily — per-day series, org-scoped, shaped avg"
+    (testing "org-daily — per-day series, org-scoped, shaped avg + bar pct"
       (let [rows (exec-stats/org-daily pool nil 7)]
         (is (= 1 (count rows)) "all three bumps share today's bucket")
-        (is (= {:runs 3 :failed 1 :avg-ms 11}
-               (select-keys (first rows) [:runs :failed :avg-ms])))
+        (is (= {:runs 3 :failed 1 :avg-ms 11 :runs-pct 100}
+               (select-keys (first rows) [:runs :failed :avg-ms :runs-pct])))
         (is (string? (:day (first rows))))))
     (testing "org-fn-stats-named — busiest fns with the name join + shaped avg"
       (let [rows (exec-stats/org-fn-stats-named pool nil 7 20)]
         (is (= [fn-id] (mapv :fn-id rows)))
-        (is (= {:runs 3 :failed 1 :avg-ms 11}
-               (select-keys (first rows) [:runs :failed :avg-ms])))
+        (is (= {:runs 3 :failed 1 :avg-ms 11 :runs-pct 100}
+               (select-keys (first rows) [:runs :failed :avg-ms :runs-pct])))
         (is (contains? (first rows) :fn-name))))
+    (testing "org-all-stats — cross-org operator read, busiest first, bar pct
+              relative to the busiest org"
+      (let [rows (exec-stats/org-all-stats pool 7 20)]
+        (is (= ["public" "acme"] (mapv :org rows)))
+        (is (= [100 33] (mapv :runs-pct rows))
+            "acme's 1 run vs public's 3 → 33%")
+        (is (= {:runs 3 :failed 1 :avg-ms 11}
+               (select-keys (first rows) [:runs :failed :avg-ms])))))
     (testing "retention sweep deletes old buckets only"
       (let [old-ms (- now (* 120 24 60 60 1000))]
         (exec-stats/bump! pool {:org nil :fn-id fn-id :status :succeeded :now-ms old-ms})

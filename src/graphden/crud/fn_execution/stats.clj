@@ -141,31 +141,45 @@
      :avg-ms (if (pos? runs) (quot dur runs) 0)}))
 
 
+(defn- with-runs-pct
+  "Attach `:runs-pct` (0-100, share of the collection max) to each row —
+   boundary shaping for the Stats panel's CSS bars, so the graph needs no
+   cross-row max/percent arithmetic."
+  [rows]
+  (let [mx (transduce (map :runs) max 0 rows)]
+    (mapv #(assoc % :runs-pct (if (pos? mx)
+                                (long (quot (* 100 (long (:runs %))) mx))
+                                0))
+          rows)))
+
+
 (defn org-daily
   "Per-DAY series for `org` over the trailing `days` (default 7), oldest
-   first: `[{:day \"YYYY-MM-DD\" :runs :failed :avg-ms} …]`. Days with no
-   runs are omitted (the panel renders the gap). Counts + durations only."
+   first: `[{:day \"YYYY-MM-DD\" :runs :failed :avg-ms :runs-pct} …]`. Days
+   with no runs are omitted (the panel renders the gap). Counts + durations
+   only; `:runs-pct` is the share of the window's busiest day (CSS bars)."
   [pool org days]
   (when pool
-    (mapv (fn [r]
-            (let [runs (long (or (:runs r) 0))
-                  dur (long (or (:duration_ms_sum r) 0))]
-              {:day (some-> (:day r) str)
-               :runs runs
-               :failed (long (or (:failed r) 0))
-               :avg-ms (if (pos? runs) (quot dur runs) 0)}))
-          (jdbc/execute!
-            pool
-            [(str "SELECT to_char(date_trunc('day', bucket_start), 'YYYY-MM-DD') AS day,"
-                  " coalesce(sum(count), 0) AS runs,"
-                  " coalesce(sum(count) FILTER (WHERE status = 'failed'), 0) AS failed,"
-                  " coalesce(sum(duration_ms_sum), 0) AS duration_ms_sum"
-                  " FROM \"usage_stat\""
-                  " WHERE org_id = ?"
-                  " AND bucket_start >= now() - make_interval(days => ?)"
-                  " GROUP BY 1 ORDER BY 1 ASC")
-             (or org "public") (int (or days 7))]
-            {:builder-fn rs/as-unqualified-lower-maps}))))
+    (with-runs-pct
+      (mapv (fn [r]
+              (let [runs (long (or (:runs r) 0))
+                    dur (long (or (:duration_ms_sum r) 0))]
+                {:day (some-> (:day r) str)
+                 :runs runs
+                 :failed (long (or (:failed r) 0))
+                 :avg-ms (if (pos? runs) (quot dur runs) 0)}))
+            (jdbc/execute!
+              pool
+              [(str "SELECT to_char(date_trunc('day', bucket_start), 'YYYY-MM-DD') AS day,"
+                    " coalesce(sum(count), 0) AS runs,"
+                    " coalesce(sum(count) FILTER (WHERE status = 'failed'), 0) AS failed,"
+                    " coalesce(sum(duration_ms_sum), 0) AS duration_ms_sum"
+                    " FROM \"usage_stat\""
+                    " WHERE org_id = ?"
+                    " AND bucket_start >= now() - make_interval(days => ?)"
+                    " GROUP BY 1 ORDER BY 1 ASC")
+               (or org "public") (int (or days 7))]
+              {:builder-fn rs/as-unqualified-lower-maps})))))
 
 
 (defn org-fn-stats-named
@@ -174,28 +188,58 @@
    busiest first, capped at `limit`. A since-deleted fn falls back to its id."
   [pool org days limit]
   (when pool
-    (mapv (fn [r]
-            (let [runs (long (or (:runs r) 0))
-                  dur (long (or (:duration_ms_sum r) 0))]
-              {:fn-id (:fn_id r)
-               :fn-name (or (:fn_name r) (some-> (:fn_id r) str))
-               :runs runs
-               :failed (long (or (:failed r) 0))
-               :avg-ms (if (pos? runs) (quot dur runs) 0)}))
-          (jdbc/execute!
-            pool
-            [(str "SELECT s.fn_id,"
-                  " f.name AS fn_name,"
-                  " coalesce(sum(s.count), 0) AS runs,"
-                  " coalesce(sum(s.count) FILTER (WHERE s.status = 'failed'), 0) AS failed,"
-                  " coalesce(sum(s.duration_ms_sum), 0) AS duration_ms_sum"
-                  " FROM \"usage_stat\" s"
-                  " LEFT JOIN \"fn\" f ON f.id = s.fn_id"
-                  " WHERE s.org_id = ?"
-                  " AND s.bucket_start >= now() - make_interval(days => ?)"
-                  " GROUP BY s.fn_id, f.name ORDER BY runs DESC LIMIT ?")
-             (or org "public") (int (or days 7)) (int (or limit 20))]
-            {:builder-fn rs/as-unqualified-lower-maps}))))
+    (with-runs-pct
+      (mapv (fn [r]
+              (let [runs (long (or (:runs r) 0))
+                    dur (long (or (:duration_ms_sum r) 0))]
+                {:fn-id (:fn_id r)
+                 :fn-name (or (:fn_name r) (some-> (:fn_id r) str))
+                 :runs runs
+                 :failed (long (or (:failed r) 0))
+                 :avg-ms (if (pos? runs) (quot dur runs) 0)}))
+            (jdbc/execute!
+              pool
+              [(str "SELECT s.fn_id,"
+                    " f.name AS fn_name,"
+                    " coalesce(sum(s.count), 0) AS runs,"
+                    " coalesce(sum(s.count) FILTER (WHERE s.status = 'failed'), 0) AS failed,"
+                    " coalesce(sum(s.duration_ms_sum), 0) AS duration_ms_sum"
+                    " FROM \"usage_stat\" s"
+                    " LEFT JOIN \"fn\" f ON f.id = s.fn_id"
+                    " WHERE s.org_id = ?"
+                    " AND s.bucket_start >= now() - make_interval(days => ?)"
+                    " GROUP BY s.fn_id, f.name ORDER BY runs DESC LIMIT ?")
+               (or org "public") (int (or days 7)) (int (or limit 20))]
+              {:builder-fn rs/as-unqualified-lower-maps})))))
+
+
+(defn org-all-stats
+  "Per-ORG rollup over the trailing `days` — `[{:org :runs :failed :avg-ms
+   :runs-pct} …]`, busiest first, capped at `limit`. The OPERATOR's
+   cross-org view (counts + durations only; no private data). Callers are
+   responsible for restricting it to the platform context — see the
+   `:usage-all-org-stats` base-fn."
+  [pool days limit]
+  (when pool
+    (with-runs-pct
+      (mapv (fn [r]
+              (let [runs (long (or (:runs r) 0))
+                    dur (long (or (:duration_ms_sum r) 0))]
+                {:org (:org_id r)
+                 :runs runs
+                 :failed (long (or (:failed r) 0))
+                 :avg-ms (if (pos? runs) (quot dur runs) 0)}))
+            (jdbc/execute!
+              pool
+              [(str "SELECT org_id,"
+                    " coalesce(sum(count), 0) AS runs,"
+                    " coalesce(sum(count) FILTER (WHERE status = 'failed'), 0) AS failed,"
+                    " coalesce(sum(duration_ms_sum), 0) AS duration_ms_sum"
+                    " FROM \"usage_stat\""
+                    " WHERE bucket_start >= now() - make_interval(days => ?)"
+                    " GROUP BY org_id ORDER BY runs DESC LIMIT ?")
+               (int (or days 7)) (int (or limit 20))]
+              {:builder-fn rs/as-unqualified-lower-maps})))))
 
 
 (defn org-totals

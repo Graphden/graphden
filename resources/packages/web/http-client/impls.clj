@@ -1,15 +1,23 @@
 (ns graphden.packages.web.http-client.impls
-  "Outgoing HTTP client base functions. The PLATFORM (unrestricted) path uses
-   http-kit; a RESTRICTED (tenant) path uses OkHttp pinned to
-   `egress/validating-dns`, so the connect-time DNS resolution is validated —
-   OkHttp only ever connects to a validated-public address (closing the SSRF
-   DNS-rebind window), with TLS / SNI / cert on the hostname."
+  "Outgoing HTTP client base function. ONE universal primitive —
+   `http-request` — carries the method as DATA (the graph narrows and
+   pins it through the fn-def ladder in fns.edn: `:standard-http-request`
+   → `:http-get` / `:http-post` / …). The PLATFORM (unrestricted) path
+   uses http-kit; the RESTRICTED (tenant) path uses OkHttp pinned to
+   `egress/validating-dns`, so the connect-time DNS resolution is
+   validated — OkHttp only ever connects to a validated-public address
+   (closing the SSRF DNS-rebind window), with TLS / SNI / cert on the
+   hostname. Every guard lives HERE, on the single impl, so no graph
+   descendant can specialize past it."
   (:require
+    [clojure.string :as str]
     [graphden.clients.egress :as egress]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [org.httpkit.client :as http])
   (:import
+    (java.nio.charset
+      StandardCharsets)
     (java.time
       Duration)
     (okhttp3
@@ -18,6 +26,7 @@
       OkHttpClient
       OkHttpClient$Builder
       Request$Builder
+      RequestBody
       Response
       ResponseBody)))
 
@@ -41,6 +50,30 @@
           (assoc! acc (if (keyword? k) (name k) (str k)) (str v)))
         (transient {})
         hs))))
+
+
+(defn- wire-method
+  "Boundary validation + normalization of the `:method` slot value.
+   The type ladder (`:http-method-token` refinement) is the authoring-
+   time guarantee; this is the runtime backstop for values arriving
+   through /api/execute. Returns the UPPER-CASE wire form."
+  [method]
+  (let [m (str/upper-case (str method))]
+    (when-not (re-matches #"[!#$%&'*+.^_`|~0-9A-Za-z-]+" m)
+      (throw (ex-info (str "Invalid HTTP method token: " (pr-str method))
+                      {:type :http-client/invalid-method :method method})))
+    m))
+
+
+(defn- final-headers
+  "Merge the generic `:headers` map with the secret-typed `:auth-value`
+   (the full Authorization header value). Auth is injected HERE, inside
+   the impl, so a secret value never crosses a generic `[:map :text
+   :text]` slot in the graph — the slot-typing IS the secret-flow
+   boundary. Auth wins on key collision."
+  [headers auth-value]
+  (cond-> (or (stringify-header-keys headers) {})
+    (some? auth-value) (assoc "Authorization" (str auth-value))))
 
 
 ;; RESTRICTED tenant egress uses OkHttp (not http-kit) for ONE reason: its
@@ -71,97 +104,99 @@
       :else (recur (ex-cause t)))))
 
 
-(defn- dial-restricted-get*
-  "RESTRICTED (tenant) GET via the DNS-pinned OkHttp client. Response body is
-   read through the per-org byte-cap (`read-capped-string!`). A non-2xx status
-   is returned with its actual code (callers branch on it); a transport failure
-   throws `:egress/blocked` (rebind/internal) or `:http-client/request-failed`.
-   Library adapter — no fn-graph composition."
-  [url headers timeout-ms]
+(def ^:private body-required-methods
+  "Wire methods OkHttp refuses to build without a request body. A nil
+   `:body` for these sends an empty body (curl -X POST parity)."
+  #{"POST" "PUT" "PATCH"})
+
+
+(defn- okhttp-request-body
+  "RequestBody for the wire `method`/`body` pair: text body as UTF-8
+   (content-type stays a header concern — no media-type here), empty
+   body when the method demands one and none was given, nil otherwise
+   (OkHttp rejects a body on GET/HEAD)."
+  [method body]
+  (cond
+    (some? body) (RequestBody/create ^bytes (String/.getBytes (str body) StandardCharsets/UTF_8))
+    (body-required-methods method) (RequestBody/create ^bytes (byte-array 0))
+    :else nil))
+
+
+(defn- dial-restricted*
+  "RESTRICTED (tenant) request via the DNS-pinned OkHttp client. Response
+   body is read through the per-org byte-cap (`read-capped-string!`). A
+   non-2xx status is returned with its actual code (callers branch on it);
+   a transport failure throws `:egress/blocked` (rebind/internal) or
+   `:http-client/request-failed`. Library adapter — no fn-graph
+   composition."
+  [method url headers body timeout-ms]
   (let [client (-> (OkHttpClient/.newBuilder @restricted-client)
                    (OkHttpClient$Builder/.callTimeout (Duration/ofMillis (long (or timeout-ms 10000))))
                    (OkHttpClient$Builder/.build))
         req (Request$Builder/.build
-              (reduce-kv (fn [b k v] (Request$Builder/.addHeader b (str k) (str v)))
-                         (Request$Builder/.url (Request$Builder.) url)
-                         (or headers {})))]
+              (Request$Builder/.method
+                (reduce-kv (fn [b k v] (Request$Builder/.addHeader b (str k) (str v)))
+                           (Request$Builder/.url (Request$Builder.) ^String url)
+                           (or headers {}))
+                method
+                (okhttp-request-body method body)))]
     (try
       (with-open [resp (Call/.execute (OkHttpClient/.newCall client req))]
         (let [hs (Response/.headers resp)
-              body (Response/.body resp)]
+              resp-body (Response/.body resp)]
           {:status (Response/.code resp)
            :headers (into {} (map (fn [n] [n (Headers/.get hs n)])) (Headers/.names hs))
-           :body (if body (egress/read-capped-string! (ResponseBody/.byteStream body)) "")}))
+           :body (if resp-body (egress/read-capped-string! (ResponseBody/.byteStream resp-body)) "")}))
       (catch Exception e
         (throw (or (egress-blocked-cause e)
-                   (ex-info (str "HTTP GET " url " failed: " (ex-message e))
-                            {:type :http-client/request-failed :url url :cause (ex-message e)})))))))
+                   (ex-info (str "HTTP " method " " url " failed: " (ex-message e))
+                            {:type :http-client/request-failed
+                             :method method :url url :cause (ex-message e)})))))))
 
 
-(defn- do-http-get*
-  "Shared get-impl — `headers` is the FINAL (merged + stringified) map. A
-   RESTRICTED (tenant/cloud) execution — `*allowed-effects*` non-nil — is
-   SSRF-guarded, rate-capped, and dialed through the DNS-pinned OkHttp client
-   with a per-org response byte-cap. The unrestricted PLATFORM ctx dials
-   http-kit and slurps in full (its own outbound to internal services is never
-   gated)."
-  [url headers timeout-ms]
-  (if (some? cr/*allowed-effects*)
-    (do
-      (egress/check-target! url)          ; early clear error + defense-in-depth
-      (egress/check-egress-rate!)         ; per-org outbound rate cap
-      (dial-restricted-get* url headers timeout-ms))
-    (let [resp @(http/get url {:headers (or headers {})
-                               :timeout (or timeout-ms 10000)
-                               :as :stream})
-          resp-body (:body resp)
-          resp-error (:error resp)]
-      (when resp-error
-        (when (instance? java.io.InputStream resp-body)
-          (java.io.InputStream/.close ^java.io.InputStream resp-body))
-        (throw (ex-info (str "HTTP GET " url " failed: " (Throwable/.getMessage resp-error))
-                        {:type :http-client/request-failed
-                         :url url
-                         :cause (Throwable/.getMessage resp-error)})))
-      {:status (or (:status resp) 0)
-       :headers (or (stringify-header-keys (:headers resp)) {})
-       :body (if (instance? java.io.InputStream resp-body) (slurp resp-body) (or resp-body ""))})))
+(defn- dial-platform*
+  "UNRESTRICTED (platform) request via http-kit — its own outbound to
+   internal services is never gated, body slurped in full."
+  [method url headers body timeout-ms]
+  (let [resp @(http/request (cond-> {:url url
+                                     :method (keyword (str/lower-case method))
+                                     :headers (or headers {})
+                                     :timeout (or timeout-ms 10000)
+                                     :as :stream}
+                              (some? body) (assoc :body (str body))))
+        resp-body (:body resp)
+        resp-error (:error resp)]
+    (when resp-error
+      (when (instance? java.io.InputStream resp-body)
+        (java.io.InputStream/.close ^java.io.InputStream resp-body))
+      (throw (ex-info (str "HTTP " method " " url " failed: " (Throwable/.getMessage resp-error))
+                      {:type :http-client/request-failed
+                       :method method :url url
+                       :cause (Throwable/.getMessage resp-error)})))
+    {:status (or (:status resp) 0)
+     :headers (or (stringify-header-keys (:headers resp)) {})
+     :body (if (instance? java.io.InputStream resp-body) (slurp resp-body) (or resp-body ""))}))
 
 
-(defbase http-get
-  [url headers timeout-ms]
+(defbase http-request
+  "The ONE outbound-HTTP primitive — method / url / headers / body /
+   auth-value / timeout all data. A RESTRICTED (tenant/cloud) execution
+   (`*allowed-effects*` non-nil) is SSRF-guarded, rate-capped, and dialed
+   through the DNS-pinned OkHttp client with a per-org response byte-cap;
+   the unrestricted PLATFORM ctx dials http-kit. Specialization (standard
+   method set, per-method presets, per-resource fns) happens in the GRAPH
+   — see fns.edn."
+  [method url headers body auth-value timeout-ms]
   (cr/record-effect! :network)
-  ;; Destructured names DO NOT shadow defbase arg-syms (the AST
-  ;; walker rewrites bare arg-syms anywhere they appear, including
-  ;; inside `{:keys [...]}`). So we rename the response's `:headers`
-  ;; key locally to `resp-headers` to avoid colliding with the
-  ;; `headers` arg-sym. Same precaution for any future status/body
-  ;; arg names that might be added.
-  (do-http-get* url (stringify-header-keys headers) timeout-ms))
-
-
-(defbase http-get-with-authorization
-  "Generalised auth-aware HTTP GET — `:auth-value` is the FULL
-   `Authorization` header value (e.g. `\"Bearer xxx\"`, `\"Token xxx\"`,
-   `\"Basic <b64>\"`) and gets injected directly into the request
-   headers. The slot is `[:secret :text]`, so a secret-typed value
-   accumulated via graph-level `:str` propagation (e.g. from
-   `:vault-get`) is accepted structurally — it never crosses a
-   generic `[:map :text :text]` slot. The slot-typing IS the
-   secret-flow invariant that keeps decomposition safe.
-
-   A scheme-specific variant (e.g. `:http-get-with-bearer`,
-   `:http-get-with-token`, `:http-get-with-basic`) would be a thin
-   graph fn-def that prepends the scheme keyword to a secret value
-   via `:str` (which propagates `[:secret :text]`) and binds the
-   resulting full auth-value here — none ship yet."
-  [url auth-value extra-headers timeout-ms]
-  (cr/record-effect! :network)
-  (let [extra (or (stringify-header-keys extra-headers) {})
-        headers (assoc extra "Authorization" auth-value)]
-    (do-http-get* url headers timeout-ms)))
+  (let [m (wire-method method)
+        hs (final-headers headers auth-value)]
+    (if (some? cr/*allowed-effects*)
+      (do
+        (egress/check-target! url)          ; early clear error + defense-in-depth
+        (egress/check-egress-rate!)         ; per-org outbound rate cap
+        (dial-restricted* m url hs body timeout-ms))
+      (dial-platform* m url hs body timeout-ms))))
 
 
 (def impls
-  {:http-get http-get
-   :http-get-with-authorization http-get-with-authorization})
+  {:http-request http-request})

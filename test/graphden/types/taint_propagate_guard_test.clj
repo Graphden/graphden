@@ -35,7 +35,11 @@
   ;; (counts + durations); no caller content passes through → not tainting.
   ;; +1 (285): `:recent-failures` (app.execution) — failed-execution listing;
   ;; returns write-side-scrubbed rows, no caller content → not tainting.
-  285)
+  ;; -1 (284): `:http-get` + `:http-get-with-authorization` (method-hardcoded
+  ;; base-fn pair) collapsed into ONE universal `:http-request` primitive
+  ;; (method as data; per-method fn-def presets keep the old names). Sinks,
+  ;; not taint-propagators, before and after — `golden-tainted` unchanged.
+  284)
 
 
 (def ^:private golden-tainted

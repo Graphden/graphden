@@ -43,7 +43,12 @@
   ;; primitive (algorithm as data; `:sha256-hex` lives on as a fn-def
   ;; preset). Content-transforming — the propagator flag moves with it:
   ;; `golden-tainted` swaps :sha256-hex → :digest-hex.
-  284)
+  ;; +3 (287): `:usage-org-summary` / `:usage-org-daily` /
+  ;; `:usage-org-fn-stats` (app.execution) — org-scoped :usage-stat rollup
+  ;; reads for the editor's Stats panel. Counts + durations only; NO caller
+  ;; content flows through them (same posture as `:usage-fn-stats`) → not
+  ;; tainting, `golden-tainted` unchanged.
+  287)
 
 
 (def ^:private golden-tainted

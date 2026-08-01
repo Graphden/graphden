@@ -25,15 +25,26 @@
    :args {:path "/health" :handler :_health-handler}
    :expects-effects #{:time}}                 ; only wall-clock; no DB / env / IO
 
+  ;; /metrics is AUTH-REQUIRED (unlike /health, which is const-only and
+  ;; feeds uptime checkers). Public metrics disclosed recon material —
+  ;; exact JVM version (CVE matching), CPU count + heap ceiling (DoS
+  ;; calibration), live load-average (a DoS feedback channel), restart
+  ;; windows, the 5xx counter. The cloud edge (Caddy) already refuses
+  ;; them publicly; auth-required closes the self-hosted / dev instance,
+  ;; which has no edge proxy, and is defense-in-depth on the cloud's
+  ;; internal scrape path. When auth is OFF (no AUTH_TOKEN) the template
+  ;; leaves them open — a local dev box with auth disabled is not
+  ;; internet-exposed. A Prometheus scrape sends its bearer via the
+  ;; scrape config's authorization/credentials_file.
   {:name :metrics
-   :description "GET /metrics — JVM info (heap, threads, uptime) plus the structural counters under `counters` (registry full-clears, delta-recompiles, compiles) as JSON."
-   :parent :get-route
+   :description "GET /metrics — JVM info (heap, threads, uptime) plus the structural counters under `counters` (registry full-clears, delta-recompiles, compiles) as JSON. AUTH-REQUIRED when auth is active (recon-hardening); a Prometheus scrape authenticates with a bearer."
+   :parent :get-auth-required
    :args {:path "/metrics" :handler :_metrics-handler}
    :expects-effects #{:io :env}}              ; reads JVM state (heap / threads / os) + env (hostname / user)
 
   {:name :metrics-prometheus
-   :description "GET /metrics/prometheus — the same JVM info + structural counters in OpenMetrics / Prometheus text exposition format, for a Prometheus scrape target."
-   :parent :get-route
+   :description "GET /metrics/prometheus — the same JVM info + structural counters in OpenMetrics / Prometheus text exposition format, for a Prometheus scrape target. AUTH-REQUIRED when auth is active — the scrape config supplies the bearer."
+   :parent :get-auth-required
    :args {:path "/metrics/prometheus" :handler :_metrics-prometheus-handler}
    :expects-effects #{:io :env}}              ; same JVM/env reads as :metrics
 

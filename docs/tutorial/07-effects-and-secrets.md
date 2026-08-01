@@ -49,11 +49,16 @@ Base-fns DECLARE their effects in `fns.edn`:
  :return-type [:list :text-keyed-map]
  :effects #{:db :raw-sql}}
 
-{:name :sha256-hex
- :args {:s {:type :text}}
+{:name :digest-hex
+ :args {:algorithm {:type :non-blank-text}   ; "SHA-256", "SHA-512", …
+        :s {:type :text}}
  :return-type :text
  :effects #{}}   ; pure
 ```
+
+(`:sha256-hex` — the everyday hashing fn — is not a base-fn but a
+one-line fn-def preset over `:digest-hex` pinning `:algorithm`;
+presets inherit computed effects like any composed fn.)
 
 Composed fn-defs DON'T declare their own effects — the type-
 checker COMPUTES them from the parent chain + every ref in

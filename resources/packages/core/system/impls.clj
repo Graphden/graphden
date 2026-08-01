@@ -13,6 +13,7 @@
     [clojure.tools.logging :as log]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]
     [graphden.util.counters :as counters])
   (:import
@@ -256,12 +257,15 @@
   (Long/parseLong s))
 
 
-(defbase sha256-hex-fn [s]
+;; One digest primitive, algorithm as DATA (the graph pins it — the
+;; `:sha256-hex` fn-def preset in fns.edn; same ladder shape as
+;; `:http-request` / `:route`). Delegates to the SAME `ids/digest-hex`
+;; the package sync's shape-hashing uses — one hex-digest impl repo-wide.
+;; An algorithm the JVM's providers don't know throws
+;; NoSuchAlgorithmException, surfacing as an execution-error.
+(defbase digest-hex-fn [algorithm s]
   (when s
-    (let [md (java.security.MessageDigest/getInstance "SHA-256")
-          bs (java.security.MessageDigest/.digest
-               md (String/.getBytes ^String s "UTF-8"))]
-      (str/join (map #(format "%02x" (bit-and ^byte % 0xff)) bs)))))
+    (ids/digest-hex algorithm s)))
 
 
 (defbase throwable-message-fn [ex]
@@ -313,13 +317,13 @@
 ;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
 
 ;; System base-fns are mixed: content-passing transforms
-;; (`:to-json-string`, `:parse-json`, `:parse-int`, `:sha256-hex`,
+;; (`:to-json-string`, `:parse-json`, `:parse-int`, `:digest-hex`,
 ;; `:slurp`, `:ex-info`, `:throw`, `:invoke`, `:call`, `:call-noargs`)
 ;; potentially expose a secret in their result and must propagate;
 ;; pure environment readers (`:system-property`, `:jvm-uptime-ms`,
 ;; the heap/os bean readers, `:thread-count`, `:current-time-ms`,
 ;; `:env`, `:read-resource-or-nil`) take no user input so taint can't
-;; enter through them — left bare. `:sha256-hex` deserves special note:
+;; enter through them — left bare. `:digest-hex` deserves special note:
 ;; even a HASH of a secret leaks the value (rainbow tables, length
 ;; oracles), so the propagator is mandatory here.
 (def impls
@@ -352,7 +356,7 @@
    :try {:impl try-fn :taint-propagate? true}
    :slurp {:impl slurp-fn :taint-propagate? true}
    :parse-int {:impl parse-int :taint-propagate? true}
-   :sha256-hex {:impl sha256-hex-fn :taint-propagate? true}
+   :digest-hex {:impl digest-hex-fn :taint-propagate? true}
    :throwable-message {:impl throwable-message-fn :taint-propagate? true}
    :throwable-class-name {:impl throwable-class-name-fn :taint-propagate? true}
    :ex-data {:impl ex-data-fn :taint-propagate? true}

@@ -348,14 +348,21 @@
               :description "Text containing the integer literal, e.g. \"8081\"."}}
    :return-type :int}
 
-  ;; SHA-256 of a UTF-8 string, returned as 64 hex chars. Used as a
-  ;; lower-level primitive when a one-off content hash is needed
-  ;; somewhere; deploy verification uses the build-time hash below
-  ;; instead (single source of truth across front- and back-end).
-  {:name :sha256-hex
-   :description "Lower-case 64-char hex SHA-256 digest of a UTF-8 string. Use `:subs` to take a shorter prefix when a concise build identifier is needed."
-   :args {:s {:type :text :description "Input string."}}
+  ;; ONE digest primitive — the ALGORITHM is data, pinned by graph-level
+  ;; presets (same ladder shape as :http-request / :route). Deploy
+  ;; verification uses the build-time hash below instead (single source
+  ;; of truth across front- and back-end).
+  {:name :digest-hex
+   :description "Lower-case hex digest of a UTF-8 string under `:algorithm` (any name the JVM's MessageDigest providers resolve — \"SHA-256\", \"SHA-512\", \"SHA-1\", \"MD5\", …; unknown names throw at runtime). Prefer the `:sha256-hex` preset unless the algorithm genuinely varies."
+   :args {:algorithm {:type :non-blank-text
+                      :description "JVM MessageDigest algorithm name, e.g. \"SHA-256\"."}
+          :s {:type :text :description "Input string."}}
    :return-type :text}
+
+  {:name :sha256-hex
+   :description "Lower-case 64-char hex SHA-256 digest of a UTF-8 string — `:digest-hex` with the algorithm pinned. Use `:subs` to take a shorter prefix when a concise build identifier is needed."
+   :parent :digest-hex
+   :args {:algorithm "SHA-256"}}
 
   ;; ============================================================================
   ;; Build identifiers (3-section)

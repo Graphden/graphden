@@ -34,7 +34,16 @@ Alertmanager to your channel. Example rules (high 5xx rate, target
 down) + a compose overlay ship in the cloud deployment repo
 (`deploy/prometheus/` — see its README); a self-hoster scrapes the same
 endpoint. This path owns infra-level alerting (availability, latency,
-resource) and needs no graphden config beyond exposing `/metrics`.
+resource).
+
+`/metrics` and `/metrics/prometheus` are **auth-required** when auth is
+active (they disclose JVM version / CPU / live load-average / restart
+windows — recon material), so a Prometheus scrape must authenticate:
+give the scrape job a bearer via `authorization.credentials_file` (a
+file holding a valid token). When auth is OFF (no `AUTH_TOKEN` — a local
+dev box) they stay open. `/health` is always public (const-only). The
+cloud additionally refuses `/metrics` at the TLS edge (Caddy), so it is
+never reachable publicly there regardless of auth.
 
 ### 3b. Built-in: domain alerter (opt-in — Telegram or webhook)
 

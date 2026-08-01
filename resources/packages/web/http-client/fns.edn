@@ -2,15 +2,22 @@
 ;; specialization LADDER (the same shape the server side uses:
 ;; `:route` carries `:method` as data, `:get-route` pins it):
 ;;
-;;   :http-request            method :http-method-token (ANY protocol
-;;                            token — custom/extension methods welcome)
+;;   :http-request            method :text (ANY RFC 9110 token —
+;;                            custom/extension methods welcome; the
+;;                            impl's wire-method backstop validates
+;;                            the token grammar at runtime)
 ;;     └─ :standard-http-request   method NARROWED to :http-method
-;;                                 (the standard set), still free
-;;          ├─ :http-get           method PINNED "get", body pinned nil
+;;                                 ([:in] refinement — the standard
+;;                                 set), still free
+;;          ├─ :http-get           method PINNED "get"
 ;;          ├─ :http-post          method PINNED "post"
 ;;          ├─ :http-put           method PINNED "put"
 ;;          ├─ :http-delete        method PINNED "delete"
 ;;          └─ :http-patch         method PINNED "patch"
+;;   (+ :http-get-with-authorization — back-compat rename preset,
+;;      parented on the ROOT: it renames the defaulted :headers slot,
+;;      and the checker resolves such renames only against the slot
+;;      owner's direct child)
 ;;
 ;; Need a custom method? Parent `:http-request`. Standard method with
 ;; a custom shape? Parent `:standard-http-request` or a per-method
@@ -38,8 +45,8 @@
 
   {:name :http-request
    :description "Universal outbound HTTP request — method carried as DATA (`:http-method-token`, any RFC 9110 token). Returns `{:status :headers :body}` — body slurped to text, headers stringified; non-2xx responses are returned with their actual status so callers can branch. Throws `http-client/request-failed` on transport errors. Prefer the per-method presets (`:http-get`, `:http-post`, …) — a preset node states its intent in the graph; use this root directly only when the method itself is dynamic or non-standard."
-   :args {:method {:type :http-method-token
-                   :description "HTTP request method, lower-case by convention (`\"get\"`, `\"post\"`, custom tokens allowed). The impl upper-cases at the wire boundary."}
+   :args {:method {:type :text
+                   :description "HTTP request method, lower-case by convention (`\"get\"`, `\"post\"`, custom tokens allowed — any RFC 9110 token; the impl validates the grammar and upper-cases at the wire boundary)."}
           :url {:type :url
                 :description "Absolute URL, e.g. `https://httpbin.org/anything`."}
           :headers {:type :text-map
@@ -64,15 +71,13 @@
    :args {:method {:type :http-method}}}
 
   ;; --- Per-method presets: value-PIN ------------------------------------
-  ;; `:http-get` pins `body nil` too — a GET carrying a body is almost
-  ;; always an authoring error, and the pin makes the mistake
-  ;; inexpressible from this preset (the type system cannot state the
-  ;; method↔body dependency; the pin can).
+  ;; Bare literals: the sweep validates them against :http-method's
+  ;; `[:in]` constraint (literal-satisfies-refinement?). `:http-get`
+  ;; keeps the root's `body nil` default (a GET does not send a body).
   {:name :http-get
-   :description "HTTP GET preset — `:standard-http-request` with the method pinned and no body. Free: `:url`, `:headers`, `:auth-value` (secret-friendly Authorization), `:timeout-ms`."
+   :description "HTTP GET preset — `:standard-http-request` with the method pinned; body stays at the root's nil default. Free: `:url`, `:headers`, `:auth-value` (secret-friendly Authorization), `:timeout-ms`."
    :parent :standard-http-request
-   :args {:method "get"
-          :body {:value nil}}}
+   :args {:method "get"}}
 
   {:name :http-post
    :description "HTTP POST preset. Free: `:url`, `:body` (text — JSON-encode upstream and set `Content-Type`), `:headers`, `:auth-value`, `:timeout-ms`."
@@ -96,9 +101,13 @@
 
   ;; --- Back-compat rename preset ----------------------------------------
   ;; Pre-ladder callers bound `:extra-headers`; keep their surface as a
-  ;; pure rename over the GET preset. `:auth-value` (root slot) is the
-  ;; same arg it always was.
+  ;; rename preset. Parented on the ROOT (not :http-get): renaming the
+  ;; DEFAULTED :headers slot resolves only against the slot owner's
+  ;; direct child — through an intermediate rung the sweep reports
+  ;; "not a slot of <parent>". `:auth-value` (root slot) is the same
+  ;; arg it always was.
   {:name :http-get-with-authorization
-   :description "Auth-aware HTTP GET — `:http-get` with `:headers` re-exposed as `:extra-headers` (back-compat surface). Bind `:auth-value` with the full Authorization header value; its `[:secret :text]`-accepting slot is the secret-flow boundary — vault tokens never cross a generic `:text-map` slot."
-   :parent :http-get
-   :args {:headers {:as :extra-headers}}}]}
+   :description "Auth-aware HTTP GET — `:http-request` with the method pinned and `:headers` re-exposed as `:extra-headers` (back-compat surface). Bind `:auth-value` with the full Authorization header value; its `[:secret :text]`-accepting slot is the secret-flow boundary — vault tokens never cross a generic `:text-map` slot."
+   :parent :http-request
+   :args {:method "get"
+          :headers {:as :extra-headers}}}]}

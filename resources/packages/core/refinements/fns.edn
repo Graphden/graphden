@@ -68,21 +68,21 @@
   {:name :http-status
    :refine {:base :int :constraint [:and [:>= 100] [:<= 599]]}}
 
-  ;; HTTP request-method types — the two upper rungs of the
-  ;; `:http-request` specialization ladder (web/http-client):
-  ;;   :http-method-token — ANY method the protocol admits (RFC 9110
-  ;;     token grammar; custom/extension methods like PROPFIND welcome),
-  ;;   :http-method       — narrowed to the standard set; per-method
-  ;;     presets (`:http-get` / `:http-post` / …) then PIN one literal.
-  ;; Lower-case is the graph convention (mirrors `:route`'s `:method
-  ;; "get"`); the impl upper-cases at the wire boundary.
-  {:name :http-method-token
-   :description "Any HTTP request-method token (RFC 9110 tchar+) — the widest rung of the :http-request method ladder; admits custom/extension methods."
-   :refine {:base :text :constraint [:matches "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"]}}
-
+  ;; Standard HTTP request method — the narrowing rung of the
+  ;; `:http-request` ladder (web/http-client): `:standard-http-request`
+  ;; pins its `:method` slot to this type, per-method presets
+  ;; (`:http-get` / `:http-post` / …) then PIN one literal (the sweep
+  ;; validates literals against `[:in]` via literal-satisfies-refinement?).
+  ;; A SINGLE refine on `:text`, deliberately: the root slot stays plain
+  ;; `:text` (any RFC 9110 token — custom methods welcome; the impl's
+  ;; wire-method backstop validates the token grammar at runtime),
+  ;; because refine⊆refine constraint implication is not provable by
+  ;; the subtype checker — only refine⊆its-base is. Lower-case is the
+  ;; graph convention (mirrors `:route`'s `:method "get"`); the impl
+  ;; upper-cases at the wire boundary.
   {:name :http-method
-   :description "A standard HTTP request method (lower-case). Narrowing of :http-method-token used by :standard-http-request; per-method presets pin one literal."
-   :refine {:base :http-method-token
+   :description "A standard HTTP request method (lower-case) — refinement on :text used by :standard-http-request; per-method presets pin one literal."
+   :refine {:base :text
             :constraint [:in #{"get" "post" "put" "delete" "patch" "head" "options"}]}}
 
   {:name :bit

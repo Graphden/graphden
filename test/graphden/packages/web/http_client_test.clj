@@ -9,8 +9,8 @@
 
    Ladder-level: the parsed package defs are asserted to carry the
    narrowing structure (`:standard-http-request` type-narrows `:method`,
-   presets pin it; `:http-get` also pins `:body` nil) so a fns.edn edit
-   can't silently flatten the ladder.
+   presets pin the literal) so a fns.edn edit can't silently flatten
+   the ladder.
 
    Loads impls.clj dynamically (same pattern as `http_realize_body_test`)
    so private helpers stay private to production but reachable here."
@@ -146,15 +146,17 @@
         (is (= :http-request (:parent fd)))
         (is (= {:type :http-method} (select-keys (get-in fd [:args :method]) [:type])))
         (is (nil? (get-in fd [:args :method :value])))))
-    (testing "per-method presets pin the method literal"
+    (testing "per-method presets pin the method literal (sweep validates
+              it against :http-method's [:in] constraint)"
       (doseq [[fn-name m] {:http-get "get" :http-post "post" :http-put "put"
                            :http-delete "delete" :http-patch "patch"}]
         (let [fd (get defs fn-name)]
           (is (= :standard-http-request (:parent fd)) (str fn-name))
           (is (= m (get-in fd [:args :method])) (str fn-name)))))
-    (testing ":http-get also pins body to literal nil (method↔body dependency)"
-      (is (= {:value nil} (get-in (get defs :http-get) [:args :body]))))
-    (testing "back-compat: :http-get-with-authorization is a pure rename preset over :http-get"
+    (testing "back-compat: :http-get-with-authorization pins GET + renames
+              :headers on the ROOT (defaulted-slot renames resolve only at
+              the slot owner's direct child)"
       (let [fd (get defs :http-get-with-authorization)]
-        (is (= :http-get (:parent fd)))
+        (is (= :http-request (:parent fd)))
+        (is (= "get" (get-in fd [:args :method])))
         (is (= :extra-headers (get-in fd [:args :headers :as])))))))

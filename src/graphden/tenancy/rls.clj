@@ -173,7 +173,9 @@
   [^Connection conn org]
   (with-open [stmt (Connection/.prepareStatement conn "SELECT set_config(?, ?, false)")]
     (PreparedStatement/.setString stmt 1 org-setting)
-    (PreparedStatement/.setString stmt 2 (if (= org tc/public-org) "" org))
+    ;; Platform tier → "" (the RLS policy's `unset` clause = full access);
+    ;; a real tenant → its own org.
+    (PreparedStatement/.setString stmt 2 (if (tc/platform-tier? org) "" org))
     (PreparedStatement/.execute stmt)))
 
 

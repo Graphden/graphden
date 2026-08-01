@@ -171,13 +171,13 @@
    go through the BASE storage and never reach this guard anyway."
   [base entity-name data]
   (when-let [fields (and data
-                         (not= (tc/current-org) tc/public-org)
+                         (not (tc/current-platform-tier?))
                          (get ref-fields entity-name))]
     (let [org (tc/current-org)
           ;; `row-org` normalises a NULL `:org-id` to the public org, so
           ;; un-owned platform rows are covered by the public branch.
           allowed? (fn [target-org]
-                     (or (= tc/public-org target-org)
+                     (or (tc/platform-tier? target-org)
                          (= org target-org)))]
       (doseq [[field target-entity] fields
               :let [v (get data field)]
@@ -214,7 +214,7 @@
    read the existing row to resolve its namespace when `data` doesn't carry the
    identifying fields (a value-only binding update, or a delete)."
   [base authorize-write entity-name data id]
-  (when (and (not= (tc/current-org) tc/public-org)
+  (when (and (not (tc/current-platform-tier?))
              (contains? tenant-forbidden-entities entity-name))
     (throw (ex-info (str "forbidden: tenants may not write privileged entity " entity-name)
                     {:type :authz/forbidden :entity entity-name})))
@@ -231,7 +231,7 @@
    Platform (public org) reads them normally. Authz is unaffected: the
    grant-store reads `:grant` from the BASE storage, not this decorator."
   [entity-name]
-  (and (not= (tc/current-org) tc/public-org)
+  (and (not (tc/current-platform-tier?))
        (contains? tenant-forbidden-entities entity-name)))
 
 

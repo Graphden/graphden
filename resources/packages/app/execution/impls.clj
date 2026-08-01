@@ -204,10 +204,9 @@
   ;; context gets [] so the Stats panel's by-org section simply never renders
   ;; for them. The guard lives HERE, impl-side, so no graph composition can
   ;; reach cross-org data from a tenant ctx.
-  (let [org (tc/current-org)]
-    (if (or (nil? org) (= org "public"))
-      (exec-stats/org-all-stats (:pool (:pg-storage ctx)) days limit)
-      [])))
+  (if (tc/current-platform-tier?)
+    (exec-stats/org-all-stats (:pool (:pg-storage ctx)) days limit)
+    []))
 
 
 (def impls

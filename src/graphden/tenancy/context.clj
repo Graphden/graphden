@@ -38,6 +38,26 @@
   *current-org*)
 
 
+(defn platform-tier?
+  "Is `org` the shared platform tier (the `public` org, or an unbound/nil
+   org that normalises to it)? Today this ALSO means \"trusted / operator\":
+   every privileged short-circuit in the tenancy layer keys on it. The two
+   meanings — the read-only shared package tier, and platform-admin
+   authority — are unified here so the whole tree tests the tier through ONE
+   predicate rather than three ad-hoc encodings (`(= org public-org)`, a
+   literal `\"public\"`, and `\"\"` at the RLS/SQL layer). When operator power
+   moves to a capability grant (Track A2), the authority meaning peels off
+   this predicate while the tier meaning stays."
+  [org]
+  (or (nil? org) (= org public-org)))
+
+
+(defn current-platform-tier?
+  "`platform-tier?` of the org in scope right now."
+  []
+  (platform-tier? (current-org)))
+
+
 (def ^:dynamic *current-principal*
   "The authenticated principal (`AuthProvider` result) for the current
    request, bound by the addon's request-scope. Read by per-namespace grant

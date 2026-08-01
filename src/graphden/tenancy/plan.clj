@@ -125,7 +125,7 @@
    so this runs in the platform ctx on the tenant's behalf). An unknown / nil
    slug on a real tenant → the locked `anonymous` default (fail-safe)."
   [storage org]
-  (when (and org (not= org tc/public-org))
+  (when-not (tc/platform-tier? org)
     (let [slug (:plan (first (sp/query-entities storage :org {:name org})))]
       (get plans slug default-plan))))
 

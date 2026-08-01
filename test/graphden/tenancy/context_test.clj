@@ -53,6 +53,22 @@
   (is (= "public" (tc/current-org)) "unbound → shared public org (single-tenant)"))
 
 
+(deftest platform-tier?-predicate
+  (testing "the shared public org, and nil/unbound which normalises to it"
+    (is (true? (tc/platform-tier? "public")))
+    (is (true? (tc/platform-tier? nil))))
+  (testing "any real tenant org is NOT the platform tier"
+    (is (false? (tc/platform-tier? "acme")))
+    (is (false? (tc/platform-tier? "graphden"))
+        "the vendor org is a normal tenant, not the platform tier"))
+  (testing "current-platform-tier? reads the org in scope"
+    (is (true? (tc/current-platform-tier?)) "unbound → platform tier")
+    (is (true? (tc/with-org "public" (tc/current-platform-tier?))))
+    (is (false? (tc/with-org "acme" (tc/current-platform-tier?))))
+    (is (true? (tc/with-org nil (tc/current-platform-tier?)))
+        "nil → public → platform tier")))
+
+
 (deftest with-org-binds-dynamically
   (testing "binds the thread-local"
     (is (= "acme" (tc/with-org "acme" (tc/current-org)))))

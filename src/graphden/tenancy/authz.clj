@@ -49,7 +49,7 @@
    store, `request-store` picks up the per-request memo."
   [store storage graph]
   (let [org (tc/current-org)]
-    (if (or (not (:fns graph)) (= org tc/public-org))
+    (if (or (not (:fns graph)) (tc/platform-tier? org))
       graph
       (let [subj   (grant/subject tc/*current-principal*)
             rstore (grant/request-store store)
@@ -158,7 +158,7 @@
    `:write` and `:admin` subsume the narrow caps (`grant/cap-implies?`)."
   [store storage]
   (fn [entity-name data id]
-    (when (not= (tc/current-org) tc/public-org) ; platform / admin: unrestricted
+    (when-not (tc/current-platform-tier?) ; platform / admin: unrestricted
       ;; Pick up the request-scope memo so a batch write shares ONE `:grant`
       ;; query across all its rows instead of one per row.
       (let [store (grant/request-store store)]
@@ -209,7 +209,7 @@
    system execution (no principal) — services / cron run unrestricted."
   [store]
   (fn [ctx fn-id]
-    (when (and (not= (tc/current-org) tc/public-org)
+    (when (and (not (tc/current-platform-tier?))
                tc/*current-principal*)
       (let [store (grant/request-store store)
             storage (:storage ctx)

@@ -413,6 +413,30 @@
    :args {:path "/api/switch-org" :handler :_switch-org-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; MEMBERSHIPS (Track B) — GET /api/memberships. The current user's org
+  ;; list + in-scope org, for the editor org-switcher chip. Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-memberships
+   :description "Invoke the addon's memberships seam — `{:current <org> :orgs [<org>…]}` for the current user, or nil without the addon."
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_memberships-json
+   :parent :to-json-string
+   :args {:data :invoke-memberships}}
+
+  {:name :_memberships-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/memberships — the current user's org membership view as JSON."
+   :parent :json-ok-response
+   :args {:body :_memberships-json}}
+
+  {:name :memberships-route
+   :description "GET /api/memberships — the current user's orgs + in-scope org (for the org-switcher). Auth-required; scoped to the authenticated principal."
+   :parent :get-auth-required
+   :args {:path "/api/memberships" :handler :_memberships-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; LOGOUT-ALL (§4.1) — POST /api/logout-all. Sign out everywhere: delete
   ;; EVERY session token for the current user (the seam reads
   ;; *current-principal*). Auth-required.

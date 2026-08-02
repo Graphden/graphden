@@ -93,11 +93,22 @@
     ((:switch-org ops) ctx request)))
 
 
+;; Memberships (Track B): the authenticated user's org list + their in-scope
+;; org, for the editor org-switcher. Reads *current-principal* (own view). No
+;; addon → nil.
+(defbase invoke-memberships
+  []
+  (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
+    ((:memberships ops) ctx)))
+
+
 (def impls
   {:invoke-login invoke-login
    :invoke-logout invoke-logout
    :invoke-logout-all invoke-logout-all
    :invoke-switch-org invoke-switch-org
+   :invoke-memberships invoke-memberships
    :invoke-signup invoke-signup
    :invoke-demo-start invoke-demo-start
    :invoke-invite-create invoke-invite-create

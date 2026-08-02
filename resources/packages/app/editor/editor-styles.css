@@ -551,6 +551,37 @@ body.sidebar-collapsed .sidebar-expand-floating {
 }
 .branch-popover-error.hidden { display: none; }
 
+/* Org-switcher chip (Track B — multi-org). Mirrors the branch chip; shown
+   only when the user belongs to >1 org. */
+.org-chip-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; color: var(--header-fg);
+  border: 1px solid var(--header-fg); border-radius: 3px;
+  padding: 3px 8px; height: 26px; cursor: pointer;
+  font: inherit; font-size: 11px; line-height: 1;
+  max-width: 140px;
+}
+.org-chip-btn span {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.org-chip-btn:hover { background: var(--header-fg); color: var(--header-bg); }
+.org-popover {
+  position: absolute; z-index: 300;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--fg); border-radius: 3px;
+  padding: 6px; min-width: 160px; max-width: 260px;
+  box-shadow: var(--shadow-md);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.org-popover.hidden { display: none; }
+.org-popover-item {
+  text-align: left; background: transparent; color: var(--fg);
+  border: none; border-radius: 3px; padding: 4px 8px; cursor: pointer;
+  font: inherit; font-size: 12px;
+}
+.org-popover-item:hover:not(:disabled) { background: var(--hover-bg); }
+.org-popover-item-current { color: var(--muted-fg); cursor: default; }
+
 .branch-popover-list {
   display: flex; flex-direction: column;
   max-height: 240px; overflow-y: auto;

@@ -285,6 +285,21 @@
     (conj grant-orgs (:org user-row))))
 
 
+(defn current-memberships
+  "The AUTHENTICATED user's org membership view for the editor org-switcher —
+   `{:current <session-org> :orgs [<org> …]}` (orgs sorted). nil when
+   unauthenticated. Reads `*current-principal*` (own session only)."
+  [ctx]
+  (let [storage (:storage ctx)
+        principal tc/*current-principal*
+        username (:user principal)]
+    (when-not (str/blank? username)
+      (tc/with-org tc/public-org
+                   (when-let [user (first (sp/query-entities storage :user {:username username}))]
+                     {:current (:org principal)
+                      :orgs (vec (sort (memberships storage user)))})))))
+
+
 (defn- target-org-from-request
   "The `?org=` query-string parameter of a Ring `request`, or nil. Read from
    the query string (never the body, which the login graph already consumed)

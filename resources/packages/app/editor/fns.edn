@@ -34,6 +34,7 @@
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
                   "packages/app/editor/editor-auth.js"
+                  "packages/app/editor/editor-org-switcher.js"
                   "packages/app/editor/editor-branches.js"
                   "packages/app/editor/editor-branch-diff.js"
                   "packages/app/editor/editor-create.js"
@@ -162,6 +163,7 @@
               ;; of `#entity-list`.
               [:div {:class "menu-header-actions"}
                [:div {:id "prefs-mount"}]
+               [:div {:id "org-mount"}]
                [:div {:id "branch-mount"}]
                [:div {:id "auth-mount"}]]]
              [:div {:id "search-bar" :role "search"}

@@ -414,6 +414,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPrefsLate();
   initAuthLock();
   if (typeof initBranchSelector === 'function') initBranchSelector();
+  if (typeof initOrgSwitcher === 'function') initOrgSwitcher();
   // Top-level catch so a failed initial /api/graph/entities load (network
   // outage, 5xx, branch-router error) shows a user-visible error in the
   // header instead of leaving the editor silently broken with just an

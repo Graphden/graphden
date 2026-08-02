@@ -278,6 +278,7 @@
      :logout users/logout!
      :logout-all users/logout-all!
      :switch-org users/switch-org!
+     :memberships users/current-memberships
      :signup (fn [ctx u p o request]
                ;; Over-quota IP → a {:rate-limited true} sentinel the handler
                ;; maps to 429 (distinct from a nil signup-failure → 401).

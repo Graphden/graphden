@@ -155,6 +155,36 @@
       (query-latest-per-group [_ _ _ _] nil))))
 
 
+(deftest org-aware-login
+  ;; Track B2: membership is grant-derived (orgs a user holds a grant in +
+  ;; their home org), and login can target any membership org via ?org=.
+  (let [storage (mem-storage)
+        ctx {:storage storage}
+        alice (sp/create-entity storage :user
+                                {:username "alice"
+                                 :password-hash (users/hash-password "pw-alice-8+")
+                                 :org "acme"})]
+    ;; alice is home in acme (org-admin) AND was granted :write in beta.
+    (sp/create-entity storage :grant {:subject-id (str (:id alice)) :subject-kind "user"
+                                      :capability "admin" :namespace nil :org "acme"})
+    (sp/create-entity storage :grant {:subject-id (str (:id alice)) :subject-kind "user"
+                                      :capability "write" :namespace nil :org "beta"})
+    (testing "memberships = grant orgs ∪ home"
+      (is (= #{"acme" "beta"} (users/memberships storage alice))))
+    (testing "no target → home org (single-org behaviour unchanged)"
+      (is (= "acme" (:org (users/login! ctx "alice" "pw-alice-8+")))))
+    (testing "?org= a membership org → a session for THAT org"
+      (is (= "beta" (:org (users/login! ctx "alice" "pw-alice-8+" {:query-string "x=1&org=beta"})))))
+    (testing "?org= an org the user is NOT a member of → denied (nil → 401)"
+      (is (nil? (users/login! ctx "alice" "pw-alice-8+" {:query-string "org=victim"}))))
+    (testing "wrong password is still denied regardless of ?org"
+      (is (nil? (users/login! ctx "alice" "wrong" {:query-string "org=acme"}))))
+    (testing "the minted token carries the chosen org"
+      (users/login! ctx "alice" "pw-alice-8+" {:query-string "org=beta"})
+      (is (some #(= "beta" (:org %))
+                (sp/query-entities storage :token {:user "alice"}))))))
+
+
 (deftest invite-roundtrip
   (let [storage (mem-storage)
         ctx {:storage storage}

@@ -272,33 +272,70 @@
     {:tokens-backfilled (stamped :token :user-id :user tokens)}))
 
 
+(defn memberships
+  "The orgs `user-row` can enter — grant-derived membership (Track B, no
+   membership entity, principle #2): every org an org-cap grant of theirs is
+   scoped to, plus their home org (`:user.org`). `:platform-admin` grants
+   (org nil) add no org. Runs in the platform context (reads the global
+   `:grant` table). Returns a set of org ids."
+  [storage user-row]
+  (let [grant-orgs (into #{}
+                         (keep :org)
+                         (sp/query-entities storage :grant {:subject-id (str (:id user-row))}))]
+    (conj grant-orgs (:org user-row))))
+
+
+(defn- target-org-from-request
+  "The `?org=` query-string parameter of a Ring `request`, or nil. Read from
+   the query string (never the body, which the login graph already consumed)
+   so `POST /api/login?org=acme` and a picker re-post both work."
+  [request]
+  (some-> (:query-string request)
+          (->> (re-find #"(?:^|&)org=([^&]+)"))
+          second
+          (java.net.URLDecoder/decode "UTF-8")
+          not-empty))
+
+
+(defn- login-impl
+  "Core login with an explicit `target-org` (nil → the user's home
+   `:user.org`). Verifies credentials AND membership of the target org, then
+   mints a session `:token` for it. Returns `{:token :user :org}` or nil (bad
+   creds / not a member of the target)."
+  [ctx username password target-org]
+  (let [storage (:storage ctx)]
+    (tc/with-org tc/public-org
+                 (let [user (first (sp/query-entities storage :user {:username username}))]
+                   (when (and user (verify-password password (:password-hash user)))
+                     (let [org (or target-org (:org user))]
+                       (when (contains? (memberships storage user) org)
+                         (let [raw (random-token)]
+                           (sp/create-entity storage :token
+                                             {:token-hash (tauth/token-hash raw)
+                                              :user username
+                                              ;; the STABLE identity (string form) —
+                                              ;; authz keys on this, not the mutable
+                                              ;; username
+                                              :user-id (str (:id user))
+                                              :org org
+                                              :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
+                           {:token raw :user username :org org}))))))))
+
+
 (defn login!
   "Verify `username`/`password` and mint a SESSION TOKEN (a `:token` row, so the
    storage-token-provider resolves it later). Runs in the platform context
    (login precedes any session). Returns `{:token <raw> :user :org}` on success,
-   nil on bad credentials (caller maps nil → 401).
+   nil on bad credentials OR when the requested org isn't one the user belongs
+   to (caller maps nil → 401).
 
-   4-arg arity: the `:login` user-ops seam is invoked with the Ring `request`
-   (its client IP feeds the addon's per-IP rate limiter); the core op ignores
-   it — this arity is just the seam adapter."
-  ([ctx username password]
-   (let [storage (:storage ctx)]
-     (tc/with-org tc/public-org
-                  (let [user (first (sp/query-entities storage :user {:username username}))]
-                    (when (and user (verify-password password (:password-hash user)))
-                      (let [raw (random-token)
-                            org (:org user)]
-                        (sp/create-entity storage :token
-                                          {:token-hash (tauth/token-hash raw)
-                                           :user username
-                                           ;; the STABLE identity (string form) —
-                                           ;; authz keys on this, not the mutable
-                                           ;; username
-                                           :user-id (str (:id user))
-                                           :org org
-                                           :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
-                        {:token raw :user username :org org}))))))
-  ([ctx username password _request] (login! ctx username password)))
+   Org-aware (Track B): the 4-arg seam adapter reads `?org=` off the Ring
+   `request` (whose client IP also feeds the per-IP rate limiter) as the target
+   org; the 3-arg has no target and lands the user in their home org
+   (`:user.org`) — an unchanged single-org login."
+  ([ctx username password] (login-impl ctx username password nil))
+  ([ctx username password request]
+   (login-impl ctx username password (target-org-from-request request))))
 
 
 (defn- grant-creator-admin!

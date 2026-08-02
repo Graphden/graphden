@@ -61,6 +61,15 @@
         r (ob/bootstrap! s {:password "s3cret-operator-pw" :user "op" :org "graphden" :plan "network"})]
     (testing "summary"
       (is (= {:org "graphden" :user "op" :user-created? true :grant-created? true} r)))
+    (testing "TWO grants: cross-org platform-admin (org nil) + org-admin scoped
+              to graphden (so the operator can edit graphden's own code)"
+      (let [u (first (sp/query-entities s :user {:username "op"}))
+            grants (sp/query-entities s :grant {:subject-id (str (:id u))})]
+        (is (= #{"platform-admin" "admin"} (set (map :capability grants))))
+        (is (nil? (:org (first (filter #(= "platform-admin" (:capability %)) grants))))
+            "platform-admin is cross-org (org nil)")
+        (is (= "graphden" (:org (first (filter #(= "admin" (:capability %)) grants))))
+            "the org-admin grant is scoped to graphden")))
     (testing "the org is a NORMAL tenant on the network plan"
       (let [org (first (sp/query-entities s :org {:name "graphden"}))]
         (is (= "network" (:plan org)))))
@@ -85,6 +94,6 @@
         (is (= {:org "graphden" :user "op" :user-created? false :grant-created? false} r2))
         (is (= 1 (count (sp/query-entities s :org {:name "graphden"}))))
         (is (= 1 (count (sp/query-entities s :user {:username "op"}))))
-        (is (= 1 (count (sp/query-entities s :grant {})))))
+        (is (= 2 (count (sp/query-entities s :grant {}))) "platform-admin + org-admin, no dupes"))
       (testing "an in-app password change is NOT clobbered by a redeploy"
         (is (= hash1 (:password-hash (first (sp/query-entities s :user {:username "op"})))))))))

@@ -43,15 +43,32 @@
                                          {:username user-name
                                           :password-hash (users/hash-password password)
                                           :org org-name}))
-          grant-created?
-          (when-not (some #(= "platform-admin" (:capability %))
-                          (sp/query-entities storage :grant {:subject-id (str (:id user-row))}))
+          existing-grants (sp/query-entities storage :grant {:subject-id (str (:id user-row))})
+          has-cap? (fn [cap] (some #(= cap (:capability %)) existing-grants))
+          ;; The platform-admin grant — cross-org (org nil, exempt from org
+          ;; matching): the admin console + cross-org read.
+          platform-grant-created?
+          (when-not (has-cap? "platform-admin")
             (sp/create-entity storage :grant
                               {:subject-id (str (:id user-row))
                                :subject-kind "user"
                                :capability "platform-admin"
                                :namespace nil})
-            true)]
+            true)
+          ;; AND an org-admin grant scoped to the operator's own org (Track
+          ;; B1), so the operator can edit graphden's OWN code (the landing /
+          ;; integration packages) as a normal org-admin — distinct from the
+          ;; cross-org platform authority above.
+          org-grant-created?
+          (when-not (has-cap? "admin")
+            (sp/create-entity storage :grant
+                              {:subject-id (str (:id user-row))
+                               :subject-kind "user"
+                               :capability "admin"
+                               :namespace nil
+                               :org org-name})
+            true)
+          grant-created? (or platform-grant-created? org-grant-created?)]
       (log/info "operator-bootstrap:" user-name "@" org-name
                 (str "(org-created " (boolean org-created?)
                      ", user-created " (nil? existing-user)

@@ -46,6 +46,28 @@
   (is (grant/can? store (subj "carol") :read "acme")))
 
 
+(deftest org-scoped-grants
+  ;; Track B1: an org-cap grant applies ONLY in the org it was granted for;
+  ;; nil org is legacy/global; platform-admin ignores org.
+  (let [s (grant/static-grant-store
+            [{:subject-id "u" :subject "u" :capability :admin :namespace nil :org "acme"}
+             {:subject-id "u" :subject "u" :capability :read :namespace nil :org nil}
+             {:subject-id "op" :subject "op" :capability :platform-admin :namespace nil :org "graphden"}])
+        in-acme {:id "u" :name "u" :org "acme"}
+        in-beta {:id "u" :name "u" :org "beta"}]
+    (testing "an org-scoped :admin applies in its own org"
+      (is (grant/can? s in-acme :write "acme.anything")))
+    (testing "but NOT when the SAME user acts in another org (the multi-org leak this closes)"
+      (is (not (grant/can? s in-beta :write "beta.anything"))
+          "acme-admin must not carry into beta"))
+    (testing "a nil-org (legacy/global) grant still matches any org"
+      (is (grant/can? s in-acme :read "x"))
+      (is (grant/can? s in-beta :read "x") "nil org = behaviour-preserving global"))
+    (testing "platform-admin is exempt from org matching (cross-org by design)"
+      (is (grant/platform-admin? s {:id "op" :name "op" :org "beta"})
+          "the operator's platform-admin works regardless of the org in scope"))))
+
+
 (deftest platform-admin?-predicate
   (let [s (grant/static-grant-store
             [{:subject-id "op" :subject "op" :capability :platform-admin :namespace nil}

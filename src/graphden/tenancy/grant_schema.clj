@@ -33,6 +33,10 @@
   #uuid "b3f5d9a1-4c27-4e8b-9f16-2a7c0d63e8b4")
 
 
+(def ^:private grant-org-field-uuid
+  #uuid "e1a7c4d2-0b58-49f3-8c61-73d2f9a4b6e0")
+
+
 (defn extend-builder
   "Add the `:grant` entity — `(subject-id, capability, namespace)`.
    `subject-id` is the STABLE authz key (the user's id) that enforcement
@@ -63,7 +67,21 @@
                                      :nullable? true}
                       :namespace {:uuid grant-namespace-field-uuid
                                   :type :text
-                                  :nullable? true}})
+                                  :nullable? true}
+                      ;; Track B1 — the org this grant is scoped to. An
+                      ;; org-cap (`:admin`/`:write`/…) applies ONLY when the
+                      ;; holder acts in THIS org; without it, a user who
+                      ;; becomes a member of a second org (Slack multi-org,
+                      ;; Track B) would carry their first org's admin into it.
+                      ;; nil = legacy / global (matches any org —
+                      ;; behaviour-preserving for pre-B1 rows and single-org
+                      ;; users); `:platform-admin` grants ignore it entirely
+                      ;; (cross-org by design). Indexed for the membership
+                      ;; read ("which orgs is this user in").
+                      :org {:uuid grant-org-field-uuid
+                            :type :text
+                            :nullable? true
+                            :indexed? true}})
       ;; grant.subject retired (audit-2 2b): the denormalized username —
       ;; enforcement and cascades key on :subject-id, display joins the
       ;; user row; legacy rows were backfilled at addon boot before
@@ -90,7 +108,10 @@
                           :subject-id (:subject-id row)
                           ;; stored as text → back to the keyword grant-allows? compares
                           :capability (keyword (:capability row))
-                          :namespace (:namespace row)})))
+                          :namespace (:namespace row)
+                          ;; Track B1 — the org this grant is scoped to (nil =
+                          ;; legacy/global). grant-allows? matches org-caps on it.
+                          :org (:org row)})))
             ids))))
 
 

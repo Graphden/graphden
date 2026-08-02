@@ -95,9 +95,16 @@
    subject's `:org`, a `\"user\"` grant (or a legacy nil kind) its stable `:id`
    (NOT the mutable username) — capability by `cap-implies?` (`:admin`/`:write`
    subsumption), and namespace by scope coverage."
-  [{:keys [subject-kind subject-id capability namespace]} subj cap ns-path]
+  [{:keys [subject-kind subject-id capability namespace org]} subj cap ns-path]
   (and (cap-implies? capability cap)
        (ns-covers? namespace ns-path)
+       ;; Org scoping (Track B1): an org-cap grant applies only in the org it
+       ;; was granted for. `:platform-admin` is cross-org by design (exempt);
+       ;; a nil `:org` is legacy/global (matches any — behaviour-preserving
+       ;; for pre-B1 rows and single-org users).
+       (or (= capability :platform-admin)
+           (nil? org)
+           (= org (:org subj)))
        (if (= subject-kind "org")
          (= subject-id (:org subj))
          (= subject-id (:id subj)))))

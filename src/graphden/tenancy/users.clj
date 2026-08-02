@@ -313,13 +313,17 @@
    enforcement either, so the write throwing there is harmless — log and let
    signup succeed rather than 500. A throw WITH the schema present (a real
    failure) leaves the creator read-only, but the warning makes it diagnosable."
-  [storage user-id]
+  [storage user-id org]
   (try
     (sp/create-entity storage :grant
                       {:subject-id (str user-id)
                        :subject-kind "user"
                        :capability "admin"
-                       :namespace nil})
+                       :namespace nil
+                       ;; Track B1 — scope the creator's admin to THEIR new org
+                       ;; (NOT the public escalation this runs under), so it
+                       ;; can't follow them into a second org they later join.
+                       :org org})
     (catch Exception e
       (log/warn e "signup: org-admin grant not created for subject" (str user-id)
                 "— grant enforcement likely disabled (no :grant schema)"))))
@@ -377,7 +381,7 @@
                        ;; The creator owns the org → make them its admin, or
                        ;; a grant-store deployment (the cloud) would leave them
                        ;; read-only in the org they just created.
-                       (grant-creator-admin! storage (:id user))
+                       (grant-creator-admin! storage (:id user) org)
                        (login! ctx username password)))))))
 
 

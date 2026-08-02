@@ -86,6 +86,10 @@
    - `:user`    — the user registry (§4.1). Write: a tenant could create
      accounts in other orgs; read: enumerate every user + their password
      hashes. `login!` reads it in the platform context, before any session.
+   - `:app-route` — an org's named apps (Track C, `(org, label) →
+     handler-fn-id`). Write: a tenant could route `<label>.<victim>.<base>` at
+     its OWN fn (host hijack); read: enumerate every org's apps. The router
+     reads it in the platform context; tenant management is org-stamped.
 
    `:branch` and `:fn-execution` were once here too; both are now ORG-SCOPED
    (see `default-scoped-entities`) — a tenant gets its OWN branches/executions
@@ -93,7 +97,7 @@
 
    Platform / admin (public org) is unrestricted. New privileged entity types
    MUST be added here."
-  #{:service :grant :domain :org :token :user})
+  #{:service :grant :domain :org :token :user :app-route})
 
 
 (defn- row-org

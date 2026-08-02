@@ -148,11 +148,13 @@
 ;;    :tenancy/token-schema {}   ; storage-backed auth tokens (§3.4 #1)
 ;;    :tenancy/domain-schema {}  ; storage-backed custom domains (§3.4 #2)
 ;;    :tenancy/user-schema {}    ; login identities (§4.1)
+;;    :tenancy/app-route-schema {} ; an org's named apps (Track C)
 ;;    :db/schema {:extensions [#ig/ref :tenancy/grant-schema
 ;;                             #ig/ref :tenancy/org-schema
 ;;                             #ig/ref :tenancy/token-schema
 ;;                             #ig/ref :tenancy/domain-schema
-;;                             #ig/ref :tenancy/user-schema]}
+;;                             #ig/ref :tenancy/user-schema
+;;                             #ig/ref :tenancy/app-route-schema]}
 ;;    ;; storage-backed custom-domain routing (provisionable, no redeploy);
 ;;    ;; register a domain via POST /api/domains, flip :verified? after the
 ;;    ;; graphden-verify=<org> DNS-TXT check, then it routes like a subdomain:

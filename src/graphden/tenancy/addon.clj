@@ -34,6 +34,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.system.api-routes-js :as api-routes-js]
     [graphden.system.route-collection :as rc]
+    [graphden.tenancy.app-route-schema :as app-route-schema]
     [graphden.tenancy.app-router :as app-router]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.authz :as authz]
@@ -250,6 +251,12 @@
 (defmethod ig/init-key :tenancy/user-schema [_ _]
   ;; Adds the `:user` entity (§4.1 — login identities).
   user-schema/extend-builder)
+
+
+(defmethod ig/init-key :tenancy/app-route-schema [_ _]
+  ;; Adds the `:app-route` entity (Track C — an org's named apps, `(org, label)
+  ;; → handler-fn-id`).
+  app-route-schema/extend-builder)
 
 
 (defmethod ig/init-key :tenancy/user-ops

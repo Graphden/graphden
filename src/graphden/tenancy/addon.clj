@@ -44,6 +44,7 @@
     [graphden.tenancy.domain-schema :as domain-schema]
     [graphden.tenancy.grant :as grant]
     [graphden.tenancy.grant-schema :as grant-schema]
+    [graphden.tenancy.operator-bootstrap :as operator-bootstrap]
     [graphden.tenancy.org-schema :as org-schema]
     [graphden.tenancy.plan :as plan]
     [graphden.tenancy.rls :as rls]
@@ -308,6 +309,16 @@
                      (not demo-signup-enabled?) {:disabled true}
                      (not (signup-limiter (users/client-ip request))) {:rate-limited true}
                      :else (users/demo-start! ctx)))}))
+
+
+(defmethod ig/init-key :tenancy/operator-bootstrap [_ {:keys [storage user org plan password]}]
+  ;; Track A2c — seed the operator org + user + platform-admin grant so the
+  ;; operator logs in through the normal /login form. No-op unless
+  ;; `:password` (GRAPHDEN_OPERATOR_PASSWORD) is set; create-if-absent, so
+  ;; reruns never clobber an in-app password change. `:storage` = base
+  ;; (:db/postgres): :org/:user/:grant are global platform entities. Depends
+  ;; on the schema init-keys (their :db/schema extension) having run.
+  (operator-bootstrap/bootstrap! storage {:user user :org org :plan plan :password password}))
 
 
 (defmethod ig/init-key :tenancy/session-cleanup [_ {:keys [storage period-ms]}]

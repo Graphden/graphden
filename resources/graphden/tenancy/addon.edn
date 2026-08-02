@@ -47,6 +47,18 @@
  ;; already created by its init-key), so policies attach after migration.
  :tenancy/rls-enabler {:storage #ig/ref :db/postgres}
 
+ ;; Operator bootstrap (Track A2c): seed the operator org + user +
+ ;; platform-admin grant so the operator logs in through the normal /login
+ ;; form (no token/DevTools). No-op unless GRAPHDEN_OPERATOR_PASSWORD is set;
+ ;; create-if-absent (reruns never clobber an in-app password change). The
+ ;; org is a NORMAL sandboxed tenant (plan `network`) — the authority is the
+ ;; grant, not the org. Depends on :db/postgres (tenancy tables exist).
+ :tenancy/operator-bootstrap {:storage #ig/ref :db/postgres
+                              :user #or [#env GRAPHDEN_OPERATOR_USER "operator"]
+                              :org #or [#env GRAPHDEN_OPERATOR_ORG "graphden"]
+                              :plan #or [#env GRAPHDEN_OPERATOR_PLAN "network"]
+                              :password #or [#env GRAPHDEN_OPERATOR_PASSWORD ""]}
+
  ;; Org-admin UI fns-package (route-collection seam, §6) — loaded ONLY with
  ;; the addon, via the fns-channel seam. Deep-merge keeps core's
  ;; :package-names and adds these. Its routes are NOT in core's :all; they

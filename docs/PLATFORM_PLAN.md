@@ -487,6 +487,21 @@ remain **PaaS** — full access to `:http-server`/port/`:service`. This is exact
 ONLY for `org ≠ public`, so one codebase gives PaaS to the self-hoster +
 the operator and FaaS to the cloud tenant — the §3.0 goal of "works WITH the addon and WITHOUT".
 
+**Operator = a capability, not a magic org (Track A).** The platform-tier
+predicate is unified (`tenancy.context/platform-tier?`), and operator
+authority is a `:platform-admin` grant (`tenancy.grant`), NOT "you are the
+public org". The `:platform-admin` holder may run the admin console
+(`:user`/`:org`/`:domain`/`:plan` writes + cross-org read/stats) from a
+NORMAL tenant org, while the effect gate, per-namespace `:fn` authz, and
+quotas still apply to them — so the vendor org (`graphden`, seeded by
+`:tenancy/operator-bootstrap` on the `network` plan) is "just tenant #1",
+sandboxed like any other, and CANNOT read/edit/execute another tenant's
+graph. The boot seed (`GRAPHDEN_OPERATOR_PASSWORD`, create-if-absent)
+mints the operator org + user + grant so the operator logs in through the
+normal `/login` form. `"public"` reverts to meaning only the shared
+read-only stdlib tier. (Slack multi-org identity + nested app subdomains
+are the follow-on tracks B/C.)
+
 **Why it's better than a service-sandbox.** In the PaaS variant a tenant-`:service` binds
 its own port BYPASSING request-scope → you'd have to invent a `:service-scope` seam +
 a per-request wrap across the port/async boundary. In FaaS the tenant's handler

@@ -23,7 +23,15 @@
       (is (= (ig/ref :org/scoped-storage) (:base-storage (:db/versioned cfg)))
           "stack becomes Versioned(OrgScoped(app/storage(Postgres)))"))
     (testing "deep-merge preserves the core :app/storage seam unchanged"
-      (is (= (ig/ref :db/postgres) (:base (:app/storage cfg)))))))
+      (is (= (ig/ref :db/postgres) (:base (:app/storage cfg)))))
+    (testing "the operator bootstrap is wired on the base storage with env
+              defaults (inactive until GRAPHDEN_OPERATOR_PASSWORD is set)"
+      (let [ob (:tenancy/operator-bootstrap cfg)]
+        (is (= (ig/ref :db/postgres) (:storage ob)))
+        (is (= "operator" (:user ob)))
+        (is (= "graphden" (:org ob)) "the operator org is a normal tenant")
+        (is (= "network" (:plan ob)))
+        (is (= "" (:password ob)) "no-op by default — self-hoster opts in")))))
 
 
 (deftest init-key-builds-org-scoped-storage

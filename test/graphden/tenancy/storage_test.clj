@@ -253,6 +253,45 @@
             (tc/with-org "graphden" (sp/create-entity s :org {:id "sys"})))))))
 
 
+(deftest org-admin-cannot-escalate-to-platform-power
+  ;; The escalation invariant, made explicit: a self-serve signup makes the
+  ;; org creator an ORG-admin (`:admin` on their own org's root namespace).
+  ;; That grant must NOT let them touch platform state — change a plan/tariff
+  ;; (write :org) or mint themselves a :grant (least of all :platform-admin).
+  ;; Both are blocked by guard-write! because an :admin grant is neither the
+  ;; platform tier nor platform-admin. This pins that a future refactor can't
+  ;; silently turn org-admin into platform power.
+  (let [s (ts/org-scoped-storage (fake))
+        ;; An org-admin of "acme": root :admin in their own org (exactly what
+        ;; grant-creator-admin! writes at signup), bound as the request principal.
+        admin-store (grant/static-grant-store
+                      [{:subject-id "boss" :subject "boss"
+                        :capability :admin :namespace nil}])
+        as-org-admin (fn [f]
+                       (binding [tc/*current-principal* {:user-id "boss" :user "boss" :org "acme"}
+                                 grant/*request-grant-store* admin-store]
+                         (tc/with-org "acme" (f))))
+        forbidden? (fn [thunk]
+                     (let [ex (try (as-org-admin thunk) nil
+                                   (catch clojure.lang.ExceptionInfo e e))]
+                       (and ex (= :authz/forbidden (:type (ex-data ex))))))]
+    (testing "an org-admin can still edit their OWN graph (baseline — the grant works)"
+      (is (some? (as-org-admin #(sp/create-entity s :fn {:id "own" :name "mine"})))))
+    (testing "but CANNOT change a plan/tariff (write :org)"
+      (is (forbidden? #(sp/create-entity s :org {:id "acme" :plan "dedicated"})))
+      (is (forbidden? #(sp/update-entity s :org "acme" {:plan "dedicated"}))))
+    (testing "and CANNOT mint a grant — least of all platform-admin for themselves"
+      (is (forbidden? #(sp/create-entity s :grant
+                                         {:subject-id "boss" :capability "platform-admin"
+                                          :subject-kind "user" :namespace nil})))
+      (is (forbidden? #(sp/create-entity s :grant
+                                         {:subject-id "boss" :capability "admin"
+                                          :subject-kind "user" :namespace "other"}))))
+    (testing "nor mint a :token or create a :user in another org"
+      (is (forbidden? #(sp/create-entity s :token {:id "t" :org "victim"})))
+      (is (forbidden? #(sp/create-entity s :user {:id "u" :username "x" :org "victim"}))))))
+
+
 (deftest tenants-cannot-read-privileged-entities
   ;; Read mirror: a tenant must not enumerate platform state (:service/:grant/
   ;; :domain) — e.g. the grants panel's :list-grants would leak every org's

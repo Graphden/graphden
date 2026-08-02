@@ -46,6 +46,27 @@
   (is (grant/can? store (subj "carol") :read "acme")))
 
 
+(deftest platform-admin?-predicate
+  (let [s (grant/static-grant-store
+            [{:subject-id "op" :subject "op" :capability :platform-admin :namespace nil}
+             {:subject-id "orgadmin" :subject "orgadmin" :capability :admin :namespace ""}])]
+    (testing "a platform-admin grant is recognised, namespace-independently"
+      (is (grant/platform-admin? s (subj "op")))
+      (is (grant/principal-platform-admin? s {:user-id "op" :user "op"})))
+    (testing "org :admin (even root) is NOT platform-admin — a tenant admin
+              can never be a platform operator"
+      (is (not (grant/platform-admin? s (subj "orgadmin")))))
+    (testing "default-deny: no grant, and unauthenticated"
+      (is (not (grant/platform-admin? s (subj "nobody"))))
+      (is (not (grant/platform-admin? s nil)))
+      (is (not (grant/principal-platform-admin? s {:authenticated? true})))
+      (is (not (grant/principal-platform-admin? s nil))))
+    (testing "platform-admin does NOT leak into the namespace lattice
+              (A2a is additive; can? is unchanged)"
+      (is (not (grant/can? s (subj "op") :write "acme"))
+          "platform-admin confers no per-namespace :write yet — that's A2b"))))
+
+
 (deftest default-deny
   (testing "capabilities are independent — only :admin implies others"
     (is (not (grant/can? store (subj "alice") :read "acme")) ":write does not imply :read")

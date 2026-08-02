@@ -30,8 +30,17 @@
    - `:bind-args` — change a binding's `:value`, NOT its ref / type-override /
      structure (restricted editing — §4.3).
    - `:append-list` — add / remove one's own `:binding-list-item` rows, not
-     parent / inherited ones."
-  #{:read :view-impl :write :execute :admin :bind-args :append-list})
+     parent / inherited ones.
+   - `:platform-admin` — PLATFORM operator authority (the admin console:
+     users / orgs / domains / plans + cross-org visibility). Distinct in
+     kind from every cap above: those are namespace-scoped, org-INTERNAL
+     powers; this is a cross-org platform flag, checked namespace-
+     independently via `platform-admin?` (NOT via the `can? … namespace`
+     lattice) and NEVER conferred by org `:admin` (an org admin is bounded
+     to their own org — ADR-identity-model). Only the operator bootstrap
+     mints it. Track A2b rehangs the platform-tier privilege sites onto it;
+     A2a introduces only the name + predicate."
+  #{:read :view-impl :write :execute :admin :bind-args :append-list :platform-admin})
 
 
 (def ^:private cap-implications
@@ -54,7 +63,11 @@
    :execute     #{:execute}
    :read        #{:read}
    :bind-args   #{:bind-args}
-   :append-list #{:append-list}})
+   :append-list #{:append-list}
+   ;; Independent for now — it is checked via `platform-admin?`, not the
+   ;; namespace lattice, and org `:admin` deliberately does NOT reach it.
+   ;; Whether it subsumes org caps for the operator is an A2b decision.
+   :platform-admin #{:platform-admin}})
 
 
 (defn- cap-implies?
@@ -239,6 +252,26 @@
   [store subj capability]
   (boolean (some #(or (= (:capability %) :admin) (= (:capability %) capability))
                  (grants-for store subj))))
+
+
+(defn platform-admin?
+  "Does `subj` hold the `:platform-admin` capability (in ANY namespace)? The
+   cross-org operator flag — checked namespace-INDEPENDENTLY (platform
+   authority is not a subtree power) and NEVER satisfied by org `:admin`.
+   Track A2b keys the platform-tier privilege sites on this. Default-deny;
+   nil subj (unauthenticated) → false."
+  [store subj]
+  (boolean (and subj
+                (some #(= (:capability %) :platform-admin)
+                      (grants-for store subj)))))
+
+
+(defn principal-platform-admin?
+  "Bridge from an auth principal to `platform-admin?` via `subject`. An
+   unauthenticated principal (no `:user-id`) → false."
+  [store principal]
+  (boolean (when-let [subj (subject principal)]
+             (platform-admin? store subj))))
 
 
 (defn can-mutate?

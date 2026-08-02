@@ -19,7 +19,8 @@
    update/delete own-guards this layer leaves to it)."
   (:require
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.tenancy.grant :as grant]))
 
 
 (def default-scoped-entities
@@ -214,7 +215,14 @@
    read the existing row to resolve its namespace when `data` doesn't carry the
    identifying fields (a value-only binding update, or a delete)."
   [base authorize-write entity-name data id]
+  ;; A platform-admin operator (org graphden, holding the grant) may write
+  ;; these platform entities — the admin console. They are global (not in
+  ;; `default-scoped-entities`), so no `:org-id` stamping is corrupted; the
+  ;; write sets the TARGET org as a data field. Everything else — the effect
+  ;; gate, per-namespace :fn authz, quotas — is untouched, so the operator
+  ;; still can't edit a tenant's graph or escape the sandbox with their own.
   (when (and (not (tc/current-platform-tier?))
+             (not (grant/current-platform-admin?))
              (contains? tenant-forbidden-entities entity-name))
     (throw (ex-info (str "forbidden: tenants may not write privileged entity " entity-name)
                     {:type :authz/forbidden :entity entity-name})))
@@ -232,6 +240,7 @@
    grant-store reads `:grant` from the BASE storage, not this decorator."
   [entity-name]
   (and (not (tc/current-platform-tier?))
+       (not (grant/current-platform-admin?))
        (contains? tenant-forbidden-entities entity-name)))
 
 

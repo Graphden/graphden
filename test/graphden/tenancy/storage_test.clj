@@ -8,6 +8,7 @@
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.grant :as grant]
     [graphden.tenancy.storage :as ts]))
 
 
@@ -218,6 +219,38 @@
     (testing "but :branch is now ORG-SCOPED, not forbidden — a tenant gets its own"
       (is (some? (tc/with-org "acme" (sp/create-entity s :branch {:id 4 :name "feat"})))
           "§4: tenants create their own branches (stamped with their org)"))))
+
+
+(deftest platform-admin-operator-may-write-privileged-entities
+  ;; Track A2b: a platform-admin operator acts in a NORMAL tenant org
+  ;; (e.g. "graphden") — NOT the public tier — yet may write the platform
+  ;; entities (the admin console). The grant is what confers this, keyed on
+  ;; the current principal via the per-request grant store.
+  (let [s (ts/org-scoped-storage (fake))
+        op-store (grant/static-grant-store
+                   [{:subject-id "op" :subject "op"
+                     :capability :platform-admin :namespace nil}])
+        as-operator (fn [f]
+                      (binding [tc/*current-principal* {:user-id "op" :user "op" :org "graphden"}
+                                grant/*request-grant-store* op-store]
+                        (tc/with-org "graphden" (f))))]
+    (testing "the operator (a tenant org, holding platform-admin) writes them"
+      (doseq [en [:org :user :domain :grant]]
+        (is (some? (as-operator #(sp/create-entity s en {:id (str "a-" (name en))})))
+            (str en " write allowed for a platform-admin operator"))))
+    (testing "and reads them (cross-org admin console)"
+      (is (map? (as-operator #(sp/read-entity s :org "a-org")))))
+    (testing "a plain tenant in the SAME org but WITHOUT the grant is still denied"
+      (binding [tc/*current-principal* {:user-id "nobody" :user "nobody" :org "graphden"}
+                grant/*request-grant-store* op-store]
+        (tc/with-org "graphden"
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           (sp/create-entity s :org {:id "denied"}))
+                         "no platform-admin grant → the tenant-forbidden guard still fires"))))
+    (testing "with NO request grant store bound (system / pre-A2c), behaviour
+              is unchanged — a tenant is denied"
+      (is (thrown? clojure.lang.ExceptionInfo
+            (tc/with-org "graphden" (sp/create-entity s :org {:id "sys"})))))))
 
 
 (deftest tenants-cannot-read-privileged-entities

@@ -12,7 +12,8 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.services.reconciler :as recon]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.tenancy.grant :as grant]))
 
 
 (defbase resolve-fn
@@ -204,7 +205,7 @@
   ;; context gets [] so the Stats panel's by-org section simply never renders
   ;; for them. The guard lives HERE, impl-side, so no graph composition can
   ;; reach cross-org data from a tenant ctx.
-  (if (tc/current-platform-tier?)
+  (if (or (tc/current-platform-tier?) (grant/current-platform-admin?))
     (exec-stats/org-all-stats (:pool (:pg-storage ctx)) days limit)
     []))
 

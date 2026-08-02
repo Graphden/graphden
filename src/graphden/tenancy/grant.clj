@@ -12,7 +12,8 @@
    - namespace — a grant on a parent ns (dot-path) covers descendants; a
      blank / nil ns is the root grant (covers everything)."
   (:require
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [graphden.tenancy.context :as tc]))
 
 
 (def capabilities
@@ -274,6 +275,17 @@
              (platform-admin? store subj))))
 
 
+(defn current-platform-admin?
+  "Does the CURRENT request principal (`tc/*current-principal*`) hold
+   platform-admin, per the per-request grant store? The zero-arg seam the
+   storage guards / admin ops read so they don't thread a store + principal
+   through their signatures. False outside a request (no `*request-grant-
+   store*`) and for a system / unauthenticated caller (nil principal)."
+  []
+  (let [store (request-store nil)]
+    (boolean (and store (principal-platform-admin? store tc/*current-principal*)))))
+
+
 (defn can-mutate?
   "Coarse 'can this subject perform SOME write' gate — holds any write-family
    capability (`:write` / `:bind-args` / `:append-list`) or `:admin` in ANY
@@ -323,7 +335,15 @@
       ;; through; the precise per-field check runs at the storage layer. An
       ;; unauthenticated principal (nil subject) is denied any write.
       (if-let [subj (subject principal)]
-        (case cap
-          :write (can-mutate? store subj)
-          (has-capability? store subj cap))
+        ;; A platform-admin operator passes the coarse write/execute gate
+        ;; regardless of org-level caps — the admin console writes platform
+        ;; entities (:user/:org/:domain/:plan), which carry no per-namespace
+        ;; grant. The precise per-entity check still runs at the storage
+        ;; layer (guard-write! allows platform-admin for tenant-forbidden
+        ;; entities; per-namespace :fn authz is untouched, so this does NOT
+        ;; let the operator edit another tenant's graph).
+        (or (platform-admin? store subj)
+            (case cap
+              :write (can-mutate? store subj)
+              (has-capability? store subj cap)))
         false))))

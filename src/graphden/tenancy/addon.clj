@@ -271,11 +271,13 @@
      :login (fn [ctx u p request]
               ;; Over-quota IP → nil, i.e. the SAME result as bad credentials
               ;; (→ 401), so the limiter's existence isn't revealed to an
-              ;; attacker probing the boundary.
+              ;; attacker probing the boundary. Pass the REQUEST so login! reads
+              ;; `?org=` (Track B org-aware login) — the 3-arg would drop it.
               (when (login-limiter (users/client-ip request))
-                (users/login! ctx u p)))
+                (users/login! ctx u p request)))
      :logout users/logout!
      :logout-all users/logout-all!
+     :switch-org users/switch-org!
      :signup (fn [ctx u p o request]
                ;; Over-quota IP → a {:rate-limited true} sentinel the handler
                ;; maps to 429 (distinct from a nil signup-failure → 401).

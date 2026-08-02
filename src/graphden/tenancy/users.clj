@@ -297,6 +297,23 @@
           not-empty))
 
 
+(defn- mint-session!
+  "Mint a session `:token` for `user` (a `:user` row) in `org` and return
+   `{:token :user :org}`. The shared minting step of login + org-switch;
+   called in the platform context."
+  [storage user org]
+  (let [raw (random-token)]
+    (sp/create-entity storage :token
+                      {:token-hash (tauth/token-hash raw)
+                       :user (:username user)
+                       ;; the STABLE identity (string form) — authz keys on
+                       ;; this, not the mutable username
+                       :user-id (str (:id user))
+                       :org org
+                       :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
+    {:token raw :user (:username user) :org org}))
+
+
 (defn- login-impl
   "Core login with an explicit `target-org` (nil → the user's home
    `:user.org`). Verifies credentials AND membership of the target org, then
@@ -309,17 +326,7 @@
                    (when (and user (verify-password password (:password-hash user)))
                      (let [org (or target-org (:org user))]
                        (when (contains? (memberships storage user) org)
-                         (let [raw (random-token)]
-                           (sp/create-entity storage :token
-                                             {:token-hash (tauth/token-hash raw)
-                                              :user username
-                                              ;; the STABLE identity (string form) —
-                                              ;; authz keys on this, not the mutable
-                                              ;; username
-                                              :user-id (str (:id user))
-                                              :org org
-                                              :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
-                           {:token raw :user username :org org}))))))))
+                         (mint-session! storage user org))))))))
 
 
 (defn login!
@@ -531,6 +538,26 @@
                                                               {:token-hash (tauth/token-hash token)}))]
                        (sp/delete-entity storage :token (:id row))
                        true))))))
+
+
+(defn switch-org!
+  "In-session org switch (Track B) — re-mint a session `:token` for another
+   org the AUTHENTICATED user is a member of, WITHOUT re-entering the
+   password. The user is read from `*current-principal*` (so a caller can
+   only switch THEIR OWN session), the target org from `?org=` on `request`.
+   Verifies membership. Returns `{:token :user :org}` for the new org, or nil
+   (unauthenticated / no target / not a member). The old token stays valid
+   until it expires or the client drops it; a fresh one is minted for the new
+   org so `*current-org*` follows on the next request."
+  [ctx request]
+  (let [storage (:storage ctx)
+        username (:user tc/*current-principal*)
+        target (target-org-from-request request)]
+    (when (and (not (str/blank? username)) target)
+      (tc/with-org tc/public-org
+                   (when-let [user (first (sp/query-entities storage :user {:username username}))]
+                     (when (contains? (memberships storage user) target)
+                       (mint-session! storage user target)))))))
 
 
 (defn logout-all!

@@ -82,10 +82,22 @@
     ((:logout-all ops) ctx)))
 
 
+;; Switch-org (Track B): re-mint a session token for another org the
+;; authenticated user is a member of (target org from `?org=` on the request).
+;; The seam reads *current-principal* for the user, so a caller only switches
+;; its OWN session. No addon → nil.
+(defbase invoke-switch-org
+  [request]
+  (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
+    ((:switch-org ops) ctx request)))
+
+
 (def impls
   {:invoke-login invoke-login
    :invoke-logout invoke-logout
    :invoke-logout-all invoke-logout-all
+   :invoke-switch-org invoke-switch-org
    :invoke-signup invoke-signup
    :invoke-demo-start invoke-demo-start
    :invoke-invite-create invoke-invite-create

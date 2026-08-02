@@ -370,6 +370,49 @@
    :args {:path "/api/logout" :handler :_logout-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; SWITCH-ORG (Track B) — POST /api/switch-org?org=<org>. Re-mint a session
+  ;; token for another org the authenticated user belongs to, without the
+  ;; password. Auth-required; the seam reads *current-principal* for the user
+  ;; and `?org=` for the target, so a caller only switches its OWN session and
+  ;; only into an org it's a member of. Returns the new token (200) or 401.
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-switch-org
+   :description "Invoke the addon's switch-org seam — re-mint a session token for the `?org=` org the current user is a member of. Returns {:token :user :org} or nil (not a member / no addon)."
+   :args {:request {:type :ring-request-shape :description "The Ring request — `?org=` names the target org; the authenticated user comes from the principal."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_switch-org-do
+   :parent :invoke-switch-org}
+
+  {:name :_switch-org-token
+   :parent :get
+   :args {:coll :_switch-org-do :key {:value :token} :default {:value ""}}}
+
+  {:name :_switch-org-token-text
+   :parent :to-str
+   :args {:value :_switch-org-token}}
+
+  {:name :_switch-org-blank?
+   :parent :blank?
+   :args {:string :_switch-org-token-text}}
+
+  {:name :_switch-org-200
+   :parent :text-ok-response
+   :args {:body :_switch-org-token-text}}
+
+  {:name :_switch-org-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/switch-org — 200 + the new session token, or 401 when the user isn't a member of the target org (blank token)."
+   :parent :if
+   :args {:test :_switch-org-blank? :then :_auth-401 :else :_switch-org-200}}
+
+  {:name :switch-org-route
+   :description "POST /api/switch-org?org=<org> — re-mint a session for another membership org. Auth-required."
+   :parent :post
+   :args {:path "/api/switch-org" :handler :_switch-org-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; LOGOUT-ALL (§4.1) — POST /api/logout-all. Sign out everywhere: delete
   ;; EVERY session token for the current user (the seam reads
   ;; *current-principal*). Auth-required.

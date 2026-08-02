@@ -22,7 +22,7 @@
                   :set-my-app-handler-route :verify-my-domain-route
                   :login-page-route :auth-form-partial-route
                   :login-route :signup-route :demo-start-route
-                  :logout-route :logout-all-route
+                  :logout-route :logout-all-route :switch-org-route
                   :invite-create-route :invite-signup-route
                   :quota-route
                   :services-list-route :services-create-route

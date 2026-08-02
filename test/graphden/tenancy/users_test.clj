@@ -8,6 +8,7 @@
     [graphden.auth.provider :as ap]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.auth :as tauth]
+    [graphden.tenancy.context :as tc]
     [graphden.tenancy.users :as users]))
 
 
@@ -183,6 +184,32 @@
       (users/login! ctx "alice" "pw-alice-8+" {:query-string "org=beta"})
       (is (some #(= "beta" (:org %))
                 (sp/query-entities storage :token {:user "alice"}))))))
+
+
+(deftest switch-org-re-mints-for-a-membership
+  ;; Track B3: an authenticated user switches to another membership org
+  ;; without a password; the user comes from *current-principal* (own session
+  ;; only), the target from ?org=.
+  (let [storage (mem-storage)
+        ctx {:storage storage}
+        alice (sp/create-entity storage :user
+                                {:username "alice"
+                                 :password-hash (users/hash-password "pw-alice-8+")
+                                 :org "acme"})]
+    (sp/create-entity storage :grant {:subject-id (str (:id alice)) :subject-kind "user"
+                                      :capability "write" :namespace nil :org "beta"})
+    (binding [tc/*current-principal* {:user "alice" :user-id (str (:id alice)) :org "acme"}]
+      (testing "switch into a membership org → a new session token for it"
+        (let [r (users/switch-org! ctx {:query-string "org=beta"})]
+          (is (= "beta" (:org r)))
+          (is (string? (:token r)))
+          (is (some #(= "beta" (:org %)) (sp/query-entities storage :token {:user "alice"})))))
+      (testing "switch into a NON-membership org → nil (denied)"
+        (is (nil? (users/switch-org! ctx {:query-string "org=victim"}))))
+      (testing "no target org → nil"
+        (is (nil? (users/switch-org! ctx {:query-string "x=1"})))))
+    (testing "unauthenticated (no principal) → nil"
+      (is (nil? (users/switch-org! ctx {:query-string "org=beta"}))))))
 
 
 (deftest invite-roundtrip

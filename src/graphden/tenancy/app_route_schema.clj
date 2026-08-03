@@ -49,5 +49,5 @@
                      {:label {:uuid app-route-label-field-uuid :type :text}
                       :org {:uuid app-route-org-field-uuid :type :text}
                       :handler-fn-id {:uuid app-route-handler-fn-id-field-uuid
-                                      :type :text}})
+                                      :type :uuid}})
       (ds/add-constraint :app-route {:type :unique :fields [:org :label]})))

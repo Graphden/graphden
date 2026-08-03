@@ -30,8 +30,8 @@
 (deftest app-route-rows-roundtrip-and-resolve
   (pth/clean-database-fast! setup/*container*)
   (let [storage (fresh-storage)
-        shop-fn (str (random-uuid))
-        docs-fn (str (random-uuid))]
+        shop-fn (random-uuid)
+        docs-fn (random-uuid)]
     (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id shop-fn})
     (sp/create-entity storage :app-route {:org "acme" :label "docs" :handler-fn-id docs-fn})
     (testing "handler-fn-id-for resolves the routing key (org, label)"
@@ -54,12 +54,12 @@
 (deftest app-route-label-is-unique-per-org-not-across-orgs
   (pth/clean-database-fast! setup/*container*)
   (let [storage (fresh-storage)]
-    (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id (str (random-uuid))})
+    (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id (random-uuid)})
     (testing "the same label may be routed by a DIFFERENT org"
-      (sp/create-entity storage :app-route {:org "beta" :label "shop" :handler-fn-id (str (random-uuid))})
+      (sp/create-entity storage :app-route {:org "beta" :label "shop" :handler-fn-id (random-uuid)})
       (is (some? (app-route/handler-fn-id-for storage "beta" "shop"))))
     (testing "(org, label) is UNIQUE — one handler per app"
       (is (thrown? Exception
             (sp/create-entity storage :app-route
-                              {:org "acme" :label "shop" :handler-fn-id (str (random-uuid))}))))
+                              {:org "acme" :label "shop" :handler-fn-id (random-uuid)}))))
     (sp/close storage)))

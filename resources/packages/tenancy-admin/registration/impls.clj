@@ -113,6 +113,53 @@
     (f (tc/current-org) (some-> (:id data) str not-empty parse-uuid))))
 
 
+(defbase tenant-list-app-routes
+  "The current tenant org's own `:app-route` rows (named apps) via the installed
+   seam (`tenancy.storage/list-tenant-app-routes-fn`), filtered by `:org`. nil
+   outside tenancy / for the public org."
+  []
+  (cr/record-effect! :db)
+  (when-let [f @ts/list-tenant-app-routes-fn]
+    (f (tc/current-org))))
+
+
+(defbase tenant-create-app-route
+  "Create an `:app-route` owned by the current tenant org via the installed seam
+   (`tenancy.storage/create-tenant-app-route-fn`, `:org`-stamped + label-validated
+   + UNIQUE `(org, label)`). `data` is the parsed body — `:label` + `:handler-fn-id`;
+   coerce the fn-id to a UUID at this HTTP boundary. Returns the created row (nil
+   outside tenancy)."
+  [data]
+  (cr/record-effect! :db)
+  (when-let [f @ts/create-tenant-app-route-fn]
+    (f (tc/current-org)
+       {:label (some-> (:label data) str not-empty)
+        :handler-fn-id (some-> (:handler-fn-id data) str not-empty parse-uuid)})))
+
+
+(defbase tenant-update-app-route
+  "Point an `:app-route` the current tenant org owns at a different handler via
+   the installed seam (`tenancy.storage/update-tenant-app-route-fn`, ownership-
+   gated by `:org`). `data` = parsed body — `:id` (route uuid) + `:handler-fn-id`.
+   Returns the updated row (nil outside tenancy)."
+  [data]
+  (cr/record-effect! :db)
+  (when-let [f @ts/update-tenant-app-route-fn]
+    (f (tc/current-org)
+       (some-> (:id data) str not-empty parse-uuid)
+       {:handler-fn-id (some-> (:handler-fn-id data) str not-empty parse-uuid)})))
+
+
+(defbase tenant-delete-app-route
+  "Delete an `:app-route` the current tenant org owns via the installed seam
+   (`tenancy.storage/delete-tenant-app-route-fn`, ownership-gated by `:org`).
+   `data` = parsed body carrying `:id` (route uuid). nil outside tenancy."
+  [data]
+  (cr/record-effect! :db)
+  (when-let [f @ts/delete-tenant-app-route-fn]
+    (f (tc/current-org) (some-> (:id data) str not-empty parse-uuid))))
+
+
 (def impls
   {:known-plan-slug? known-plan-slug?
    :invalidate-byo-cache invalidate-byo-cache
@@ -120,4 +167,8 @@
    :tenant-create-service tenant-create-service
    :tenant-list-services tenant-list-services
    :tenant-update-service tenant-update-service
-   :tenant-delete-service tenant-delete-service})
+   :tenant-delete-service tenant-delete-service
+   :tenant-list-app-routes tenant-list-app-routes
+   :tenant-create-app-route tenant-create-app-route
+   :tenant-update-app-route tenant-update-app-route
+   :tenant-delete-app-route tenant-delete-app-route})

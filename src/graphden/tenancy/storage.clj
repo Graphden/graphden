@@ -286,6 +286,25 @@
 (defonce delete-tenant-service-fn (atom nil))
 
 
+;; Tenant app-route (named-app) CRUD seams (Track C4a). `:app-route` is
+;; tenant-forbidden (host-hijack / enumeration guard — see
+;; `tenant-forbidden-entities`), so the tenant-facing `/api/orgs/apps` endpoints
+;; reach it via the platform base storage, `:org`-stamped on create and
+;; `:org`-filtered on list; update / delete are ownership-gated by `:org` in the
+;; seam. `graphden.tenancy.plan/install!` sets them (closed over base); nil (no
+;; addon) → the endpoints no-op. Same lifecycle-binding rationale as above.
+(defonce create-tenant-app-route-fn (atom nil))
+
+
+(defonce list-tenant-app-routes-fn (atom nil))
+
+
+(defonce update-tenant-app-route-fn (atom nil))
+
+
+(defonce delete-tenant-app-route-fn (atom nil))
+
+
 ;; The tenant-controlled DB-growth entities the create-path gates, → the
 ;; user-facing over-limit message. `:fn` and `:binding-list-item` are the two
 ;; INDEPENDENT vectors: fns (slots/bindings scale with them) and sequence

@@ -15,6 +15,7 @@
   (:require
     [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.app-route :as app-route]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
     [next.jdbc :as jdbc]
@@ -312,6 +313,84 @@
   (sp/delete-entity storage :service service-id))
 
 
+;; --- tenant app-routes (Track C4a) ----------------------------------------
+
+(defn- valid-app-label?
+  "A DNS-safe subdomain label: 1–63 chars, lower-case alnum + internal hyphens,
+   no leading/trailing hyphen. `<label>.<org>.<base>` must be a legal host."
+  [label]
+  (boolean (and (string? label)
+                (<= 1 (count label) 63)
+                (re-matches #"[a-z0-9]([a-z0-9-]*[a-z0-9])?" label))))
+
+
+(defn- checked-app-label
+  "Normalize + validate an app label, or throw `:app-route/invalid-label`."
+  [label]
+  (let [l (app-route/normalize-label label)]
+    (when-not (valid-app-label? l)
+      (throw (ex-info "An app label must be a DNS-safe subdomain (lower-case letters, digits, hyphens)."
+                      {:type :app-route/invalid-label :label label})))
+    l))
+
+
+(defn create-tenant-app-route!
+  "Create an `:app-route` OWNED by tenant `org` (a named app `(org, label)` →
+   `handler-fn-id`), via the platform `storage`. `:app-route` is tenant-forbidden,
+   so this stamps `:org` and writes below the OrgScoped decorator. The label is
+   normalized + validated; the schema's UNIQUE `(org, label)` rejects a duplicate.
+   Throws `:authz/forbidden` (no tenant) / `:app-route/invalid-label`."
+  [storage org data]
+  (when (or (nil? org) (= org tc/public-org))
+    (throw (ex-info "Apps require an authenticated tenant."
+                    {:type :authz/forbidden :reason :app-route/no-tenant})))
+  (sp/create-entity storage :app-route
+                    {:org org
+                     :label (checked-app-label (:label data))
+                     :handler-fn-id (:handler-fn-id data)}))
+
+
+(defn list-tenant-app-routes!
+  "Every `:app-route` OWNED by tenant `org` (its `:org` rows), read via the
+   platform `storage` — the entity is tenant-forbidden, so the tenant reads its
+   own through this seam, filtered by `:org` (never another org's). Public org /
+   no org → nil."
+  [storage org]
+  (when (and org (not= org tc/public-org))
+    (vec (app-route/routes-for-org storage org))))
+
+
+(defn- owned-app-route!
+  "Read `:app-route` `route-id` via base + assert tenant `org` OWNS it. Throws
+   `:authz/forbidden` (unknown id / other org) — one opaque error so a tenant
+   can't probe another org's route ids. Returns the row."
+  [storage org route-id]
+  (let [row (when route-id (sp/read-entity storage :app-route route-id))]
+    (when (or (nil? row) (nil? org) (= org tc/public-org) (not= org (:org row)))
+      (throw (ex-info "App not found."
+                      {:type :authz/forbidden :org org :reason :app-route/not-owned})))
+    row))
+
+
+(defn update-tenant-app-route!
+  "Point an `:app-route` tenant `org` OWNS at a different `handler-fn-id`
+   (ownership-checked). The `(org, label)` routing key is immutable — retargeting
+   swaps only the handler; changing the label is delete + create. Returns the
+   updated row."
+  [storage org route-id data]
+  (owned-app-route! storage org route-id)
+  (sp/update-entity storage :app-route route-id
+                    {:handler-fn-id (:handler-fn-id data)}))
+
+
+(defn delete-tenant-app-route!
+  "Delete an `:app-route` tenant `org` OWNS (ownership-checked), through the
+   platform `storage`. Returns the delete result."
+  [storage org route-id]
+  (owned-app-route! storage org route-id)
+  (sp/delete-entity storage :app-route route-id))
+
+
 (defn install!
   "Install the plan-driven seams (closed over the platform `storage`): the
    effect allow-list resolver (compile-runtime), the row-cap check, the
@@ -325,7 +404,11 @@
   (reset! ts/create-tenant-service-fn (partial create-tenant-service! storage))
   (reset! ts/list-tenant-services-fn (partial list-tenant-services! storage))
   (reset! ts/update-tenant-service-fn (partial update-tenant-service! storage))
-  (reset! ts/delete-tenant-service-fn (partial delete-tenant-service! storage)))
+  (reset! ts/delete-tenant-service-fn (partial delete-tenant-service! storage))
+  (reset! ts/create-tenant-app-route-fn (partial create-tenant-app-route! storage))
+  (reset! ts/list-tenant-app-routes-fn (partial list-tenant-app-routes! storage))
+  (reset! ts/update-tenant-app-route-fn (partial update-tenant-app-route! storage))
+  (reset! ts/delete-tenant-app-route-fn (partial delete-tenant-app-route! storage)))
 
 
 (defn uninstall!
@@ -339,4 +422,8 @@
   (reset! ts/create-tenant-service-fn nil)
   (reset! ts/list-tenant-services-fn nil)
   (reset! ts/update-tenant-service-fn nil)
-  (reset! ts/delete-tenant-service-fn nil))
+  (reset! ts/delete-tenant-service-fn nil)
+  (reset! ts/create-tenant-app-route-fn nil)
+  (reset! ts/list-tenant-app-routes-fn nil)
+  (reset! ts/update-tenant-app-route-fn nil)
+  (reset! ts/delete-tenant-app-route-fn nil))

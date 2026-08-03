@@ -8,15 +8,22 @@
 // inside the partial that swap the refreshed panel back into [data-apps-panel]
 // — no client JS here beyond the shell.
 //
-// Shown to authenticated users (the partial route is auth-required, org-scoped
-// by current-org). Mirrors editor-errors.js / editor-packages.js; the caller
+// Shown to authenticated users ON A TENANCY deployment only: /partials/apps-panel
+// lives in the addon-only tenancy-admin package, so on a single-tenant instance
+// it 404s. We gate on window.API.api_orgs_apps (the /api/orgs/apps route, present
+// only when tenancy-admin is loaded) — the same "is tenancy active" signal the
+// org-switcher uses (api_memberships) — so a single-tenant editor never mounts
+// the section and never logs the 404. Mirrors editor-errors.js; the caller
 // (editor-sidebar.js mountAdminSection) runs htmx.process after appending, so
 // the hx-get on a CONNECTED node fires.
 //
-// Globals consumed: isAuthenticated, htmx.
+// Globals consumed: isAuthenticated, window.API, htmx.
 
 function buildAppsSection() {
   if (!isAuthenticated()) return null;
+  // Tenancy-only: no addon → no /api/orgs/apps route → no Apps section (avoids a
+  // console 404 for /partials/apps-panel on single-tenant instances).
+  if (!window.API?.api_orgs_apps) return null;
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-apps';
   wrap.innerHTML = ''

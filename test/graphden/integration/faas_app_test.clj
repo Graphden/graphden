@@ -684,6 +684,40 @@
       (is (= :authz/forbidden (:type (ex-data ex)))))))
 
 
+(deftest org-admin-cannot-escalate-to-platform
+  ;; The escalation the two-layer effect gate + guard-write! must block: a
+  ;; signup-minted org-ADMIN (holds :admin on its OWN org's namespace) still
+  ;; cannot touch PLATFORM state. Plan tiers (:org) and grants (:grant) are
+  ;; tenant-forbidden entities, and guard-write! exempts only platform-admin —
+  ;; an org-scoped :admin does NOT satisfy it. Pins that a tenant can neither
+  ;; change a tariff nor self-mint the :platform-admin capability.
+  (let [storage (:storage *ctx*)]
+    ;; The attacker even HOLDS org-admin on its own org — proving that grant
+    ;; buys no platform reach.
+    (sp/create-entity storage :grant {:subject-id "attacker" :capability "admin" :namespace "attacker-org"})
+    (sp/create-entity storage :org {:name "esc-victim" :plan "free"})
+
+    (testing "an org-admin can't change a plan tier — set-org-plan writes the
+              tenant-forbidden :org, so it throws and the plan is untouched"
+      (is (thrown? clojure.lang.ExceptionInfo
+            (tc/with-org "attacker-org"
+                         (cr/execute *ctx* (fn-id-of storage "set-org-plan")
+                                     {:name "esc-victim" :plan "dedicated"}))))
+      (is (= "free" (:plan (first (sp/query-entities storage :org {:name "esc-victim"}))))
+          "the target org's tier is unchanged"))
+
+    (testing "an org-admin can't self-grant :platform-admin — :grant is
+              tenant-forbidden, so guard-write! denies it (:authz/forbidden)"
+      (let [ex (try (tc/with-org "attacker-org"
+                                 (sp/create-entity storage :grant
+                                                   {:subject-id "attacker" :capability "platform-admin" :namespace nil}))
+                    nil (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :authz/forbidden (:type (ex-data ex)))))
+      (is (empty? (filter #(= "platform-admin" (:capability %))
+                          (tc/with-org tc/public-org (sp/query-entities storage :grant {:subject-id "attacker"}))))
+          "no :platform-admin grant was minted for the attacker"))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; Session TTL (§4.1) — the provider rejects expired tokens; logout deletes the
 ;; row so a token can't be replayed after sign-out.

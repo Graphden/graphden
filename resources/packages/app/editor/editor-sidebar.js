@@ -608,6 +608,9 @@ function updateEntityList(data) {
   if (!searchMode && typeof buildRolesAdminSection === 'function') {
     mountAdminSection(list, 'roles', buildRolesAdminSection);
   }
+  if (!searchMode && typeof buildOrgsAdminSection === 'function') {
+    mountAdminSection(list, 'orgs', buildOrgsAdminSection);
+  }
   if (!searchMode && typeof buildPackagesSection === 'function') {
     mountAdminSection(list, 'packages', buildPackagesSection);
   }

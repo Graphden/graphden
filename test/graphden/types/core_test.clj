@@ -12,13 +12,25 @@
 ;; alias registry, then the built-ins are seeded.
 (use-fixtures :each
   (fn [test-fn]
-    (t/clear-aliases!)
-    (t/register-type-alias! :positive-int     [:refine :int     [:> 0]])
-    (t/register-type-alias! :non-negative-int [:refine :int     [:>= 0]])
-    (t/register-type-alias! :negative-int     [:refine :int     [:< 0]])
-    (t/register-type-alias! :non-empty-text   [:refine :text    [:not= ""]])
-    (t/register-type-alias! :positive-numeric [:refine :numeric [:> 0]])
-    (test-fn)))
+    ;; Snapshot + restore the PROCESS-GLOBAL alias registry around every test so
+    ;; nothing this NS does leaks to a sibling NS. Load-bearing for the tests
+    ;; that deliberately drive the global path (`*type-aliases-override* nil` —
+    ;; the owner-collision-warning + per-ns-qualified tests): those escape the
+    ;; parallel plugin's per-thread override and mutate the shared atoms; the
+    ;; restore rolls that back even if a test's own cleanup is skipped, so a
+    ;; type-checking sibling (e.g. deps `check-order-and-warn`) never sees a
+    ;; stray alias. Order-independent.
+    (let [snap (t/global-aliases-snapshot)]
+      (try
+        (t/clear-aliases!)
+        (t/register-type-alias! :positive-int     [:refine :int     [:> 0]])
+        (t/register-type-alias! :non-negative-int [:refine :int     [:>= 0]])
+        (t/register-type-alias! :negative-int     [:refine :int     [:< 0]])
+        (t/register-type-alias! :non-empty-text   [:refine :text    [:not= ""]])
+        (t/register-type-alias! :positive-numeric [:refine :numeric [:> 0]])
+        (test-fn)
+        (finally
+          (t/restore-global-aliases! snap))))))
 
 
 ;; -----------------------------------------------------------------------------

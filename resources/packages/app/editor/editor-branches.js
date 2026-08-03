@@ -106,10 +106,22 @@ function graphdenInWorkspace(nsPath) {
 // The tenancy addon is active iff we've seen a capability header (absent in
 // single-tenant). Used to gate addon-only UI like the Grants admin section.
 function graphdenTenancyActive() { return graphdenCapabilities !== null; }
+// Org-RBAC (org-management) capability gate for the admin panels: true only when
+// the tenancy addon is active AND the header carries `cap` (one of manage-users
+// / manage-grants / manage-roles / manage-apps, or `org-owner`). Unknown caps
+// (single-tenant) → false, so an addon-less editor shows no org-admin panel.
+function graphdenHasCap(cap) {
+  return graphdenCapabilities?.has(cap) ?? false;
+}
+// The current user owns their org (may transfer ownership) — the `org-owner`
+// signal in the capabilities header.
+function graphdenIsOrgOwner() { return graphdenHasCap('org-owner'); }
 window.graphdenCanWrite = graphdenCanWrite;
 window.graphdenCanExecute = graphdenCanExecute;
 window.graphdenInWorkspace = graphdenInWorkspace;
 window.graphdenTenancyActive = graphdenTenancyActive;
+window.graphdenHasCap = graphdenHasCap;
+window.graphdenIsOrgOwner = graphdenIsOrgOwner;
 
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);

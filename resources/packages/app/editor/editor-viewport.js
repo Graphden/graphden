@@ -239,7 +239,7 @@ function animateViewportTo(graphPoint, durationMs) {
   const step = (now) => {
     const t = Math.min(1, (now - start) / durationMs);
     // ease-out, matching the node animations
-    const k = 1 - Math.pow(1 - t, 3);
+    const k = 1 - (1 - t) ** 3;
     setViewportPan(from.x + (target.x - from.x) * k,
                    from.y + (target.y - from.y) * k);
     if (t < 1) requestAnimationFrame(step);

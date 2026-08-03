@@ -10,11 +10,18 @@
 // module only decides WHETHER to mount the section (a client-side gate) and
 // lazy-loads the panel via hx-get.
 //
-// Globals consumed: isAuthenticated, graphdenTenancyActive, htmx.
+// Shown only to a user who may hand out grants in their org (org-RBAC: the
+// owner or a holder of `manage-grants`, from the capabilities header) — not
+// every authenticated user, and not the operator (public org, no such cap).
+//
+// Globals consumed: isAuthenticated, graphdenTenancyActive, graphdenHasCap, htmx.
 
 function buildGrantsAdminSection() {
   if (!isAuthenticated()) return null;
   if (typeof window.graphdenTenancyActive === 'function' && !window.graphdenTenancyActive()) {
+    return null;
+  }
+  if (typeof window.graphdenHasCap === 'function' && !window.graphdenHasCap('manage-grants')) {
     return null;
   }
   const wrap = document.createElement('div');

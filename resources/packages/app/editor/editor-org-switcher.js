@@ -19,7 +19,7 @@ async function initOrgSwitcher() {
   if (!mount || typeof authFetch !== 'function') return;
   // No memberships route (single-tenant / no tenancy addon) → nothing to
   // switch; skip the fetch so we don't hit /undefined.
-  if (!window.API || !window.API.api_memberships) return;
+  if (!window.API?.api_memberships) return;
   let data;
   try {
     const resp = await authFetch(window.API.api_memberships);

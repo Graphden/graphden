@@ -10,11 +10,20 @@
 // every HTMX request via the htmx:configRequest bridge in editor-auth.js. This
 // module only decides WHETHER to mount the section and lazy-loads via hx-get.
 //
-// Globals consumed: isAuthenticated, graphdenTenancyActive, htmx.
+// Shown only to a user who may MANAGE users in their org (org-RBAC: the owner
+// or a holder of the `manage-users` capability — surfaced in the capabilities
+// header). This replaces the old "any authenticated user" gate, so a plain
+// member no longer sees an empty/denied panel, and the operator (public org,
+// no org-management caps) no longer sees a cross-org user list.
+//
+// Globals consumed: isAuthenticated, graphdenTenancyActive, graphdenHasCap, htmx.
 
 function buildUsersAdminSection() {
   if (!isAuthenticated()) return null;
   if (typeof window.graphdenTenancyActive === 'function' && !window.graphdenTenancyActive()) {
+    return null;
+  }
+  if (typeof window.graphdenHasCap === 'function' && !window.graphdenHasCap('manage-users')) {
     return null;
   }
   const wrap = document.createElement('div');

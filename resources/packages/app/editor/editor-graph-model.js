@@ -151,7 +151,7 @@ function graphStopAnimation() {
 }
 
 function easeOutCubic(t) {
-  return 1 - Math.pow(1 - t, 3);
+  return 1 - (1 - t) ** 3;
 }
 
 // Nodes arriving decelerate into place; nodes leaving accelerate away.

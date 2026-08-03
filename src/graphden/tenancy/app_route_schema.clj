@@ -4,15 +4,20 @@
    entry `(org, label, handler-fn-id)`. This replaces the single
    `:org.handler-fn-id` as the source of `host → handler-fn` truth:
 
-   - `label`          — the app's subdomain label. `<label>.<org>.<base>` serves
-                        this app's handler; a verified custom `:domain` may also
-                        point at `(org, label)`. Lower-cased, UNIQUE per org.
-   - `org`            — the owning org. `(org, label)` is the routing key.
-   - `handler-fn-id`  — the fn the app-router runs for the host, exactly like the
-                        legacy `:org.handler-fn-id` did for the whole org.
+   - `label`          — the app's subdomain label. `<label>.<apps-domain>`
+                        (e.g. `shop.graphden.app`) serves this app's handler; a
+                        verified custom `:domain` may also point at it by label.
+                        Lower-cased, **globally UNIQUE** — the apps-domain is a
+                        FLAT namespace (no org in the host), first-come naming
+                        (Vercel-style). Track C model A.
+   - `org`            — the owning org. Scopes list / update / delete + runs the
+                        handler under that org's sandbox.
+   - `handler-fn-id`  — the fn the app-router runs for the host.
 
-   The org's ROOT subdomain (`<org>.<base>`) is the org's editor/login, NOT an
-   app — so apps always carry a non-blank `label` and there is no default row.
+   Apps live on a SEPARATE apps-domain (`graphden.app`), not `graphden.dev` —
+   `<org>.graphden.dev` is the org's editor. So untrusted tenant app code is
+   isolated from the editor's origin (token), and app labels never collide with
+   org editor subdomains.
 
    Platform-managed: `:app-route` is in
    `tenancy.storage/tenant-forbidden-entities` — a tenant writing it could route
@@ -41,8 +46,9 @@
 
 
 (defn extend-builder
-  "Add the `:app-route` entity — `(label, org, handler-fn-id)`, UNIQUE per
-   `(org, label)` so an org can't route one label at two handlers."
+  "Add the `:app-route` entity — `(label, org, handler-fn-id)` with a GLOBALLY
+   UNIQUE `label` (the apps-domain is one flat namespace — `shop.graphden.app`
+   names exactly one app across all orgs)."
   [builder]
   (-> builder
       (ds/add-entity :app-route app-route-entity-uuid
@@ -50,4 +56,4 @@
                       :org {:uuid app-route-org-field-uuid :type :text}
                       :handler-fn-id {:uuid app-route-handler-fn-id-field-uuid
                                       :type :uuid}})
-      (ds/add-constraint :app-route {:type :unique :fields [:org :label]})))
+      (ds/add-constraint :app-route {:type :unique :fields [:label]})))

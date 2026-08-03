@@ -28,6 +28,7 @@
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
     [graphden.system.route-collection :as rc]
+    [graphden.tenancy.app-route-schema :as app-route-schema]
     [graphden.tenancy.app-router :as app]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
@@ -38,7 +39,6 @@
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.org-schema :as org-schema]
     [graphden.tenancy.storage :as ts]
-    [graphden.tenancy.subdomain :as subdomain]
     [graphden.tenancy.token-schema :as token-schema]
     [graphden.tenancy.user-schema :as user-schema]
     [graphden.tenancy.users :as users]
@@ -62,6 +62,7 @@
       (pkgs/extend-builder)
       (grant-schema/extend-builder)
       (org-schema/extend-builder)
+      (app-route-schema/extend-builder)
       (token-schema/extend-builder)
       (domain-schema/extend-builder)
       (user-schema/extend-builder)
@@ -122,9 +123,18 @@
                     (cond-> {:name name} handler-fn-id (assoc :handler-fn-id handler-fn-id))))
 
 
+(defn- set-app!
+  "Register a named app (an `:app-route`) — a GLOBAL `label` owned by `org`,
+   serving `handler-fn-id` (or nil). Track C model A: `<label>.graphden.app`."
+  [label org handler-fn-id]
+  (sp/create-entity (:storage *ctx*) :app-route
+                    (cond-> {:label label :org org}
+                      handler-fn-id (assoc :handler-fn-id handler-fn-id))))
+
+
 (defn- router
   []
-  (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil))
+  (app/make-app-router "graphden.app" nil))
 
 
 (deftest fixture-bootstraps-addon-active-stack
@@ -133,44 +143,44 @@
     (is (some? (:list-grants *fn-id*)) "app :list-grants base-fn compiled + queryable")))
 
 
-(deftest app-router-resolves-the-right-handler-per-org
-  (set-org! "rez-acme" (:list-grants *fn-id*))
-  (set-org! "rez-beta" nil)
+(deftest app-router-resolves-the-right-app-by-global-label
+  (set-app! "rez-acme" "org-acme" (:list-grants *fn-id*))
   (let [target (fn [host]
-                 (app/app-handler-target (:storage *ctx*) (request host)
-                                         (subdomain/identity-org-resolver) "graphden.app" nil))]
-    (testing "a tenant subdomain → that org + its handler (real OrgScoped + :org)"
-      (is (= {:org "rez-acme" :handler-fn-id (:list-grants *fn-id*)} (target "rez-acme.graphden.app"))))
-    (testing "an org with no handler → nil handler-fn-id (→ 404)"
-      (is (nil? (:handler-fn-id (target "rez-beta.graphden.app")))))
-    (testing "apex → nil (not an app request → editor/API)"
-      (is (nil? (target "graphden.app"))))))
+                 (app/app-handler-target (:storage *ctx*) (request host) "graphden.app" nil))]
+    (testing "an apps-domain label → the global app-route's org + handler"
+      (is (= {:org "org-acme" :label "rez-acme" :handler-fn-id (:list-grants *fn-id*)}
+             (target "rez-acme.graphden.app"))))
+    (testing "an UNROUTED apps-domain label → still an app request, nil handler (→ 404)"
+      (is (= {:org nil :label "rez-beta" :handler-fn-id nil} (target "rez-beta.graphden.app"))))
+    (testing "the apps-domain apex is not an app request → nil (→ editor/API)"
+      (is (nil? (target "graphden.app"))))
+    (testing "a graphden.dev editor subdomain is NOT an app → nil (→ editor)"
+      (is (nil? (target "org-acme.graphden.dev"))))))
 
 
 (deftest app-router-runs-handler-effect-gated
-  (set-org! "sandbox-org" (:env *fn-id*))
+  (set-app! "sandbox-app" "sandbox-org" (:env *fn-id*))
   (testing "a tenant handler doing a forbidden :env effect is BLOCKED → 500"
     ;; :env's impl calls record-effect! :env first; the app-router runs it with
     ;; *allowed-effects* = default-cloud-allowed-effects (no :env), so the gate
     ;; throws before any env read → app-error. This is the cloud sandbox.
-    (is (= 500 (:status ((router) *ctx* (request "sandbox-org.graphden.app")))))))
+    (is (= 500 (:status ((router) *ctx* (request "sandbox-app.graphden.app")))))))
 
 
 (deftest app-router-runs-handler-in-org-context
-  (set-org! "exec-org" (:list-grants *fn-id*))
-  (testing "the handler EXECUTES in the org context (resolved + run); reading a
-            tenant-forbidden entity (:grant) is denied → [] (not 404 / 500)"
-    ;; Proves the chain end-to-end: app-router → cr/execute the org's handler
-    ;; with *current-org* bound. :list-grants reads :grant via OrgScoped; as a
-    ;; tenant that's read-denied → []. A 404 would mean unresolved; a 500 would
-    ;; mean an execution error — [] means it ran org-scoped.
-    (is (= [] ((router) *ctx* (request "exec-org.graphden.app"))))))
+  (set-app! "exec-app" "exec-org" (:list-grants *fn-id*))
+  (testing "the handler EXECUTES in the app owner's org context (resolved + run);
+            reading a tenant-forbidden entity (:grant) is denied → [] (not 404 / 500)"
+    ;; Proves the chain end-to-end: app-router → cr/execute the app's handler
+    ;; with *current-org* bound to the label's owner. :list-grants reads :grant
+    ;; via OrgScoped; as a tenant that's read-denied → []. A 404 would mean
+    ;; unresolved; a 500 would mean an execution error — [] means it ran scoped.
+    (is (= [] ((router) *ctx* (request "exec-app.graphden.app"))))))
 
 
-(deftest app-router-404-when-no-handler
-  (set-org! "noh-org" nil)
-  (testing "org exists but no app handler configured → 404"
-    (is (= 404 (:status ((router) *ctx* (request "noh-org.graphden.app")))))))
+(deftest app-router-404-when-app-unconfigured
+  (testing "an apps-domain label with no app-route → 404 (not a fall-through)"
+    (is (= 404 (:status ((router) *ctx* (request "noh-app.graphden.app")))))))
 
 
 ;; ---------------------------------------------------------------------------

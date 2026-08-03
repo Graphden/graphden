@@ -34,32 +34,33 @@
         docs-fn (random-uuid)]
     (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id shop-fn})
     (sp/create-entity storage :app-route {:org "acme" :label "docs" :handler-fn-id docs-fn})
-    (testing "handler-fn-id-for resolves the routing key (org, label)"
-      (is (= shop-fn (app-route/handler-fn-id-for storage "acme" "shop")))
-      (is (= docs-fn (app-route/handler-fn-id-for storage "acme" "docs"))))
-    (testing "an unrouted (org, label) resolves to nil"
-      (is (nil? (app-route/handler-fn-id-for storage "acme" "nope")))
-      (is (nil? (app-route/handler-fn-id-for storage "other-org" "shop"))))
+    (testing "route-by-label resolves a GLOBAL label to its org + handler"
+      (is (= {:org "acme" :handler-fn-id shop-fn} (select-keys (app-route/route-by-label storage "shop") [:org :handler-fn-id])))
+      (is (= docs-fn (:handler-fn-id (app-route/route-by-label storage "docs")))))
+    (testing "an unrouted label resolves to nil"
+      (is (nil? (app-route/route-by-label storage "nope"))))
     (testing "the label is normalized before lookup (case / whitespace)"
-      (is (= shop-fn (app-route/handler-fn-id-for storage "acme" "  SHOP "))))
+      (is (= shop-fn (:handler-fn-id (app-route/route-by-label storage "  SHOP ")))))
     (testing "a blank label never resolves"
-      (is (nil? (app-route/handler-fn-id-for storage "acme" "   ")))
-      (is (nil? (app-route/handler-fn-id-for storage "acme" nil))))
+      (is (nil? (app-route/route-by-label storage "   ")))
+      (is (nil? (app-route/route-by-label storage nil))))
     (testing "routes-for-org lists just that org's apps, sorted by label"
       (is (= ["docs" "shop"] (map :label (app-route/routes-for-org storage "acme"))))
       (is (empty? (app-route/routes-for-org storage "other-org"))))
     (sp/close storage)))
 
 
-(deftest app-route-label-is-unique-per-org-not-across-orgs
+(deftest app-route-label-is-globally-unique
   (pth/clean-database-fast! setup/*container*)
-  (let [storage (fresh-storage)]
-    (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id (random-uuid)})
-    (testing "the same label may be routed by a DIFFERENT org"
-      (sp/create-entity storage :app-route {:org "beta" :label "shop" :handler-fn-id (random-uuid)})
-      (is (some? (app-route/handler-fn-id-for storage "beta" "shop"))))
-    (testing "(org, label) is UNIQUE — one handler per app"
+  (let [storage (fresh-storage)
+        shop-fn (random-uuid)]
+    (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id shop-fn})
+    (testing "the label identifies the app + its owner globally"
+      (is (= "acme" (:org (app-route/route-by-label storage "shop")))))
+    (testing "label is GLOBALLY UNIQUE — a different org can't claim the same label"
       (is (thrown? Exception
             (sp/create-entity storage :app-route
-                              {:org "acme" :label "shop" :handler-fn-id (random-uuid)}))))
+                              {:org "beta" :label "shop" :handler-fn-id (random-uuid)})))
+      ;; still the original owner
+      (is (= shop-fn (:handler-fn-id (app-route/route-by-label storage "shop")))))
     (sp/close storage)))

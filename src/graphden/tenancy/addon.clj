@@ -408,11 +408,13 @@
   (tauth/storage-token-provider storage))
 
 
-(defmethod ig/init-key :tenancy/app-router [_ {:keys [org-resolver base-domain host-resolver timeout-ms]}]
-  ;; (§3.4 FaaS) The seam the branch-router's dispatch consults first: a
-  ;; tenant-subdomain request is served by that org's handler fn, sandboxed +
-  ;; time-bounded. Wired onto `:exec/context`'s `:app-router`.
-  (app-router/make-app-router org-resolver base-domain host-resolver
+(defmethod ig/init-key :tenancy/app-router [_ {:keys [apps-domain host-resolver timeout-ms]}]
+  ;; (§3.4 FaaS, Track C model A) The seam the branch-router's dispatch consults
+  ;; first: a request to the apps-domain (`<label>.graphden.app`) or a verified
+  ;; custom domain is served by that app's handler fn, sandboxed + time-bounded.
+  ;; A `graphden.dev` editor subdomain is NOT an app → nil → editor. Wired onto
+  ;; `:exec/context`'s `:app-router`.
+  (app-router/make-app-router apps-domain host-resolver
                               (or timeout-ms app-router/default-app-timeout-ms)))
 
 

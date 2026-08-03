@@ -1,18 +1,22 @@
 (ns graphden.tenancy.app-router
-  "FaaS app-routing (PLATFORM_PLAN §3.4). A request to a TENANT's app is served
-   by that org's handler fn ORG-SCOPED + EFFECT-GATED — the tenant's code runs
-   INSIDE the platform's sandbox, never owning a server (FaaS, not PaaS). The
-   branch-router's `dispatch` delegates here; this resolves the app target,
-   looks up its handler, and executes it. An app is addressed by (Track C):
+  "FaaS app-routing (PLATFORM_PLAN §3.4, Track C model A). A request to a
+   TENANT's APP is served by that org's handler fn ORG-SCOPED + EFFECT-GATED —
+   the tenant's code runs INSIDE the platform's sandbox, never owning a server
+   (FaaS, not PaaS). The branch-router's `dispatch` delegates here; this
+   resolves the app target, looks up its handler, and executes it.
 
-   - a TWO-level `<label>.<org>.base` subdomain → the org's named app
-     `(org, label)` via `:app-route`;
-   - a single-level `<org>.base` subdomain → the org's default `:handler-fn-id`
-     (legacy; C2b relocates the org root to the editor);
-   - a verified custom domain → the org's default `:handler-fn-id`.
+   Apps live on the SEPARATE apps-domain (`graphden.app`), isolated from the
+   editor's `graphden.dev` origin. An app is addressed by:
 
-   An apex / platform request (no resolvable app target) yields nil and falls
-   through to the normal editor/API flow (token-authority)."
+   - `<label>.<apps-domain>` (e.g. `shop.graphden.app`) → the GLOBAL `:app-route`
+     for `label` → its org + handler;
+   - a verified custom domain → the org's app (a `:domain`-pinned label, else the
+     org's default `:handler-fn-id`).
+
+   Anything ELSE — the apex, an `<org>.graphden.dev` editor subdomain, `app.` —
+   yields nil and falls through to the editor/API flow (token-authority). The
+   editor's org binding comes from the request-scope's own subdomain guard, not
+   here."
   (:require
     [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
@@ -22,45 +26,34 @@
     [graphden.tenancy.subdomain :as subdomain]))
 
 
-(defn resolve-app-target
-  "The app a request addresses, or nil when it's not an app request (→
-   editor/API). Resolution, most-specific first:
-
-   1. a TWO-level `<label>.<org>.base` subdomain → `{:org <org> :label <label>}`
-      (Track C — one of the org's named apps);
-   2. a single-level `<org>.base` subdomain → `{:org <org>}` (the org's default
-      app — legacy, `:org.handler-fn-id`; C2b relocates this to the editor);
-   3. a verified custom domain → `{:org <org>}`, or `{:org <org> :label <app>}`
-      when the domain row pins a specific named app (Track C).
-
-   The apex / an unresolvable host → nil."
-  [request org-resolver base-domain host-resolver]
-  (or (subdomain/app-from-request org-resolver request base-domain)
-      (when-let [org (subdomain/org-from-request org-resolver request base-domain)]
-        {:org org})
-      (domain/target-from-request host-resolver request)))
-
-
 (defn read-handler-fn-id
-  "The handler fn for a resolved app target (or nil — app unconfigured / org
-   absent). A `:label` target reads the `(org, label)` `:app-route`; a
-   label-less target (single-level subdomain / custom domain) reads the org's
-   default `:handler-fn-id`. Reads in the CURRENT (platform/public) context —
-   the dispatch consults the app-router BEFORE the request-scope binds an org,
-   so the tenant-forbidden read guard (org ≠ public only) doesn't block it."
+  "The handler fn for a resolved app target (or nil — app unconfigured). A
+   `:label` target resolves the GLOBAL `:app-route`; a label-less target (a
+   custom domain with no pinned app) reads the org's default `:handler-fn-id`.
+   Reads in the CURRENT (platform/public) context — the dispatch consults the
+   app-router BEFORE the request-scope binds an org, so the tenant-forbidden read
+   guard (org ≠ public only) doesn't block it."
   [storage {:keys [org label]}]
   (if label
-    (app-route/handler-fn-id-for storage org label)
+    (:handler-fn-id (app-route/route-by-label storage label))
     (some-> (first (sp/query-entities storage :org {:name org})) :handler-fn-id)))
 
 
 (defn app-handler-target
-  "Resolve the request to its app target, or nil when it's not an app request.
-   Returns `{:org <slug> :handler-fn-id <uuid-or-nil>}` (plus `:label` for a
-   named-app subdomain); a nil handler → 404 upstream."
-  [storage request org-resolver base-domain host-resolver]
-  (when-let [target (resolve-app-target request org-resolver base-domain host-resolver)]
-    (assoc target :handler-fn-id (read-handler-fn-id storage target))))
+  "Resolve the request to its app target, or nil when it's not an app request
+   (→ editor/API). Returns `{:org <slug> :label? <label> :handler-fn-id <uuid-
+   or-nil>}`; a nil handler → 404 upstream. For a `<label>.<apps-domain>` host
+   the org + handler come from the GLOBAL app-route (the label's owner is
+   authoritative); a custom domain uses the `:domain` row's target."
+  [storage request apps-domain host-resolver]
+  (if-let [label (subdomain/extract-subdomain (get-in request [:headers "host"]) apps-domain)]
+    ;; A host under the apps-domain is ALWAYS an app request (a missing route →
+    ;; 404 upstream, never a fall-through to the editor — the apps-domain serves
+    ;; no editor).
+    (let [row (app-route/route-by-label storage label)]
+      {:org (:org row) :label label :handler-fn-id (:handler-fn-id row)})
+    (when-let [target (domain/target-from-request host-resolver request)]
+      (assoc target :handler-fn-id (read-handler-fn-id storage target)))))
 
 
 (def ^:private app-not-configured
@@ -99,18 +92,20 @@
 
 (defn make-app-router
   "Build the `:app-router` seam — `(fn [ctx request] ring-response-or-nil)`.
-   `org-resolver` + `base-domain` (subdomain) and `host-resolver` (custom
-   domain) feed `app-handler-target`; `timeout-ms` bounds the handler."
-  ([org-resolver base-domain host-resolver]
-   (make-app-router org-resolver base-domain host-resolver default-app-timeout-ms))
-  ([org-resolver base-domain host-resolver timeout-ms]
+   `apps-domain` (the flat apps namespace, e.g. `graphden.app`) + `host-resolver`
+   (custom domains) feed `app-handler-target`; `timeout-ms` bounds the handler.
+   Base-domain (`graphden.dev`) subdomains are NOT app requests here — they fall
+   through to the editor."
+  ([apps-domain host-resolver]
+   (make-app-router apps-domain host-resolver default-app-timeout-ms))
+  ([apps-domain host-resolver timeout-ms]
    (fn [ctx request]
      ;; Resolve the app target + its handler fresh per request — an indexed
-     ;; unique-key lookup (`:app-route` or `:org`), negligible next to the
-     ;; graph-handler `execute` below, and always current (a `set-org-handler!`
-     ;; / app-route write takes effect at once).
+     ;; unique-key lookup (`:app-route` by label / custom `:domain`), negligible
+     ;; next to the graph-handler `execute` below, and always current (a
+     ;; `set-org-handler!` / app-route write takes effect at once).
      (when-let [{:keys [org handler-fn-id]}
-                (app-handler-target (:storage ctx) request org-resolver base-domain host-resolver)]
+                (app-handler-target (:storage ctx) request apps-domain host-resolver)]
        (cond
          ;; Wrong executor → 421, for either reason (checked BEFORE the
          ;; handler verdict so it never reads as "not deployed"):

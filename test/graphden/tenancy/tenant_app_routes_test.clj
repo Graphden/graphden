@@ -65,19 +65,20 @@
         (is (= "shop" (:label row)) "normalized (lower-cased + trimmed)")
         (is (= handler-id (:handler-fn-id row)))))
 
-    (testing "a duplicate (org, label) is rejected by the UNIQUE constraint"
+    (testing "a duplicate label is rejected by the UNIQUE constraint"
       (is (thrown? Exception
             (plan/create-tenant-app-route! storage "acme" {:label "shop" :handler-fn-id handler-id}))))
 
-    (testing "the same label under a DIFFERENT org is fine"
-      (is (some? (plan/create-tenant-app-route! storage "beta" {:label "shop" :handler-fn-id handler-id}))))))
+    (testing "the label is GLOBALLY unique — a DIFFERENT org can't claim it either"
+      (is (thrown? Exception
+            (plan/create-tenant-app-route! storage "beta" {:label "shop" :handler-fn-id handler-id}))))))
 
 
 (deftest list-tenant-app-routes!-returns-only-the-org-s-own
   (let [{:keys [storage handler-id]} (fresh-storage)]
     (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id handler-id})
     (sp/create-entity storage :app-route {:org "acme" :label "docs" :handler-fn-id handler-id})
-    (sp/create-entity storage :app-route {:org "other" :label "shop" :handler-fn-id handler-id})
+    (sp/create-entity storage :app-route {:org "other" :label "othershop" :handler-fn-id handler-id})
     (testing "a tenant sees only its own apps, sorted by label"
       (is (= ["docs" "shop"] (map :label (plan/list-tenant-app-routes! storage "acme")))))
     (testing "public / nil org → nil"
@@ -88,7 +89,7 @@
 (deftest update-and-delete-tenant-app-route!-are-ownership-gated
   (let [{:keys [storage handler-id handler2-id]} (fresh-storage)
         mine (sp/create-entity storage :app-route {:org "acme" :label "shop" :handler-fn-id handler-id})
-        theirs (sp/create-entity storage :app-route {:org "other" :label "shop" :handler-fn-id handler-id})]
+        theirs (sp/create-entity storage :app-route {:org "other" :label "othershop" :handler-fn-id handler-id})]
     (testing "an owned app retargets to a different handler (label immutable)"
       (plan/update-tenant-app-route! storage "acme" (:id mine) {:handler-fn-id handler2-id})
       (let [row (sp/read-entity storage :app-route (:id mine))]

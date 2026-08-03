@@ -1,22 +1,33 @@
 ;; FaaS app-routing addon fragment (PLATFORM_PLAN §3.4, docs/FLEET_RFC.md §6.1).
 ;; Merge AFTER graphden/tenancy/addon.edn:
 ;;   GRAPHDEN_ADDON_CONFIGS=graphden/tenancy/addon.edn,graphden/tenancy/faas.edn
-;; Turns on the app-router so a request to a tenant subdomain
-;; (`<org>.<base-domain>`) is served by that org's handler fn — and, in a
-;; SHARDED fleet, forward-hopped to the executor holding the org's cell when it
-;; isn't in this pod's shard (the `:fleet-forward` seam). base-domain via
-;; GRAPHDEN_BASE_DOMAIN (default graphden.app). Splices the :org registry (the
-;; app-router reads `:org.handler-fn-id`).
+;; Turns on the app-router (Track C model A): a request to the APPS-DOMAIN
+;; (`<label>.graphden.app`) is served by that app's handler fn — resolved from
+;; the GLOBAL `:app-route` label — and, in a SHARDED fleet, forward-hopped to
+;; the executor holding the org's cell when it isn't in this pod's shard (the
+;; `:fleet-forward` seam). A verified custom `:domain` routes the same way.
+;; A `graphden.dev` editor subdomain is NOT an app → falls through to the editor.
+;; apps-domain via GRAPHDEN_APPS_DOMAIN (default graphden.app).
 {:graphden/require [graphden.tenancy.addon]
 
  :tenancy/org-schema {}
+ :tenancy/app-route-schema {}
+ :tenancy/domain-schema {}
 
- :db/schema {:extensions [#ig/ref :tenancy/org-schema]}
+ :db/schema {:extensions [#ig/ref :tenancy/org-schema
+                          #ig/ref :tenancy/app-route-schema
+                          #ig/ref :tenancy/domain-schema]}
 
+ ;; org-resolver is consumed by the request-scope (editor org-binding from the
+ ;; `<org>.graphden.dev` subdomain guard), NOT by the app-router.
  :tenancy/org-resolver {}
 
- :tenancy/app-router {:org-resolver #ig/ref :tenancy/org-resolver
-                      :base-domain #or [#env GRAPHDEN_BASE_DOMAIN "graphden.app"]
+ ;; Custom-domain resolver over verified `:domain` rows (apps on a customer's
+ ;; own domain). The app-router reads it in the platform context.
+ :tenancy/storage-host-resolver {:storage #ig/ref :db/postgres}
+
+ :tenancy/app-router {:apps-domain #or [#env GRAPHDEN_APPS_DOMAIN "graphden.app"]
+                      :host-resolver #ig/ref :tenancy/storage-host-resolver
                       :timeout-ms 10000}
 
  :exec/context {:app-router #ig/ref :tenancy/app-router}}

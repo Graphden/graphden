@@ -1,13 +1,12 @@
 (ns graphden.tenancy.app-route
   "Read-side of the `:app-route` registry (Track C — see
-   `graphden.tenancy.app-route-schema`). Resolves a routing key
-   `(org, label)` to the app's handler fn, and lists an org's apps for the
-   management UI. Writes go through the org-stamped platform-storage seam
-   (like `:service` / `:domain`), never this namespace.
+   `graphden.tenancy.app-route-schema`). Resolves a GLOBAL app label
+   (`shop.graphden.app` → the `shop` app-route → its org + handler), and lists
+   an org's apps for the management UI. Writes go through the org-stamped
+   platform-storage seam (like `:service` / `:domain`), never this namespace.
 
    Reads run in the platform context — app-routing happens before the request
-   scope binds an org, so `sp/query-entities` here sees every org's rows; the
-   caller supplies the `org` filter."
+   scope binds an org, so `sp/query-entities` here sees every org's rows."
   (:require
     [clojure.string :as str]
     [graphden.storage.protocol.core :as sp]))
@@ -21,13 +20,13 @@
       (when-not (str/blank? l) l))))
 
 
-(defn handler-fn-id-for
-  "The handler-fn-id for `(org, label)`, or nil when no app is routed at that
-   key. `label` is normalized before lookup."
-  [storage org label]
+(defn route-by-label
+  "The `:app-route` row for a GLOBAL `label` (`{:org :label :handler-fn-id …}`),
+   or nil when unrouted. `label` is normalized before lookup. The apps-domain is
+   a flat namespace, so the label alone identifies the app + its owning org."
+  [storage label]
   (when-let [label (normalize-label label)]
-    (:handler-fn-id
-      (first (sp/query-entities storage :app-route {:org org :label label})))))
+    (first (sp/query-entities storage :app-route {:label label}))))
 
 
 (defn routes-for-org

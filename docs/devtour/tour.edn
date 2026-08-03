@@ -849,10 +849,12 @@
    :after [:crud]
    :steps
    [{:ns graphden.tenancy.app-router :defn make-app-router
-     :say "The opening stop — literally where a tenant request arrives. This
-           builds the `:app-router` seam the branch-router consults first:
-           resolve the tenant org from the request Host, look up that org's
-           handler fn, and run it org-scoped, sandboxed, and time-bounded."}
+     :say "The opening stop — literally where a tenant APP request arrives. This
+           builds the `:app-router` seam the branch-router consults first: on the
+           apps-domain (`<label>.graphden.app`) resolve the GLOBAL app-route for
+           the label — its owning org + handler fn — and run it org-scoped,
+           sandboxed, and time-bounded. A `graphden.dev` editor subdomain is not
+           an app, so it falls through to the editor."}
     {:ns graphden.auth.provider :defn AuthProvider
      :say "The pluggable identification protocol: Ring request → principal map
            (`:authenticated?`, plus `:user` / `:org`). This injectable seam is how

@@ -33,27 +33,6 @@
             sub))))))
 
 
-(defn extract-app-host
-  "Parse a TWO-level app host `<label>.<org>.<base-domain>` into
-   `{:label <label> :org <org>}`, or nil (Track C — an org's named apps).
-
-   `shop.acme.graphden.app` → `{:label \"shop\" :org \"acme\"}`. The apex, a
-   single-level `<org>.<base>` (that's the org's editor, not an app), and 3+
-   level hosts all return nil. Strips a `:port` and lower-cases."
-  [host base-domain]
-  (when (and (string? host) (seq host) (string? base-domain) (seq base-domain))
-    (let [h (-> host (str/split #":") first str/lower-case)
-          suffix (str "." (str/lower-case base-domain))]
-      (when (and (str/ends-with? h suffix)
-                 (not= h (str/lower-case base-domain)))
-        (let [sub (subs h 0 (- (count h) (count suffix)))
-              parts (str/split sub #"\.")]
-          (when (= 2 (count parts))
-            (let [[label org] parts]
-              (when (and (seq label) (seq org))
-                {:label label :org org}))))))))
-
-
 (defprotocol OrgResolver
   "Resolve a subdomain label to an org id (or nil when unmapped)."
 
@@ -142,15 +121,3 @@
   (when (and resolver base-domain)
     (when-let [sub (extract-subdomain (get-in request [:headers "host"]) base-domain)]
       (org-for-subdomain resolver sub))))
-
-
-(defn app-from-request
-  "Resolve a TWO-level app host `<label>.<org>.<base>` to `{:label <label>
-   :org <org>}` (Track C), or nil. The middle label is resolved through the
-   same `OrgResolver` as `org-from-request` — so a reserved / unmapped org
-   position (`shop.app.<base>`) yields nil (→ not an app; falls through)."
-  [resolver request base-domain]
-  (when (and resolver base-domain)
-    (when-let [{:keys [label org]} (extract-app-host (get-in request [:headers "host"]) base-domain)]
-      (when-let [resolved (org-for-subdomain resolver org)]
-        {:label label :org resolved}))))

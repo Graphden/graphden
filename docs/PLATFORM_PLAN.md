@@ -546,7 +546,7 @@ platform decisions).
 
 1. `:org` entity + schema (`tenancy/org_schema`), tenant-forbidden, addon-wiring.
 2. The org registration endpoint (`POST /api/orgs`, platform-only).
-3. The app-routing seam (`tenancy/app-router` + `:app-router` on the ctx + dispatch): subdomain→org→execute `:org.handler-fn-id`; apex → editor/API.
+3. The app-routing seam (`tenancy/app-router` + `:app-router` on the ctx + dispatch). **⚠ Track C model A (2026-08-03) reshaped this:** apps now live on a SEPARATE apps-domain (`graphden.app`), addressed by a GLOBALLY-unique label — `<label>.graphden.app` → the `:app-route` for `label` → its owning org + handler (`app-route/route-by-label`); a verified custom `:domain` routes the same way. A `graphden.dev` subdomain is the org's EDITOR (`<org>.graphden.dev`), NOT an app, so it falls through. This supersedes the original "`<org>.<base>` subdomain→org→`:org.handler-fn-id`" (kept for custom-domain default only). Rationale: DNS has no `*.*` wildcard (nested subdomains need per-org DNS), and tenant app code must be isolated from the editor's origin/token (GitHub/Vercel pattern).
 4. Executing the handler org-scoped + effect-gated (in app-router: `with-org` + `:allowed-effects` + `:execute-guard nil`).
 4a. The set-handler mechanism: the `set-org-handler` base-fn (update `:org.handler-fn-id` by name, str→uuid) + `POST /api/orgs/handler` (platform-only). Now the app-router serves the real handler when it is set.
 4b. self-serve — the tenant sets THEIR OWN handler.

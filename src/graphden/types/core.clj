@@ -650,6 +650,26 @@
   (reset! (aliases-atom) {}))
 
 
+(defn global-aliases-snapshot
+  "Test-support: capture the PROCESS-GLOBAL alias state — the three registry
+   atoms (struct map, owners, qualified names), ignoring any
+   `*type-aliases-override*`. Pair with `restore-global-aliases!` so a namespace
+   whose tests deliberately drive the global registry (`*type-aliases-override*`
+   nil — e.g. the owner-collision-warning path) can't leak into a sibling NS.
+   Mirrors `registry/snapshot-for-isolation` for rich-types."
+  []
+  {:aliases @type-aliases :owners @alias-owners :qualified @alias-qualified})
+
+
+(defn restore-global-aliases!
+  "Test-support: reset the process-global alias state to a snapshot taken by
+   `global-aliases-snapshot`."
+  [{:keys [aliases owners qualified]}]
+  (reset! type-aliases aliases)
+  (reset! alias-owners owners)
+  (reset! alias-qualified qualified))
+
+
 ;; -----------------------------------------------------------------------------
 ;; Substitutions — type-var → type binding map
 

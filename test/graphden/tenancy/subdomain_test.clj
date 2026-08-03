@@ -37,6 +37,33 @@
     (is (nil? (sub/extract-subdomain "" "graphden.app")))))
 
 
+(deftest extract-app-host-test
+  (testing "a two-level <label>.<org>.base → {:label :org} (Track C)"
+    (is (= {:label "shop" :org "acme"} (sub/extract-app-host "shop.acme.graphden.app" "graphden.app")))
+    (is (= {:label "shop" :org "acme"} (sub/extract-app-host "SHOP.Acme.Graphden.App" "graphden.app")))
+    (is (= {:label "shop" :org "acme"} (sub/extract-app-host "shop.acme.graphden.app:8080" "graphden.app"))))
+  (testing "a single-level <org>.base is the org's editor, NOT an app → nil"
+    (is (nil? (sub/extract-app-host "acme.graphden.app" "graphden.app"))))
+  (testing "apex / 3+ level / bare host → nil"
+    (is (nil? (sub/extract-app-host "graphden.app" "graphden.app")))
+    (is (nil? (sub/extract-app-host "a.b.c.graphden.app" "graphden.app")))
+    (is (nil? (sub/extract-app-host "example.com" "graphden.app"))))
+  (testing "nil / blank inputs"
+    (is (nil? (sub/extract-app-host nil "graphden.app")))
+    (is (nil? (sub/extract-app-host "shop.acme.graphden.app" nil)))))
+
+
+(deftest app-from-request-test
+  (let [r (sub/wrap-reserved (sub/identity-org-resolver) sub/default-reserved-labels)
+        req (fn [host] {:headers {"host" host}})]
+    (testing "two-level app host → {:label :org} with the org resolved"
+      (is (= {:label "shop" :org "acme"} (sub/app-from-request r (req "shop.acme.graphden.app") "graphden.app"))))
+    (testing "a single-level org host is not an app → nil"
+      (is (nil? (sub/app-from-request r (req "acme.graphden.app") "graphden.app"))))
+    (testing "a reserved org position (shop.app.base) → nil (falls through)"
+      (is (nil? (sub/app-from-request r (req "shop.app.graphden.app") "graphden.app"))))))
+
+
 (deftest static-org-resolver-test
   (let [r (sub/static-org-resolver {"acme" "org-acme" "beta" "org-beta"})]
     (is (= "org-acme" (sub/org-for-subdomain r "acme")))

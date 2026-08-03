@@ -55,6 +55,56 @@
              (app/app-handler-target storage (req "ghost.graphden.app") resolver "graphden.app" nil))))))
 
 
+(defn- app-route-storage
+  "Fake storage answering `query-entities :app-route {:org o :label l}` from an
+   `{[org label] handler-fn-id}` map (Track C — named apps)."
+  [key->handler]
+  (reify sp/StorageCRUD
+    (query-entities
+      [_ en where]
+      (when (= en :app-route)
+        (when-let [h (get key->handler [(:org where) (:label where)])]
+          [{:org (:org where) :label (:label where) :handler-fn-id h}])))
+
+    (query-entities [_ _ _ _] nil)
+
+    (create-entity [_ _ _] nil)
+
+    (read-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-latest-per-group [_ _ _ _] nil)))
+
+
+(deftest app-handler-target-two-level-named-apps
+  ;; Track C: <label>.<org>.base resolves to the org's named app via :app-route,
+  ;; NOT the org's default :handler-fn-id.
+  (let [shop-fn (random-uuid)
+        storage (app-route-storage {["acme" "shop"] shop-fn})
+        resolver (subdomain/identity-org-resolver)]
+    (testing "two-level host → {:org :label :handler-fn-id} from :app-route"
+      (is (= {:org "acme" :label "shop" :handler-fn-id shop-fn}
+             (app/app-handler-target storage (req "shop.acme.graphden.app") resolver "graphden.app" nil))))
+    (testing "an org's unconfigured label → nil handler (→ 404), still an app request"
+      (is (= {:org "acme" :label "docs" :handler-fn-id nil}
+             (app/app-handler-target storage (req "docs.acme.graphden.app") resolver "graphden.app" nil))))
+    (testing "the single-level org host stays the legacy default-app path (no :label)"
+      (is (nil? (:label (app/app-handler-target (org-storage {"acme" (random-uuid)})
+                                                (req "acme.graphden.app") resolver "graphden.app" nil)))))))
+
+
+(deftest make-app-router-serves-named-app-404-when-unconfigured
+  (let [shop-fn (random-uuid)
+        storage (app-route-storage {["acme" "shop"] shop-fn})
+        ar (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil)
+        ctx {:storage storage}]
+    (testing "a two-level host with no :app-route row → 404 (app request, not editor)"
+      (is (= 404 (:status (ar ctx (req "gone.acme.graphden.app"))))))))
+
+
 (deftest run-with-timeout-test
   (testing "a fast thunk returns its value"
     (is (= :done (cr/run-with-timeout 1000 (fn [] :done)))))

@@ -41,6 +41,8 @@
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written |
 | 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
 | 19 | [Signing up & signing in — your cloud account](19-signing-up-and-in.md) | ✅ written |
+| 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written |
+| 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written |
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

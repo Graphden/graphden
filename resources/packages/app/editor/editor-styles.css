@@ -4289,6 +4289,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-apps .apps-admin-table th,
 .sidebar-apps .apps-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
 .sidebar-apps .app-row-label { font-weight: 600; color: var(--fg); }
+.sidebar-apps .app-host-link { color: var(--fg); text-decoration: none; }
+.sidebar-apps .app-host-link:hover { color: var(--accent); text-decoration: underline; }
 .sidebar-apps .app-serves-link { color: var(--accent); text-decoration: none; }
 .sidebar-apps .app-serves-link:hover { text-decoration: underline; }
 .sidebar-apps .apps-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }

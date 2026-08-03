@@ -79,7 +79,7 @@
         (testing "the panel shell + table headers render"
           (is (str/includes? (:body resp) "apps-admin"))
           (is (str/includes? (:body resp) "Apps"))
-          (is (str/includes? (:body resp) "Subdomain"))
+          (is (str/includes? (:body resp) "<th>App"))
           (is (str/includes? (:body resp) "Serves")))
         (testing "the create form posts to the panel's own create route"
           (is (str/includes? (:body resp) "/partials/apps-panel/create"))

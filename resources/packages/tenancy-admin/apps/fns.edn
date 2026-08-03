@@ -8,16 +8,47 @@
 ;; org-scoped by `current-org`. Auth-required; degrades to a notice when the
 ;; tenancy addon is inactive.
 {:fns
- [;; --- one table row per app: subdomain label | serves (open link) | delete ---
+ [;; The apps-domain (`graphden.app`) — deployment config, so read from the env
+  ;; (`GRAPHDEN_APPS_DOMAIN`) with a default, exactly like the app-router. Used
+  ;; to render each app's full public host `<label>.<apps-domain>`.
+  {:name :_apps-domain-env
+   :parent :env
+   :args {:name {:value "GRAPHDEN_APPS_DOMAIN"}}}
+
+  {:name :_apps-domain
+   :parent :coalesce
+   :args {:value :_apps-domain-env :default {:value "graphden.app"}}}
+
+  ;; --- one table row per app: app URL | serves (open link) | delete ---
   {:name :_app-row-label-val
    :parent :get
    :args {:coll {:as :item} :key {:value :label} :default {:value ""}}}
+
+  ;; The app's public host `<label>.<apps-domain>` + a link to the LIVE app.
+  {:name :_app-row-host
+   :parent :str-join
+   :args {:coll [:_app-row-label-val {:value "."} :_apps-domain] :separator {:value ""}}}
+
+  {:name :_app-row-url
+   :parent :str-join
+   :args {:coll [{:value "https://"} :_app-row-host {:value "/"}] :separator {:value ""}}}
+
+  {:name :_app-row-url-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "app-host-link" :target "_blank" :rel "noopener"
+                        :title "Open the live app"}}
+          :key {:value :href}
+          :value :_app-row-url}}
+
+  {:name :_app-row-url-link
+   :parent :hiccup
+   :args {:tag {:value "a"} :attrs :_app-row-url-link-attrs :children [:_app-row-host]}}
 
   {:name :_app-row-td-label
    :parent :hiccup
    :args {:tag {:value "td"}
           :attrs {:value {:class "app-row-label"}}
-          :children [:_app-row-label-val]}}
+          :children [:_app-row-url-link]}}
 
   ;; "Serves" — a #hash link to the handler fn; the editor's native hashchange
   ;; navigation resolves it (same idea as the errors/stats panels' fn links).
@@ -108,7 +139,7 @@
   ;; --- table head + body ---
   {:name :_apps-thead
    :parent :const
-   :args {:value [:thead [:tr [:th "Subdomain"] [:th "Serves"] [:th ""]]]}}
+   :args {:value [:thead [:tr [:th "App"] [:th "Serves"] [:th ""]]]}}
 
   {:name :_apps-tbody
    :parent :hiccup

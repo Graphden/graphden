@@ -11,6 +11,10 @@
                    `graphden-verify=<org>` (see `domain/verify-domain-ownership`).
                    An unverified host resolves to nil → falls through to the
                    subdomain / token, never hijacks routing.
+   - `app-label` — (Track C, nullable) the org's named app this host serves.
+                   Set → the host routes at `(org, app-label)` via `:app-route`;
+                   nil → the org's default `:handler-fn-id` (legacy). Lets an org
+                   point two custom domains at two different apps.
 
    Platform-managed: `:domain` is in `tenancy.storage/tenant-forbidden-entities`
    — a tenant writing it could hijack another org's host; reading it could
@@ -36,12 +40,20 @@
   #uuid "0e9b4d72-1c63-4a85-9f06-7d3a2e5c81b4")
 
 
+(def ^:private domain-app-label-field-uuid
+  #uuid "7c483f42-2766-4048-8518-44c13c3ac42e")
+
+
 (defn extend-builder
-  "Add the `:domain` entity — `(hostname, org, verified?)` with a UNIQUE host."
+  "Add the `:domain` entity — `(hostname, org, verified?, app-label?)` with a
+   UNIQUE host. `app-label` (nullable) pins the host at an org's named app."
   [builder]
   (-> builder
       (ds/add-entity :domain domain-entity-uuid
                      {:hostname {:uuid domain-hostname-field-uuid :type :text}
                       :org {:uuid domain-org-field-uuid :type :text}
-                      :verified? {:uuid domain-verified-field-uuid :type :bool}})
+                      :verified? {:uuid domain-verified-field-uuid :type :bool}
+                      :app-label {:uuid domain-app-label-field-uuid
+                                  :type :text
+                                  :nullable? true}})
       (ds/add-constraint :domain {:type :unique :fields [:hostname]})))

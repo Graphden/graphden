@@ -30,15 +30,15 @@
       (Track C — one of the org's named apps);
    2. a single-level `<org>.base` subdomain → `{:org <org>}` (the org's default
       app — legacy, `:org.handler-fn-id`; C2b relocates this to the editor);
-   3. a verified custom domain → `{:org <org>}` (the org's default app).
+   3. a verified custom domain → `{:org <org>}`, or `{:org <org> :label <app>}`
+      when the domain row pins a specific named app (Track C).
 
    The apex / an unresolvable host → nil."
   [request org-resolver base-domain host-resolver]
   (or (subdomain/app-from-request org-resolver request base-domain)
       (when-let [org (subdomain/org-from-request org-resolver request base-domain)]
         {:org org})
-      (when-let [org (domain/org-from-request host-resolver request)]
-        {:org org})))
+      (domain/target-from-request host-resolver request)))
 
 
 (defn read-handler-fn-id

@@ -29,7 +29,12 @@
 
 (defprotocol HostResolver
 
-  (org-for-host [this host]))
+  (org-for-host [this host])
+
+  (target-for-host
+    [this host]
+    "The app target for a verified custom `host`: `{:org <org> :label <app>}`
+     (`:label` only when the domain row pins a named app — Track C), or nil."))
 
 
 (defrecord StaticHostResolver
@@ -40,7 +45,16 @@
   (org-for-host
     [_ host]
     (when host
-      (get host->org (-> host (str/split #":") first str/lower-case)))))
+      (get host->org (-> host (str/split #":") first str/lower-case))))
+
+
+  (target-for-host
+    [_ host]
+    ;; A static `{hostname org}` map carries no per-host app-label — a config
+    ;; custom domain always serves the org's default app.
+    (when host
+      (when-let [org (get host->org (-> host (str/split #":") first str/lower-case))]
+        {:org org}))))
 
 
 (defn static-host-resolver
@@ -67,7 +81,18 @@
         ;; ONLY verified rows resolve — an unverified host falls through to the
         ;; subdomain / token, so a half-provisioned domain never routes.
         (when (:verified? row)
-          (:org row))))))
+          (:org row)))))
+
+
+  (target-for-host
+    [_ host]
+    (when host
+      (let [row (first (sp/query-entities storage :domain {:hostname (normalize-host host)}))]
+        (when (:verified? row)
+          ;; Track C: a row's `:app-label` pins the host at that named app;
+          ;; absent → the org's default handler (the label-less target).
+          (cond-> {:org (:org row)}
+            (:app-label row) (assoc :label (:app-label row))))))))
 
 
 (defn storage-host-resolver
@@ -85,6 +110,16 @@
   [resolver request]
   (when resolver
     (org-for-host resolver (get-in request [:headers "host"]))))
+
+
+(defn target-from-request
+  "The app target for the request's `Host` via a verified custom domain
+   (Track C): `{:org <org> :label <app>}` — `:label` only when the domain row
+   pins a named app; otherwise `{:org <org>}` (the org's default). nil when no
+   verified domain matches → the request falls through to the subdomain/token."
+  [resolver request]
+  (when resolver
+    (target-for-host resolver (get-in request [:headers "host"]))))
 
 
 ;; --- provisioning: DNS TXT ownership verification (privileged) -------------

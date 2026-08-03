@@ -3,6 +3,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
+    [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.addon]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.domain :as domain]
@@ -41,7 +42,50 @@
       (is (nil? (domain/org-for-host r "evil.com"))))
     (testing "org-from-request reads the Host header"
       (is (= "acme" (domain/org-from-request r {:headers {"host" "app.acme.com"}})))
-      (is (nil? (domain/org-from-request nil {:headers {"host" "app.acme.com"}}))))))
+      (is (nil? (domain/org-from-request nil {:headers {"host" "app.acme.com"}}))))
+    (testing "target-for-host on a static resolver carries no :label (default app)"
+      (is (= {:org "acme"} (domain/target-for-host r "app.acme.com")))
+      (is (nil? (domain/target-for-host r "evil.com"))))))
+
+
+(defn- domain-storage
+  "Fake storage: `query-entities :domain {:hostname h}` → the given row (or [])."
+  [host->row]
+  (reify sp/StorageCRUD
+    (query-entities
+      [_ en where]
+      (when (= en :domain)
+        (when-let [row (get host->row (:hostname where))]
+          [row])))
+
+    (query-entities [_ _ _ _] nil)
+
+    (create-entity [_ _ _] nil)
+
+    (read-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-latest-per-group [_ _ _ _] nil)))
+
+
+(deftest storage-host-resolver-app-label-target
+  ;; Track C: a verified :domain row's :app-label pins the host at a named app.
+  (let [r (domain/storage-host-resolver
+            (domain-storage {"shop.acme.com" {:org "acme" :verified? true :app-label "shop"}
+                             "acme.com" {:org "acme" :verified? true}
+                             "pending.acme.com" {:org "acme" :verified? false :app-label "shop"}}))]
+    (testing "verified row WITH :app-label → {:org :label} (a specific app)"
+      (is (= {:org "acme" :label "shop"} (domain/target-for-host r "shop.acme.com")))
+      (is (= {:org "acme" :label "shop"} (domain/target-from-request r {:headers {"host" "shop.acme.com"}}))))
+    (testing "verified row WITHOUT :app-label → {:org} (the org's default app)"
+      (is (= {:org "acme"} (domain/target-for-host r "acme.com"))))
+    (testing "an UNVERIFIED row never resolves (even with an app-label)"
+      (is (nil? (domain/target-for-host r "pending.acme.com"))))
+    (testing "org-for-host still returns just the org (request-scope guard)"
+      (is (= "acme" (domain/org-for-host r "shop.acme.com"))))))
 
 
 (deftest request-scope-custom-domain-is-a-guard

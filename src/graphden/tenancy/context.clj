@@ -58,6 +58,30 @@
   (platform-tier? (current-org)))
 
 
+;; Platform-admin predicate SEAM. Whether the current principal holds the
+;; platform-admin capability is a POLICY question (it reads the principal's
+;; grants), so the check lives in the tenancy addon. Core keeps only this
+;; installable hook + the predicate that consults it, so an addon-less /
+;; single-tenant instance has no operator escalation. The tenancy addon calls
+;; `install-platform-admin-fn!` at wire time with its zero-arg
+;; `grant/current-platform-admin?`.
+(defonce ^:private platform-admin-fn (atom (constantly false)))
+
+
+(defn install-platform-admin-fn!
+  "Install the addon's zero-arg platform-admin predicate. `nil` restores the
+   no-op default (no platform-admin)."
+  [f]
+  (reset! platform-admin-fn (or f (constantly false))))
+
+
+(defn current-platform-admin?
+  "True when the current principal holds the platform-admin capability — via the
+   installed seam. False with no tenancy addon."
+  []
+  (boolean (@platform-admin-fn)))
+
+
 (def ^:dynamic *current-principal*
   "The authenticated principal (`AuthProvider` result) for the current
    request, bound by the addon's request-scope. Read by per-namespace grant

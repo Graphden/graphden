@@ -18,7 +18,7 @@
   what it assumes you have already seen. Start with the **Executor** — it is
   the spine everything else hangs off — then follow the dependency order:
   Storage, then Branches, Types, CRUD, Packages, Web, Layout,
-  Services, and Multi-tenancy.
+  Services. (The multi-tenant / cloud policy layer is in the private graphden-tenancy repo — the open-core split — plugging into the `graphden.tenancy.context` seam kept here.)
 
   Every step shows you the **actual source** of one function, pulled straight
   from the file it lives in. When a step points you at code in another block,
@@ -839,75 +839,4 @@
            (target compiles first, placement epoch bumps to reroute, source evicts
            last). How an abstract `move` decision safely becomes a live cell
            migration across pods."}]}
-
-  {:id :tenancy
-   :title "Multi-tenancy"
-   :status :toured
-   :summary "Orgs, RLS, grants, the two-layer effect gate, and per-request
-             tenant routing."
-   :paths ["src/graphden/tenancy/" "src/graphden/auth/"]
-   :after [:crud]
-   :steps
-   [{:ns graphden.tenancy.app-router :defn make-app-router
-     :say "The opening stop — literally where a tenant APP request arrives. This
-           builds the `:app-router` seam the branch-router consults first: on the
-           apps-domain (`<label>.graphden.app`) resolve the GLOBAL app-route for
-           the label — its owning org + handler fn — and run it org-scoped,
-           sandboxed, and time-bounded. A `graphden.dev` editor subdomain is not
-           an app, so it falls through to the editor."}
-    {:ns graphden.auth.provider :defn AuthProvider
-     :say "The pluggable identification protocol: Ring request → principal map
-           (`:authenticated?`, plus `:user` / `:org`). This injectable seam is how
-           core's single-token check is swapped for a tenant-aware one."}
-    {:ns graphden.tenancy.auth :defn token-map-provider
-     :say "The addon's `AuthProvider` that resolves a bearer token to
-           `{:user :org}` (hash-matched). The piece that adds the `:org`, turning
-           the addon from a safe no-op into real multi-tenancy."}
-    {:ns graphden.tenancy.context :defn org-from-principal
-     :say "Extracts the org id from the authenticated principal and feeds the
-           `*current-org*` thread-local that all scoping reads. Exactly how `who
-           you are` becomes `which org's data you see`."}
-    {:ns graphden.tenancy.addon :defn ig/init-key :dispatch :tenancy/request-scope
-     :say "The central orchestrator wiring every other piece together:
-           authenticate, bind the org, reject cross-org / wrong-pod, gate effects,
-           enforce grants, then run the handler. The heart of the tour — read the
-           steps below as expansions of what this one calls."}
-    {:ns graphden.tenancy.storage :defn OrgScopedStorage
-     :say "Isolation layer one: a storage decorator that stamps `:org-id` on
-           writes and filters reads to `{current-org, public}`. The concrete
-           answer to `how is one org's data kept apart`, once the org is bound."}
-    {:ns graphden.tenancy.rls :defn enable-rls!
-     :say "Isolation layer two: install own+public-read / own-write Postgres RLS
-           policies on every org-scoped table at boot. Belt-and-suspenders — a raw
-           SQL path cannot bypass it the way it could bypass the decorator above."}
-    {:ns graphden.tenancy.rls :defn org-aware-datasource
-     :say "Wraps the pool so every borrowed connection sets the
-           `graphden.current_org` GUC from `*current-org*`, making RLS enforce per
-           request. The runtime half of RLS, and why the session variable is
-           reset on each borrow."}
-    {:ns graphden.tenancy.grant :defn can?
-     :say "The pure grant decision: does a subject hold a capability in a
-           namespace (subject × capability × namespace, with `:admin` / `:write`
-           subsumption and dot-path coverage). The authorization primitive every
-           gate below calls into."}
-    {:ns graphden.tenancy.authz :defn authorize-writer
-     :say "Builds the per-namespace write guard `OrgScopedStorage` runs: resolve
-           the target `:namespace-id` and deny (403) a write the principal lacks
-           the capability for. Where coarse org-scoping sharpens into per-namespace
-           write enforcement."}
-    {:ns graphden.tenancy.authz :defn authorize-executor
-     :say "Builds the `:execute-guard` seam the executor consults once per
-           top-level call, throwing `:authz/forbidden` when the principal lacks
-           `:execute` on the fn's namespace. The admission seam for RUNNING a fn —
-           the execute-side mirror of the write guard."}
-    {:ns graphden.executor.compile-runtime :defn cloud-request-allowed-effects
-     :say "Effect gate, layer one: the `*allowed-effects*` a tenant HTTP request
-           runs under — blocks env / io / network / process, but keeps `:raw-sql`
-           so the trusted handler can read storage on the tenant's behalf. Bound
-           by `request-scope`."
-     :see [[:tenancy "request-scope"]]}
-    {:ns graphden.executor.compile-runtime :defn default-cloud-allowed-effects
-     :say "Effect gate, layer two: the stricter set (`#{:db :state :time
-           :random}`, no `:raw-sql`) placed on the exec ctx when a tenant's OWN
-           submitted graph runs. Closes the tour — even code a tenant authors
-           cannot reach the raw-SQL escape hatch or the outside world."}]}]}
+]}

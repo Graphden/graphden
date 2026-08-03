@@ -23,8 +23,10 @@
     [graphden.packages.loader :as loader]))
 
 
+;; The public package superset. `tenancy-admin` moved to the private
+;; graphden-tenancy repo (open-core split) and guards its own route shapes there.
 (def ^:private package-set
-  ["core" "storage" "web" "app-base" "app" "registry" "mcp" "tenancy-admin"])
+  ["core" "storage" "web" "app-base" "app" "registry" "mcp"])
 
 
 (def ^:private bare-route-parents

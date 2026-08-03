@@ -629,9 +629,15 @@ src/graphden/
 │                       #   packer, churn-min rebalancer, control-loop (sustained
 │                       #   hysteresis), directed cell-command transport,
 │                       #   DNS-SRV discovery. Driven by :exec/fleet-controller.
-├── tenancy/            # Multi-tenant router, users, grants, RLS, plan/tier +
-│                       #   quota row-cap (plan.clj), ephemeral-org TTL reaper
-│                       #   (demo_gc.clj)
+├── tenancy/            # OPEN-CORE SPLIT: only context.clj lives here now — the
+│                       #   `*current-org*` thread-local + platform-tier? /
+│                       #   platform-admin? seams that core CRUD reads. The
+│                       #   multi-tenant POLICY (OrgScoped storage, grants/authz,
+│                       #   RLS, plan/tier, users, the addon, app-router + apps,
+│                       #   domains, operator bootstrap) + the `tenancy-admin`
+│                       #   package + the addon config + the tenancy tests moved
+│                       #   to the PRIVATE `graphden-tenancy` repo, pulled into
+│                       #   graphden-cloud as a git-dep. See its README.
 ├── auth/               # Pluggable auth-provider seam
 ├── clients/            # External clients (vault / OpenBao) + SSRF egress guard
 │                       #   (egress.clj — deny-internal classifier for tenant :network)
@@ -661,11 +667,14 @@ src/graphden/
                         #   checkpoint; `-main` for the restore image. See
                         #   development/crac/README.md.
 
-resources/graphden/tenancy/  # Addon config fragments (spliced via
-                             #   GRAPHDEN_ADDON_CONFIGS): addon.edn (org-scoped
-                             #   storage + RLS + request-scope) and faas.edn
-                             #   (app-router + :org schema → FaaS app-routing +
-                             #   the fleet forward-hop). See docs/PLATFORM_PLAN.md.
+;; NOTE (open-core split): the tenancy POLICY — src/graphden/tenancy/* (except
+;; context.clj), the `tenancy-admin` package below, and the addon config
+;; fragments (resources/graphden/tenancy/{addon,faas}.edn) — moved to the
+;; PRIVATE `graphden-tenancy` repo, pulled into graphden-cloud as a git-dep.
+;; The dirs/packages described in the rest of this file's tenancy entries no
+;; longer exist in THIS repo; they document what graphden-tenancy provides + the
+;; seams (context.clj + the :exec/context slots) it plugs into. The tenancy docs
+;; (PLATFORM_PLAN.md, SCALING.md, …) stay here.
 
 resources/packages/     # First-party package definitions (EDN + Clojure impls)
 ├── core/               # Core primitives (arithmetic, logic, HOF, etc.)

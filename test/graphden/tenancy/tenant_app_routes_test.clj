@@ -59,6 +59,13 @@
           (is (= :app-route/invalid-label (:type (ex-data e))) (str "rejected: " (pr-str bad)))))
       (is (empty? (sp/query-entities storage :app-route {})) "no invalid label persisted"))
 
+    (testing "a reserved platform label → :app-route/reserved-label, nothing written"
+      (doseq [reserved ["www" "api" "admin" "APP" "  Graphden "]]
+        (let [e (try (plan/create-tenant-app-route! storage "acme" {:label reserved :handler-fn-id handler-id}) nil
+                     (catch clojure.lang.ExceptionInfo ex ex))]
+          (is (= :app-route/reserved-label (:type (ex-data e))) (str "rejected reserved: " (pr-str reserved)))))
+      (is (empty? (sp/query-entities storage :app-route {})) "no reserved label persisted"))
+
     (testing "a valid label creates the row, :org stamped from the caller"
       (let [row (plan/create-tenant-app-route! storage "acme" {:label "  SHOP " :handler-fn-id handler-id})]
         (is (= "acme" (:org row)))

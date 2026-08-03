@@ -317,20 +317,34 @@
 
 (defn- valid-app-label?
   "A DNS-safe subdomain label: 1–63 chars, lower-case alnum + internal hyphens,
-   no leading/trailing hyphen. `<label>.<org>.<base>` must be a legal host."
+   no leading/trailing hyphen. `<label>.<apps-domain>` must be a legal host."
   [label]
   (boolean (and (string? label)
                 (<= 1 (count label) 63)
                 (re-matches #"[a-z0-9]([a-z0-9-]*[a-z0-9])?" label))))
 
 
+(def ^:private reserved-app-labels
+  "Platform / infra labels kept off the flat apps-domain — a tenant can't claim
+   `www.graphden.app`, `api.graphden.app`, … as an app (they'd shadow common
+   infra hosts or read as official). Global, since the apps-domain namespace is."
+  #{"www" "api" "app" "admin" "root" "mail" "smtp" "imap" "pop" "ns" "ns1" "ns2"
+    "mx" "ftp" "static" "assets" "cdn" "media" "img" "images" "js" "css"
+    "status" "health" "internal" "console" "dashboard" "support" "help" "docs"
+    "blog" "about" "billing" "account" "auth" "login" "signup" "graphden"})
+
+
 (defn- checked-app-label
-  "Normalize + validate an app label, or throw `:app-route/invalid-label`."
+  "Normalize + validate an app label, or throw. `:app-route/invalid-label` for a
+   non-DNS-safe label; `:app-route/reserved-label` for a platform-reserved one."
   [label]
   (let [l (app-route/normalize-label label)]
     (when-not (valid-app-label? l)
       (throw (ex-info "An app label must be a DNS-safe subdomain (lower-case letters, digits, hyphens)."
                       {:type :app-route/invalid-label :label label})))
+    (when (contains? reserved-app-labels l)
+      (throw (ex-info (str "The label \"" l "\" is reserved. Pick a different app name.")
+                      {:type :app-route/reserved-label :label l})))
     l))
 
 

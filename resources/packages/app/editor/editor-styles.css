@@ -4282,6 +4282,26 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-grants-admin .grants-admin-disabled,
 .sidebar-users-admin .grants-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
 
+/* Apps sidebar section (Track C4b) — the tenant org's named apps
+   (:app-route rows) rendered from /partials/apps-panel: a table + a create
+   form + per-row delete. Auth-required, org-scoped (editor-apps.js). */
+.sidebar-apps .apps-admin-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.sidebar-apps .apps-admin-table th,
+.sidebar-apps .apps-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.sidebar-apps .app-row-label { font-weight: 600; color: var(--fg); }
+.sidebar-apps .app-serves-link { color: var(--accent); text-decoration: none; }
+.sidebar-apps .app-serves-link:hover { text-decoration: underline; }
+.sidebar-apps .apps-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
+.sidebar-apps .app-delete-form { display: inline; }
+.sidebar-apps .app-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; line-height: 1; }
+.sidebar-apps .app-delete:hover { color: var(--error-fg); }
+/* Create form — hint + stacked inputs + add button. */
+.sidebar-apps .app-create-form { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
+.sidebar-apps .apps-create-hint { font-size: 10px; color: var(--muted-fg); }
+.sidebar-apps .app-input { font-size: 10px; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.sidebar-apps .app-create-btn { align-self: flex-start; background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
+.sidebar-apps .app-create-btn:hover { background: var(--hover-bg); }
+
 /* Packages sidebar section (3e) — installed pins + browse/install registry. */
 .sidebar-packages .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
 .sidebar-packages .packages-panel-table th,

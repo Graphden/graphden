@@ -29,7 +29,9 @@
                   :services-list-route :services-create-route
                   :services-update-route :services-delete-route
                   :apps-list-route :apps-create-route
-                  :apps-update-route :apps-delete-route]}}
+                  :apps-update-route :apps-delete-route
+                  :partial-apps-panel :apps-panel-create-route
+                  :apps-panel-delete-route]}}
 
   {:name :tenancy-router
    :description "Fall-through Ring router over `:tenancy-routes` — returns nil on no-match (`:router-or-nil`) so the seam falls through to the main app router for anything that isn't a control-plane path. Installed into the active-router singleton by `:tenancy/router-install` at boot."

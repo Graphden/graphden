@@ -611,6 +611,9 @@ function updateEntityList(data) {
   if (!searchMode && typeof buildStatsSection === 'function') {
     mountAdminSection(list, 'stats', buildStatsSection);
   }
+  if (!searchMode && typeof buildAppsSection === 'function') {
+    mountAdminSection(list, 'apps', buildAppsSection);
+  }
   if (!searchMode && typeof buildErrorsSection === 'function') {
     mountAdminSection(list, 'errors', buildErrorsSection);
   }

@@ -9,4 +9,4 @@
  ;; addon control-plane loads without pulling the editor UI. `app-base`
  ;; does NOT depend on this package — the dependency stays one-way.
  :dependencies ["core" "web" "app-base"]
- :modules ["grants" "users" "registration" "my-app" "auth" "router"]}
+ :modules ["grants" "users" "registration" "my-app" "apps" "auth" "router"]}

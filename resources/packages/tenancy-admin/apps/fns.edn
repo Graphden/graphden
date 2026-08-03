@@ -1,0 +1,241 @@
+;; Apps panel (Track C4b) — the editor sidebar section where a tenant org
+;; manages its NAMED APPS (`:app-route` rows, `(org, label) → handler-fn`).
+;; Server-rendered hiccup, HTMX-swapped — no client JS beyond the section shell
+;; (`editor-apps.js`). Mirrors the grants panel: a table over
+;; `:tenant-list-app-routes` + a create <form hx-post> + per-row delete, all
+;; swapping the refreshed panel back into `[data-apps-panel]`. Every mutation
+;; goes through the C4a base-storage seams (`:app-route` is tenant-forbidden),
+;; org-scoped by `current-org`. Auth-required; degrades to a notice when the
+;; tenancy addon is inactive.
+{:fns
+ [;; --- one table row per app: subdomain label | serves (open link) | delete ---
+  {:name :_app-row-label-val
+   :parent :get
+   :args {:coll {:as :item} :key {:value :label} :default {:value ""}}}
+
+  {:name :_app-row-td-label
+   :parent :hiccup
+   :args {:tag {:value "td"}
+          :attrs {:value {:class "app-row-label"}}
+          :children [:_app-row-label-val]}}
+
+  ;; "Serves" — a #hash link to the handler fn; the editor's native hashchange
+  ;; navigation resolves it (same idea as the errors/stats panels' fn links).
+  {:name :_app-row-fn-id-val
+   :parent :get
+   :args {:coll {:as :item} :key {:value :handler-fn-id} :default {:value ""}}}
+
+  {:name :_app-row-fn-id-str
+   :parent :to-str
+   :args {:value :_app-row-fn-id-val}}
+
+  {:name :_app-row-fn-href
+   :parent :str-join
+   :args {:coll [{:value "#"} :_app-row-fn-id-str] :separator {:value ""}}}
+
+  {:name :_app-row-fn-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "app-serves-link" :title "Open the fn this app serves"}}
+          :key {:value :href}
+          :value :_app-row-fn-href}}
+
+  {:name :_app-row-fn-link
+   :parent :hiccup
+   :args {:tag {:value "a"} :attrs :_app-row-fn-link-attrs :children [{:value "open ↗"}]}}
+
+  {:name :_app-row-td-serves
+   :parent :hiccup
+   :args {:tag {:value "td"} :children [:_app-row-fn-link]}}
+
+  ;; per-row delete — a tiny <form hx-post> carrying the row id; `:app-route` is
+  ;; tenant-forbidden so it can't use the generic entity endpoint, it POSTs the
+  ;; panel's own delete handler, which deletes via the seam THEN re-renders.
+  {:name :_app-row-id-val
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default {:value ""}}}
+
+  {:name :_app-row-id-str
+   :parent :to-str
+   :args {:value :_app-row-id-val}}
+
+  {:name :_app-row-delete-id-attrs
+   :parent :assoc
+   :args {:map {:value {:type "hidden" :name "id"}}
+          :key {:value :value}
+          :value :_app-row-id-str}}
+
+  {:name :_app-row-delete-id-input
+   :parent :hiccup
+   :args {:tag {:value "input"} :attrs :_app-row-delete-id-attrs :children []}}
+
+  {:name :_app-row-delete-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "submit" :class "app-delete" :title "Delete app"}}
+          :children [{:value "×"}]}}
+
+  {:name :_app-row-delete-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "app-delete-form"
+                          :hx-post "/partials/apps-panel/delete"
+                          :hx-target "closest [data-apps-panel]"
+                          :hx-swap "outerHTML"
+                          :hx-confirm "Delete this app? Its subdomain / domain will stop serving."}}
+          :children [:_app-row-delete-id-input :_app-row-delete-btn]}}
+
+  {:name :_app-row-td-actions
+   :parent :hiccup
+   :args {:tag {:value "td"} :children [:_app-row-delete-form]}}
+
+  {:name :_app-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children [:_app-row-td-label :_app-row-td-serves :_app-row-td-actions]}}
+
+  ;; The seam returns `[:union :null [:list :keyword-map]]` (nil outside
+  ;; tenancy); `:coalesce` strips the `:null` to a concrete list so `:map` has a
+  ;; valid coll (nil → empty table, no throw).
+  {:name :_apps-list-coll
+   :parent :coalesce
+   :args {:value :tenant-list-app-routes
+          :default {:value [] :type [:list :keyword-map]}}}
+
+  {:name :_apps-rows
+   :parent :map
+   :args {:func :_app-row :coll :_apps-list-coll}}
+
+  ;; --- table head + body ---
+  {:name :_apps-thead
+   :parent :const
+   :args {:value [:thead [:tr [:th "Subdomain"] [:th "Serves"] [:th ""]]]}}
+
+  {:name :_apps-tbody
+   :parent :hiccup
+   :args {:tag {:value "tbody"} :children :_apps-rows}}
+
+  {:name :_apps-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "apps-admin-table"}}
+          :children [:_apps-thead :_apps-tbody]}}
+
+  ;; --- degradation: addon inactive / no tenant (seam returns nil → :map on nil
+  ;; is fine, but a hard throw is caught here) → a notice ---
+  {:name :_apps-disabled
+   :parent :const
+   :args {:value [:div {:class "apps-admin-disabled"}
+                  "Sign in to a tenant org to manage its apps."]}}
+
+  {:name :_apps-safe
+   :description "The apps table, or the notice when the list seam throws (addon inactive / no tenant)."
+   :parent :try
+   :args {:body :_apps-table
+          :on-throw {:parent :const :args {:value :_apps-disabled}}}}
+
+  ;; --- create form — a real <form hx-post> (no client JS). The label is a
+  ;; DNS-safe subdomain; the handler-fn-id is the fn to serve (its hash, copyable
+  ;; from any fn card). On submit HTMX POSTs, the handler creates via the seam
+  ;; THEN re-renders, swapping the refreshed panel into [data-apps-panel]. ---
+  {:name :_apps-create-hint
+   :parent :const
+   :args {:value [:div {:class "apps-create-hint"}
+                  "Add an app — a subdomain label + the fn it serves."]}}
+
+  {:name :_app-input-label
+   :parent :const
+   :args {:value [:input {:type "text" :name "label" :placeholder "subdomain (e.g. shop)"
+                          :class "app-input" :required true
+                          :pattern "[a-z0-9]([a-z0-9-]*[a-z0-9])?"
+                          :title "Lower-case letters, digits and hyphens"}]}}
+
+  {:name :_app-input-fn
+   :parent :const
+   :args {:value [:input {:type "text" :name "handler-fn-id" :placeholder "fn id it serves"
+                          :class "app-input" :required true}]}}
+
+  {:name :_app-create-btn
+   :parent :const
+   :args {:value [:button {:type "submit" :class "app-create-btn"} "+ Add app"]}}
+
+  {:name :_apps-create-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "app-create-form"
+                          :hx-post "/partials/apps-panel/create"
+                          :hx-target "closest [data-apps-panel]"
+                          :hx-swap "outerHTML"}}
+          :children [:_apps-create-hint :_app-input-label :_app-input-fn :_app-create-btn]}}
+
+  ;; --- container + handler + route ---
+  {:name :_apps-admin-title
+   :parent :const
+   :args {:value [:h3 "Apps"]}}
+
+  {:name :_apps-admin-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "apps-admin" :data-apps-panel "1"}}
+          :children [:_apps-admin-title :_apps-safe :_apps-create-form]}}
+
+  {:name :_apps-admin-html
+   :parent :render-hiccup
+   :args {:hiccup :_apps-admin-body}}
+
+  {:name :_partial-apps-panel-handler
+   :description "Ring handler for GET /partials/apps-panel — the current org's apps table as text/html."
+   :parent :html-ok-response
+   :args {:body :_apps-admin-html}}
+
+  {:name :partial-apps-panel
+   :description "GET /partials/apps-panel — server-rendered apps table for the current tenant org. Auth-required; degrades to a notice when the tenancy addon is inactive."
+   :parent :get-auth-required
+   :args {:path "/partials/apps-panel" :handler :_partial-apps-panel-handler}}
+
+  ;; --- POST /partials/apps-panel/create — create via the seam, THEN re-render ---
+  {:name :_apps-create-form-data
+   :parent :parse-form-body-kw}
+
+  {:name :_apps-create-do
+   :parent :tenant-create-app-route
+   :args {:data :_apps-create-form-data}}
+
+  {:name :_apps-create-then-panel
+   :description "Create the app, THEN render the refreshed panel — `:do` forces left-to-right so the panel's :tenant-list-app-routes includes the new row."
+   :parent :do
+   :args {:steps [:_apps-create-do :_apps-admin-html]}}
+
+  {:name :_apps-create-handler
+   :lambda-params [:request :limit]
+   :description "Ring handler for POST /partials/apps-panel/create — create the app and return the refreshed panel as text/html (HTMX swap target)."
+   :parent :html-ok-response
+   :args {:body :_apps-create-then-panel}}
+
+  {:name :apps-panel-create-route
+   :description "POST /partials/apps-panel/create — create an :app-route for the current org from a form-encoded body (label + handler-fn-id), return the refreshed panel. Auth-required."
+   :parent :post
+   :args {:path "/partials/apps-panel/create" :handler :_apps-create-handler}}
+
+  ;; --- POST /partials/apps-panel/delete — delete via the seam, THEN re-render ---
+  {:name :_apps-delete-form-data
+   :parent :parse-form-body-kw}
+
+  {:name :_apps-delete-do
+   :parent :tenant-delete-app-route
+   :args {:data :_apps-delete-form-data}}
+
+  {:name :_apps-delete-then-panel
+   :description "Delete the app, THEN render the refreshed panel — `:do` forces the delete before the panel re-reads :tenant-list-app-routes."
+   :parent :do
+   :args {:steps [:_apps-delete-do :_apps-admin-html]}}
+
+  {:name :_apps-delete-handler
+   :lambda-params [:request :limit]
+   :description "Ring handler for POST /partials/apps-panel/delete — delete the app and return the refreshed panel as text/html (HTMX swap target)."
+   :parent :html-ok-response
+   :args {:body :_apps-delete-then-panel}}
+
+  {:name :apps-panel-delete-route
+   :description "POST /partials/apps-panel/delete — delete an :app-route the current org owns (form-encoded :id), return the refreshed panel. Auth-required."
+   :parent :post
+   :args {:path "/partials/apps-panel/delete" :handler :_apps-delete-handler}}]}

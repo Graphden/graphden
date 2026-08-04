@@ -175,10 +175,14 @@ approach B.
   simpler to type-check (no arity ambiguity); positional is closer to
   Clojure idiom. **Shipped: positional** — `:self` is a 1-arg callable
   re-entered via `:invoke :func :self :arg <next>`.
-+ **Effects propagation**: `:fix`'s declared effects = the union of
-  `:step`'s effects. Type-checker needs to handle the recursive
-  effect propagation without infinite loop. Loose MVP: `:fix
-  :effects :any`.
++ **Effects propagation**: ideally `:fix`'s declared effects = the
+  union of `:step`'s effects; the type-checker would need to handle
+  the recursive effect propagation without an infinite loop. As
+  shipped, `:fix` declares `:effects #{}` (the HOF pure-by-contract
+  house rule — same as `:map`/`:filter`): the static checker does no
+  recursive union, so a `:fix` over an effectful step under-reports
+  statically, while the runtime effect gate still records the step's
+  actual effects at execution.
 
 ---
 

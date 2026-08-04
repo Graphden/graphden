@@ -67,8 +67,8 @@ Launch-order refinements agreed 2026-07-20:
 4. **Debug/observability** with the PHILOSOPHY § Debugging
    constraints (per-fn opt-in, sampling, `:secret` auto-skip,
    size/TTL limits) — ~1.5 weeks
-5. **Free-arg aliases** — see § Future Work entry; status check,
-   finish if not already shipped
+5. ~~**Free-arg aliases**~~ — SHIPPED (the `slot.source-slot-id`
+   rename model; see § Future Work entry, kept as the design record)
 (The routes-API + static-lint-against-drift item shipped as `window.API` +
 a sync-time drift validator — done, see § Implemented.)
 
@@ -321,8 +321,10 @@ for the current-state writeup.
 
 ### Free Argument Aliases (UI-friendly names)
 
-> Now scheduled in **Block 3** (status check + finish if not done).
-> The design below remains authoritative.
+> **Shipped** (Phase 6+ / 6c — verified in code 2026-08-04: the
+> `slot.source-slot-id` FK model below is live, `slot-by-fn-source-slot`
+> index in `executor/compile/lookups.clj`, rename popover in
+> `editor-overlay-edge-label.js`). Kept here as the design record.
 
 **Goal**: Human-readable names for free arguments in execution forms.
 
@@ -390,11 +392,15 @@ Execute function: calculate-report
 the structure first, fix details later — without errors being silent.
 
 **Current state**: type mismatch IS treated as an error (the type-rules
-throw), but the sync-time check wraps every `check-fn-def!` in a
-swallowing `try/catch` — a broken fn just drops out of the rich-types
-registry with no surfaced diagnostic. The editor shows per-arg mismatch
-rings, but there is no graph-level error status or branch-wide error
-list.
+throw). The sync-time sweep wraps every `check-fn-def!` in a `try/catch`,
+but the failure is NOT silent anymore: each failing fn is logged with its
+reason, a summary WARN fires, and `assert-sweep-failures-match-allowlist!`
+THROWS at sync time on any failure outside the (empty) allowlist — so a
+new broken fn blocks boot/CI. What's still true: the failing fn's
+computed rich type drops from the registry (its effect strip / computed
+return go missing in the editor), and the editor shows only per-arg
+mismatch rings — there is no graph-level error status or branch-wide
+error list.
 
 **What's needed:**
 

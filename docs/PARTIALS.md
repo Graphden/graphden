@@ -218,30 +218,26 @@ checking emptiness of the collection directly over counting-then-comparing:
 {:parent :zero? :args {:number :_count}}
 ```
 
-### 3. Inline anonymous `{:parent ...}` fn-defs are NOT supported
+### 3. Inline anonymous `{:parent ...}` fn-defs ARE supported (since the anon-lift pre-pass)
 
-The parser only accepts inline `{:value <literal>}` for arg-bindings.
-Anything compositional has to be a named fn-def, even when used once.
+The parser lifts an inline `{:parent X :args Y}` map in arg-value
+position into a synthetic `_anon-<hash>` named fn-def
+(`expand-inline-anons-in-module` in `packages/records/parse.clj`),
+including nested anons. The synthetic name mixes the use-site tuple, so
+identical-shape anons at different use-sites stay distinct entries.
 
 ```edn
-;; WRONG — parser rejects inline-anon
+;; WORKS — the inner :assoc is lifted to a synthetic _anon-… fn-def
 {:parent :assoc
  :args {:map {:parent :assoc :args {:map {:value {}} :key {:value :a} :value …}}
         :key {:value :b}
         :value …}}
-
-;; RIGHT — extract the inner :assoc into a named step
-{:name :_X-attrs-base
- :parent :assoc
- :args {:map {:value {}} :key {:value :a} :value …}}
-
-{:name :_X-attrs
- :parent :assoc
- :args {:map :_X-attrs-base :key {:value :b} :value …}}
 ```
 
-For complex hiccup attrs maps with multiple keys (class + data-*+
-hx-*), this means one named fn-def per `:assoc` step.
+Still prefer a NAMED `:_`-step when the sub-chain is reused, needs a
+comment, or should show up under a readable name in sync logs /
+type-check output — the naming guidance in
+[graphden-fn-design](PACKAGES.md#naming-guidelines) applies unchanged.
 
 ### 4. Literal-map keys are keywordized after JSONB roundtrip
 
@@ -454,11 +450,11 @@ by their addon/route groups rather than `app.routes` — same pattern.
   POST endpoint that takes `?version-id=` and does the same PUT
   internally.
 
-- **Inline-anon fn-def support**: every `:assoc` chain in the
-  partials decomposes into 2-4 named steps. The parser COULD
-  accept inline `{:parent X :args Y}` and synthesise a `_anon-…`
-  name — would cut ~30% of the partial fn-defs. Not a blocker;
-  cosmetic.
+- ~~**Inline-anon fn-def support**~~ — DONE: the parser lifts inline
+  `{:parent X :args Y}` into synthetic `_anon-…` fn-defs (see gotcha
+  3 above). Rewriting the existing named `:_`-steps into inline form
+  is pure churn — new partials just use it where a step has no
+  independent meaning.
 
 - **A dedicated `app.editor.partials` namespace** once the partials
   section in `app/editor/fns.edn` outgrows the same-file convention.

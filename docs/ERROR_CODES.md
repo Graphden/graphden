@@ -41,6 +41,10 @@ SUBMIT-time rejections carry 4xx; the 5 MB result cap is a 200 with
 
 Previously-undocumented types now covered by the table:
 `:constraint-violation/reparent-cross-branch` (400),
+`:constraint-violation/route-handler-shape` (400 — a bare-route
+handler's declared `:lambda-params` outside `[]`/`[:request]`),
+`:packages/route-handler-shape` (400 — the same contract at package
+sync),
 `:merge-conflict`, `:vault/not-configured`, `:refinement/violated`,
 `:capability/secret-leaf-restricted`, `:authz/forbidden`,
 `:branch-router/handler-not-found`, `:storage-error/unsupported-opts`

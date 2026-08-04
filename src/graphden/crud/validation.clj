@@ -12,7 +12,8 @@
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check.literals :as types-lit]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.web.route-shape :as route-shape]))
 
 
 ;; === Cycle-check on writes ==================================================
@@ -618,6 +619,87 @@
                           "would launder the value out of the type system")}))))))
 
 
+(defn- bare-route-fn?
+  "True when the fn's ancestor closure contains one of the bare
+   (middleware-less) route templates — matched by their deterministic
+   package ids (`route-shape/bare-route-template-ids`), never by name."
+  [storage fn-id]
+  (let [template-ids @route-shape/bare-route-template-ids]
+    (boolean
+      (or (template-ids fn-id)
+          (some (comp template-ids :id)
+                (collect-ancestor-closure storage [fn-id]))))))
+
+
+(defn- handler-slot?
+  "Is this the `:handler` slot? Binding rows always carry the SOURCE
+   slot id (renames create display-side view rows that still resolve
+   through it), so the source slot's name is authoritative."
+  [storage slot-id]
+  (some->> slot-id
+           (sp/read-entity storage :slot)
+           :name
+           (= "handler")))
+
+
+(defn- route-handler-shape-rej
+  "Guard the bare-route handler calling convention (the silent
+   wire-break class): a handler referenced from a middleware-less
+   route (`:get-route`/`:post-route` ancestor closure) must declare
+   `:lambda-params` `[]` or `[:request]` — any other DECLARED shape
+   makes reitit's raw positional call mis-bind the ring request
+   (blank form fields / request rendered as markup). nil = derived,
+   validated by the compile pipeline separately.
+
+   Two write directions:
+   - a `:binding` write that refs a fn: reject when the target's
+     declared params are invalid AND the binding sits on the
+     `:handler` slot of a bare route;
+   - a `:fn` write that declares `:lambda-params`: reject when the
+     shape is invalid AND some bare route already references this fn
+     as its handler.
+
+   The repo's own corpus is pinned by
+   `route-handler-shape-guard-test`; this guard extends the same
+   contract to editor-authored fns."
+  [storage entity-type data]
+  (case entity-type
+    :binding
+    (when-let [ref-id (:ref-fn-id data)]
+      (let [target (sp/read-entity storage :fn ref-id)]
+        (when (and target
+                   (not (route-shape/valid-handler-lambda-params?
+                          (:lambda-params target)))
+                   (handler-slot? storage (:slot-id data))
+                   (some->> (:fn-id data) (bare-route-fn? storage)))
+          {:reason (str "handler " (pr-str (:name target))
+                        " declares :lambda-params "
+                        (pr-str (vec (:lambda-params target)))
+                        " — a bare (middleware-less) route calls its handler"
+                        " with the raw ring request positionally; only [] or"
+                        " [:request] thread it correctly")})))
+
+    :fn
+    (when (and (contains? data :lambda-params)
+               (not (route-shape/valid-handler-lambda-params?
+                      (:lambda-params data)))
+               (:id data))
+      (when-let [handler-use (some (fn [b]
+                                     (when (and (handler-slot? storage (:slot-id b))
+                                                (bare-route-fn? storage (:fn-id b)))
+                                       b))
+                                   (sp/query-entities storage :binding
+                                                      {:ref-fn-id (:id data)}))]
+        {:reason (str ":lambda-params " (pr-str (vec (:lambda-params data)))
+                      " is invalid for a bare-route handler — this fn is"
+                      " bound as the :handler of the middleware-less route "
+                      (:fn-id handler-use)
+                      "; only [] or [:request] thread the raw ring request"
+                      " correctly")}))
+
+    nil))
+
+
 (defn write-rej
   "Run every server-side write-time guard against the proposed row.
    Returns the first `{:reason :type}` rejection or nil if all pass.
@@ -640,4 +722,6 @@
       (some-> (reparent-cross-branch-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/reparent-cross-branch))
       (some-> (resolver-rej storage entity-type entity-data)
-              (assoc :type :capability/resolver-marker-laundering))))
+              (assoc :type :capability/resolver-marker-laundering))
+      (some-> (route-handler-shape-rej storage entity-type entity-data)
+              (assoc :type :constraint-violation/route-handler-shape))))

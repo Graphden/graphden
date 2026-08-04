@@ -19,8 +19,10 @@
    out of scope here. Loads packages as pure data (no DB) so it runs in the
    unit suite."
   (:require
-    [clojure.test :refer [deftest is]]
-    [graphden.packages.loader :as loader]))
+    [clojure.test :refer [deftest is testing]]
+    [graphden.packages.loader :as loader]
+    [graphden.packages.sync :as sync]
+    [graphden.web.route-shape :as route-shape]))
 
 
 ;; The public package superset. `tenancy-admin` moved to the private
@@ -29,18 +31,15 @@
   ["core" "storage" "web" "app-base" "app" "registry" "mcp"])
 
 
-(def ^:private bare-route-parents
-  #{:get-route :post-route})
-
-
-(def ^:private allowed-shapes
-  #{[] [:request]})
-
+;; The template set + allowed shapes live in `graphden.web.route-shape`,
+;; shared with the sync-time validator (`packages.sync`) and the editor
+;; write-time guard (`crud.validation/route-handler-shape-rej`) so the
+;; three enforcement points can't drift.
 
 (deftest bare-route-handlers-declare-request-or-empty-params
   (let [fn-defs (:fn-defs (loader/load-packages package-set))
         by-name (into {} (map (juxt :name identity)) fn-defs)
-        bare-routes (filter #(bare-route-parents (:parent %)) fn-defs)
+        bare-routes (filter #(route-shape/bare-route-parents (:parent %)) fn-defs)
         offenders (for [r bare-routes
                         :let [h (get-in r [:args :handler])
                               handler (when (keyword? h) (by-name h))
@@ -48,8 +47,8 @@
                         ;; nil lambda-params = derived; the compile pipeline
                         ;; validates those separately. Only DECLARED shapes
                         ;; outside the allowed set break the wire path.
-                        :when (and handler (some? lp)
-                                   (not (allowed-shapes (vec lp))))]
+                        :when (and handler
+                                   (not (route-shape/valid-handler-lambda-params? lp)))]
                     {:route (:name r) :handler h :lambda-params (vec lp)})]
     (is (seq bare-routes) "sanity: the loader surfaced bare routes to check")
     (is (empty? offenders)
@@ -57,3 +56,39 @@
              " [] or [:request] — the raw-ring positional call breaks any other"
              " shape (blank form fields / request-rendered-as-markup): "
              (pr-str offenders)))))
+
+
+;; The sync-time mirror of the same contract — what an EXTERNAL package
+;; hits at `register-base-fns-from-packages!` before any DB write.
+
+(deftest sync-validator-rejects-bad-bare-route-handler
+  (let [validate! #'sync/validate-route-handler-shapes!]
+    (testing "a bare route whose handler declares a wire-breaking shape throws"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"lambda-params"
+            (validate! {:fn-defs [{:name :probe-route
+                                   :parent :get-route
+                                   :args {:path {:value "/probe"}
+                                          :handler :probe-handler}}
+                                  {:name :probe-handler
+                                   :parent :const
+                                   :lambda-params [:request :limit]
+                                   :args {}}]}))))
+
+    (testing "valid + derived shapes pass"
+      (is (nil? (validate! {:fn-defs [{:name :probe-route
+                                       :parent :get-route
+                                       :args {:handler :probe-handler}}
+                                      {:name :probe-handler
+                                       :lambda-params [:request]}]})))
+      (is (nil? (validate! {:fn-defs [{:name :probe-route
+                                       :parent :post-route
+                                       :args {:handler :probe-handler}}
+                                      {:name :probe-handler}]}))
+          "nil lambda-params = derived, out of scope"))
+
+    (testing "a foreign namespace's same-named template is not the bare template"
+      (is (nil? (validate! {:fn-defs [{:name :probe-route
+                                       :parent :other.ns/get-route
+                                       :args {:handler :probe-handler}}
+                                      {:name :probe-handler
+                                       :lambda-params [:x :y]}]}))))))

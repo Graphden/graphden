@@ -456,11 +456,17 @@ by their addon/route groups rather than `app.routes` — same pattern.
   is pure churn — new partials just use it where a step has no
   independent meaning.
 
-- **A dedicated `app.editor.partials` namespace** once the partials
-  section in `app/editor/fns.edn` outgrows the same-file convention.
-  Cut-over criterion: ~50+ fn-defs purely for partials, or once
-  partials need their own dependencies (currently they reuse
-  `app.branches` and `app.execution` chains directly).
+- ~~**A dedicated `app.editor.partials` namespace**~~ — RESOLVED by the
+  feature-module split instead: `app/editor/fns.edn` is now the
+  assembly/chrome core (plus the shared partial helpers and the
+  effect-explainer + auth-form partials), and each partial lives in
+  the module of its FEATURE — `editor-row-actions/`,
+  `editor-provenance/`, `editor-execute/`, `editor-edit-forms/`,
+  `editor-branches/`, `editor-panels/`. All modules keep
+  `:namespace "app.editor"` (fn identity is uuid-v5(ns, name), so
+  only the file layout changed). Partials were deliberately NOT
+  grouped into one partials namespace — they stay with their
+  features.
 
 ### 12. Bare-route handlers: `:lambda-params` must be `[]` or `[:request]`
 

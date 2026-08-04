@@ -1,0 +1,736 @@
+{:namespace "app.editor"
+ :description "Execute-feature partials — execute-popover shell, execute-result body (incl. inline variant), execute-history panel, and the runtime-effects strip."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; execute-popover shell — `GET /partials/execute-popover?fn-id=<uuid>`.
+  ;; Server renders the header / effects banner / free-arg scaffold /
+  ;; options row / action bar / hosts; `editor-execute.js` mounts the
+  ;; per-arg value-forms into the `[data-slot-id]` hosts (same
+  ;; `/api/value-form` flow as before) and owns the run / poll /
+  ;; cancel / history lifecycle. Free args come from the backend's own
+  ;; `:free-arg-slot-map` — the JS `freeArgsOf` re-derivation (which
+  ;; described itself as a mirror of that very fn) is gone, along with
+  ;; its wait-for-subtree workaround.
+
+  ;; `:nullable-uuid` honestly — `parse-uuid` yields nil for a
+  ;; missing/malformed param; the shell then degrades to the
+  ;; "(anonymous)" header (see the missing-fn-id test) instead of
+  ;; pretending the value can't be nil.
+  {:name :_xp-row
+   :parent :fn-row-by-id
+   :args {:fn-id {:ref :fn-id-param :type :nullable-uuid}}}
+
+  {:name :_xp-name
+   :parent :get
+   :args {:coll :_xp-row :key {:value :name} :default nil}}
+
+  {:name :_xp-title-name
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_xp-name}}
+          :then :_xp-name
+          :else {:value "(anonymous)"}}}
+
+  {:name :_xp-title
+   :parent :str-join
+   :args {:coll [{:value "Run :"} :_xp-title-name] :separator {:value ""}}}
+
+  ;; The branch pill is inserted CLIENT-side after the swap — which
+  ;; branch chip the user sees is client state (URL ?branch= +
+  ;; localStorage), and the JS already owns that surface.
+  {:name :_xp-header
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-popover-header"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "execute-popover-title"}}
+                             :children [:_xp-title]}}
+                     {:value [:button {:type "button"
+                                       :class "execute-history-toggle"
+                                       :title "Show persisted runs of this fn"
+                                       :aria-expanded "false"} "History"]}
+                     {:value [:button {:type "button"
+                                       :class "execute-popover-close"
+                                       :aria-label "Close run-fn popover"} "×"]}]}}
+
+  ;; --- effects banner ---------------------------------------------------
+
+  {:name :_xp-entry
+   :parent :rich-type-of-name
+   :args {:fn-name :_xp-name}}
+
+  {:name :_xp-effects
+   :description "Sorted vec of the fn's computed effects (raw registry entry holds a set of keywords)."
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :get
+                               :args {:coll :_xp-entry
+                                      :key {:value :effects}
+                                      :default []}}}}}}
+
+  {:name :_xp-has-effects?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_xp-effects}}}}
+
+  {:name :_xp-eff-chip-class
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} :_kw-item-name]
+          :separator {:value ""}}}
+
+  {:name :_xp-eff-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class}]
+                         :vals [:_xp-eff-chip-class]}}
+          :children [:_kw-item-name]}}
+
+  {:name :_xp-eff-chips
+   :parent :map
+   :args {:func :_xp-eff-chip :coll :_xp-effects}}
+
+  {:name :_xp-effects-banner
+   :parent :if
+   :args {:test :_xp-has-effects?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "execute-effects-warning"}}
+                        :children [{:value [:span {:class "execute-effects-warning-label"} "side effects: "]}
+                                   :_xp-eff-chips]}}
+          :else :_hidden-span}}
+
+  ;; --- free-arg scaffold ------------------------------------------------
+
+  {:name :_xp-free-map
+   :parent :free-arg-slot-map
+   :args {:fn-id {:ref :fn-id-param :type :nullable-uuid}}}
+
+  {:name :_xp-free-names
+   :description "Free-arg names, sorted for a stable row order (the slot-map is unordered)."
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :keys :args {:map :_xp-free-map}}}}}}
+
+  {:name :_xp-arg-slot-id-text
+   :parent :to-str
+   :args {:value {:parent :get
+                  :args {:coll :_xp-free-map :key {:as :item} :default nil}}}}
+
+  {:name :_xp-arg-host
+   :description "Empty per-arg mount host — editor-execute.js fetches `/api/value-form` for the `(fn-id, slot-id)` pair and renders the widget into it post-swap."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class} {:value :data-slot-id} {:value :data-slot-name}]
+                         :vals [{:value "execute-arg-form"}
+                                :_xp-arg-slot-id-text
+                                :_kw-item-name]}}
+          :children [{:value "…"}]}}
+
+  {:name :_xp-arg-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-arg-row"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:class "execute-arg-label"}}
+                             :children [:_kw-item-name]}}
+                     :_xp-arg-host]}}
+
+  {:name :_xp-arg-rows
+   :parent :map
+   :args {:func :_xp-arg-row :coll :_xp-free-names}}
+
+  {:name :_xp-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-popover-body"}}
+          :children [{:parent :if
+                      :args {:test {:parent :empty? :args {:coll :_xp-free-names}}
+                             :then {:value [:div {:class "execute-no-args-note"}
+                                            "No free arguments — click Run to invoke."]}
+                             :else :_hidden-span}}
+                     :_xp-arg-rows]}}
+
+  ;; --- options + actions -----------------------------------------------
+  ;; Effects-bearing fns: confirm checkbox gates Run (server emits Run
+  ;; disabled; JS live-toggles), persist is pre-checked + locked (the
+  ;; backend auto-persists effectful runs regardless).
+
+  {:name :_xp-options
+   :parent :if
+   :args {:test :_xp-has-effects?
+          :then {:value [:div {:class "execute-options-row"}
+                         [:label {:class "execute-option-label execute-confirm-label"}
+                          [:input {:type "checkbox" :class "execute-confirm-checkbox"}]
+                          [:span " I understand this will produce side effects"]]
+                         [:label {:class "execute-option-label execute-option-label-locked"
+                                  :title "Automatically saved — runs that produce side effects are always persisted for audit trail."}
+                          [:input {:type "checkbox" :class "execute-persist-checkbox"
+                                   :checked "checked" :disabled "disabled"}]
+                          [:span " Save to history"]]]}
+          :else {:value [:div {:class "execute-options-row"}
+                         [:label {:class "execute-option-label"
+                                  :title "When checked, this run is saved to fn-execution storage. Pure fast runs are NOT saved by default — tick this for runs you want to keep."}
+                          [:input {:type "checkbox" :class "execute-persist-checkbox"}]
+                          [:span " Save to history"]]]}}}
+
+  {:name :_xp-actions
+   :parent :if
+   :args {:test :_xp-has-effects?
+          :then {:value [:div {:class "execute-action-bar"}
+                         [:button {:type "button" :class "execute-run-btn"
+                                   :disabled "disabled"
+                                   :title "Confirm side-effects acknowledgement first"} "Run"]
+                         [:button {:type "button" :class "execute-cancel-btn"
+                                   :style "display:none"} "Cancel"]]}
+          :else {:value [:div {:class "execute-action-bar"}
+                         [:button {:type "button" :class "execute-run-btn"} "Run"]
+                         [:button {:type "button" :class "execute-cancel-btn"
+                                   :style "display:none"} "Cancel"]]}}}
+
+  {:name :_xp-fragment
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-popover-content"}}
+          :children [:_xp-header
+                     {:value [:div {:class "execute-history-host"
+                                    :style "display:none"}]}
+                     :_xp-effects-banner
+                     :_xp-body
+                     :_xp-options
+                     :_xp-actions
+                     {:value [:div {:class "execute-result-host"}]}]}}
+
+  {:name :_xp-html
+   :parent :render-hiccup
+   :args {:hiccup :_xp-fragment}}
+
+  {:name :_partial-xp-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/execute-popover?fn-id=<uuid>` — the Run-popover shell as `text/html`. JS mounts value-forms into the arg hosts and owns run/poll/cancel/history."
+   :parent :html-ok-response
+   :args {:body :_xp-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; execute-result body partial. Replaces the JS `renderResultBody`
+  ;; chain in `editor-execute-result.js` — `renderListResult` /
+  ;; `renderRecordResult` / `renderScalarResult` / `renderTaintedPane`
+  ;; / large-JSON-preview / 5MB-truncated note all migrate into the
+  ;; source-side `render-execute-result-hiccup` walker; this partial
+  ;; reads the execution row + emits the body hiccup.
+  ;;
+  ;; URL: `GET /partials/execute-result?id={uuid}`. Consumers:
+  ;; `editor-execute-history.js` (row-expand body) + (future)
+  ;; `editor-execute.js` orchestrator (post-Run body).
+
+  {:name :_partial-execute-result-id-str
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "id"}}}
+
+  {:name :_partial-execute-result-id
+   :parent :parse-uuid
+   :args {:string :_partial-execute-result-id-str}}
+
+  {:name :_partial-execute-result-exec
+   :parent :get-execution
+   :args {:id :_partial-execute-result-id}}
+
+  {:name :_partial-execute-result-fragment
+   :description "Execute-result body hiccup for a persisted exec-id. Reparents `:_er-body` (the pure-graph walker chain in `app/execution/fns.edn`)."
+   :parent :_er-body
+   :args {:exec :_partial-execute-result-exec}}
+
+  {:name :_partial-execute-result-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-execute-result-fragment}}
+
+  {:name :_partial-execute-result-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/execute-result?id={uuid}` — returns the execution body hiccup as `text/html`. nil execution → an `[:span hidden]` (the popover stays empty so the editor's `Loading…` → empty path is graceful)."
+   :parent :html-ok-response
+   :args {:body :_partial-execute-result-html}}
+
+  ;; --- POST /partials/execute-result-inline — same hiccup off a
+  ;; POSTed body (not a persisted execution-id). The orchestrator's
+  ;; inline-Run path uses this when persist?=false: the result lives
+  ;; only in the POST response and never hits storage, so the
+  ;; `?id={uuid}` endpoint can't read it. We round-trip the JSON
+  ;; response back to the server purely so the editor's render layer
+  ;; stays exclusively server-side — no JS branch reading
+  ;; `body.result` / `body.error` and building DOM locally.
+
+  {:name :_partial-execute-result-inline-body
+   :description "JSON request body — the execution-row shape `/api/execute` returns inline. `:parse-json-body` types its return as `:nullable-jsonb`; the orchestrator only calls this partial with a keyword-keyed map body, so we narrow to `:nullable-keyword-map` for the downstream `:_er-body` slot."
+   :parent :parse-json-body
+   :return-type :nullable-keyword-map
+   :args {:request {:as :request}}}
+
+  {:name :_partial-execute-result-inline-fragment
+   :description "Same `:_er-body` walker as the id-based GET sibling, but `:exec` comes from the POST body instead of storage."
+   :parent :_er-body
+   :args {:exec :_partial-execute-result-inline-body}}
+
+  {:name :_partial-execute-result-inline-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-execute-result-inline-fragment}}
+
+  {:name :_partial-execute-result-inline-handler
+   :lambda-params [:request]
+   :description "Ring handler for `POST /partials/execute-result-inline` — body is the JSON shape `/api/execute` returns inline (with `:status` / `:result` / `:error` / `:touched-secret?` / etc.). Same `:render-execute-result-hiccup` walker the id-based GET partial uses; lets the orchestrator render non-persisted runs server-side too."
+   :parent :html-ok-response
+   :args {:body :_partial-execute-result-inline-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Execute-history panel — list of persisted runs for one fn (across
+  ;; all of its versions, current branch). Lazy-fetched when the user
+  ;; clicks the "History" toggle in the execute popover header.
+  ;;
+  ;; v1 scope: status pill + timestamp + preview + Repeat button. The
+  ;; tainted/audit badges and the audit-filter chip are deferred —
+  ;; surfacing them server-side needs richer per-row taint + secret
+  ;; introspection than the current /api/executions exposes, and the
+  ;; existing e2e contract (status + preview + repeat-btn) doesn't
+  ;; depend on them.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-exec-hist-data
+   :description "Live by-fn executions data. Reuses `:_list-executions-by-fn` — same cond / parsed shape `/api/executions` uses, so the partial is the HTML projection of that JSON."
+   :parent :_list-executions-by-fn}
+
+  {:name :_partial-exec-hist-rows
+   :description "`:executions` list out of the envelope. Falls to `[]` for the error envelope path (no fn-id supplied) so the empty-state renders cleanly."
+   :parent :get
+   :args {:coll :_partial-exec-hist-data
+          :key {:value :executions}
+          :default {:value []}}}
+
+  {:name :_partial-exec-hist-empty?
+   :parent :empty?
+   :args {:coll :_partial-exec-hist-rows}}
+
+  ;; --- Per-row HOF callback.
+  {:name :_partial-eh-row-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default {:value ""}}}
+
+  {:name :_partial-eh-row-status-kw
+   :parent :get
+   :args {:coll {:as :item} :key {:value :status} :default nil}}
+
+  ;; Status is keyword (`:succeeded` / `:failed` / `:cancelled`) —
+  ;; `:name` strips the leading `:` for both class suffix and visible
+  ;; text. `:coalesce` survives the rare nil-status row.
+  {:name :_partial-eh-row-status-text
+   :parent :coalesce
+   :args {:value {:parent :name :args {:value :_partial-eh-row-status-kw}}
+          :default {:value "?"}}}
+
+  {:name :_partial-eh-row-status-class
+   :parent :str-join
+   :args {:coll [{:value "execute-history-status execute-history-status-"}
+                 :_partial-eh-row-status-text]
+          :separator {:value ""}}}
+
+  {:name :_partial-eh-row-status-attrs
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :class}
+          :value :_partial-eh-row-status-class}}
+
+  {:name :_partial-eh-row-status-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs :_partial-eh-row-status-attrs
+          :children [:_partial-eh-row-status-text]}}
+
+  ;; `:decode-row` parses timestamptz columns into `java.sql.Timestamp`
+  ;; objects, not strings — `:subs` on one throws
+  ;; `count not supported on type Timestamp`. Stringify first via
+  ;; `:to-str` (Timestamp's `.toString` is the SQL shape
+  ;; "YYYY-MM-DD HH:MM:SS.…", which fits the 16-char truncation
+  ;; cleanly).
+  {:name :_partial-eh-row-started-at
+   :parent :get
+   :args {:coll {:as :item} :key {:value :started-at} :default {:value ""}}}
+
+  {:name :_partial-eh-row-started-at-text
+   :parent :to-str
+   :args {:value :_partial-eh-row-started-at}}
+
+  {:name :_partial-eh-row-ts-short
+   :parent :subs
+   :args {:string :_partial-eh-row-started-at-text
+          :start {:value 0}
+          :end {:value 16}}}
+
+  {:name :_partial-eh-row-ts-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "execute-history-ts"}}
+          :children [:_partial-eh-row-ts-short]}}
+
+  ;; Repeat button — carries `data-execution-id` so the post-swap JS
+  ;; handler can wire `applyHistoryArgs(fnEntity, id)` by selector.
+  {:name :_partial-eh-row-repeat-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "execute-history-repeat-btn"
+                        :title "Re-fill the form with this run's args"}}
+          :key {:value :data-execution-id}
+          :value :_partial-eh-row-id}}
+
+  {:name :_partial-eh-row-repeat-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_partial-eh-row-repeat-attrs
+          :children ["Repeat"]}}
+
+  ;; Preview text dispatch by status. JSON-stringifying the result
+  ;; server-side keeps the format identical to what `shortPreview`
+  ;; produced in JS. Error path picks `:error`; cancelled is literal.
+  {:name :_partial-eh-row-result-json
+   :parent :to-json-string
+   :args {:data {:parent :get :args {:coll {:as :item}
+                                     :key {:value :result}
+                                     :default nil}}}}
+
+  {:name :_partial-eh-row-error-text
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item}
+                                      :key {:value :error}
+                                      :default nil}}
+          :default {:value ""}}}
+
+  {:name :_partial-eh-row-succeeded?
+   :parent :equal?
+   :args {:a :_partial-eh-row-status-kw :b {:value :succeeded}}}
+
+  {:name :_partial-eh-row-failed?
+   :parent :equal?
+   :args {:a :_partial-eh-row-status-kw :b {:value :failed}}}
+
+  {:name :_partial-eh-row-preview-text
+   :parent :cond
+   :args {:clauses [:_partial-eh-row-succeeded?  :_partial-eh-row-result-json
+                    :_partial-eh-row-failed?     :_partial-eh-row-error-text
+                    {:value true}                :_partial-eh-row-status-text]}}
+
+  {:name :_partial-eh-row-preview-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-preview"}}
+          :children [:_partial-eh-row-preview-text]}}
+
+  ;; Row header (status + timestamp + Repeat) + preview body.
+  {:name :_partial-eh-row-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-row-head"}}
+          :children [:_partial-eh-row-status-span
+                     :_partial-eh-row-ts-span
+                     :_partial-eh-row-repeat-btn]}}
+
+  {:name :_partial-eh-row-attrs
+   :parent :assoc
+   :args {:map {:value {:class "execute-history-row"}}
+          :key {:value :data-execution-id}
+          :value :_partial-eh-row-id}}
+
+  {:name :_partial-eh-row
+   :description "Per-row hiccup. Row carries `data-execution-id` for the post-swap row-click expand binding; the Repeat button carries the same attribute for its own binding."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-eh-row-attrs
+          :children [:_partial-eh-row-head :_partial-eh-row-preview-div]}}
+
+  {:name :_partial-eh-rendered-rows
+   :parent :map
+   :args {:func :_partial-eh-row :coll :_partial-exec-hist-rows}}
+
+  {:name :_partial-eh-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-list"}}
+          :children :_partial-eh-rendered-rows}}
+
+  {:name :_partial-eh-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-empty"}}
+          :children ["No saved runs yet. Tick \"Save to history\" before clicking Run to populate."]}}
+
+  {:name :_partial-eh-body
+   :parent :if
+   :args {:test :_partial-exec-hist-empty?
+          :then :_partial-eh-empty-msg
+          :else :_partial-eh-list}}
+
+  ;; --- usage-stats strip (Phase C1) — 7-day rollup line above the rows. ---
+  {:name :_peh-stats
+   :description "7-day usage rollup for the panel's fn — `{:runs :failed :cancelled :avg-ms}` from the pre-aggregated `:usage-stat` table (counts + durations only, org-scoped)."
+   :parent :usage-fn-stats
+   :args {:fn-id {:as :fn-id} :days 7}}
+
+  {:name :_peh-stats-runs
+   :parent :get
+   :args {:coll :_peh-stats :key {:value :runs} :default 0}}
+
+  {:name :_peh-stats-failed
+   :parent :get
+   :args {:coll :_peh-stats :key {:value :failed} :default 0}}
+
+  {:name :_peh-stats-avg
+   :parent :get
+   :args {:coll :_peh-stats :key {:value :avg-ms} :default 0}}
+
+  {:name :_peh-stats-text
+   :parent :str
+   :args {:parts [{:value "7d: "} :_peh-stats-runs {:value " runs · "}
+                  :_peh-stats-failed {:value " failed · avg "}
+                  :_peh-stats-avg {:value " ms"}]}}
+
+  {:name :_peh-stats-line
+   :description "The rollup strip rendered above the history rows."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-stats"}}
+          :children [:_peh-stats-text]}}
+
+  {:name :_partial-eh-fragment
+   :description "Full execute-history panel hiccup — the 7-day usage strip, then empty-state OR the list of rows."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-panel"}}
+          :children [:_peh-stats-line :_partial-eh-body]}}
+
+  {:name :_partial-eh-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-eh-fragment}}
+
+  {:name :_partial-execute-history-handler
+   :lambda-params [:storage-query :fn-id :request]
+   :description "Ring handler for `GET /partials/execute-history?fn-id=X` — returns the history panel hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the panel host and binds Repeat / row-expand handlers post-swap."
+   :parent :html-ok-response
+   :args {:body :_partial-eh-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Runtime-effects strip — chips for {runtime, declared} effect sets
+  ;; with drift detection. Slimmed out of editor-execute-result.js
+  ;; (rendered per-execution-result, was the most isolated of that
+  ;; module's render helpers — single input shape, no recursive
+  ;; rendering of arbitrary result values).
+  ;;
+  ;; Effects come in as comma-separated kebab-case names via query
+  ;; string (`?runtime=db,io&declared=db`) so the JS caller can build
+  ;; the URL without JSON-encoding. Empty list → empty string → split
+  ;; returns `[""]` so we filter blanks.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-rfx-runtime-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "runtime"}}}
+
+  {:name :_partial-rfx-declared-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "declared"}}}
+
+  {:name :_partial-rfx-runtime-split
+   :parent :str-split
+   :args {:string {:parent :coalesce :args {:value :_partial-rfx-runtime-raw :default ""}}
+          :separator {:value ","}}}
+
+  {:name :_partial-rfx-declared-split
+   :parent :str-split
+   :args {:string {:parent :coalesce :args {:value :_partial-rfx-declared-raw :default ""}}
+          :separator {:value ","}}}
+
+  {:name :_partial-rfx-blank?
+   :parent :blank?
+   :args {:string {:as :item}}}
+
+  {:name :_partial-rfx-not-blank?
+   :parent :not
+   :args {:value :_partial-rfx-blank?}}
+
+  {:name :_partial-rfx-runtime
+   :description "Cleaned runtime-effects list — drops empty strings produced by `str-split` on empty input."
+   :parent :filter
+   :args {:pred :_partial-rfx-not-blank? :coll :_partial-rfx-runtime-split}}
+
+  {:name :_partial-rfx-declared
+   :parent :filter
+   :args {:pred :_partial-rfx-not-blank? :coll :_partial-rfx-declared-split}}
+
+  {:name :_partial-rfx-empty?
+   :description "Both sets empty → return empty fragment (caller's host stays untouched)."
+   :parent :and
+   :args {:values [{:parent :empty? :args {:coll :_partial-rfx-runtime}}
+                   {:parent :empty? :args {:coll :_partial-rfx-declared}}]}}
+
+  ;; --- Runtime chips (effects that ACTUALLY fired). Drift detection:
+  ;; chip carries `execute-effects-drift` when the runtime effect isn't
+  ;; in the declared set (impl widens what the rich-type promised).
+  ;;
+  ;; `:contains?` over a list checks INDEX, not value — so we build a
+  ;; set-as-map `{eff true}` via `:into {} <pairs>` and `:contains?` it
+  ;; by key. Pair HOF: `:_partial-rfx-pair-true` returns `[item true]`.
+  {:name :_partial-rfx-pair-true
+   :description "Per-item HOF — returns `[item true]` as a VECTOR (not list); `:into {} <list-of-pairs>` requires vector-shaped Map$Entry items at runtime."
+   :parent :vec
+   :args {:coll [{:as :item} {:value true}]}}
+
+  {:name :_partial-rfx-declared-pairs
+   :parent :map
+   :args {:func :_partial-rfx-pair-true :coll :_partial-rfx-declared}}
+
+  {:name :_partial-rfx-runtime-declared-set
+   :parent :into
+   :args {:to {:value {}} :from :_partial-rfx-declared-pairs}}
+
+  {:name :_partial-rfx-runtime-drift?
+   :parent :not
+   :args {:value {:parent :contains?
+                  :args {:coll :_partial-rfx-runtime-declared-set
+                         :key {:as :item}}}}}
+
+  {:name :_partial-rfx-runtime-chip-class-base
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} {:as :item}]
+          :separator {:value ""}}}
+
+  {:name :_partial-rfx-runtime-chip-class
+   :parent :if
+   :args {:test :_partial-rfx-runtime-drift?
+          :then {:parent :str-join
+                 :args {:coll [:_partial-rfx-runtime-chip-class-base
+                               {:value " execute-effects-drift"}]
+                        :separator {:value ""}}}
+          :else :_partial-rfx-runtime-chip-class-base}}
+
+  {:name :_partial-rfx-runtime-chip-attrs
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :class}
+          :value :_partial-rfx-runtime-chip-class}}
+
+  {:name :_partial-rfx-runtime-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs :_partial-rfx-runtime-chip-attrs
+          :children [{:as :item}]}}
+
+  {:name :_partial-rfx-runtime-chips
+   :parent :map
+   :args {:func :_partial-rfx-runtime-chip :coll :_partial-rfx-runtime}}
+
+  ;; --- Declared-but-unobserved chips (declared but didn't fire on this
+  ;; run). Skipped entirely when no runtime data was recorded — "missing"
+  ;; in that case means "unknown", not "unobserved". The check is
+  ;; `runtime-non-empty? AND not (item in runtime-set)`. Same set-as-map
+  ;; trick as the drift check above.
+  {:name :_partial-rfx-runtime-pairs
+   :parent :map
+   :args {:func :_partial-rfx-pair-true :coll :_partial-rfx-runtime}}
+
+  {:name :_partial-rfx-runtime-set
+   :parent :into
+   :args {:to {:value {}} :from :_partial-rfx-runtime-pairs}}
+
+  {:name :_partial-rfx-runtime-non-empty?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_partial-rfx-runtime}}}}
+
+  {:name :_partial-rfx-declared-show-unobserved?
+   :parent :and
+   :args {:values [:_partial-rfx-runtime-non-empty?
+                   {:parent :not :args {:value {:parent :contains?
+                                                :args {:coll :_partial-rfx-runtime-set
+                                                       :key {:as :item}}}}}]}}
+
+  {:name :_partial-rfx-declared-chip-class
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} {:as :item}
+                 {:value " execute-effects-unobserved"}]
+          :separator {:value ""}}}
+
+  {:name :_partial-rfx-declared-chip-title
+   :parent :str-join
+   :args {:coll [{:value "Declared by the fn-def but the runtime impl didn't fire it: "}
+                 {:as :item}]
+          :separator {:value ""}}}
+
+  {:name :_partial-rfx-declared-chip-shown
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc
+                               :args {:map {:value {}}
+                                      :key {:value :class}
+                                      :value :_partial-rfx-declared-chip-class}}
+                         :key {:value :title}
+                         :value :_partial-rfx-declared-chip-title}}
+          :children [{:as :item}]}}
+
+  ;; Hidden span (zero-width sentinel) when the chip should be skipped —
+  ;; keeps the children-vec shape uniform across runs.
+  {:name :_partial-rfx-declared-chip-hidden
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-rfx-declared-chip
+   :parent :if
+   :args {:test :_partial-rfx-declared-show-unobserved?
+          :then :_partial-rfx-declared-chip-shown
+          :else :_partial-rfx-declared-chip-hidden}}
+
+  {:name :_partial-rfx-declared-chips
+   :parent :map
+   :args {:func :_partial-rfx-declared-chip :coll :_partial-rfx-declared}}
+
+  ;; --- Composition.
+  {:name :_partial-rfx-label
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "execute-runtime-effects-label"}}
+          :children ["ran: "]}}
+
+  ;; Wrap the label in a 1-element list so `:concat :colls` sees a
+  ;; collection of collections (the inner `[:_partial-rfx-label]`
+  ;; literal would store as `[:literal-kw]`, not as a ref to the
+  ;; label fn-def — `:value` literals don't resolve refs).
+  {:name :_partial-rfx-label-list
+   :parent :list
+   :args {:items [:_partial-rfx-label]}}
+
+  {:name :_partial-rfx-strip-children
+   :parent :concat
+   :args {:colls [:_partial-rfx-label-list
+                  :_partial-rfx-runtime-chips
+                  :_partial-rfx-declared-chips]}}
+
+  {:name :_partial-rfx-strip-populated
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-runtime-effects-strip"}}
+          :children :_partial-rfx-strip-children}}
+
+  {:name :_partial-rfx-strip-empty
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-rfx-strip
+   :parent :if
+   :args {:test :_partial-rfx-empty?
+          :then :_partial-rfx-strip-empty
+          :else :_partial-rfx-strip-populated}}
+
+  {:name :_partial-rfx-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-rfx-strip}}
+
+  {:name :_partial-execute-result-effects-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/execute-result-effects?runtime=db,io&declared=db` — returns the runtime-effects strip hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the result host below the result body."
+   :parent :html-ok-response
+   :args {:body :_partial-rfx-html}}]}

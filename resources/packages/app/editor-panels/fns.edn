@@ -1,0 +1,507 @@
+{:namespace "app.editor"
+ :description "Sidebar panel partials — error-log (recent failed executions) and stats (org usage rollups)."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; ERROR LOG partial (Phase C2) — GET /partials/error-log. The current
+  ;; org's recent failed executions (write-side redacted/scrubbed), newest
+  ;; first. Fn names link via the editor's native #hash navigation.
+  ;; ---------------------------------------------------------------------
+  {:name :_perr-rows
+   :parent :recent-failures
+   :args {:days 7 :limit 50}}
+
+  {:name :_perr-item-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+
+  {:name :_perr-item-href
+   :parent :str
+   :args {:parts [{:value "#"} :_perr-item-name]}}
+
+  {:name :_perr-item-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "error-log-fn"}}
+          :key {:value :href}
+          :value :_perr-item-href}}
+
+  {:name :_perr-item-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs :_perr-item-link-attrs
+          :children [:_perr-item-name]}}
+
+  {:name :_perr-item-time
+   :parent :get
+   :args {:coll {:as :item} :key {:value :finished-at} :default {:value ""}}}
+
+  {:name :_perr-item-error
+   :parent :get
+   :args {:coll {:as :item} :key {:value :error} :default {:value ""}}}
+
+  {:name :_perr-item-time-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-time"}}
+          :children [:_perr-item-time]}}
+
+  {:name :_perr-item-error-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-msg"}}
+          :children [:_perr-item-error]}}
+
+  {:name :_perr-item-data
+   :parent :get
+   :args {:coll {:as :item} :key {:value :error-data} :default {:value nil}}}
+
+  {:name :_perr-item-data-pre
+   :parent :hiccup
+   :args {:tag {:value "pre"}
+          :attrs {:value {:class "error-log-data"}}
+          :children [:_perr-item-data]}}
+
+  {:name :_perr-item-details
+   :description "Collapsible ex-data (trace context) — rendered only when the row HAS error-data."
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "error-log-details"}}
+          :children [{:value [:summary "details"]} :_perr-item-data-pre]}}
+
+  {:name :_perr-item-data?
+   :parent :some?
+   :args {:value :_perr-item-data}}
+
+  {:name :_perr-item-details-opt
+   :parent :if
+   :args {:test :_perr-item-data?
+          :then :_perr-item-details
+          :else :_hidden-span}}
+
+  {:name :_perr-row
+   :description "One failure row — fn link (native #hash navigation), finish time, scrubbed error text, optional ex-data details."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-row"}}
+          :children [:_perr-item-link :_perr-item-time-div
+                     :_perr-item-error-div :_perr-item-details-opt]}}
+
+  {:name :_perr-rendered-rows
+   :parent :map
+   :args {:func :_perr-row :coll :_perr-rows}}
+
+  {:name :_perr-empty?
+   :parent :empty?
+   :args {:coll :_perr-rows}}
+
+  {:name :_perr-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-empty"}}
+          :children ["No failed runs in the last 7 days."]}}
+
+  {:name :_perr-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "error-log-list"}}
+          :children [:_perr-rendered-rows]}}
+
+  {:name :_perr-body
+   :parent :if
+   :args {:test :_perr-empty?
+          :then :_perr-empty-msg
+          :else :_perr-list}}
+
+  {:name :_perr-html
+   :parent :render-hiccup
+   :args {:hiccup :_perr-body}}
+
+  {:name :_partial-error-log-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/error-log — the org's recent failed executions as text/html. Auth-required (route side)."
+   :parent :html-ok-response
+   :args {:body :_perr-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; STATS partial (Phase C) — GET /partials/stats. The CURRENT org's run
+  ;; statistics over a 7-day window: headline totals, a per-day trend
+  ;; table, and a top-fns table. Every number comes from an org-scoped
+  ;; `:usage-stat` rollup (counts + durations only — never args/results/
+  ;; errors), so a tenant sees exactly their own workspace and nothing of
+  ;; anyone else's. Fn names in the top table are native #hash links.
+  ;; ---------------------------------------------------------------------
+  {:name :_pstats-days-raw
+   :description "Read the `days` query-string parameter; nil when absent."
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "days"}}}
+
+  {:name :_pstats-days-30?
+   :parent :equal? :args {:a :_pstats-days-raw :b {:value "30"}}}
+  {:name :_pstats-days-90?
+   :parent :equal? :args {:a :_pstats-days-raw :b {:value "90"}}}
+
+  {:name :_pstats-days-else
+   :parent :if :args {:test :_pstats-days-30? :then {:value 30} :else {:value 7}}}
+  {:name :_pstats-window-days
+   :description "The panel's trailing window — `?days=30|90` allowed, anything else clamps to 7 (allowlist, not parse: no way to smuggle an arbitrary interval)."
+   :parent :if :args {:test :_pstats-days-90? :then {:value 90} :else :_pstats-days-else}}
+
+  {:name :_pstats-summary
+   :parent :usage-org-summary
+   :args {:days :_pstats-window-days}}
+
+  {:name :_pstats-summary-runs
+   :parent :get :args {:coll :_pstats-summary :key {:value :runs} :default {:value 0}}}
+  {:name :_pstats-summary-failed
+   :parent :get :args {:coll :_pstats-summary :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-summary-avg
+   :parent :get :args {:coll :_pstats-summary :key {:value :avg-ms} :default {:value 0}}}
+
+  {:name :_pstats-headline-text
+   :description "`<N>d: N runs · M failed · avg K ms` — the panel headline, window included."
+   :parent :str
+   :args {:parts [:_pstats-window-days {:value "d: "} :_pstats-summary-runs {:value " runs · "}
+                  :_pstats-summary-failed {:value " failed · avg "}
+                  :_pstats-summary-avg {:value " ms"}]}}
+
+  {:name :_pstats-headline
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "stats-headline"}}
+          :children [:_pstats-headline-text]}}
+
+  ;; --- Period switcher — three htmx buttons re-fetching the partial with
+  ;; ?days=N and swapping the [data-stats-panel] root (outerHTML, the
+  ;; packages-panel pattern). Active state is server-rendered.
+  {:name :_pstats-is-7?
+   :parent :equal? :args {:a :_pstats-window-days :b {:value 7}}}
+  {:name :_pstats-is-30?
+   :parent :equal? :args {:a :_pstats-window-days :b {:value 30}}}
+  {:name :_pstats-is-90?
+   :parent :equal? :args {:a :_pstats-window-days :b {:value 90}}}
+
+  {:name :_pstats-p7-class
+   :parent :if :args {:test :_pstats-is-7?
+                      :then {:value "stats-period stats-period-active"}
+                      :else {:value "stats-period"}}}
+  {:name :_pstats-p30-class
+   :parent :if :args {:test :_pstats-is-30?
+                      :then {:value "stats-period stats-period-active"}
+                      :else {:value "stats-period"}}}
+  {:name :_pstats-p90-class
+   :parent :if :args {:test :_pstats-is-90?
+                      :then {:value "stats-period stats-period-active"}
+                      :else {:value "stats-period"}}}
+
+  {:name :_pstats-p7-attrs
+   :parent :assoc
+   :args {:map {:value {:hx-get "/partials/stats?days=7"
+                        :hx-target "closest [data-stats-panel]"
+                        :hx-swap "outerHTML" :type "button"}}
+          :key {:value :class} :value :_pstats-p7-class}}
+  {:name :_pstats-p30-attrs
+   :parent :assoc
+   :args {:map {:value {:hx-get "/partials/stats?days=30"
+                        :hx-target "closest [data-stats-panel]"
+                        :hx-swap "outerHTML" :type "button"}}
+          :key {:value :class} :value :_pstats-p30-class}}
+  {:name :_pstats-p90-attrs
+   :parent :assoc
+   :args {:map {:value {:hx-get "/partials/stats?days=90"
+                        :hx-target "closest [data-stats-panel]"
+                        :hx-swap "outerHTML" :type "button"}}
+          :key {:value :class} :value :_pstats-p90-class}}
+
+  {:name :_pstats-p7-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pstats-p7-attrs :children ["7d"]}}
+  {:name :_pstats-p30-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pstats-p30-attrs :children ["30d"]}}
+  {:name :_pstats-p90-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pstats-p90-attrs :children ["90d"]}}
+
+  {:name :_pstats-period-bar
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "stats-period-bar"}}
+          :children [:_pstats-p7-btn :_pstats-p30-btn :_pstats-p90-btn]}}
+
+  ;; --- Per-day trend table ---------------------------------------------
+  {:name :_pstats-daily
+   :parent :usage-org-daily
+   :args {:days :_pstats-window-days}}
+
+  {:name :_pstats-day-label
+   :parent :get :args {:coll {:as :item} :key {:value :day} :default {:value ""}}}
+  {:name :_pstats-day-runs
+   :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
+  {:name :_pstats-day-failed
+   :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-day-avg
+   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+
+  {:name :_pstats-day-label-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-day"}}
+          :children [:_pstats-day-label]}}
+  {:name :_pstats-day-runs-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-day-runs]}}
+  {:name :_pstats-day-failed-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
+          :children [:_pstats-day-failed]}}
+  {:name :_pstats-day-avg-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-day-avg]}}
+
+  ;; CSS bar — width % comes server-computed (`:runs-pct`, share of the
+  ;; window max) so the graph does no cross-row arithmetic.
+  {:name :_pstats-day-pct
+   :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
+  {:name :_pstats-day-bar-style
+   :parent :str :args {:parts [{:value "width:"} :_pstats-day-pct {:value "%"}]}}
+  {:name :_pstats-day-bar-attrs
+   :parent :assoc
+   :args {:map {:value {:class "stats-bar-fill"}}
+          :key {:value :style} :value :_pstats-day-bar-style}}
+  {:name :_pstats-day-bar-fill
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs :_pstats-day-bar-attrs :children []}}
+  {:name :_pstats-day-bar
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "stats-bar"}}
+          :children [:_pstats-day-bar-fill]}}
+  {:name :_pstats-day-bar-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-bar-cell"}}
+          :children [:_pstats-day-bar]}}
+
+  {:name :_pstats-day-row
+   :description "One trend row — `[:tr [:td day] [:td bar] [:td runs] [:td failed] [:td avg]]`."
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :attrs {:value {:class "stats-row"}}
+          :children [:_pstats-day-label-cell :_pstats-day-bar-cell
+                     :_pstats-day-runs-cell
+                     :_pstats-day-failed-cell :_pstats-day-avg-cell]}}
+
+  {:name :_pstats-day-rows
+   :parent :map :args {:func :_pstats-day-row :coll :_pstats-daily}}
+
+  {:name :_pstats-daily-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "stats-table"}}
+          :children [{:value [:thead [:tr [:th "Day"] [:th ""] [:th "Runs"] [:th "Failed"] [:th "Avg ms"]]]}
+                     :_pstats-day-rows]}}
+
+  {:name :_pstats-daily-empty?
+   :parent :empty? :args {:coll :_pstats-daily}}
+
+  {:name :_pstats-daily-section
+   :parent :if
+   :args {:test :_pstats-daily-empty?
+          :then {:value [:div {:class "stats-empty"} "No runs in the last 7 days."]}
+          :else :_pstats-daily-table}}
+
+  ;; --- Top-fns table ----------------------------------------------------
+  {:name :_pstats-top-fns
+   :parent :usage-org-fn-stats
+   :args {:days :_pstats-window-days :limit {:value 20}}}
+
+  {:name :_pstats-fn-name
+   :parent :get :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+  {:name :_pstats-fn-runs
+   :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
+  {:name :_pstats-fn-failed
+   :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-fn-avg
+   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+
+  {:name :_pstats-fn-href
+   :parent :str :args {:parts [{:value "#"} :_pstats-fn-name]}}
+  {:name :_pstats-fn-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "stats-fn"}} :key {:value :href} :value :_pstats-fn-href}}
+  {:name :_pstats-fn-link
+   :parent :hiccup
+   :args {:tag {:value "a"} :attrs :_pstats-fn-link-attrs :children [:_pstats-fn-name]}}
+  {:name :_pstats-fn-name-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-fn-cell"}}
+          :children [:_pstats-fn-link]}}
+
+  {:name :_pstats-fn-runs-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-fn-runs]}}
+  {:name :_pstats-fn-failed-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
+          :children [:_pstats-fn-failed]}}
+  {:name :_pstats-fn-avg-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-fn-avg]}}
+
+  {:name :_pstats-fn-pct
+   :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
+  {:name :_pstats-fn-bar-style
+   :parent :str :args {:parts [{:value "width:"} :_pstats-fn-pct {:value "%"}]}}
+  {:name :_pstats-fn-bar-attrs
+   :parent :assoc
+   :args {:map {:value {:class "stats-bar-fill"}}
+          :key {:value :style} :value :_pstats-fn-bar-style}}
+  {:name :_pstats-fn-bar-fill
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs :_pstats-fn-bar-attrs :children []}}
+  {:name :_pstats-fn-bar
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "stats-bar"}}
+          :children [:_pstats-fn-bar-fill]}}
+  {:name :_pstats-fn-bar-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-bar-cell"}}
+          :children [:_pstats-fn-bar]}}
+
+  {:name :_pstats-fn-row
+   :description "One top-fns row — fn link (native #hash nav), bar, runs, failed, avg — each in its own `[:td]`."
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :attrs {:value {:class "stats-row"}}
+          :children [:_pstats-fn-name-cell :_pstats-fn-bar-cell
+                     :_pstats-fn-runs-cell
+                     :_pstats-fn-failed-cell :_pstats-fn-avg-cell]}}
+
+  {:name :_pstats-fn-rows
+   :parent :map :args {:func :_pstats-fn-row :coll :_pstats-top-fns}}
+
+  {:name :_pstats-fn-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "stats-table"}}
+          :children [{:value [:thead [:tr [:th "Function"] [:th ""] [:th "Runs"] [:th "Failed"] [:th "Avg ms"]]]}
+                     :_pstats-fn-rows]}}
+
+  {:name :_pstats-fn-empty?
+   :parent :empty? :args {:coll :_pstats-top-fns}}
+  {:name :_pstats-fn-section
+   :parent :if
+   :args {:test :_pstats-fn-empty?
+          :then {:value [:div {:class "stats-empty"} "No functions have run yet."]}
+          :else :_pstats-fn-table}}
+
+  ;; --- Operator-only by-org section -------------------------------------
+  ;; `:usage-all-org-stats` returns [] for ANY tenant context (impl-side
+  ;; guard), so this whole section renders only for the platform operator.
+  {:name :_pstats-orgs
+   :parent :usage-all-org-stats
+   :args {:days :_pstats-window-days :limit {:value 20}}}
+
+  {:name :_pstats-org-name
+   :parent :get :args {:coll {:as :item} :key {:value :org} :default {:value "?"}}}
+  {:name :_pstats-org-runs
+   :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
+  {:name :_pstats-org-failed
+   :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-org-avg
+   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+  {:name :_pstats-org-pct
+   :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
+
+  {:name :_pstats-org-name-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-fn-cell"}}
+          :children [:_pstats-org-name]}}
+  {:name :_pstats-org-bar-style
+   :parent :str :args {:parts [{:value "width:"} :_pstats-org-pct {:value "%"}]}}
+  {:name :_pstats-org-bar-attrs
+   :parent :assoc
+   :args {:map {:value {:class "stats-bar-fill"}}
+          :key {:value :style} :value :_pstats-org-bar-style}}
+  {:name :_pstats-org-bar-fill
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs :_pstats-org-bar-attrs :children []}}
+  {:name :_pstats-org-bar
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "stats-bar"}}
+          :children [:_pstats-org-bar-fill]}}
+  {:name :_pstats-org-bar-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-bar-cell"}}
+          :children [:_pstats-org-bar]}}
+  {:name :_pstats-org-runs-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-org-runs]}}
+  {:name :_pstats-org-failed-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num stats-failed"}}
+          :children [:_pstats-org-failed]}}
+  {:name :_pstats-org-avg-cell
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
+          :children [:_pstats-org-avg]}}
+
+  {:name :_pstats-org-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :attrs {:value {:class "stats-row"}}
+          :children [:_pstats-org-name-cell :_pstats-org-bar-cell
+                     :_pstats-org-runs-cell
+                     :_pstats-org-failed-cell :_pstats-org-avg-cell]}}
+
+  {:name :_pstats-org-rows
+   :parent :map :args {:func :_pstats-org-row :coll :_pstats-orgs}}
+
+  {:name :_pstats-org-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "stats-table"}}
+          :children [{:value [:thead [:tr [:th "Organization"] [:th ""] [:th "Runs"] [:th "Failed"] [:th "Avg ms"]]]}
+                     :_pstats-org-rows]}}
+
+  {:name :_pstats-org-block
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "stats-org-block"}}
+          :children [{:value [:div {:class "stats-subhead"} "By organization"]}
+                     :_pstats-org-table]}}
+
+  {:name :_pstats-orgs-empty?
+   :parent :empty? :args {:coll :_pstats-orgs}}
+  {:name :_pstats-org-section
+   :parent :if
+   :args {:test :_pstats-orgs-empty?
+          :then :_hidden-span
+          :else :_pstats-org-block}}
+
+  ;; --- Assembly ---------------------------------------------------------
+  ;; The wrapper carries `data-stats-panel` so the period buttons can
+  ;; hx-target `closest [data-stats-panel]` and swap the whole panel
+  ;; (outerHTML — the packages-panel pattern).
+  {:name :_pstats-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "stats-panel" :data-stats-panel "1"}}
+          :children [:_pstats-headline
+                     :_pstats-period-bar
+                     {:value [:div {:class "stats-subhead"} "By day"]}
+                     :_pstats-daily-section
+                     {:value [:div {:class "stats-subhead"} "Top functions"]}
+                     :_pstats-fn-section
+                     :_pstats-org-section]}}
+
+  {:name :_pstats-html
+   :parent :render-hiccup
+   :args {:hiccup :_pstats-body}}
+
+  {:name :_partial-stats-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /partials/stats?days=7|30|90 — the current org's run statistics as text/html (headline, period switcher, per-day trend with CSS bars, top-fns; plus the operator-only by-org section). Auth-required (route side); org-scoped by construction (every rollup base-fn reads the CURRENT org only; the cross-org read returns [] for tenants impl-side)."
+   :parent :html-ok-response
+   :args {:body :_pstats-html}}]}

@@ -711,7 +711,15 @@ resources/packages/     # First-party package definitions (EDN + Clojure impls)
 │                       #   — loaded only when the tenancy addon is wired
 └── app/                # Application server (editor UI + routes + server chain).
     ├── package.edn     #   Deps core+web+storage+app-base; startup-fn :web-server.
-    ├── editor/         # Editor UI fn-defs + impls
+    ├── editor/         # Editor UI assembly — assets/page/chrome fn-defs + JS/CSS,
+    │                   #   shared partial helpers, effect-explainer + auth-form partials
+    ├── editor-row-actions/  # row-actions popover partial (4 contexts)
+    ├── editor-provenance/   # mismatch-explainer + provenance + return-type-rule partials
+    ├── editor-execute/      # execute popover / result / history / effects-strip partials
+    ├── editor-edit-forms/   # type-name datalist, compatible-type options, expects-effects
+    │                        #   form, fn-picker incompat partials
+    ├── editor-branches/     # fn-versions, branch-diff, merge-conflicts partials
+    ├── editor-panels/       # error-log + stats sidebar-panel partials
     ├── lookups/ execution/ branches/ secrets/ …  # app content
     ├── routes/ route-groups/  # main router aggregation (no registry/mcp refs)
     └── server/         # web-server root + the `_app-ring-response` handler chain

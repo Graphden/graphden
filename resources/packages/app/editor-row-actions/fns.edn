@@ -1,0 +1,625 @@
+{:namespace "app.editor"
+ :description "Row-actions popover partial — server-rendered per-row action buttons for the 4 contexts (col-header / cell / use-site-arg / root-row). See docs/EDITOR_HTMX_MIGRATION_PLAN.md."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; row-actions popover content. Phase A1 of the HTMX migration
+  ;; (docs/EDITOR_HTMX_MIGRATION_PLAN.md) — server-renders the
+  ;; per-row action buttons (ns / i / ↗ for col-header today; cell
+  ;; / use-site / root-row added in A2-A4). JS owns the lifecycle
+  ;; (hover/click/dismiss/position) + the post-swap dispatch from
+  ;; `data-action="…"` attrs to the existing edit-mode handlers.
+  ;;
+  ;; URL: `GET /partials/row-actions?fn-id=X&context=col-header[&show-open=false]`.
+  ;; Public route (`:get-route`, not auth-required) — the partial
+  ;; itself is read-only; click handlers re-check `isAuthenticated()`
+  ;; client-side before invoking write actions.
+
+  {:name :_partial-row-actions-fn-id-str
+   :description "Read the `fn-id` query-string parameter; nil when absent."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "fn-id"}}}
+
+  {:name :_partial-row-actions-context-str
+   :description "Read the `context` query-string parameter — one of `col-header` / `cell` / `use-site-arg` / `root-row`. A1 only handles `col-header`; other contexts trigger the default branch which emits an empty toolbar (Phase A2-A4 fills them in)."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "context"}}}
+
+  {:name :_partial-row-actions-show-open-str
+   :description "Optional `show-open` flag (`\"true\"` / `\"false\"`). Client passes `false` when the row IS the currently-selected root view (otherwise `↗` would open the same fn the user is already on)."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "show-open"}}}
+
+  {:name :_partial-row-actions-show-open?
+   :description "True iff `show-open` is absent OR not literally `\"false\"`. Default-on so callers who don't care don't have to pass the flag."
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a :_partial-row-actions-show-open-str
+                         :b {:value "false"}}}}}
+
+  ;; --- Phase A2 query params ---
+
+  {:name :_partial-row-actions-card-fn-id-str
+   :description "Optional `card-fn-id` query parameter — the fn that OWNS the card. Distinct from `fn-id` (which is the cell's fn) in the MI cell context. Used by the × Remove-MI / + Add-MI buttons whose target is the CARD's parent-set, not the cell's."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "card-fn-id"}}}
+
+  {:name :_partial-row-actions-editable-str
+   :description "Optional `editable` flag (`\"true\"` / `\"false\"`). Client computes the per-context editability gate (auth + `implementationFnIds.has(cardFnId)` for MI cells) and passes the result so the partial doesn't need an additional auth-state query. JS dispatcher RE-CHECKS at click time as a defence in depth."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "editable"}}}
+
+  {:name :_partial-row-actions-editable?
+   :description "True iff `editable=true`. Default-off — safer to omit edit affordances when the caller forgot to gate."
+   :parent :equal?
+   :args {:a :_partial-row-actions-editable-str :b {:value "true"}}}
+
+  ;; --- Phase A3 query param ---
+
+  {:name :_partial-row-actions-binding-id-str
+   :description "Optional `binding-id` query parameter — identifies the use-site arg binding the × / ✎ buttons target. Goes onto the host div as `data-binding-id`; JS dispatcher uses it to look up the rich `useSiteArg` object from the client-side registry that `loadRowActionsContent` populates pre-fetch."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "binding-id"}}}
+
+  ;; --- Phase A4 query params ---
+
+  {:name :_partial-row-actions-edit-block-reason-str
+   :description "Optional `edit-block-reason` — human-readable text JS gets from `getFnEditBlockReason(fnId)`. When non-empty + `editable=false`, the ✎ / + / ✕ buttons render in disabled-with-reason state (the reason shows via `showIconReasonPopover` on click)."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "edit-block-reason"}}}
+
+  {:name :_partial-row-actions-edit-blocked?
+   :description "True iff the fn isn't editable AND a reason was supplied."
+   :parent :and
+   :args {:values [{:parent :not :args {:value :_partial-row-actions-editable?}}
+                   {:parent :some? :args {:value :_partial-row-actions-edit-block-reason-str}}]}}
+
+  ;; ⚙ service-block reason — computed SERVER-side from the same
+  ;; predicate the create-service guard uses
+  ;; (`:service-blocking-free-args`, which drops per-invocation
+  ;; callback subtrees). It used to arrive as a query param the
+  ;; client computed from its full `freeArgsOf` mirror — that both
+  ;; over-blocked listener fns (full set vs the service projection)
+  ;; and died silently when the mirror was deleted.
+
+  {:name :_partial-row-actions-svc-blocking-names
+   :description "Sorted free-arg names that would block STARTING this fn as a service; empty vec when startable."
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :keys
+                               :args {:map {:parent :service-blocking-free-args
+                                            :args {:fn-id :fn-id-param}}}}}}}}
+
+  {:name :_partial-row-actions-svc-name-text
+   :parent :str-join
+   :args {:coll [{:value ":"} :_kw-item-name]
+          :separator {:value ""}}}
+
+  {:name :_partial-row-actions-svc-names-text
+   :parent :str-join
+   :args {:coll {:parent :map
+                 :args {:func :_partial-row-actions-svc-name-text
+                        :coll :_partial-row-actions-svc-blocking-names}}
+          :separator {:value " "}}}
+
+  {:name :_partial-row-actions-service-blocked-reason-str
+   :description "`\"Can't make a service — fn has free args: :a :b. …\"` when `:service-blocking-free-args` is non-empty, nil when the fn is startable. Forced only on the root-row branch (lazy executor), so col-header / cell fetches don't pay the graph walk."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-row-actions-svc-blocking-names}}
+          :then {:value nil}
+          :else {:parent :str-join
+                 :args {:coll [{:value "Can't make a service — fn has free args: "}
+                               :_partial-row-actions-svc-names-text
+                               {:value ". Bind them in a derived fn-def first."}]
+                        :separator {:value ""}}}}}
+
+  {:name :_partial-row-actions-service-blocked?
+   :parent :some?
+   :args {:value :_partial-row-actions-service-blocked-reason-str}}
+
+  ;; Fetch the fn row + project the three fields the buttons need.
+  {:name :_partial-row-actions-fn-row
+   :description "The decoded fn row for the popover's target fn."
+   :parent :fn-row-by-id
+   :args {:fn-id :fn-id-param}}
+
+  {:name :_partial-row-actions-fn-name
+   :parent :get
+   :args {:coll :_partial-row-actions-fn-row :key {:value :name} :default ""}}
+
+  {:name :_partial-row-actions-fn-desc
+   :parent :get
+   :args {:coll :_partial-row-actions-fn-row :key {:value :description} :default ""}}
+
+  ;; --- Button hiccup ---
+
+  {:name :_partial-row-actions-ns-button
+   :description "`<button class=\"namespace-badge\" data-action=\"namespace-move\" …>ns</button>` — JS dispatcher re-checks auth + editability before opening the namespace-picker."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "namespace-badge action-icon"
+                          :data-action "namespace-move"
+                          :title "Move to a different namespace"
+                          :aria-label "Move to a different namespace"}}
+          :children [{:value "ns"}]}}
+
+  {:name :_partial-row-actions-i-button
+   :description "`<button class=\"description-badge\" data-action=\"description\" …>i</button>` — JS dispatcher reads the inlined description / name / namespace from `data-*` attrs and opens the description tooltip without an additional fetch."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "description-badge action-icon"
+                                       :data-action "description"
+                                       :data-entity-type "fn"
+                                       :title "Description"
+                                       :aria-label "Description"}}
+                         :key {:value :data-description}
+                         :value :_partial-row-actions-fn-desc}}
+          :children [{:value "i"}]}}
+
+  {:name :_partial-row-actions-open-href
+   :description "Tab URL for the ↗ button — `?fn=<name>` (the editor's `selectFn` reads `?fn=` to navigate). Falls back to `?fn=` for anonymous fns; the JS dispatcher gates the button visibility on `:_partial-row-actions-show-open?` so an anonymous fn-id never gets rendered here in practice."
+   :parent :str
+   :args {:parts [{:value "?fn="} :_partial-row-actions-fn-name]}}
+
+  {:name :_partial-row-actions-open-button
+   :description "`<a class=\"open-in-new-tab\" data-action=\"open\" target=\"_blank\" href=\"?fn=<name>\">↗</a>`. Rendered only when `show-open=true`; otherwise the `:if` short-circuits to an empty `:list` slot."
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "open-in-new-tab action-icon"
+                                       :data-action "open"
+                                       :target "_blank"
+                                       :title "Open in new tab"}}
+                         :key {:value :href}
+                         :value :_partial-row-actions-open-href}}
+          :children [{:value "↗"}]}}
+
+  {:name :_partial-row-actions-open-button-or-nil
+   :description "The ↗ button when `show-open=true`; nil otherwise. nil entries downstream are filtered by `:filter :some?` before they reach hiccup."
+   :parent :if
+   :args {:test :_partial-row-actions-show-open?
+          :then :_partial-row-actions-open-button
+          :else {:value nil}}}
+
+  ;; --- Toolbar assembly ---
+
+  {:name :_partial-row-actions-col-header-children-raw
+   :description "Raw list of button candidates for the col-header context: ns badge, i badge, (optional) ↗ link. Nil entries are stripped by the next step so they don't render as `<></>` empties."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil]}}
+
+  {:name :_partial-row-actions-col-header-children
+   :description "Non-nil children — `↗` drops out when the caller requested `show-open=false`."
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-col-header-children-raw}}
+
+  {:name :_partial-row-actions-col-header
+   :description "Toolbar for the col-header context — wraps the three buttons in a flex container with `data-context` + `data-fn-id` attrs for the dispatcher."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "row-actions-content"
+                                       :role "toolbar"
+                                       :aria-label "Row actions"
+                                       :data-context "col-header"}}
+                         :key {:value :data-fn-id}
+                         :value :_partial-row-actions-fn-id-str}}
+          :children :_partial-row-actions-col-header-children}}
+
+  ;; Dispatch on context — A1 only handles col-header; A2-A4 add
+  ;; cell / use-site-arg / root-row branches.
+  {:name :_partial-row-actions-unknown
+   :description "Fallback toolbar for an unknown / unsupported context — empty `<div>` so the partial-fetch swap-in doesn't blow up while a context is being migrated."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "row-actions-content"
+                          :data-context "unknown"}}
+          :children {:value []}}}
+
+  ;; --- Phase A2 MI cell buttons ---
+
+  {:name :_partial-row-actions-remove-mi-button
+   :description "`<button data-action=\"remove-mi-parent\" …>×</button>` — JS dispatcher reads `data-fn-id` (the cell's fn = the parent being removed) + `data-card-fn-id` from the host (the fn whose parent-set we mutate) and calls `removeParentInline(card, cell)`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-icon-danger"
+                          :data-action "remove-mi-parent"
+                          :title "Remove this parent"
+                          :aria-label "Remove this parent"}}
+          :children [{:value "×"}]}}
+
+  {:name :_partial-row-actions-add-mi-button
+   :description "`<button data-action=\"add-mi-parent\" …>+</button>` — JS dispatcher reads `data-card-fn-id` from the host and opens the MI picker. Compatibility gating (no candidates → disabled + reason text) stays JS-side because `compatibleMIParentInfo` reads client-cached `lookups`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "add-mi-parent"
+                          :title "Add another parent (multi-inheritance)"
+                          :aria-label "Add another parent"}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-remove-mi-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-remove-mi-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-add-mi-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-add-mi-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-cell-children-raw
+   :description "Raw button list for the MI cell context: ns / i / ↗ (shared with col-header) + (when editable) × Remove-MI + + Add-MI."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-remove-mi-button-or-nil
+                  :_partial-row-actions-add-mi-button-or-nil]}}
+
+  {:name :_partial-row-actions-cell-children
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-cell-children-raw}}
+
+  {:name :_partial-row-actions-cell-attrs-base
+   :parent :assoc
+   :args {:map {:value {:class "row-actions-content"
+                        :role "toolbar"
+                        :aria-label "Row actions"
+                        :data-context "cell"}}
+          :key {:value :data-fn-id}
+          :value :_partial-row-actions-fn-id-str}}
+
+  {:name :_partial-row-actions-cell-attrs
+   :parent :assoc
+   :args {:map :_partial-row-actions-cell-attrs-base
+          :key {:value :data-card-fn-id}
+          :value :_partial-row-actions-card-fn-id-str}}
+
+  {:name :_partial-row-actions-cell
+   :description "MI cell context toolbar — 3 read-only buttons (ns/i/↗) + 2 editable (× Remove-MI / + Add-MI) when `editable=true`. Host attrs carry BOTH `data-fn-id` (cell fn) AND `data-card-fn-id` (card-owning fn) — the JS dispatcher needs both for the × / + actions."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-row-actions-cell-attrs
+          :children :_partial-row-actions-cell-children}}
+
+  ;; --- Phase A3 use-site-arg buttons ---
+
+  {:name :_partial-row-actions-remove-use-site-button
+   :description "`<button data-action=\"remove-use-site-binding\" …>×</button>` — JS dispatcher reads `data-binding-id` from the host, looks up the rich `useSiteArg` from the in-process registry, and calls `deleteUseSiteBinding(arg)`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-icon-danger"
+                          :data-action "remove-use-site-binding"
+                          :title "Remove this value (slot reverts to free-arg)"
+                          :aria-label "Remove this value"}}
+          :children [{:value "×"}]}}
+
+  {:name :_partial-row-actions-change-use-site-button
+   :description "`<button data-action=\"change-use-site-value\" …>✎</button>` — JS dispatcher looks up `useSiteArg` by `data-binding-id` and calls `enterFreeArgBindEditMode(arg, btn)` (which dispatches on the arg's effective type to the right editor — fn-picker for `:fn` slots, literal form for the rest)."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "change-use-site-value"
+                          :title "Change value (pick another fn / set a literal)"
+                          :aria-label "Change value"}}
+          :children [{:value "✎"}]}}
+
+  {:name :_partial-row-actions-remove-use-site-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-remove-use-site-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-change-use-site-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-change-use-site-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-use-site-children-raw
+   :description "Raw button list for the use-site-arg context: ns / i / ↗ (always) + (when editable) × Remove-binding + ✎ Change-value. Matches the legacy `useSiteArg` branch of `buildPopoverContent` in editor-overlay-fn.js, plus the always-on shared head from the line context."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-remove-use-site-button-or-nil
+                  :_partial-row-actions-change-use-site-button-or-nil]}}
+
+  {:name :_partial-row-actions-use-site-children
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-use-site-children-raw}}
+
+  {:name :_partial-row-actions-use-site-attrs-base
+   :parent :assoc
+   :args {:map {:value {:class "row-actions-content"
+                        :role "toolbar"
+                        :aria-label "Row actions"
+                        :data-context "use-site-arg"}}
+          :key {:value :data-fn-id}
+          :value :_partial-row-actions-fn-id-str}}
+
+  {:name :_partial-row-actions-use-site-attrs
+   :parent :assoc
+   :args {:map :_partial-row-actions-use-site-attrs-base
+          :key {:value :data-binding-id}
+          :value :_partial-row-actions-binding-id-str}}
+
+  {:name :_partial-row-actions-use-site
+   :description "use-site-arg context toolbar — 3 read-only buttons (ns/i/↗) + 2 editable (× Remove-binding / ✎ Change-value) when `editable=true`. Host attrs carry `data-fn-id` + `data-binding-id`; the dispatcher uses binding-id to recover the rich `useSiteArg` object."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-row-actions-use-site-attrs
+          :children :_partial-row-actions-use-site-children}}
+
+  ;; --- Phase A4 root-row buttons ---
+  ;;
+  ;; ▶ Run / ⌛ History are always enabled when the popover renders
+  ;; the root-row context (caller gated on signed-in + lineIsRoot).
+  ;; ⚙ Service is enabled unless `service-blocked-reason` is set.
+  ;; ✎ Rename / + Extend / ✕ Delete render disabled-with-reason
+  ;; when `editable=false` + `edit-block-reason` non-empty.
+
+  {:name :_partial-row-actions-run-button
+   :description "▶ — open the execute popover for this fn."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "run-fn"
+                          :title "Run this function"
+                          :aria-label "Run"}}
+          :children [{:value "▶"}]}}
+
+  {:name :_partial-row-actions-history-button
+   :description "⌛ — open the version-history popover for this fn (cross-branch)."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "fn-versions"
+                          :title "Version history across branches"
+                          :aria-label "Version history"}}
+          :children [{:value "⌛"}]}}
+
+  ;; ⚙ Service — two flavours based on whether the fn has free args
+  ;; (blocked → disabled + reason in the title + class).
+  {:name :_partial-row-actions-service-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "service-settings"
+                          :title "Service settings (declare / edit / delete a :service row)"
+                          :aria-label "Service settings"}}
+          :children [{:value "⚙"}]}}
+
+  {:name :_partial-row-actions-service-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-disabled"
+                                       :data-action "service-settings"
+                                       :aria-label "Service settings (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-service-blocked-reason-str}}
+          :children [{:value "⚙"}]}}
+
+  {:name :_partial-row-actions-service-button
+   :parent :if
+   :args {:test :_partial-row-actions-service-blocked?
+          :then :_partial-row-actions-service-button-disabled
+          :else :_partial-row-actions-service-button-enabled}}
+
+  ;; ✎ Rename — enabled when editable, disabled-with-reason otherwise.
+  {:name :_partial-row-actions-rename-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "rename-fn"
+                          :title "Rename this function"
+                          :aria-label "Rename"}}
+          :children [{:value "✎"}]}}
+
+  {:name :_partial-row-actions-rename-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-disabled"
+                                       :data-action "rename-fn"
+                                       :aria-label "Rename (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-edit-block-reason-str}}
+          :children [{:value "✎"}]}}
+
+  {:name :_partial-row-actions-rename-button
+   :parent :if
+   :args {:test :_partial-row-actions-edit-blocked?
+          :then :_partial-row-actions-rename-button-disabled
+          :else :_partial-row-actions-rename-button-enabled}}
+
+  ;; + Extend — same enabled/disabled pattern.
+  {:name :_partial-row-actions-extend-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "extend-fn"
+                          :title "Extend (create a child fn with this as :parent)"
+                          :aria-label "Extend"}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-extend-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-disabled"
+                                       :data-action "extend-fn"
+                                       :aria-label "Extend (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-edit-block-reason-str}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-extend-button
+   :parent :if
+   :args {:test :_partial-row-actions-edit-blocked?
+          :then :_partial-row-actions-extend-button-disabled
+          :else :_partial-row-actions-extend-button-enabled}}
+
+  ;; ✕ Delete — destructive, separate danger class. Same enabled
+  ;; vs disabled split.
+  {:name :_partial-row-actions-delete-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-icon-danger"
+                          :data-action "delete-fn"
+                          :title "Delete this fn"
+                          :aria-label "Delete"}}
+          :children [{:value "✕"}]}}
+
+  {:name :_partial-row-actions-delete-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-danger action-icon-disabled"
+                                       :data-action "delete-fn"
+                                       :aria-label "Delete (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-edit-block-reason-str}}
+          :children [{:value "✕"}]}}
+
+  {:name :_partial-row-actions-delete-button
+   :parent :if
+   :args {:test :_partial-row-actions-edit-blocked?
+          :then :_partial-row-actions-delete-button-disabled
+          :else :_partial-row-actions-delete-button-enabled}}
+
+  ;; ⌂ Set-as-app-handler (§3.4 4b self-serve deploy) — points the current
+  ;; org at this fn. Always emitted; editor-row-actions.js hides it unless the
+  ;; tenancy addon is active (body.gd-tenancy) and re-checks before POSTing.
+  {:name :_partial-row-actions-deploy-button
+   :description "⌂ — set this fn as the current org's app handler (FaaS self-serve deploy). CSS-hidden unless body.gd-tenancy; the handler POSTs /api/my-app/handler."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-deploy"
+                          :data-action "set-app-handler"
+                          :title "Set as this org's app handler"
+                          :aria-label "Set as app handler"}}
+          :children [{:value "⌂"}]}}
+
+  ;; Assembly — shared head (ns / i / ↗) + root-row buttons.
+  {:name :_partial-row-actions-root-row-children-raw
+   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ✎ + ✕ + ⌂. Disabled-state for ⚙/✎/+/✕ baked in by the per-button `:if` wrappers; ⌂ is CSS-gated client-side."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-run-button
+                  :_partial-row-actions-history-button
+                  :_partial-row-actions-service-button
+                  :_partial-row-actions-rename-button
+                  :_partial-row-actions-extend-button
+                  :_partial-row-actions-delete-button
+                  :_partial-row-actions-deploy-button]}}
+
+  {:name :_partial-row-actions-root-row-children
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-root-row-children-raw}}
+
+  {:name :_partial-row-actions-root-row
+   :description "root-row context toolbar — ns/i/↗ + ▶⌛⚙✎+✕. Caller (`buildPopoverContent` when `rootAffordancesVisible`) is already gated on signed-in + lineIsRoot, so all action buttons render unconditionally; their disabled-state is server-baked via `editable` / `edit-block-reason` / `service-blocked-reason` query params."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "row-actions-content"
+                                       :role "toolbar"
+                                       :aria-label "Row actions"
+                                       :data-context "root-row"}}
+                         :key {:value :data-fn-id}
+                         :value :_partial-row-actions-fn-id-str}}
+          :children :_partial-row-actions-root-row-children}}
+
+  ;; --- Context dispatch ---
+
+  {:name :_partial-row-actions-context-is-col-header?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "col-header"}}}
+
+  {:name :_partial-row-actions-context-is-cell?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "cell"}}}
+
+  {:name :_partial-row-actions-context-is-use-site-arg?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "use-site-arg"}}}
+
+  {:name :_partial-row-actions-context-is-root-row?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "root-row"}}}
+
+  {:name :_partial-row-actions-body-or-root-row
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-root-row?
+          :then :_partial-row-actions-root-row
+          :else :_partial-row-actions-unknown}}
+
+  {:name :_partial-row-actions-body-or-use-site
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-use-site-arg?
+          :then :_partial-row-actions-use-site
+          :else :_partial-row-actions-body-or-root-row}}
+
+  {:name :_partial-row-actions-body-or-cell
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-cell?
+          :then :_partial-row-actions-cell
+          :else :_partial-row-actions-body-or-use-site}}
+
+  {:name :_partial-row-actions-body
+   :description "Dispatch on context — A1 col-header, A2 cell, A3 use-site-arg, A4 root-row. The nested-`:if` chain is the workaround for `:case`'s parametric-type-var unification on a single-clause input; with 4 contexts the chain is starting to look unwieldy but still readable enough."
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-col-header?
+          :then :_partial-row-actions-col-header
+          :else :_partial-row-actions-body-or-cell}}
+
+  {:name :_partial-row-actions-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-row-actions-body}}
+
+  {:name :_partial-row-actions-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/row-actions` — see the comment block above for the URL shape + JS contract."
+   :parent :html-ok-response
+   :args {:body :_partial-row-actions-html}}]}

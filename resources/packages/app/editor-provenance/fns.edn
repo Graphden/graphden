@@ -1,0 +1,1081 @@
+{:namespace "app.editor"
+ :description "Type-explainer partials — mismatch-explainer popover, slot-narrowing provenance popover (shared `_provenance-*` chain), and the return-type-rule popover."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; mismatch-explainer popover. Reads the binding row from DB (single
+  ;; source of truth) and reuses `:resolve-slot-effective-type` +
+  ;; `:current-slot-value` (both from `app.forms`) + `:classify-literal`
+  ;; + `:subtype?` + `:describe-type-mismatch` to render the expected /
+  ;; actual / reason hiccup.
+  ;;
+  ;; URL: `GET /partials/mismatch-explainer?binding-id=X[&item-id=Y]`.
+  ;; STEP 1 — header + Expected / Got / Reason rows only; provenance
+  ;; chain and diff-leaves stay in JS for now (next steps).
+
+  {:name :_partial-mismatch-binding-id-str
+   :description "Read the `binding-id` query-string parameter; nil when absent."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "binding-id"}}}
+
+  {:name :_partial-mismatch-binding-id
+   :description "Parse the `binding-id` query param to a UUID; nil when absent / malformed (downstream lookups handle nil)."
+   :parent :parse-uuid
+   :args {:string :_partial-mismatch-binding-id-str}}
+
+  {:name :_partial-mismatch-item-id-str
+   :description "Read the `item-id` query-string parameter; nil when absent. Set for binding-list-item edits where the per-position elem type matters."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "item-id"}}}
+
+  {:name :_partial-mismatch-item-id
+   :description "Parse the `item-id` query param to a UUID; nil when absent / malformed."
+   :parent :parse-uuid
+   :args {:string :_partial-mismatch-item-id-str}}
+
+  ;; Build the `:_value-form-parsed-shape` map the existing
+  ;; `:resolve-slot-effective-type` + `:current-slot-value` base-fns
+  ;; expect. We only need `:binding-id` + `:item-id` from the URL —
+  ;; the resolver looks up `:fn-id` / `:slot-id` off the binding row.
+  {:name :_partial-mismatch-parsed
+   :description "Synthesise the `:_value-form-parsed-shape` map for `:resolve-slot-effective-type` / `:current-slot-value` — `:fn-id` and `:slot-id` are derived off the binding row server-side."
+   :parent :zipmap
+   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
+          :vals [:_partial-mismatch-binding-id
+                 {:value nil}
+                 {:value nil}
+                 :_partial-mismatch-item-id]}}
+
+  {:name :_partial-mismatch-expected-type
+   :description "Effective type at the slot edit site; nil when the binding-id doesn't resolve."
+   :parent :resolve-slot-effective-type
+   :args {:parsed :_partial-mismatch-parsed}}
+
+  {:name :_partial-mismatch-current-value
+   :description "The currently-bound value the mismatch is being reported against — read from `:binding.value` (or the item's `:value` when `:item-id` is set). Single source of truth: no JS payload."
+   :parent :current-slot-value
+   :args {:parsed :_partial-mismatch-parsed}}
+
+  {:name :_partial-mismatch-candidate-type
+   :description "Structural type expression of the bound value — `classify-literal` so `:subtype?` / `:describe-type-mismatch` can compare against `:_partial-mismatch-expected-type`."
+   :parent :classify-literal
+   :args {:value :_partial-mismatch-current-value}}
+
+  {:name :_partial-mismatch-ok?
+   :description "True iff the bound value's classified type is a subtype of the expected slot type."
+   :parent :subtype?
+   :args {:expected :_partial-mismatch-expected-type
+          :candidate :_partial-mismatch-candidate-type}}
+
+  {:name :_partial-mismatch-reason
+   :description "One-line natural-language reason `candidate` ⊄ `expected`. Always computed (lazy via the `:if` consumer); reads `\"\"` when the types match (and the consumer hides the row)."
+   :parent :if
+   :args {:test :_partial-mismatch-ok?
+          :then {:value ""}
+          :else {:parent :describe-type-mismatch
+                 :args {:expected :_partial-mismatch-expected-type
+                        :candidate :_partial-mismatch-candidate-type}}}}
+
+  {:name :_partial-mismatch-expected-text
+   :description "`pr-str`-form of the expected type for the Expected row. Full structural readout — the editor's JS `formatTypeHint` pretty-printer is the next step."
+   :parent :to-str
+   :args {:value :_partial-mismatch-expected-type}}
+
+  {:name :_partial-mismatch-got-text
+   :description "`pr-str`-form of the actual value for the Got row. JSON-encoded shape ≈ matches what the JS `formatActualLiteral` showed."
+   :parent :to-str
+   :args {:value :_partial-mismatch-current-value}}
+
+  ;; Hiccup composition. Each `:hiccup`-using fn-def folds in one
+  ;; dynamic child; pure-literal sub-trees use `:const`.
+
+  {:name :_partial-mismatch-header
+   :description "Popover header — title + close button. Pure literal. The close button carries `data-explainer-close` so the post-swap JS handler binds dismissal without selectors (same convention `:_partial-effect-header` uses)."
+   :parent :const
+   :args {:value
+          [:div {:class "mismatch-explainer-header"}
+           [:span {:class "mismatch-explainer-title"} "Type mismatch"]
+           [:button {:type "button"
+                     :class "mismatch-explainer-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close mismatch explainer"} "×"]]}}
+
+  {:name :_partial-mismatch-expected-row
+   :description "`<div class=\"mismatch-explainer-row mismatch-row-expected\"><span class=\"...-label\">Expected</span><span class=\"...-value\">{type}</span></div>`."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-expected"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Expected"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-mismatch-expected-text]}}]}}
+
+  {:name :_partial-mismatch-got-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-got"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Got"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-mismatch-got-text]}}]}}
+
+  {:name :_partial-mismatch-reason-row
+   :description "`<div class=\"mismatch-explainer-row mismatch-row-reason\">…</div>` carrying the `:describe-type-mismatch` text. Always rendered; the JS consumer can hide the row when `:_partial-mismatch-ok?` is true (text is `\"\"`)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-reason"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Reason"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-mismatch-reason]}}]}}
+
+  ;; STEP 2 — diff-leaves section. The recursive type-walking + leaf-
+  ;; level disagreement collection lives in `types/check.clj`; this
+  ;; chain just wraps + slices + per-leaf-formats into hiccup.
+
+  {:name :_partial-mismatch-diff-leaves
+   :description "Leaf-level disagreements `[{:path :expected :actual}, …]` between the bound value and the expected slot type. Empty when types match (the consumer hides the section)."
+   :parent :diff-value-against-type
+   :args {:value :_partial-mismatch-current-value
+          :expected :_partial-mismatch-expected-type}}
+
+  {:name :_partial-mismatch-diff-leaves-count
+   :parent :count
+   :args {:coll :_partial-mismatch-diff-leaves}}
+
+  {:name :_partial-mismatch-diff-has-leaves?
+   :parent :gt
+   :args {:nums [:_partial-mismatch-diff-leaves-count {:value 0}]}}
+
+  {:name :_partial-mismatch-diff-head-text
+   :description "`At` when there's exactly one leaf, `Disagreements` when many. Mirrors the JS render's headline."
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_partial-mismatch-diff-leaves-count :b {:value 1}}}
+          :then {:value "At"}
+          :else {:value "Disagreements"}}}
+
+  ;; Cap at 6 leaves, plus an overflow row when there are more. Same
+  ;; truncation rule the JS render used.
+  {:name :_partial-mismatch-diff-leaves-shown
+   :parent :take
+   :args {:count {:value 6}
+          :coll :_partial-mismatch-diff-leaves}}
+
+  {:name :_partial-mismatch-diff-leaves-overflow?
+   :parent :gt
+   :args {:nums [:_partial-mismatch-diff-leaves-count {:value 6}]}}
+
+  {:name :_partial-mismatch-diff-overflow-count
+   :parent :sub
+   :args {:nums [:_partial-mismatch-diff-leaves-count {:value 6}]}}
+
+  {:name :_partial-mismatch-diff-overflow-text
+   :parent :str-join
+   :args {:coll [{:value "… +"} :_partial-mismatch-diff-overflow-count {:value " more"}]
+          :separator ""}}
+
+  {:name :_partial-mismatch-diff-overflow-row
+   :description "`<div class=\"mismatch-explainer-leaf-more\">… +N more</div>` when more than 6 disagreements. Hidden via empty `:span` when within cap."
+   :parent :if
+   :args {:test :_partial-mismatch-diff-leaves-overflow?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "mismatch-explainer-leaf-more"}}
+                        :children [:_partial-mismatch-diff-overflow-text]}}
+          :else :_hidden-span}}
+
+  ;; Per-leaf row — `:map` over the truncated leaf list. Each leaf is
+  ;; `{:path :expected :actual}`. The `:as :leaf` rename gives the
+  ;; inner readers a stable name; readers use `:get :default <fallback>`
+  ;; so a missing path renders as `(top)` (same JS fallback).
+  {:name :_partial-mismatch-diff-leaf-path-raw
+   :parent :get :args {:coll {:as :item} :key {:value :path} :default ""}}
+
+  {:name :_partial-mismatch-diff-leaf-path
+   :description "Per-leaf path readout — empty path → `(top)` (root of the value)."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-mismatch-diff-leaf-path-raw}}
+          :then {:value "(top)"}
+          :else :_partial-mismatch-diff-leaf-path-raw}}
+
+  {:name :_partial-mismatch-diff-leaf-expected
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :expected} :default nil}}}}
+
+  {:name :_partial-mismatch-diff-leaf-actual
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :actual} :default nil}}}}
+
+  {:name :_partial-mismatch-diff-leaf-row
+   :description "One leaf row — `<div>{path}: expected {expected}, got {actual}</div>` with the same span classes the JS render used."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-leaf"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-leaf-path"}}
+                             :children [:_partial-mismatch-diff-leaf-path]}}
+                     {:value [:span {:class "mismatch-explainer-leaf-sep"} ": expected "]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-leaf-expected"}}
+                             :children [:_partial-mismatch-diff-leaf-expected]}}
+                     {:value [:span {:class "mismatch-explainer-leaf-sep"} ", got "]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-leaf-actual"}}
+                             :children [:_partial-mismatch-diff-leaf-actual]}}]}}
+
+  {:name :_partial-mismatch-diff-leaf-rows
+   :parent :map
+   :args {:func :_partial-mismatch-diff-leaf-row
+          :coll :_partial-mismatch-diff-leaves-shown}}
+
+  {:name :_partial-mismatch-diff-leaves-head-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-leaves-head"}}
+          :children [:_partial-mismatch-diff-head-text]}}
+
+  {:name :_partial-mismatch-diff-section
+   :description "Full diff-leaves section — head + per-leaf rows + overflow note. Hidden (`<span hidden=1>`) when the value matches the expected type (no leaves)."
+   :parent :if
+   :args {:test :_partial-mismatch-diff-has-leaves?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "mismatch-explainer-leaves"}}
+                        :children [:_partial-mismatch-diff-leaves-head-div
+                                   :_partial-mismatch-diff-leaf-rows
+                                   :_partial-mismatch-diff-overflow-row]}}
+          :else :_hidden-span}}
+
+  ;; STEP 3 — provenance section. The 4-tier resolution chain
+  ;; (override → unified → ref-return → slot) tells users WHERE the
+  ;; expected type came from. The algorithm lives in
+  ;; `value-form/slot-type-provenance`; this chain reads each field
+  ;; off the structured result and renders rows conditionally (hidden
+  ;; via `<span hidden=1>` when a tier doesn't apply). Inheritance
+  ;; chain (multi-hop narrowing path) renders above the tiers when
+  ;; non-empty. Nav-links carry `data-fn-id` so the JS post-swap
+  ;; binding can attach `selectFn(fn-id)` click handlers.
+
+  {:name :_provenance
+   :description "Server-side provenance computation for the binding under the cursor — `{:winner :tiers :inheritance-chain}` or nil (list-item rows / unresolved sites). `:parsed` is read as a FREE-ARG (`{:as :parsed}`) so any partial — `/partials/mismatch-explainer`, `/partials/provenance`, future popovers — provides its OWN parsed-shape map at the call site and the whole chain (4-tier rows, inheritance section, nav-links) renders against it."
+   :parent :slot-type-provenance
+   :args {:parsed {:as :parsed}}}
+
+  {:name :_provenance-some?
+   :parent :some?
+   :args {:value :_provenance}}
+
+  ;; Per-tier readers — each tier sits at a fixed index in the `:tiers`
+  ;; vec (override / unified / ref-return / slot) so we extract by index
+  ;; rather than name-lookup, mirroring the JS render order.
+  {:name :_provenance-tiers
+   :parent :get
+   :args {:coll :_provenance :key {:value :tiers} :default []}}
+
+  {:name :_provenance-inheritance
+   :parent :get
+   :args {:coll :_provenance :key {:value :inheritance-chain} :default []}}
+
+  ;; Per-tier helper: given a `{:key :label :type :source}` map (the
+  ;; `:as :tier` rename) and the wrapping list-context, build one row.
+  ;; Hidden via `<span hidden=1>` when `:type` is nil (tier doesn't
+  ;; apply at this slot).
+
+  {:name :_provenance-tier-type-raw
+   :parent :get
+   :args {:coll {:as :item} :key {:value :type} :default nil}}
+
+  {:name :_provenance-tier-applies?
+   :parent :some?
+   :args {:value :_provenance-tier-type-raw}}
+
+  {:name :_provenance-tier-type-text
+   :parent :to-str
+   :args {:value :_provenance-tier-type-raw}}
+
+  {:name :_provenance-tier-label
+   :parent :get
+   :args {:coll {:as :item} :key {:value :label} :default ""}}
+
+  {:name :_provenance-tier-source
+   :parent :get
+   :args {:coll {:as :item} :key {:value :source} :default nil}}
+
+  {:name :_provenance-tier-source-fn-name
+   :parent :get
+   :args {:coll :_provenance-tier-source
+          :key {:value :fn-name} :default ""}}
+
+  {:name :_provenance-tier-source-fn-id
+   :parent :get
+   :args {:coll :_provenance-tier-source
+          :key {:value :fn-id} :default ""}}
+
+  {:name :_provenance-tier-source-fn-id-text
+   :parent :to-str
+   :args {:value :_provenance-tier-source-fn-id}}
+
+  {:name :_provenance-tier-has-source?
+   :parent :some?
+   :args {:value :_provenance-tier-source}}
+
+  ;; Source cell: `<a data-fn-id=…>name</a>` when source exists,
+  ;; blank `<span>` otherwise. The data-fn-id attr lets the JS post-
+  ;; swap binding attach `selectFn(fn-id) + hide` click handlers.
+  {:name :_provenance-tier-source-cell
+   :parent :if
+   :args {:test :_provenance-tier-has-source?
+          :then {:parent :hiccup
+                 :args {:tag {:value "a"}
+                        :attrs {:parent :assoc
+                                :args {:map {:value {:class "type-inline-resolution-source type-inline-resolution-link"
+                                                     :href "#"}}
+                                       :key {:value :data-fn-id}
+                                       :value :_provenance-tier-source-fn-id-text}}
+                        :children [:_provenance-tier-source-fn-name]}}
+          :else {:value [:span {:class "type-inline-resolution-source-empty"}]}}}
+
+  ;; Per-tier "is THIS tier the resolver-chosen winner?". The HOF
+  ;; predicate `:_provenance-tier-is-winner?` (defined later) reads
+  ;; the same `{:as :item}` slot from the `:filter` callsite — we
+  ;; reuse the underlying key-lookup so the row picks up
+  ;; `type-inline-resolution-active` on the winning row, matching
+  ;; the JS-rendered version's class scheme that
+  ;; `editor-provenance-popover.js` (and the visual tests) expect.
+  {:name :_provenance-tier-key
+   :parent :get
+   :args {:coll {:as :item} :key {:value :key} :default nil}}
+
+  {:name :_provenance-tier-this-is-winner?
+   :parent :equal?
+   :args {:a :_provenance-tier-key
+          :b :_provenance-winner-key}}
+
+  {:name :_provenance-tier-row-class
+   :description "`type-inline-resolution-tier` for losing tiers, `+ type-inline-resolution-active` for the winning one."
+   :parent :if
+   :args {:test :_provenance-tier-this-is-winner?
+          :then {:value "type-inline-resolution-tier type-inline-resolution-active"}
+          :else {:value "type-inline-resolution-tier"}}}
+
+  {:name :_provenance-tier-row-built
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :class}
+                         :value :_provenance-tier-row-class}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "type-inline-resolution-label"}}
+                             :children [:_provenance-tier-label]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "type-inline-resolution-type"}}
+                             :children [:_provenance-tier-type-text]}}
+                     :_provenance-tier-source-cell]}}
+
+  {:name :_provenance-tier-row
+   :description "One tier row — built when the tier applies (non-nil type), hidden via `<span hidden=1>` when it doesn't. Same conditional pattern the diff overflow row uses."
+   :parent :if
+   :args {:test :_provenance-tier-applies?
+          :then :_provenance-tier-row-built
+          :else :_hidden-span}}
+
+  {:name :_provenance-tier-rows
+   :parent :map
+   :args {:func :_provenance-tier-row
+          :coll :_provenance-tiers}}
+
+  {:name :_provenance-resolved-head
+   :parent :const
+   :args {:value [:div {:class "type-inline-resolution-head"} "Resolved via"]}}
+
+  ;; Inheritance-chain rows — `{:fn-id :fn-name :override-fn-id}` per
+  ;; entry. Render only when chain is non-empty; otherwise hide the
+  ;; whole inheritance section.
+
+  {:name :_provenance-inh-fn-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default ""}}
+
+  {:name :_provenance-inh-fn-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default ""}}
+
+  {:name :_provenance-inh-fn-id-text
+   :parent :to-str
+   :args {:value :_provenance-inh-fn-id}}
+
+  {:name :_provenance-inh-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-inline-resolution-inheritance-row"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "a"}
+                             :attrs {:parent :assoc
+                                     :args {:map {:value {:class "type-inline-resolution-source type-inline-resolution-link"
+                                                          :href "#"}}
+                                            :key {:value :data-fn-id}
+                                            :value :_provenance-inh-fn-id-text}}
+                             :children [:_provenance-inh-fn-name]}}]}}
+
+  {:name :_provenance-inh-rows
+   :parent :map
+   :args {:func :_provenance-inh-row
+          :coll :_provenance-inheritance}}
+
+  {:name :_provenance-inh-count
+   :parent :count
+   :args {:coll :_provenance-inheritance}}
+
+  {:name :_provenance-inh-has?
+   :parent :gt
+   :args {:nums [:_provenance-inh-count {:value 0}]}}
+
+  {:name :_provenance-inh-head
+   :parent :const
+   :args {:value [:div {:class "type-inline-resolution-head"} "Inherited via"]}}
+
+  {:name :_provenance-inh-section
+   :parent :if
+   :args {:test :_provenance-inh-has?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "type-inline-resolution-inheritance"}}
+                        :children [:_provenance-inh-head
+                                   :_provenance-inh-rows]}}
+          :else :_hidden-span}}
+
+  {:name :_provenance-built
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-inline-resolution"}}
+          :children [:_provenance-inh-section
+                     :_provenance-resolved-head
+                     :_provenance-tier-rows]}}
+
+  {:name :_provenance-section
+   :description "Full provenance section — `.type-inline-resolution` wrapper with `Inherited via` chain (when non-empty) + `Resolved via` 4-tier rows. Hidden when no provenance (list-item rows / unresolved sites)."
+   :parent :if
+   :args {:test :_provenance-some?
+          :then :_provenance-built
+          :else :_hidden-span}}
+
+  ;; STEP 4 — Edit-action button. The partial route is `:get-auth-
+  ;; required`, so reaching this partial means the user is signed in;
+  ;; the JS `showMismatchExplainer` also guards `if (!bindingId)
+  ;; return`, so reaching this partial means we have a real binding
+  ;; (= a fn-def, not a base-fn) — which is the editability contract
+  ;; the JS `isEditableArg` was checking. So the button always
+  ;; renders; the JS post-swap binding attaches the click handler that
+  ;; opens the inline value-edit popover (the popover itself stays
+  ;; JS-side — it's an interactive component, not a render).
+
+  {:name :_partial-mismatch-edit-button
+   :parent :const
+   :args {:value [:button {:type "button"
+                           :class "mismatch-explainer-btn"
+                           :data-edit-action "1"} "Edit value"]}}
+
+  {:name :_partial-mismatch-actions
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-actions"}}
+          :children [:_partial-mismatch-edit-button]}}
+
+  ;; Thin wrapper that binds `:parsed` into the generic
+  ;; `:_provenance-section` chain. The prov chain reads `:parsed` as a
+  ;; free-arg so other partials (e.g. `/partials/provenance`) can share
+  ;; the same renderer with their own parsed-shape map.
+  {:name :_partial-mismatch-prov-section
+   :parent :_provenance-section
+   :args {:parsed :_partial-mismatch-parsed}}
+
+  {:name :_partial-mismatch-fragment
+   :description "Full popover hiccup — header + Expected + Got + Reason rows + diff-leaves + provenance section + Edit-action button, all server-rendered (steps 1-4 complete). JS post-swap binds click handlers on `[data-explainer-close]`, `[data-fn-id]` (provenance nav links), and `[data-edit-action]` (the Edit button → opens the inline value-edit popover)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-content"}}
+          :children [:_partial-mismatch-header
+                     :_partial-mismatch-expected-row
+                     :_partial-mismatch-got-row
+                     :_partial-mismatch-reason-row
+                     :_partial-mismatch-diff-section
+                     :_partial-mismatch-prov-section
+                     :_partial-mismatch-actions]}}
+
+  {:name :_partial-mismatch-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-mismatch-fragment}}
+
+  {:name :_partial-mismatch-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/mismatch-explainer?binding-id=X[&item-id=Y]` — returns the mismatch-explainer hiccup as `text/html`. STEP 1 of the JS→graph migration: replaces the JS-side validation + render with a server fetch reading the binding straight from DB. Provenance / diff-leaves / Edit button stay JS-side until steps 2-4."
+   :parent :html-ok-response
+   :args {:body :_partial-mismatch-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; provenance popover. The `↳` provenance badge on an arg-overlay's
+  ;; type-chip used to open a JS-built popover whose body was
+  ;; `appendResolutionSection(slotTypeProvenance(arg))` — the same
+  ;; chain the mismatch-explainer now renders server-side. Reusing
+  ;; the generic `_provenance-*` chain (extracted from mismatch's prov
+  ;; section), this partial wraps it in its own header so the
+  ;; standalone `↳`-trigger flow uses the same source of truth.
+  ;;
+  ;; URL: `GET /partials/provenance?binding-id=X[&item-id=Y]`.
+  ;; STEP 1 — header + Resolved-via section ONLY. Allowed-values
+  ;; (closed-enum refinement) + slot-effect-bound (fn-type eff) are
+  ;; step-2/3 of this migration.
+
+  {:name :_partial-provenance-parsed
+   :description "Same `:_value-form-parsed-shape` URL-param synth as `:_partial-mismatch-parsed` — `:fn-id` / `:slot-id` resolved server-side off the binding row, `:item-id` propagated for list-item rows."
+   :parent :zipmap
+   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
+          :vals [:_partial-mismatch-binding-id
+                 {:value nil}
+                 {:value nil}
+                 :_partial-mismatch-item-id]}}
+
+  {:name :_partial-provenance-prov-section
+   :description "Thin wrapper binding `:parsed` for the standalone provenance popover — shares the generic `_provenance-section` chain with `:_partial-mismatch-fragment`."
+   :parent :_provenance-section
+   :args {:parsed :_partial-provenance-parsed}}
+
+  {:name :_partial-provenance-header
+   :parent :const
+   :args {:value
+          [:div {:class "provenance-popover-header"}
+           [:span {:class "provenance-popover-title"} "Type narrowing"]
+           [:button {:type "button"
+                     :class "provenance-popover-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close type narrowing popover"} "×"]]}}
+
+  ;; STEP 2 — Allowed-values section. When the resolved slot type is
+  ;; a closed-enum refinement (`[:refine base [:in [...]]]`), surface
+  ;; the member list directly — saves the reader from opening the
+  ;; inline `▸/▾` panel to discover the (often tiny) set. Server-side
+  ;; via `:closed-enum-of` on the provenance winner's type; section
+  ;; hides when the winner isn't a closed-enum refinement.
+
+  {:name :_provenance-winner-tier
+   :description "The tier the resolver chose (matching `:_provenance-winner` key against the tier list). nil when no tier applied."
+   :parent :first
+   :args {:coll {:parent :filter
+                 :args {:pred :_provenance-tier-is-winner?
+                        :coll :_provenance-tiers}}}}
+
+  {:name :_provenance-winner-key
+   :parent :get
+   :args {:coll :_provenance :key {:value :winner} :default nil}}
+
+  {:name :_provenance-tier-is-winner?
+   :description "HOF predicate — true for the tier whose `:key` matches the winner. `:as :item` per the HOF callback convention."
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :key} :default nil}}
+          :b :_provenance-winner-key}}
+
+  {:name :_provenance-winner-type
+   :parent :get
+   :args {:coll :_provenance-winner-tier :key {:value :type} :default nil}}
+
+  {:name :_provenance-enum
+   :description "`{:base :members}` when the winner's type is a closed-enum refinement, nil otherwise."
+   :parent :closed-enum-of
+   :args {:expected :_provenance-winner-type}}
+
+  {:name :_provenance-enum-some?
+   :parent :some?
+   :args {:value :_provenance-enum}}
+
+  {:name :_provenance-enum-members
+   :parent :get
+   :args {:coll :_provenance-enum :key {:value :members} :default []}}
+
+  ;; Per-member chip — `<span class="provenance-popover-enum-chip">
+  ;; :value</span>`. `:label` is the user-facing text (colon-
+  ;; prefixed for keyword bases via `closed-enum-of`).
+  {:name :_provenance-enum-chip-label
+   :parent :get
+   :args {:coll {:as :item} :key {:value :label} :default ""}}
+
+  {:name :_provenance-enum-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "provenance-popover-enum-chip"}}
+          :children [:_provenance-enum-chip-label]}}
+
+  {:name :_provenance-enum-chips
+   :parent :map
+   :args {:func :_provenance-enum-chip
+          :coll :_provenance-enum-members}}
+
+  {:name :_provenance-enum-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-enum-list"}}
+          :children [:_provenance-enum-chips]}}
+
+  {:name :_provenance-enum-head
+   :parent :const
+   :args {:value [:div {:class "type-inline-resolution-head"} "Allowed values"]}}
+
+  {:name :_provenance-enum-section-built
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-enum"}}
+          :children [:_provenance-enum-head
+                     :_provenance-enum-list]}}
+
+  {:name :_provenance-enum-section
+   :description "Allowed-values section — chip list of every closed-enum member. Hidden when the winner isn't a closed-enum refinement."
+   :parent :if
+   :args {:test :_provenance-enum-some?
+          :then :_provenance-enum-section-built
+          :else :_hidden-span}}
+
+  ;; Wrapper that binds `:parsed` for the new section — same pattern
+  ;; as `:_partial-provenance-prov-section`. Lets the fragment include
+  ;; the section as a child without passing args at the hiccup level.
+  {:name :_partial-provenance-enum-section
+   :parent :_provenance-enum-section
+   :args {:parsed :_partial-provenance-parsed}}
+
+  ;; STEP 3 — Slot-effect-bound section. When the resolved slot type
+  ;; is `[:fn args ret eff]` with a CONCRETE eff (not `:any`), surface
+  ;; the constraint as a chip row so the reader sees "this slot
+  ;; demands a pure callable" / "this slot allows only :env reads"
+  ;; without opening the inline `▸/▾` panel. Empty eff → `pure` pill.
+
+  {:name :_provenance-eff
+   :description "Vec of effect-name strings when the winner type is `[:fn args ret eff]` with concrete eff, nil otherwise."
+   :parent :fn-type-bound-effects
+   :args {:expected :_provenance-winner-type}}
+
+  {:name :_provenance-eff-some?
+   :parent :some?
+   :args {:value :_provenance-eff}}
+
+  {:name :_provenance-eff-empty?
+   :description "Empty eff = `:pure` constraint — caller renders a `pure` pill instead of the chip list."
+   :parent :empty?
+   :args {:coll :_provenance-eff}}
+
+  {:name :_provenance-eff-pure-pill
+   :parent :const
+   :args {:value [:span {:class "type-inline-effects-pure"
+                         :title "This slot requires a PURE callable (no side effects)."}
+                  "pure"]}}
+
+  ;; Per-effect chip — `<span class="effects-chip effects-chip-{cat}"
+  ;; title="Allowed effect: {cat}">{cat}</span>`. `:as :item` per the
+  ;; HOF callback convention; `cat` is the bare effect name.
+  {:name :_provenance-eff-chip-class
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} {:as :item}]
+          :separator ""}}
+
+  {:name :_provenance-eff-chip-title
+   :parent :str-join
+   :args {:coll [{:value "Allowed effect: "} {:as :item}]
+          :separator ""}}
+
+  {:name :_provenance-eff-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc
+                               :args {:map {:value {}}
+                                      :key {:value :class}
+                                      :value :_provenance-eff-chip-class}}
+                         :key {:value :title}
+                         :value :_provenance-eff-chip-title}}
+          :children [{:as :item}]}}
+
+  {:name :_provenance-eff-chips
+   :parent :map
+   :args {:func :_provenance-eff-chip
+          :coll :_provenance-eff}}
+
+  ;; Concrete-eff render: `pure` pill when empty, otherwise the chip
+  ;; list. Both go after the `eff:` label inside the readonly wrapper.
+  {:name :_provenance-eff-chips-or-pure
+   :parent :if
+   :args {:test :_provenance-eff-empty?
+          :then {:value [:_provenance-eff-pure-pill]}
+          :else :_provenance-eff-chips}}
+
+  {:name :_provenance-eff-readonly
+   :description "Mirrors `makeEffectsReadOnly` in `editor-overlay-type-expand.js` — `eff:` label + either the `pure` pill or one chip per allowed effect."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-inline-effects-readonly"}}
+          :children [{:value [:span {:class "type-inline-effects-label"} "eff:"]}
+                     :_provenance-eff-chips-or-pure]}}
+
+  {:name :_provenance-eff-head
+   :parent :const
+   :args {:value [:div {:class "type-inline-resolution-head"} "Slot effect bound"]}}
+
+  {:name :_provenance-eff-section-built
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-effects"}}
+          :children [:_provenance-eff-head
+                     :_provenance-eff-readonly]}}
+
+  {:name :_provenance-eff-section
+   :description "Slot-effect-bound section — head + the readonly chip row. Hidden when the winner type isn't a `[:fn args ret eff]` with concrete eff."
+   :parent :if
+   :args {:test :_provenance-eff-some?
+          :then :_provenance-eff-section-built
+          :else :_hidden-span}}
+
+  {:name :_partial-provenance-eff-section
+   :parent :_provenance-eff-section
+   :args {:parsed :_partial-provenance-parsed}}
+
+  {:name :_partial-provenance-fragment
+   :description "Full provenance popover hiccup — header + Resolved-via section + Allowed-values section + Slot-effect-bound section. All server-rendered (steps 1-3 complete)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-content"}}
+          :children [:_partial-provenance-header
+                     :_partial-provenance-prov-section
+                     :_partial-provenance-enum-section
+                     :_partial-provenance-eff-section]}}
+
+  {:name :_partial-provenance-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-provenance-fragment}}
+
+  {:name :_partial-provenance-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/provenance?binding-id=X[&item-id=Y]` — returns the provenance popover hiccup as `text/html`. STEP 1 of the JS→graph migration: header + the shared `_provenance-section`. Steps 2-3 will add Allowed-values (closed-enum refinement member list) and Slot-effect-bound (`[:fn …]` eff constraint) sections."
+   :parent :html-ok-response
+   :args {:body :_partial-provenance-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; return-type-rule popover ("Type rule") — the `↳` badge on a
+  ;; fn-card's RETURN-TYPE strip. Used to be a fully JS-built popover
+  ;; (`showReturnTypeRulePopover` + a ~185-line `ruleNarrators` prose
+  ;; mirror of the per-base-fn `:return-type-rule` semantics); the
+  ;; server renders it now and JS only mounts + anchors.
+  ;;
+  ;; URL: `GET /partials/return-type-rule?fn=<name>`.
+  ;;
+  ;; Chain: fn name → RAW registry entry (`:rich-type-of-name` — raw,
+  ;; so rule presence is `:return-type-rule` directly, no wire
+  ;; projection) → `:fix` walk up `:primary-parent` links to the
+  ;; rule-owning base-fn → header + intro (owner as `data-fn-id`
+  ;; nav-link) + static per-rule narrative (`:_rtr-narratives`) +
+  ;; Inputs table over `:resolved-bindings`. When the queried fn has
+  ;; no rule-owning ancestor the body collapses to a hidden span —
+  ;; the JS caller probes for `.provenance-popover-intro` and skips
+  ;; showing (same UX the old client-side bail gave).
+
+  {:name :_rtr-fn-name
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "fn"}}}
+
+  {:name :_rtr-entry
+   :description "Full RAW rich-types registry entry for the queried fn — nil for unknown names. Raw (not the `/api/types` wire projection), so `:return-type-rule` / `:primary-parent` read directly."
+   :parent :rich-type-of-name
+   :args {:fn-name :_rtr-fn-name}}
+
+  ;; --- rule owner -------------------------------------------------------
+  ;; The rule lives on a BASE-FN at the root of the primary-parent
+  ;; chain; the queried fn-def's immediate parent is often itself a
+  ;; fn-def (`:assoc-timestamp → :assoc`). `:rule-owner-of-name`
+  ;; (web/crud) is the atomic boundary over the registry's canonical
+  ;; `root-base-fn-name` walk — `{:name :fn-id}` with the id straight
+  ;; off the registry entry (no name→id graph query); nil for base-fn
+  ;; cards (no primary parent) and rule-less chains, which collapses
+  ;; the body to the hidden span below.
+
+  {:name :_rtr-owner-info
+   :parent :rule-owner-of-name
+   :args {:fn-name :_rtr-fn-name}}
+
+  {:name :_rtr-owner-some?
+   :parent :some?
+   :args {:value :_rtr-owner-info}}
+
+  ;; Narrowed owner info — every consumer below sits inside the
+  ;; `:_rtr-owner-some?` branch, so the assert never fires.
+  {:name :_rtr-owner-info-sure
+   :parent :assert-some
+   :args {:value :_rtr-owner-info}}
+
+  {:name :_rtr-owner-sure
+   :description "Owner base-fn's bare name (text) off the narrowed info map — feeds the label / title / narrative-key consumers."
+   :parent :get
+   :args {:coll :_rtr-owner-info-sure :key {:value :name} :default nil}}
+
+  ;; --- per-rule narrative -----------------------------------------------
+  ;; Static prose per rule — the graph-resident successor of the JS
+  ;; `ruleNarrators` table (same pattern as `:_effect-descriptions`).
+  ;; The dynamic specifics the JS templates interpolated (literal key,
+  ;; input types, computed return) are all visible in the Inputs table
+  ;; below / the return-type strip itself, so the prose carries the
+  ;; RULE SEMANTICS only. Rules without an entry fall through to a
+  ;; hidden span — the Inputs table speaks for itself.
+
+  {:name :_rtr-narratives
+   :description "Per-rule narrative prose for the return-type-rule popover — `{rule-name-keyword → sentence}`. Covered by `graphden.app.rule-narratives-test`, which trips when a rule from the known roster loses its narrative."
+   :parent :const
+   :args {:value
+          {:assoc "Literal key + typed value add that field to the map's record shape; a computed (non-literal) key widens the result to :jsonb."
+           :dissoc "Literal key removed from the map's record shape; a computed key falls back to :jsonb."
+           :get "Literal key looked up in coll's record shape; a computed key returns the slot's declared default."
+           :get-in "Path walks coll's record shape to type the returned leaf."
+           :assoc-in "Path-walked update — inner record shapes refined when every segment is a literal key."
+           :update-in "Lambda applied at path — result type follows `:f`'s return."
+           :conj "Item appended/prepended to coll — element type widened to include the item."
+           :first "Returns [:union :null a] — head of a list, or :null when empty."
+           :rest "Returns [:list a] — drops the head, element type preserved."
+           :cons "Item prepended — element type widens to LUB with coll's."
+           :list "Element type LUB'd over the literal vector of items."
+           :merge "Records merged left-to-right — later keys win, per-item record shapes unioned."
+           :into "Items poured into destination — returns destination's effective shape."
+           :repeat "Fixed-count copies of value — return [:list a]."
+           :keys "Returns [:list k] — keys of the homogeneous [:map k v]."
+           :vals "Returns [:list v] — values of the homogeneous [:map k v]."
+           :case "Dispatch table union'd with default."
+           :cond "Result-position branches union'd."
+           :coalesce ":null stripped from value's type, unioned with default's."
+           :if "Branches union'd: [:union then-type else-type]."
+           :invoke "Bound callable's return type pulled in; runtime decides between hof-wrap and thunk by produces-callable?."
+           :map "Declared signature — element type follows `:func`'s return: [:fn {:item a} b], [:list a] → [:list b]."
+           :filter "Declared signature — elements kept, type preserved: [:list a] → [:list a]."
+           :reduce "Declared signature — result follows the accumulator: [:fn {:acc a :item b} a] → a."
+           :find-first "Declared signature — first matching element: [:list a] → a."
+           :group-by "Declared signature — keys from `:func`'s return, values group the input: [:map b [:list a]]."
+           :sort-by "Declared signature — order changes, element type preserved: [:list a] → [:list a]."
+           :constantly "Declared signature — always returns the captured value: a → a."
+           :transduce "Declared signature — result follows the reducing fn's accumulator: a."
+           :call "Declared signature — the bound callable's return: b."
+           :call-noargs "Declared signature — the bound thunk's return: a."
+           :try "Declared signature — body's type unioned with the handler's: [:union a b]."
+           :vec "Declared signature — container changes, element type preserved: [:list a] → [:list a]."
+           :to-set "Declared signature — duplicates dropped, element type preserved: [:list a] → [:list a]."
+           :flatten "Nested lists collapsed one level per pass — element type LUB'd across the nesting."
+           :zipmap "Literal keys zipped with per-item value types — a record shape when every key is a literal keyword."
+           :select-keys "Literal key subset of a known record — the result carries exactly those fields."
+           :update-keys "Keys mapped through `:f` — [:map <f's return> V]."
+           :update-vals "Values mapped through `:f` — [:map K <f's return>]."
+           :assert-some ":null stripped from the input's type; :never when the input is always nil."
+           :name "Keyword/text member-wise → text; :null passes through."
+           :str-to-keyword "Text narrowed to keyword; :null passes through."
+           :const "Identity passthrough — return type follows `:value`."
+           :identity "Identity passthrough — return type follows `:value`."
+           :take "First :count items — element type preserved from coll."
+           :drop "All but first :count items — element type preserved."
+           :reverse "Items reversed — element type preserved."
+           :sort "Items sorted — element type preserved."
+           :distinct "Duplicates removed — element type preserved."
+           :concat "Colls concatenated — element type LUB'd across inputs."
+           :add "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
+           :sub "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
+           :mul "When every input is :int the result is :int, else widens to :numeric. Refinement constraints (e.g. :positive-int) do NOT propagate through arithmetic."
+           :mod "Modulo — :int when dividend and divisor are :int, else :numeric widening."
+           :neg "Negation — refinement constraints don't propagate through arithmetic; a :positive-int negated is :int."
+           :abs "Absolute value — constraint inference deliberately not propagated through arithmetic."}}}
+
+  {:name :_rtr-narrative-text
+   :parent :get
+   :args {:coll :_rtr-narratives
+          :key {:parent :str-to-keyword :args {:string :_rtr-owner-sure}}
+          :default nil}}
+
+  {:name :_rtr-narrative-div
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_rtr-narrative-text}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "provenance-popover-narrative"}}
+                        :children [:_rtr-narrative-text]}}
+          :else :_hidden-span}}
+
+  ;; --- owner nav-link ---------------------------------------------------
+  ;; `a[data-fn-id]` — the same post-swap contract as the provenance
+  ;; partial: JS binds `selectFn` navigation on it. The id rides in on
+  ;; the owner info map (registry entry's own id), so when the owner
+  ;; exists the link always resolves — no defensive plain-span fork.
+
+  {:name :_rtr-owner-fn-id
+   :parent :get
+   :args {:coll :_rtr-owner-info-sure :key {:value :fn-id} :default nil}}
+
+  {:name :_rtr-owner-label
+   :parent :str-join
+   :args {:coll [{:value ":"} :_rtr-owner-sure] :separator {:value ""}}}
+
+  {:name :_rtr-owner-link-title
+   :parent :str-join
+   :args {:coll [{:value "Open base-fn :"} :_rtr-owner-sure] :separator {:value ""}}}
+
+  {:name :_rtr-owner-fn-id-text
+   :parent :to-str
+   :args {:value :_rtr-owner-fn-id}}
+
+  {:name :_rtr-owner-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :href} {:value :class}
+                                {:value :data-fn-id} {:value :title}]
+                         :vals [{:value "#"}
+                                {:value "type-inline-resolution-link"}
+                                :_rtr-owner-fn-id-text
+                                :_rtr-owner-link-title]}}
+          :children [:_rtr-owner-label]}}
+
+  {:name :_rtr-intro
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-intro"}}
+          :children [{:value "Return type computed by "}
+                     :_rtr-owner-link
+                     {:value "'s :return-type-rule"}]}}
+
+  ;; --- Inputs table -----------------------------------------------------
+  ;; One row per resolved binding — name + kind (`ref→:x` / `= literal`
+  ;; / `(free)`) + effective type. The shape mirrors the type-rule's
+  ;; view of the world: which slot was bound by literal vs ref is what
+  ;; makes the rule's output explicable.
+
+  {:name :_rtr-bindings
+   :parent :get
+   :args {:coll :_rtr-entry :key {:value :resolved-bindings} :default {:value {}}}}
+
+  {:name :_rtr-binding-names
+   :parent :sort
+   :args {:coll {:parent :keys :args {:map :_rtr-bindings}}}}
+
+  {:name :_rtr-has-inputs?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_rtr-binding-names}}}}
+
+  {:name :_rtr-row-binding
+   :parent :get
+   :args {:coll :_rtr-bindings :key {:as :item} :default {:value {}}}}
+
+  {:name :_rtr-row-ref
+   :parent :get
+   :args {:coll :_rtr-row-binding :key {:value :ref} :default nil}}
+
+  {:name :_rtr-row-value
+   :parent :get
+   :args {:coll :_rtr-row-binding :key {:value :value} :default nil}}
+
+  {:name :_rtr-row-kind
+   :description "`ref→:x` when the rule input is a fn-ref, `= <literal>` when a bound literal, `(free)` otherwise."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_rtr-row-ref}}
+          :then {:parent :str-join
+                 :args {:coll [{:value "ref→:"}
+                               {:parent :keyword-to-str
+                                :args {:keyword {:ref :_rtr-row-ref :type :keyword}}}]
+                        :separator {:value ""}}}
+          :else {:parent :if
+                 :args {:test {:parent :some? :args {:value :_rtr-row-value}}
+                        :then {:parent :str-join
+                               :args {:coll [{:value "= "}
+                                             {:parent :pr-str
+                                              :args {:value :_rtr-row-value}}]
+                                      :separator {:value ""}}}
+                        :else {:value "(free)"}}}}}
+
+  {:name :_rtr-row-label
+   :parent :str-join
+   :args {:coll [:_kw-item-name {:value " "} :_rtr-row-kind]
+          :separator {:value ""}}}
+
+  {:name :_rtr-row-type
+   :parent :get
+   :args {:coll :_rtr-row-binding :key {:value :type} :default nil}}
+
+  {:name :_rtr-row-type-text
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_rtr-row-type}}
+          :then {:parent :to-str :args {:value :_rtr-row-type}}
+          :else {:value "—"}}}
+
+  {:name :_rtr-input-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-inline-resolution-row"}}
+          :children [{:value [:span {:class "type-inline-resolution-mark"} "·"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "type-inline-resolution-label"}}
+                             :children [:_rtr-row-label]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "type-inline-resolution-type"}}
+                             :children [:_rtr-row-type-text]}}]}}
+
+  {:name :_rtr-input-rows
+   :parent :map
+   :args {:func :_rtr-input-row
+          :coll :_rtr-binding-names}}
+
+  {:name :_rtr-inputs-section
+   :parent :if
+   :args {:test :_rtr-has-inputs?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "provenance-popover-inputs"}}
+                        :children [{:value [:div {:class "type-inline-resolution-head"} "Inputs"]}
+                                   :_rtr-input-rows]}}
+          :else :_hidden-span}}
+
+  ;; --- assembly ---------------------------------------------------------
+
+  {:name :_rtr-header
+   :parent :const
+   :args {:value
+          [:div {:class "provenance-popover-header"}
+           [:span {:class "provenance-popover-title"} "Type rule"]
+           [:button {:type "button"
+                     :class "provenance-popover-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close type rule popover"} "×"]]}}
+
+  {:name :_rtr-body
+   :description "Intro + narrative + Inputs when a rule-owning ancestor exists; hidden span otherwise (the JS caller probes `.provenance-popover-intro` and skips showing)."
+   :parent :if
+   :args {:test :_rtr-owner-some?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {}}
+                        :children [:_rtr-intro
+                                   :_rtr-narrative-div
+                                   :_rtr-inputs-section]}}
+          :else :_hidden-span}}
+
+  {:name :_rtr-fragment
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-content"}}
+          :children [:_rtr-header :_rtr-body]}}
+
+  {:name :_rtr-html
+   :parent :render-hiccup
+   :args {:hiccup :_rtr-fragment}}
+
+  {:name :_partial-rtr-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/return-type-rule?fn=<name>` — returns the return-type-rule popover hiccup as `text/html`. Replaces the JS-built popover + `ruleNarrators` prose mirror; JS mounts + anchors only."
+   :parent :html-ok-response
+   :args {:body :_rtr-html}}]}

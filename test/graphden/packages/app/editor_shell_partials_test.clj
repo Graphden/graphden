@@ -184,7 +184,7 @@
   ;; way registry/rule-owner-of does — base-fn entries (no
   ;; :primary-parent) carrying a hand :return-type-rule or a
   ;; var-carrying :return — and require narrative coverage for each.
-  (let [narratives (->> (io/resource "packages/app/editor/fns.edn")
+  (let [narratives (->> (io/resource "packages/app/editor-provenance/fns.edn")
                         slurp edn/read-string :fns
                         (some #(when (= :_rtr-narratives (:name %)) %))
                         :args :value keys (map keyword) set)

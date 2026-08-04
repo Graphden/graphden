@@ -1,6 +1,6 @@
 (ns graphden.packages.app.rule-narratives-test
   "Contract tests for the return-type-rule popover's narrative table
-   (`:_rtr-narratives` in `resources/packages/app/editor/fns.edn`) —
+   (`:_rtr-narratives` in `resources/packages/app/editor-provenance/fns.edn`) —
    the graph-resident successor of the JS `ruleNarrators` map that
    used to live in `editor-provenance-popover.js`.
 
@@ -65,7 +65,7 @@
 
 (defn- narratives
   []
-  (-> (read-fns-edn "packages/app/editor/fns.edn")
+  (-> (read-fns-edn "packages/app/editor-provenance/fns.edn")
       fn-defs
       (fn-def-by-name :_rtr-narratives)
       (get-in [:args :value])))

@@ -255,7 +255,7 @@
 
 (deftest log-effect-drift-aligned-skips
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args))]
+    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
       (persist/log-effect-drift! "exec-id" ["db"] ["db"])
       (is (empty? @calls)
           "declared == runtime → no log line"))))
@@ -263,7 +263,7 @@
 
 (deftest log-effect-drift-both-empty-skips
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args))]
+    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
       (persist/log-effect-drift! "exec-id" nil nil)
       (is (empty? @calls)
           "both nil/empty → no drift to report"))))
@@ -271,7 +271,7 @@
 
 (deftest log-effect-drift-widened-warns
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args))]
+    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
       (persist/log-effect-drift! "exec-id" ["db"] ["db" "io"])
       (is (= 1 (count @calls))
           "runtime added :io that wasn't declared → one warn line"))))
@@ -279,7 +279,7 @@
 
 (deftest log-effect-drift-unobserved-warns
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args))]
+    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
       (persist/log-effect-drift! "exec-id" ["db" "env"] ["db"])
       (is (= 1 (count @calls))
           "declared :env never fired at runtime → warn"))))

@@ -1326,7 +1326,11 @@
   ;; `:execution/effect-drift` to count ONLY this test's emissions.
   (let [logs (atom [])
         capture (fn [_ns level _throwable msg]
-                  (swap! logs conj {:level level :msg (str msg)}))
+                  (swap! logs conj {:level level :msg (str msg)})
+                  ;; log*'s contract is nil — returning swap!'s vector
+                  ;; from a redef'd GLOBAL log* poisons parallel NSes
+                  ;; that assert on a log/warn caller's return.
+                  nil)
         drift-logs (fn [] (filter #(re-find #":execution/effect-drift" (:msg %)) @logs))]
     (with-redefs [clojure.tools.logging/log* capture]
       (testing "no log when declared == runtime"

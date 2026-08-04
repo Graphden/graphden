@@ -981,7 +981,14 @@
       (try
         (with-redefs [clojure.tools.logging/log*
                       (fn [_ level _ message]
-                        (swap! warns conj [level message]))]
+                        (swap! warns conj [level message])
+                        ;; log*'s contract is nil. `swap!` returns the
+                        ;; accumulated vector — leaking it out of a
+                        ;; with-redefs'd GLOBAL log* poisons parallel
+                        ;; NSes that assert on a `log/warn` caller's
+                        ;; return (deps-test's check-order-and-warn
+                        ;; gate flake, 2026-08-02).
+                        nil)]
           (t/register-type-alias! :collide-probe :text owner-a)
           (testing "same owner re-registering is silent"
             (t/register-type-alias! :collide-probe :text owner-a)

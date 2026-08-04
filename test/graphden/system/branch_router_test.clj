@@ -329,21 +329,63 @@
         (br/resolve-branch-id router "feature-a")
         (br/resolve-branch-id router "feature-a")
         (br/resolve-branch-id router "feature-a")
-        (is (= 1 @calls)
-            "after first hit the ref-cache holds the mapping; subsequent
-             lookups skip the storage round-trip")
+        (is (= 2 @calls)
+            "a cache MISS costs two reads (resolve + TOCTOU recheck);
+             subsequent lookups hit the cache and skip storage entirely")
 
         (testing "invalidate! drops the ref-cache entry for that branch"
           (br/invalidate! router feature-id)
           (br/resolve-branch-id router "feature-a")
-          (is (= 2 @calls)
-              "post-invalidate, the next lookup goes back to uncached"))
+          (is (= 4 @calls)
+              "post-invalidate, the next lookup goes back to uncached
+               (again resolve + recheck)"))
 
         (testing "unresolved refs are NOT cached — a typo never sticks"
           (br/resolve-branch-id router "no-such")
           (br/resolve-branch-id router "no-such")
-          (is (= 4 @calls)
-              "each unresolved call should re-query (calls went from 2 → 4)"))))))
+          (is (= 6 @calls)
+              "each unresolved call re-queries once (no recheck on a
+               miss that resolves to nothing) — calls went from 4 → 6"))))))
+
+
+(deftest ref-cache-toctou-recheck-drops-dead-entry
+  ;; The race docs/VERSIONING.md § Known gaps used to describe: a branch
+  ;; deleted between resolve's uncached DB read and its cache write left
+  ;; a dead id cached (the delete's value-sweep had already run). The
+  ;; post-assoc recheck closes it: the deletion is seen, the entry is
+  ;; dropped, and the caller gets nil instead of the dead id.
+  (let [phase (atom :alive)]
+    (with-redefs [br/resolve-branch-id-uncached
+                  (fn [_ _]
+                    (when (= :alive @phase)
+                      (reset! phase :deleted)
+                      feature-id))]
+      (let [router (-> (br/->BranchRouter nil default-id (atom {}) :stub)
+                       (assoc :ref-cache (atom {})))]
+        (is (nil? (br/resolve-branch-id router "doomed"))
+            "the recheck saw the concurrent delete → nil, not the dead id")
+        (is (empty? @(:ref-cache router))
+            "the dead id must not be retained in the ref-cache")))))
+
+
+(deftest ref-cache-toctou-recheck-follows-recreate
+  ;; delete + re-create with the same name racing the first resolution:
+  ;; the recheck returns the NEW id — the stale first read is neither
+  ;; cached nor returned.
+  (let [new-id (random-uuid)
+        first-read? (atom true)]
+    (with-redefs [br/resolve-branch-id-uncached
+                  (fn [_ _]
+                    (if @first-read?
+                      (do (reset! first-read? false) feature-id)
+                      new-id))]
+      (let [router (-> (br/->BranchRouter nil default-id (atom {}) :stub)
+                       (assoc :ref-cache (atom {})))]
+        (is (= new-id (br/resolve-branch-id router "reborn"))
+            "the recheck's id wins over the pre-delete read")
+        (is (empty? @(:ref-cache router))
+            "the ambiguous first id is dropped; the next call re-resolves
+             and caches the stable id")))))
 
 
 (deftest invalidate-all-clears-ref-cache

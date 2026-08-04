@@ -1,7 +1,10 @@
-(ns ^:integration ^:serial graphden.system.graph-epoch-test
-  "`^:serial` — `with-redefs` root-rebinds `cr/rebuild!` /
-   `cr/rebuild-optimistic!` to counting no-ops; a concurrent NS whose
-   rebuild lands in the window never actually compiles its graph.
+(ns ^:integration graphden.system.graph-epoch-test
+  "Parallel-safe: the heal's rebuild counting goes through the
+   thread-local `cr/*impl-override*` seam (`binding`, with
+   `br/*epoch-heal-sync?*` keeping the heal on this thread) instead of
+   `with-redefs` — a root rebind was process-global and pinned this NS
+   `^:serial` (a concurrent NS whose rebuild landed in the window never
+   actually compiled its graph; serial-reduction batch 4).
 
    The graph-epoch freshness self-heal, ledger edition (audit-7): the
    watermark advances only when every epoch in (w, global] is
@@ -108,25 +111,25 @@
       (binding [br/*epoch-state-override* (fresh-state)
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
-                epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
-                      cr/rebuild! (fn [_] (swap! healed inc))]
-          (let [router (router-over v {(vs/current-branch-id v)
-                                       {:ctx {:x 1} :handler :h}})]
-            (sp/create-entity v :fn {:name "f1" :parent-ids [] :description "h"})
-            (epoch/note-applied! base)
-            (br/handler-for router nil)
-            (is (zero? @healed) "fully-noted range advances without healing")
-            (foreign-bump! base)
-            (sp/create-entity v :fn {:name "f2" :parent-ids [] :description "h"})
-            (epoch/note-applied! base)
-            (br/handler-for router nil)
-            (testing "the foreign hole heals now, despite the fresh local bump"
-              (is (pos? @healed)))
-            (testing "watermark advanced past the healed range — no re-heal"
-              (let [n @healed]
-                (br/handler-for router nil)
-                (is (= n @healed)))))))
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                                    :rebuild! (fn [_] (swap! healed inc))}]
+        (let [router (router-over v {(vs/current-branch-id v)
+                                     {:ctx {:x 1} :handler :h}})]
+          (sp/create-entity v :fn {:name "f1" :parent-ids [] :description "h"})
+          (epoch/note-applied! base)
+          (br/handler-for router nil)
+          (is (zero? @healed) "fully-noted range advances without healing")
+          (foreign-bump! base)
+          (sp/create-entity v :fn {:name "f2" :parent-ids [] :description "h"})
+          (epoch/note-applied! base)
+          (br/handler-for router nil)
+          (testing "the foreign hole heals now, despite the fresh local bump"
+            (is (pos? @healed)))
+          (testing "watermark advanced past the healed range — no re-heal"
+            (let [n @healed]
+              (br/handler-for router nil)
+              (is (= n @healed))))))
       (finally (sp/close base)))))
 
 
@@ -140,17 +143,17 @@
       (binding [br/*epoch-state-override* (fresh-state)
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
-                epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
-                      cr/rebuild! (fn [_] (swap! healed inc))]
-          (let [router (router-over v {(vs/current-branch-id v)
-                                       {:ctx {:x 1} :handler :h}})]
-            (sp/create-entity v :fn {:name "pend" :parent-ids [] :description "h"})
-            (br/handler-for router nil)
-            (is (zero? @healed) "pending local bump: wait, don't heal")
-            (epoch/note-applied! base)
-            (br/handler-for router nil)
-            (is (zero? @healed) "noted range advances without healing"))))
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                                    :rebuild! (fn [_] (swap! healed inc))}]
+        (let [router (router-over v {(vs/current-branch-id v)
+                                     {:ctx {:x 1} :handler :h}})]
+          (sp/create-entity v :fn {:name "pend" :parent-ids [] :description "h"})
+          (br/handler-for router nil)
+          (is (zero? @healed) "pending local bump: wait, don't heal")
+          (epoch/note-applied! base)
+          (br/handler-for router nil)
+          (is (zero? @healed) "noted range advances without healing")))
       (finally (sp/close base)))))
 
 
@@ -165,15 +168,15 @@
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
                 br/*epoch-heal-grace-ms* 0
-                epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
-                      cr/rebuild! (fn [_] (swap! healed inc))]
-          (let [router (router-over v {(vs/current-branch-id v)
-                                       {:ctx {:x 1} :handler :h}})]
-            (sp/create-entity v :fn {:name "abt" :parent-ids [] :description "h"})
-            ;; NO note — simulated abort; grace 0 ⇒ aged out instantly
-            (br/handler-for router nil)
-            (is (pos? @healed)))))
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                                    :rebuild! (fn [_] (swap! healed inc))}]
+        (let [router (router-over v {(vs/current-branch-id v)
+                                     {:ctx {:x 1} :handler :h}})]
+          (sp/create-entity v :fn {:name "abt" :parent-ids [] :description "h"})
+          ;; NO note — simulated abort; grace 0 ⇒ aged out instantly
+          (br/handler-for router nil)
+          (is (pos? @healed))))
       (finally (sp/close base)))))
 
 
@@ -187,15 +190,15 @@
       (binding [br/*epoch-state-override* (fresh-state)
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
-                epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
-                      cr/rebuild! (fn [_] (swap! healed inc))]
-          (let [router (router-over v {(vs/current-branch-id v)
-                                       {:ctx {:x 1} :handler :h}})
-                foreign (foreign-bump! base)]
-            (br/note-graph-epoch-covered! v [foreign])
-            (br/handler-for router nil)
-            (is (zero? @healed) "covered epoch satisfies the range"))))
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                                    :rebuild! (fn [_] (swap! healed inc))}]
+        (let [router (router-over v {(vs/current-branch-id v)
+                                     {:ctx {:x 1} :handler :h}})
+              foreign (foreign-bump! base)]
+          (br/note-graph-epoch-covered! v [foreign])
+          (br/handler-for router nil)
+          (is (zero? @healed) "covered epoch satisfies the range")))
       (finally (sp/close base)))))
 
 
@@ -210,16 +213,16 @@
       (binding [br/*epoch-state-override* state
                 br/*epoch-check-ttl-ms* 0
                 br/*epoch-heal-sync?* true
-                epoch/*request-bump-log* (atom [])]
-        (with-redefs [cr/rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
-                      cr/rebuild! (fn [_] (swap! healed inc))]
-          (let [router (router-over v {(vs/current-branch-id v)
-                                       {:ctx {:x 1} :handler :h}})]
-            (sp/create-entity v :fn {:name "rgr" :parent-ids [] :description "h"})
-            (br/handler-for router nil)
-            (testing "regression detected → reseed + heal instead of dead"
-              (is (pos? @healed))
-              (is (< (:w @state) 999999))))))
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                                    :rebuild! (fn [_] (swap! healed inc))}]
+        (let [router (router-over v {(vs/current-branch-id v)
+                                     {:ctx {:x 1} :handler :h}})]
+          (sp/create-entity v :fn {:name "rgr" :parent-ids [] :description "h"})
+          (br/handler-for router nil)
+          (testing "regression detected → reseed + heal instead of dead"
+            (is (pos? @healed))
+            (is (< (:w @state) 999999)))))
       (finally (sp/close base)))))
 
 

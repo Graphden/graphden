@@ -47,6 +47,35 @@
   (or (nil? orgs) (nil? org) (boolean (orgs org))))
 
 
+;; =============================================================================
+;; Parallel-test seam
+;; =============================================================================
+
+(def ^:dynamic *impl-override*
+  "Parallel-test seam: a map of `{op-keyword → fn}` shadowing the real
+   implementation of the correspondingly-named registry-lifecycle
+   operation (`:rebuild!` `:rebuild-optimistic!` `:read-graph`
+   `:load-cell!` `:evict-cell!` — same args as the fns). nil
+   (production) = every call runs the real body. Tests `binding` this
+   instead of `with-redefs`-ing the root vars — a root rebind is
+   process-global and forced `^:serial` pins on the graph-epoch,
+   compile-runtime and fleet-command suites (serial-reduction batch 4).
+   Cost on the real path: one nil-map lookup per rebuild / epoch-heal /
+   fleet cell-command — these are cold per-rebuild / per-heal /
+   per-command paths, never the per-execute hot path.
+
+   A stub that wants to DELEGATE to the real implementation must
+   re-bind this var to nil around the delegate call — the root fn
+   re-checks the override on entry, so a plain call to the captured
+   root value would recurse straight back into the stub."
+  nil)
+
+
+(defn- impl
+  [op]
+  (get *impl-override* op))
+
+
 (defn- read-graph
   "Read the slot/fn-slot/binding model entities from storage. Bundled
    so `rebuild!` and the on-demand free-arg resolver share the same
@@ -66,16 +95,18 @@
    turns that from an emergent property into an enforced one."
   ([storage] (read-graph storage nil))
   ([storage orgs]
-   (let [q (fn [entity]
-             (let [rows (sp/query-entities storage entity {})]
-               (if orgs
-                 (filterv #(org-in-shard? orgs (:org-id %)) rows)
-                 rows)))]
-     {:fns        (q :fn)
-      :slots      (q :slot)
-      :fn-slots   (q :fn-slot)
-      :bindings   (q :binding)
-      :list-items (q :binding-list-item)})))
+   (if-let [f (impl :read-graph)]
+     (f storage orgs)
+     (let [q (fn [entity]
+               (let [rows (sp/query-entities storage entity {})]
+                 (if orgs
+                   (filterv #(org-in-shard? orgs (:org-id %)) rows)
+                   rows)))]
+       {:fns        (q :fn)
+        :slots      (q :slot)
+        :fn-slots   (q :fn-slot)
+        :bindings   (q :binding)
+        :list-items (q :binding-list-item)}))))
 
 
 (defonce ^:private per-org-aliases
@@ -377,24 +408,26 @@
    Alias re-registration runs outside the lock too — it is idempotent
    and per-name, so a transiently-ahead alias view is harmless."
   [ctx unchanged?]
-  (counters/count! :registry/rebuild)
-  (let [storage (compile-storage ctx)
-        graph (read-graph storage (:executor-orgs ctx))
-        _ (register-type-aliases-from-db! graph)
-        base-fns (:base-fns ctx)
-        lookups (assoc (l/cached-build-lookups graph)
-                       :base-fns base-fns)
-        _ (prime-always-fresh! (:fns graph))
-        compiled (ce/compile-all lookups)]
-    (call-with-invalidation-lock
-      ctx
-      (fn []
-        (if (unchanged?)
-          (do (reset! (:compiled-registry ctx) compiled)
-              (prime-graph-cache! ctx graph)
-              (prime-compile-deps! ctx graph)
-              true)
-          false)))))
+  (if-let [f (impl :rebuild-optimistic!)]
+    (f ctx unchanged?)
+    (let [_ (counters/count! :registry/rebuild)
+          storage (compile-storage ctx)
+          graph (read-graph storage (:executor-orgs ctx))
+          _ (register-type-aliases-from-db! graph)
+          base-fns (:base-fns ctx)
+          lookups (assoc (l/cached-build-lookups graph)
+                         :base-fns base-fns)
+          _ (prime-always-fresh! (:fns graph))
+          compiled (ce/compile-all lookups)]
+      (call-with-invalidation-lock
+        ctx
+        (fn []
+          (if (unchanged?)
+            (do (reset! (:compiled-registry ctx) compiled)
+                (prime-graph-cache! ctx graph)
+                (prime-compile-deps! ctx graph)
+                true)
+            false))))))
 
 
 (defn rebuild!
@@ -407,25 +440,28 @@
    read-graph → compute → prime-multi-atom sequence stays atomic
    relative to concurrent `invalidate-graph-cache!` callers."
   [ctx]
-  ;; The expensive outcome, counted where it actually happens rather than at the
-  ;; call site — a caller can ask for a delta and still land here (see
-  ;; `delta-recompile!`'s fallback). Measured at 4137 fns: 49.8 s.
-  (counters/count! :registry/rebuild)
-  (call-with-invalidation-lock
-    ctx
-    (fn []
-      (let [storage (compile-storage ctx)
-            graph (read-graph storage (:executor-orgs ctx))
-            _ (register-type-aliases-from-db! graph)
-            base-fns (:base-fns ctx)
-            lookups (assoc (l/cached-build-lookups graph)
-                           :base-fns base-fns)
-            _ (prime-always-fresh! (:fns graph))
-            compiled (ce/compile-all lookups)]
-        (reset! (:compiled-registry ctx) compiled)
-        (prime-graph-cache! ctx graph)
-        (prime-compile-deps! ctx graph)
-        compiled))))
+  (if-let [f (impl :rebuild!)]
+    (f ctx)
+    (do
+      ;; The expensive outcome, counted where it actually happens rather than at
+      ;; the call site — a caller can ask for a delta and still land here (see
+      ;; `delta-recompile!`'s fallback). Measured at 4137 fns: 49.8 s.
+      (counters/count! :registry/rebuild)
+      (call-with-invalidation-lock
+        ctx
+        (fn []
+          (let [storage (compile-storage ctx)
+                graph (read-graph storage (:executor-orgs ctx))
+                _ (register-type-aliases-from-db! graph)
+                base-fns (:base-fns ctx)
+                lookups (assoc (l/cached-build-lookups graph)
+                               :base-fns base-fns)
+                _ (prime-always-fresh! (:fns graph))
+                compiled (ce/compile-all lookups)]
+            (reset! (:compiled-registry ctx) compiled)
+            (prime-graph-cache! ctx graph)
+            (prime-compile-deps! ctx graph)
+            compiled))))))
 
 
 (defn instantiate-from-templates!
@@ -562,28 +598,30 @@
    in this executor's shard). Cell fns absent from the graph (a stale forward
    edge to a deleted fn) are filtered out rather than crashing the compile."
   [ctx root-fn-id]
-  (let [holder (:compiled-registry ctx)
-        storage (compile-storage ctx)
-        graph (read-graph storage (:executor-orgs ctx))
-        _ (register-type-aliases-from-db! graph)
-        base-fns (:base-fns ctx)
-        fns-map (if (map? (:fns graph))
-                  (:fns graph)
-                  (into {} (map (juxt :id identity)) (:fns graph)))
-        _ (prime-always-fresh! (vals fns-map))
-        forward-deps (ctx-forward-deps ctx (constantly graph))
-        cell (into #{}
-                   (filter #(contains? fns-map %))
-                   (deps/forward-closure forward-deps [root-fn-id]))
-        lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)]
-    (when (seq cell)
-      (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
-      (prime-graph-cache! ctx graph)
-      (prime-compile-deps! ctx graph (vec cell))
-      ;; Record the root so `evict-cell!` can reference-count shared fns.
-      (when-let [roots (:loaded-roots ctx)]
-        (swap! roots conj root-fn-id)))
-    cell))
+  (if-let [f (impl :load-cell!)]
+    (f ctx root-fn-id)
+    (let [holder (:compiled-registry ctx)
+          storage (compile-storage ctx)
+          graph (read-graph storage (:executor-orgs ctx))
+          _ (register-type-aliases-from-db! graph)
+          base-fns (:base-fns ctx)
+          fns-map (if (map? (:fns graph))
+                    (:fns graph)
+                    (into {} (map (juxt :id identity)) (:fns graph)))
+          _ (prime-always-fresh! (vals fns-map))
+          forward-deps (ctx-forward-deps ctx (constantly graph))
+          cell (into #{}
+                     (filter #(contains? fns-map %))
+                     (deps/forward-closure forward-deps [root-fn-id]))
+          lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)]
+      (when (seq cell)
+        (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
+        (prime-graph-cache! ctx graph)
+        (prime-compile-deps! ctx graph (vec cell))
+        ;; Record the root so `evict-cell!` can reference-count shared fns.
+        (when-let [roots (:loaded-roots ctx)]
+          (swap! roots conj root-fn-id)))
+      cell)))
 
 
 (defn evict-cell!
@@ -597,23 +635,25 @@
    (no graph read needed), else built from a transient graph read. Returns the
    set of fn-ids evicted (empty if the root wasn't loaded)."
   [ctx root-fn-id]
-  (let [holder (:compiled-registry ctx)
-        roots-atom (:loaded-roots ctx)]
-    (if (or (nil? holder) (nil? roots-atom) (not (contains? @roots-atom root-fn-id)))
-      #{}
-      (let [forward-deps (ctx-forward-deps
-                           ctx #(read-graph (compile-storage ctx) (:executor-orgs ctx)))
-            remaining (disj @roots-atom root-fn-id)
-            ;; Union of every OTHER loaded root's closure — the fns that must
-            ;; survive. `forward-closure` over a set of roots is their union.
-            still-needed (deps/forward-closure forward-deps remaining)
-            evictable (into #{}
-                            (remove still-needed)
-                            (deps/forward-closure forward-deps [root-fn-id]))]
-        (swap! roots-atom disj root-fn-id)
-        (when (seq evictable)
-          (swap! holder (fn [current] (apply dissoc current evictable))))
-        evictable))))
+  (if-let [f (impl :evict-cell!)]
+    (f ctx root-fn-id)
+    (let [holder (:compiled-registry ctx)
+          roots-atom (:loaded-roots ctx)]
+      (if (or (nil? holder) (nil? roots-atom) (not (contains? @roots-atom root-fn-id)))
+        #{}
+        (let [forward-deps (ctx-forward-deps
+                             ctx #(read-graph (compile-storage ctx) (:executor-orgs ctx)))
+              remaining (disj @roots-atom root-fn-id)
+              ;; Union of every OTHER loaded root's closure — the fns that must
+              ;; survive. `forward-closure` over a set of roots is their union.
+              still-needed (deps/forward-closure forward-deps remaining)
+              evictable (into #{}
+                              (remove still-needed)
+                              (deps/forward-closure forward-deps [root-fn-id]))]
+          (swap! roots-atom disj root-fn-id)
+          (when (seq evictable)
+            (swap! holder (fn [current] (apply dissoc current evictable))))
+          evictable)))))
 
 
 (defn cell-held?

@@ -142,7 +142,9 @@
 
 
 (defn- on-notify
-  "Multi-purpose listener callback:
+  "Multi-purpose listener callback. `reconcile!` is the injected
+   reconcile fn (see the init-key's `:reconcile-fn` opt) —
+   `recon/reconcile-once!` in production.
 
    - `:service` events → trigger a reconcile pass (managed-service
      ownership re-evaluation).
@@ -154,14 +156,14 @@
    - `:execution :cancel` events → cancel the execution if THIS pod is
      the one running it. Every pod gets the event; at most one owns the
      future, the rest no-op."
-  [ctx]
+  [ctx reconcile!]
   (fn [{:keys [kind op id branch-id epochs] :as event}]
     (try
       (case kind
         ;; Retry-free: a start failure isn't retried inline (which would sleep
         ;; under `reconcile-monitor` and block the listener thread + every
         ;; other reconcile trigger) — the periodic tick reconverges instead.
-        :service   (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
+        :service   (reconcile! ctx recon/running {:max-retries 0 :backoff-ms 0})
         :fn        (when (= op :invalidate)
                      (invalidate-from-notify! ctx id branch-id)
                      ;; Delta applied — mark the writer's exact bump
@@ -180,16 +182,17 @@
 
 
 (defn- start-reconcile-ticker!
-  "Spawn a scheduled tick that re-runs `reconcile-once!` every `period-ms`,
-   retry-free (a failed start reconverges on the next tick rather than
-   sleeping under `reconcile-monitor`). Returns the scheduler for halt."
-  [ctx period-ms]
+  "Spawn a scheduled tick that re-runs `reconcile!` (the injected
+   reconcile fn) every `period-ms`, retry-free (a failed start
+   reconverges on the next tick rather than sleeping under
+   `reconcile-monitor`). Returns the scheduler for halt."
+  [ctx reconcile! period-ms]
   (let [scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
     (log/info "Starting service reconcile ticker — period" period-ms "ms")
     (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
       scheduler
       ^Runnable (fn []
-                  (try (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
+                  (try (reconcile! ctx recon/running {:max-retries 0 :backoff-ms 0})
                        (catch Exception e
                          (log/warn e "periodic reconcile failed"))))
       period-ms period-ms
@@ -198,12 +201,22 @@
 
 
 (defmethod ig/init-key :exec/service-reconciler
-  [_ {:keys [context packages notify-listener service-locks reconcile-period-ms]}]
+  [_ {:keys [context packages notify-listener service-locks reconcile-period-ms
+             reconcile-fn stop-all-fn]}]
+  ;; `:reconcile-fn` / `:stop-all-fn` are injectable-DI test seams
+  ;; (defaulting to `recon/reconcile-once!` / `recon/stop-all!`) — a
+  ;; test drives the lifecycle with counting stubs via plain opts
+  ;; instead of `with-redefs` (a root rebind is process-global and
+  ;; forced a `^:serial` pin on `graphden.system.core-test`;
+  ;; serial-reduction batch 4). Closures carry the injected fn to the
+  ;; NOTIFY callback + ticker threads too, which a thread-local
+  ;; `binding` could not.
   (log/info "Starting service reconciler...")
   ;; Production singleton — clear any stale state from a previous run
   ;; (e.g. test fixture or REPL reset) before reconciling.
   (reset! recon/running {})
-  (let [storage (:storage context)
+  (let [reconcile! (or reconcile-fn recon/reconcile-once!)
+        storage (:storage context)
         ;; Thread the lock HOLDER through ctx so reconcile-once! can use it
         ;; without changing its arglist contract. The holder (not a bare
         ;; connection) is what lets a pass reconnect a dropped lock conn +
@@ -218,23 +231,24 @@
                 {:rows (mapv (fn [s] (select-keys s [:fn-name :package-name])) new-seeds)}))
     (when (seq enabled-services)
       (log/info "Reconciling" (count enabled-services) "enabled :service rows")
-      (recon/reconcile-once! ctx recon/running))
+      (reconcile! ctx recon/running))
     ;; Hook into the NOTIFY transport — reconcile when a sibling pod
     ;; mutates `:service`. Callback closes over the lock-augmented
     ;; ctx so per-NOTIFY reconciles use the same advisory-lock path
     ;; as boot.
     (let [callback (when notify-listener
-                     (pg-notify/register! notify-listener (on-notify ctx)))
-          ticker (start-reconcile-ticker! ctx (or reconcile-period-ms 15000))]
-      {:running recon/running
-       :context ctx
-       :notify-listener notify-listener
-       :notify-callback callback
-       :ticker ticker})))
+                     (pg-notify/register! notify-listener (on-notify ctx reconcile!)))
+          ticker (start-reconcile-ticker! ctx reconcile! (or reconcile-period-ms 15000))]
+      (cond-> {:running recon/running
+               :context ctx
+               :notify-listener notify-listener
+               :notify-callback callback
+               :ticker ticker}
+        stop-all-fn (assoc :stop-all-fn stop-all-fn)))))
 
 
 (defmethod ig/halt-key! :exec/service-reconciler
-  [_ {:keys [running notify-listener notify-callback ticker]}]
+  [_ {:keys [running notify-listener notify-callback ticker stop-all-fn]}]
   (log/info "Stopping service reconciler...")
   (when ticker
     (java.util.concurrent.ExecutorService/.shutdown ^java.util.concurrent.ExecutorService ticker)
@@ -243,10 +257,10 @@
          (catch InterruptedException _ nil)))
   (when (and notify-listener notify-callback)
     (pg-notify/unregister! notify-listener notify-callback))
-  (when running (recon/stop-all! running))
+  (when running ((or stop-all-fn recon/stop-all!) running))
   (log/info "Service reconciler stopped"))
 
 
-(defmethod ig/suspend-key! :exec/service-reconciler [_ {:keys [running]}]
+(defmethod ig/suspend-key! :exec/service-reconciler [_ {:keys [running stop-all-fn]}]
   ;; Same as halt — services don't have a suspend state distinct from stop.
-  (when running (recon/stop-all! running)))
+  (when running ((or stop-all-fn recon/stop-all!) running)))

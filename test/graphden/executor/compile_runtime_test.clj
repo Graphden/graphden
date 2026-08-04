@@ -1,7 +1,10 @@
-(ns ^:serial graphden.executor.compile-runtime-test
-  "`^:serial` — `with-redefs` wraps `cr/read-graph` with a call
-   counter; a concurrent rebuild/delta landing in the window increments
-   it and flakes the zero-reads assertion.
+(ns graphden.executor.compile-runtime-test
+  "Parallel-safe: the read-graph call counter goes through the
+   thread-local `cr/*impl-override*` seam (`binding`) instead of
+   `with-redefs` — a root rebind was process-global and pinned this NS
+   `^:serial` (a concurrent NS's rebuild/delta landing in the window
+   incremented the counter and flaked the zero-reads assertion;
+   serial-reduction batch 4).
 
    Tests for the public compile-runtime API — the surface `exec/` delegates to.
 
@@ -492,10 +495,16 @@
             ;; the same handle, no shard filter, so the reuse guard admits it.
             _ (ectx/fill-graph-cache! ctx (#'graphden.executor.compile-runtime/read-graph storage))
             reads (atom 0)
+            ;; The root fn value — its body re-checks `*impl-override*` on
+            ;; entry, so the counting stub must re-bind the seam to nil
+            ;; around the delegate call or it would recurse into itself.
             orig @#'graphden.executor.compile-runtime/read-graph]
         (testing "a warm, equivalent cache means zero storage reads"
-          (with-redefs [graphden.executor.compile-runtime/read-graph
-                        (fn [& args] (swap! reads inc) (apply orig args))]
+          (binding [cr/*impl-override*
+                    {:read-graph (fn [& args]
+                                   (swap! reads inc)
+                                   (binding [cr/*impl-override* nil]
+                                     (apply orig args)))}]
             (#'graphden.executor.compile-runtime/delta-recompile! ctx #{child-id}))
           (is (zero? @reads)
               "delta-recompile re-read the whole graph despite a warm cache"))

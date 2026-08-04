@@ -1,5 +1,12 @@
-(ns ^:serial graphden.system.core-test
+(ns graphden.system.core-test
   "Tests for Integrant init-key implementations in system.core.
+
+   Parallel-safe (serial-reduction batch 4): the reconciler lifecycle
+   stubs ride the init-key's injectable `:reconcile-fn` / `:stop-all-fn`
+   opts, and the fn-entities sync stubs the thread-local
+   `fn-composition/*sync-fns-override*` + `sync/*reconcile-moved-override*`
+   seams (`binding`) — no `with-redefs` root rebinds left, which is what
+   used to pin this NS `^:serial`.
 
    Covers:
    - :exec/service-reconciler init/halt/suspend lifecycle (replaces
@@ -9,8 +16,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.packages.records.parse]
-    [graphden.packages.sync]
-    [graphden.services.reconciler :as recon]
+    [graphden.packages.sync :as sync]
     [graphden.storage.protocol.core :as sp]
     ;; `graphden.system.core` still required for its `defmethod` side
     ;; effects — it loads the `:exec/fn-entities` + `:exec/service-
@@ -62,41 +68,40 @@
 
 (deftest service-reconciler-init-empty-storage-test
   (testing "no :service rows + no seeded-services → init-key returns a quiet component"
-    (let [reconcile-called? (atom false)]
-      (with-redefs [recon/reconcile-once! (fn [_ _] (reset! reconcile-called? true))]
-        (let [storage (mock-storage [])
-              context {:storage storage}
-              opts {:context context :packages {:seeded-services []}}
-              component (ig/init-key :exec/service-reconciler opts)]
-          (is (not @reconcile-called?)
-              "nothing enabled → reconcile-once! not invoked")
-          (is (some? (:running component)))
-          (ig/halt-key! :exec/service-reconciler component))))))
+    (let [reconcile-called? (atom false)
+          storage (mock-storage [])
+          context {:storage storage}
+          opts {:context context :packages {:seeded-services []}
+                :reconcile-fn (fn [& _] (reset! reconcile-called? true))}
+          component (ig/init-key :exec/service-reconciler opts)]
+      (is (not @reconcile-called?)
+          "nothing enabled → reconcile-once! not invoked")
+      (is (some? (:running component)))
+      (ig/halt-key! :exec/service-reconciler component))))
 
 
 (deftest service-reconciler-init-with-rows-reconciles-test
   (testing "enabled :service rows present → init-key calls reconcile"
-    (let [reconcile-called? (atom false)]
-      (with-redefs [recon/reconcile-once!
-                    (fn [_ _] (reset! reconcile-called? true))]
-        (let [storage (mock-storage [{:id (random-uuid)
-                                      :fn-id (random-uuid)
-                                      :enabled? true}])
-              context {:storage storage}
-              opts {:context context :packages {:seeded-services []}}
-              component (ig/init-key :exec/service-reconciler opts)]
-          (is @reconcile-called?
-              "reconcile-once! invoked to start the desired services")
-          (ig/halt-key! :exec/service-reconciler component))))))
+    (let [reconcile-called? (atom false)
+          storage (mock-storage [{:id (random-uuid)
+                                  :fn-id (random-uuid)
+                                  :enabled? true}])
+          context {:storage storage}
+          opts {:context context :packages {:seeded-services []}
+                :reconcile-fn (fn [& _] (reset! reconcile-called? true))}
+          component (ig/init-key :exec/service-reconciler opts)]
+      (is @reconcile-called?
+          "reconcile-once! invoked to start the desired services")
+      (ig/halt-key! :exec/service-reconciler component))))
 
 
 (deftest service-reconciler-suspend-drains-running-test
   (testing "suspend-key! invokes stop-all! on running"
-    (let [stop-all-called? (atom false)]
-      (with-redefs [recon/stop-all! (fn [_] (reset! stop-all-called? true))]
-        (let [component {:running (atom {}) :context {}}]
-          (ig/suspend-key! :exec/service-reconciler component)
-          (is @stop-all-called? "suspend invokes stop-all! on running"))))))
+    (let [stop-all-called? (atom false)
+          component {:running (atom {}) :context {}
+                     :stop-all-fn (fn [_] (reset! stop-all-called? true))}]
+      (ig/suspend-key! :exec/service-reconciler component)
+      (is @stop-all-called? "suspend invokes stop-all! on running"))))
 
 
 ;; =============================================================================
@@ -118,13 +123,12 @@
 
 (deftest fn-entities-init-test
   (testing "init-key creates fn entities from packages"
-    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns
-                  ;; keyword mock-storage can't answer the moved-
-                  ;; identity reconciler's identity-plane reads —
-                  ;; no-op it (its own behavior is covered by
-                  ;; graphden.system.moved-identity-test).
-                  graphden.packages.sync/reconcile-moved-identities!
-                  (fn [& _] 0)]
+    (binding [fn-composition/*sync-fns-override* mock-sync-fns
+              ;; keyword mock-storage can't answer the moved-
+              ;; identity reconciler's identity-plane reads —
+              ;; no-op it (its own behavior is covered by
+              ;; graphden.system.moved-identity-test).
+              sync/*reconcile-moved-override* (fn [& _] 0)]
       (let [storage :mock-storage
             packages {:fn-defs [{:name :test-fn :parent :const}
                                 {:name :another-fn :parent :add}]}
@@ -140,9 +144,8 @@
         (is (contains? result :another-fn) "Should contain another-fn"))))
 
   (testing "init-key handles empty fn-defs"
-    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns
-                  graphden.packages.sync/reconcile-moved-identities!
-                  (fn [& _] 0)]
+    (binding [fn-composition/*sync-fns-override* mock-sync-fns
+              sync/*reconcile-moved-override* (fn [& _] 0)]
       (let [opts {:storage :mock :packages {:fn-defs []}
                   :skip-allowlist-gate? true}
             result (ig/init-key :exec/fn-entities opts)]

@@ -1,13 +1,17 @@
 (ns ^:serial graphden.fleet.command-test
-  "`^:serial` — `with-redefs` root-rebinds `cr/load-cell!` /
-   `cr/evict-cell!` (some stubs THROW) and `http/request` (with
-   embedded assertions); a concurrent compile or HTTP call landing in
-   the window blows up in the wrong NS.
+  "`^:serial` — ONLY because `with-redefs` root-rebinds
+   `org.httpkit.client/request` (with embedded assertions); a
+   concurrent NS's real HTTP call landing in the window blows up in
+   the wrong NS. (Cluster A of the serial-reduction epic — the httpkit
+   seam comes in a later batch.) The former second pin reason —
+   root-rebinding `cr/load-cell!` / `cr/evict-cell!`, some stubs
+   THROWING — is gone: those now go through the thread-local
+   `cr/*impl-override*` seam (`binding`; serial-reduction batch 4).
 
    Directed cell-command transport (`graphden.fleet.command`, docs/FLEET_RFC.md
    §6.3). URL parse/build are pure; the auth-gated server seam + the ACK-gated
-   client are exercised in-JVM by redefining `cr/load-cell!` / `cr/evict-cell!`
-   and `http/request` — no container, no second pod."
+   client are exercised in-JVM by stubbing `cr/load-cell!` / `cr/evict-cell!`
+   (via the seam) and `http/request` — no container, no second pod."
   (:require
     [cheshire.core :as json]
     [clojure.test :refer [deftest is testing]]
@@ -51,7 +55,7 @@
       (is (nil? (handler ctx (req :get "/api/branches" TOKEN))))
       (is (nil? (handler ctx (req :post "/api/execute" TOKEN)))))
     (testing "a command with a wrong / missing token → 401, never runs"
-      (with-redefs [cr/load-cell! (fn [_ _] (throw (AssertionError. "must not run unauthorized")))]
+      (binding [cr/*impl-override* {:load-cell! (fn [_ _] (throw (AssertionError. "must not run unauthorized")))}]
         (is (= 401 (:status (handler ctx (req :post (str cmd/path-prefix "load/" ROOT) "wrong")))))
         (is (= 401 (:status (handler ctx (req :post (str cmd/path-prefix "load/" ROOT) nil)))))))
     (testing "an unset internal token fail-closes (denies even a blank bearer)"
@@ -63,18 +67,18 @@
   (let [handler (cmd/make-command-handler TOKEN)
         ctx {:tag :the-ctx}]
     (testing "authorized load compiles the cell → 200 + loaded count"
-      (with-redefs [cr/load-cell! (fn [c root]
-                                    (is (= ctx c) "the pod's own ctx is used")
-                                    (is (= ROOT root))
-                                    #{root :a :b})]
+      (binding [cr/*impl-override* {:load-cell! (fn [c root]
+                                                  (is (= ctx c) "the pod's own ctx is used")
+                                                  (is (= ROOT root))
+                                                  #{root :a :b})}]
         (let [resp (handler ctx (req :post (str cmd/path-prefix "load/" ROOT) TOKEN))]
           (is (= 200 (:status resp)))
           (is (= {"ok" true "loaded" 3} (json/parse-string (:body resp)))))))
     (testing "an empty load (cell not in this shard) → 409 so the move aborts"
-      (with-redefs [cr/load-cell! (fn [_ _] #{})]
+      (binding [cr/*impl-override* {:load-cell! (fn [_ _] #{})}]
         (is (= 409 (:status (handler ctx (req :post (str cmd/path-prefix "load/" ROOT) TOKEN)))))))
     (testing "authorized evict → 200 + evicted count (idempotent)"
-      (with-redefs [cr/evict-cell! (fn [_ _] #{:a :b})]
+      (binding [cr/*impl-override* {:evict-cell! (fn [_ _] #{:a :b})}]
         (let [resp (handler ctx (req :post (str cmd/path-prefix "evict/" ROOT) TOKEN))]
           (is (= 200 (:status resp)))
           (is (= {"ok" true "evicted" 2} (json/parse-string (:body resp)))))))))
@@ -113,7 +117,7 @@
 (deftest server-seam-500-on-a-thrown-command
   (testing "an authorized command whose handler throws → 500 (not a leaked stack)"
     (let [handler (cmd/make-command-handler TOKEN)]
-      (with-redefs [cr/load-cell! (fn [_ _] (throw (RuntimeException. "compile blew up")))]
+      (binding [cr/*impl-override* {:load-cell! (fn [_ _] (throw (RuntimeException. "compile blew up")))}]
         (let [resp (handler {} (req :post (str cmd/path-prefix "load/" ROOT) TOKEN))]
           (is (= 500 (:status resp)))
           (is (= {"ok" false "error" "command failed"} (json/parse-string (:body resp)))))))))

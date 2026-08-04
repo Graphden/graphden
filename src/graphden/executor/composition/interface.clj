@@ -42,6 +42,18 @@
     [graphden.executor.composition.core :as core]))
 
 
+(def ^:dynamic *sync-fns-override*
+  "Parallel-test seam: when bound to a fn, `sync-fns-to-storage!`
+   delegates to it (same args, any arity) instead of
+   `core/sync-fns-to-storage!`. nil (production) = the real sync runs.
+   Tests `binding` this instead of `with-redefs`-ing the root var — a
+   root rebind is process-global and forced a `^:serial` pin on
+   `graphden.system.core-test` (serial-reduction batch 4). Cost on the
+   real path: one nil check per package sync — a boot / bootstrap-time
+   path, never per-execute."
+  nil)
+
+
 (defn sync-fns-to-storage!
   "Syncs fn definitions to storage.
 
@@ -58,11 +70,12 @@
 
    See namespace docstring for definition format."
   ([storage fn-defs]
-   (core/sync-fns-to-storage! storage fn-defs))
+   ((or *sync-fns-override* core/sync-fns-to-storage!) storage fn-defs))
   ([storage fn-defs ns-id-map]
-   (core/sync-fns-to-storage! storage fn-defs ns-id-map))
+   ((or *sync-fns-override* core/sync-fns-to-storage!) storage fn-defs ns-id-map))
   ([storage fn-defs ns-id-map extra-name->id]
-   (core/sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id))
+   ((or *sync-fns-override* core/sync-fns-to-storage!)
+    storage fn-defs ns-id-map extra-name->id))
   ([storage fn-defs ns-id-map extra-name->id extra-defs-by-name]
-   (core/sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id
-                              extra-defs-by-name)))
+   ((or *sync-fns-override* core/sync-fns-to-storage!)
+    storage fn-defs ns-id-map extra-name->id extra-defs-by-name)))

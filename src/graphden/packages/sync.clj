@@ -381,6 +381,21 @@
         (set (keys @failures)) @failures))))
 
 
+(def ^:dynamic *reconcile-moved-override*
+  "Parallel-test seam: when bound to a fn, `reconcile-moved-identities!`
+   delegates to it (same args) instead of running the real
+   identity-plane scan. nil (production) = the real pass runs. Tests
+   `binding` this instead of `with-redefs`-ing the root var — a root
+   rebind is process-global and forced a `^:serial` pin on
+   `graphden.system.core-test` (serial-reduction batch 4). Cost on the
+   real path: one nil check per package sync — a boot / bootstrap-time
+   path, never per-execute."
+  nil)
+
+
+(declare reconcile-moved-identities*!)
+
+
 (defn reconcile-moved-identities!
   "ROOT FIX for the ghost-identity class (audit-4): a package fn's
    deterministic id is `uuid-v5(ns-path, name)`, so moving it to
@@ -406,6 +421,15 @@
    version rows, in place) at the new id, purge the ghost's own
    subgraph, and drop its registry entry. Runs BEFORE the
    compiled-registry build, so there is nothing stale to invalidate."
+  [storage packages synced-fn-rows]
+  (if-let [f *reconcile-moved-override*]
+    (f storage packages synced-fn-rows)
+    (reconcile-moved-identities*! storage packages synced-fn-rows)))
+
+
+(defn- reconcile-moved-identities*!
+  "The real body of `reconcile-moved-identities!` (see its docstring) —
+   split out so the seam check stays a one-liner."
   [storage packages synced-fn-rows]
   (let [base (idrepair/base-of storage)
         package-roots (into #{} (map :name) (:packages packages))

@@ -34,7 +34,8 @@
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
-    [graphden.versioning.identity-repair :as idrepair]))
+    [graphden.versioning.identity-repair :as idrepair]
+    [graphden.web.route-shape :as route-shape]))
 
 
 (defn compute-all-fn-name-ids
@@ -243,6 +244,49 @@
                        :colliding-names base-name-dups})))))
 
 
+(defn- validate-route-handler-shapes!
+  "Bare (middleware-less) routes — `:get-route`/`:post-route` parents —
+   call their handler with the raw ring request positionally; a handler
+   whose DECLARED `:lambda-params` is anything but `[]`/`[:request]`
+   mis-binds the request silently at the wire (see
+   `graphden.web.route-shape`). Fail loud at sync so an external /
+   third-party package can't ship the class the repo's own corpus is
+   pinned against (`route-handler-shape-guard-test`); the editor write
+   path is guarded by `crud.validation/route-handler-shape-rej`.
+
+   Direct-parent detection mirrors the guard test: package routes
+   parent the templates directly. A qualified parent ref only counts
+   when it names the owning module (`app.routes.method`)."
+  [packages]
+  (let [fn-defs (:fn-defs packages)
+        by-name (into {} (keep (fn [d] (when (:name d) [(:name d) d]))) fn-defs)
+        bare? (fn [p]
+                (and (keyword? p)
+                     (contains? route-shape/bare-route-parents
+                                (keyword (name p)))
+                     (or (nil? (namespace p))
+                         (= route-shape/bare-route-template-ns
+                            (namespace p)))))
+        offenders (for [r fn-defs
+                        :when (or (bare? (:parent r))
+                                  (some bare? (:parents r)))
+                        :let [h (get-in r [:args :handler])
+                              h (if (map? h) (:ref h) h)
+                              handler (when (keyword? h)
+                                        (or (by-name h)
+                                            (by-name (keyword (name h)))))
+                              lp (:lambda-params handler)]
+                        :when (and handler
+                                   (not (route-shape/valid-handler-lambda-params? lp)))]
+                    {:route (:name r) :handler h :lambda-params (vec lp)})]
+    (when (seq offenders)
+      (throw (ex-info (str "Bare-route handlers must declare :lambda-params"
+                           " [] or [:request] — the raw positional ring call"
+                           " breaks any other shape: " (pr-str offenders))
+                      {:type :packages/route-handler-shape
+                       :offenders (vec offenders)})))))
+
+
 (defn register-base-fns-from-packages!
   "Pure side-effects: sync namespaces, register type-aliases, register
    base-fn impls in the global registry, sync base-fn rows to storage.
@@ -257,8 +301,10 @@
   ([storage packages]
    (register-base-fns-from-packages! storage packages nil))
   ([storage packages extra-base-fns]
-   ;; Fail loud BEFORE any DB write if a base-fn and a fn-def share a name.
+   ;; Fail loud BEFORE any DB write if a base-fn and a fn-def share a name,
+   ;; or a bare route's handler declares a wire-breaking :lambda-params.
    (validate-no-name-collisions! packages)
+   (validate-route-handler-shapes! packages)
    (let [base-fn-defs (:base-fn-defs packages)
          ;; Sync namespace entities first (creates ns hierarchy in DB)
          ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)

@@ -10,8 +10,10 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.validation :as v]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.web.route-shape :as route-shape]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -454,6 +456,108 @@
               b (setup/create-base-fn! storage "wr-clean-b")]
           (is (nil? (v/write-rej storage :binding
                                  {:fn-id (:id a) :ref-fn-id (:id b)}))))
+        (finally (sp/close storage))))))
+
+
+;; =============================================================================
+;; route-handler-shape-rej — the bare-route handler calling convention
+;; =============================================================================
+
+(defn- bare-route-scenario!
+  "A probe route parented on the REAL `:get-route` template id (the
+   deterministic package id the guard matches ancestor closures on),
+   with a `handler`-named slot + an unrelated `path` slot attached at
+   the template. Returns `{:route :handler-slot :other-slot}` ids."
+  [storage]
+  (let [template-id (records/fn-id route-shape/bare-route-template-ns :get-route)
+        _ (sp/create-entity storage :fn {:id template-id
+                                         :name "get-route"
+                                         :parent-ids nil})
+        handler-slot (setup/create-slot! storage "handler" :any)
+        _ (setup/attach-slot! storage template-id (:id handler-slot) 0)
+        other-slot (setup/create-slot! storage "path" :any)
+        _ (setup/attach-slot! storage template-id (:id other-slot) 1)
+        route (setup/create-composed-fn! storage "rhs-probe-route" template-id)]
+    {:route (:id route)
+     :handler-slot (:id handler-slot)
+     :other-slot (:id other-slot)}))
+
+
+(defn- fn-with-params!
+  [storage fn-name lambda-params]
+  (sp/create-entity storage :fn
+                    (cond-> {:id (records/fn-id nil (keyword fn-name))
+                             :name fn-name
+                             :parent-ids nil}
+                      (some? lambda-params) (assoc :lambda-params lambda-params))))
+
+
+(deftest route-handler-shape-rej-binding-test
+  (testing "binding a handler onto a bare route's :handler slot"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [route handler-slot other-slot]} (bare-route-scenario! storage)
+              bad (fn-with-params! storage "rhs-bad" ["request" "limit"])
+              good-req (fn-with-params! storage "rhs-good-req" ["request"])
+              good-empty (fn-with-params! storage "rhs-good-empty" [])
+              derived (fn-with-params! storage "rhs-derived" nil)]
+          (let [rej (v/write-rej storage :binding {:fn-id route
+                                                   :slot-id handler-slot
+                                                   :ref-fn-id (:id bad)})]
+            (is (= :constraint-violation/route-handler-shape (:type rej))
+                "a 2+-param declared shape mis-binds the raw ring request")
+            (is (string? (:reason rej))))
+          (is (nil? (v/write-rej storage :binding {:fn-id route
+                                                   :slot-id handler-slot
+                                                   :ref-fn-id (:id good-req)}))
+              "[:request] threads correctly")
+          (is (nil? (v/write-rej storage :binding {:fn-id route
+                                                   :slot-id handler-slot
+                                                   :ref-fn-id (:id good-empty)}))
+              "[] (static response) threads correctly")
+          (is (nil? (v/write-rej storage :binding {:fn-id route
+                                                   :slot-id handler-slot
+                                                   :ref-fn-id (:id derived)}))
+              "nil lambda-params = derived, validated by the compile pipeline")
+          (is (nil? (v/write-rej storage :binding {:fn-id route
+                                                   :slot-id other-slot
+                                                   :ref-fn-id (:id bad)}))
+              "a non-:handler slot doesn't carry the contract"))
+        (finally (sp/close storage)))))
+
+  (testing "a bad-shaped handler bound at a NON-bare-route fn passes"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "rhs-plain-base")
+              hslot (setup/create-slot! storage "handler" :any)
+              _ (setup/attach-slot! storage (:id base) (:id hslot) 0)
+              owner (setup/create-composed-fn! storage "rhs-plain-owner" (:id base))
+              bad (fn-with-params! storage "rhs-bad-elsewhere" ["oops"])]
+          (is (nil? (v/write-rej storage :binding {:fn-id (:id owner)
+                                                   :slot-id (:id hslot)
+                                                   :ref-fn-id (:id bad)}))
+              "only the :get-route/:post-route closure carries the raw
+               positional calling convention"))
+        (finally (sp/close storage))))))
+
+
+(deftest route-handler-shape-rej-fn-update-test
+  (testing "declaring a bad shape on a fn already bound as a bare-route handler"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [route handler-slot]} (bare-route-scenario! storage)
+              h (fn-with-params! storage "rhs-live" ["request"])]
+          (setup/bind-ref! storage route handler-slot (:id h))
+          (let [rej (v/write-rej storage :fn {:id (:id h)
+                                              :lambda-params ["request" "limit"]})]
+            (is (= :constraint-violation/route-handler-shape (:type rej))
+                "the reverse lookup finds the bare-route :handler use"))
+          (is (nil? (v/write-rej storage :fn {:id (:id h)
+                                              :lambda-params ["request"]}))
+              "a valid shape passes")
+          (is (nil? (v/write-rej storage :fn {:id (records/fn-id nil :rhs-unbound)
+                                              :lambda-params ["whatever"]}))
+              "a fn not referenced as any handler declares what it likes"))
         (finally (sp/close storage))))))
 
 

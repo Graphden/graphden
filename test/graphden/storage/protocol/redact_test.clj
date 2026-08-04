@@ -1,13 +1,12 @@
-(ns ^:serial graphden.storage.protocol.redact-test
+(ns graphden.storage.protocol.redact-test
   "Tests for redaction and sensitive field handling.
 
-   `^:serial` — `register-sensitive-field-pattern!` /
-   `register-sensitive-field-predicate!` write to a JVM-wide registry
-   atom; the per-test `(finally (reset-sensitive-field-registry!))`
-   restores AFTER the assertions complete, but under parallel
-   scheduling a sibling NS can reset BETWEEN this NS's register-and-
-   check pair, knocking the registration out. Serial scope confines
-   the registry mutation to one test thread."
+   Runs in the PARALLEL pool: the sensitive-field registry is now
+   per-NS-thread via the parallel plugin's isolation-vars
+   (`redaction/*sensitive-fields-override*`, seeded from the global
+   defaults) — this NS's register/reset pairs and `errors_test`'s
+   registrations mutate their own copies, so the cross-NS reset race
+   the old `^:serial` pin defended against is structurally gone."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as storage]))

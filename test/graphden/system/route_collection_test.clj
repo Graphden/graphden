@@ -1,10 +1,11 @@
-(ns ^:serial graphden.system.route-collection-test
+(ns graphden.system.route-collection-test
   "Unit tests for the route-collection seam (PLATFORM_PLAN §6) — the JVM-wide
    ORDERED COLLECTION of fall-through routers. `br/dispatch` calls
    `dispatch-first` on EVERY request, so the nil-safety contract here is what
    keeps single-tenant (no optional package / addon) a transparent
-   pass-through. `^:serial` because it mutates the process-wide collection atom
-   (isolated per-NS-thread only under the parallel plugin)."
+   pass-through. Runs in the PARALLEL pool: the collection atom is per-NS-thread via
+   the plugin's isolation-vars (*active-collection-override*), so this
+   NS's install/deinstall mutations can't leak to siblings."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.system.route-collection :as rc]))

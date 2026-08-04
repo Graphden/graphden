@@ -170,7 +170,13 @@
     ;; (`acme`/`beta`) — e.g. subdomain-test's request-scope 421s an apex
     ;; request whose org was cached byo elsewhere. Empty `{}` seed is the
     ;; correct default (no orgs cached).
-    graphden.tenancy.context/*byo-cache-override*])
+    graphden.tenancy.context/*byo-cache-override*
+    ;; The sensitive-field redaction registry. `errors_test` (parallel)
+    ;; registers `:employee-ssn`-style extras and `redact_test` resets
+    ;; the registry to defaults — a cross-NS race on the shared atom in
+    ;; either direction. Seeded from the global snapshot so the default
+    ;; names/patterns (+ any boot registrations) stay active per thread.
+    graphden.storage.protocol.redaction/*sensitive-fields-override*])
 
 
 ;; Per-var seeders. Some isolation atoms must start non-empty — the
@@ -194,7 +200,9 @@
     graphden.system.branch-router/*epoch-state-override*
     graphden.system.branch-router/epoch-state-seed
     graphden.system.route-collection/*active-collection-override*
-    graphden.system.route-collection/active-collection-isolation-seed})
+    graphden.system.route-collection/active-collection-isolation-seed
+    graphden.storage.protocol.redaction/*sensitive-fields-override*
+    graphden.storage.protocol.redaction/sensitive-fields-isolation-seed})
 
 
 (defn- seed-for

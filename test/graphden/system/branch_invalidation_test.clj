@@ -1,4 +1,4 @@
-(ns ^:serial graphden.system.branch-invalidation-test
+(ns graphden.system.branch-invalidation-test
   "Cross-branch compiled-registry invalidation.
 
    A branch ctx caches its own `{fn-id → closure}` map. A branch with

@@ -63,6 +63,30 @@
          :predicates []}))
 
 
+(def ^:dynamic *sensitive-fields-override*
+  "Per-NS-thread override atom for parallel-test isolation. nil = use
+   the process-global registry. The kaocha parallel plugin binds a
+   fresh atom (seeded via `sensitive-fields-isolation-seed`) per
+   NS-thread, so tests that register/reset sensitive fields mutate
+   their own copy — `errors_test` registering `:employee-ssn` can no
+   longer race a sibling NS's redaction mid-run."
+  nil)
+
+
+(defn- registry-atom
+  []
+  (or *sensitive-fields-override* sensitive-field-registry))
+
+
+(defn sensitive-fields-isolation-seed
+  "Seed for the plugin's per-thread override — the current GLOBAL
+   registry state (explicitly not the override, which the plugin is
+   about to bind), so the defaults and any boot-time registrations
+   stay visible inside the isolated copy."
+  []
+  @sensitive-field-registry)
+
+
 (defn register-sensitive-field-name!
   "Registers an explicit field name as sensitive.
    The name will be matched exactly (case-insensitive for keywords).
@@ -78,7 +102,7 @@
     (throw (ex-info "field-name must be a keyword"
                     {:type :invalid-argument
                      :field-name field-name})))
-  (swap! sensitive-field-registry update :names conj field-name)
+  (swap! (registry-atom) update :names conj field-name)
   field-name)
 
 
@@ -99,7 +123,7 @@
                     {:type :invalid-argument
                      :pattern pattern
                      :pattern-type (type pattern)})))
-  (swap! sensitive-field-registry update :patterns conj pattern)
+  (swap! (registry-atom) update :patterns conj pattern)
   pattern)
 
 
@@ -125,7 +149,7 @@
     (throw (ex-info "pred-fn must be a function"
                     {:type :invalid-argument
                      :pred-fn pred-fn})))
-  (swap! sensitive-field-registry update :predicates conj pred-fn)
+  (swap! (registry-atom) update :predicates conj pred-fn)
   pred-fn)
 
 
@@ -135,7 +159,7 @@
 
    WARNING: This removes all custom registrations."
   []
-  (reset! sensitive-field-registry
+  (reset! (registry-atom)
           {:names default-sensitive-field-names
            :patterns default-sensitive-field-patterns
            :predicates []})
@@ -146,7 +170,7 @@
   "Returns the current sensitive field registry state.
    Useful for saving state before modifications in tests."
   []
-  @sensitive-field-registry)
+  @(registry-atom))
 
 
 (defn set-sensitive-field-registry!
@@ -156,7 +180,7 @@
    Arguments:
    - state: map with :names, :patterns, :predicates keys"
   [state]
-  (reset! sensitive-field-registry state)
+  (reset! (registry-atom) state)
   nil)
 
 
@@ -190,14 +214,14 @@
   "Returns the current set of explicitly registered sensitive field names.
    Includes both default and custom registered names."
   []
-  (:names @sensitive-field-registry))
+  (:names @(registry-atom)))
 
 
 (defn sensitive-field-patterns
   "Returns the current vector of sensitive field regex patterns.
    Includes both default and custom registered patterns."
   []
-  (:patterns @sensitive-field-registry))
+  (:patterns @(registry-atom)))
 
 
 (defn sensitive-field?
@@ -216,7 +240,7 @@
   (when field-name
     (let [kw (if (keyword? field-name) field-name (keyword field-name))
           name-str (name kw)
-          {:keys [names patterns predicates]} @sensitive-field-registry]
+          {:keys [names patterns predicates]} @(registry-atom)]
       (when (seq name-str)
         (or
           ;; Check explicit names first (fast exact match)

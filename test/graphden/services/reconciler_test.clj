@@ -953,8 +953,8 @@
         pod-a (atom {})
         pod-b (atom {})]
     (try
-      (with-redefs [pg-lock/try-acquire-slot! try-lock
-                    pg-lock/release-slot! release]
+      (binding [pg-lock/*impl-override* {:try-acquire-slot! try-lock
+                                         :release-slot! release}]
         (let [ra (recon/reconcile-once! (pod-ctx storage) pod-a)
               rb (recon/reconcile-once! (pod-ctx storage) pod-b)]
           (testing "pod A wins the lock and starts it"
@@ -986,8 +986,8 @@
         pod-a (atom {})
         pod-b (atom {})]
     (try
-      (with-redefs [pg-lock/try-acquire-slot! try-lock
-                    pg-lock/release-slot! release]
+      (binding [pg-lock/*impl-override* {:try-acquire-slot! try-lock
+                                         :release-slot! release}]
         (let [ra (recon/reconcile-once! (pod-ctx storage) pod-a)
               rb (recon/reconcile-once! (pod-ctx storage) pod-b)]
           (testing "both pods start their own copy — a listener must bind on each"
@@ -1019,9 +1019,10 @@
         released (atom [])
         pod (atom {})]
     (try
-      (with-redefs [pg-lock/try-acquire-slot! try-lock
-                    pg-lock/release-slot!
-                    (fn [_conn sid _slot] (swap! released conj sid) true)]
+      (binding [pg-lock/*impl-override*
+                {:try-acquire-slot! try-lock
+                 :release-slot!
+                 (fn [_conn sid _slot] (swap! released conj sid) true)}]
         (recon/reconcile-once! (pod-ctx storage) pod)
         (sp/update-entity storage :service (:id svc) {:enabled? false})
         (recon/reconcile-once! (pod-ctx storage) pod)
@@ -1044,8 +1045,8 @@
         [_held try-lock release] (fake-lock-table)
         pod (atom {})]
     (try
-      (with-redefs [pg-lock/try-acquire-slot! try-lock
-                    pg-lock/release-slot! release]
+      (binding [pg-lock/*impl-override* {:try-acquire-slot! try-lock
+                                         :release-slot! release}]
         (recon/reconcile-once! (pod-ctx storage) pod)
         (is (true? (:locked? (get @pod (:id svc)))))
         (sp/update-entity storage :service (:id svc) {:cardinality :per-pod})
@@ -1078,8 +1079,8 @@
           [_held try-lock release] (fake-lock-table)
           pods [(atom {}) (atom {}) (atom {})]]
       (try
-        (with-redefs [pg-lock/try-acquire-slot! try-lock
-                      pg-lock/release-slot! release]
+        (binding [pg-lock/*impl-override* {:try-acquire-slot! try-lock
+                                           :release-slot! release}]
           (let [results (mapv #(recon/reconcile-once! (pod-ctx storage) %) pods)
                 started (filter #(seq (:started %)) results)
                 idle (filter #(seq (:not-our-lock %)) results)
@@ -1113,8 +1114,8 @@
           pod-a (atom {})
           pod-b (atom {})]
       (try
-        (with-redefs [pg-lock/try-acquire-slot! try-lock
-                      pg-lock/release-slot! release]
+        (binding [pg-lock/*impl-override* {:try-acquire-slot! try-lock
+                                           :release-slot! release}]
           (recon/reconcile-once! (pod-ctx storage) pod-a)
           (recon/reconcile-once! (pod-ctx storage) pod-b)
           (testing "pod A owns it, pod B idles (::not-our-lock)"
@@ -1148,8 +1149,8 @@
           [_held try-lock release] (fake-lock-table)
           pod (atom {})]
       (try
-        (with-redefs [pg-lock/try-acquire-slot! try-lock
-                      pg-lock/release-slot! release]
+        (binding [pg-lock/*impl-override* {:try-acquire-slot! try-lock
+                                           :release-slot! release}]
           (recon/reconcile-once! (pod-ctx storage) pod)
           (is (= 2 (:pool-size (get @pod (:id svc)))))
           (sp/update-entity storage :service (:id svc) {:pool-size 1})
@@ -1178,11 +1179,11 @@
         pod (atom {})]
     (try
       ;; Start under a (fake) lock connection so the entry is :locked? true.
-      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] true)]
+      (binding [pg-lock/*impl-override* {:try-acquire-slot! (fn [_ _ _] true)}]
         (recon/reconcile-once! (pod-ctx storage) pod))
       (is (true? (:locked? (get @pod (:id svc)))))
       ;; Reconnect scenario: re-acquire SUCCEEDS (nobody stole it).
-      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] true)]
+      (binding [pg-lock/*impl-override* {:try-acquire-slot! (fn [_ _ _] true)}]
         (#'recon/reassert-lock-ownership! ::fresh-conn pod))
       (testing "service we re-acquired stays running, not stopped"
         (is (contains? @pod (:id svc)))
@@ -1202,12 +1203,12 @@
                                :restart-policy :always :cardinality :singleton})
         pod (atom {})]
     (try
-      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] true)]
+      (binding [pg-lock/*impl-override* {:try-acquire-slot! (fn [_ _ _] true)}]
         (recon/reconcile-once! (pod-ctx storage) pod))
       (is (true? (:locked? (get @pod (:id svc)))))
       ;; Reconnect scenario: re-acquire FAILS — a sibling took it during the
       ;; outage. The pod must stop its local copy and yield.
-      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] false)]
+      (binding [pg-lock/*impl-override* {:try-acquire-slot! (fn [_ _ _] false)}]
         (#'recon/reassert-lock-ownership! ::fresh-conn pod))
       (testing "we stopped the local copy and dropped the entry"
         (is (not (contains? @pod (:id svc))))
@@ -1235,16 +1236,16 @@
     (try
       ;; Pass 1: no reconnect (ensure-live! false) — acquire the lock so the
       ;; entry is :locked? true, exactly as a healthy pass would leave it.
-      (with-redefs [pg-lock/ensure-live! (fn [_] false)
-                    pg-lock/try-acquire-slot! (fn [_ _ _] true)]
+      (binding [pg-lock/*impl-override* {:ensure-live! (fn [_] false)
+                                         :try-acquire-slot! (fn [_ _ _] true)}]
         (recon/reconcile-once! ctx pod))
       (is (true? (:locked? (get @pod (:id svc)))))
       ;; Pass 2: the holder reconnected (ensure-live! true) → the glue must
       ;; re-assert on the fresh conn. A sibling grabbed the lock during the
       ;; outage (try-lock! false), so reassert stops our local copy.
-      (with-redefs [pg-lock/ensure-live! (fn [_] true)
-                    pg-lock/holder-conn (fn [_] ::fresh)
-                    pg-lock/try-acquire-slot! (fn [_ _ _] false)]
+      (binding [pg-lock/*impl-override* {:ensure-live! (fn [_] true)
+                                         :holder-conn (fn [_] ::fresh)
+                                         :try-acquire-slot! (fn [_ _ _] false)}]
         (recon/reconcile-once! ctx pod))
       (testing "the reconnect drove reassert: the stolen singleton was stopped"
         (is (= 1 (count @stops)) "the local copy's stopper fired exactly once")
@@ -1269,7 +1270,8 @@
       (is (false? (:locked? (get @pod (:id svc)))) ":per-pod never locked")
       ;; Even if try-lock! would fail, a :per-pod entry (:locked? false) is
       ;; skipped — it never depended on a lock.
-      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] (throw (ex-info "should not be called" {})))]
+      (binding [pg-lock/*impl-override*
+                {:try-acquire-slot! (fn [_ _ _] (throw (ex-info "should not be called" {})))}]
         (#'recon/reassert-lock-ownership! ::fresh-conn pod))
       (testing ":per-pod service stays running, try-lock! never consulted"
         (is (contains? @pod (:id svc)))

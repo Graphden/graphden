@@ -105,6 +105,29 @@
 
 
 ;; =============================================================================
+;; Parallel-test seam
+;; =============================================================================
+
+(def ^:dynamic *impl-override*
+  "Parallel-test seam: a map of `{op-keyword → fn}` shadowing the real
+   implementation of the correspondingly-named lock operation
+   (`:try-acquire-slot!` `:release-slot!` `:try-lock!` `:release-lock!`
+   `:holder-conn` `:ensure-live!`). nil (production) = every call runs
+   the real body. Tests `binding` this instead of `with-redefs`-ing
+   the root vars — a root rebind is process-global and forced
+   `^:serial` pins on the reconciler + fleet-controller suites
+   (serial-reduction batch 2); the two suites even raced each other's
+   identical rebinds. Cost on the real path: one nil-map lookup per
+   reconcile/controller tick."
+  nil)
+
+
+(defn- impl
+  [op]
+  (get *impl-override* op))
+
+
+;; =============================================================================
 ;; Lock operations
 ;; =============================================================================
 
@@ -119,9 +142,11 @@
    serial today, so this isn't a concern, but if a future caller
    parallelises reconciles they need to lock around this call)."
   [^Connection conn service-id slot]
-  (let [k (slot-lock-key service-id slot)
-        rows (jdbc/execute! conn ["SELECT pg_try_advisory_lock(?) AS acquired" k])]
-    (boolean (:acquired (first rows)))))
+  (if-let [f (impl :try-acquire-slot!)]
+    (f conn service-id slot)
+    (let [k (slot-lock-key service-id slot)
+          rows (jdbc/execute! conn ["SELECT pg_try_advisory_lock(?) AS acquired" k])]
+      (boolean (:acquired (first rows))))))
 
 
 (defn release-slot!
@@ -129,20 +154,24 @@
    if this session held it (now released), false otherwise — same
    semantics as `pg_advisory_unlock`. `release-lock!` is the slot-0 case."
   [^Connection conn service-id slot]
-  (let [k (slot-lock-key service-id slot)
-        rows (jdbc/execute! conn ["SELECT pg_advisory_unlock(?) AS released" k])
-        released? (boolean (:released (first rows)))]
-    (when-not released?
-      (log/debug "advisory unlock of service slot we don't own — no-op"
-                 {:service-id service-id :slot slot}))
-    released?))
+  (if-let [f (impl :release-slot!)]
+    (f conn service-id slot)
+    (let [k (slot-lock-key service-id slot)
+          rows (jdbc/execute! conn ["SELECT pg_advisory_unlock(?) AS released" k])
+          released? (boolean (:released (first rows)))]
+      (when-not released?
+        (log/debug "advisory unlock of service slot we don't own — no-op"
+                   {:service-id service-id :slot slot}))
+      released?)))
 
 
 (defn try-lock!
   "Attempt the singleton advisory lock (pool slot 0) for `service-id`.
    Non-blocking — true when acquired, false when another pod holds it."
   [^Connection conn service-id]
-  (try-acquire-slot! conn service-id 0))
+  (if-let [f (impl :try-lock!)]
+    (f conn service-id)
+    (try-acquire-slot! conn service-id 0)))
 
 
 (defn release-lock!
@@ -150,7 +179,9 @@
    Idempotent at the call-site level: unlocking a service we don't own
    logs a debug line and returns false."
   [^Connection conn service-id]
-  (release-slot! conn service-id 0))
+  (if-let [f (impl :release-lock!)]
+    (f conn service-id)
+    (release-slot! conn service-id 0)))
 
 
 (defn release-all!
@@ -187,9 +218,14 @@
 
 (defn holder-conn
   "The holder's current live `Connection`. Callers that ran `ensure-live!`
-   this pass can pass this straight to `try-lock!` / `release-lock!`."
-  ^Connection [holder]
-  (:conn @holder))
+   this pass can pass this straight to `try-lock!` / `release-lock!`.
+   (No `^Connection` return hint — the seam may return a test fake;
+   every production consumer hands the value to another graphden fn,
+   never to direct interop.)"
+  [holder]
+  (if-let [f (impl :holder-conn)]
+    (f holder)
+    (:conn @holder)))
 
 
 (defn ensure-live!
@@ -201,14 +237,16 @@
    `isValid` runs a lightweight validation query (1s timeout); a throw
    from it is treated as dead."
   [holder]
-  (let [{:keys [conn pg-opts]} @holder]
-    (if (try (Connection/.isValid conn 1) (catch Exception _ false))
-      false
-      (do
-        (log/warn "service-locks connection is dead — reconnecting")
-        (try (pg-conn/close-dedicated! conn "service-locks") (catch Exception _ nil))
-        (reset! holder {:conn (create-lock-conn pg-opts) :pg-opts pg-opts})
-        true))))
+  (if-let [f (impl :ensure-live!)]
+    (f holder)
+    (let [{:keys [conn pg-opts]} @holder]
+      (if (try (Connection/.isValid conn 1) (catch Exception _ false))
+        false
+        (do
+          (log/warn "service-locks connection is dead — reconnecting")
+          (try (pg-conn/close-dedicated! conn "service-locks") (catch Exception _ nil))
+          (reset! holder {:conn (create-lock-conn pg-opts) :pg-opts pg-opts})
+          true)))))
 
 
 (defn close-holder!

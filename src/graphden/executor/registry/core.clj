@@ -559,9 +559,14 @@
      (when-let [org (current-tenant-org)]
        (swap! (target-per-org-rich-atom)
               (fn [m]
-                (-> m
-                    (assoc-in [org :by-id fn-id] (get-in new-reg [:by-id fn-id]))
-                    (assoc-in [org :by-name fn-name] fn-id)))))
+                ;; Same dual keying (bare + qualified) as the global
+                ;; name index — a bare-only slice would mis-resolve a
+                ;; tenant's per-ns duplicate names on the qualified
+                ;; lookup path.
+                (reduce (fn [acc k] (assoc-in acc [org :by-name k] fn-id))
+                        (assoc-in m [org :by-id fn-id]
+                                  (get-in new-reg [:by-id fn-id]))
+                        (index-keys-for fn-name (:namespace rich-type-map))))))
      nil)))
 
 

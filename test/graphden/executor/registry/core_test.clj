@@ -30,6 +30,31 @@
       (is (= :text (:return (tc/with-org tc/public-org (reg/rich-type-of "myfilter"))))))))
 
 
+(deftest tenant-slice-name-index-is-dual-keyed
+  ;; The per-org slice used to key `:by-name` with the BARE name only —
+  ;; a tenant's QUALIFIED ref to its own fn missed the slice and read
+  ;; the global's (possibly another signature). The slice now uses the
+  ;; same `index-keys-for` dual keying as the global name index.
+  (binding [reg/*per-org-rich-override* (atom {})
+            reg/*rich-types-override* (atom {})]
+    (tc/with-org "A"
+                 (reg/record-rich-types-raw! "dup"
+                                             {:return :int :args {}
+                                              :namespace "org-a.tools"}))
+    ;; global gets a DIFFERENT signature under the same names
+    (reg/record-rich-types-raw! "dup"
+                                {:return :text :args {}
+                                 :namespace "org-a.tools"})
+    (testing "tenant resolves its own entry by the QUALIFIED name too"
+      (is (= :int (:return (tc/with-org "A"
+                                        (reg/rich-type-of :org-a.tools/dup))))))
+    (testing "and by the bare name (unchanged)"
+      (is (= :int (:return (tc/with-org "A" (reg/rich-type-of "dup"))))))
+    (testing "public path reads the global under both spellings"
+      (is (= :text (:return (tc/with-org tc/public-org
+                                         (reg/rich-type-of :org-a.tools/dup))))))))
+
+
 (use-fixtures :once (setup/create-container-fixture))
 
 

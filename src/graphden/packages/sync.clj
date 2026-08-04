@@ -50,17 +50,34 @@
    (mirrors how unions / variants stash their payload). Pre-fix this
    path aliased them to `primitive-fn-id :fn`, leaving every
    `:return-type :http-server-handle`-style reference pointing at the
-   bare-`:fn` row and erasing the structural shape from storage."
+   bare-`:fn` row and erasing the structural shape from storage.
+
+   The map is DUAL-keyed to the same contract as `parse-module`'s
+   `name->id` (which seeds from it): every named def lands under its
+   always-qualified form (`:core.strings/upper`; root ns = the
+   empty-ns spelling) AND its bare name — where a bare name is
+   claimed by two different `(ns, name)` identities it maps to the
+   `ambiguous-name` sentinel instead of silently keeping the
+   last-write id (a cross-package duplicate used to hand every
+   downstream reference the wrong row with no diagnostic; the
+   sentinel makes parse's fail-loud path demand qualification)."
   [packages]
-  (let [base-pairs (keep (fn [[fn-name fn-def]]
-                           (when fn-name
-                             [fn-name (records/fn-id (:namespace fn-def) fn-name)]))
-                         (:base-fn-defs packages))
-        fn-def-pairs (keep (fn [fd]
-                             (when-let [n (:name fd)]
-                               [n (records/fn-id (:namespace fd) n)]))
-                           (:fn-defs packages))]
-    (into {} (concat base-pairs fn-def-pairs))))
+  (let [pairs (concat
+                (keep (fn [[fn-name fn-def]]
+                        (when fn-name [fn-name (:namespace fn-def)]))
+                      (:base-fn-defs packages))
+                (keep (fn [fd]
+                        (when (:name fd) [(:name fd) (:namespace fd)]))
+                      (:fn-defs packages)))]
+    (reduce (fn [m [n ns-path]]
+              (let [id (records/fn-id ns-path n)
+                    existing (get m n)]
+                (-> (assoc m n (if (and existing (not= existing id))
+                                 records-parse/ambiguous-name
+                                 id))
+                    (assoc (keyword (str ns-path) (name n)) id))))
+            {}
+            pairs)))
 
 
 (defn register-type-aliases!

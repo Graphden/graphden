@@ -8,6 +8,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.composition.interface :as fn-composition]
+    [graphden.packages.records.parse]
     [graphden.packages.sync]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
@@ -219,13 +220,29 @@
                               {:name nil :namespace 'app.skip}
                               {:name "other-composed" :namespace 'core.z}]}
           result (graphden.packages.sync/compute-all-fn-name-ids packages)]
-      (is (= 3 (count result))
-          "1 base + 2 named fn-defs (nil-name fn-def skipped)")
+      (is (= 6 (count result))
+          "1 base + 2 named fn-defs (nil-name skipped), each dual-keyed
+           bare + qualified")
       (is (every? uuid? (vals result))
-          "all values are UUIDs")
+          "no collisions here → all values are UUIDs")
       (is (contains? result :my-base))
       (is (contains? result "my-composed"))
-      (is (contains? result "other-composed"))))
+      (is (contains? result "other-composed"))
+      (is (uuid? (get result :core.x/my-base))
+          "the always-qualified key is present alongside the bare one")))
+
+  (testing "cross-package bare-name collision → ambiguous sentinel,
+            qualified keys stay precise"
+    (let [packages {:base-fn-defs {}
+                    :fn-defs [{:name "dup" :namespace "pkg.a"}
+                              {:name "dup" :namespace "pkg.b"}]}
+          result (graphden.packages.sync/compute-all-fn-name-ids packages)]
+      (is (= graphden.packages.records.parse/ambiguous-name
+             (get result "dup"))
+          "the bare key must NOT silently keep the last-write id")
+      (is (uuid? (get result :pkg.a/dup)))
+      (is (uuid? (get result :pkg.b/dup)))
+      (is (not= (get result :pkg.a/dup) (get result :pkg.b/dup)))))
 
   (testing "deterministic — same input → same UUIDs across calls"
     (let [packages {:base-fn-defs {} :fn-defs [{:name "x" :namespace 'a}]}

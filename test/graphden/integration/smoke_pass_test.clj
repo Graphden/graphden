@@ -3,11 +3,13 @@
    through the Ring handler chain so the same flow regresses
    automatically.
 
-   The ns is `^:serial` because the scenarios share state across
-   stages: a namespace is created in step (1), then referenced by
-   the fn-def in step (2), etc. Splitting into separate deftests
-   would race under kaocha's parallel runner, so everything lives
-   in one `smoke-pass-test` deftest with `testing` blocks in order.
+   Runs in the PARALLEL pool (deliberately un-pinned in `7ef9d307`
+   \"parallelise smoke-pass-test\" — this prose used to claim
+   `^:serial`). The staged scenarios still need in-order execution,
+   which one `smoke-pass-test` deftest with ordered `testing` blocks
+   already guarantees (kaocha parallelises at NS granularity, never
+   inside a deftest); the router/global mutations it makes are
+   per-thread via the parallel plugin's isolation-vars.
 
    Test surface uses the same `br/dispatch` path http-kit feeds —
    any wrap / env-binding / closure-capture regression that breaks

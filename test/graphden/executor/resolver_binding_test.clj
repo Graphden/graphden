@@ -1,4 +1,4 @@
-(ns ^:serial graphden.executor.resolver-binding-test
+(ns graphden.executor.resolver-binding-test
   "End-to-end test of the generic value-resolver binding
    (`{:resolver <fn> :value <stored>}` → `binding.resolver-fn-id`):
    the executor evaluates the resolver graph fn with the stored value

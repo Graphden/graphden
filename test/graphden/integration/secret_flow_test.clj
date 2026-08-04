@@ -1,10 +1,13 @@
 (ns ^:integration ^:serial graphden.integration.secret-flow-test
   "End-to-end integration tests for the `:secret` type-system pipeline
 
-   `^:serial` because tests redef `vault/get-secret` process-globally;
-   sibling NS-threads exercising real vault calls during the redef
-   window would see the test's stub return values.
-   wired up across T1–T6:
+   `^:serial` because the tests seed the shared type-check registries
+   (base-fn shapes via `with-clean-registry` + `check-fn-def!`
+   rich-type writes) across staged scenarios. (The `vault/get-secret`
+   redef this line used to cite is long gone from the file — stale
+   reason corrected 2026-08-04.) Un-pin candidate for the
+   registry-isolation batch of the serial-reduction plan.
+   Wired up across T1–T6:
 
    - T1: `:secret` is a refinement-marker with asymmetric subtyping.
    - T2: per-base-fn `:return-type-rule`s propagate the marker through

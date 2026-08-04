@@ -410,6 +410,7 @@ The production config reads these via `#env`:
 | `GRAPHDEN_BYO_EXECUTOR` | *(empty)* | Truthy marks this pod a BYO executor |
 | `GRAPHDEN_EXECUTOR_ID` | *(empty)* | Fleet identity; set enables `:exec/fleet-controller` |
 | `GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS` | `30000` | Fleet placement-controller tick period (ms) |
+| `GRAPHDEN_MAX_CACHED_BRANCHES` | `16` | LRU cap on warm per-branch ctx entries in the branch router |
 
 (Deployment-specific fleet/BYO knobs read directly via `System/getenv` —
 `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS`, `GRAPHDEN_FLEET_*`, the BYO vars — are

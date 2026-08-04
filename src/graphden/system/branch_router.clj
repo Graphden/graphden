@@ -78,7 +78,9 @@
    LRU evicts the least-recently-used non-default entry when adding
    would exceed this. 16 covers a dev workflow with a handful of
    active feature branches comfortably; production multi-tenant
-   would tune this through the `:max-size` arg to `create-router`."
+   tunes this via the `GRAPHDEN_MAX_CACHED_BRANCHES` env var (read
+   by the `:exec/branch-router` init-key into `create-router`'s
+   `:max-size` option)."
   16)
 
 
@@ -784,7 +786,16 @@
    cache slot (else one would run in the other's branch ctx). A
    non-default branch name resolves once per process lifetime per
    (org, name). Invalidated by `invalidate!` / `invalidate-all!`.
-   Misses (unresolved refs) are NOT cached so a typo never sticks."
+   Misses (unresolved refs) are NOT cached so a typo never sticks.
+
+   TOCTOU guard: `delete-branch!`'s `forget-ref-cache-for-branch!`
+   sweep matches entries by value, so a sweep that runs between the
+   uncached DB read and the `assoc` below sees no entry — the assoc
+   would then cache a dead id forever. Re-reading AFTER the assoc
+   closes the window: a delete that lands before the re-read is seen
+   here (entry dropped, nil/new id returned); a delete that lands
+   after it sees the now-present entry and sweeps it itself. Costs one
+   extra read per cache MISS only (once per (org, ref) per process)."
   [{:keys [default-branch-id ref-cache] :as router} branch-ref]
   (if (or (nil? branch-ref) (str/blank? branch-ref))
     default-branch-id
@@ -792,8 +803,14 @@
       (if (and ref-cache (contains? @ref-cache k))
         (get @ref-cache k)
         (when-let [id (resolve-branch-id-uncached router branch-ref)]
-          (when ref-cache (swap! ref-cache assoc k id))
-          id)))))
+          (if-not ref-cache
+            id
+            (do (swap! ref-cache assoc k id)
+                (let [id' (resolve-branch-id-uncached router branch-ref)]
+                  (if (= id' id)
+                    id
+                    (do (swap! ref-cache dissoc k)
+                        id'))))))))))
 
 
 (defn dispatch

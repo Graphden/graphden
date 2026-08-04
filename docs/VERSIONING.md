@@ -405,17 +405,17 @@ keeps its inline 📍 badge on the same rows.
 ## Known gaps
 
 - Per-branch ctx cache is LRU-bounded (`default-max-cached-branches` = 16,
-  `evict-lru-if-full` keyed on `:last-used`); a busier multi-tenant prod
-  may want the cap raised or made configurable.
-- `resolve-branch-id`'s ref-cache has a narrow TOCTOU: a branch deleted
-  concurrently with the FIRST (uncached) resolution of its name can
-  leave the just-deleted id cached (the resolve's DB read raced ahead
-  of the delete's `forget-ref-cache-for-branch!`). A later request for
-  that name then builds a ctx for a dead branch (chain resolves to
-  `[dead-id]`, falling back to main's versions / entity-not-found).
-  Admin-triggered + recoverable (cache invalidate / restart); an
-  airtight fix needs resolve↔delete coordination — deferred with the
-  LRU work above.
+  `evict-lru-if-full` keyed on `:last-used`); tune via the
+  `GRAPHDEN_MAX_CACHED_BRANCHES` env var (read by `:exec/branch-router`
+  into `create-router`'s `:max-size`).
+- ~~`resolve-branch-id` ref-cache TOCTOU~~ — CLOSED: a branch deleted
+  between the FIRST (uncached) resolution's DB read and its cache write
+  used to leave the dead id cached (the delete's value-sweep had already
+  run). `resolve-branch-id` now re-reads AFTER the cache write: a delete
+  landing before the recheck is seen (entry dropped, nil/new id
+  returned); one landing after it sees the now-present entry and sweeps
+  it. Costs one extra read per cache miss only. Covered by the
+  `ref-cache-toctou-*` tests in `branch_router_test`.
 - The `:exec/branch-router` is unit-tested at the dispatcher level
   (`branch-router-test`: header / query parsing, default fallback,
   unknown-ref rejection, invalidate). The full middleware-through-storage

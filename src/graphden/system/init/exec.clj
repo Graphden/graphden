@@ -238,10 +238,13 @@
   ;; still boots (it never references them). This replaces the route-collection
   ;; seam for these packages — the seam's boot-frozen router baked their
   ;; constant-arg data reads and could not thread `:request`/`:storage-query`.
-  (let [router (br/create-router
+  (let [max-size (some-> (System/getenv "GRAPHDEN_MAX_CACHED_BRANCHES")
+                         parse-long)
+        router (br/create-router
                  context "_app-ring-response"
-                 {:optional-handler-fn-names ["_registry-ring-response"
-                                              "_mcp-ring-response"]})]
+                 (cond-> {:optional-handler-fn-names ["_registry-ring-response"
+                                                      "_mcp-ring-response"]}
+                   max-size (assoc :max-size max-size)))]
     (br/set-active-router! router)
     router))
 

@@ -1,6 +1,12 @@
 (ns ^:serial graphden.storage.postgres.sql-errors-test
   "Tests for PostgreSQL storage SQL error handling.
 
+   `^:serial` — `with-redefs` of third-party root Vars:
+   `next.jdbc/execute!` / `next.jdbc/execute-one!` (14 SQL-error
+   injection sites). Root rebinds are process-global and race any
+   concurrently running NS. Un-pin path: the cluster-A wrapper seam
+   (batch 7).
+
    ## 2-Entity Schema
 
    Uses simplified schema:

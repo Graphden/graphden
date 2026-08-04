@@ -1,11 +1,14 @@
 (ns ^:integration ^:serial graphden.crud.leak-prone-handlers-graph-test
-  "`^:serial` — the list-secrets handler execution intermittently threw a
-  nil-callable NPE (`invoke-fn` `(func arg)`, func=nil) only under the
-  parallel runner. Serialising the smoke-pass aggressor (its missing
-  ^:serial meta) cut the flake but didn't fully clear it, and the exact
-  shared-state source resisted an extensive investigation (see memory
-  `project_parallel_test_races` for the ruled-out candidates + repro
-  recipe). Runs outside the pool until the root is pinned.
+  "`^:serial` — kept DEFENSIVELY; root cause never found. The
+  list-secrets handler execution intermittently threw a nil-callable
+  NPE (`invoke-fn` `(func arg)`, func=nil) only under the parallel
+  runner, and the shared-state source resisted an extensive
+  investigation (see memory `project_parallel_test_races` for the
+  ruled-out candidates + repro recipe). The once-observed interaction
+  with the smoke-pass NS predates the isolation-vars coverage —
+  smoke-pass is now deliberately un-pinned (7ef9d307) with its
+  mutations bound per NS-thread, so that mechanism no longer explains
+  anything. Pin stays until a root cause is pinned down.
 
   Graph-path tests for HTTP handlers historically prone to the
    `feedback_optional_slot_free_arg_leak` failure mode — fn-defs that

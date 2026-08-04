@@ -1,17 +1,19 @@
-(ns ^:serial graphden.system.branch-router-test
+(ns graphden.system.branch-router-test
   "Tests for `graphden.system.branch-router`.
 
-   `^:serial` because the `dispatch-test-router` helper redefs
-   `br/resolve-branch-id` process-globally for the duration of each
-   test. Sibling NS-threads resolving real branch refs during the
-   redef window would see the stub's per-test resolutions map
-   (default-id for nil/main, nil for everything else).
+   Parallel-safe (un-pinned 2026-08-04): the resolution stubs that
+   used to be process-global `with-redefs` of `br/resolve-branch-id`
+   / `br/resolve-branch-id-uncached` now go through the per-thread
+   seams `br/*resolve-branch-id-override*` (dispatch suite) and
+   `br/*resolve-uncached-override*` (ref-cache / TOCTOU suite) via
+   `binding` — sibling NS-threads resolving real branch refs never
+   see this NS's scripted resolutions.
 
    - Pure-function (UNIT): extract-branch-ref + dispatch (with stubbed
      resolve-branch-id), invalidate, LRU eviction (testing the
      private `evict-lru-if-full`). 16 of 17 deftests fall here — they
-     don't touch storage, they redef the protocol calls. Tagged at
-     the deftest level only for the one integration test below.
+     don't touch storage, they stub resolution via the seams. Tagged
+     at the deftest level only for the one integration test below.
    - Integration: full create-router → dispatch chain against a real
      PG-backed storage with a compilable test fn, asserting the
      per-branch ctx ends up bound to the right branch."
@@ -84,52 +86,53 @@
 
 
 ;; =============================================================================
-;; dispatch — request → branch-id → handler. Stubs storage / handler
-;; lookup with `with-redefs` so we don't need a full PG fixture; the
-;; STORAGE side is exercised by versioning.storage.core-test and the
-;; end-to-end manual checks in the feat/versioning PR notes.
+;; dispatch — request → branch-id → handler. Stubs resolution via the
+;; per-thread `br/*resolve-branch-id-override*` seam so we don't need a
+;; full PG fixture; the STORAGE side is exercised by
+;; versioning.storage.core-test and the end-to-end manual checks in the
+;; feat/versioning PR notes.
 ;; =============================================================================
 
 (def ^:private default-id (random-uuid))
 (def ^:private feature-id (random-uuid))
 
 
-(defn- with-fake-router
+(defn- stub-resolutions
+  "Build a `*resolve-branch-id-override*` fn: nil/\"main\" → default-id,
+   anything else looked up in the `{branch-ref → branch-id}` map."
+  [resolutions]
+  (fn [_ branch-ref]
+    (cond
+      (or (nil? branch-ref) (= "main" branch-ref)) default-id
+      :else                                        (get resolutions branch-ref))))
+
+
+(defn- fake-router
   "Build a BranchRouter pointed at fake ctx/handler atoms so we can
    verify dispatch's routing without spinning up storage. `handlers`
-   pre-seeds the atom; `resolutions` is a `{branch-ref → branch-id}`
-   stub for `resolve-branch-id`."
-  [{:keys [handlers resolutions]}]
-  (with-redefs [br/resolve-branch-id
-                (fn [_ branch-ref]
-                  (cond
-                    (or (nil? branch-ref) (= "main" branch-ref)) default-id
-                    :else                                        (get resolutions branch-ref)))]
-    {:router (br/->BranchRouter nil default-id (atom (or handlers {})) :stub-fn-id)
-     :calls (atom [])}))
+   pre-seeds the atom."
+  [handlers]
+  (br/->BranchRouter nil default-id (atom (or handlers {})) :stub-fn-id))
 
 
 (deftest dispatch-falls-back-to-default-branch
   (testing "no header / query → default-branch handler invoked"
-    (let [calls (atom [])
-          {:keys [router]} (with-fake-router
-                             {:handlers {default-id
-                                         {:handler (fn [req]
-                                                     (swap! calls conj [:default req])
-                                                     {:status 200 :body "main"})}}})
-          resp (br/dispatch router {:headers {} :query-string nil})]
-      (is (= 200 (:status resp)))
-      (is (= "main" (:body resp)))
-      (is (= 1 (count @calls))))))
+    (binding [br/*resolve-branch-id-override* (stub-resolutions {})]
+      (let [calls (atom [])
+            router (fake-router {default-id
+                                 {:handler (fn [req]
+                                             (swap! calls conj [:default req])
+                                             {:status 200 :body "main"})}})
+            resp (br/dispatch router {:headers {} :query-string nil})]
+        (is (= 200 (:status resp)))
+        (is (= "main" (:body resp)))
+        (is (= 1 (count @calls)))))))
 
 
 (deftest dispatch-routes-by-header
   (testing "X-Graphden-Branch hits the corresponding per-branch handler"
-    (with-redefs [br/resolve-branch-id
-                  (fn [_ branch-ref]
-                    (cond
-                      (or (nil? branch-ref) (= "main" branch-ref)) default-id
-                      (= "feature-a" branch-ref)                   feature-id))]
+    (binding [br/*resolve-branch-id-override*
+              (stub-resolutions {"feature-a" feature-id})]
       (let [calls (atom [])
             router (br/->BranchRouter nil default-id
                                       (atom {default-id
@@ -180,9 +183,7 @@
 
 (deftest dispatch-rejects-unknown-branch
   (testing "explicit ref that doesn't resolve → 400 JSON, default NOT called"
-    (with-redefs [br/resolve-branch-id
-                  (fn [_ branch-ref]
-                    (when (or (nil? branch-ref) (= "main" branch-ref)) default-id))]
+    (binding [br/*resolve-branch-id-override* (stub-resolutions {})]
       (let [calls (atom [])
             router (br/->BranchRouter nil default-id
                                       (atom {default-id
@@ -203,7 +204,7 @@
   ;; string-concat let a `"` inject arbitrary keys into the response
   ;; envelope. It must now be a properly JSON-encoded string.
   (testing "a branch-ref containing quotes stays contained in the :error string"
-    (with-redefs [br/resolve-branch-id (fn [_ _] nil)]
+    (binding [br/*resolve-branch-id-override* (fn [_ _] nil)]
       (let [router (br/->BranchRouter nil default-id (atom {}) :stub-fn-id)
             evil "\",\"admin\":true,\"x\":\""
             resp (br/dispatch router {:headers {"x-graphden-branch" evil}
@@ -219,12 +220,8 @@
 
 (deftest dispatch-prefers-header-over-query
   (testing "header wins even when both are set"
-    (with-redefs [br/resolve-branch-id
-                  (fn [_ branch-ref]
-                    (cond
-                      (or (nil? branch-ref) (= "main" branch-ref)) default-id
-                      (= "from-header" branch-ref)                 feature-id
-                      :else                                        nil))]
+    (binding [br/*resolve-branch-id-override*
+              (stub-resolutions {"from-header" feature-id})]
       (let [calls (atom [])
             router (br/->BranchRouter nil default-id
                                       (atom {default-id
@@ -309,19 +306,20 @@
 
 
 ;; =============================================================================
-;; ref-cache + invalidate! semantics. Mocks resolve-branch-id-uncached
-;; to count calls, then verifies the cache cuts subsequent reads.
+;; ref-cache + invalidate! semantics. Stubs the UNCACHED read via the
+;; per-thread `br/*resolve-uncached-override*` seam to count calls,
+;; then verifies the cache cuts subsequent reads.
 ;; =============================================================================
 
 (deftest ref-cache-skips-redundant-uncached-lookups
   (let [calls (atom 0)]
-    (with-redefs [br/resolve-branch-id-uncached
-                  (fn [_ branch-ref]
-                    (swap! calls inc)
-                    (case branch-ref
-                      "main" default-id
-                      "feature-a" feature-id
-                      nil))]
+    (binding [br/*resolve-uncached-override*
+              (fn [_ branch-ref]
+                (swap! calls inc)
+                (case branch-ref
+                  "main" default-id
+                  "feature-a" feature-id
+                  nil))]
       (let [router (-> (br/->BranchRouter nil default-id
                                           (atom {default-id {:handler :h}})
                                           :stub)
@@ -355,11 +353,11 @@
   ;; post-assoc recheck closes it: the deletion is seen, the entry is
   ;; dropped, and the caller gets nil instead of the dead id.
   (let [phase (atom :alive)]
-    (with-redefs [br/resolve-branch-id-uncached
-                  (fn [_ _]
-                    (when (= :alive @phase)
-                      (reset! phase :deleted)
-                      feature-id))]
+    (binding [br/*resolve-uncached-override*
+              (fn [_ _]
+                (when (= :alive @phase)
+                  (reset! phase :deleted)
+                  feature-id))]
       (let [router (-> (br/->BranchRouter nil default-id (atom {}) :stub)
                        (assoc :ref-cache (atom {})))]
         (is (nil? (br/resolve-branch-id router "doomed"))
@@ -374,11 +372,11 @@
   ;; cached nor returned.
   (let [new-id (random-uuid)
         first-read? (atom true)]
-    (with-redefs [br/resolve-branch-id-uncached
-                  (fn [_ _]
-                    (if @first-read?
-                      (do (reset! first-read? false) feature-id)
-                      new-id))]
+    (binding [br/*resolve-uncached-override*
+              (fn [_ _]
+                (if @first-read?
+                  (do (reset! first-read? false) feature-id)
+                  new-id))]
       (let [router (-> (br/->BranchRouter nil default-id (atom {}) :stub)
                        (assoc :ref-cache (atom {})))]
         (is (= new-id (br/resolve-branch-id router "reborn"))
@@ -436,8 +434,9 @@
 (deftest active-router-singleton-roundtrip-test
   (testing "set-active-router! → current-router → clear-active-router!"
     (let [fake-router (br/->BranchRouter nil default-id (atom {}) :stub-fn-id)]
-      ;; Start clean (sibling tests may have left state — `^:serial`
-      ;; protects against parallel writes but not from carry-over).
+      ;; Start clean (sibling tests in THIS NS may have left state —
+      ;; the parallel plugin's `*active-router-override*` binding
+      ;; isolates us from other NSes but not from same-NS carry-over).
       (br/clear-active-router!)
       (is (nil? (br/current-router)) "clean precondition")
 

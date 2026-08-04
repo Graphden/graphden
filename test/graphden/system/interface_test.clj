@@ -1,6 +1,11 @@
 (ns ^:serial graphden.system.interface-test
   "Tests for system/interface.clj public API.
 
+   `^:serial` — `with-redefs` of third-party root Vars:
+   `integrant.core/halt!` / `suspend!` / `resume` / `init` (lifecycle
+   stubs). Root rebinds are process-global and race any concurrently
+   running NS. Un-pin path: the cluster-A wrapper seam (batch 7).
+
    Tests configuration loading and lifecycle functions.
    Full integration tests use test-helpers.clj fixtures."
   (:require

@@ -1,13 +1,13 @@
-(ns ^:serial graphden.types.closure-capture-test
-  "FLAKY UNDER PARALLEL — pinned serial (same family as
-   `graphden.types.check-test`): `load-core-into-rich-types!` calls
-   `system.core/register-type-aliases!`, which writes the PROCESS-GLOBAL,
-   name-keyed type-alias registry (deliberately global — see
-   docs/adr/AUDIT-name-vs-id-resolution.md). `with-isolated-rich-types`
-   scopes the rich-types atoms, not that registry, so a sibling NS
-   re-registering aliases concurrently makes `record-rich-types!` throw
-   for `:schedule`; the helper swallows it and the assertion then sees a
-   nil rich-type. Observed in a landing gate at host load ~10.
+(ns graphden.types.closure-capture-test
+  "Parallel-safe (un-pinned 2026-08-04; the old serial reason was
+   stale): every alias mutator writes through `(aliases-atom)` =
+   `(or *type-aliases-override* type-aliases)`, and the global
+   side-tables (`alias-owners` / `alias-qualified`) are only touched
+   when `(nil? *type-aliases-override*)` — see
+   `graphden.types.core`. The kaocha parallel plugin binds
+   `*type-aliases-override*` (with the rest of its isolation-vars)
+   per NS-thread, so this NS's alias registrations never reach the
+   process-global registry a sibling NS could race on.
 
    Failing tests demonstrating the closure-capture extension's target
    behavior. Spec lives in `docs/CLOSURE_CAPTURE.md`.

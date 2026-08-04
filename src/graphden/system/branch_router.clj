@@ -783,14 +783,42 @@
        router))))
 
 
+(def ^:dynamic *resolve-uncached-override*
+  "Test seam: when bound to `(fn [router branch-ref] id-or-nil)`,
+   `resolve-branch-id-uncached` delegates to it instead of the real
+   base-storage reads. Exists for the ref-cache / TOCTOU suite in
+   `branch-router-test`, which drives the UNCACHED internals with
+   scripted read sequences (call counting, delete-between-reads)
+   while keeping `resolve-branch-id`'s caching layer real.
+
+   WHY a dynamic var and not `with-redefs` (same rationale as
+   `*ctx-for-override*` above): a root rebind is process-global, so
+   any test using it races every parallel test resolving a real
+   branch ref — forcing `^:serial` pins. `binding` is per-thread;
+   nil (the default) means production behaviour."
+  nil)
+
+
 (defn- resolve-branch-id-uncached
-  [{:keys [base-ctx]} branch-ref]
-  (let [base (vs/unwrap (:storage base-ctx))]
-    (or (try (some->> branch-ref java.util.UUID/fromString
-                      (sp/read-entity base :branch)
-                      :id)
-             (catch IllegalArgumentException _ nil))
-        (:id (first (sp/query-entities base :branch {:name branch-ref}))))))
+  [{:keys [base-ctx] :as router} branch-ref]
+  (if-let [f *resolve-uncached-override*]
+    (f router branch-ref)
+    (let [base (vs/unwrap (:storage base-ctx))]
+      (or (try (some->> branch-ref java.util.UUID/fromString
+                        (sp/read-entity base :branch)
+                        :id)
+               (catch IllegalArgumentException _ nil))
+          (:id (first (sp/query-entities base :branch {:name branch-ref})))))))
+
+
+(def ^:dynamic *resolve-branch-id-override*
+  "Test seam: when bound to `(fn [router branch-ref] id-or-nil)`,
+   `resolve-branch-id` delegates to it WHOLESALE — no default-branch
+   short-circuit, no ref-cache. Exists for the dispatch suite's
+   scripted `{ref → id}` resolution stubs. Same `with-redefs`-vs-
+   `binding` rationale as `*ctx-for-override*` /
+   `*resolve-uncached-override*` above."
+  nil)
 
 
 (defn resolve-branch-id
@@ -814,22 +842,27 @@
    closes the window: a delete that lands before the re-read is seen
    here (entry dropped, nil/new id returned); a delete that lands
    after it sees the now-present entry and sweeps it itself. Costs one
-   extra read per cache MISS only (once per (org, ref) per process)."
+   extra read per cache MISS only (once per (org, ref) per process).
+
+   Checks `*resolve-branch-id-override*` first (test seam — see its
+   docstring)."
   [{:keys [default-branch-id ref-cache] :as router} branch-ref]
-  (if (or (nil? branch-ref) (str/blank? branch-ref))
-    default-branch-id
-    (let [k [(current-scope) branch-ref]]
-      (if (and ref-cache (contains? @ref-cache k))
-        (get @ref-cache k)
-        (when-let [id (resolve-branch-id-uncached router branch-ref)]
-          (if-not ref-cache
-            id
-            (do (swap! ref-cache assoc k id)
-                (let [id' (resolve-branch-id-uncached router branch-ref)]
-                  (if (= id' id)
-                    id
-                    (do (swap! ref-cache dissoc k)
-                        id'))))))))))
+  (if-let [f *resolve-branch-id-override*]
+    (f router branch-ref)
+    (if (or (nil? branch-ref) (str/blank? branch-ref))
+      default-branch-id
+      (let [k [(current-scope) branch-ref]]
+        (if (and ref-cache (contains? @ref-cache k))
+          (get @ref-cache k)
+          (when-let [id (resolve-branch-id-uncached router branch-ref)]
+            (if-not ref-cache
+              id
+              (do (swap! ref-cache assoc k id)
+                  (let [id' (resolve-branch-id-uncached router branch-ref)]
+                    (if (= id' id)
+                      id
+                      (do (swap! ref-cache dissoc k)
+                          id')))))))))))
 
 
 (defn dispatch

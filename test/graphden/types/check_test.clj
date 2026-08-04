@@ -1,15 +1,18 @@
 (ns ^:serial graphden.types.check-test
-  "FLAKY UNDER PARALLEL: this ns shares `core-base-fns` (a JVM-wide
-   `defonce` from `loader/load-packages`) with the type-check sweep
-   and its `:each` fixture seeds `:int-add` / `:map` / `:filter`
-   synthetic shapes through `record-rich-types!`. The seeding is
-   isolated to this NS's thread-local override, but under heavy
-   parallel scheduling 3 tests (`check-all-defs-stops-at-first-mismatch`,
-   `refinement-base-mismatch-throws`, `binding-type-widening-via-union-rejected`)
-   intermittently see `:int-add`'s rich-type resolve to a permissive
-   default instead of the seeded `{:a :int :b :int}` shape — the
-   expected `:type-check failed` doesn't fire. Cause not fully
-   characterised; pin to serial until the underlying race is found."
+  "`^:serial` because of `with-redefs` of process-global root Vars —
+   root rebinds are visible to every concurrently running NS-thread
+   and no isolation-var covers them:
+   - `check/allowed-type-check-failures` (the allowlist set) in the
+     allowlist tests near the bottom of the file;
+   - `clojure.tools.logging/log*` in the warn-capture test.
+   Un-pin path: the cluster-A wrapper seam (batch 7) — convert both
+   to dynamic-binding seams.
+
+   (Historical note: earlier revisions attributed the pin to the
+   `core-base-fns` `defonce` and an `:int-add` rich-type race. That
+   was mis-attributed: the `defonce` is test-local and idempotent,
+   and the rich-type seeding is covered by the parallel plugin's
+   seeded `*rich-types-override*`.)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging :as log]

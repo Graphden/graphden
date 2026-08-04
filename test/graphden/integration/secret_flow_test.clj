@@ -1,12 +1,13 @@
-(ns ^:integration ^:serial graphden.integration.secret-flow-test
+(ns ^:integration graphden.integration.secret-flow-test
   "End-to-end integration tests for the `:secret` type-system pipeline
 
-   `^:serial` because the tests seed the shared type-check registries
-   (base-fn shapes via `with-clean-registry` + `check-fn-def!`
-   rich-type writes) across staged scenarios. (The `vault/get-secret`
-   redef this line used to cite is long gone from the file — stale
-   reason corrected 2026-08-04.) Un-pin candidate for the
-   registry-isolation batch of the serial-reduction plan.
+   Parallel-safe (un-pinned 2026-08-04): the registry mutations the
+   old `^:serial` cited are both thread-locally scoped now —
+   `with-clean-registry` writes through `*registry-override*` and
+   `check-fn-def!`'s rich-type writes go through
+   `*rich-types-override*`, and BOTH Vars are in the kaocha parallel
+   plugin's isolation-vars (bound per NS-thread), so this NS's
+   seeding never leaks to sibling NSes.
    Wired up across T1–T6:
 
    - T1: `:secret` is a refinement-marker with asymmetric subtyping.

@@ -1,6 +1,11 @@
 (ns ^:serial graphden.storage.postgres.edge-cases-test
   "Tests for PostgreSQL storage edge cases.
 
+   `^:serial` — `with-redefs` of a third-party root Var:
+   `next.jdbc/execute!` (the SQL-error injection test). Root rebinds
+   are process-global and race any concurrently running NS. Un-pin
+   path: the cluster-A wrapper seam (batch 7).
+
    Covers:
    - Query with NULL values in WHERE clause
    - NULL in unique constraints

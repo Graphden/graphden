@@ -1,6 +1,11 @@
 (ns ^:serial graphden.storage.postgres.crud-test
   "Tests for PostgreSQL storage CRUD operations.
 
+   `^:serial` — `with-redefs` of a third-party root Var:
+   `next.jdbc/execute!` (2 SQL-error injection tests). Root rebinds
+   are process-global and race any concurrently running NS. Un-pin
+   path: the cluster-A wrapper seam (batch 7).
+
    Covers:
    - StorageCRUD protocol (create, read, update, delete, query)
    - StorageBatchCRUD protocol (batch create, read, update, upsert, delete)

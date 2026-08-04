@@ -63,10 +63,11 @@ Launch-order refinements agreed 2026-07-20:
    sidebar — ~3-4 days
 2. **Workspaces** (namespace M:N self-link + UI scoping) — ~1 week
 3. **Error tolerance** (type mismatches as derived diagnostics, not
-   silent swallow) — phases 0–2 shipped (structured diagnostics +
+   silent swallow) — phases 0–3 shipped (structured diagnostics +
    per-branch store + non-blocking user CRUD writes with
-   `:type-warnings`); the editor surface + branch policy gates
-   remain — ~1-2 days. See § Future Work → Error Tolerance.
+   `:type-warnings` + the editor surfaces: branch error panel,
+   per-fn ⚠ badge, per-namespace counts); branch policy gates
+   remain — ~1 day. See § Future Work → Error Tolerance.
 4. **Debug/observability** with the PHILOSOPHY § Debugging
    constraints (per-fn opt-in, sampling, `:secret` auto-skip,
    size/TTL limits) — ~1.5 weeks
@@ -394,7 +395,12 @@ Execute function: calculate-report
 **Goal**: A graph with type errors can be saved and iterated on — sketch
 the structure first, fix details later — without errors being silent.
 
-**Current state — phases 0–2 SHIPPED, 3–5 pending.**
+**Current state — phases 0–3 SHIPPED; pending: execute-refusal + branch
+policy gates (phases 4-5), and a boot/ctx-build recompute for USER fns
+(the in-memory store re-records package fns via the sweep at boot, but a
+user fn broken before a JVM restart stays absent from the panel until
+its next write re-checks it — derived-data contract, needs the branch
+ctx build to re-run checks for editor-authored fns).**
 
 - *Phase 0 (done)*: the CRUD check guards return structured
   diagnostics — `type-check-fn-after-mutation!` /
@@ -417,17 +423,22 @@ the structure first, fix details later — without errors being silent.
   — still hard-reject, and the package corpus is still gated at sync
   time by `assert-sweep-failures-match-allowlist!` (a broken
   first-party fn still blocks boot/CI).
-- *Still true / pending (phases 3–5)*: a failing fn's computed rich
-  type drops from the registry (its effect strip / computed return
-  go missing in the editor); the editor shows only its local per-arg
-  mismatch rings and ignores `:type-warnings` — there is no
-  graph-level error status or branch-wide error list yet.
+- *Phase 3 (done)*: the editor surfaces. `GET /partials/type-errors`
+  (the `:_pterr-*` family + `:type-diagnostics-list` base-fn) renders
+  the current branch's recorded diagnostics as a sidebar section
+  (`editor-type-errors.js`, error-log pattern); the `:subtree` graph
+  payload carries `:type-error-count` per fn (⚠ badge on the card
+  root row) and the `:tree` counts carry it per namespace (⚠ chip on
+  ns rows). Two write-path gaps closed with it: the `/api/sequence/*`
+  append/update cores run the same post-write check (+ additive
+  `:type-warnings`), and a binding / binding-list-item DELETE re-runs
+  the owner's check (an fn delete drops its stored entry).
+- *Still true / pending*: a failing fn's computed rich type drops
+  from the registry (its effect strip / computed return go missing in
+  the editor).
 
 **What's needed (remaining phases):**
 
-- Graph-level "this fn has N errors" status + a "view all errors in a
-  branch" surface, fed from the diagnostics store + the response
-  `:type-warnings`.
 - Branch policy gates: a protected branch may forbid invalid fns
   (block merge); execution of an invalid fn is refused with a clear
   "unresolved type errors" message rather than a runtime crash.

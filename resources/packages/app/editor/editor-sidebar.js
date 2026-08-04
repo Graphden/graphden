@@ -358,6 +358,19 @@ function renderNsNode(container, name, node, path, searchMode) {
   label.className = 'ns-label';
   label.textContent = name;
   header.appendChild(label);
+  // Type-error chip (error-tolerance Phase 3) — server-computed
+  // per-namespace count of recorded type diagnostics on the current
+  // branch (`:type-error-count` on the `:tree` counts payload).
+  const nsTypeErrs = node?.nsId != null
+    ? (lookups?.nsTypeErrors?.get(node.nsId) || 0) : 0;
+  if (nsTypeErrs > 0) {
+    const chip = document.createElement('span');
+    chip.className = 'ns-type-error-chip';
+    chip.textContent = '⚠ ' + nsTypeErrs;
+    chip.title = nsTypeErrs + ' type error' + (nsTypeErrs === 1 ? '' : 's')
+      + ' in this namespace — see the Type errors panel';
+    header.appendChild(chip);
+  }
   // All three right-edge icons live in one group. Order:
   //   ✎ (rename, hover-only)  +  + (create-child, hover-only)  +  i (description, always)
   // The always-visible `i` sits LAST so the empty slots left by the
@@ -540,6 +553,17 @@ function renderRootNode(list, rootFns, searchMode) {
   count.className = 'ns-count';
   count.textContent = loaded ? visible.length : rootCount;
   header.appendChild(count);
+  // Type-error chip for the null bucket — namespace-less fns' recorded
+  // diagnostics land under the `null` key of the `:tree` counts payload.
+  const rootTypeErrs = lookups?.nsTypeErrors?.get(null) || 0;
+  if (rootTypeErrs > 0) {
+    const chip = document.createElement('span');
+    chip.className = 'ns-type-error-chip';
+    chip.textContent = '⚠ ' + rootTypeErrs;
+    chip.title = rootTypeErrs + ' type error' + (rootTypeErrs === 1 ? '' : 's')
+      + ' in this namespace — see the Type errors panel';
+    header.appendChild(chip);
+  }
   header.onclick = (e) => {
     e.stopPropagation();
     if (isOpen) expandedNamespaces.delete(groupPath);
@@ -622,6 +646,9 @@ function updateEntityList(data) {
   }
   if (!searchMode && typeof buildErrorsSection === 'function') {
     mountAdminSection(list, 'errors', buildErrorsSection);
+  }
+  if (!searchMode && typeof buildTypeErrorsSection === 'function') {
+    mountAdminSection(list, 'type-errors', buildTypeErrorsSection);
   }
 
   // Top-level namespaces (sorted) — skip any with nothing visible under

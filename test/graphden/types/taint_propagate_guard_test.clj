@@ -51,7 +51,13 @@
   ;; +1 (288): `:usage-all-org-stats` (app.execution) — the OPERATOR-only
   ;; cross-org rollup (tenant ctx gets [] impl-side). Same counts-only
   ;; posture → not tainting.
-  288)
+  ;; +1 (289): `:type-diagnostics-list` (app.editor panels) — reads the
+  ;; per-branch type-diagnostics store (fn names, arg names, check
+  ;; messages). Diagnostics are PRE-execution check ex-data over stored
+  ;; graph rows; resolved secret values never appear there (a secret
+  ;; binding's :binding shows the resolver form / vault path, not the
+  ;; resolved value) → not tainting, `golden-tainted` unchanged.
+  289)
 
 
 (def ^:private golden-tainted

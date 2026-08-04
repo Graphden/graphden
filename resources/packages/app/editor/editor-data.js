@@ -110,7 +110,7 @@ function clientSubtype(sub, sup) {
 //
 // Plus shared maps:
 //   fnMap, nsMap, nsPathMap
-//   fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn
+//   fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn, nsTypeErrors
 function buildLookups(data) {
   const fnMap = new Map();
   const slotMap = new Map();
@@ -200,6 +200,10 @@ function buildLookups(data) {
   const fnUsedAsRef    = new Map();
   const nsHasChildNs   = new Map();
   const nsHasChildFn   = new Map();
+  // Per-namespace recorded-type-diagnostic counts (Phase 3) — from the
+  // `:tree` counts payload's additive `:type-error-count`; feeds the
+  // sidebar's ⚠ chip on namespace rows.
+  const nsTypeErrors   = new Map();
   const bump = (m, k) => { if (k) m.set(k, (m.get(k) || 0) + 1); };
 
   (data.fns || []).forEach(f => {
@@ -210,6 +214,7 @@ function buildLookups(data) {
   });
   (data.counts || []).forEach(c => {
     if (c.count) nsHasChildFn.set(c['namespace-id'], c.count);
+    if (c['type-error-count']) nsTypeErrors.set(c['namespace-id'], c['type-error-count']);
   });
   (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
 
@@ -222,6 +227,7 @@ function buildLookups(data) {
            bindingMap, bindingsByFn, bindingByFnSlot, itemsByBinding, itemByItemId,
            nsMap, nsPathMap,
            fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn,
+           nsTypeErrors,
            inheritanceLevelsCache };
 }
 

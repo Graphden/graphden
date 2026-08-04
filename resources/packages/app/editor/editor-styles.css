@@ -83,6 +83,10 @@
      "green = ok / red = problem" is unambiguous. */
   --success-fg: #4ade80;
   --error-fg: #ff6b6b;
+  /* WCAG-AA-safe error TEXT on the light surface (#ff6b6b is 2.6:1
+     on the light bg — fine as a glow/border accent, too low for
+     small text). Use for small error-colored text nodes. */
+  --error-fg-strong: #c0392b;
   --warning-fg: #c47b00;
   /* Saturated fills: `--on-accent` is legible text over Graphden Blue / any
      status fill; `--danger-bg` backs the fatal-load banner. */
@@ -146,6 +150,8 @@ body.theme-dark {
      so they don't vibrate. Hue still maps green=ok / red=error. */
   --success-fg: #5be08a;
   --error-fg: #ff7777;
+  /* On the dark surface the base red already clears AA for text. */
+  --error-fg-strong: #ff7777;
   --warning-fg: #e0a94a;
   --on-accent: #fff;
   --danger-bg: #e5484d;
@@ -376,6 +382,15 @@ body.sidebar-collapsed .sidebar-expand-floating {
   font-size: 10px;
   color: var(--muted-fg);
   font-style: italic;
+}
+/* Per-namespace type-error chip (error-tolerance Phase 3) — ⚠ N on a
+   namespace row when fns inside carry recorded type diagnostics on the
+   current branch. Count-chip sizing, error-colored to stand out. */
+.ns-type-error-chip {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--error-fg-strong);
+  flex-shrink: 0;
 }
 .ns-header-pseudo .ns-label { font-style: italic; color: var(--muted-fg); }
 .ns-children { padding-left: 16px; }
@@ -3748,6 +3763,20 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   50%      { opacity: 1; }
 }
 
+/* Type-error badge (error-tolerance Phase 3) — small ⚠ on the root row
+ * of an fn-card whose fn currently fails the aggregate type-check.
+ * Anchored just inside the row's reserved more-actions right padding;
+ * hover title explains, the Type errors panel lists details. */
+.type-error-badge {
+  position: absolute;
+  right: 26px; top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px; line-height: 1;
+  color: var(--error-fg-strong);
+  user-select: none;
+  z-index: 1;
+}
+
 .execute-popover-body {
   margin-bottom: 10px;
 }
@@ -3943,6 +3972,17 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg); margin: 2px 0 0; }
 .error-log-details summary { cursor: pointer; color: var(--muted-fg); font-size: 10px; }
 .error-log-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
+
+/* Phase 3 type-errors sidebar section — the current branch's recorded
+   type diagnostics. Same row grammar as the error-log above. */
+.type-errors-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
+  font-size: 11px; }
+.type-errors-fn { color: var(--accent); display: block; }
+.type-errors-arg { color: var(--light-fg); }
+.type-errors-arg:empty { display: none; }
+.type-errors-msg { color: var(--error-fg-strong); overflow-wrap: anywhere; }
+.type-errors-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
+.type-errors-list { max-height: 320px; overflow-y: auto; }
 
 /* Phase C stats sidebar section — org-scoped run rollups. */
 .stats-panel { padding: 4px 8px 8px; font-size: 11px;

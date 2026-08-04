@@ -317,7 +317,7 @@
   ;; §3.3 sequence-write atomic units. Same `{:created/:updated}` /
   ;; `{:error}` shape the graph dispatches on.
   {:name :try-apply-seq-append
-   :description "§3.3 core of sequence-append. Returns `{:created <item-id> :position <int> :fn-id <fn-id>}` or `{:error <reason>}`."
+   :description "§3.3 core of sequence-append. Returns `{:created <item-id> :position <int> :fn-id <fn-id>}` (plus `:type-warnings [<diagnostic> …]` when the item landed but the owning fn now fails the aggregate type-check — error-tolerance Phase 3 keeps the row and records a per-branch diagnostic) or `{:error <reason>}`."
    :args {:parsed {:type :_seq-append-parsed-shape
                    :description "Parsed POST /api/sequence/append/:fn-id payload (`{:fn-id :body}`)."}
           :seq-binding {:type :nullable-keyword-map :description "Resolved sequence-binding row (real or synthetic)."}}
@@ -325,7 +325,7 @@
    :effects #{:db}}
 
   {:name :try-apply-seq-update
-   :description "§3.3 core of sequence-update. Returns `{:updated <item-id>}` or `{:error <reason>}`."
+   :description "§3.3 core of sequence-update. Returns `{:updated <item-id>}` (plus `:type-warnings [<diagnostic> …]` — same Phase-3 record-or-clear semantics as the binding update core) or `{:error <reason>}`."
    :args {:parsed {:type :_seq-update-parsed-shape
                    :description "Parsed PUT /api/sequence/item/:item-id payload."}
           :item {:type :nullable-keyword-map :description "Pre-read binding-list-item row."}}
@@ -2920,15 +2920,33 @@
                  :_seq-append-apply-ok-body]}}
 
   {:name :_seq-append-apply-ok-body
-   :description "JSON body `{:item-id :position}` rendered via `:to-json-string` over the result map."
+   :description "JSON body `{:item-id :position}` rendered via `:to-json-string` over the result map — plus `:type-warnings` additively when the write landed but the owning fn now fails the aggregate type-check (error-tolerance Phase 3)."
    :parent :to-json-string
-   :args {:data :_seq-append-apply-ok-body-data}}
+   :args {:data :_seq-append-apply-ok-body-chosen}}
+
+  {:name :_seq-append-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_seq-append-apply-ok-body-chosen
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_seq-append-apply-type-warnings}}
+          :then :_seq-append-apply-ok-body-warn
+          :else :_seq-append-apply-ok-body-data}}
 
   {:name :_seq-append-apply-ok-body-data
    :parent :zipmap
    :args {:keys [{:value :item-id} {:value :position}]
           :vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
                  {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}]}}
+
+  {:name :_seq-append-apply-ok-body-warn
+   :description "Success-with-warnings body — `{:item-id :position :type-warnings [...]}` (row kept, diagnostic recorded per-branch)."
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position} {:value :type-warnings}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}
+                 :_seq-append-apply-type-warnings]}}
 
   {:name :_seq-append-err-invalid-fn-id
    :parent :const
@@ -3084,7 +3102,33 @@
   {:name :_seq-update-apply-success
    :parent :do
    :args {:steps [:_seq-update-apply-do-invalidate
-                  :_apply-ok-empty-response]}}
+                  :_seq-update-apply-ok-response]}}
+
+  ;; 200 response — legacy empty body when the write is fully clean;
+  ;; JSON `{message, type-warnings}` when the atomic unit reports
+  ;; `:type-warnings` (error-tolerance Phase 3 — mirrors the binding
+  ;; create/update envelopes).
+  {:name :_seq-update-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_seq-update-apply-ok-response
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_seq-update-apply-type-warnings}}
+          :then :_seq-update-apply-ok-warn-response
+          :else :_apply-ok-empty-response}}
+
+  {:name :_seq-update-apply-ok-warn-response
+   :description "200 JSON success-with-warnings envelope — `{\"message\": \"Sequence item updated\", \"type-warnings\": [...]}`."
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 {:parent :to-json-string
+                  :args {:data {:parent :zipmap
+                                :args {:keys [{:value :message} {:value :type-warnings}]
+                                       :vals [{:value "Sequence item updated"}
+                                              :_seq-update-apply-type-warnings]}}}}]}}
 
   {:name :_seq-update-apply-do-invalidate
    :parent :invalidate-after-write

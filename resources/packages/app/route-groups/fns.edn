@@ -32,6 +32,7 @@
                   :partial-execute-history
                   :partial-stats
                   :partial-error-log
+                  :partial-type-errors
                   :partial-branch-diff
                   :partial-merge-conflicts
                   :partial-execute-result-effects

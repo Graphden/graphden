@@ -482,6 +482,21 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       line.appendChild(badge);
     }
   }
+  // Type-error badge (error-tolerance Phase 3) — root row of a card
+  // whose fn currently fails the aggregate type-check. The count is
+  // server-computed (`:type-error-count` on the subtree payload, from
+  // the per-branch diagnostics store) and refreshes with the subtree
+  // re-fetch after every mutation.
+  if (lineIsRoot && lineFnEntity && (lineFnEntity['type-error-count'] || 0) > 0) {
+    const n = lineFnEntity['type-error-count'];
+    const warn = document.createElement('span');
+    warn.className = 'type-error-badge';
+    warn.textContent = '⚠';
+    warn.title = n === 1
+      ? '1 type error on this fn — see the Type errors panel'
+      : n + ' type errors on this fn — see the Type errors panel';
+    line.appendChild(warn);
+  }
   if (typeof createMoreActionsTrigger === 'function') {
     const trigger = createMoreActionsTrigger({
       onEnter: lineClearPreview,

@@ -905,6 +905,98 @@
         (finally (sp/close storage))))))
 
 
+(deftest seq-append-type-breaking-item-warns-and-update-fix-clears-test
+  ;; Phase 3, Gap A — the sequence-op cores run the same post-write
+  ;; aggregate check the binding cores got in Phase 2: a type-breaking
+  ;; appended item is KEPT, warned about, and recorded; fixing it via
+  ;; the sequence-update core clears the stored diagnostic.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "etp3s-base")
+              slot  (setup/create-slot! storage "nums" :any)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              _     (registry/record-rich-types-raw!
+                      :etp3s-base {:return :int :args {:nums [:list :int]} :effects #{}})
+              child (setup/create-composed-fn! storage "etp3s-child" (:id base))
+              r     (entities/apply-seq-append-core
+                      {:fn-id (:id child) :body {:value "not-an-int"}}
+                      {:fn-id (:id child) :slot-id (:id slot) :synthetic true}
+                      c)]
+          (testing "the append SUCCEEDS — item present, no rollback, no :error"
+            (is (some? (:created r)))
+            (is (nil? (:error r)))
+            (is (some? (sp/read-entity storage :binding-list-item (:created r)))
+                "the type-breaking item row survived"))
+          (testing "the success shape surfaces the failure additively"
+            (is (vector? (:type-warnings r))))
+          (testing "the per-branch diagnostics store recorded the same entry"
+            (is (= (:type-warnings r)
+                   (diag/errors-for-fn nil (:id child)))))
+          (testing "fixing the item via the sequence-update core clears everything"
+            (let [r2 (entities/apply-seq-update-core
+                       {:item-id (:created r) :body {:value 5}}
+                       (sp/read-entity storage :binding-list-item (:created r))
+                       c)]
+              (is (= (:created r) (:updated r2)))
+              (is (nil? (:type-warnings r2)))
+              (is (nil? (diag/errors-for-fn nil (:id child))))))
+          (testing "re-break, then DELETE the item — Gap B clears via the list-item path"
+            (let [r3 (entities/apply-seq-update-core
+                       {:item-id (:created r) :body {:value "broken-again"}}
+                       (sp/read-entity storage :binding-list-item (:created r))
+                       c)]
+              (is (vector? (:type-warnings r3)))
+              (entities/delete-entity "binding-list-item" (:created r) c)
+              (is (nil? (diag/errors-for-fn nil (:id child)))
+                  "item delete re-ran the owner's check through its binding"))))
+        (finally (sp/close storage))))))
+
+
+(deftest delete-binding-clears-stored-diagnostic-test
+  ;; Phase 3, Gap B — deleting the offending binding row re-runs the
+  ;; owner's aggregate check, which clears the stored diagnostic (the
+  ;; fn is clean again once the bad binding is gone). Also: deleting
+  ;; the fn itself drops its entry outright.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "etp3d-base")
+              slot  (setup/create-slot! storage "a" :int)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              _     (registry/record-rich-types-raw!
+                      :etp3d-base {:return :int :args {:a :int} :effects #{}})
+              child (setup/create-composed-fn! storage "etp3d-child" (:id base))
+              r     (entities/apply-create-core
+                      {:entity-type :binding
+                       :type-str "binding"
+                       :form-data {}
+                       :entity-data {:fn-id (:id child) :slot-id (:id slot)
+                                     :value "not-an-int"
+                                     :value-present true}}
+                      c)]
+          (is (vector? (:type-warnings r)) "precondition: diagnostic recorded")
+          (is (some? (diag/errors-for-fn nil (:id child))))
+          (testing "deleting the offending binding clears the stored entry"
+            (entities/delete-entity "binding" (:created r) c)
+            (is (nil? (diag/errors-for-fn nil (:id child)))))
+          (testing "a re-broken fn's entry dies with the fn row itself"
+            (let [r2 (entities/apply-create-core
+                       {:entity-type :binding
+                        :type-str "binding"
+                        :form-data {}
+                        :entity-data {:fn-id (:id child) :slot-id (:id slot)
+                                      :value "still-not-an-int"
+                                      :value-present true}}
+                       c)]
+              (is (vector? (:type-warnings r2)))
+              (entities/delete-entity "fn" (:id child) c)
+              (is (nil? (diag/errors-for-fn nil (:id child)))))))
+        (finally (sp/close storage))))))
+
+
 (deftest structural-gates-still-reject-test
   ;; Phase 2 flipped ONLY the type check. The structural write-rej
   ;; family (dependency cycles here; MI / terminal / list-closed

@@ -16,9 +16,21 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
+    [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
     [graphden.storage.protocol.core :as sp]))
+
+
+(defn- post-write-warnings
+  "Error-tolerance Phase 3 (Gap A): the same post-write aggregate
+   type-check the binding create/update cores run — records / clears
+   the owner's per-branch diagnostic and returns the `:type-warnings`
+   vector (or nil when clean) for the success envelope."
+  [storage owner-fn-id]
+  (when owner-fn-id
+    (when-let [rej (tc/type-check-fn-after-mutation! storage owner-fn-id)]
+      [(:diagnostic rej)])))
 
 
 (defn find-sequence-binding
@@ -123,10 +135,12 @@
   "§3.3 atomic core of sequence-append: materialise synthetic binding
    if needed, compute next position, run pre-write validation, write
    the binding-list-item row. Returns `{:created <item-id> :position
-   <int> :fn-id <fn-id>}` on success or `{:error <reason>}` on
-   pre-write validation rejection. The graph composition around this
-   primitive dispatches on the returned shape and runs invalidate +
-   response.
+   <int> :fn-id <fn-id>}` on success (plus `:type-warnings
+   [<diagnostic> …]` when the item landed but the owning fn now fails
+   the aggregate type-check — error-tolerance Phase 3) or `{:error
+   <reason>}` on pre-write validation rejection. The graph composition
+   around this primitive dispatches on the returned shape and runs
+   invalidate + response.
 
    The synthetic-binding materialise + position-compute + pre-rej
    triplet share a binding-id that can't be split across graph nodes
@@ -173,9 +187,15 @@
                                {:binding-id binding-id}))))
             {:error (:reason pre-rej)})
           (do (sp/create-entity storage :binding-list-item new-item)
-              {:created (:id new-item)
-               :position new-pos
-               :fn-id fn-id}))))))
+              ;; Post-write whole-fn type-check (Phase 3, Gap A) — the
+              ;; item is KEPT either way; a failure is recorded in the
+              ;; per-branch diagnostics store and surfaced additively.
+              (let [warnings (post-write-warnings
+                               storage (or (:fn-id seq-binding) fn-id))]
+                (cond-> {:created (:id new-item)
+                         :position new-pos
+                         :fn-id fn-id}
+                  warnings (assoc :type-warnings warnings)))))))))
 
 
 (defn load-seq-remove-item
@@ -202,8 +222,9 @@
 (defn apply-seq-update-core
   "§3.3 atomic core of sequence-update: resolve body payload, run
    pre-write validation, write the binding-list-item row. Returns
-   `{:updated <item-id>}` on success or `{:error <reason>}` on
-   pre-write rejection."
+   `{:updated <item-id>}` on success (plus `:type-warnings` — the
+   Phase-3 post-write check, record-or-clear) or `{:error <reason>}`
+   on pre-write rejection."
   [parsed item ctx]
   (let [storage (request/require-storage ctx)
         item-id (:item-id parsed)
@@ -214,4 +235,11 @@
     (if pre-rej
       {:error (:reason pre-rej)}
       (do (sp/update-entity storage :binding-list-item item-id changes)
-          {:updated item-id}))))
+          ;; Post-write whole-fn type-check (Phase 3, Gap A) — same
+          ;; record-or-clear semantics as the binding update core.
+          (let [owner-fn-id (some->> (:binding-id item)
+                                     (sp/read-entity storage :binding)
+                                     :fn-id)
+                warnings (post-write-warnings storage owner-fn-id)]
+            (cond-> {:updated item-id}
+              warnings (assoc :type-warnings warnings)))))))

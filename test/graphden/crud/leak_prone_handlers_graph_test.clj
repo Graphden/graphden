@@ -31,7 +31,9 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.diagnostics :as diag]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (def ^:dynamic *graph* nil)
@@ -144,6 +146,46 @@
           body (str (:body response))]
       (is (= 200 (:status response)))
       (is (str/includes? body "No failed runs")))))
+
+
+(deftest partial-type-errors-handler-renders-test
+  ;; Error-tolerance Phase 3 — the type-errors partial renders
+  ;; end-to-end through the production graph chain: empty state on a
+  ;; clean store, then a recorded diagnostic renders a row with the
+  ;; fn's #hash link + arg + message. Records into the (per-NS-thread
+  ;; isolated) diagnostics store directly — the record→render seam is
+  ;; what this covers; the recording write-paths are covered in
+  ;; `entities_test`.
+  (testing "GET /partials/type-errors renders the empty state on a clean store"
+    (let [response (via :_partial-type-errors-handler
+                        {:uri "/partials/type-errors"
+                         :request-method :get
+                         :headers {}})
+          body (str (:body response))]
+      (is (= 200 (:status response)))
+      (is (str/includes? body "No type errors"))))
+  (testing "a recorded diagnostic renders a row (fn link + arg + message)"
+    (let [storage (:storage *graph*)
+          ;; The golden graph's storage is versioned — record under ITS
+          ;; current branch (the same id the handler's impl derives).
+          branch-id (vs/current-branch-id storage)
+          target (first (sp/query-entities storage :fn {:name "web-server"}))]
+      (is (some? target) "golden graph has a web-server fn to point at")
+      (try
+        (diag/record! branch-id (:id target)
+                      [{:message "expected :int, got :text"
+                        :arg-name :port}])
+        (let [response (via :_partial-type-errors-handler
+                            {:uri "/partials/type-errors"
+                             :request-method :get
+                             :headers {}})
+              body (str (:body response))]
+          (is (= 200 (:status response)))
+          (is (str/includes? body "href=\"#web-server\"")
+              "fn name is a native #hash link")
+          (is (str/includes? body "port"))
+          (is (str/includes? body "expected :int, got :text")))
+        (finally (diag/clear-fn! branch-id (:id target)))))))
 
 
 (deftest partial-auth-form-handler-renders-login-fields-test

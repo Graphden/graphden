@@ -436,7 +436,19 @@
             ;; on fn-name, not fn-id), so the read pays for itself.
             snapshot (if (= et :fn)
                        (or (sp/read-entity storage et id) {:id id})
-                       (sp/read-entity storage et id))]
+                       (sp/read-entity storage et id))
+            ;; Owner fn of a binding-family row, resolved BEFORE the
+            ;; delete (the binding row itself may be the row going
+            ;; away). Error-tolerance Phase 3 (Gap B): a binding /
+            ;; list-item delete can fix OR break the owning fn's
+            ;; aggregate type-check, so the stored diagnostic must be
+            ;; re-derived after the row is gone.
+            owning-fn-id (case et
+                           :binding (:fn-id snapshot)
+                           :binding-list-item (some->> (:binding-id snapshot)
+                                                       (sp/read-entity storage :binding)
+                                                       :fn-id)
+                           nil)]
         ;; User-facing delete → tombstone (so deleting an inherited entity on a
         ;; branch actually hides it, not a silent no-op). Sync / rollback deletes
         ;; keep the default hard-delete.
@@ -451,6 +463,14 @@
           ;; Row id threaded so the drop is keyed by THIS identity — a
           ;; same-named duplicate (stale-identity class) keeps its entry.
           (registry/unregister-rich-type! (keyword (:name snapshot)) id))
+        ;; Diagnostics stay fresh across deletes (Phase 3, Gap B):
+        ;; a deleted fn takes its stored entry with it; a deleted
+        ;; binding / list-item re-runs the owner's aggregate check,
+        ;; which records anew or clears as appropriate.
+        (if (= et :fn)
+          (diag/clear-fn! (vcore/current-branch-id storage) id)
+          (when owning-fn-id
+            (tc/type-check-fn-after-mutation! storage owning-fn-id)))
         (invalidate! ctx storage et snapshot)
         ;; NOTIFY the full pre-read `snapshot` (not a bare `{:id id}`): sibling
         ;; pods' `affected-fn-ids` needs the row's FKs (`:binding-id` / `:fn-id`)
@@ -728,6 +748,12 @@
          ;; Whole-graph reverse-ref tallies — realised only for the scopes
          ;; that project fn rows (`:namespace` / `:search` / `:subtree`).
          rev-index (delay (reverse-ref-index base))
+         ;; Per-fn diagnostic counts for the CURRENT branch (error-
+         ;; tolerance Phase 3) — a cheap in-memory map lookup; realised
+         ;; only by the `:tree` / `:subtree` scopes that surface them.
+         diag-counts (delay (into {}
+                                  (map (fn [[fid ds]] [fid (count ds)]))
+                                  (diag/branch-errors (vcore/current-branch-id storage))))
          namespaces (delay (vec (sp/query-entities storage :ns {})))]
      (cond
        (= scope :tree)
@@ -736,11 +762,32 @@
        ;; at all — leaves load lazily via `:namespace`. This is the
        ;; O(namespaces) replacement for the O(all-fns) `:index` pull that
        ;; the editor fetched on every init AND every post-mutation refresh.
-       {:namespaces @namespaces
-        :counts (->> (:fns base)
-                     (filter :name)
-                     (group-by :namespace-id)
-                     (mapv (fn [[nid fns]] {:namespace-id nid :count (count fns)})))}
+       ;; Each count row additively carries `:type-error-count` (recorded
+       ;; diagnostics on fns of that namespace, current branch) when >0 —
+       ;; the sidebar's per-namespace warning chip.
+       (let [ns-of-fn (when (seq @diag-counts)
+                        (into {} (map (juxt :id :namespace-id)) (:fns base)))
+             ns-err (reduce (fn [m [fid n]]
+                              (update m (get ns-of-fn fid) (fnil + 0) n))
+                            {} @diag-counts)
+             counts (->> (:fns base)
+                         (filter :name)
+                         (group-by :namespace-id)
+                         (mapv (fn [[nid fns]]
+                                 (let [errs (get ns-err nid 0)]
+                                   (cond-> {:namespace-id nid :count (count fns)}
+                                     (pos? errs) (assoc :type-error-count errs))))))
+             ;; Namespaces whose only diagnosed fns are anonymous still
+             ;; get a chip row (count 0 reads falsy client-side).
+             covered (into #{} (map :namespace-id) counts)
+             extra (into []
+                         (comp (remove (fn [[nid _]] (contains? covered nid)))
+                               (map (fn [[nid errs]]
+                                      {:namespace-id nid :count 0
+                                       :type-error-count errs})))
+                         ns-err)]
+         {:namespaces @namespaces
+          :counts (into counts extra)})
 
        (= scope :namespace)
        ;; Lazy per-namespace expand: light rows for one namespace's named
@@ -788,7 +835,15 @@
              ;; Annotate with whole-graph reverse-ref counts so the
              ;; graph-view delete/edit gate reads them off the fn row
              ;; instead of counting over the (now sliced) client mirror.
-             sub-roled-fns (mapv #(with-ref-counts @rev-index (or (get roled-by-id (:id %)) %))
+             ;; `:type-error-count` (Phase 3) rides along when the fn has
+             ;; recorded diagnostics on the current branch — the card's
+             ;; root-row warning badge reads it.
+             sub-roled-fns (mapv (fn [f]
+                                   (let [row (with-ref-counts @rev-index
+                                               (or (get roled-by-id (:id f)) f))
+                                         errs (get @diag-counts (:id row) 0)]
+                                     (cond-> row
+                                       (pos? errs) (assoc :type-error-count errs))))
                                  (:fns sub))
              ;; Include each fn's namespace AND its parent chain so
              ;; the sidebar can render the full path (e.g. `web.crud

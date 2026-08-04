@@ -1,5 +1,5 @@
 {:namespace "app.editor"
- :description "Sidebar panel partials — error-log (recent failed executions) and stats (org usage rollups)."
+ :description "Sidebar panel partials — error-log (recent failed executions), type-errors (current branch's recorded type diagnostics) and stats (org usage rollups)."
  :fns
  [;; ---------------------------------------------------------------------
   ;; ERROR LOG partial (Phase C2) — GET /partials/error-log. The current
@@ -120,6 +120,105 @@
    :description "Ring handler for GET /partials/error-log — the org's recent failed executions as text/html. Auth-required (route side)."
    :parent :html-ok-response
    :args {:body :_perr-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; TYPE ERRORS partial (error-tolerance Phase 3) — GET /partials/
+  ;; type-errors. The CURRENT branch's recorded type diagnostics (the
+  ;; per-branch in-memory store every post-write check keeps fresh),
+  ;; one row per diagnostic: fn name (native #hash link), arg, short
+  ;; message. Mirrors the error-log family above.
+  ;; ---------------------------------------------------------------------
+  {:name :type-diagnostics-list
+   :description "The CURRENT branch's recorded type diagnostics as flat display rows — `[{:fn-id :fn-name :arg :message} …]`, sorted by fn name. Reads the in-memory per-branch diagnostics store (`graphden.types.diagnostics/branch-errors`, branch = the request's versioned storage, nil = default) and joins fn names in one batched read. Empty when the branch has no recorded diagnostics."
+   :args {}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :_pterr-rows
+   :parent :type-diagnostics-list}
+
+  {:name :_pterr-item-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+
+  {:name :_pterr-item-href
+   :parent :str
+   :args {:parts [{:value "#"} :_pterr-item-name]}}
+
+  {:name :_pterr-item-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "type-errors-fn"}}
+          :key {:value :href}
+          :value :_pterr-item-href}}
+
+  {:name :_pterr-item-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs :_pterr-item-link-attrs
+          :children [:_pterr-item-name]}}
+
+  {:name :_pterr-item-arg
+   :parent :get
+   :args {:coll {:as :item} :key {:value :arg} :default {:value ""}}}
+
+  {:name :_pterr-item-arg-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-errors-arg"}}
+          :children [:_pterr-item-arg]}}
+
+  {:name :_pterr-item-msg
+   :parent :get
+   :args {:coll {:as :item} :key {:value :message} :default {:value ""}}}
+
+  {:name :_pterr-item-msg-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-errors-msg"}}
+          :children [:_pterr-item-msg]}}
+
+  {:name :_pterr-row
+   :description "One diagnostic row — fn link (native #hash navigation), arg name, short message."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-errors-row"}}
+          :children [:_pterr-item-link :_pterr-item-arg-div :_pterr-item-msg-div]}}
+
+  {:name :_pterr-rendered-rows
+   :parent :map
+   :args {:func :_pterr-row :coll :_pterr-rows}}
+
+  {:name :_pterr-empty?
+   :parent :empty?
+   :args {:coll :_pterr-rows}}
+
+  {:name :_pterr-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-errors-empty"}}
+          :children ["No type errors on this branch."]}}
+
+  {:name :_pterr-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-errors-list"}}
+          :children [:_pterr-rendered-rows]}}
+
+  {:name :_pterr-body
+   :parent :if
+   :args {:test :_pterr-empty?
+          :then :_pterr-empty-msg
+          :else :_pterr-list}}
+
+  {:name :_pterr-html
+   :parent :render-hiccup
+   :args {:hiccup :_pterr-body}}
+
+  {:name :_partial-type-errors-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/type-errors — the current branch's recorded type diagnostics as text/html. Auth-required (route side)."
+   :parent :html-ok-response
+   :args {:body :_pterr-html}}
 
   ;; ---------------------------------------------------------------------
   ;; STATS partial (Phase C) — GET /partials/stats. The CURRENT org's run

@@ -96,6 +96,7 @@
                   "packages/app/editor/editor-quota.js"
                   "packages/app/editor/editor-stats.js"
                   "packages/app/editor/editor-errors.js"
+                  "packages/app/editor/editor-type-errors.js"
                   "packages/app/editor/editor-apps.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"

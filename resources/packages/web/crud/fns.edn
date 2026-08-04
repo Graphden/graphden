@@ -1591,28 +1591,8 @@
    :parent :some?
    :args {:value :_create-write-rej}}
 
-  {:name :_create-is-binding-create?
-   :description "Lazy gate — only fire `:type-check-binding-rej` for binding creates."
-   :parent :and
-   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
-                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "binding"}}}]}}
-
-  {:name :_create-binding-type-rej
-   :description "Guard 8 (binding creates only) — save-time type-check for the binding's `:value`/`:ref`. The underlying `:type-check-binding-rej` primitive returns `{:reason <message>}` on mismatch (surfaced as a 400 by the Stage-2 `:cond`), nil otherwise. `:id` is nil on CREATE."
-   :parent :if
-   :args {:test :_create-is-binding-create?
-          :then {:parent :type-check-binding-rej
-                 :args {:entity-data :_parsed-entity-data
-                        :id {:value nil}}}
-          :else nil}}
-
-  {:name :_create-binding-type-rej?
-   :description "True when guard 8 produced a `{:reason}` — a binding-value type mismatch (rare; most binding values type-check clean)."
-   :parent :some?
-   :args {:value :_create-binding-type-rej}}
-
   {:name :_create-validation
-   :description "Stage 2 of create — eight write-time guards wired as a flat `:cond`. Returns the rejection `{:reason …}` from the first matching guard, or `nil` (`{:value nil}` clause) when the create may proceed."
+   :description "Stage 2 of create — seven STRUCTURAL write-time guards wired as a flat `:cond`. Returns the rejection `{:reason …}` from the first matching guard, or `nil` (`{:value nil}` clause) when the create may proceed. Error-tolerance Phase 2: the former guard 8 (pre-write binding TYPE-check) is gone — type validity is no longer a write gate; the post-write `type-check-fn-after-mutation!` inside `:try-apply-create` records failures as per-branch diagnostics and the response carries them as `:type-warnings`."
    :parent :cond
    :args {:clauses [:_create-entity-type-rej?        :_create-entity-type-rej
                     :_create-form-data-rej?          :_create-form-data-rej
@@ -1621,7 +1601,6 @@
                     :_create-service-free-args-rej?  :_create-service-free-args-rej
                     :_create-service-no-process-rej? :_create-service-no-process-rej
                     :_create-write-rej?              :_create-write-rej
-                    :_create-binding-type-rej?       :_create-binding-type-rej
                     {:value true}                    {:value nil}]
           :parsed :_create-parsed}}
 
@@ -1642,7 +1621,7 @@
           :result :_create-apply-result}}
 
   {:name :_create-apply-result
-   :description "Outcome of the atomic create unit. `{:created <id>}` on success, `{:error <human-msg>}` on capability-rej / write-failure / post-check rejection (the rollback is internal)."
+   :description "Outcome of the atomic create unit. `{:created <id>}` on success (plus `:type-warnings [<diagnostic> …]` when the write landed but the owning fn now fails the aggregate type-check — error-tolerance Phase 2 keeps the row and records a per-branch diagnostic), `{:error <human-msg>}` on capability-rej / write-failure."
    :parent :try-apply-create
    :args {:entity-type :_apply-entity-type-str
           :entity-data :_parsed-entity-data
@@ -1712,9 +1691,34 @@
           :op {:value "write"}
           :entity-data :_create-apply-success-payload}}
 
+  ;; 200 response. Legacy HTML body when the write is fully clean;
+  ;; when the atomic unit reports `:type-warnings` (error-tolerance
+  ;; Phase 2 — row kept, type-check failed, diagnostic recorded) the
+  ;; body switches to JSON `{message, type-warnings}` so API clients
+  ;; get the structured diagnostics. Additive: status stays 200 and
+  ;; body-ignoring clients (the editor checks `r.ok` only) are
+  ;; unaffected.
+  {:name :_create-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
   {:name :_create-apply-ok-response
-   :parent :const
-   :args {:value {:status 200 :body "<p>Entity created successfully</p>"}}}
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_create-apply-type-warnings}}
+          :then :_create-apply-ok-warn-response
+          :else {:value {:status 200 :body "<p>Entity created successfully</p>"}}}}
+
+  {:name :_create-apply-ok-warn-response
+   :description "200 JSON success-with-warnings envelope — `{\"message\": \"Entity created successfully\", \"type-warnings\": [...]}`."
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 {:parent :to-json-string
+                  :args {:data {:parent :zipmap
+                                :args {:keys [{:value :message} {:value :type-warnings}]
+                                       :vals [{:value "Entity created successfully"}
+                                              :_create-apply-type-warnings]}}}}]}}
 
   ;; --- :_update-parsed. Mirrors :_create-parsed plus
   ;; (a) `:id-str` + `:id-uuid` from the URI, (b) `:pre-existing` row
@@ -1806,11 +1810,11 @@
    :return-type :_update-parsed-shape}
 
   ;; --- :write-rej / :type-check-binding-rej — atomic §3.1 boundaries
-  ;; over the §3.3 validators. Used by both create + update chains so
-  ;; both `:_create-write-rej` / `:_create-binding-type-rej` and the
-  ;; per-guard graph fn-defs below can reach the same algorithm
-  ;; without each call site re-implementing the cycle / MI / type-check
-  ;; logic at the graph layer.
+  ;; over the §3.3 validators. `:write-rej` is the STRUCTURAL gate
+  ;; both create + update chains still block on;
+  ;; `:type-check-binding-rej` is no longer wired as a blocking guard
+  ;; (error-tolerance Phase 2) but stays available as an on-demand
+  ;; pre-flight validator any graph composition can call.
   {:name :write-rej
    :description "Stage-2 write-time validation for create/update flows. Returns `{:reason …}` rejection or nil."
    :args {:entity-type {:type :text :description "Canonical entity-name as text (`fn`, `slot`, `binding`, …)."}
@@ -1819,7 +1823,7 @@
    :effects #{:db}}
 
   {:name :type-check-binding-rej
-   :description "Stage-2 type-check for `:binding` flows. nil on success, `{:reason <message>}` on a type mismatch (never throws for a mismatch — the caller's `:cond` surfaces it as a 400)."
+   :description "On-demand single-binding type validator. nil on success, `{:reason <message>}` on a type mismatch (never throws for a mismatch). Error-tolerance Phase 2 unhooked it from the create/update `:cond` chains — binding writes proceed and the post-write aggregate check records diagnostics instead; compose this fn where a verdict WITHOUT a write is wanted (pre-flight validation)."
    :args {:entity-data {:type :nullable-keyword-map :description "Binding row to type-check. Nullable at type level."}
           :id {:type :nullable-uuid :description "Existing binding id (UPDATE) or nil (CREATE)."}}
    :return-type :_rejection-shape
@@ -1834,9 +1838,12 @@
   ;; required case unique to update.
   ;;
   ;; The `:else` branch builds the merged-data (pre-existing +
-  ;; entity-data + {:id id-uuid}) and runs write-rej; if write-rej is
-  ;; nil and this is a binding update, type-check-binding-rej runs.
-  ;; `:if`-gated so non-binding updates skip the type-check.
+  ;; entity-data + {:id id-uuid}) and runs write-rej — the structural
+  ;; gate. Error-tolerance Phase 2 removed the blocking pre-write
+  ;; binding type-check from this chain: a type-breaking update lands
+  ;; and the post-write check inside `:try-apply-update` records the
+  ;; failure as a per-branch diagnostic + `:type-warnings` on the
+  ;; response.
 
   {:name :_update-parsed-id-str
    :parent :get
@@ -1881,44 +1888,22 @@
                         :entity-data :_update-merged-data}}
           :else nil}}
 
-  {:name :_update-is-binding-update?
-   :description "Lazy gate — only fire `:type-check-binding-rej` for binding updates with a resolved id."
-   :parent :and
-   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
-                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "binding"}}}
-                   {:parent :some? :args {:value :_update-parsed-id-uuid}}]}}
-
-  {:name :_update-binding-type-rej-result
-   :description "Binding-specific type-check; throws on mismatch (executor surfaces structured ExceptionInfo). Gated on binding-update-with-id."
-   :parent :if
-   :args {:test :_update-is-binding-update?
-          :then {:parent :type-check-binding-rej
-                 :args {:entity-data :_parsed-entity-data
-                        :id :_update-parsed-id-uuid}}
-          :else nil}}
-
-  {:name :_update-validation-tail
-   :description "Combine write-rej and binding-type-rej: write-rej (cycle / MI / list-closed) wins over a type mismatch, mirroring the create-side `:cond` order. `:if` short-circuits — when write-rej is present it skips `:_update-binding-type-rej-result` (a `:db`-effecting type-check query), which the eager `:coalesce` would run needlessly."
-   :parent :if
-   :args {:test {:parent :some? :args {:value :_update-write-rej-result}}
-          :then :_update-write-rej-result
-          :else :_update-binding-type-rej-result}}
-
   {:name :_update-validation
-   :description "Stage 2 of update — `:cond` over the 4 simple guards (3 of which reuse the create-side rej-builders) then a tail `:coalesce` of write-rej and (when applicable) binding-type-rej. Returns the first rejection `{:reason …}` or nil."
+   :description "Stage 2 of update — `:cond` over the 4 simple guards (3 of which reuse the create-side rej-builders) then the tail `write-rej` structural check against the merged post-write view. Returns the first rejection `{:reason …}` or nil. Error-tolerance Phase 2: the former binding-type-rej tail is gone — type validity no longer gates the write."
    :parent :cond
    :args {:clauses [:_create-entity-type-rej?        :_create-entity-type-rej
                     :_update-id-str-nil?             :_update-err-id-required
                     :_create-form-data-rej?          :_create-form-data-rej
                     :_create-parse-error-rej?        :_create-parse-error-rej
-                    {:value true}                    :_update-validation-tail]
+                    {:value true}                    :_update-write-rej-result]
           :parsed :_update-parsed}}
 
   ;; Success branch of PUT /api/entities/:type/:id as graph composition.
-  ;; `:try-apply-update` is the atomic
-  ;; write unit (sp/update-entity + rename-slot). Update has
-  ;; no post-write type-check + rollback so the primitive is §3.1
-  ;; (not §3.3 like create).
+  ;; `:try-apply-update` is the atomic write unit (sp/update-entity +
+  ;; rename-slot + post-write type-check for binding-shaped updates —
+  ;; non-blocking since error-tolerance Phase 2: failures are recorded
+  ;; as per-branch diagnostics and surfaced as `:type-warnings`, never
+  ;; rolled back).
   {:name :_update-apply
    :description "Stage 3 of update — atomic update + invalidate + notify + 200, or 400 with the error message."
    :parent :if
@@ -1928,7 +1913,7 @@
           :result :_update-apply-result}}
 
   {:name :_update-apply-result
-   :description "Outcome of the atomic update unit. `{:updated <id>}` on success, `{:error <msg>}` on write failure."
+   :description "Outcome of the atomic update unit. `{:updated <id>}` on success (plus `:type-warnings [<diagnostic> …]` when a binding-shaped write landed but the owning fn now fails the aggregate type-check), `{:error <msg>}` on write failure."
    :parent :try-apply-update
    :args {:entity-type :_apply-entity-type-str
           :id-uuid :_update-apply-id-uuid
@@ -1984,9 +1969,30 @@
           :op {:value "write"}
           :entity-data :_update-apply-success-payload}}
 
+  ;; 200 response — same warning-aware split as the create side:
+  ;; legacy HTML body when clean, JSON `{message, type-warnings}` when
+  ;; the kept write carries recorded type diagnostics.
+  {:name :_update-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
   {:name :_update-apply-ok-response
-   :parent :const
-   :args {:value {:status 200 :body "<p>Entity updated successfully</p>"}}}
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_update-apply-type-warnings}}
+          :then :_update-apply-ok-warn-response
+          :else {:value {:status 200 :body "<p>Entity updated successfully</p>"}}}}
+
+  {:name :_update-apply-ok-warn-response
+   :description "200 JSON success-with-warnings envelope — `{\"message\": \"Entity updated successfully\", \"type-warnings\": [...]}`."
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 {:parent :to-json-string
+                  :args {:data {:parent :zipmap
+                                :args {:keys [{:value :message} {:value :type-warnings}]
+                                       :vals [{:value "Entity updated successfully"}
+                                              :_update-apply-type-warnings]}}}}]}}
 
   {:name :_rejected?
    :description "True when a `validate-*` stage produced a rejection. `:some? :validation`."
@@ -3264,7 +3270,7 @@
                  {:parent :to-json-string :args {:data :_tighten-apply-success-result}}]}}
 
   {:name :try-apply-tighten
-   :description "§3.3 core of tighten-fn-effects: narrows the fn-typed binding's effective type. Returns `{:status :reason :result}` — graph dispatches on `:status`."
+   :description "§3.3 core of tighten-fn-effects: narrows the fn-typed binding's effective type. Returns `{:status :reason :result}` — graph dispatches on `:status`. Error-tolerance Phase 2: when the post-write aggregate type-check fails the override is KEPT, the failure is recorded as a per-branch diagnostic, and `:result` carries `:type-warnings [<diagnostic> …]` in the 200 JSON body. The subtype-safety pre-checks (widening / bound-callable effect escape / non-fn slot) still return 400."
    :args {:parsed {:type :_tighten-parsed-shape}}
    :return-type :keyword-map
    :effects #{:db}}

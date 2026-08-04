@@ -1370,88 +1370,93 @@
          (log/error e "ensure-rename-slot! failed"))))
 
 
-(defn- post-create-type-check-fn-id
+(defn- post-write-type-check-fn-id
   "Resolve the OWNING fn-id for a binding-shaped mutation so the
-   post-create type-check sees the aggregate of every sibling binding."
-  [storage type-str entity-data]
+   post-write type-check sees the aggregate of every sibling binding.
+   On UPDATE the entity-data is the partial form payload and may omit
+   the FK fields, so fall back to reading the just-written row by
+   `id-uuid`."
+  [storage type-str entity-data id-uuid]
   (cond
     (= type-str "binding")
-    (:fn-id entity-data)
+    (or (:fn-id entity-data)
+        (when id-uuid
+          (:fn-id (sp/read-entity storage :binding id-uuid))))
     (= type-str "binding-list-item")
-    (some-> (:binding-id entity-data)
-            (#(sp/read-entity storage :binding %))
-            :fn-id)))
+    (when-let [binding-id (or (:binding-id entity-data)
+                              (when id-uuid
+                                (:binding-id (sp/read-entity
+                                               storage :binding-list-item
+                                               id-uuid))))]
+      (:fn-id (sp/read-entity storage :binding binding-id)))))
 
 
-(defn- verify-post-create-or-rollback!
-  "Post-create whole-fn type-check for binding mutations. A binding can
+(defn- post-write-type-warnings
+  "Post-write whole-fn type-check for binding mutations. A binding can
    be individually valid yet break the OWNING fn-def's aggregate
-   check; on failure delete the just-created row so DB state stays
-   consistent. Returns the rejection map (with `:reason`) when the
-   check rejects, nil when the row stays."
-  [storage create-result type-str entity-data entity-type]
-  (when (and (:created create-result)
-             (#{"binding" "binding-list-item"} type-str))
-    (when-let [fn-id (post-create-type-check-fn-id storage type-str entity-data)]
+   check. Error-tolerance Phase 2: the just-written row is KEPT even
+   when the check fails — `type-check-fn-after-mutation!` records the
+   failure in the per-branch diagnostics store (and clears it again
+   once a later write fixes the fn), and the structured diagnostics
+   come back here as a vector the caller surfaces additively as
+   `:type-warnings` on the success envelope. nil when the check passes
+   or doesn't apply to this entity type."
+  [storage type-str entity-data id-uuid]
+  (when (#{"binding" "binding-list-item"} type-str)
+    (when-let [fn-id (post-write-type-check-fn-id
+                       storage type-str entity-data id-uuid)]
       (when-let [rej (tc/type-check-fn-after-mutation! storage fn-id)]
-        ;; Roll back the just-created row when the post-write check
-        ;; rejects. Silently nil'ing the rollback failure would mask
-        ;; orphan rows surviving the rejection — log so dashboards see it.
-        (try (sp/delete-entity storage entity-type (:created create-result))
-             (catch Exception e
-               (log/warn e "Rollback delete-entity failed after type-check rejection"
-                         {:entity-type entity-type
-                          :id (:created create-result)})))
-        rej))))
+        [(:diagnostic rej)]))))
 
 
 (defn apply-create-core
   "§3.3 atomic core of the create-apply flow: capability gate +
    `sp/create-entity` (with unique-violation humanisation) + Phase-6c
-   rename-slot side-effect + post-create whole-fn type-check +
-   on-failure rollback. Returns a uniform shape:
+   rename-slot side-effect + post-create whole-fn type-check.
+   Returns a uniform shape:
      `{:created <id>}` on success
-     `{:error <human-msg>}` on any failure path
+     `{:created <id> :type-warnings [<diagnostic> …]}` when the write
+       landed but the owning fn now fails the aggregate type-check
+       (error-tolerance Phase 2 — the row is KEPT, the failure is
+       recorded in the per-branch diagnostics store and surfaced
+       additively; clients that ignore the key keep working)
+     `{:error <human-msg>}` on a write failure (capability rejection,
+       storage constraint violation, …)
    so the outer graph can dispatch on the shape and run invalidate /
-   notify / response without re-deriving the rollback semantics.
-
-   The §3.3 invariant — type-check + rollback see the SAME just-
-   created row id — lives entirely inside this fn. Phase 4.4 is the
-   place where a `:atom` + `:try` graph composition expresses the
-   same invariant; here we keep the carve-out because the rollback
-   is conditional on the post-check result, not on an exception."
+   notify / response uniformly. Structural gates (cycles, name
+   collisions, terminal / list-closed, MI) still reject BEFORE this
+   fn runs — only the TYPE check became non-blocking."
   [{:keys [entity-type type-str form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
         create-result (try-create-or-error storage entity-type entity-data type-str)]
-    (if-let [post-rej (verify-post-create-or-rollback!
-                        storage create-result type-str entity-data entity-type)]
-      {:error (:reason post-rej)}
-      (if (:created create-result)
-        (do
-          ;; Rename-slot side-effect runs ONLY after the post-create check
-          ;; passes. Running it earlier meant a binding the aggregate check
-          ;; then REJECTED (and rolled back) still left the renamed-view
-          ;; slot + fn-slot behind — an orphan the fn permanently exposed
-          ;; with no backing binding. The rename is a type-preserving name
-          ;; alias, so the check's outcome is unaffected by ordering.
-          (when (and (= type-str "binding")
-                     (contains? form-data :rename-to))
-            (forward-rename-slot! storage form-data entity-data))
-          create-result)
-        ;; Preserve the error's :http-status (409 collisions, 403
-        ;; capability — the central web.errors mapping) alongside the
-        ;; human message.
-        (cond-> {:error (or (:error create-result)
-                            (str "Failed to create " type-str))}
-          (:http-status create-result)
-          (assoc :http-status (:http-status create-result)))))))
+    (if (:created create-result)
+      (let [warnings (post-write-type-warnings
+                       storage type-str entity-data nil)]
+        (when (and (= type-str "binding")
+                   (contains? form-data :rename-to))
+          (forward-rename-slot! storage form-data entity-data))
+        (cond-> create-result
+          warnings (assoc :type-warnings warnings)))
+      ;; Preserve the error's :http-status (409 collisions, 403
+      ;; capability — the central web.errors mapping) alongside the
+      ;; human message.
+      (cond-> {:error (or (:error create-result)
+                          (str "Failed to create " type-str))}
+        (:http-status create-result)
+        (assoc :http-status (:http-status create-result))))))
 
 
 (defn apply-update-core
   "§3.1 atomic core of the update-apply flow: `sp/update-entity` +
-   Phase-6c rename-slot side-effect (binding writes only). Returns
-   a uniform shape:
+   Phase-6c rename-slot side-effect (binding writes only) + post-write
+   whole-fn type-check for binding-shaped updates. Returns a uniform
+   shape:
      `{:updated <id>}` on success
+     `{:updated <id> :type-warnings [<diagnostic> …]}` when the write
+       landed but the owning fn now fails the aggregate type-check
+       (error-tolerance Phase 2 — recorded in the per-branch
+       diagnostics store, surfaced additively; a later fixing write
+       clears the stored entry)
      `{:error <msg>}` on write failure
    The rename-slot failure is logged but never escalated — the
    binding row is still useful without the rename slot, matching the
@@ -1481,7 +1486,10 @@
         (catch Exception e
           (log/error e "ensure-rename-slot! failed"))))
     (if updated
-      {:updated id-uuid}
+      (let [warnings (post-write-type-warnings
+                       storage type-str entity-data id-uuid)]
+        (cond-> {:updated id-uuid}
+          warnings (assoc :type-warnings warnings)))
       {:error (or @error-msg "Failed to update entity")})))
 
 

@@ -19,11 +19,13 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.validation :as validation]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -733,44 +735,51 @@
 
 
 ;; ============================================================================
-;; tighten — extended coverage: rollback, bound-callable escape
+;; tighten — extended coverage: post-write warn path, bound-callable escape
 ;;
 ;; The basic happy/reject branches of `tighten-fn-type-impl!` were
 ;; covered above; these tests close the remaining branches:
-;;   - commit-tighten! rollback path (post-write type-check fails)
+;;   - commit-tighten! keep-and-warn path (post-write type-check fails —
+;;     error-tolerance Phase 2 keeps the override + records a diagnostic)
 ;;   - bound-callable effect escape (ref-fn effects exceed new constraint)
 ;; ============================================================================
 
-(deftest commit-tighten-rollback-on-post-write-type-check-fail-test
-  ;; Make the REAL post-write `type-check-fn-after-mutation!` reject so
-  ;; the roll-back path fires: the owning fn carries a second binding
-  ;; whose literal violates its `:int` slot, and the parent's signature
-  ;; is registered for real in the (thread-isolated) rich-types
-  ;; registry so `check-fn-def!` has a contract to check against. The
-  ;; tighten pre-checks never look at that slot, so the write commits;
-  ;; the aggregate check then rejects and the binding's
-  ;; `:type-override-fn-id` must end up back at its pre-tighten value.
-  (let [storage (setup/create-test-storage)]
-    (try
-      (let [[bid comp-fn-id base-id] (make-binding-on-fn-typed-slot!
-                                       storage "rb" [:fn {} :any #{:io :db}])
-            nslot (setup/create-slot! storage "n" :int)
-            _ (setup/attach-slot! storage base-id (:id nslot) 1)
-            _ (setup/bind-value! storage comp-fn-id (:id nslot) "not-an-int")
-            _ (registry/record-rich-types-raw!
-                base-id :th-base-rb
-                {:return :any
-                 :args {:cb [:fn {} :any #{:io :db}] :n :int}
-                 :effects #{}})
-            before (sp/read-entity storage :binding bid)
-            r (entities/tighten-fn-type-impl! storage bid {:effects ["io"]})
-            after (sp/read-entity storage :binding bid)]
-        (is (= 400 (:status r)))
-        (is (re-find #"post-write type-check" (:reason r)))
-        (is (= (:type-override-fn-id before)
-               (:type-override-fn-id after))
-            "rollback restored the pre-tighten override pointer"))
-      (finally (sp/close storage)))))
+(deftest commit-tighten-keeps-write-and-warns-on-post-write-type-check-fail-test
+  ;; Make the REAL post-write `type-check-fn-after-mutation!` fail: the
+  ;; owning fn carries a second binding whose literal violates its
+  ;; `:int` slot, and the parent's signature is registered for real in
+  ;; the (thread-isolated) rich-types registry so `check-fn-def!` has a
+  ;; contract to check against. The tighten pre-checks never look at
+  ;; that slot, so the write commits; the aggregate check then FAILS —
+  ;; and since error-tolerance Phase 2 the override is KEPT, the
+  ;; failure is recorded as a per-branch diagnostic, and the 200 result
+  ;; carries it as `:type-warnings`.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [[bid comp-fn-id base-id] (make-binding-on-fn-typed-slot!
+                                         storage "rb" [:fn {} :any #{:io :db}])
+              nslot (setup/create-slot! storage "n" :int)
+              _ (setup/attach-slot! storage base-id (:id nslot) 1)
+              _ (setup/bind-value! storage comp-fn-id (:id nslot) "not-an-int")
+              _ (registry/record-rich-types-raw!
+                  base-id :th-base-rb
+                  {:return :any
+                   :args {:cb [:fn {} :any #{:io :db}] :n :int}
+                   :effects #{}})
+              r (entities/tighten-fn-type-impl! storage bid {:effects ["io"]})
+              after (sp/read-entity storage :binding bid)]
+          (is (= 200 (:status r)))
+          (is (some? (get-in r [:result :type-override-fn-id])))
+          (is (= (get-in r [:result :type-override-fn-id])
+                 (:type-override-fn-id after))
+              "the tighten override was KEPT despite the failing aggregate check")
+          (is (vector? (get-in r [:result :type-warnings]))
+              "the 200 result surfaces the failure as :type-warnings")
+          (is (= (get-in r [:result :type-warnings])
+                 (diag/errors-for-fn nil comp-fn-id))
+              "the same diagnostics landed in the per-branch store"))
+        (finally (sp/close storage))))))
 
 
 (deftest tighten-rejects-when-bound-callable-effects-exceed-new-constraint-test
@@ -801,6 +810,118 @@
             "the reject message names the escaping effect")
         ;; Use comp-fn-id so the let-binding isn't dead code.
         (is (some? comp-fn-id)))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; error-tolerance Phase 2 — a type-breaking USER write is KEPT + warns
+;;
+;; The core behaviour flip: `apply-create-core` / `apply-update-core`
+;; no longer roll back (or reject) a binding write that fails the
+;; owning fn's aggregate type-check. The row lands, the failure is
+;; recorded in the per-branch diagnostics store, and the success
+;; envelope carries `:type-warnings` additively. Structural gates
+;; (cycle / MI / terminal / list-closed) are untouched and still
+;; hard-reject.
+;; ============================================================================
+
+(deftest create-type-breaking-binding-kept-with-warnings-test
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "etp2-base")
+              slot  (setup/create-slot! storage "a" :int)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              _     (registry/record-rich-types-raw!
+                      :etp2-base {:return :int :args {:a :int} :effects #{}})
+              child (setup/create-composed-fn! storage "etp2-child" (:id base))
+              r     (entities/apply-create-core
+                      {:entity-type :binding
+                       :type-str "binding"
+                       :form-data {}
+                       ;; `:value-present true` mirrors the form
+                       ;; parser's value-presence normalisation.
+                       :entity-data {:fn-id (:id child) :slot-id (:id slot)
+                                     :value "not-an-int"
+                                     :value-present true}}
+                      c)]
+          (testing "the write SUCCEEDS — row present, no rollback, no :error"
+            (is (some? (:created r)))
+            (is (nil? (:error r)))
+            (is (some? (sp/read-entity storage :binding (:created r)))
+                "the type-breaking binding row survived"))
+          (testing "the success envelope surfaces the failure additively"
+            (is (vector? (:type-warnings r)))
+            (is (= :int (get-in r [:type-warnings 0 :expected])))
+            (is (= :text (get-in r [:type-warnings 0 :actual]))))
+          (testing "the per-branch diagnostics store recorded the same entry"
+            (is (= (:type-warnings r)
+                   (diag/errors-for-fn nil (:id child)))))
+          (testing "fixing the binding via the update core clears everything"
+            (let [r2 (entities/apply-update-core
+                       {:entity-type :binding
+                        :type-str "binding"
+                        :id-uuid (:created r)
+                        :form-data {}
+                        :entity-data {:value 5}}
+                       c)]
+              (is (= (:created r) (:updated r2)))
+              (is (nil? (:type-warnings r2)))
+              (is (nil? (diag/errors-for-fn nil (:id child)))))))
+        (finally (sp/close storage))))))
+
+
+(deftest update-type-breaking-binding-kept-with-warnings-test
+  ;; The update path had NO post-mutation check before Phase 2 (only
+  ;; the now-removed pre-write guard) — this covers the added
+  ;; record-after-write: a valid binding updated to a type-breaking
+  ;; value still updates, warns, and records.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "etp2u-base")
+              slot  (setup/create-slot! storage "a" :int)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              _     (registry/record-rich-types-raw!
+                      :etp2u-base {:return :int :args {:a :int} :effects #{}})
+              child (setup/create-composed-fn! storage "etp2u-child" (:id base))
+              bind  (setup/bind-value! storage (:id child) (:id slot) 5)
+              ;; entity-data deliberately omits :fn-id — the check must
+              ;; recover the owner from the row (partial form payload).
+              r     (entities/apply-update-core
+                      {:entity-type :binding
+                       :type-str "binding"
+                       :id-uuid (:id bind)
+                       :form-data {}
+                       :entity-data {:value "nope"}}
+                      c)]
+          (is (= (:id bind) (:updated r)))
+          (is (vector? (:type-warnings r)))
+          (is (= (:type-warnings r)
+                 (diag/errors-for-fn nil (:id child)))
+              "recorded under the owning fn recovered from the binding row"))
+        (finally (sp/close storage))))))
+
+
+(deftest structural-gates-still-reject-test
+  ;; Phase 2 flipped ONLY the type check. The structural write-rej
+  ;; family (dependency cycles here; MI / terminal / list-closed
+  ;; covered in `crud/validation_test.clj`) must keep hard-rejecting.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [a    (setup/create-base-fn! storage "sg-a")
+            b    (setup/create-base-fn! storage "sg-b")
+            slot (setup/create-slot! storage "s" :any)
+            _    (sp/create-entity storage :binding
+                                   {:fn-id (:id a) :slot-id (:id slot)
+                                    :ref-fn-id (:id b)})
+            rej  (validation/write-rej storage :binding
+                                       {:fn-id (:id b) :slot-id (:id slot)
+                                        :ref-fn-id (:id a)})]
+        (is (some? rej) "closing a ref cycle is still a hard rejection")
+        (is (re-find #"[Dd]ependency cycle" (:reason rej))))
       (finally (sp/close storage)))))
 
 

@@ -1,7 +1,11 @@
 // Type-system arg-value validation — both layers:
 //
-// 1. Backend save-time guard: PUT /api/entities/arg/:id rejects with
-//    400 when the new literal violates the slot's expected type.
+// 1. Backend save-time behavior (Error Tolerance, ROADMAP Block 3):
+//    PUT /api/entities/binding/:id SAVES a type-violating literal and
+//    answers 200 with an additive `type-warnings` array naming the
+//    violation; fixing the value clears the warning (clean legacy
+//    body, no warnings). Type errors are recorded diagnostics, not
+//    rejections — only structural gates still 400.
 // 2. Editor live ✓/✗ status: the value-edit popover surfaces the same
 //    classification before the user clicks Save.
 //
@@ -50,28 +54,52 @@ const TEST_NAME = 'test-arg-value-validation';
     assert(!okResp.status || okResp.status === 200,
            'valid port (22) accepted: ' + JSON.stringify(okResp));
 
-    // -1 is OUTSIDE 1..65535 — backend must reject with 400.
+    // -1 is OUTSIDE 1..65535 — under Error Tolerance the write SAVES
+    // and the response carries a type-warning naming the refinement.
     const badResp = await api(page, 'PUT',
                               '/api/entities/binding/' + port['binding-id'],
                               'value=' + encodeURIComponent('-1'));
-    assert(badResp.status === 400,
-           'out-of-range port (-1) rejected with 400: '
-           + JSON.stringify(badResp));
-    assert(/Type mismatch|refine|port/.test(badResp.body || ''),
-           'rejection body mentions the type / refinement');
+    const badWarnings = badResp['type-warnings']
+      || (badResp.body && JSON.parse(badResp.body)['type-warnings']);
+    assert(!badResp.status || badResp.status === 200,
+           'out-of-range port (-1) SAVES with a warning (tolerance): '
+           + JSON.stringify(badResp).slice(0, 200));
+    assert(Array.isArray(badWarnings) && badWarnings.length > 0,
+           'response carries type-warnings: ' + JSON.stringify(badResp).slice(0, 200));
+    assert(/refine|refinement|port/.test(JSON.stringify(badWarnings)),
+           'warning names the refinement / port slot');
 
-    // String where :int expected — backend rejects.
+    // String where :int expected — also saves, also warns.
     const wrongType = await api(page, 'PUT',
                                 '/api/entities/binding/' + port['binding-id'],
                                 'value=' + encodeURIComponent('"not-a-number"'));
-    assert(wrongType.status === 400,
-           ':text into :port slot rejected with 400');
+    const wrongWarnings = wrongType['type-warnings']
+      || (wrongType.body && JSON.parse(wrongType.body)['type-warnings']);
+    assert(Array.isArray(wrongWarnings) && wrongWarnings.length > 0,
+           ':text into :port slot saves WITH warnings');
 
-    // After all the failed PUTs, the value should still be the last
-    // VALID write (22), not whatever the failed PUTs tried.
+    // Tolerance doctrine: the LAST write wins even when invalid — the
+    // row now holds the warned value, not the last valid one.
     const afterBad = (await getEntities(page, fn.id)).bindings.find(b => b.id === port['binding-id']);
-    assert(afterBad.value === 22,
-           'rejected writes left value at last valid (22)');
+    assert(afterBad.value === 'not-a-number',
+           'warned write persisted (tolerance keeps the row): '
+           + JSON.stringify(afterBad.value));
+
+    // Fixing the value clears the warning — the record→clear cycle
+    // over the wire: a clean write answers with the legacy body and
+    // NO type-warnings.
+    const fixResp = await api(page, 'PUT',
+                              '/api/entities/binding/' + port['binding-id'],
+                              'value=' + encodeURIComponent('22'));
+    assert(!fixResp.status || fixResp.status === 200,
+           'fix write accepted: ' + JSON.stringify(fixResp).slice(0, 120));
+    const fixWarnings = fixResp['type-warnings']
+      || (fixResp.body && (fixResp.body[0] === '{')
+          && JSON.parse(fixResp.body)['type-warnings']);
+    assert(!fixWarnings || fixWarnings.length === 0,
+           'clean write carries no type-warnings');
+    const afterFix = (await getEntities(page, fn.id)).bindings.find(b => b.id === port['binding-id']);
+    assert(afterFix.value === 22, 'fixed value persisted (22)');
 
     // === Editor live ✓/✗ ===
 

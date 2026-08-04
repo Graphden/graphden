@@ -331,13 +331,14 @@
 (defn type-check-fn-after-mutation!
   "Run `check-fn-def!` on the affected fn-id after a CRUD mutation
    touched its bindings/slots. Returns nil on success or
-   `{:reason … :diagnostic …}` on type-check failure — caller can use
-   that to reject + rollback. `:reason` stays the human-readable
-   message string (existing callers embed it verbatim in HTTP
-   rejections); `:diagnostic` is the cleaned structured ex-data
-   (`diag/from-ex` — `:expected` / `:actual` / `:arg-name` / …).
-   Composed fns only; type-rows / base-fns short-circuit (no parents →
-   nothing to check).
+   `{:reason … :diagnostic …}` on type-check failure. Since
+   error-tolerance Phase 2 the CRUD callers KEEP the write on failure
+   and surface `:diagnostic` additively as `:type-warnings` on the
+   success envelope — this guard's job is recording, not rejection.
+   `:reason` stays the human-readable message string; `:diagnostic`
+   is the cleaned structured ex-data (`diag/from-ex` — `:expected` /
+   `:actual` / `:arg-name` / …). Composed fns only; type-rows /
+   base-fns short-circuit (no parents → nothing to check).
 
    Also keeps the per-branch diagnostics store fresh: failure records,
    success clears, the fn's entry under the storage's current branch
@@ -371,14 +372,19 @@
 
 
 (defn type-check-binding-direct!
-  "Save-time type guard for `/api/entities/binding` POST/PUT. Resolves
-   the slot's expected type once, then validates EITHER the value
-   (literal compared by `subtype?`) OR the ref (the bound fn's
-   `:return-type` from the rich-types registry compared via subtype?
-   or unify). Returns nil on success or `{:reason … :diagnostic …}` on
-   rejection (`:reason` = message string, `:diagnostic` = structured
-   `:expected`/`:actual` map). Pre-write guard — the rejected row never
-   lands, so nothing is recorded in the diagnostics store here.
+  "On-demand single-binding type validator. Resolves the slot's
+   expected type once, then validates EITHER the value (literal
+   compared by `subtype?`) OR the ref (the bound fn's `:return-type`
+   from the rich-types registry compared via subtype? or unify).
+   Returns nil on success or `{:reason … :diagnostic …}` on mismatch
+   (`:reason` = message string, `:diagnostic` = structured
+   `:expected`/`:actual` map). Since error-tolerance Phase 2 this is
+   NO LONGER wired as a blocking pre-write gate on
+   `/api/entities/binding` POST/PUT — those writes proceed and the
+   post-mutation `type-check-fn-after-mutation!` records the aggregate
+   result in the diagnostics store. This fn stays available (through
+   the `:type-check-binding-rej` base-fn) for pre-flight validation
+   surfaces that want a verdict WITHOUT writing; it records nothing.
 
    Skip silently when the slot's expected type is `:any` (the
    uninformative escape hatch — type-check can't catch anything

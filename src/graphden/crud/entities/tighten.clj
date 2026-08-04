@@ -41,11 +41,6 @@
   [storage binding-id b new-c _effects-vec]
   (let [hash-hex (records/digest-hex "SHA-1" (pr-str new-c))
         new-id (records/anonymous-fn-id hash-hex)
-        pre-override (:type-override-fn-id b)
-        ;; Track whether WE materialised the anon fn-row this call. A
-        ;; pre-existing row is a shared dedup target (some other binding
-        ;; may already point at it), so it must survive a rejection here;
-        ;; a freshly-created one must be rolled back with the binding.
         created? (nil? (sp/read-entity storage :fn new-id))]
     ;; Find or create. Storage upsert is the natural fit — same
     ;; id ⇒ same row, no orphan duplicates.
@@ -65,24 +60,21 @@
     ;; Aggregate type-check on the owning fn. The bound-callable
     ;; effect check above is the primary guard; this catches
     ;; whatever else `check-fn-def!` evaluates (return-type
-    ;; subtype, deeper structural unification, etc.). Roll back
-    ;; on rejection so the binding doesn't end up in a broken
-    ;; state the user has to debug.
-    (if-let [post-rej (tc/type-check-fn-after-mutation! storage (:fn-id b))]
-      (do (sp/update-entity storage :binding binding-id
-                            {:type-override-fn-id pre-override})
-          ;; Roll back the anon fn-row too — but only the one we just
-          ;; created. Skipping this left an orphan constraint-row behind
-          ;; on every rejected tighten.
-          (when created?
-            (sp/delete-entity storage :fn new-id))
-          {:status 400
-           :reason (str "Tightening rejected by post-write "
-                        "type-check: " (:reason post-rej))})
+    ;; subtype, deeper structural unification, etc.).
+    ;; Error-tolerance Phase 2: the new override is KEPT even when
+    ;; the aggregate check fails — the guard records the failure in
+    ;; the per-branch diagnostics store (and a later fixing write
+    ;; clears it), and the response surfaces it additively as
+    ;; `:type-warnings` on the success payload. The subtype-safety
+    ;; pre-checks in `tighten-fn-type-impl!` (widening rejection,
+    ;; bound-callable effect escape) stay hard rejections — they
+    ;; guard the tighten operation's own contract, not fn validity.
+    (let [post-rej (tc/type-check-fn-after-mutation! storage (:fn-id b))]
       {:status 200
-       :result {:type-override-fn-id new-id
-                :constraint new-c
-                :fn-id (:fn-id b)}})))
+       :result (cond-> {:type-override-fn-id new-id
+                        :constraint new-c
+                        :fn-id (:fn-id b)}
+                 post-rej (assoc :type-warnings [(:diagnostic post-rej)]))})))
 
 
 (defn tighten-fn-type-impl!

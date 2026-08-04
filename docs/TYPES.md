@@ -729,8 +729,11 @@ are complementary:
   on drift.
 - A slot-level `[:fn args ret eff-set]` constraint binds at the
   callsite: "any callable bound *here* must satisfy this effect
-  bound". It's a *hard reject* at sync time, same channel as a
-  return-type mismatch.
+  bound". At package-sync time it's a *hard reject* (the sweep
+  allowlist gate), same channel as a return-type mismatch; on a USER
+  CRUD write it's a recorded diagnostic + `:type-warnings` on the
+  kept row (error-tolerance Phase 2 — type errors no longer block
+  user writes).
 
 Use the slot constraint when the *contract of the HOF itself*
 demands purity (`:filter`, `:map`, `:reduce` — order-independence,
@@ -771,10 +774,12 @@ every binding along the inheritance chain.
 
 - **Optional → required**: allowed (a binding with `:required true`).
   Once narrowed, *every* descendant inherits the required state.
-- **Required → optional**: forbidden. The sync-time check rejects
-  any binding row carrying `:required false` with
-  `:bindings/widening-required`. Optionality is declared once, on
-  the slot itself.
+- **Required → optional**: forbidden. The check flags any binding row
+  carrying `:required false` with `:bindings/widening-required` —
+  a hard reject at package-sync time; on a USER CRUD write the row is
+  kept and the violation is recorded as a diagnostic +
+  `:type-warnings` (error-tolerance Phase 2). Optionality is declared
+  once, on the slot itself.
 
 A binding may legitimately combine `:required true` with other
 metadata (`:value`, `:as`, `:type`) — narrowing applies regardless
@@ -797,7 +802,7 @@ direction, no surprises.
 |-------|-------------|
 | `binding.required` (schema) | Optional bool. nil = no opinion at this binding. |
 | `effective-required?` | Walks the inheritance chain, ORs slot's `:required` with every binding's `:required true`. Used by `classify-slot` to populate the `:free` entry's `:required` field. |
-| `check-binding-monotonicity!` | Unified pre-pass in `check-fn-def!` — rejects `:required false` bindings (tag `:bindings/widening-required`) AND `:type T` overrides where T ⊄ inherited slot type (tag `:bindings/widening-type`). Fires on package load AND on CRUD writes. Replaces the older `check-required-widening!` which only covered the boolean half. |
+| `check-binding-monotonicity!` | Unified pre-pass in `check-fn-def!` — flags `:required false` bindings (tag `:bindings/widening-required`) AND `:type T` overrides where T ⊄ inherited slot type (tag `:bindings/widening-type`). Fires on package load (hard reject, sweep-gated) AND on CRUD writes (recorded diagnostic + `:type-warnings`, row kept — error-tolerance Phase 2). Replaces the older `check-required-widening!` which only covered the boolean half. |
 | Loader (`map-arg-value->binding-fields`) | Recognises `:required` in `:args`-value maps and emits the corresponding binding-row column. |
 
 ---
@@ -1203,7 +1208,9 @@ blocking on the more lenient sync-time WARN.
 
 **Goal:** types created via API/editor become resolvable to the
 type-checker without a server restart, and broken bindings get
-rejected at write time instead of silently breaking later.
+caught at write time instead of silently breaking later. (The
+"caught = rejected" half of this phase was later superseded by
+error-tolerance Phase 2 — see the note below.)
 
 **Single invalidation entry point.** `invalidate-graph-cache!` in
 `executor/context.clj` clears `:graph-cache`, `:compiled-registry`,
@@ -1220,15 +1227,21 @@ references resolve regardless of declaration order. Mirrors the
 EDN-side `register-type-aliases!` which only sees package data —
 runtime additions follow the same path.
 
-**Save-time rejection on type-check failure.** CRUD's
-`process-create-entity` validates ref-bindings (target's
-`:return-type` ⊆ slot's expected type via `subtype?`) AND runs
-full `check-fn-def!` on the owning fn-def for any binding /
-binding-list-item mutation. On failure, the just-created entity
-is deleted (best-effort rollback) and the response carries the
-type-checker's diagnostic. `parse-fn-from-form` resolves
-`return-type` form values via storage lookup with explicit error
-on unknown names.
+**Save-time type-check → recorded diagnostics (updated by
+error-tolerance Phase 2).** CRUD's create / update / tighten cores
+run full `check-fn-def!` on the owning fn-def for any binding /
+binding-list-item mutation. As originally shipped this phase
+DELETED the just-created entity on failure (best-effort rollback)
+and returned the diagnostic as a 400; error-tolerance Phase 2
+flipped that: the row is KEPT, the failure is recorded in the
+per-branch diagnostics store (`graphden.types.diagnostics`,
+cleared when a later write fixes the fn), and the 200 response
+carries `:type-warnings [{…diagnostic…}]` additively. Only the
+structural gates (cycles, name collisions, terminal / list-closed,
+MI, reparent-cross-branch) still reject a user write; the package
+corpus stays hard-gated at sync time by the sweep allowlist.
+`parse-fn-from-form` resolves `return-type` form values via
+storage lookup with explicit error on unknown names.
 
 **Polymorphic `:invoke` via runtime detection.** `:invoke :func`
 is typed `[:fn {:arg a} b]` — the type-checker unifies, runtime

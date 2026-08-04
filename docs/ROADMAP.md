@@ -63,7 +63,10 @@ Launch-order refinements agreed 2026-07-20:
    sidebar — ~3-4 days
 2. **Workspaces** (namespace M:N self-link + UI scoping) — ~1 week
 3. **Error tolerance** (type mismatches as derived diagnostics, not
-   silent swallow) — ~3-4 days. See § Future Work → Error Tolerance.
+   silent swallow) — phases 0–2 shipped (structured diagnostics +
+   per-branch store + non-blocking user CRUD writes with
+   `:type-warnings`); the editor surface + branch policy gates
+   remain — ~1-2 days. See § Future Work → Error Tolerance.
 4. **Debug/observability** with the PHILOSOPHY § Debugging
    constraints (per-fn opt-in, sampling, `:secret` auto-skip,
    size/TTL limits) — ~1.5 weeks
@@ -391,25 +394,40 @@ Execute function: calculate-report
 **Goal**: A graph with type errors can be saved and iterated on — sketch
 the structure first, fix details later — without errors being silent.
 
-**Current state**: type mismatch IS treated as an error (the type-rules
-throw). The sync-time sweep wraps every `check-fn-def!` in a `try/catch`,
-but the failure is NOT silent anymore: each failing fn is logged with its
-reason, a summary WARN fires, and `assert-sweep-failures-match-allowlist!`
-THROWS at sync time on any failure outside the (empty) allowlist — so a
-new broken fn blocks boot/CI. What's still true: the failing fn's
-computed rich type drops from the registry (its effect strip / computed
-return go missing in the editor), and the editor shows only per-arg
-mismatch rings — there is no graph-level error status or branch-wide
-error list.
+**Current state — phases 0–2 SHIPPED, 3–5 pending.**
 
-**What's needed:**
+- *Phase 0 (done)*: the CRUD check guards return structured
+  diagnostics — `type-check-fn-after-mutation!` /
+  `type-check-binding-direct!` carry a cleaned `:diagnostic` map
+  (`:expected` / `:actual` / `:arg-name` / `:message`) alongside the
+  human `:reason`.
+- *Phase 1 (done)*: `graphden.types.diagnostics` — a per-branch
+  in-memory store; the post-mutation guard records failures and
+  clears them again when a later write fixes the fn.
+- *Phase 2 (done)*: the behaviour flip. A USER CRUD write that fails
+  the TYPE check KEEPS the row — no rollback, no 400: the create /
+  update apply-cores and the tighten commit record the diagnostic
+  and the success envelope carries `:type-warnings
+  [{…diagnostic…}]` additively (a 200 JSON `{message,
+  type-warnings}` body when warnings exist; the legacy HTML body
+  otherwise). The pre-write single-binding guard is unhooked from
+  the create/update validation chains (kept as the on-demand
+  `:type-check-binding-rej` validator). Structural gates — cycles,
+  name collisions, terminal / list-closed, MI, reparent-cross-branch
+  — still hard-reject, and the package corpus is still gated at sync
+  time by `assert-sweep-failures-match-allowlist!` (a broken
+  first-party fn still blocks boot/CI).
+- *Still true / pending (phases 3–5)*: a failing fn's computed rich
+  type drops from the registry (its effect strip / computed return
+  go missing in the editor); the editor shows only its local per-arg
+  mismatch rings and ignores `:type-warnings` — there is no
+  graph-level error status or branch-wide error list yet.
 
-- Type errors as DERIVED, non-blocking diagnostics — recorded per fn,
-  always recomputed, never swallowed. Saving an invalid fn stays
-  allowed; only the hard structural gates (cycles, name uniqueness,
-  terminal/list-closed) reject a write.
+**What's needed (remaining phases):**
+
 - Graph-level "this fn has N errors" status + a "view all errors in a
-  branch" surface.
+  branch" surface, fed from the diagnostics store + the response
+  `:type-warnings`.
 - Branch policy gates: a protected branch may forbid invalid fns
   (block merge); execution of an invalid fn is refused with a clear
   "unresolved type errors" message rather than a runtime crash.

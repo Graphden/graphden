@@ -140,15 +140,21 @@
 
 
 (defbase type-check-binding-rej
-  "Stage-2 type-checker for `:binding` create/update flows. Wraps
+  "On-demand single-binding type validator. Wraps
    `type-check/type-check-binding-direct!` which runs the full graphden
    type system against the binding's `:value` / `:ref-fn-id` against
    the slot's declared type. Returns nil on success or `{:reason
-   <message>}` on a type mismatch (it never throws for a mismatch) —
-   the create/update Stage-2 `:cond` surfaces that `:reason` as a 400.
+   <message>}` on a type mismatch (it never throws for a mismatch).
 
-   `id` is the existing binding row's id on UPDATE (so the check sees
-   the merged post-write state); pass nil on CREATE."
+   Error-tolerance Phase 2 unhooked this from the create/update
+   Stage-2 `:cond` chains — binding writes proceed and the post-write
+   aggregate check inside the `try-apply-*` cores records failures as
+   per-branch diagnostics instead. Compose this where a verdict
+   WITHOUT a write is wanted (pre-flight validation); it records
+   nothing in the diagnostics store.
+
+   `id` is an existing binding row's id (the check then sees the
+   merged post-write state); nil to validate standalone entity-data."
   [entity-data id]
   (cr/record-effect! :db)
   (when entity-data
@@ -555,27 +561,24 @@
 
 
 
-;; `:_create-write-rej` and `:_create-binding-type-rej` are now graph
-;; fn-defs — see fns.edn. Both compose over the new `:write-rej` /
-;; `:type-check-binding-rej` atomic primitives (the same the update
-;; chain uses).
+;; `:_create-write-rej` is a graph fn-def — see fns.edn — composing
+;; over the `:write-rej` atomic primitive (the same the update chain
+;; uses). The former `:_create-binding-type-rej` guard is gone
+;; (error-tolerance Phase 2): type validity no longer gates the write.
 
 
 
 (defbase try-apply-create
   "§3.3 atomic core of the create-apply flow: capability gate +
    `sp/create-entity` + Phase-6c rename-slot side-effect + post-
-   create whole-fn type-check + on-failure rollback. Returns a
-   uniform `{:created <id>}` on success or `{:error <human-msg>}`
-   on any failure (cap-gate, write-time error, post-check rejection).
+   create whole-fn type-check. Returns a uniform `{:created <id>}`
+   on success — plus `:type-warnings [<diagnostic> …]` when the write
+   landed but the owning fn now fails the aggregate type-check
+   (error-tolerance Phase 2: the row is KEPT, the failure recorded as
+   a per-branch diagnostic) — or `{:error <human-msg>}` on a write
+   failure (cap-gate, storage error).
 
-   The §3.3 invariant is the type-check ↔ rollback pair: both must
-   see the SAME just-created row id. Splitting them across graph
-   nodes would risk a stale-row read if `:graph-cache` invalidation
-   races between the steps. Keeping the pair inside one defbase
-   keeps that contract verifiable from one place.
-
-   The outer graph composition runs the cheap rejection clauses
+   The outer graph composition runs the STRUCTURAL rejection clauses
    (validation, secret-fn guard) BEFORE this primitive fires, then
    dispatches on the returned shape and runs invalidate / notify /
    response."
@@ -590,17 +593,21 @@
 
 (defbase try-apply-update
   "Atomic core of the update-apply flow: `sp/update-entity` +
-   rename-slot side-effect (binding writes only). Returns
-   a uniform `{:updated <id>}` on success or `{:error <msg>}` on
-   write failure. Rename-slot failure is logged but never escalated
-   (the binding row is still useful without the renamed view).
+   rename-slot side-effect (binding writes only) + post-write
+   whole-fn type-check for binding-shaped updates. Returns a uniform
+   `{:updated <id>}` on success — plus `:type-warnings [<diagnostic>
+   …]` when the write landed but the owning fn now fails the
+   aggregate type-check (error-tolerance Phase 2: recorded as a
+   per-branch diagnostic, never rolled back) — or `{:error <msg>}`
+   on write failure. Rename-slot failure is logged but never
+   escalated (the binding row is still useful without the renamed
+   view).
 
    This IS the `_apply` stage of the already-decomposed
    parse→validate→apply update flow (C2-C4): the write, its
    error-envelope, and the write-dependent rename-slot side effect
    are one coupled unit — the same class as the other `_apply` cores
-   this file keeps. Unlike create it has no post-write type-check +
-   rollback journal, so no `:try`-journal graph shape applies."
+   this file keeps."
   [entity-type id-uuid entity-data type-str form-data]
   (cr/record-effect! :db)
   (entities/apply-update-core {:entity-type (keyword entity-type)

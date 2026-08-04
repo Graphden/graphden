@@ -359,7 +359,9 @@ FILE_COUNT=$((PASS + FAIL))
        "$TOTAL_SECS" "$FILE_COUNT" "$((TOTAL_SECS / FILE_COUNT))"
 
 # The executor's memory, first file vs last. The retry above blames "JVM GC
-# pressure when heap passes ~85%" for the suite-tail flakes. Nobody had checked.
+# pressure when heap passes ~85%" for the suite-tail flakes. Checked 2026-08-04:
+# after-GC live-set stays flat (~60MB) across the whole suite — first->last RSS
+# growth on a fresh boot is committed-heap expansion toward MaxRAMPercentage.
 echo
 echo "── entities leaked into the graph ──"
 if [ -n "$LEAKS" ]; then
@@ -372,7 +374,19 @@ fi
 
 echo
 echo "── executor memory, first file -> last ──"
+# The caption is COMPUTED, not asserted: a >25% climb earns the
+# tail-flake note, anything else reads "steady". (The old hardcoded
+# "climbing" suffix printed even on a +0.7MiB run and sent a
+# heap-dump investigation chasing a leak that wasn't there — the
+# 2026-08-04 probe measured a FLAT ~60MB after-GC live-set across
+# the whole suite; the gate's first->last growth is G1 committing
+# heap toward MaxRAMPercentage under a fresh boot, not retention.)
 printf '%s' "$TIMINGS" | awk -F'\t' 'NR==1{first=$2} {last=$2} END{
-  printf "  %s  ->  %s   (climbing = the tail-flake theory has legs)\n", first, last}'
+  f=first; l=last
+  fv=f; sub(/[A-Za-z].*/,"",fv); lv=l; sub(/[A-Za-z].*/,"",lv)
+  fb=(f ~ /GiB/)? fv*1024 : fv+0
+  lb=(l ~ /GiB/)? lv*1024 : lv+0
+  note=(fb>0 && lb>fb*1.25)? "(climbed >25% — check after-GC live-set in the gc log before calling it a leak)" : "(steady)"
+  printf "  %s  ->  %s   %s\n", first, last, note}'
 echo "============================================================"
 exit "$WORST"

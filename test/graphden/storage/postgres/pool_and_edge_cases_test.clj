@@ -1,5 +1,16 @@
-(ns ^:serial graphden.storage.postgres.pool-and-edge-cases-test
-  "Tests for PostgreSQL storage pool management, timeouts, and edge cases."
+(ns graphden.storage.postgres.pool-and-edge-cases-test
+  "Tests for PostgreSQL storage pool management, timeouts, and edge cases.
+
+   Parallel-safe (previously `^:serial` for `with-redefs` over
+   `metadata/read-metadata-rows` / `metadata/parse-metadata` — both
+   process-global root rebinds):
+   - the parse-extra edge cases call the PURE
+     `metadata/parse-metadata-lenient` directly on fixture rows;
+   - the metadata/DB-inconsistency test plants a real corrupted
+     `_schema_metadata` row instead of stubbing `parse-metadata`;
+   - the SQLException-rethrow tests bind the thread-local
+     `metadata/*read-rows-override*` seam (house pattern —
+     `advisory-lock/*impl-override*`)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.malli.core :as mds]
@@ -254,106 +265,42 @@
 ;; === Edge case coverage tests ===
 
 (deftest edge-case-coverage-test
-  (testing "parse-extra handles non-string non-PGobject values"
-    ;; This covers the :else branch in parse-extra (line 160)
-    (let [storage (setup/create-test-storage)
-          entity-uuid #uuid "00000000-0000-0000-0000-000000008001"
-          field-uuid #uuid "00000000-0000-0000-0000-000000008002"]
-      (try
-        (let [schema (th/make-schema :entity-name :test-entity
-                                     :entity-uuid entity-uuid
-                                     :fields {:name {:uuid field-uuid :type :text}})]
-          (sp/initialize storage schema))
-        ;; Mock read-metadata-rows to return a row with extra as a number (not string/PGobject)
-        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra nil}
-                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
-                          :extra 12345}]] ; number instead of string/PGobject
-          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
-            ;; schema-metadata uses parse-metadata-lenient which calls parse-extra
-            (let [metadata (sp/schema-metadata storage)]
-              ;; Should not throw, just parse what it can
-              (is (some? metadata)))))
-        (finally
-          (sp/close storage)))))
+  ;; `parse-metadata-lenient` (and the `parse-extra` it wraps) is PURE —
+  ;; feed it fixture rows directly instead of stubbing
+  ;; `read-metadata-rows` under a live storage. Same rows the old
+  ;; stubbed `sp/schema-metadata` round-trip fed it.
+  (let [entity-uuid #uuid "00000000-0000-0000-0000-000000008001"
+        field-uuid #uuid "00000000-0000-0000-0000-000000008002"
+        rows (fn [entity-extra field-extra]
+               [{:uuid entity-uuid :kind "entity" :name "test-entity"
+                 :parent_uuid nil :extra entity-extra}
+                {:uuid field-uuid :kind "field" :name "name"
+                 :parent_uuid entity-uuid :extra field-extra}])
+        plain-field-entry {:entity :test-entity :field :name}]
+    (testing "parse-extra handles non-string non-PGobject values"
+      ;; Number instead of string/PGobject — covers the :else branch in
+      ;; parse-extra.
+      (let [md (metadata/parse-metadata-lenient (rows nil 12345))]
+        (is (= plain-field-entry (get-in md [:fields field-uuid]))
+            "non-map extra is dropped; the field entry survives without a type")))
 
-  (testing "parse-extra handles string 'null' value"
-    (let [storage (setup/create-test-storage)
-          entity-uuid #uuid "00000000-0000-0000-0000-000000008050"
-          field-uuid #uuid "00000000-0000-0000-0000-000000008051"]
-      (try
-        (let [schema (th/make-schema :entity-name :test-entity
-                                     :entity-uuid entity-uuid
-                                     :fields {:name {:uuid field-uuid :type :text}})]
-          (sp/initialize storage schema))
-        ;; Mock read-metadata-rows to return "null" string
-        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra "null"}
-                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
-                          :extra "null"}]]
-          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
-            (let [metadata (sp/schema-metadata storage)]
-              (is (some? metadata)))))
-        (finally
-          (sp/close storage)))))
+    (testing "parse-extra handles string 'null' value"
+      (let [md (metadata/parse-metadata-lenient (rows "null" "null"))]
+        (is (= plain-field-entry (get-in md [:fields field-uuid])))))
 
-  (testing "parse-extra handles empty JSON object string"
-    (let [storage (setup/create-test-storage)
-          entity-uuid #uuid "00000000-0000-0000-0000-000000008060"
-          field-uuid #uuid "00000000-0000-0000-0000-000000008061"]
-      (try
-        (let [schema (th/make-schema :entity-name :test-entity
-                                     :entity-uuid entity-uuid
-                                     :fields {:name {:uuid field-uuid :type :text}})]
-          (sp/initialize storage schema))
-        ;; Mock read-metadata-rows to return "{}" string
-        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra "{}"}
-                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
-                          :extra "{}"}]]
-          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
-            (let [metadata (sp/schema-metadata storage)]
-              (is (some? metadata)))))
-        (finally
-          (sp/close storage)))))
+    (testing "parse-extra handles empty JSON object string"
+      (let [md (metadata/parse-metadata-lenient (rows "{}" "{}"))]
+        (is (= plain-field-entry (get-in md [:fields field-uuid])))))
 
-  (testing "parse-extra handles raw string input"
-    (let [storage (setup/create-test-storage)
-          entity-uuid #uuid "00000000-0000-0000-0000-000000008070"
-          field-uuid #uuid "00000000-0000-0000-0000-000000008071"]
-      (try
-        (let [schema (th/make-schema :entity-name :test-entity
-                                     :entity-uuid entity-uuid
-                                     :fields {:name {:uuid field-uuid :type :text}})]
-          (sp/initialize storage schema))
-        ;; Mock read-metadata-rows to return a valid JSON string
-        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra nil}
-                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
-                          :extra "{\"type\": \"text\", \"nullable?\": \"false\"}"}]]
-          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
-            (let [metadata (sp/schema-metadata storage)]
-              (is (some? metadata))
-              ;; Should have parsed the string values to keywords
-              (is (= :text (:type (val (first (:fields metadata)))))))))
-        (finally
-          (sp/close storage)))))
+    (testing "parse-extra handles raw string input"
+      (let [md (metadata/parse-metadata-lenient
+                 (rows nil "{\"type\": \"text\", \"nullable?\": \"false\"}"))]
+        ;; String values are parsed back to keywords.
+        (is (= :text (get-in md [:fields field-uuid :type])))))
 
-  (testing "parse-extra handles empty string"
-    (let [storage (setup/create-test-storage)
-          entity-uuid #uuid "00000000-0000-0000-0000-000000008080"
-          field-uuid #uuid "00000000-0000-0000-0000-000000008081"]
-      (try
-        (let [schema (th/make-schema :entity-name :test-entity
-                                     :entity-uuid entity-uuid
-                                     :fields {:name {:uuid field-uuid :type :text}})]
-          (sp/initialize storage schema))
-        ;; Mock read-metadata-rows to return empty string for extra
-        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra ""}
-                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
-                          :extra ""}]]
-          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
-            (let [metadata (sp/schema-metadata storage)]
-              ;; Should work, extra is just nil
-              (is (some? metadata)))))
-        (finally
-          (sp/close storage))))))
+    (testing "parse-extra handles empty string"
+      (let [md (metadata/parse-metadata-lenient (rows "" ""))]
+        (is (= plain-field-entry (get-in md [:fields field-uuid])))))))
 
 
 ;; === Uninitialized storage tests ===
@@ -385,36 +332,38 @@
     (let [storage (setup/create-test-storage)
           entity-uuid #uuid "00000000-0000-0000-0000-000000007001"
           field-uuid #uuid "00000000-0000-0000-0000-000000007002"
+          ghost-uuid #uuid "00000000-0000-0000-0000-000000007099"
           schema1 (th/make-schema :entity-name :user
                                   :entity-uuid entity-uuid
                                   :fields {:name {:uuid field-uuid :type :text}})]
       (try
         ;; First initialize normally
         (sp/initialize storage schema1)
-        ;; Mock parse-metadata to return metadata claiming a non-existent field
-        (let [fake-metadata {:entities {entity-uuid :user}
-                             :fields {field-uuid {:entity :user
-                                                  :field :name
-                                                  :type :text
-                                                  :nullable? false}
-                                      ;; This field doesn't exist in DB!
-                                      #uuid "00000000-0000-0000-0000-000000007099"
-                                      {:entity :user
-                                       :field :ghost-field
-                                       :type :text
-                                       :nullable? false}}
-                             :enums {}
-                             :enum-values {}}
-              schema2 (-> (mds/create-builder)
+        ;; Plant REAL corrupted state instead of stubbing `parse-metadata`:
+        ;; a `_schema_metadata` row claiming a `ghost-field` that has no
+        ;; matching DB column. The strict re-init parse reads it off the
+        ;; actual table. Extra mirrors what `save-metadata-in-tx!` writes
+        ;; (boolean nullable?, string type).
+        (let [{:keys [jdbc-url username password]} (setup/get-container-config)]
+          (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
+                                                 :user username
+                                                 :password password})]
+            (jdbc/execute! conn
+                           ["INSERT INTO _schema_metadata (uuid, kind, name, parent_uuid, extra) VALUES (?, ?, ?, ?, ?::jsonb)"
+                            ghost-uuid "field" "ghost-field" entity-uuid
+                            "{\"type\": \"text\", \"nullable?\": false}"])))
+        ;; Re-initialize with a schema that declares the ghost field under
+        ;; the same uuid — the field verifier finds it in old metadata but
+        ;; no `ghost_field` column in the table.
+        (let [schema2 (-> (mds/create-builder)
                           (ds/add-entity :user entity-uuid
                                          {:name {:uuid field-uuid :type :text}
-                                          :ghost-field {:uuid #uuid "00000000-0000-0000-0000-000000007099"
+                                          :ghost-field {:uuid ghost-uuid
                                                         :type :text}})
                           ds/build)]
-          (with-redefs [metadata/parse-metadata (constantly fake-metadata)]
-            (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                  #"Metadata/DB inconsistency"
-                  (sp/initialize storage schema2)))))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Metadata/DB inconsistency"
+                (sp/initialize storage schema2))))
         (finally
           (sp/close storage))))))
 
@@ -433,9 +382,10 @@
   (testing "current-fields re-throws non-42P01 SQLException"
     (let [storage (setup/create-test-storage)]
       (try
-        ;; Mock read-metadata-rows to throw a non-42P01 SQLException
+        ;; Thread-local seam (not `with-redefs`): make the metadata read
+        ;; throw a non-42P01 SQLException.
         (let [connection-error (SQLException. "connection failed" "08001")]
-          (with-redefs [metadata/read-metadata-rows (fn [_] (throw connection-error))]
+          (binding [metadata/*read-rows-override* (fn [_] (throw connection-error))]
             (is (thrown? SQLException (sp/current-fields storage :any-entity)))))
         (finally
           (sp/close storage)))))
@@ -443,9 +393,10 @@
   (testing "schema-metadata re-throws non-42P01 SQLException"
     (let [storage (setup/create-test-storage)]
       (try
-        ;; Mock read-metadata-rows to throw a non-42P01 SQLException
+        ;; Thread-local seam (not `with-redefs`): make the metadata read
+        ;; throw a non-42P01 SQLException.
         (let [connection-error (SQLException. "connection failed" "08001")]
-          (with-redefs [metadata/read-metadata-rows (fn [_] (throw connection-error))]
+          (binding [metadata/*read-rows-override* (fn [_] (throw connection-error))]
             (is (thrown? SQLException (sp/schema-metadata storage)))))
         (finally
           (sp/close storage))))))

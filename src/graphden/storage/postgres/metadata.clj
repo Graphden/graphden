@@ -36,14 +36,28 @@
 
 ;; === Read operations ===
 
+(def ^:dynamic *read-rows-override*
+  "Parallel-test seam: when bound, `read-metadata-rows` calls this fn
+   `(f ds)` instead of querying `_schema_metadata` — lets a test throw
+   a synthetic SQLException through the boot-path readers
+   (`schema-metadata` / `current-fields`) without `with-redefs`-ing the
+   root var (process-global → forced a `^:serial` pin on
+   `pool-and-edge-cases-test`). nil (production) = real query. Mirrors
+   `advisory-lock/*impl-override*`. Cold path: metadata reads happen
+   only at boot / migration / cache-miss."
+  nil)
+
+
 (defn read-metadata-rows
   "Reads raw metadata rows for processing."
   [ds]
-  (jdbc/execute! ds
-                 (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
-                              :from [(keyword metadata-table-name)]}
-                             {:quoted true})
-                 (util/query-opts)))
+  (if-let [f *read-rows-override*]
+    (f ds)
+    (jdbc/execute! ds
+                   (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
+                                :from [(keyword metadata-table-name)]}
+                               {:quoted true})
+                   (util/query-opts))))
 
 
 ;; === JSON conversion ===

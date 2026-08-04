@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.versioning.merge.core-test
+(ns ^:integration graphden.versioning.merge.core-test
   "Tests for `graphden.versioning.merge.core` — merge protection traits.
 
    Storage stack: PostgreSQL via testcontainer + graph + versioning +
@@ -6,12 +6,15 @@
    row to attach to, so every test seeds a base-fn + slot + binding
    before exercising the protection API.
 
-   `^:serial` (tests.edn contract): the resolution-write-failure test
-   `with-redefs`es `pg-crud/create-entities` — a PROCESS-WIDE root
-   var. Under the parallel runner the injected `boom` leaked into
-   whatever sibling NS happened to sync fn-defs during that window
-   (observed: state-cell-test's `sync-fns-to-storage!` dying with
-   `{:injected true}` in a landing gate)."
+   Parallel-safe: the resolution-write-failure test injects its write
+   failure by `binding` the THREAD-LOCAL
+   `pg-crud/*create-entities-override*` seam (house pattern —
+   `advisory-lock/*impl-override*`), not by `with-redefs`-ing the root
+   var. The root rebind was process-wide and leaked the injected
+   `boom` into whatever sibling NS happened to sync fn-defs during
+   that window (observed: state-cell-test's `sync-fns-to-storage!`
+   dying with `{:injected true}` in a landing gate), which forced a
+   `^:serial` pin on this NS."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
@@ -258,12 +261,17 @@
           "expected a conflict on the binding")
       ;; Inject a failure into the resolution write only. `create-merge-record!`
       ;; uses `create-entity` (singular) and runs FIRST inside the tx;
-      ;; `apply-resolutions!` uses `create-entities` (plural, batched) — redef
-      ;; the postgres impl of that to throw, so the merge record is written
-      ;; then rolled back. (Redef the concrete `pg-crud/create-entities` defn,
-      ;; which the protocol method delegates to, rather than the protocol var.)
+      ;; `apply-resolutions!` uses `create-entities` (plural, batched) — bind
+      ;; the thread-local `*create-entities-override*` seam in the concrete
+      ;; postgres impl (which the protocol method delegates to) to throw, so
+      ;; the merge record is written then rolled back. A protocol-level
+      ;; wrapper storage can't intercept here without breaking the very
+      ;; atomicity under test: `merge-branch!` reaches into the concrete
+      ;; record (`(:pool base-storage)` + `(assoc base-storage :pool tx)`)
+      ;; for its transaction plumbing.
       (let [threw? (atom false)]
-        (with-redefs [pg-crud/create-entities (fn [& _] (throw (ex-info "boom" {:injected true})))]
+        (binding [pg-crud/*create-entities-override*
+                  (fn [& _] (throw (ex-info "boom" {:injected true})))]
           (try (vs/merge-branch! storage (:id source)
                                  {:conflict-resolutions {[:binding (:id b)] :source}})
                (catch clojure.lang.ExceptionInfo _ (reset! threw? true))))

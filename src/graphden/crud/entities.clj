@@ -330,7 +330,20 @@
          :reason "fn-defs with parent on an admin-only vault base-fn (:secret-leaf / :vault-put / :vault-delete / :vault-metadata-put) can only be created via POST /api/secrets — the admin path that also writes the value to OpenBao. Use the Secrets sidebar panel in the editor, or call /api/secrets directly."}))))
 
 
-(defn create-entity
+(def ^:dynamic *create-entity-override*
+  "Parallel-test failure-injection seam: when bound, `create-entity`
+   calls this fn `(f entity-type data ctx)` instead of the real body.
+   An override that wants the real behaviour for a subset of calls
+   re-binds this var to nil and re-enters `create-entity`. nil
+   (production) = real body. Tests `binding` this instead of
+   `with-redefs`-ing the root var — a root rebind is process-global
+   and forced a `^:serial` pin on `crud.secrets-test`. Mirrors
+   `advisory-lock/*impl-override*`. Cost on the real path: one nil
+   check per CRUD create."
+  nil)
+
+
+(defn- create-entity-impl
   [entity-type data ctx]
   ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
   ;; completes even if the client disconnects mid-request (see
@@ -369,6 +382,13 @@
           (invalidate! ctx storage et result)
           (notify-after-write! ctx storage et :write result)
           result)))))
+
+
+(defn create-entity
+  [entity-type data ctx]
+  (if-let [f *create-entity-override*]
+    (f entity-type data ctx)
+    (create-entity-impl entity-type data ctx)))
 
 
 (defn update-entity

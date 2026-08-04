@@ -33,6 +33,30 @@
   (atom nil))
 
 
+;; =============================================================================
+;; Parallel-test seam
+;; =============================================================================
+
+(def ^:dynamic *impl-override*
+  "Parallel-test seam: a map of `{op-keyword → fn}` shadowing the real
+   HTTP implementation of the correspondingly-named vault operation
+   (`:get-secret` `:put-secret` `:delete-secret` `:get-metadata`
+   `:put-metadata`). Each override fn receives the same args as the
+   public fn (client map first). nil (production) = every call performs
+   the real OpenBao request. Tests `binding` this instead of
+   `with-redefs`-ing the root vars — a root rebind is process-global
+   and forced a `^:serial` pin on `crud.secrets-test` (a sibling NS
+   exercising real vault calls during the window would have seen the
+   fake). Mirrors `advisory-lock/*impl-override*`. Cost on the real
+   path: one nil-map lookup per vault call."
+  nil)
+
+
+(defn- impl
+  [op]
+  (get *impl-override* op))
+
+
 (defn- require-path!
   "Reject nil / non-string / blank paths upfront with a clean
    `:vault/lookup-failed :reason :missing-path` ex-info. The string-
@@ -102,69 +126,84 @@
   "Read `secret/data/<path>` and return the inner `data.data.value`
    string. Raises if missing or shape doesn't match the single-value
    convention."
-  [{:keys [address token]} path]
-  (require-path! path "get-secret")
-  (let [resp @(http/get (vault-url address "data" path) (request-opts token))
-        _ (check-status! resp #{200} path "GET data")
-        parsed (json/parse-string (:body resp) true)
-        value (get-in parsed [:data :data :value])]
-    (when-not (string? value)
-      ;; Do NOT put `parsed` in ex-data — for a KV v2 read it embeds the
-      ;; secret material itself, and this ex-data is persisted verbatim into
-      ;; a fn-execution's API-readable `:error-data` (redaction only fires
-      ;; for `:secret`-typed RETURNS, so a fn that merely reads a secret
-      ;; would leak it). The path + a class hint are enough to debug.
-      (throw (ex-info (str "Vault secret at " path
-                           " is missing `data.value` (expected a string)")
-                      {:type :vault/lookup-failed :path path
-                       :value-class (some-> value class .getName)})))
-    value))
+  [{:keys [address token] :as client} path]
+  (if-let [f (impl :get-secret)]
+    (f client path)
+    (do
+      (require-path! path "get-secret")
+      (let [resp @(http/get (vault-url address "data" path) (request-opts token))
+            _ (check-status! resp #{200} path "GET data")
+            parsed (json/parse-string (:body resp) true)
+            value (get-in parsed [:data :data :value])]
+        (when-not (string? value)
+          ;; Do NOT put `parsed` in ex-data — for a KV v2 read it embeds the
+          ;; secret material itself, and this ex-data is persisted verbatim into
+          ;; a fn-execution's API-readable `:error-data` (redaction only fires
+          ;; for `:secret`-typed RETURNS, so a fn that merely reads a secret
+          ;; would leak it). The path + a class hint are enough to debug.
+          (throw (ex-info (str "Vault secret at " path
+                               " is missing `data.value` (expected a string)")
+                          {:type :vault/lookup-failed :path path
+                           :value-class (some-> value class .getName)})))
+        value))))
 
 
 (defn put-secret
   "Write `secret/data/<path>` with `{value: <value>}`. Returns the
    new version number (KV v2 retains history)."
-  [{:keys [address token]} path value]
-  (require-path! path "put-secret")
-  (let [resp @(http/post (vault-url address "data" path)
-                         (json-body token {:data {:value value}}))
-        _ (check-status! resp #{200} path "POST data")
-        parsed (json/parse-string (:body resp) true)]
-    (get-in parsed [:data :version])))
+  [{:keys [address token] :as client} path value]
+  (if-let [f (impl :put-secret)]
+    (f client path value)
+    (do
+      (require-path! path "put-secret")
+      (let [resp @(http/post (vault-url address "data" path)
+                             (json-body token {:data {:value value}}))
+            _ (check-status! resp #{200} path "POST data")
+            parsed (json/parse-string (:body resp) true)]
+        (get-in parsed [:data :version])))))
 
 
 (defn delete-secret
   "Permanently delete every version + metadata. Uses
    `DELETE /v1/secret/metadata/<path>` because the data endpoint
    only soft-deletes the latest version."
-  [{:keys [address token]} path]
-  (require-path! path "delete-secret")
-  (let [resp @(http/delete (vault-url address "metadata" path)
-                           (request-opts token))]
-    (check-status! resp #{204} path "DELETE metadata")
-    nil))
+  [{:keys [address token] :as client} path]
+  (if-let [f (impl :delete-secret)]
+    (f client path)
+    (do
+      (require-path! path "delete-secret")
+      (let [resp @(http/delete (vault-url address "metadata" path)
+                               (request-opts token))]
+        (check-status! resp #{204} path "DELETE metadata")
+        nil))))
 
 
 (defn get-metadata
   "Read `created_time`, `current_version`, `custom_metadata`, version
    list, etc. Returns the inner `:data` map (JSON-decoded, keyword
    keys). Raises with `:vault/lookup-failed` if the path is missing."
-  [{:keys [address token]} path]
-  (require-path! path "get-metadata")
-  (let [resp @(http/get (vault-url address "metadata" path)
-                        (request-opts token))
-        _ (check-status! resp #{200} path "GET metadata")
-        parsed (json/parse-string (:body resp) true)]
-    (:data parsed)))
+  [{:keys [address token] :as client} path]
+  (if-let [f (impl :get-metadata)]
+    (f client path)
+    (do
+      (require-path! path "get-metadata")
+      (let [resp @(http/get (vault-url address "metadata" path)
+                            (request-opts token))
+            _ (check-status! resp #{200} path "GET metadata")
+            parsed (json/parse-string (:body resp) true)]
+        (:data parsed)))))
 
 
 (defn put-metadata
   "Replace `custom_metadata` (a map of string→string) wholesale.
    Vault rejects non-string values, so callers must stringify
    before calling."
-  [{:keys [address token]} path metadata]
-  (require-path! path "put-metadata")
-  (let [resp @(http/post (vault-url address "metadata" path)
-                         (json-body token {:custom_metadata metadata}))]
-    (check-status! resp #{204} path "POST metadata")
-    nil))
+  [{:keys [address token] :as client} path metadata]
+  (if-let [f (impl :put-metadata)]
+    (f client path metadata)
+    (do
+      (require-path! path "put-metadata")
+      (let [resp @(http/post (vault-url address "metadata" path)
+                             (json-body token {:custom_metadata metadata}))]
+        (check-status! resp #{204} path "POST metadata")
+        nil))))

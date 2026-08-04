@@ -349,16 +349,23 @@
 
 ;; === Batch CRUD operations ===
 
-(defn create-entities
-  "Creates multiple entity records in a single transaction.
-   Returns a sequence of created records with generated ids.
-   Throws :unique-violation if any unique constraint violated.
-   Throws :duplicate-ids if duplicate IDs found in batch.
-   Throws :batch-error/batch-too-large if batch exceeds *max-batch-size*.
+(def ^:dynamic *create-entities-override*
+  "Parallel-test failure-injection seam: when bound, `create-entities`
+   calls this fn `(f ds entity-name data-seq fields)` instead of the
+   real batch insert. nil (production) = real body. Tests `binding`
+   this instead of `with-redefs`-ing the root var — a root rebind is
+   process-global, and an injected failure leaked into whatever
+   sibling NS happened to batch-write during that window (observed:
+   `versioning.merge.core-test`'s `boom` killing a sibling's fn-def
+   sync, which forced a `^:serial` pin on that NS). Mirrors
+   `advisory-lock/*impl-override*`. Cost on the real path: one nil
+   check per batch write."
+  nil)
 
-   Note: PostgreSQL batch INSERT uses a single statement, so on failure
-   the exact failing record index is unknown. Error context includes
-   batch-size and all record IDs for debugging."
+
+(defn- create-entities-impl
+  "Real body of `create-entities` — see its docstring. Split out so
+   the `*create-entities-override*` seam check stays a one-liner."
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
     []
@@ -397,6 +404,22 @@
                            :actual-count actual-count})))
         (write-junction-rows! ds entity-name batch-ids ref-many-records fields false)
         (merge-back-ref-many result-rows ref-many-records fields)))))
+
+
+(defn create-entities
+  "Creates multiple entity records in a single transaction.
+   Returns a sequence of created records with generated ids.
+   Throws :unique-violation if any unique constraint violated.
+   Throws :duplicate-ids if duplicate IDs found in batch.
+   Throws :batch-error/batch-too-large if batch exceeds *max-batch-size*.
+
+   Note: PostgreSQL batch INSERT uses a single statement, so on failure
+   the exact failing record index is unknown. Error context includes
+   batch-size and all record IDs for debugging."
+  [ds entity-name data-seq fields]
+  (if-let [f *create-entities-override*]
+    (f ds entity-name data-seq fields)
+    (create-entities-impl ds entity-name data-seq fields)))
 
 
 (defn read-entities

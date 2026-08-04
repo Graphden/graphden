@@ -1,17 +1,19 @@
-(ns ^:integration ^:serial graphden.crud.secrets-test
+(ns ^:integration graphden.crud.secrets-test
   "Tests for `graphden.crud.secrets` — admin Secrets CRUD orchestrators
-
-   `^:serial` because `with-fake-vault*` (line ~37) redefs
-   `vault/get-secret` / `vault/put-secret` process-globally for the
-   duration of each test. Sibling NS-threads exercising real vault
-   calls during that window would see the fake stubs instead.
    over OpenBao + graphden storage.
 
-   Vault is mocked via `with-redefs` over `graphden.clients.vault` so
-   the tests don't need a live OpenBao; an atom-backed in-memory store
-   captures the OpenBao state and lets assertions inspect it. The
-   graphden side hits the real shared PG container — same convention
-   as `branches-test`."
+   Vault is faked via the THREAD-LOCAL `vault/*impl-override*` seam
+   (house pattern — `advisory-lock/*impl-override*`) so the tests don't
+   need a live OpenBao; an atom-backed in-memory store captures the
+   OpenBao state and lets assertions inspect it. The graphden side hits
+   the real shared PG container — same convention as `branches-test`.
+
+   Parallel-safe: `with-fake-vault*` `binding`s the seam instead of
+   `with-redefs`-ing `vault/get-secret` / `vault/put-secret` — the root
+   rebind was process-global (sibling NS-threads exercising real vault
+   calls during the window saw the fake stubs), which forced a
+   `^:serial` pin on this NS. Same for the graphden-write failure
+   injection, which binds `crud-entities/*create-entity-override*`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.clients.vault :as vault]
@@ -40,32 +42,33 @@
 
 (defn- with-fake-vault*
   [fake-state body-fn]
-  (with-redefs [vault/get-secret      (fn [_client path]
-                                        (or (get-in @fake-state [:values path])
-                                            (throw (ex-info "no path"
-                                                            {:type :vault/lookup-failed :path path}))))
-                vault/put-secret      (fn [_client path value]
-                                        (swap! fake-state assoc-in [:values path] value)
-                                        (count (swap! fake-state update :versions
-                                                      (fnil conj []) [path value])))
-                vault/delete-secret   (fn [_client path]
-                                        (swap! fake-state
-                                               (fn [s]
-                                                 (-> s
-                                                     (update :values dissoc path)
-                                                     (update :metadata dissoc path))))
-                                        nil)
-                vault/get-metadata    (fn [_client path]
-                                        (or (get-in @fake-state [:metadata path])
-                                            (throw (ex-info "no metadata"
-                                                            {:type :vault/lookup-failed :path path}))))
-                vault/put-metadata    (fn [_client path metadata]
-                                        (swap! fake-state assoc-in [:metadata path]
-                                               {:custom_metadata metadata
-                                                :current_version 1
-                                                :created_time "2026-05-28T00:00:00Z"
-                                                :updated_time "2026-05-28T00:00:00Z"})
-                                        nil)]
+  (binding [vault/*impl-override*
+            {:get-secret    (fn [_client path]
+                              (or (get-in @fake-state [:values path])
+                                  (throw (ex-info "no path"
+                                                  {:type :vault/lookup-failed :path path}))))
+             :put-secret    (fn [_client path value]
+                              (swap! fake-state assoc-in [:values path] value)
+                              (count (swap! fake-state update :versions
+                                            (fnil conj []) [path value])))
+             :delete-secret (fn [_client path]
+                              (swap! fake-state
+                                     (fn [s]
+                                       (-> s
+                                           (update :values dissoc path)
+                                           (update :metadata dissoc path))))
+                              nil)
+             :get-metadata  (fn [_client path]
+                              (or (get-in @fake-state [:metadata path])
+                                  (throw (ex-info "no metadata"
+                                                  {:type :vault/lookup-failed :path path}))))
+             :put-metadata  (fn [_client path metadata]
+                              (swap! fake-state assoc-in [:metadata path]
+                                     {:custom_metadata metadata
+                                      :current_version 1
+                                      :created_time "2026-05-28T00:00:00Z"
+                                      :updated_time "2026-05-28T00:00:00Z"})
+                              nil)}]
     (body-fn)))
 
 
@@ -230,17 +233,20 @@
   ;; doesn't outlive the (failed) fn-row.
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)
-        vault-state (fresh-vault)
-        orig-create-entity crud-entities/create-entity]
+        vault-state (fresh-vault)]
     (try
       (seed-secret-leaf! storage)
       (with-fake-vault vault-state
-        (with-redefs [crud-entities/create-entity
-                      (fn [entity-type data ctx]
-                        (if (= entity-type :binding)
-                          (throw (ex-info "simulated binding-write failure"
-                                          {:type :test/simulated}))
-                          (orig-create-entity entity-type data ctx)))]
+        ;; Thread-local seam, not `with-redefs`: fail the :binding create
+        ;; only, re-enter the real path (override re-bound to nil) for
+        ;; everything else.
+        (binding [crud-entities/*create-entity-override*
+                  (fn [entity-type data ctx]
+                    (if (= entity-type :binding)
+                      (throw (ex-info "simulated binding-write failure"
+                                      {:type :test/simulated}))
+                      (binding [crud-entities/*create-entity-override* nil]
+                        (crud-entities/create-entity entity-type data ctx))))]
           (let [{:keys [ok error]} (secrets/create-secret
                                      c {:name "_rollback-pwd"
                                         :path "rollback/pwd"

@@ -67,13 +67,10 @@
 ;; plugin-load time (the parallel-suite -run dispatch needs to
 ;; complete `try-load-third-party-lib` first).
 ;;
-;; 2026-06-15 audit of `src/`-side process-global atoms — the four
-;; entries below cover every test-contaminator surface. The other
-;; defonce atoms are safe under parallel by construction:
-;;
-;;   - `executor.registry/default-registry` — covered via the
-;;     `*registry-override*` thread-local pattern (different mechanism,
-;;     wired through `exec/with-clean-registry` instead of this list).
+;; 2026-06-15 audit of `src/`-side process-global atoms (re-audited
+;; 2026-08-04) — the entries below cover every test-contaminator
+;; surface. The other defonce atoms are safe under parallel by
+;; construction:
 ;;   - `executor.compile.lookups/cached-build-lookups-state`
 ;;     and `layout.data/cached-build-lookups-state` — identity-keyed by
 ;;     graph reference. Two ctxes never collide on the same key (the
@@ -136,6 +133,18 @@
     ;; merge-on-read view tipped bootstrap from seconds into a 20-min
     ;; GC-thrashing hang).
     graphden.executor.registry.core/*rich-types-override*
+    ;; The base-fn IMPLS registry override. Historically "covered via
+    ;; `exec/with-clean-registry` instead of this list" — but that only
+    ;; holds for NSes that remember the fixture: the 2026-08-04 audit
+    ;; found two non-serial NSes (`executor.registry.core-test`'s
+    ;; register-base-fns-test, `crud.fn-execution-test`'s ten
+    ;; register-base-fn! sites) writing the ROOT atom directly with no
+    ;; override on the stack. Binding it here is the plugin-level
+    ;; backstop that makes the class impossible for future NSes too.
+    ;; Seeded from the global snapshot (rich-types pattern); reads are
+    ;; unchanged either way — `get-base-fn` falls through to the global
+    ;; for names an override doesn't carry.
+    graphden.executor.registry/*registry-override*
     ;; §4 Risk-2: the per-org type-alias slice index, rebuilt (reset!) by
     ;; `register-type-aliases-from-db!` in lockstep with the global aliases.
     ;; Without isolation a sibling NS-thread's rebuild overwrites it mid-run and
@@ -172,6 +181,8 @@
 (def ^:private isolation-var-seeders
   '{graphden.executor.registry.core/*rich-types-override*
     graphden.executor.registry.core/snapshot-for-isolation
+    graphden.executor.registry/*registry-override*
+    graphden.executor.registry/snapshot-for-isolation
     graphden.executor.compile-runtime/*per-org-aliases-override*
     graphden.executor.compile-runtime/per-org-snapshot-for-isolation
     graphden.executor.registry.core/*per-org-rich-override*

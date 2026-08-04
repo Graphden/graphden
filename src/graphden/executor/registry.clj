@@ -41,6 +41,17 @@
   (or *registry-override* default-registry))
 
 
+(defn snapshot-for-isolation
+  "Current GLOBAL registry map. The kaocha parallel plugin seeds each
+   NS-thread's `*registry-override*` atom with it, so per-thread writes
+   isolate while everything registered before the thread started stays
+   readable as a plain O(1) lookup. (`get-base-fn` already falls
+   through to the global for names an override lacks — the seed is for
+   whole-map readers and keeps the semantics identical either way.)"
+  []
+  @default-registry)
+
+
 (defn register-base-fn!
   "Register `f` under `fn-name` (keyword) in the active registry
    (thread-local override when bound, global otherwise). `f` is

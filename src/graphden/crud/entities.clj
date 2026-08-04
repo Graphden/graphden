@@ -643,11 +643,15 @@
   (into {} (remove (comp nil? val)) (select-keys (with-ref-counts rev f) light-fn-fields)))
 
 
-(def ^:private default-search-limit
+(def ^:private ^:dynamic *default-search-limit*
   "Cap on `:search` results. The sidebar filter / fn-picker only render a
    bounded list; an unbounded match on a huge graph would defeat the
    whole point of moving the filter server-side. `:truncated?` in the
-   response tells the client more matched than were returned."
+   response tells the client more matched than were returned.
+
+   Dynamic so tests can `binding` it low (thread-local) instead of a
+   process-global `with-redefs` — it's a cold constant read on the
+   search path, so the Var deref costs nothing that matters."
   200)
 
 
@@ -678,7 +682,7 @@
      for the named fns of that one namespace. The lazy-expand payload.
 
    - `:search` with `q` — light rows for named fns whose raw name
-     contains `q` (case-insensitive), capped at `default-search-limit`
+     contains `q` (case-insensitive), capped at `*default-search-limit*`
      with a `:truncated?` flag. The server-side replacement for the
      editor's client-side filter box + the fn / namespace / MI-reparent
      pickers + name→id resolution.
@@ -743,7 +747,7 @@
 
        (= scope :search)
        ;; Server-side filter: case-insensitive substring on the raw fn
-       ;; name, capped at `default-search-limit`. Replaces the client-side
+       ;; name, capped at `*default-search-limit*`. Replaces the client-side
        ;; scan over the (former) full-fns mirror in the sidebar filter box,
        ;; the fn / namespace / MI-reparent pickers, and name→id resolution.
        (let [needle (some-> q str/lower-case str/trim not-empty)
@@ -752,9 +756,9 @@
                              (filter #(and (:name %)
                                            (str/includes? (str/lower-case (:name %)) needle)))
                              (:fns base)))
-             limited (into [] (take default-search-limit) matches)]
+             limited (into [] (take *default-search-limit*) matches)]
          {:fns (mapv (comp (partial light-fn-row @rev-index) role-of) limited)
-          :truncated? (boolean (and needle (> (count matches) default-search-limit)))})
+          :truncated? (boolean (and needle (> (count matches) *default-search-limit*)))})
 
        (= scope :index)
        ;; Drop nil-valued fields from each fn row. This is a sidebar /

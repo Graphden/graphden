@@ -1,12 +1,25 @@
-(ns ^:serial graphden.executor.runtime-test
-  ;; `with-redefs` of `graphden.executor.interface/make-single-arg-
-  ;; callable` (line ~89) is process-global; sibling NS-threads
-  ;; calling that function during the redef window would see the
-  ;; stub instead of the real impl. `^:serial` scopes the redef.
+(ns graphden.executor.runtime-test
+  "Unit tests for the runtime arg-resolution helpers plus
+   `hof-callable`.
+
+   Parallel-safe: no `with-redefs`. The UUID branches of `hof-callable`
+   drive the REAL `make-single-arg-callable` over a container-backed
+   storage (a registered `double` base-fn + a composed fn with one free
+   arg), asserting the wrap actually executes — instead of stubbing the
+   interface fn, which root-rebound a per-execute hot-path var
+   process-globally and pinned this NS `^:serial` (serial-reduction
+   cluster B). `register-base-fn!` writes go through the plugin's
+   per-NS-thread `*registry-override*` seam, same as
+   `compile-runtime-test`."
   (:require
-    [clojure.test :refer [deftest is testing]]
-    [graphden.executor.interface]
-    [graphden.executor.runtime :as rt]))
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.runtime :as rt]
+    [graphden.executor.test-setup :as setup]
+    [graphden.storage.protocol.core :as sp]))
+
+
+(use-fixtures :once (setup/create-container-fixture))
 
 
 (deftest resolve-arg-literal
@@ -82,30 +95,40 @@
       (is (= inner (rt/hof-callable {:func wrapped} :func nil))))))
 
 
+(defn- doubler-ctx
+  "Register a `double` base-fn impl, build the base + composed fn rows
+   in `storage`, and return `[ctx composed-fn-id]` — a real graph for
+   `hof-callable`'s UUID branch to wrap through the genuine
+   `make-single-arg-callable` (one free arg `x`, so the wrap yields a
+   single-arg callable)."
+  [storage]
+  (exec/register-base-fn! :double (setup/fn-impl [x] (* 2 x)))
+  (let [base-fn (setup/create-base-fn! storage "double" :int)
+        _ (setup/create-arg! storage (:id base-fn)
+                             {:name "x" :type :int :required true})
+        composed (setup/create-composed-fn! storage "my-double" (:id base-fn))]
+    [(exec/create-context {:storage storage}) (:id composed)]))
+
+
 (deftest hof-callable-uuid-resolves-via-make-callable
-  (testing "raw UUID arg → wrap via make-single-arg-callable"
-    (let [calls (atom [])
-          fake-callable (fn [x] (str "called-with " x))]
-      ;; `hof-callable` resolves `make-single-arg-callable` lazily via
-      ;; requiring-resolve. Stub it via with-redefs so we don't need a
-      ;; full executor context — just verify the UUID hits the wrap
-      ;; path with the expected (ctx, fn-id) call.
-      (with-redefs [graphden.executor.interface/make-single-arg-callable
-                    (fn [ctx fn-id] (swap! calls conj [ctx fn-id]) fake-callable)]
-        (let [id (random-uuid)
-              result (rt/hof-callable {:func id} :func :ctx-sentinel)]
-          (is (identical? fake-callable result))
-          (is (= [[:ctx-sentinel id]] @calls)))))))
+  (testing "raw UUID arg → wrapped via the REAL make-single-arg-callable"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [[ctx fn-id] (doubler-ctx storage)
+              result (rt/hof-callable {:func fn-id} :func ctx)]
+          (is (fn? result) "the UUID took the wrap path — a callable came back")
+          (is (= 10 (result 5))
+              "the callable executes the composed fn (item bound to the free arg)"))
+        (finally (sp/close storage))))))
 
 
 (deftest hof-callable-ideref-of-uuid
   (testing "IDeref-wrapped UUID also routes through make-callable"
-    (let [calls (atom [])
-          fake-callable (fn [x] x)]
-      (with-redefs [graphden.executor.interface/make-single-arg-callable
-                    (fn [ctx fn-id] (swap! calls conj [ctx fn-id]) fake-callable)]
-        (let [id (random-uuid)
-              wrapped (delay id)
-              result (rt/hof-callable {:func wrapped} :func :ctx-sentinel)]
-          (is (identical? fake-callable result))
-          (is (= [[:ctx-sentinel id]] @calls)))))))
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [[ctx fn-id] (doubler-ctx storage)
+              result (rt/hof-callable {:func (delay fn-id)} :func ctx)]
+          (is (fn? result))
+          (is (= 14 (result 7))
+              "deref-then-wrap — same live execution as the raw-UUID path"))
+        (finally (sp/close storage))))))

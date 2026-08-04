@@ -1,13 +1,16 @@
-(ns ^:serial graphden.crud.fn-execution.persist-test
+(ns graphden.crud.fn-execution.persist-test
   "Unit tests for the pure helpers in `graphden.crud.fn-execution.persist`.
 
-   `^:serial` because `log-effect-drift-widened-warns` and its
-   sibling redef the global `clojure.tools.logging/log*` via
-   `with-redefs`. Under in-JVM parallel runs that redef leaks into
-   any other test that emits a log message during the window,
-   inflating the `(count @calls)` assertion. Forcing this NS into
-   the sequential bucket (kaocha.plugin/parallel) keeps the redef
-   scoped to this NS's tests only.
+   Parallel-safe: no `with-redefs`. The effect-drift log assertions
+   capture output by `binding` `log/*logger-factory*` to a reifying
+   sink — thread-local, so sibling NS-threads neither see the capture
+   nor pollute its counts. The `declared-effects-of` inputs are REAL
+   `record-rich-types-raw!` registrations (thread-isolated by the
+   parallel plugin's `*rich-types-override*` seam; the `:once`
+   `with-isolated-rich-types` fixture covers solo runs) instead of a
+   `rich-type-of-id` root-redef on the per-execute hot path
+   (serial-reduction cluster B).
+
    The DB-touching write paths are covered indirectly by the
    integration tests in `graphden.crud.fn-execution-test` — this
    file focuses on truncation, futures-registry lifecycle,
@@ -16,12 +19,18 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging :as log]
+    [clojure.tools.logging.impl :as log-impl]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]))
+
+
+(use-fixtures :once
+  exec/with-isolated-rich-types)
 
 
 ;; =============================================================================
@@ -192,19 +201,23 @@
 
 
 (deftest declared-effects-of-no-entry
-  (with-redefs [registry/rich-type-of-id (constantly nil)]
-    (is (nil? (persist/declared-effects-of (random-uuid))))))
+  ;; A fresh random id genuinely has no registry entry — no stub needed.
+  (is (nil? (persist/declared-effects-of (random-uuid)))))
 
 
 (deftest declared-effects-of-empty-effects
-  (with-redefs [registry/rich-type-of-id (constantly {:effects #{}})]
-    (is (nil? (persist/declared-effects-of (random-uuid)))
+  (let [id (random-uuid)]
+    (registry/record-rich-types-raw!
+      id :persist-test-pure {:return :any :args {} :effects #{}})
+    (is (nil? (persist/declared-effects-of id))
         "empty effects set means `pure` — same nil signal as missing entry")))
 
 
 (deftest declared-effects-of-stringified
-  (with-redefs [registry/rich-type-of-id (constantly {:effects #{:db :env}})]
-    (is (= #{"db" "env"} (set (persist/declared-effects-of (random-uuid)))))))
+  (let [id (random-uuid)]
+    (registry/record-rich-types-raw!
+      id :persist-test-effectful {:return :any :args {} :effects #{:db :env}})
+    (is (= #{"db" "env"} (set (persist/declared-effects-of id))))))
 
 
 ;; =============================================================================
@@ -253,9 +266,30 @@
 ;; log-effect-drift! — fires WARN only when sets diverge
 ;; =============================================================================
 
+(defn- capturing-log-factory
+  "A LoggerFactory that records every line into `sink`. `binding` it
+   under `log/*logger-factory*` is THREAD-LOCAL — the drift call and
+   the capture share this thread only, so sibling NS-threads keep the
+   real logger AND can't inflate `sink`'s counts. This is why the
+   drift tests need neither a global `log/log*` redef nor a
+   marker-string filter."
+  [sink]
+  (reify log-impl/LoggerFactory
+    (name [_] "persist-test-capture")
+
+    (get-logger
+      [_ _logger-ns]
+      (reify log-impl/Logger
+        (enabled? [_ _level] true)
+
+        (write!
+          [_ level _throwable message]
+          (swap! sink conj {:level level :msg (str message)}))))))
+
+
 (deftest log-effect-drift-aligned-skips
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
+    (binding [log/*logger-factory* (capturing-log-factory calls)]
       (persist/log-effect-drift! "exec-id" ["db"] ["db"])
       (is (empty? @calls)
           "declared == runtime → no log line"))))
@@ -263,7 +297,7 @@
 
 (deftest log-effect-drift-both-empty-skips
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
+    (binding [log/*logger-factory* (capturing-log-factory calls)]
       (persist/log-effect-drift! "exec-id" nil nil)
       (is (empty? @calls)
           "both nil/empty → no drift to report"))))
@@ -271,15 +305,18 @@
 
 (deftest log-effect-drift-widened-warns
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
+    (binding [log/*logger-factory* (capturing-log-factory calls)]
       (persist/log-effect-drift! "exec-id" ["db"] ["db" "io"])
       (is (= 1 (count @calls))
-          "runtime added :io that wasn't declared → one warn line"))))
+          "runtime added :io that wasn't declared → one warn line")
+      (is (= :warn (:level (first @calls))))
+      (is (re-find #":execution/effect-drift" (:msg (first @calls)))
+          "the canonical grep-marker rides the line"))))
 
 
 (deftest log-effect-drift-unobserved-warns
   (let [calls (atom [])]
-    (with-redefs [log/log* (fn [& args] (swap! calls conj args) nil)]
+    (binding [log/*logger-factory* (capturing-log-factory calls)]
       (persist/log-effect-drift! "exec-id" ["db" "env"] ["db"])
       (is (= 1 (count @calls))
           "declared :env never fired at runtime → warn"))))

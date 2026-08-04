@@ -1,7 +1,10 @@
-(ns ^:serial graphden.crud.value-form-test
-  "`^:serial` — `with-redefs` root-rebinds `exec/execute-by-name` to a
-   constant stub; any parallel NS invoking the executor in the window
-   gets the bogus fixed rows.
+(ns graphden.crud.value-form-test
+  "Parallel-safe: no `with-redefs`. The registry-parse test that used
+   to stub `exec/execute-by-name` (a per-execute hot-path fn — root
+   rebind pinned this NS `^:serial`) now seeds a REAL
+   `_value-form-registry` const row through `forms-ctx` and reads it
+   back through the executor, JSONB roundtrip included
+   (serial-reduction cluster B).
 
    Tests for `graphden.crud.value-form` — the `/api/value-form`
    resolver: structural classification, form-fn dispatch, refinement
@@ -165,18 +168,6 @@
         "marker leaf picks the widget row over :any")
     (is (= "_form-text" (vf/pick-form-fn reg :text))
         "plain text unaffected")))
-
-
-(deftest registry-pairs-vector-type-keys-parse-test
-  ;; The graph registry rows are JSONB-round-tripped strings; a
-  ;; VECTOR first element becomes a structural keyword vector.
-  (with-redefs [graphden.executor.interface/execute-by-name
-                (fn [_ _ _]
-                  [["text" "_form-text"]
-                   [["secret" "any"] "_form-secret-binding"]])]
-    (is (= [[:text "_form-text"]
-            [[:secret :any] "_form-secret-binding"]]
-           (registry-pairs nil)))))
 
 
 (deftest pick-form-fn-js-source-prefers-textarea-over-text-input-test
@@ -495,29 +486,32 @@
    `vf-const` identity base-fn, the leaf form-fn `:const` rows, and the
    `_value-form-registry` dispatch list — and return an executor ctx
    over it. Enough to drive the ctx-backed stages without loading the
-   real `app.forms` package."
-  [storage]
-  (exec/register-base-fn! :vf-const (setup/fn-impl [value] value))
-  (let [const (setup/create-base-fn! storage "vf-const")
-        vslot (setup/create-slot! storage "value" :any)
-        _     (setup/attach-slot! storage (:id const) (:id vslot) 0)
-        form! (fn [nm hiccup]
-                (let [f (setup/create-composed-fn! storage nm (:id const))]
-                  (setup/bind-value! storage (:id f) (:id vslot) hiccup)
-                  f))]
-    (form! "_form-text"
-           ["input" {"type" "text" "class" "arg-value-edit-input"
-                     "data-form-field" "" "data-field-kind" "text"}])
-    (form! "_form-number"
-           ["input" {"type" "number" "class" "arg-value-edit-input"
-                     "data-form-field" "" "data-field-kind" "number"}])
-    (form! "_form-json"
-           ["textarea" {"class" "arg-value-edit-input"
-                        "data-form-field" "" "data-field-kind" "json"}])
-    (form! "_value-form-registry"
-           [["text" "_form-text"] ["int" "_form-number"]
-            ["numeric" "_form-number"] ["any" "_form-json"]])
-    (exec/create-context {:storage storage})))
+   real `app.forms` package. The 2-arity overrides the registry row's
+   value so parse-shape tests can seed non-default entries."
+  ([storage]
+   (forms-ctx storage
+              [["text" "_form-text"] ["int" "_form-number"]
+               ["numeric" "_form-number"] ["any" "_form-json"]]))
+  ([storage registry-value]
+   (exec/register-base-fn! :vf-const (setup/fn-impl [value] value))
+   (let [const (setup/create-base-fn! storage "vf-const")
+         vslot (setup/create-slot! storage "value" :any)
+         _     (setup/attach-slot! storage (:id const) (:id vslot) 0)
+         form! (fn [nm hiccup]
+                 (let [f (setup/create-composed-fn! storage nm (:id const))]
+                   (setup/bind-value! storage (:id f) (:id vslot) hiccup)
+                   f))]
+     (form! "_form-text"
+            ["input" {"type" "text" "class" "arg-value-edit-input"
+                      "data-form-field" "" "data-field-kind" "text"}])
+     (form! "_form-number"
+            ["input" {"type" "number" "class" "arg-value-edit-input"
+                      "data-form-field" "" "data-field-kind" "number"}])
+     (form! "_form-json"
+            ["textarea" {"class" "arg-value-edit-input"
+                         "data-form-field" "" "data-field-kind" "json"}])
+     (form! "_value-form-registry" registry-value)
+     (exec/create-context {:storage storage}))))
 
 
 (defn- in-tree?
@@ -533,6 +527,23 @@
         (is (= [[:text "_form-text"] [:int "_form-number"]
                 [:numeric "_form-number"] [:any "_form-json"]]
                (registry-pairs (forms-ctx storage))))
+        (finally (sp/close storage))))))
+
+
+(deftest registry-pairs-vector-type-keys-parse-test
+  ;; The graph registry rows are JSONB-round-tripped strings; a VECTOR
+  ;; first element becomes a structural keyword vector. Seeded as a
+  ;; REAL registry const row and read back through the executor — the
+  ;; parse sees the genuine post-roundtrip shape, no stubbing.
+  (testing "a vector type-name parses to a structural keyword vector"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [ctx (forms-ctx storage
+                             [["text" "_form-text"]
+                              [["secret" "any"] "_form-secret-binding"]])]
+          (is (= [[:text "_form-text"]
+                  [[:secret :any] "_form-secret-binding"]]
+                 (registry-pairs ctx))))
         (finally (sp/close storage))))))
 
 

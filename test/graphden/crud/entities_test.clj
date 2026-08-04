@@ -1,4 +1,4 @@
-(ns ^:serial graphden.crud.entities-test
+(ns graphden.crud.entities-test
   "DB-backed tests for `graphden.crud.entities` — the heavy CRUD logic
    behind the web/crud base functions: form parsers, generic
    create/read/update/delete, the compound type-row endpoints, the
@@ -7,28 +7,29 @@
    Uses the shared container plus a real `ExecutionContext` so the
    `invalidate!` path exercises against live storage.
 
-   `^:serial` because two deftests (`tighten-rejects-when-bound-
-   callable-effects-exceed-new-constraint-test` /
-   `tighten-rejects-on-post-write-type-check-failure-test`)
-   `with-redefs` process-global vars (`registry/rich-type-of` /
-   `tc/type-check-fn-after-mutation!`) for the duration of one
-   call. Under N=8 parallel UNIT runs the redef scope can leak
-   into sibling NS-threads — the redef intentionally returns nil
-   for any name OUTSIDE the test's target, which then breaks the
-   sibling test's `rich-type-of` lookups arbitrarily. Forcing
-   this NS into the sequential bucket scopes the redef cleanly."
+   Parallel-safe: no `with-redefs` (serial-reduction cluster B). The
+   two tighten tests that used to root-redef the hot-path
+   `registry/rich-type-of-id` / `tc/type-check-fn-after-mutation!`
+   now register REAL rich-types entries and construct data that makes
+   the genuine post-write check fail — writes go to the parallel
+   plugin's per-NS-thread `*rich-types-override*` atom (the `:once`
+   `with-isolated-rich-types` fixture covers solo runs). The search
+   cap is a thread-local `binding` of the now-dynamic
+   `entities/*default-search-limit*`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
-    [graphden.crud.type-check :as tc]
     [graphden.executor.context :as ctx]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]))
 
 
-(use-fixtures :once (setup/create-container-fixture))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  exec/with-isolated-rich-types)
 
 
 (defn- test-ctx
@@ -436,8 +437,8 @@
           (is (empty? (:fns dump)))
           (is (false? (:truncated? dump)))))
       (testing "scope :search caps at the limit and flags :truncated?"
-        ;; Rebind the private cap low rather than seed 200+ rows.
-        (with-redefs [entities/default-search-limit 1]
+        ;; Bind the (dynamic) private cap low rather than seed 200+ rows.
+        (binding [entities/*default-search-limit* 1]
           (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
             (is (= 1 (count (:fns dump))) "result capped at the limit")
             (is (true? (:truncated? dump)) "more matched than were returned"))))
@@ -620,9 +621,9 @@
 ;;
 ;; Each test constructs a slot whose effective type is a callable fn-row
 ;; (`:constraint [:fn args ret eff]`), a binding pointing at that slot,
-;; and exercises one branch of the impl's `cond` chain. The bound-callable
-;; effect-escape check needs a referenced fn registered in the rich-types
-;; registry, so those tests redef registry/rich-type-of to control it.
+;; and exercises one branch of the impl's `cond` chain. Tests that need
+;; a referenced fn in the rich-types registry register it for REAL via
+;; `record-rich-types-raw!` (thread-isolated — see the ns docstring).
 ;; ============================================================================
 
 (defn- make-callable-type-fn!
@@ -638,8 +639,9 @@
 
 (defn- make-binding-on-fn-typed-slot!
   "Build a composed-fn + an fn-typed slot + the binding row pointing
-   at the slot. Returns the binding-id so tighten-fn-type-impl! can
-   target it."
+   at the slot. Returns `[binding-id comp-fn-id base-fn-id]` so
+   tighten-fn-type-impl! can target the binding and tests can extend
+   the parent (`th-base-<suffix>`) with more slots."
   [storage suffix constraint]
   (let [cb-fn-id (make-callable-type-fn! storage (str "th-cb-" suffix) constraint)
         base-fn (sp/create-entity storage :fn
@@ -657,7 +659,7 @@
                               {:fn-id (:id comp-fn)
                                :slot-id (:id slot)
                                :value nil})]
-    [(:id bnd) (:id comp-fn)]))
+    [(:id bnd) (:id comp-fn) (:id base-fn)]))
 
 
 (deftest tighten-fn-type-impl-missing-binding-404
@@ -740,17 +742,28 @@
 ;; ============================================================================
 
 (deftest commit-tighten-rollback-on-post-write-type-check-fail-test
-  ;; Stub `type-check-fn-after-mutation!` to always reject so the
-  ;; post-commit roll-back path fires — the binding's
+  ;; Make the REAL post-write `type-check-fn-after-mutation!` reject so
+  ;; the roll-back path fires: the owning fn carries a second binding
+  ;; whose literal violates its `:int` slot, and the parent's signature
+  ;; is registered for real in the (thread-isolated) rich-types
+  ;; registry so `check-fn-def!` has a contract to check against. The
+  ;; tighten pre-checks never look at that slot, so the write commits;
+  ;; the aggregate check then rejects and the binding's
   ;; `:type-override-fn-id` must end up back at its pre-tighten value.
   (let [storage (setup/create-test-storage)]
     (try
-      (let [[bid] (make-binding-on-fn-typed-slot!
-                    storage "rb" [:fn {} :any #{:io :db}])
+      (let [[bid comp-fn-id base-id] (make-binding-on-fn-typed-slot!
+                                       storage "rb" [:fn {} :any #{:io :db}])
+            nslot (setup/create-slot! storage "n" :int)
+            _ (setup/attach-slot! storage base-id (:id nslot) 1)
+            _ (setup/bind-value! storage comp-fn-id (:id nslot) "not-an-int")
+            _ (registry/record-rich-types-raw!
+                base-id :th-base-rb
+                {:return :any
+                 :args {:cb [:fn {} :any #{:io :db}] :n :int}
+                 :effects #{}})
             before (sp/read-entity storage :binding bid)
-            r (with-redefs [tc/type-check-fn-after-mutation!
-                            (fn [_ _] {:reason "synthetic rejection"})]
-                (entities/tighten-fn-type-impl! storage bid {:effects ["io"]}))
+            r (entities/tighten-fn-type-impl! storage bid {:effects ["io"]})
             after (sp/read-entity storage :binding bid)]
         (is (= 400 (:status r)))
         (is (re-find #"post-write type-check" (:reason r)))
@@ -775,14 +788,13 @@
             _ (sp/update-entity storage :binding bid
                                 {:ref-fn-id (:id ref-fn)})
             ;; The tighten path reads the registry by the ref-row's ID
-            ;; (`rich-type-of-id`) — stub by identity, not name.
-            r (with-redefs [registry/rich-type-of-id
-                            (fn stub
-                              ([id] (when (= (:id ref-fn) id)
-                                      {:effects #{:io}}))
-                              ([id arg] (get-in (stub id) [:args arg])))]
-                ;; Tighten to {:db} — :io must escape → reject.
-                (entities/tighten-fn-type-impl! storage bid {:effects ["db"]}))]
+            ;; (`rich-type-of-id`) — register under that identity for
+            ;; real (3-arity threads the row id; thread-isolated).
+            _ (registry/record-rich-types-raw!
+                (:id ref-fn) :esc-effectful
+                {:return :any :args {} :effects #{:io}})
+            ;; Tighten to {:db} — :io must escape → reject.
+            r (entities/tighten-fn-type-impl! storage bid {:effects ["db"]})]
         (is (= 400 (:status r)))
         (is (re-find #"produces effects" (:reason r)))
         (is (re-find #":io" (:reason r))

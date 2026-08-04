@@ -1,8 +1,10 @@
-(ns ^:serial graphden.types.folds-test
-  "`^:serial` — `with-redefs` root-rebinds `registry/rich-type-of` to a
-   stub map, defeating the `*rich-types-override*` isolation for every
-   NS in the parallel pool (the plugin isolates the backing atom, not
-   the reader fn).
+(ns graphden.types.folds-test
+  "Parallel-safe: no `with-redefs`. The `root-base-fn-name` walks are
+   driven by REAL `record-rich-types-raw!` registrations under
+   distinctive `:folds-*` names — the parallel plugin binds
+   `*rich-types-override*` per NS-thread, and the `:once`
+   `with-isolated-rich-types` fixture covers solo runs, so the writes
+   never reach the process-global registry (serial-reduction cluster B).
 
    Direct unit tests for the structural-fold helpers consolidated in the
    option-3 type-checker hardening (commit f1068b97):
@@ -14,8 +16,13 @@
    lets X slip through' hazard the `type-any?` combinator exists to kill."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.types.core :as t]))
+
+
+(use-fixtures :once
+  exec/with-isolated-rich-types)
 
 
 (use-fixtures :each
@@ -109,21 +116,26 @@
 ;; root-base-fn-name — walk the :primary-parent chain to the base-fn root.
 
 (deftest root-base-fn-name-walks-to-root
-  (with-redefs [registry/rich-type-of
-                (fn [n]
-                  (get {:a {:primary-parent :b}
-                        :b {:primary-parent :c}
-                        :c {}}
-                       n))]
-    (is (= :c (registry/root-base-fn-name :a)) "chases the chain to the root")
-    (is (= :c (registry/root-base-fn-name :c)) "a root returns itself")
-    (is (= :z (registry/root-base-fn-name :z)) "an unknown ref returns itself")
-    (is (nil? (registry/root-base-fn-name nil))))
+  ;; Real registry entries (thread-isolated — see the ns docstring), so
+  ;; the reader path `root-base-fn-name → rich-type-of` runs unstubbed.
+  (registry/record-rich-types-raw!
+    :folds-chain-a {:return :any :args {} :primary-parent :folds-chain-b})
+  (registry/record-rich-types-raw!
+    :folds-chain-b {:return :any :args {} :primary-parent :folds-chain-c})
+  (registry/record-rich-types-raw!
+    :folds-chain-c {:return :any :args {}})
+  (is (= :folds-chain-c (registry/root-base-fn-name :folds-chain-a))
+      "chases the chain to the root")
+  (is (= :folds-chain-c (registry/root-base-fn-name :folds-chain-c))
+      "a root returns itself")
+  (is (= :folds-unknown-ref (registry/root-base-fn-name :folds-unknown-ref))
+      "an unknown ref returns itself")
+  (is (nil? (registry/root-base-fn-name nil)))
   (testing "cycle guard — a mutual-parent loop terminates instead of hanging"
-    (with-redefs [registry/rich-type-of
-                  (fn [n]
-                    (get {:x {:primary-parent :y}
-                          :y {:primary-parent :x}}
-                         n))]
-      (is (contains? #{:x :y} (registry/root-base-fn-name :x))
-          "returns a node in the cycle rather than looping forever"))))
+    (registry/record-rich-types-raw!
+      :folds-cycle-x {:return :any :args {} :primary-parent :folds-cycle-y})
+    (registry/record-rich-types-raw!
+      :folds-cycle-y {:return :any :args {} :primary-parent :folds-cycle-x})
+    (is (contains? #{:folds-cycle-x :folds-cycle-y}
+                   (registry/root-base-fn-name :folds-cycle-x))
+        "returns a node in the cycle rather than looping forever")))

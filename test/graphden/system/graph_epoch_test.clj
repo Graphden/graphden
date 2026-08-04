@@ -1,5 +1,9 @@
-(ns ^:integration graphden.system.graph-epoch-test
-  "The graph-epoch freshness self-heal, ledger edition (audit-7): the
+(ns ^:integration ^:serial graphden.system.graph-epoch-test
+  "`^:serial` — `with-redefs` root-rebinds `cr/rebuild!` /
+   `cr/rebuild-optimistic!` to counting no-ops; a concurrent NS whose
+   rebuild lands in the window never actually compiles its graph.
+
+   The graph-epoch freshness self-heal, ledger edition (audit-7): the
    watermark advances only when every epoch in (w, global] is
    accounted for — locally noted or NOTIFY-covered — so an interleaved
    foreign write whose NOTIFY was lost can never be buried by a local

@@ -1,5 +1,8 @@
-(ns ^:integration graphden.clients.vault-test
-  "Integration tests for `graphden.clients.vault` against a real
+(ns ^:integration ^:serial graphden.clients.vault-test
+  "`^:serial` — `with-redefs` root-rebinds `org.httpkit.client/get`;
+   every concurrent GET in the integration pool got the stub body.
+
+   Integration tests for `graphden.clients.vault` against a real
    OpenBao container — covers the HTTP path that the unit tests in
    `secrets_test.clj` mock out via `with-redefs`.
 

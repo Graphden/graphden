@@ -1,5 +1,10 @@
-(ns graphden.services.reconciler-test
-  "Tests for `graphden.services.reconciler` — the diff/start/stop
+(ns ^:serial graphden.services.reconciler-test
+  "`^:serial` — `with-redefs` root-rebinds the shared PG advisory-lock
+   fns (`pg-lock/try-acquire-slot!` & co.), `br/ctx-for` and
+   `vres/collect-branch-chain`; the pg-lock rebinds RACED
+   fleet-controller-test identical rebinds in the parallel pool.
+
+   Tests for `graphden.services.reconciler` — the diff/start/stop
    policy and the storage-driven reconcile pass.
 
    The pure `diff-desired` is tested in isolation; the start/stop

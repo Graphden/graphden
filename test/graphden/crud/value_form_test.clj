@@ -1,5 +1,9 @@
-(ns graphden.crud.value-form-test
-  "Tests for `graphden.crud.value-form` — the `/api/value-form`
+(ns ^:serial graphden.crud.value-form-test
+  "`^:serial` — `with-redefs` root-rebinds `exec/execute-by-name` to a
+   constant stub; any parallel NS invoking the executor in the window
+   gets the bogus fixed rows.
+
+   Tests for `graphden.crud.value-form` — the `/api/value-form`
    resolver: structural classification, form-fn dispatch, refinement
    extraction, the request parse/validate stages, the storage-backed
    slot-type resolution, and the ctx-backed form assembly.

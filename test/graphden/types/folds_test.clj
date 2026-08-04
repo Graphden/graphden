@@ -1,5 +1,10 @@
-(ns graphden.types.folds-test
-  "Direct unit tests for the structural-fold helpers consolidated in the
+(ns ^:serial graphden.types.folds-test
+  "`^:serial` — `with-redefs` root-rebinds `registry/rich-type-of` to a
+   stub map, defeating the `*rich-types-override*` isolation for every
+   NS in the parallel pool (the plugin isolates the backing atom, not
+   the reader fn).
+
+   Direct unit tests for the structural-fold helpers consolidated in the
    option-3 type-checker hardening (commit f1068b97):
    `types.core/{child-types, type-any?, strip-null}` and
    `registry.core/root-base-fn-name`. Before this they were exercised

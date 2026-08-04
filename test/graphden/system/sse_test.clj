@@ -1,5 +1,9 @@
-(ns ^:integration graphden.system.sse-test
-  "End-to-end SSE invalidation round-trip in ONE process: the hub relay
+(ns ^:integration ^:serial graphden.system.sse-test
+  "`^:serial` — `with-redefs` root-rebinds `org.httpkit.server/send!`;
+   a concurrent frame send in the integration pool is silently
+   swallowed by the stub.
+
+   End-to-end SSE invalidation round-trip in ONE process: the hub relay
    (`system.sse`) and the remote source (`storage.remote.sse`) connected over
    a real socket. Fire an event through the relay's `graphden_events` callback
    and assert the remote source turns it back into the same parsed event a

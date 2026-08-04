@@ -1,5 +1,9 @@
-(ns graphden.executor.compile-runtime-test
-  "Tests for the public compile-runtime API — the surface `exec/` delegates to.
+(ns ^:serial graphden.executor.compile-runtime-test
+  "`^:serial` — `with-redefs` wraps `cr/read-graph` with a call
+   counter; a concurrent rebuild/delta landing in the window increments
+   it and flakes the zero-reads assertion.
+
+   Tests for the public compile-runtime API — the surface `exec/` delegates to.
 
    Focuses on branches that core-level tests don't always hit directly:
    - `execute` with a callable `fn-id` (legacy HOF pattern)

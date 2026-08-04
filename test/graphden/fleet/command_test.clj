@@ -1,5 +1,10 @@
-(ns graphden.fleet.command-test
-  "Directed cell-command transport (`graphden.fleet.command`, docs/FLEET_RFC.md
+(ns ^:serial graphden.fleet.command-test
+  "`^:serial` — `with-redefs` root-rebinds `cr/load-cell!` /
+   `cr/evict-cell!` (some stubs THROW) and `http/request` (with
+   embedded assertions); a concurrent compile or HTTP call landing in
+   the window blows up in the wrong NS.
+
+   Directed cell-command transport (`graphden.fleet.command`, docs/FLEET_RFC.md
    §6.3). URL parse/build are pure; the auth-gated server seam + the ACK-gated
    client are exercised in-JVM by redefining `cr/load-cell!` / `cr/evict-cell!`
    and `http/request` — no container, no second pod."

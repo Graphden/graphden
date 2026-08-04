@@ -1,5 +1,8 @@
-(ns graphden.system.fleet-controller-test
-  "Leader-gate GLUE for `:exec/fleet-controller` (`fleet-controller-tick!` in
+(ns ^:serial graphden.system.fleet-controller-test
+  "`^:serial` — `with-redefs` root-rebinds the shared PG advisory-lock
+   fns; raced reconciler-test identical rebinds in the parallel pool.
+
+   Leader-gate GLUE for `:exec/fleet-controller` (`fleet-controller-tick!` in
    `graphden.system.init.fleet`). The pure decision (`plan-tick` / `run-tick!`) is
    covered in `graphden.fleet.*`; this covers the integrant-side gating the fleet
    tests can't reach — only the advisory-lock holder ticks, a non-leader resets

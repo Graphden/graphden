@@ -37,6 +37,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
+    [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res]
     [next.jdbc :as jdbc]
@@ -1054,14 +1055,24 @@
 
    Returns the branch-merge record."
   ([versioned-storage source-branch-id]
-   (mrg/merge-branch! versioned-storage source-branch-id))
+   (let [result (mrg/merge-branch! versioned-storage source-branch-id)]
+     ;; A committed merge surfaces source versions on the TARGET —
+     ;; its recorded diagnostics may describe pre-merge state. The
+     ;; store is derived: drop the target's entries; the next check
+     ;; re-records the survivors. (mrg throws on unresolved conflicts,
+     ;; so this only runs on success.)
+     (diag/clear-branch! (:branch-id versioned-storage))
+     result))
   ([versioned-storage source-branch-id opts]
    ;; The merge record is written via base storage inside the merge
    ;; transaction; bump the graph epoch here (bump-before-write) so a
    ;; committed merge is always visible to the router's lazy epoch
    ;; validation even when the eager post-commit invalidate is skipped.
    (epoch/bump! (:base-storage versioned-storage) :branch-merge)
-   (mrg/merge-branch! versioned-storage source-branch-id opts)))
+   (let [result (mrg/merge-branch! versioned-storage source-branch-id opts)]
+     ;; See the 2-arity note — post-commit target-branch invalidation.
+     (diag/clear-branch! (:branch-id versioned-storage))
+     result)))
 
 
 ;; === Delete Branch ===
@@ -1133,6 +1144,9 @@
     ;; ancestor — globals survive across CRUD calls and would
     ;; otherwise still hand back the pre-delete chain.
     (res/invalidate-chain-cache! branch-id)
+    ;; The diagnostics store is per-branch and derived — a deleted
+    ;; branch's entries can never be recomputed, so drop them here.
+    (diag/clear-branch! branch-id)
     true))
 
 

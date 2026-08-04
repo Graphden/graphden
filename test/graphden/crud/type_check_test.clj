@@ -10,7 +10,9 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.diagnostics :as diag]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once
@@ -453,4 +455,92 @@
                                :ref-fn-id (:id bad-target)} nil)]
             (is (some? rej))
             (is (re-find #"Type mismatch on ref binding" (:reason rej)))))
+        (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; Phase 0+1 — structured diagnostics + the per-branch store
+;; ============================================================================
+
+(deftest structured-diagnostic-on-mutation-test
+  (testing "a broken mutation records a structured diagnostic; fixing clears it"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [storage (setup/create-test-storage)]
+        (try
+          (let [base  (setup/create-base-fn! storage "diagfam-base")
+                slot  (setup/create-slot! storage "a" :int)
+                _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+                _     (registry/record-rich-types-raw!
+                        :diagfam-base {:return :int :args {:a :int} :effects #{}})
+                child (setup/create-composed-fn! storage "diagfam-child" (:id base))
+                bind  (setup/bind-value! storage (:id child) (:id slot) "hello")
+                rej   (tc/type-check-fn-after-mutation! storage (:id child))]
+            ;; Phase 0 — the rejection map keeps :reason (message string)
+            ;; and adds the cleaned structured ex-data under :diagnostic.
+            (is (some? rej))
+            (is (string? (:reason rej)))
+            (is (= :int (get-in rej [:diagnostic :expected])))
+            (is (= :text (get-in rej [:diagnostic :actual])))
+            (is (= :a (get-in rej [:diagnostic :arg-name])))
+            (is (string? (get-in rej [:diagnostic :message])))
+            ;; Phase 1 — the same diagnostic landed in the store under
+            ;; the storage's branch (nil = unversioned/base storage).
+            (is (= [(:diagnostic rej)]
+                   (diag/errors-for-fn nil (:id child))))
+            (is (= 1 (diag/error-count nil)))
+            ;; Fix the binding → re-check passes → entry cleared.
+            (sp/update-entity storage :binding (:id bind) {:value 5})
+            (is (nil? (tc/type-check-fn-after-mutation! storage (:id child))))
+            (is (nil? (diag/errors-for-fn nil (:id child))))
+            (is (zero? (diag/error-count nil))))
+          (finally (sp/close storage)))))))
+
+
+(deftest diagnostics-branch-scoping-test
+  (testing "a versioned storage records under ITS branch, absent elsewhere"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [vstorage (setup/create-versioned-test-storage)]
+        (try
+          (let [branch-a (vs/current-branch-id vstorage)
+                base  (setup/create-base-fn! vstorage "diagbr-base")
+                slot  (setup/create-slot! vstorage "n" :int)
+                _     (setup/attach-slot! vstorage (:id base) (:id slot) 0)
+                _     (registry/record-rich-types-raw!
+                        :diagbr-base {:return :int :args {:n :int} :effects #{}})
+                child (setup/create-composed-fn! vstorage "diagbr-child" (:id base))
+                _     (setup/bind-value! vstorage (:id child) (:id slot) "nope")
+                rej   (tc/type-check-fn-after-mutation! vstorage (:id child))]
+            (is (some? rej))
+            (is (some? branch-a))
+            ;; Recorded under branch A (the wrapper's branch)…
+            (is (= [(:diagnostic rej)]
+                   (diag/errors-for-fn branch-a (:id child))))
+            ;; …and invisible from any other branch (incl. the nil
+            ;; default) — per-branch validity is the point of the store.
+            (is (nil? (diag/errors-for-fn (random-uuid) (:id child))))
+            (is (nil? (diag/errors-for-fn nil (:id child)))))
+          (finally (sp/close (vs/unwrap vstorage))))))))
+
+
+(deftest binding-direct-diagnostic-test
+  (testing "type-check-binding-direct! rejections carry :diagnostic too"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [slot (setup/create-slot! storage "n" :int)
+              rej  (tc/type-check-binding-direct!
+                     storage {:slot-id (:id slot) :value "hello"} nil)]
+          (is (some? rej))
+          (is (= :int (get-in rej [:diagnostic :expected])))
+          (is (= :text (get-in rej [:diagnostic :actual])))
+          (is (= :value-mismatch (get-in rej [:diagnostic :reason]))))
+        (let [slot   (setup/create-slot! storage "m" :int)
+              target (setup/create-base-fn! storage "diagbd-text-fn")
+              _      (registry/record-rich-types-raw!
+                       :diagbd-text-fn {:return :text :args {} :effects #{}})
+              rej    (tc/type-check-binding-direct!
+                       storage {:slot-id (:id slot) :ref-fn-id (:id target)} nil)]
+          (is (some? rej))
+          (is (= :int (get-in rej [:diagnostic :expected])))
+          (is (= :text (get-in rej [:diagnostic :actual])))
+          (is (= :ref-return-mismatch (get-in rej [:diagnostic :reason]))))
         (finally (sp/close storage))))))

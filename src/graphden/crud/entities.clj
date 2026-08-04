@@ -25,6 +25,7 @@
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.types.diagnostics :as diag]
     [graphden.util.abort-shield :as shield]
     [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as vcore]
@@ -157,7 +158,13 @@
         ;; Cache lives below the VersionedStorage wrapper and is keyed by
         ;; the BASE storage handle; unwrap before invalidating.
         (let [base (or (:base-storage storage) storage)]
-          (branch-local/invalidate! base)))
+          (branch-local/invalidate! base))
+        ;; A `:fn` write (rename / reparent / return-type / delete) can
+        ;; stale a recorded type-check diagnostic for that fn on this
+        ;; branch — drop the entry; the next post-mutation check
+        ;; re-records it if the fn is still broken.
+        (when-let [id (:id entity-data)]
+          (diag/clear-fn! (vcore/current-branch-id storage) id)))
       ;; The cache holds slot rows, and a `:slot` write now invalidates nothing
       ;; (see `affected-fn-ids`) — so splice the single row rather than let a reader
       ;; of the whole graph miss it.

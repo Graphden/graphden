@@ -24,7 +24,9 @@
     [graphden.tenancy.context :as tc]
     [graphden.types.check :as types-check]
     [graphden.types.check.literals :as types-lit]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.diagnostics :as diag]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (defn with-org-alias-view*
@@ -329,26 +331,43 @@
 (defn type-check-fn-after-mutation!
   "Run `check-fn-def!` on the affected fn-id after a CRUD mutation
    touched its bindings/slots. Returns nil on success or
-   `{:reason …}` on type-check failure — caller can use that to
-   reject + rollback. Composed fns only; type-rows / base-fns
-   short-circuit (no parents → nothing to check)."
+   `{:reason … :diagnostic …}` on type-check failure — caller can use
+   that to reject + rollback. `:reason` stays the human-readable
+   message string (existing callers embed it verbatim in HTTP
+   rejections); `:diagnostic` is the cleaned structured ex-data
+   (`diag/from-ex` — `:expected` / `:actual` / `:arg-name` / …).
+   Composed fns only; type-rows / base-fns short-circuit (no parents →
+   nothing to check).
+
+   Also keeps the per-branch diagnostics store fresh: failure records,
+   success clears, the fn's entry under the storage's current branch
+   (nil branch-id for an unversioned/base storage = default branch)."
   [storage fn-id]
   (with-org-alias-view*
     (fn []
-      (try
-        (when-let [fn-def (reconstruct-fn-def storage fn-id)]
-          (types-check/check-fn-def! fn-def))
-        nil
-        (catch clojure.lang.ExceptionInfo e
-          ;; `.getMessage` is nullable; `str` keeps the response field a
-          ;; string instead of a JSON-`null` the client would render as
-          ;; "rejected, no reason".
-          {:reason (str (Throwable/.getMessage e))})
-        (catch Exception e
-          ;; Defensive: any unexpected error during reconstruction is
-          ;; surfaced (better than silent broken state, worse than
-          ;; nothing).
-          {:reason (str "type-check error: " (Throwable/.getMessage e))})))))
+      (let [result
+            (try
+              (when-let [fn-def (reconstruct-fn-def storage fn-id)]
+                (types-check/check-fn-def! fn-def))
+              nil
+              (catch clojure.lang.ExceptionInfo e
+                ;; `.getMessage` is nullable; `str` keeps the response field a
+                ;; string instead of a JSON-`null` the client would render as
+                ;; "rejected, no reason".
+                {:reason (str (Throwable/.getMessage e))
+                 :diagnostic (diag/from-ex e)})
+              (catch Exception e
+                ;; Defensive: any unexpected error during reconstruction is
+                ;; surfaced (better than silent broken state, worse than
+                ;; nothing).
+                (let [msg (str "type-check error: " (Throwable/.getMessage e))]
+                  {:reason msg
+                   :diagnostic {:message msg}})))
+            branch-id (vs/current-branch-id storage)]
+        (if result
+          (diag/record! branch-id fn-id [(:diagnostic result)])
+          (diag/clear-fn! branch-id fn-id))
+        result))))
 
 
 (defn type-check-binding-direct!
@@ -356,7 +375,10 @@
    the slot's expected type once, then validates EITHER the value
    (literal compared by `subtype?`) OR the ref (the bound fn's
    `:return-type` from the rich-types registry compared via subtype?
-   or unify). Returns nil on success or `{:reason …}` on rejection.
+   or unify). Returns nil on success or `{:reason … :diagnostic …}` on
+   rejection (`:reason` = message string, `:diagnostic` = structured
+   `:expected`/`:actual` map). Pre-write guard — the rejected row never
+   lands, so nothing is recorded in the diagnostics store here.
 
    Skip silently when the slot's expected type is `:any` (the
    uninformative escape hatch — type-check can't catch anything
@@ -389,9 +411,16 @@
                                (let [r (types-lit/literal-satisfies-refinement?
                                          new-value (types/refine-constraint expected))]
                                  (or (true? r) (= :unknown r)))))
-              {:reason (str "Type mismatch on value: expected " (pr-str expected)
-                            ", got " (pr-str actual)
-                            " (value " (pr-str new-value) ")")}))
+              (let [msg (str "Type mismatch on value: expected " (pr-str expected)
+                             ", got " (pr-str actual)
+                             " (value " (pr-str new-value) ")")]
+                {:reason msg
+                 :diagnostic {:type :types/check-failed
+                              :reason :value-mismatch
+                              :expected expected
+                              :actual actual
+                              :binding {:value new-value}
+                              :message msg}})))
 
           ;; Ref-binding case: bound fn's return type vs expected.
           (some? new-ref-id)
@@ -433,6 +462,13 @@
                                  (or (:effects target-info) :any))
                                expected)))]
             (when-not ok?
-              {:reason (str "Type mismatch on ref binding: slot expects "
-                            (pr-str expected) ", but " (pr-str target-name)
-                            " returns " (pr-str target-ret))})))))))
+              (let [msg (str "Type mismatch on ref binding: slot expects "
+                             (pr-str expected) ", but " (pr-str target-name)
+                             " returns " (pr-str target-ret))]
+                {:reason msg
+                 :diagnostic {:type :types/check-failed
+                              :reason :ref-return-mismatch
+                              :expected expected
+                              :actual target-ret
+                              :binding target-name
+                              :message msg}}))))))))

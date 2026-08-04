@@ -34,7 +34,9 @@
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
+    [graphden.types.diagnostics :as diag]
     [graphden.versioning.identity-repair :as idrepair]
+    [graphden.versioning.storage.core :as vs]
     [graphden.web.route-shape :as route-shape]))
 
 
@@ -346,31 +348,59 @@
      allowlist gates against.
    - Sweep summary WARN runs when any fn-def failed (DEBUG-logged
      per-fn).
+   - **Diagnostics store** — the FINAL failure set's structured
+     ex-data is recorded per-fn into `graphden.types.diagnostics`
+     under `branch-id` (the branch the sync ran on; nil = default),
+     and sweep-covered fns that now pass get their entries cleared.
+     Recording happens BEFORE the allowlist gate so a red gate still
+     leaves the diagnostics readable.
    - **Allowlist gate** — `types-check/allowed-type-check-failures`
      enumerates the known-failing fn-defs (closed over time as the
      type system gains expressiveness). Any failure NOT in the
      allowlist is a regression; any allowlisted name that's NO LONGER
      failing must be removed from the allowlist. Throws at sync time
-     so CI catches both. `skip-allowlist-gate?` opts a test bootstrap
-     out — useful when loading a SUBSET of production packages."
-  [expanded-fn-defs skip-allowlist-gate?]
+     so CI catches both — the package-corpus gate stays HARD:
+     tolerance is for user CRUD, our corpus stays at zero.
+     `skip-allowlist-gate?` opts a test bootstrap out — useful when
+     loading a SUBSET of production packages."
+  [expanded-fn-defs skip-allowlist-gate? branch-id]
   (let [sorted (deps/topological-sort expanded-fn-defs)
-        failures (atom {})]
+        fd-fn-id (fn [fd]
+                   (when (and (:name fd) (:namespace fd))
+                     (records/fn-id (:namespace fd) (:name fd))))
+        failures (atom {})
+        collect! (fn [fd e]
+                   (swap! failures assoc (:name fd)
+                          {:message (ex-message e)
+                           :fn-id (fd-fn-id fd)
+                           :diagnostic (diag/from-ex e)})
+                   (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                              (ex-message e)))]
     (doseq [fd sorted]
       (try (types-check/check-fn-def! fd)
            (catch Exception e
-             (swap! failures assoc (:name fd) (ex-message e))
-             (log/debug "Type-check failed for fn-def" (:name fd) "—"
-                        (ex-message e)))))
+             (collect! fd e))))
     (let [narrowings (types-narrowing/build-caller-narrowings sorted)
           overrides  (types-narrowing/build-ref-return-overrides sorted)]
       (reset! failures {})
       (doseq [fd sorted]
         (try (types-narrowing/check-fn-def-with-narrowings! fd narrowings overrides)
              (catch Exception e
-               (swap! failures assoc (:name fd) (ex-message e))
-               (log/debug "Type-check failed for fn-def" (:name fd) "—"
-                          (ex-message e))))))
+               (collect! fd e)))))
+    ;; Record the final per-fn structured failures under the sync's
+    ;; branch; clear entries for sweep-covered fns that now pass.
+    ;; Only fns THIS sweep saw are touched — editor-created rows on
+    ;; the same branch keep their CRUD-recorded entries.
+    (let [failed @failures
+          failed-ids (into #{} (keep :fn-id) (vals failed))
+          sweep-ids (into #{} (keep fd-fn-id) sorted)]
+      (doseq [{:keys [fn-id diagnostic]} (vals failed)
+              :when fn-id]
+        (diag/record! branch-id fn-id [diagnostic]))
+      (doseq [fn-id (keys (diag/branch-errors branch-id))
+              :when (and (contains? sweep-ids fn-id)
+                         (not (contains? failed-ids fn-id)))]
+        (diag/clear-fn! branch-id fn-id)))
     (when (pos? (count @failures))
       (log/warn "Type-check sweep: " (count @failures)
                 "fn-defs failed (DEBUG-logged) — runtime unaffected,"
@@ -378,7 +408,8 @@
                 " docs/TYPE_CHECK_BACKLOG.md"))
     (when-not skip-allowlist-gate?
       (types-check/assert-sweep-failures-match-allowlist!
-        (set (keys @failures)) @failures))))
+        (set (keys @failures))
+        (update-vals @failures :message)))))
 
 
 (def ^:dynamic *reconcile-moved-override*
@@ -595,7 +626,11 @@
                 (catch Exception e
                   (log/debug e "Re-seed record-rich-types! failed for" fn-name)))))
        (when-not skip-type-check?
-         (run-type-check-sweep! expanded-fn-defs skip-allowlist-gate?)
+         ;; The sweep records its final failure set into the per-branch
+         ;; diagnostics store — key it by the branch this sync ran on
+         ;; (nil for an unversioned/base storage = default branch).
+         (run-type-check-sweep! expanded-fn-defs skip-allowlist-gate?
+                                (vs/current-branch-id storage))
          ;; Port-collision scan — runs against the expanded fn-def
          ;; set so synthetic anons that bind `:port` get inspected
          ;; too. Logs a WARN per colliding port; doesn't fail

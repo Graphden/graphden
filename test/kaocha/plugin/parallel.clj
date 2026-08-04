@@ -176,7 +176,14 @@
     ;; the registry to defaults — a cross-NS race on the shared atom in
     ;; either direction. Seeded from the global snapshot so the default
     ;; names/patterns (+ any boot registrations) stay active per thread.
-    graphden.storage.protocol.redaction/*sensitive-fields-override*])
+    graphden.storage.protocol.redaction/*sensitive-fields-override*
+    ;; The per-branch type-check diagnostics store. CRUD post-mutation
+    ;; checks and package-sync sweeps record/clear entries; without
+    ;; isolation a sibling NS-thread's bootstrap sweep leaks failure
+    ;; entries into another NS's counts. Default `{}` seed (no seeder
+    ;; entry) — an empty store is the correct fresh-thread state, the
+    ;; entries are derived, not configuration.
+    graphden.types.diagnostics/*diagnostics-override*])
 
 
 ;; Per-var seeders. Some isolation atoms must start non-empty — the

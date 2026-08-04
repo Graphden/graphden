@@ -1,8 +1,9 @@
-(ns ^:serial graphden.services.reconciler-test
-  "`^:serial` — `with-redefs` root-rebinds the shared PG advisory-lock
-   fns (`pg-lock/try-acquire-slot!` & co.), `br/ctx-for` and
-   `vres/collect-branch-chain`; the pg-lock rebinds RACED
-   fleet-controller-test identical rebinds in the parallel pool.
+(ns graphden.services.reconciler-test
+  "Runs in the parallel pool: every former `with-redefs` root-rebind
+   now goes through a per-thread binding-able seam —
+   `pg-lock/*impl-override*`, `br/*ctx-for-override*` and
+   `vres/*collect-branch-chain-override*` — so nothing here mutates
+   process-global state.
 
    Tests for `graphden.services.reconciler` — the diff/start/stop
    policy and the storage-driven reconcile pass.
@@ -507,10 +508,10 @@
       ;; off it; `br/ctx-for` is stubbed to the base ctx — which is what
       ;; the real router's seeded default-branch entry resolves to anyway.
       (br/set-active-router! {:default-branch-id default-id})
-      (with-redefs [br/ctx-for (fn [_router branch-id]
-                                 (is (= default-id branch-id)
-                                     "nil-branch row resolves to the default branch ctx")
-                                 c)]
+      (binding [br/*ctx-for-override* (fn [_router branch-id]
+                                        (is (= default-id branch-id)
+                                            "nil-branch row resolves to the default branch ctx")
+                                        c)]
         (recon/reconcile-once! c running)
         (testing "running entry records the default branch id"
           (is (= default-id (-> @running vals first :branch-id))))
@@ -1313,7 +1314,7 @@
                :forward-deps {}})
       ;; Chain lookup: the entries' branch rows don't exist in this
       ;; harness, so stub the chain — each branch is its own root.
-      (with-redefs [vres/collect-branch-chain (fn [_base bid] [bid])]
+      (binding [vres/*collect-branch-chain-override* (fn [_base bid] [bid])]
         (recon/restart-services-depending-on! c running #{dep-fn-id} edit-branch))
       (testing "service on the edited branch restarted"
         (is (= 1 (count @stops-same)))

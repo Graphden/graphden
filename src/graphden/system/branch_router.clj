@@ -563,17 +563,36 @@
     (:handler (or cached (build-and-cache! router effective)))))
 
 
+(def ^:dynamic *ctx-for-override*
+  "Test seam: when bound to `(fn [router branch-id] ctx)`, `ctx-for`
+   delegates to it instead of the real cache lookup. Exists for the
+   reconciler suite's stub (it hands the reconciler a minimal fake
+   \"router\" and needs `ctx-for` to return a fixed base ctx).
+
+   WHY a dynamic var and not `with-redefs`: a root rebind is
+   process-global, so any test using it races every parallel test that
+   goes through the real `ctx-for` — forcing `^:serial` pins.
+   `binding` is per-thread; nil (the default) means production
+   behaviour, at the cost of one Var deref on a cold path."
+  nil)
+
+
 (defn ctx-for
   "Return the per-branch ExecutionContext for `branch-id`, building
    lazily on miss. Useful for CRUD impls that need to call
-   `invalidate-graph-cache!` after a write."
+   `invalidate-graph-cache!` after a write.
+
+   Checks `*ctx-for-override*` first (test seam — see its docstring)."
   [{:keys [default-branch-id handlers] :as router} branch-id]
-  (validate-graph-epoch! router)
-  (let [effective (or branch-id default-branch-id)
-        cached (get @handlers effective)]
-    (when (and cached (not= effective default-branch-id))
-      (touch! handlers effective))
-    (:ctx (or cached (build-and-cache! router effective)))))
+  (if-let [f *ctx-for-override*]
+    (f router branch-id)
+    (do
+      (validate-graph-epoch! router)
+      (let [effective (or branch-id default-branch-id)
+            cached (get @handlers effective)]
+        (when (and cached (not= effective default-branch-id))
+          (touch! handlers effective))
+        (:ctx (or cached (build-and-cache! router effective)))))))
 
 
 (defn- current-scope

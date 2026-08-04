@@ -50,16 +50,25 @@
 (defn- fleet-controller-tick!
   "One control pass, leader-gated. Re-asserts the advisory lock (re-acquiring
    after a lock-conn reconnect, or failing if a sibling took over); only the
-   holder ticks. A non-leader resets its streak so a failover starts clean."
+   holder ticks. A non-leader resets its streak so a failover starts clean.
+
+   Test seams via `opts` (the tick is invoked directly by its glue test with a
+   hand-built opts map, so no dynamic vars / `with-redefs` root-rebinds are
+   needed — those are process-global and force `^:serial` pins):
+   `:executors-fn` (default `fleet-discovery/fleet-executors`) and
+   `:run-tick-fn` (default `fleet-loop/run-tick!`). The init-key never sets
+   them (`fleet-controller-opts` reads only env), so production is unchanged."
   [ctx holder state-atom opts]
   (try
     (pg-lock/ensure-live! holder)
     (if (pg-lock/try-lock! (pg-lock/holder-conn holder) fleet-controller-lock-id)
-      (let [env {:storage (:storage ctx)
+      (let [executors-fn (or (:executors-fn opts) fleet-discovery/fleet-executors)
+            run-tick-fn (or (:run-tick-fn opts) fleet-loop/run-tick!)
+            env {:storage (:storage ctx)
                  :forward-deps (:forward-deps (some-> (:compile-deps ctx) deref))
-                 :executors (fleet-discovery/fleet-executors)
+                 :executors (executors-fn)
                  :move-fn (fn [cmd] (fleet-command/execute-move! ctx cmd))}
-            decision (fleet-loop/run-tick! env @state-atom opts)]
+            decision (run-tick-fn env @state-atom opts)]
         (reset! state-atom (:state decision))
         (when (or (seq (:moves decision)) (seq (:initial-placements decision)))
           (log/info "Fleet controller applied placement"

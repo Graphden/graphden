@@ -387,23 +387,45 @@
       chain)))
 
 
+(def ^:dynamic *collect-branch-chain-override*
+  "Test seam: when bound to `(fn [base-storage branch-id] chain)`,
+   `collect-branch-chain` delegates to it wholesale (cache included).
+   Exists for the reconciler suite, whose harness has no branch rows —
+   it stubs each branch as its own root (`[bid]`).
+
+   WHY a dynamic var and not `with-redefs`: a root rebind is
+   process-global, so it races every parallel test resolving through
+   the real chain walk — forcing `^:serial` pins. `binding` is
+   per-thread; nil (the default) means production behaviour.
+
+   PERF: `collect-branch-chain` sits on the warm read path (consulted
+   per resolve), so the seam is deliberately a single `if-let` on this
+   Var — one Var deref before the normal cache hit."
+  nil)
+
+
 (defn collect-branch-chain
   "Returns vector of branch-ids from current to root (for inheritance
    lookup). When `*branch-chain-cache*` is bound it wins (test
    isolation); otherwise consults the process-wide
    `global-chain-cache`, populating on miss.
 
+   Checks `*collect-branch-chain-override*` first (test seam — see its
+   docstring).
+
    Public because cache invalidation needs the same reachability
    question the resolver asks: a write on branch W is visible from
    branch C exactly when W ∈ (collect-branch-chain … C). See
    `system.branch-router/invalidate-affected-ctxs!`."
   [base-storage branch-id]
-  (let [cache (or *branch-chain-cache* global-chain-cache)]
-    (if-let [cached (get @cache branch-id)]
-      cached
-      (let [chain (collect-branch-chain-impl base-storage branch-id)]
-        (swap! cache assoc branch-id chain)
-        chain))))
+  (if-let [f *collect-branch-chain-override*]
+    (f base-storage branch-id)
+    (let [cache (or *branch-chain-cache* global-chain-cache)]
+      (if-let [cached (get @cache branch-id)]
+        cached
+        (let [chain (collect-branch-chain-impl base-storage branch-id)]
+          (swap! cache assoc branch-id chain)
+          chain)))))
 
 
 (defn- load-merge-aware-cache

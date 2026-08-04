@@ -1,25 +1,22 @@
-(ns ^:serial graphden.fleet.command-test
-  "`^:serial` — ONLY because `with-redefs` root-rebinds
-   `org.httpkit.client/request` (with embedded assertions); a
-   concurrent NS's real HTTP call landing in the window blows up in
-   the wrong NS. (Cluster A of the serial-reduction epic — the httpkit
-   seam comes in a later batch.) The former second pin reason —
-   root-rebinding `cr/load-cell!` / `cr/evict-cell!`, some stubs
-   THROWING — is gone: those now go through the thread-local
-   `cr/*impl-override*` seam (`binding`; serial-reduction batch 4).
+(ns graphden.fleet.command-test
+  "Parallel-safe: the HTTP transport is stubbed by `binding` the
+   thread-local `cmd/*request-fn-override*` seam (serial-reduction
+   cluster A) — no `with-redefs` of the httpkit root Var, so a
+   concurrent NS's real HTTP call can never land in a stub window.
+   The cell load/evict stubs likewise go through the thread-local
+   `cr/*impl-override*` seam (serial-reduction batch 4).
 
    Directed cell-command transport (`graphden.fleet.command`, docs/FLEET_RFC.md
    §6.3). URL parse/build are pure; the auth-gated server seam + the ACK-gated
    client are exercised in-JVM by stubbing `cr/load-cell!` / `cr/evict-cell!`
-   (via the seam) and `http/request` — no container, no second pod."
+   and the request fn (both via seams) — no container, no second pod."
   (:require
     [cheshire.core :as json]
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.fleet.command :as cmd]
     [graphden.fleet.placement :as placement]
-    [graphden.storage.protocol.core :as sp]
-    [org.httpkit.client :as http]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (def ^:private ROOT #uuid "00000000-0000-0000-0000-0000000000e1")
@@ -86,26 +83,26 @@
 
 (deftest client-send-command-is-ack-gated
   (testing "a 200 ack → true; the URL + bearer are well-formed"
-    (with-redefs [http/request (fn [opts]
-                                 (is (= (str "http://pod-b:8080" cmd/path-prefix "load/" ROOT)
-                                        (:url opts)))
-                                 (is (= "Bearer tok" (get-in opts [:headers "Authorization"])))
-                                 (is (= :post (:method opts)))
-                                 (future {:status 200 :body "{}"}))]
+    (binding [cmd/*request-fn-override* (fn [opts]
+                                          (is (= (str "http://pod-b:8080" cmd/path-prefix "load/" ROOT)
+                                                 (:url opts)))
+                                          (is (= "Bearer tok" (get-in opts [:headers "Authorization"])))
+                                          (is (= :post (:method opts)))
+                                          (future {:status 200 :body "{}"}))]
       (is (true? (cmd/send-command "pod-b" 8080 "tok" :load ROOT)))))
   (testing "a 409/401 or any non-200 → false (controller aborts the move)"
-    (with-redefs [http/request (fn [_] (future {:status 409 :body "{}"}))]
+    (binding [cmd/*request-fn-override* (fn [_] (future {:status 409 :body "{}"}))]
       (is (false? (cmd/send-command "pod-b" 8080 "tok" :load ROOT))))
-    (with-redefs [http/request (fn [_] (future {:status 401 :body "{}"}))]
+    (binding [cmd/*request-fn-override* (fn [_] (future {:status 401 :body "{}"}))]
       (is (false? (cmd/send-command "pod-b" 8080 "tok" :load ROOT)))))
   (testing "a transport error → false, not a throw"
-    (with-redefs [http/request (fn [_] (future {:error (java.net.ConnectException. "refused")}))]
+    (binding [cmd/*request-fn-override* (fn [_] (future {:error (java.net.ConnectException. "refused")}))]
       (is (false? (cmd/send-command "pod-b" 8080 "tok" :evict ROOT))))))
 
 
 (deftest directed-seams-close-over-port-and-token
   (let [seen (atom nil)]
-    (with-redefs [http/request (fn [opts] (reset! seen (:url opts)) (future {:status 200 :body "{}"}))]
+    (binding [cmd/*request-fn-override* (fn [opts] (reset! seen (:url opts)) (future {:status 200 :body "{}"}))]
       (let [load-on ((cmd/directed-load 9000 "t") "pod-x" ROOT)]
         (is (true? load-on))
         (is (= (str "http://pod-x:9000" cmd/path-prefix "load/" ROOT) @seen)))
@@ -187,13 +184,13 @@
 
 (deftest execute-move-assembles-directed-seams-and-relocates
   ;; execute-move! is the ops/controller entry: read port+token from env, build
-  ;; the directed load/evict seams, run move-cell!. Redefine the HTTP transport
+  ;; the directed load/evict seams, run move-cell!. Stub the HTTP transport seam
   ;; so the load acks 200 (no real pod) and assert the placement actually flips.
   (let [storage (mem-placement-storage)
         ctx {:storage storage}
         posts (atom [])]
     (placement/assign! storage {:org "acme" :entry-fn-id ROOT :executor-id "pod-a" :epoch 1})
-    (with-redefs [http/request (fn [opts] (swap! posts conj (:url opts)) (future {:status 200 :body "{}"}))]
+    (binding [cmd/*request-fn-override* (fn [opts] (swap! posts conj (:url opts)) (future {:status 200 :body "{}"}))]
       (let [r (cmd/execute-move! ctx {:org "acme" :entry-fn-id ROOT :to-executor "pod-b"})]
         (testing "the move ran end-to-end through the directed seams"
           (is (true? (:ok r)))

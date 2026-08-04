@@ -21,6 +21,7 @@
     [clojure.string :as str]
     [graphden.storage.postgres.errors :as errors]
     [graphden.storage.protocol.core :as sp]
+    [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
 
 
@@ -270,3 +271,54 @@
    (assoc default-query-opts :timeout (get-query-timeout-seconds)))
   ([extra-opts]
    (merge (query-opts) extra-opts)))
+
+
+;; === JDBC execution seam ===
+;;
+;; Every direct SQL statement in the postgres storage layer goes
+;; through `exec!` / `exec-one!` instead of calling next.jdbc root
+;; Vars — one choke point, one test seam.
+
+(def ^:dynamic *jdbc-override*
+  "Parallel-test seam: a map `{:execute! f :execute-one! f}` shadowing
+   `next.jdbc/execute!` / `next.jdbc/execute-one!` inside `exec!` /
+   `exec-one!`. Each override fn receives `[ds sql-params opts]`
+   (`opts` is the fully-resolved options map, `{}` when the call site
+   asked for raw jdbc defaults). nil (production) = the real jdbc
+   call. Tests `binding` this instead of `with-redefs`-ing the
+   next.jdbc root Vars — a root rebind is process-global and forced
+   `^:serial` pins on the sql-errors / crud / edge-cases postgres
+   suites (serial-reduction cluster A). Mirrors
+   `advisory-lock/*impl-override*`.
+
+   Perf note: an extra fn call + nil check in front of a NETWORK
+   round trip is noise by construction — this repo's
+   reverted-optimization lessons concern per-node registry paths,
+   not per-SQL-call ones."
+  nil)
+
+
+(defn exec!
+  "`next.jdbc/execute!` behind the `*jdbc-override*` seam.
+
+   The 2-arity threads `(query-opts)` — the standard DML options
+   (unqualified-lowercase builder + the protocol query timeout),
+   DRYing the former `(jdbc/execute! ds q (query-opts))` boilerplate.
+   Pass `{}` explicitly for raw jdbc defaults — DDL / migration /
+   session statements (advisory locks, NOTIFY) that must NOT inherit
+   the DML query timeout."
+  ([ds sql-params] (exec! ds sql-params (query-opts)))
+  ([ds sql-params opts]
+   (if-let [f (:execute! *jdbc-override*)]
+     (f ds sql-params opts)
+     (jdbc/execute! ds sql-params opts))))
+
+
+(defn exec-one!
+  "`next.jdbc/execute-one!` behind the `*jdbc-override*` seam.
+   Arity/option semantics identical to `exec!`."
+  ([ds sql-params] (exec-one! ds sql-params (query-opts)))
+  ([ds sql-params opts]
+   (if-let [f (:execute-one! *jdbc-override*)]
+     (f ds sql-params opts)
+     (jdbc/execute-one! ds sql-params opts))))

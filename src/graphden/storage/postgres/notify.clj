@@ -39,8 +39,8 @@
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.connection :as pg-conn]
     [graphden.storage.postgres.errors :as pg-errors]
-    [graphden.util.backoff :as backoff]
-    [next.jdbc :as jdbc])
+    [graphden.storage.postgres.util :as util]
+    [graphden.util.backoff :as backoff])
   (:import
     (java.sql
       Connection
@@ -294,7 +294,7 @@
   (fn emit-notify
     [event]
     (try
-      (jdbc/execute! ds ["SELECT pg_notify(?, ?)" channel-name (format-payload event)])
+      (util/exec! ds ["SELECT pg_notify(?, ?)" channel-name (format-payload event)] {})
       nil
       (catch Exception e
         (log/warn e "NOTIFY emit failed — sibling pods may lag until next mutation"

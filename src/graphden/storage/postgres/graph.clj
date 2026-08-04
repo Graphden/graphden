@@ -38,8 +38,7 @@
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-graph :as generic]
-    [graphden.storage.protocol.graph :as graph]
-    [next.jdbc :as jdbc]))
+    [graphden.storage.protocol.graph :as graph]))
 
 
 (def ^:private reachable-fns-sql
@@ -103,8 +102,7 @@
   (let [rows (util/with-sql-error-handling
                "Database error" :resolve-execution-graph
                {:fn-id seed-id}
-               (jdbc/execute! ds [reachable-fns-sql seed-id]
-                              (util/query-opts)))]
+               (util/exec! ds [reachable-fns-sql seed-id]))]
     (into #{} (keep :fn_id) rows)))
 
 

@@ -1,10 +1,14 @@
-(ns ^:serial graphden.system.interface-test
+(ns graphden.system.interface-test
   "Tests for system/interface.clj public API.
 
-   `^:serial` — `with-redefs` of third-party root Vars:
-   `integrant.core/halt!` / `suspend!` / `resume` / `init` (lifecycle
-   stubs). Root rebinds are process-global and race any concurrently
-   running NS. Un-pin path: the cluster-A wrapper seam (batch 7).
+   Parallel-safe: the lifecycle tests drive REAL integrant over a
+   hand-built one-key config (`::probe` / `::other`, whose lifecycle
+   multimethods live in this NS), injected through the existing
+   `^:dynamic sys/read-config` seam via `binding` — no `with-redefs`
+   of the integrant root Vars (which is process-global and forced a
+   `^:serial` pin — serial-reduction cluster A). The probe key's
+   config value carries its own callback fns, so concurrent tests
+   can't share observation state.
 
    Tests configuration loading and lifecycle functions.
    Full integration tests use test-helpers.clj fixtures."
@@ -14,6 +18,34 @@
     [graphden.system.config]
     [graphden.system.interface :as sys]
     [integrant.core :as ig]))
+
+
+;; =============================================================================
+;; Probe integrant keys — a minimal real lifecycle for the tests below.
+;; The initialized value IS the config value, so halt/suspend/resume
+;; callbacks travel inside it (no shared test state).
+;; =============================================================================
+
+(defmethod ig/init-key ::probe [_ v] v)
+
+
+(defmethod ig/halt-key! ::probe
+  [_ v]
+  (when-let [f (:on-halt v)] (f v)))
+
+
+(defmethod ig/suspend-key! ::probe
+  [_ v]
+  (when-let [f (:on-suspend v)] (f v)))
+
+
+(defmethod ig/resume-key ::probe
+  [_ v _old-value _old-impl]
+  (when-let [f (:on-resume v)] (f v))
+  v)
+
+
+(defmethod ig/init-key ::other [_ v] v)
 
 
 ;; =============================================================================
@@ -76,39 +108,44 @@
 ;; =============================================================================
 
 (deftest stop-delegation-test
-  (testing "stop! delegates to ig/halt!"
-    (let [halted? (atom false)
-          mock-system {:db/schema :mock}]
-      (with-redefs [ig/halt! (fn [sys]
-                               (reset! halted? true)
-                               (is (= mock-system sys)))]
-        (sys/stop! mock-system)
-        (is @halted? "ig/halt! should be called")))))
+  (testing "stop! halts the system through ig/halt!"
+    (let [halted (atom nil)
+          system (binding [sys/read-config
+                           (fn [_]
+                             {::probe {:tag :stop-me
+                                       :on-halt (fn [v] (reset! halted v))}})]
+                   (sys/start! :test))]
+      (is (= :stop-me (get-in system [::probe :tag])) "probe key initialized")
+      (sys/stop! system)
+      (is (= :stop-me (:tag @halted)) "halt-key! ran for the probe key"))))
 
 
 (deftest suspend-delegation-test
-  (testing "suspend! delegates to ig/suspend!"
-    (let [suspended? (atom false)
-          mock-system {:db/schema :mock}]
-      (with-redefs [ig/suspend! (fn [sys]
-                                  (reset! suspended? true)
-                                  (is (= mock-system sys)))]
-        (sys/suspend! mock-system)
-        (is @suspended? "ig/suspend! should be called")))))
+  (testing "suspend! suspends the system through ig/suspend!"
+    (let [suspended (atom nil)
+          system (binding [sys/read-config
+                           (fn [_]
+                             {::probe {:tag :suspend-me
+                                       :on-suspend (fn [v] (reset! suspended v))}})]
+                   (sys/start! :test))]
+      (sys/suspend! system)
+      (is (= :suspend-me (:tag @suspended)) "suspend-key! ran for the probe key"))))
 
 
 (deftest resume-delegation-test
-  (testing "resume! delegates to ig/resume with new config"
-    (let [resumed? (atom false)
-          mock-system {:db/schema :mock}]
-      (with-redefs [ig/resume (fn [config sys]
-                                (reset! resumed? true)
-                                (is (map? config) "Config should be passed")
-                                (is (= mock-system sys) "System should be passed")
-                                :resumed)]
-        (let [result (sys/resume! mock-system :test)]
-          (is @resumed? "ig/resume should be called")
-          (is (= :resumed result)))))))
+  (testing "resume! resumes the system through ig/resume with the new config"
+    (let [resumed (atom nil)
+          read-cfg (fn [_]
+                     {::probe {:tag :resume-me
+                               :on-resume (fn [v] (reset! resumed v))}})
+          system (binding [sys/read-config read-cfg]
+                   (sys/start! :test))]
+      (sys/suspend! system)
+      (let [result (binding [sys/read-config read-cfg]
+                     (sys/resume! system :test))]
+        (is (= :resume-me (:tag @resumed)) "resume-key ran for the probe key")
+        (is (= :resume-me (get-in result [::probe :tag]))
+            "resume! returns the resumed system map")))))
 
 
 ;; =============================================================================
@@ -117,25 +154,18 @@
 
 (deftest start-with-component-keys-test
   (testing "start! accepts optional component-keys parameter"
-    (let [init-called? (atom false)
-          init-keys-passed (atom nil)]
-      (with-redefs [ig/init (fn [_config & [component-keys]]
-                              (reset! init-called? true)
-                              (reset! init-keys-passed component-keys)
-                              {:mock :system})]
-        ;; Test with component-keys
-        (sys/start! :test [:db/schema])
-        (is @init-called? "ig/init should be called")
-        (is (= [:db/schema] @init-keys-passed)
-            "Component keys should be passed to ig/init")
-
-        ;; Reset and test without component-keys
-        (reset! init-called? false)
-        (reset! init-keys-passed :not-called)
-        (sys/start! :test)
-        (is @init-called? "ig/init should be called")
-        (is (nil? @init-keys-passed)
-            "No component keys should be passed for full system start")))))
+    (let [read-cfg (fn [_] {::probe {:tag :a} ::other {:tag :b}})]
+      (binding [sys/read-config read-cfg]
+        ;; With component-keys: only the named key is initialized
+        (let [system (sys/start! :test [::probe])]
+          (is (contains? system ::probe)
+              "Named component key should be initialized")
+          (is (not (contains? system ::other))
+              "Unnamed component key should NOT be initialized"))
+        ;; Without component-keys: the whole config is initialized
+        (let [system (sys/start! :test)]
+          (is (= #{::probe ::other} (set (keys system)))
+              "Full system start initializes every config key"))))))
 
 
 ;; =============================================================================

@@ -1,7 +1,10 @@
-(ns ^:integration ^:serial graphden.system.sse-test
-  "`^:serial` — `with-redefs` root-rebinds `org.httpkit.server/send!`;
-   a concurrent frame send in the integration pool is silently
-   swallowed by the stub.
+(ns ^:integration graphden.system.sse-test
+  "Parallel-safe: the one failing-channel test `binding` the
+   thread-local `sse/*send-override*` seam (serial-reduction cluster
+   A) instead of `with-redefs`-ing `org.httpkit.server/send!` — a
+   root rebind is process-global, and a concurrent NS's real frame
+   send landing in the stub window was silently swallowed. Every
+   other test here sends over real sockets.
 
    End-to-end SSE invalidation round-trip in ONE process: the hub relay
    (`system.sse`) and the remote source (`storage.remote.sse`) connected over
@@ -12,8 +15,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
     [graphden.storage.remote.sse :as remote-sse]
-    [graphden.system.sse :as sse]
-    [org.httpkit.server :as hk]))
+    [graphden.system.sse :as sse]))
 
 
 (defn- wait-for
@@ -35,12 +37,13 @@
 (deftest broadcast-evicts-a-subscriber-whose-send-fails
   ;; A subscriber whose channel closed underneath us (send! throws or returns
   ;; falsey) must be dropped, and not counted as delivered, so a dead channel
-  ;; doesn't linger in the fan-out set. Pure — redef send! to fail one channel.
+  ;; doesn't linger in the fan-out set. Pure — stub the send seam to fail one
+  ;; channel.
   (let [subscribers (atom {:good "acme" :bad "acme"})]
-    (with-redefs [hk/send! (fn [ch _frame _close?]
-                             (if (= ch :bad)
-                               (throw (Exception. "channel closed"))
-                               true))]
+    (binding [sse/*send-override* (fn [ch _frame _close?]
+                                    (if (= ch :bad)
+                                      (throw (Exception. "channel closed"))
+                                      true))]
       (let [delivered (sse/broadcast! subscribers
                                       {:kind :fn :op :invalidate :id "f" :org-id "acme"})]
         (is (= 1 delivered) "only the healthy subscriber is counted")

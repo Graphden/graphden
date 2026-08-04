@@ -1,10 +1,11 @@
-(ns ^:serial graphden.storage.postgres.edge-cases-test
+(ns graphden.storage.postgres.edge-cases-test
   "Tests for PostgreSQL storage edge cases.
 
-   `^:serial` — `with-redefs` of a third-party root Var:
-   `next.jdbc/execute!` (the SQL-error injection test). Root rebinds
-   are process-global and race any concurrently running NS. Un-pin
-   path: the cluster-A wrapper seam (batch 7).
+   Parallel-safe: the SQL-error injection test `binding` the
+   thread-local `util/*jdbc-override*` seam (a pass-through stub that
+   delegates to the real `jdbc/execute!`) instead of `with-redefs`-ing
+   the next.jdbc root Var, which is process-global and forced a
+   `^:serial` pin (serial-reduction cluster A).
 
    Covers:
    - Query with NULL values in WHERE clause
@@ -18,6 +19,7 @@
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.test-setup :as setup]
+    [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]
     [next.jdbc :as jdbc]))
@@ -211,27 +213,27 @@
           schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
-        ;; Mock jdbc/execute! to return fewer rows than expected
-        (let [original-execute jdbc/execute!]
-          (with-redefs [jdbc/execute! (fn [ds query & args]
-                                        (let [result (apply original-execute ds query args)]
-                                          ;; If this is an INSERT with RETURNING, drop one row
-                                          (if (and (vector? query)
-                                                   (string? (first query))
-                                                   (str/includes? (first query) "INSERT")
-                                                   (str/includes? (first query) "RETURNING"))
-                                            (drop-last result)
-                                            result)))]
-            (let [ex (try
-                       (sp/create-entities storage :user
-                                           [{:name "Alice"}
-                                            {:name "Bob"}
-                                            {:name "Carol"}])
-                       nil
-                       (catch clojure.lang.ExceptionInfo e e))]
-              (is (some? ex))
-              (is (= :batch-insert-mismatch (:type (ex-data ex))))
-              (is (= 3 (:expected-count (ex-data ex))))
-              (is (= 2 (:actual-count (ex-data ex)))))))
+        ;; Stub the jdbc seam to return fewer rows than expected
+        (binding [util/*jdbc-override*
+                  {:execute! (fn [ds query opts]
+                               (let [result (jdbc/execute! ds query opts)]
+                                 ;; If this is an INSERT with RETURNING, drop one row
+                                 (if (and (vector? query)
+                                          (string? (first query))
+                                          (str/includes? (first query) "INSERT")
+                                          (str/includes? (first query) "RETURNING"))
+                                   (drop-last result)
+                                   result)))}]
+          (let [ex (try
+                     (sp/create-entities storage :user
+                                         [{:name "Alice"}
+                                          {:name "Bob"}
+                                          {:name "Carol"}])
+                     nil
+                     (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex))
+            (is (= :batch-insert-mismatch (:type (ex-data ex))))
+            (is (= 3 (:expected-count (ex-data ex))))
+            (is (= 2 (:actual-count (ex-data ex))))))
         (finally
           (sp/close storage))))))

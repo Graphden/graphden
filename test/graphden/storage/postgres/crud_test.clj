@@ -1,10 +1,11 @@
-(ns ^:serial graphden.storage.postgres.crud-test
+(ns graphden.storage.postgres.crud-test
   "Tests for PostgreSQL storage CRUD operations.
 
-   `^:serial` — `with-redefs` of a third-party root Var:
-   `next.jdbc/execute!` (2 SQL-error injection tests). Root rebinds
-   are process-global and race any concurrently running NS. Un-pin
-   path: the cluster-A wrapper seam (batch 7).
+   Parallel-safe: the 2 SQL-error injection tests `binding` the
+   thread-local `util/*jdbc-override*` seam (pass-through stubs that
+   delegate to the real `jdbc/execute!`) instead of `with-redefs`-ing
+   the next.jdbc root Var, which is process-global and forced a
+   `^:serial` pin (serial-reduction cluster A).
 
    Covers:
    - StorageCRUD protocol (create, read, update, delete, query)
@@ -17,6 +18,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.postgres.test-setup :as setup]
+    [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]
     [next.jdbc :as jdbc]))
@@ -929,26 +931,26 @@
                                                  :type :text}})
           _ (sp/initialize storage schema)]
       (try
-        (let [original-execute jdbc/execute!]
-          (with-redefs [jdbc/execute! (fn [ds query & args]
-                                        (let [result (apply original-execute ds query args)]
-                                          ;; If this is an INSERT ON CONFLICT (upsert), drop one row
-                                          (if (and (vector? query)
-                                                   (string? (first query))
-                                                   (str/includes? (first query) "ON CONFLICT"))
-                                            (drop-last result)
-                                            result)))]
-            (let [ex (try
-                       (sp/upsert-entities storage :user
-                                           [{:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"}
-                                            {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"}
-                                            {:id #uuid "33333333-3333-3333-3333-333333333333" :name "Charlie"}])
-                       nil
-                       (catch clojure.lang.ExceptionInfo e e))]
-              (is (some? ex))
-              (is (= :batch-upsert-mismatch (:type (ex-data ex))))
-              (is (= 3 (:expected-count (ex-data ex))))
-              (is (= 2 (:actual-count (ex-data ex)))))))
+        (binding [util/*jdbc-override*
+                  {:execute! (fn [ds query opts]
+                               (let [result (jdbc/execute! ds query opts)]
+                                 ;; If this is an INSERT ON CONFLICT (upsert), drop one row
+                                 (if (and (vector? query)
+                                          (string? (first query))
+                                          (str/includes? (first query) "ON CONFLICT"))
+                                   (drop-last result)
+                                   result)))}]
+          (let [ex (try
+                     (sp/upsert-entities storage :user
+                                         [{:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"}
+                                          {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"}
+                                          {:id #uuid "33333333-3333-3333-3333-333333333333" :name "Charlie"}])
+                     nil
+                     (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex))
+            (is (= :batch-upsert-mismatch (:type (ex-data ex))))
+            (is (= 3 (:expected-count (ex-data ex))))
+            (is (= 2 (:actual-count (ex-data ex))))))
         (finally
           (sp/close storage))))))
 
@@ -962,21 +964,21 @@
                                                  :type :text}})]
       (try
         (sp/initialize storage schema)
-        ;; Force a SQL error by using with-redefs to throw a SQLException
-        (let [original-execute jdbc/execute!]
-          (with-redefs [jdbc/execute! (fn [ds query & args]
-                                        (if (and (vector? query)
-                                                 (string? (first query))
-                                                 (str/includes? (first query) "ON CONFLICT"))
-                                          (throw (java.sql.SQLException. "simulated error" "23505"))
-                                          (apply original-execute ds query args)))]
-            (let [ex (try
-                       (sp/upsert-entities storage :user
-                                           [{:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"}])
-                       nil
-                       (catch clojure.lang.ExceptionInfo e e))]
-              (is (some? ex))
-              (is (contains? (ex-data ex) :batch-size)))))
+        ;; Force a SQL error by injecting a throw through the jdbc seam
+        (binding [util/*jdbc-override*
+                  {:execute! (fn [ds query opts]
+                               (if (and (vector? query)
+                                        (string? (first query))
+                                        (str/includes? (first query) "ON CONFLICT"))
+                                 (throw (java.sql.SQLException. "simulated error" "23505"))
+                                 (jdbc/execute! ds query opts)))}]
+          (let [ex (try
+                     (sp/upsert-entities storage :user
+                                         [{:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"}])
+                     nil
+                     (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex))
+            (is (contains? (ex-data ex) :batch-size))))
         (finally
           (sp/close storage))))))
 

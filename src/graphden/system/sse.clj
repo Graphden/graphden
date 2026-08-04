@@ -38,6 +38,27 @@
   (str "data: " (pg-notify/format-payload event) "\n\n"))
 
 
+(def ^:dynamic *send-override*
+  "Parallel-test seam: when bound, `send!` calls this fn
+   `(f ch frame close?)` instead of `org.httpkit.server/send!`. nil
+   (production) = the real httpkit send. Tests `binding` this instead
+   of `with-redefs`-ing the httpkit root Var — a root rebind is
+   process-global and forced a `^:serial` pin on the sse suite
+   (serial-reduction cluster A); a concurrent NS's real frame send
+   landing in the window was silently swallowed by the stub. Mirrors
+   `advisory-lock/*impl-override*`. Cost on the real path: one nil
+   check per frame (itself a socket write)."
+  nil)
+
+
+(defn- send!
+  "`org.httpkit.server/send!` behind the `*send-override*` seam."
+  [ch frame close?]
+  (if-let [f *send-override*]
+    (f ch frame close?)
+    (hk/send! ch frame close?)))
+
+
 (defn- authenticate
   "Authenticate the request; return `{:ok? bool :org <string-or-nil>}`. The
    org (`(:org principal)`, read directly to avoid a tenancy dependency) keys
@@ -79,11 +100,11 @@
                       ;; so the client's request resolves and `data:` frames
                       ;; flow.
                       (swap! subscribers assoc ch org)
-                      (hk/send! ch {:status 200
-                                    :headers {"Content-Type" "text/event-stream"
-                                              "Cache-Control" "no-cache"}}
-                                false)
-                      (hk/send! ch ": connected\n\n" false))
+                      (send! ch {:status 200
+                                 :headers {"Content-Type" "text/event-stream"
+                                           "Cache-Control" "no-cache"}}
+                             false)
+                      (send! ch ": connected\n\n" false))
            :on-close (fn [ch _status] (swap! subscribers dissoc ch))})))))
 
 
@@ -97,7 +118,7 @@
     (reduce-kv (fn [n ^AsyncChannel ch sub-org]
                  (cond
                    (not (deliver? event-org sub-org)) n
-                   (try (hk/send! ch frame false) (catch Exception _ false)) (inc n)
+                   (try (send! ch frame false) (catch Exception _ false)) (inc n)
                    :else (do (swap! subscribers dissoc ch) n)))
                0
                @subscribers)))

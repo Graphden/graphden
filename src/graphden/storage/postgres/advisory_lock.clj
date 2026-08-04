@@ -55,7 +55,7 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.connection :as pg-conn]
-    [next.jdbc :as jdbc])
+    [graphden.storage.postgres.util :as util])
   (:import
     (java.sql
       Connection)
@@ -145,7 +145,7 @@
   (if-let [f (impl :try-acquire-slot!)]
     (f conn service-id slot)
     (let [k (slot-lock-key service-id slot)
-          rows (jdbc/execute! conn ["SELECT pg_try_advisory_lock(?) AS acquired" k])]
+          rows (util/exec! conn ["SELECT pg_try_advisory_lock(?) AS acquired" k] {})]
       (boolean (:acquired (first rows))))))
 
 
@@ -157,7 +157,7 @@
   (if-let [f (impl :release-slot!)]
     (f conn service-id slot)
     (let [k (slot-lock-key service-id slot)
-          rows (jdbc/execute! conn ["SELECT pg_advisory_unlock(?) AS released" k])
+          rows (util/exec! conn ["SELECT pg_advisory_unlock(?) AS released" k] {})
           released? (boolean (:released (first rows)))]
       (when-not released?
         (log/debug "advisory unlock of service slot we don't own — no-op"
@@ -191,7 +191,7 @@
    connection closes (Postgres would do it anyway, but explicit is
    visible in logs)."
   [^Connection conn]
-  (jdbc/execute! conn ["SELECT pg_advisory_unlock_all()"])
+  (util/exec! conn ["SELECT pg_advisory_unlock_all()"] {})
   nil)
 
 

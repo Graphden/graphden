@@ -34,7 +34,7 @@
      safe, never wrong."
   (:require
     [clojure.tools.logging :as log]
-    [next.jdbc :as jdbc]))
+    [graphden.storage.postgres.util :as util]))
 
 
 (def sequence-name "graphden_graph_epoch")
@@ -52,7 +52,7 @@
 (defn ensure-sequence!
   "CREATE SEQUENCE IF NOT EXISTS — hooked into schema initialization."
   [ds]
-  (jdbc/execute! ds [(str "CREATE SEQUENCE IF NOT EXISTS " sequence-name)]))
+  (util/exec! ds [(str "CREATE SEQUENCE IF NOT EXISTS " sequence-name)] {}))
 
 
 (defn attach-state
@@ -105,8 +105,8 @@
         ;; single-column row; take the value positionally — next.jdbc
         ;; qualifies column keys by relation, so keyword access is
         ;; brittle across the two query shapes here.
-        (let [v (some-> (jdbc/execute-one!
-                          pool [(str "SELECT nextval('" sequence-name "')")])
+        (let [v (some-> (util/exec-one!
+                          pool [(str "SELECT nextval('" sequence-name "')")] {})
                         vals first)]
           (when (and v (:graph-epoch-local storage))
             (swap! (:graph-epoch-local storage)
@@ -189,7 +189,7 @@
   [storage]
   (when-let [pool (:pool storage)]
     (try
-      (some-> (jdbc/execute-one!
-                pool [(str "SELECT last_value FROM " sequence-name)])
+      (some-> (util/exec-one!
+                pool [(str "SELECT last_value FROM " sequence-name)] {})
               vals first)
       (catch Exception e (warn-once e) nil))))

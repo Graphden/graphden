@@ -10,8 +10,8 @@
    Two opt-out mechanisms keep parallel runs honest:
 
    - `^:serial` NS meta — an NS-level opt-out for tests that mutate
-     non-`^:dynamic` symbols via `with-redefs` (jdbc/execute!,
-     ig/halt!, …); their writes are process-global and parallel runs
+     non-`^:dynamic` symbols via `with-redefs` (e.g. vault-test's
+     httpkit/get); their writes are process-global and parallel runs
      race fatally. They run sequentially BEFORE the parallel set so
      the parallel slot count bounds wall-clock.
 

@@ -4,8 +4,7 @@
   (:require
     [clojure.string :as str]
     [graphden.storage.postgres.util :as util]
-    [honey.sql :as sql]
-    [next.jdbc :as jdbc]))
+    [honey.sql :as sql]))
 
 
 (def ^:private metadata-table-name "_schema_metadata")
@@ -22,14 +21,13 @@
   "Returns set of table names in public schema (excluding metadata table)."
   [ds]
   (with-introspection-error-handling :current-tables {}
-    (let [rows (jdbc/execute! ds
-                              (sql/format {:select [:table_name]
-                                           :from [:information_schema.tables]
-                                           :where [:and
-                                                   [:= :table_schema "public"]
-                                                   [:= :table_type "BASE TABLE"]]}
-                                          {:quoted true})
-                              (util/query-opts))]
+    (let [rows (util/exec! ds
+                           (sql/format {:select [:table_name]
+                                        :from [:information_schema.tables]
+                                        :where [:and
+                                                [:= :table_schema "public"]
+                                                [:= :table_type "BASE TABLE"]]}
+                                       {:quoted true}))]
       (set (remove #(= % metadata-table-name)
                    (map :table_name rows))))))
 
@@ -38,15 +36,14 @@
   "Returns map of column definitions for a table."
   [ds table-name]
   (with-introspection-error-handling :current-columns {:table-name table-name}
-    (let [rows (jdbc/execute! ds
-                              (sql/format {:select [:column_name :data_type :udt_name :is_nullable]
-                                           :from [:information_schema.columns]
-                                           :where [:and
-                                                   [:= :table_schema "public"]
-                                                   [:= :table_name table-name]
-                                                   [:<> :column_name "id"]]}
-                                          {:quoted true})
-                              (util/query-opts))]
+    (let [rows (util/exec! ds
+                           (sql/format {:select [:column_name :data_type :udt_name :is_nullable]
+                                        :from [:information_schema.columns]
+                                        :where [:and
+                                                [:= :table_schema "public"]
+                                                [:= :table_name table-name]
+                                                [:<> :column_name "id"]]}
+                                       {:quoted true}))]
       (into {}
             (map (fn [row]
                    (let [col-name (util/snake->kw (:column_name row))
@@ -77,16 +74,15 @@
   "Returns set of enum type names in public schema."
   [ds]
   (with-introspection-error-handling :current-pg-enums {}
-    (let [rows (jdbc/execute! ds
-                              (sql/format {:select [:t.typname]
-                                           :from [[:pg_type :t]]
-                                           :join [[:pg_catalog.pg_namespace :n]
-                                                  [:= :n.oid :t.typnamespace]]
-                                           :where [:and
-                                                   [:= :n.nspname "public"]
-                                                   [:= :t.typtype "e"]]}
-                                          {:quoted true})
-                              (util/query-opts))]
+    (let [rows (util/exec! ds
+                           (sql/format {:select [:t.typname]
+                                        :from [[:pg_type :t]]
+                                        :join [[:pg_catalog.pg_namespace :n]
+                                               [:= :n.oid :t.typnamespace]]
+                                        :where [:and
+                                                [:= :n.nspname "public"]
+                                                [:= :t.typtype "e"]]}
+                                       {:quoted true}))]
       (into #{} (map :typname) rows))))
 
 
@@ -95,16 +91,15 @@
    Converts SQL snake_case back to kebab-case keywords."
   [ds enum-name]
   (with-introspection-error-handling :current-enum-values-pg {:enum-name enum-name}
-    (let [rows (jdbc/execute! ds
-                              (sql/format {:select [:e.enumlabel]
-                                           :from [[:pg_type :t]]
-                                           :join [[:pg_catalog.pg_namespace :n]
-                                                  [:= :n.oid :t.typnamespace]
-                                                  [:pg_enum :e]
-                                                  [:= :e.enumtypid :t.oid]]
-                                           :where [:and
-                                                   [:= :n.nspname "public"]
-                                                   [:= :t.typname enum-name]]}
-                                          {:quoted true})
-                              (util/query-opts))]
+    (let [rows (util/exec! ds
+                           (sql/format {:select [:e.enumlabel]
+                                        :from [[:pg_type :t]]
+                                        :join [[:pg_catalog.pg_namespace :n]
+                                               [:= :n.oid :t.typnamespace]
+                                               [:pg_enum :e]
+                                               [:= :e.enumtypid :t.oid]]
+                                        :where [:and
+                                                [:= :n.nspname "public"]
+                                                [:= :t.typname enum-name]]}
+                                       {:quoted true}))]
       (into #{} (map (comp util/sql->enum-value :enumlabel)) rows))))

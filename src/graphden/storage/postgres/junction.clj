@@ -87,8 +87,8 @@
   (let [jt (ddl/junction-table-name entity-name field-name)]
     (util/with-sql-error-handling "Database error" :delete-junction
                                   {:entity-name entity-name :field-name field-name :owner-id owner-id}
-                                  (jdbc/execute! ds (sql/format {:delete-from [(keyword jt)]
-                                                                 :where [:= :owner_id owner-id]})))))
+                                  (util/exec! ds (sql/format {:delete-from [(keyword jt)]
+                                                              :where [:= :owner_id owner-id]}) {}))))
 
 
 (defn read-junction-rows
@@ -97,12 +97,11 @@
   (let [jt (ddl/junction-table-name entity-name field-name)]
     (util/with-sql-error-handling "Database error" :read-junction
                                   {:entity-name entity-name :field-name field-name :owner-id owner-id}
-                                  (let [rows (jdbc/execute! ds
-                                                            (sql/format {:select [:target_id]
-                                                                         :from [(keyword jt)]
-                                                                         :where [:= :owner_id owner-id]
-                                                                         :order-by [:ord]})
-                                                            (util/query-opts))]
+                                  (let [rows (util/exec! ds
+                                                         (sql/format {:select [:target_id]
+                                                                      :from [(keyword jt)]
+                                                                      :where [:= :owner_id owner-id]
+                                                                      :order-by [:ord]}))]
                                     ;; query-opts uses :as-unqualified-lower-maps which converts underscore to underscore
                                     ;; (NOT to kebab-case), so column "target_id" becomes :target_id
                                     (mapv :target_id rows)))))
@@ -119,11 +118,10 @@
   (let [jt (ddl/junction-table-name entity-name field-name)]
     (util/with-sql-error-handling "Database error" :read-junction-owners
                                   {:entity-name entity-name :field-name field-name :target-id target-id}
-                                  (let [rows (jdbc/execute! ds
-                                                            (sql/format {:select-distinct [:owner_id]
-                                                                         :from [(keyword jt)]
-                                                                         :where [:= :target_id target-id]})
-                                                            (util/query-opts))]
+                                  (let [rows (util/exec! ds
+                                                         (sql/format {:select-distinct [:owner_id]
+                                                                      :from [(keyword jt)]
+                                                                      :where [:= :target_id target-id]}))]
                                     (mapv :owner_id rows)))))
 
 
@@ -140,7 +138,7 @@
                              :order-by [:owner_id :ord]})]
       (util/with-sql-error-handling "Database error" :read-junction-batch
                                     {:entity-name entity-name :field-name field-name}
-                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                    (let [rows (util/exec! ds query)]
                                       (reduce (fn [acc row]
                                                 (update acc (:owner_id row) (fnil conj []) (:target_id row)))
                                               {}
@@ -216,7 +214,7 @@
       (util/with-sql-error-handling "Database error" :delete-junction-batch
                                     {:entity-name entity-name :field-name field-name
                                      :owner-count (count owner-ids)}
-                                    (jdbc/execute! ds query (util/query-opts))))))
+                                    (util/exec! ds query)))))
 
 
 (defn write-ref-many-fields-batch!

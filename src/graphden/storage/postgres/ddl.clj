@@ -5,8 +5,7 @@
     [clojure.string :as str]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.util :as util]
-    [honey.sql :as sql]
-    [next.jdbc :as jdbc]))
+    [honey.sql :as sql]))
 
 
 ;; === Enum operations ===
@@ -31,7 +30,7 @@
   (util/with-sql-error-handling "DDL error" :create-enum {:enum-name enum-name}
                                 (let [sql-name (util/ident->sql enum-name)
                                       vals-sql (str/join ", " (map #(str "'" (util/enum-value->sql %) "'") values))]
-                                  (jdbc/execute! ds [(str "CREATE TYPE " sql-name " AS ENUM (" vals-sql ")")]))))
+                                  (util/exec! ds [(str "CREATE TYPE " sql-name " AS ENUM (" vals-sql ")")] {}))))
 
 
 (defn add-enum-value!
@@ -40,8 +39,8 @@
    Security: enum-name and value are validated via util/ident->sql and util/enum-value->sql."
   [ds enum-name value]
   (util/with-sql-error-handling "DDL error" :add-enum-value {:enum-name enum-name :value value}
-                                (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql enum-name)
-                                                        " ADD VALUE IF NOT EXISTS '" (util/enum-value->sql value) "'")])))
+                                (util/exec! ds [(str "ALTER TYPE " (util/ident->sql enum-name)
+                                                     " ADD VALUE IF NOT EXISTS '" (util/enum-value->sql value) "'")] {})))
 
 
 (defn rename-enum!
@@ -50,8 +49,8 @@
    Security: old-name and new-name are validated via util/ident->sql."
   [ds old-name new-name]
   (util/with-sql-error-handling "DDL error" :rename-enum {:old-name old-name :new-name new-name}
-                                (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql old-name)
-                                                        " RENAME TO " (util/ident->sql new-name))])))
+                                (util/exec! ds [(str "ALTER TYPE " (util/ident->sql old-name)
+                                                     " RENAME TO " (util/ident->sql new-name))] {})))
 
 
 ;; === Column specification ===
@@ -80,10 +79,10 @@
                                 (let [columnar-fields (remove (fn [[_ fspec]] (= :ref-many (:type fspec))) fields)
                                       columns (into [[:id :uuid [:primary-key] [:default [:raw "gen_random_uuid()"]]]]
                                                     (map (fn [[fname fspec]] (build-column-spec fname fspec)) columnar-fields))]
-                                  (jdbc/execute! ds
-                                                 (sql/format {:create-table (keyword (util/kw->snake-case table-name))
-                                                              :with-columns columns}
-                                                             {:quoted true})))))
+                                  (util/exec! ds
+                                              (sql/format {:create-table (keyword (util/kw->snake-case table-name))
+                                                           :with-columns columns}
+                                                          {:quoted true}) {}))))
 
 
 ;; === Junction tables for :ref-many fields ===
@@ -106,17 +105,17 @@
         owner-table (util/kw->snake-case entity-name)]
     (util/with-sql-error-handling "DDL error" :create-junction-table
                                   {:entity-name entity-name :field-name field-name}
-                                  (jdbc/execute! ds
-                                                 [(str "CREATE TABLE \"" jt-name "\" ("
-                                                       "owner_id UUID NOT NULL REFERENCES \"" owner-table "\"(id) ON DELETE CASCADE,"
-                                                       "target_id UUID NOT NULL,"
-                                                       "ord INT NOT NULL,"
-                                                       "PRIMARY KEY (owner_id, ord),"
-                                                       "UNIQUE (owner_id, target_id))")])
+                                  (util/exec! ds
+                                              [(str "CREATE TABLE \"" jt-name "\" ("
+                                                    "owner_id UUID NOT NULL REFERENCES \"" owner-table "\"(id) ON DELETE CASCADE,"
+                                                    "target_id UUID NOT NULL,"
+                                                    "ord INT NOT NULL,"
+                                                    "PRIMARY KEY (owner_id, ord),"
+                                                    "UNIQUE (owner_id, target_id))")] {})
                                   ;; Index for reverse lookup (find owners pointing at a target)
-                                  (jdbc/execute! ds
-                                                 [(str "CREATE INDEX \"idx_" jt-name "_target\" "
-                                                       "ON \"" jt-name "\" (target_id)")]))))
+                                  (util/exec! ds
+                                              [(str "CREATE INDEX \"idx_" jt-name "_target\" "
+                                                    "ON \"" jt-name "\" (target_id)")] {}))))
 
 
 (defn create-junction-tables!
@@ -132,10 +131,10 @@
   "Renames a PostgreSQL table."
   [ds old-name new-name]
   (util/with-sql-error-handling "DDL error" :rename-table {:old-name old-name :new-name new-name}
-                                (jdbc/execute! ds
-                                               (sql/format {:alter-table (keyword (util/kw->snake-case old-name))
-                                                            :rename-table (keyword (util/kw->snake-case new-name))}
-                                                           {:quoted true}))))
+                                (util/exec! ds
+                                            (sql/format {:alter-table (keyword (util/kw->snake-case old-name))
+                                                         :rename-table (keyword (util/kw->snake-case new-name))}
+                                                        {:quoted true}) {})))
 
 
 ;; === Column operations ===
@@ -144,21 +143,21 @@
   "Adds a column to an existing table."
   [ds table-name field-name field-spec]
   (util/with-sql-error-handling "DDL error" :add-column {:table-name table-name :field-name field-name}
-                                (jdbc/execute! ds
-                                               (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
-                                                            :add-column (build-column-spec field-name field-spec)}
-                                                           {:quoted true}))))
+                                (util/exec! ds
+                                            (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
+                                                         :add-column (build-column-spec field-name field-spec)}
+                                                        {:quoted true}) {})))
 
 
 (defn rename-column!
   "Renames a column in a table."
   [ds table-name old-col-name new-col-name]
   (util/with-sql-error-handling "DDL error" :rename-column {:table-name table-name :old-col-name old-col-name :new-col-name new-col-name}
-                                (jdbc/execute! ds
-                                               (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
-                                                            :rename-column [(keyword (util/kw->snake-case old-col-name))
-                                                                            (keyword (util/kw->snake-case new-col-name))]}
-                                                           {:quoted true}))))
+                                (util/exec! ds
+                                            (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
+                                                         :rename-column [(keyword (util/kw->snake-case old-col-name))
+                                                                         (keyword (util/kw->snake-case new-col-name))]}
+                                                        {:quoted true}) {})))
 
 
 (defn drop-column!
@@ -167,9 +166,9 @@
   [ds table-name col-name]
   (util/with-sql-error-handling "DDL error" :drop-column
                                 {:table-name table-name :col-name col-name}
-                                (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
-                                                        " DROP COLUMN IF EXISTS "
-                                                        (util/ident->sql col-name))])))
+                                (util/exec! ds [(str "ALTER TABLE " (util/ident->sql table-name)
+                                                     " DROP COLUMN IF EXISTS "
+                                                     (util/ident->sql col-name))] {})))
 
 
 (defn alter-column-drop-not-null!
@@ -177,9 +176,9 @@
    nullable, so the DB must allow nil where it previously didn't."
   [ds table-name col-name]
   (util/with-sql-error-handling "DDL error" :alter-column-nullable {:table-name table-name :col-name col-name}
-                                (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
-                                                        " ALTER COLUMN " (util/ident->sql col-name)
-                                                        " DROP NOT NULL")])))
+                                (util/exec! ds [(str "ALTER TABLE " (util/ident->sql table-name)
+                                                     " ALTER COLUMN " (util/ident->sql col-name)
+                                                     " DROP NOT NULL")] {})))
 
 
 (defn alter-column-type!
@@ -197,9 +196,9 @@
                 (str col "::" new-type-sql))]
     (util/with-sql-error-handling "DDL error" :alter-column-type {:table-name table-name :col-name col-name :new-type new-type-sql}
                                   ;; ALTER COLUMN with USING clause needs raw SQL for complex expressions
-                                  (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
-                                                          " ALTER COLUMN " col
-                                                          " TYPE " new-type-sql " USING " using)]))))
+                                  (util/exec! ds [(str "ALTER TABLE " (util/ident->sql table-name)
+                                                       " ALTER COLUMN " col
+                                                       " TYPE " new-type-sql " USING " using)] {}))))
 
 
 ;; === Index operations ===
@@ -217,8 +216,8 @@
                                 (let [table-name (util/ident->sql entity-name)
                                       index-name (ref-index-name entity-name field-name)
                                       column-name (util/ident->sql field-name)]
-                                  (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
-                                                          "\" ON " table-name " (" column-name ")")]))))
+                                  (util/exec! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
+                                                       "\" ON " table-name " (" column-name ")")] {}))))
 
 
 (defn create-ref-indexes!
@@ -247,8 +246,8 @@
                                 (let [table-name (util/ident->sql entity-name)
                                       index-name (field-index-name entity-name field-name)
                                       column-name (util/ident->sql field-name)]
-                                  (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
-                                                          "\" ON " table-name " (" column-name ")")]))))
+                                  (util/exec! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
+                                                       "\" ON " table-name " (" column-name ")")] {}))))
 
 
 (defn create-field-indexes!
@@ -304,8 +303,8 @@
                                       ;; lets a composite key like `(org-id, name)` stay unique when org-id is
                                       ;; NULL (single-tenant), while still allowing distinct orgs the same name.
                                       nulls-sql (if (:nulls-not-distinct? constraint) " NULLS NOT DISTINCT" "")]
-                                  (jdbc/execute! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
-                                                          " (" columns-sql ")" nulls-sql)]))))
+                                  (util/exec! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
+                                                       " (" columns-sql ")" nulls-sql)] {}))))
 
 
 (defn create-entity-constraints!

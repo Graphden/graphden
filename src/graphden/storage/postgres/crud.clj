@@ -76,7 +76,7 @@
    create/update/upsert — the shape was identical modulo the `op`."
   [ds query op entity-name batch-ids batch-size]
   (try
-    (jdbc/execute! ds query (util/query-opts))
+    (util/exec! ds query)
     (catch java.sql.SQLException e
       ;; Index is -1 because PostgreSQL batch INSERT/UPDATE doesn't
       ;; reveal which row failed.
@@ -115,7 +115,7 @@
       (util/with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
                                     (letfn [(do-create
                                               [conn]
-                                              (let [created (-> (jdbc/execute-one! conn query (util/query-opts))
+                                              (let [created (-> (util/exec-one! conn query)
                                                                 (codec/row->entity fields))]
                                                 (when (seq ref-many-data)
                                                   (junction/write-ref-many-fields! conn entity-name (:id created) ref-many-data))
@@ -146,7 +146,7 @@
                             :where [:= :id id]}
                            {:quoted true})]
      (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
-                                   (when-let [row (jdbc/execute-one! ds query (util/query-opts))]
+                                   (when-let [row (util/exec-one! ds query)]
                                      (let [record (codec/row->entity row fields)]
                                        (if (and fields (junction/has-ref-many? fields))
                                          (first (junction/populate-ref-many-fields ds entity-name [record] fields))
@@ -187,7 +187,7 @@
                                       (letfn [(do-update
                                                 [conn]
                                                 (let [updated-row (if do-column-update?
-                                                                    (-> (jdbc/execute-one! conn query (util/query-opts))
+                                                                    (-> (util/exec-one! conn query)
                                                                         (codec/row->entity fields))
                                                                     (dissoc columnar-data nil))]
                                                   ;; Replace junction rows for any ref-many fields actually present in the update
@@ -215,7 +215,7 @@
                           {:quoted true})]
     (util/with-sql-error-handling "Database error" :delete-entity {:entity-name entity-name :id id}
                                   (pos? (:next.jdbc/update-count
-                                          (jdbc/execute-one! ds query (util/query-opts)))))))
+                                          (util/exec-one! ds query))))))
 
 
 (defn- build-where-clause
@@ -287,7 +287,7 @@
      (when-not where-clause
        (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
      (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where :opts opts}
-                                   (let [rows (jdbc/execute! ds query (util/query-opts))
+                                   (let [rows (util/exec! ds query)
                                          records (mapv #(codec/row->entity % fields) rows)]
                                      (if (and fields (junction/has-ref-many? fields))
                                        (junction/populate-ref-many-fields ds entity-name records fields)
@@ -340,7 +340,7 @@
     (util/with-sql-error-handling "Database error" :query-latest-per-group
                                   {:entity-name entity-name :where where
                                    :group-cols group-cols}
-                                  (let [rows (jdbc/execute! ds query (util/query-opts))
+                                  (let [rows (util/exec! ds query)
                                         records (mapv #(codec/row->entity % fields) rows)]
                                     (if (and fields (junction/has-ref-many? fields))
                                       (junction/populate-ref-many-fields ds entity-name records fields)
@@ -439,7 +439,7 @@
                               :where [:in :id (vec ids)]}
                              {:quoted true})]
        (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
-                                     (let [rows (jdbc/execute! ds query (util/query-opts))
+                                     (let [rows (util/exec! ds query)
                                            ;; Decode WITHOUT field-specs on purpose: the
                                            ;; versioned-resolution + compile paths that call
                                            ;; `read-entities` (versioning/storage/*) rely on the
@@ -667,4 +667,4 @@
                             {:quoted true})]
       (util/with-sql-error-handling "Database error" :delete-entities {:entity-name entity-name :count (count ids)}
                                     (:next.jdbc/update-count
-                                      (jdbc/execute-one! ds query (util/query-opts)))))))
+                                      (util/exec-one! ds query))))))

@@ -1,6 +1,10 @@
 (ns ^:integration ^:serial graphden.clients.vault-test
   "`^:serial` — `with-redefs` root-rebinds `org.httpkit.client/get`;
    every concurrent GET in the integration pool got the stub body.
+   KEPT in the cluster-A sweep: the one redef (the no-leak test) must
+   inject a fake raw HTTP response BENEATH the real `get-secret` body
+   — the op-level `vault/*impl-override*` seam would replace the very
+   parse/error path under test, weakening it to a stub test.
 
    Integration tests for `graphden.clients.vault` against a real
    OpenBao container — covers the HTTP path that the unit tests in

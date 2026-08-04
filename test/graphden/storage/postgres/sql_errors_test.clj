@@ -1,11 +1,13 @@
-(ns ^:serial graphden.storage.postgres.sql-errors-test
+(ns graphden.storage.postgres.sql-errors-test
   "Tests for PostgreSQL storage SQL error handling.
 
-   `^:serial` — `with-redefs` of third-party root Vars:
-   `next.jdbc/execute!` / `next.jdbc/execute-one!` (14 SQL-error
-   injection sites). Root rebinds are process-global and race any
-   concurrently running NS. Un-pin path: the cluster-A wrapper seam
-   (batch 7).
+   Parallel-safe: the SQL-error injection sites `binding` the
+   thread-local `util/*jdbc-override*` seam instead of
+   `with-redefs`-ing the next.jdbc root Vars (which is process-global
+   and forced a `^:serial` pin — serial-reduction cluster A). The
+   remaining direct `jdbc/execute!` calls here run REAL statements
+   against the test container (FK setup / raw hard-deletes), not
+   stubs.
 
    ## 2-Entity Schema
 
@@ -256,8 +258,8 @@
   (testing "read-entity throws wrapped error on SQLException"
     (let [read-entity-fn #'crud/read-entity
           table-not-found-ex (SQLException. "relation does not exist" "42P01")]
-      (with-redefs [jdbc/execute-one! (fn [_ds _query & _opts]
-                                        (throw table-not-found-ex))]
+      (binding [util/*jdbc-override* {:execute-one! (fn [_ds _query _opts]
+                                                      (throw table-not-found-ex))}]
         (try
           (read-entity-fn nil :some-entity (random-uuid))
           (is false "Should have thrown")
@@ -272,13 +274,13 @@
           unique-violation-ex (SQLException. "duplicate key" "23505")
           call-count (atom 0)]
       ;; First call to read-entity succeeds, second call (update) fails
-      (with-redefs [jdbc/execute-one! (fn [_ds _query & _opts]
-                                        (swap! call-count inc)
-                                        (if (= 1 @call-count)
-                                          ;; First call - read existing entity
-                                          {:id (random-uuid) :name "test"}
-                                          ;; Second call - update fails
-                                          (throw unique-violation-ex)))]
+      (binding [util/*jdbc-override* {:execute-one! (fn [_ds _query _opts]
+                                                      (swap! call-count inc)
+                                                      (if (= 1 @call-count)
+                                                        ;; First call - read existing entity
+                                                        {:id (random-uuid) :name "test"}
+                                                        ;; Second call - update fails
+                                                        (throw unique-violation-ex)))}]
         (try
           (update-entity-fn nil :some-entity (random-uuid) {:name "new"} nil)
           (is false "Should have thrown")
@@ -291,8 +293,8 @@
   (testing "query-entities throws wrapped error on SQLException"
     (let [query-entities-fn #'crud/query-entities
           connection-ex (SQLException. "connection failed" "08001")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw connection-ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw connection-ex))}]
         (try
           ;; query-entities signature: [ds entity-name where fields]
           (query-entities-fn nil :some-entity {:name "test"} {:name {:type :text}})
@@ -306,8 +308,8 @@
   (testing "read-entities throws wrapped error on SQLException"
     (let [read-entities-fn #'crud/read-entities
           timeout-ex (SQLException. "query canceled" "57014")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw timeout-ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw timeout-ex))}]
         (try
           (read-entities-fn nil :some-entity [(random-uuid)])
           (is false "Should have thrown")
@@ -327,8 +329,8 @@
   (testing "create-enum! throws wrapped error on SQLException"
     (let [create-enum-fn #'ddl/create-enum!
           ex (SQLException. "type already exists" "42710")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (create-enum-fn nil :my-enum [:a :b])
           (is false "Should have thrown")
@@ -343,8 +345,8 @@
   (testing "add-enum-value! throws wrapped error on SQLException"
     (let [add-fn #'ddl/add-enum-value!
           ex (SQLException. "type does not exist" "42704")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (add-fn nil :my-enum :new-val)
           (is false "Should have thrown")
@@ -358,8 +360,8 @@
   (testing "rename-enum! throws wrapped error on SQLException"
     (let [rename-fn #'ddl/rename-enum!
           ex (SQLException. "type does not exist" "42704")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (rename-fn nil :old-name :new-name)
           (is false "Should have thrown")
@@ -374,8 +376,8 @@
   (testing "create-table! throws wrapped error on SQLException"
     (let [create-fn #'ddl/create-table!
           ex (SQLException. "relation already exists" "42P07")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (create-fn nil :my-table {:name {:type :text}})
           (is false "Should have thrown")
@@ -389,8 +391,8 @@
   (testing "rename-table! throws wrapped error on SQLException"
     (let [rename-fn #'ddl/rename-table!
           ex (SQLException. "relation does not exist" "42P01")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (rename-fn nil :old-table :new-table)
           (is false "Should have thrown")
@@ -403,8 +405,8 @@
   (testing "add-column! throws wrapped error on SQLException"
     (let [add-fn #'ddl/add-column!
           ex (SQLException. "column already exists" "42701")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (add-fn nil :my-table :new-col {:type :text})
           (is false "Should have thrown")
@@ -418,8 +420,8 @@
   (testing "rename-column! throws wrapped error on SQLException"
     (let [rename-fn #'ddl/rename-column!
           ex (SQLException. "column does not exist" "42703")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (rename-fn nil :my-table :old-col :new-col)
           (is false "Should have thrown")
@@ -433,8 +435,8 @@
   (testing "alter-column-type! throws wrapped error on SQLException"
     (let [alter-fn #'ddl/alter-column-type!
           ex (SQLException. "column does not exist" "42703")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (alter-fn nil :my-table :my-col "TEXT")
           (is false "Should have thrown")
@@ -448,8 +450,8 @@
   (testing "create-ref-index! throws wrapped error on SQLException"
     (let [create-fn #'ddl/create-ref-index!
           ex (SQLException. "relation does not exist" "42P01")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (create-fn nil :my-table :my-ref-col)
           (is false "Should have thrown")
@@ -482,8 +484,8 @@
                           [{:type :unique :fields [:name]}])
 
                         (retired-fields [_] {}))]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw ex))]
+      (binding [util/*jdbc-override* {:execute! (fn [_ds _query _opts]
+                                                  (throw ex))}]
         (try
           (create-fn nil mock-schema :my-table)
           (is false "Should have thrown")

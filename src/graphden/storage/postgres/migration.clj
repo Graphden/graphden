@@ -208,7 +208,7 @@
    that already dropped it (idempotent)."
   [tx]
   (doseq [idx-name retired-indexes]
-    (jdbc/execute! tx [(str "DROP INDEX IF EXISTS \"" idx-name "\"")])))
+    (util/exec! tx [(str "DROP INDEX IF EXISTS \"" idx-name "\"")] {})))
 
 
 (defn- ensure-field-indexes!
@@ -297,7 +297,7 @@
                                ;; state — so a sibling that migrated first is seen and this pod
                                ;; computes a no-op instead of re-running first-init against a stale
                                ;; empty-DB plan.
-                               (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(?)" migration-advisory-lock-key])
+                               (util/exec! tx ["SELECT pg_advisory_xact_lock(?)" migration-advisory-lock-key] {})
                                (metadata/ensure-metadata-table! tx)
                                (graph-epoch/ensure-sequence! tx)
                                (let [old-metadata (metadata/parse-metadata (metadata/read-metadata-rows tx))

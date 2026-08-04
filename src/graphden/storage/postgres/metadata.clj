@@ -6,8 +6,7 @@
     [clojure.tools.logging :as log]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.util :as util]
-    [honey.sql :as sql]
-    [next.jdbc :as jdbc])
+    [honey.sql :as sql])
   (:import
     (org.postgresql.util
       PGobject)))
@@ -21,17 +20,17 @@
 (defn ensure-metadata-table!
   "Creates metadata table and indexes if they don't exist."
   [ds]
-  (jdbc/execute! ds
-                 (sql/format {:create-table [(keyword metadata-table-name) :if-not-exists]
-                              :with-columns [[:uuid :uuid [:primary-key]]
-                                             [:kind :text [:not nil]]
-                                             [:name :text [:not nil]]
-                                             [:parent_uuid :uuid]
-                                             [:extra :jsonb]]}
-                             {:quoted true}))
+  (util/exec! ds
+              (sql/format {:create-table [(keyword metadata-table-name) :if-not-exists]
+                           :with-columns [[:uuid :uuid [:primary-key]]
+                                          [:kind :text [:not nil]]
+                                          [:name :text [:not nil]]
+                                          [:parent_uuid :uuid]
+                                          [:extra :jsonb]]}
+                          {:quoted true}) {})
   ;; Index on parent_uuid for faster lookups when parsing metadata
-  (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"idx_" metadata-table-name "_parent_uuid\" "
-                          "ON \"" metadata-table-name "\" (parent_uuid)")]))
+  (util/exec! ds [(str "CREATE INDEX IF NOT EXISTS \"idx_" metadata-table-name "_parent_uuid\" "
+                       "ON \"" metadata-table-name "\" (parent_uuid)")] {}))
 
 
 ;; === Read operations ===
@@ -53,11 +52,10 @@
   [ds]
   (if-let [f *read-rows-override*]
     (f ds)
-    (jdbc/execute! ds
-                   (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
-                                :from [(keyword metadata-table-name)]}
-                               {:quoted true})
-                   (util/query-opts))))
+    (util/exec! ds
+                (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
+                             :from [(keyword metadata-table-name)]}
+                            {:quoted true}))))
 
 
 ;; === JSON conversion ===
@@ -192,16 +190,16 @@
   ([ds uuid kind meta-name parent-uuid]
    (upsert-metadata! ds uuid kind meta-name parent-uuid nil))
   ([ds uuid kind meta-name parent-uuid extra]
-   (jdbc/execute! ds
-                  (sql/format {:insert-into (keyword metadata-table-name)
-                               :values [{:uuid uuid
-                                         :kind (name kind)
-                                         :name (name meta-name)
-                                         :parent_uuid parent-uuid
-                                         :extra [:cast (extra->json extra) :jsonb]}]
-                               :on-conflict [:uuid]
-                               :do-update-set [:name :parent_uuid :extra]}
-                              {:quoted true}))))
+   (util/exec! ds
+               (sql/format {:insert-into (keyword metadata-table-name)
+                            :values [{:uuid uuid
+                                      :kind (name kind)
+                                      :name (name meta-name)
+                                      :parent_uuid parent-uuid
+                                      :extra [:cast (extra->json extra) :jsonb]}]
+                            :on-conflict [:uuid]
+                            :do-update-set [:name :parent_uuid :extra]}
+                           {:quoted true}) {})))
 
 
 (defn- field-metadata-row
@@ -267,13 +265,13 @@
   "Saves complete metadata to table (truncate + insert all in one batch).
    Assumes caller has already started a transaction."
   [tx schema]
-  (jdbc/execute! tx (sql/format {:truncate (keyword metadata-table-name)}
-                                {:quoted true}))
+  (util/exec! tx (sql/format {:truncate (keyword metadata-table-name)}
+                             {:quoted true}) {})
   (let [rows (collect-metadata-rows schema)]
     (when (seq rows)
-      (jdbc/execute! tx
-                     (sql/format {:insert-into (keyword metadata-table-name)
-                                  :values rows
-                                  :on-conflict [:uuid]
-                                  :do-update-set [:name :parent_uuid :extra]}
-                                 {:quoted true})))))
+      (util/exec! tx
+                  (sql/format {:insert-into (keyword metadata-table-name)
+                               :values rows
+                               :on-conflict [:uuid]
+                               :do-update-set [:name :parent_uuid :extra]}
+                              {:quoted true}) {}))))

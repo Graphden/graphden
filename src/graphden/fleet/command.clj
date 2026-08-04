@@ -139,6 +139,19 @@
 ;; Client — the seams the controller calls
 ;; =============================================================================
 
+(def ^:dynamic *request-fn-override*
+  "Parallel-test seam: when bound, `send-command` calls this fn
+   `(f opts) → deref-able response` instead of
+   `org.httpkit.client/request`. nil (production) = the real HTTP
+   request. Tests `binding` this instead of `with-redefs`-ing the
+   httpkit root Var — a root rebind is process-global and forced a
+   `^:serial` pin on this NS (serial-reduction cluster A); a
+   concurrent NS's real HTTP call landing in the window got the stub.
+   Mirrors `advisory-lock/*impl-override*`. Cost on the real path:
+   one nil check per cell command (itself a network round trip)."
+  nil)
+
+
 (defn- command-url
   [executor-id port op root-fn-id]
   (str "http://" executor-id ":" port path-prefix (name op) "/" root-fn-id))
@@ -150,12 +163,13 @@
    the controller reads a false `load-on` as abort-before-flip, so a target that
    can't (or won't) load never gets the routing flipped to it."
   [executor-id port token op root-fn-id]
-  (let [resp @(http/request {:method :post
-                             :url (command-url executor-id port op root-fn-id)
-                             :headers (cond-> {}
-                                        token (assoc "Authorization" (str "Bearer " token)))
-                             :timeout 30000
-                             :as :text})]
+  (let [request-fn (or *request-fn-override* http/request)
+        resp @(request-fn {:method :post
+                           :url (command-url executor-id port op root-fn-id)
+                           :headers (cond-> {}
+                                      token (assoc "Authorization" (str "Bearer " token)))
+                           :timeout 30000
+                           :as :text})]
     (cond
       (:error resp)
       (do (log/warn (:error resp) "fleet command transport failed"

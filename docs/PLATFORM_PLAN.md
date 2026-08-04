@@ -1047,11 +1047,14 @@ the core".
        paths NOR `API.*` — the paths live only in the graph. Covered by integration
        tests (the partial render contains hx-*; no `data-act`).
      *Next:* by the same pattern the remaining editor popovers can be migrated
-     from JS-fetch to HTMX (EDITOR_HTMX_MIGRATION_PLAN). One known gap: a real
-     HTMX submit in the browser is tested only in multi-tenant (the panels are visible
-     only when the addon is active) — currently the hx-* attributes + handler-return are checked
-     at the integration level, single-tenant boot/Playwright confirms that the JS is not
-     broken and the panels are correctly absent.
+     from JS-fetch to HTMX (EDITOR_HTMX_MIGRATION_PLAN). ~~One known gap: a real
+     HTMX submit in the browser is tested only in multi-tenant~~ — CLOSED:
+     `tools/browser-test/edit-packages-publish-form.test.js` drives the packages
+     panel's "Publish a namespace" `<form hx-post>` end-to-end on the plain
+     single-tenant stack (fill → submit → HTMX form-encode + Authorization
+     bridge → outerHTML swap → server-side row asserted); runs in every e2e
+     gate. The multi-tenant grants/users panels remain covered by their own
+     integration render tests.
 - **Phase 4 (breakup/mixed mode):** protocols + deps.edn git-deps;
   the mixed mode = a composition of "org-scoped storage API" + "their executor".
   Polylith — optional, not a blocker.

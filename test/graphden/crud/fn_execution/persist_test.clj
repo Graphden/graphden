@@ -23,6 +23,7 @@
     [clojure.tools.logging :as log]
     [clojure.tools.logging.impl :as log-impl]
     [graphden.crud.fn-execution.persist :as persist]
+    [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
@@ -202,20 +203,36 @@
 
 
 (deftest snapshot-path-trace-empty-vector
-  (is (nil? (persist/snapshot-path-trace (atom [])))
+  (is (nil? (persist/snapshot-path-trace (ce/new-path-trace)))
       "opted-in but nothing captured (fn set empty) also returns nil"))
 
 
 (deftest snapshot-path-trace-within-cap
   (let [id (random-uuid)
         out (persist/snapshot-path-trace
-              (atom [{:fn-id id :cache-hit? false :duration-ms 3}
-                     {:fn-id id :cache-hit? true}]))]
+              (atom {:entries [{:fn-id id :cache-hit? false :duration-ms 3}
+                               {:fn-id id :cache-hit? true}]}))]
     (testing "wire shape: {:entries […]} with fn-ids stringified"
       (is (= [{:fn-id (str id) :cache-hit? false :duration-ms 3}
               {:fn-id (str id) :cache-hit? true}]
              (:entries out)))
       (is (not (contains? out :path-truncated?))))))
+
+
+(deftest snapshot-path-trace-strips-value-accounting
+  ;; Debug P3 — the internal per-entry byte accounting must NOT reach
+  ;; the wire; a capture-time oldest-first drop surfaces as
+  ;; `:values-dropped? true` so the user is told (constraint 5).
+  (let [id (random-uuid)
+        out (persist/snapshot-path-trace
+              (atom {:entries [{:fn-id id :cache-hit? false :duration-ms 1
+                                :value {:n 7} ce/value-bytes-key 9}]
+                     :capture-values? true
+                     :value-bytes 9
+                     :values-dropped? true}))]
+    (is (= [{:fn-id (str id) :cache-hit? false :duration-ms 1 :value {:n 7}}]
+           (:entries out)))
+    (is (true? (:values-dropped? out)))))
 
 
 (deftest snapshot-path-trace-oversize-truncates-oldest-first
@@ -226,7 +243,7 @@
                          :cache-hit? false
                          :duration-ms i})
                       (range 8000))
-        out (persist/snapshot-path-trace (atom entries))]
+        out (persist/snapshot-path-trace (atom {:entries entries}))]
     (is (true? (:path-truncated? out)))
     (is (< (count (:entries out)) 8000))
     (testing "the NEWEST entry survives; the oldest went first"

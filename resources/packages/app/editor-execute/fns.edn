@@ -157,6 +157,11 @@
   ;; disabled; JS live-toggles), persist is pre-checked + locked (the
   ;; backend auto-persists effectful runs regardless).
 
+  ;; The "capture values" checkbox is the SECOND-STEP control of the
+  ;; Debug-P3 value capture: server emits it disabled; JS enables it
+  ;; only while "Trace path" is checked, and checking it opens an
+  ;; explicit confirm dialog with an estimated cost line (PHILOSOPHY
+  ;; § Debugging constraint 3) before it sticks.
   {:name :_xp-options
    :parent :if
    :args {:test :_xp-has-effects?
@@ -172,7 +177,12 @@
                          [:label {:class "execute-option-label"
                                   :title "Record which fns this run traverses (with per-call durations and cache hits). Off by default — tracing adds a small capture cost to the run."}
                           [:input {:type "checkbox" :class "execute-trace-checkbox"}]
-                          [:span " Trace path"]]]}
+                          [:span " Trace path"]]
+                         [:label {:class "execute-option-label execute-capture-values-label"
+                                  :title "Also record each traversed fn's return value (up to 4 KB per value; secret-touching fns stay hidden). Requires Trace path and an explicit confirmation — value capture is the expensive mode."}
+                          [:input {:type "checkbox" :class "execute-capture-values-checkbox"
+                                   :disabled "disabled"}]
+                          [:span " + capture values"]]]}
           :else {:value [:div {:class "execute-options-row"}
                          [:label {:class "execute-option-label"
                                   :title "When checked, this run is saved to fn-execution storage. Pure fast runs are NOT saved by default — tick this for runs you want to keep."}
@@ -181,7 +191,12 @@
                          [:label {:class "execute-option-label"
                                   :title "Record which fns this run traverses (with per-call durations and cache hits). Off by default — tracing adds a small capture cost to the run."}
                           [:input {:type "checkbox" :class "execute-trace-checkbox"}]
-                          [:span " Trace path"]]]}}}
+                          [:span " Trace path"]]
+                         [:label {:class "execute-option-label execute-capture-values-label"
+                                  :title "Also record each traversed fn's return value (up to 4 KB per value; secret-touching fns stay hidden). Requires Trace path and an explicit confirmation — value capture is the expensive mode."}
+                          [:input {:type "checkbox" :class "execute-capture-values-checkbox"
+                                   :disabled "disabled"}]
+                          [:span " + capture values"]]]}}}
 
   {:name :_xp-actions
    :parent :if

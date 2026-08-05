@@ -65,7 +65,19 @@ async function openExecutePopoverForCard(page, fnId) {
 
 (async () => {
   const {browser, page} = await newContext(chromium);
-  console.log('edit-execute-trace — trace checkbox → run → path highlight → clear → history replay');
+  console.log('edit-execute-trace — trace checkbox → run → path highlight → clear → history replay → value capture');
+
+  // Debug P3 — the "+ capture values" checkbox opens a real
+  // window.confirm with the estimated-cost line. Auto-answer per the
+  // current mode (decline first, accept later) and keep the message so
+  // the cost line can be asserted.
+  let acceptCaptureDialog = false;
+  let lastDialogMessage = null;
+  page.on('dialog', (d) => {
+    lastDialogMessage = d.message();
+    if (acceptCaptureDialog) d.accept();
+    else d.dismiss();
+  });
 
   try {
     await cleanup(page);
@@ -198,6 +210,90 @@ async function openExecutePopoverForCard(page, fnId) {
         .map((el) => el.dataset.originalFnId));
     assert(replay.includes(probeConst.id),
            'history "path" replays the highlight: ' + JSON.stringify(replay));
+
+    // ===================================================================
+    // Phase E (Debug P3): the "+ capture values" second-step control.
+    // Declining the confirm dialog reverts the checkbox; the run then
+    // captures NO values.
+    // ===================================================================
+    await openExecutePopoverForCard(page, probeWrap.id);
+    const secondStep = await page.evaluate(() => {
+      const popover = document.querySelector('.execute-popover.visible');
+      const captureCb = popover.querySelector('.execute-capture-values-checkbox');
+      return {present: !!captureCb, disabled: !!captureCb?.disabled};
+    });
+    assert(secondStep.present && secondStep.disabled,
+           'capture-values checkbox ships disabled until Trace path is on');
+    await page.click('.execute-popover.visible .execute-trace-checkbox');
+    const unlocked = await page.evaluate(() =>
+      !document.querySelector(
+        '.execute-popover.visible .execute-capture-values-checkbox').disabled);
+    assert(unlocked, 'ticking Trace path unlocks capture values');
+
+    acceptCaptureDialog = false;
+    lastDialogMessage = null;
+    // The click blocks on the modal confirm until our dialog handler
+    // dismisses it, so lastDialogMessage is set once it resolves.
+    await page.click('.execute-popover.visible .execute-capture-values-checkbox');
+    assert(lastDialogMessage && /Estimated cost: up to ~\d+ KB/.test(lastDialogMessage),
+           'confirm dialog shows the estimated cost line: '
+           + JSON.stringify(lastDialogMessage));
+    const declined = await page.evaluate(() =>
+      document.querySelector(
+        '.execute-popover.visible .execute-capture-values-checkbox').checked);
+    assert(!declined, 'declining the dialog reverts the checkbox');
+
+    await page.evaluate(() => {
+      document.querySelector('.execute-popover.visible .execute-run-btn').click();
+    });
+    await page.waitForSelector('.execute-popover.visible .execute-show-path-btn',
+                               {timeout: 30000});
+    await page.click('.execute-popover.visible .execute-show-path-btn');
+    await page.waitForSelector('.path-view-panel', {timeout: 10000});
+    const noValues = await page.evaluate(() =>
+      document.querySelectorAll('.path-value-badge').length);
+    assert(noValues === 0, 'declined capture → no value badges on the path view');
+
+    // ===================================================================
+    // Phase F (Debug P3): accepting the confirm captures values — the
+    // path view shows a value badge whose popover carries the value.
+    // ===================================================================
+    await openExecutePopoverForCard(page, probeWrap.id);
+    await page.click('.execute-popover.visible .execute-trace-checkbox');
+    acceptCaptureDialog = true;
+    await page.click('.execute-popover.visible .execute-capture-values-checkbox');
+    const accepted = await page.evaluate(() =>
+      document.querySelector(
+        '.execute-popover.visible .execute-capture-values-checkbox').checked);
+    assert(accepted, 'accepting the dialog keeps capture values checked');
+    await page.evaluate(() => {
+      document.querySelector('.execute-popover.visible .execute-run-btn').click();
+    });
+    await page.waitForSelector('.execute-popover.visible .execute-show-path-btn',
+                               {timeout: 30000});
+    await page.click('.execute-popover.visible .execute-show-path-btn');
+    await page.waitForSelector('.path-value-badge', {timeout: 10000});
+    const valBadge = await page.evaluate(() => {
+      const badge = document.querySelector('.path-value-badge');
+      badge.click();
+      return badge.textContent;
+    });
+    assert(/value/.test(valBadge), 'value badge rendered: ' + valBadge);
+    await page.waitForSelector('.path-value-popover', {timeout: 5000});
+    const popText = await page.evaluate(() =>
+      document.querySelector('.path-value-popover').textContent);
+    assert(popText.includes('41'),
+           'value popover shows the captured return (41): '
+           + JSON.stringify(popText.slice(0, 120)));
+    await page.click('.path-view-clear');
+    const clearedValues = await page.evaluate(() => ({
+      badges: document.querySelectorAll('.path-value-badge').length,
+      popoverVisible: !!document.querySelector('.path-value-popover')
+        && document.querySelector('.path-value-popover').style.display !== 'none',
+    }));
+    assert(clearedValues.badges === 0 && !clearedValues.popoverVisible,
+           'clear removes value badges + popover: '
+           + JSON.stringify(clearedValues));
 
     console.log('PASS');
   } catch (e) {

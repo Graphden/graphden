@@ -4180,6 +4180,63 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .execute-show-path-btn:hover,
 .execute-show-path-btn:focus-visible { background: var(--hover-bg); outline: none; }
 
+/* Captured-value affordance (Debug P3) — a small "= value" chip under
+   the timing badge; opens the singleton value popover. */
+.path-value-badge {
+  position: absolute;
+  top: 20px; right: 2px;
+  z-index: 6;
+  font-family: inherit; font-size: 10px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.path-value-badge:hover,
+.path-value-badge:focus-visible { background: var(--hover-bg); outline: none; }
+
+/* Captured-value popover — singleton, fixed-positioned by
+   anchorBelowClamped. The <pre> body scrolls inside its own box so a
+   4 KB JSON value can't blow the popover past the viewport. */
+.path-value-popover {
+  position: fixed;
+  z-index: 10003;
+  max-width: 420px;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  box-shadow: var(--shadow-lg);
+}
+.path-value-popover-head {
+  font-weight: 600;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.path-value-popover-body {
+  margin: 0;
+  max-height: 260px;
+  max-width: 100%;
+  overflow: auto;
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--light-border);
+  border-radius: 3px;
+  padding: 6px 8px;
+}
+.path-value-popover-note {
+  color: var(--muted-fg);
+  margin-top: 6px;
+}
+
 /* =========================================================================
    SECRETS — sidebar section + 🔒 indicator + create / rotate popover.
    ========================================================================= */

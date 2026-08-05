@@ -85,9 +85,25 @@ Launch-order refinements agreed 2026-07-20:
    ring + per-fn aggregate badge: count × total/max duration,
    cache-hit, `[hidden — secret]`), dims the rest, and lists
    off-canvas fns in a bottom-centre panel with ✕ clear; the view
-   is transient (any overlay rebuild clears it). **P3 pending**
-   (~1% ambient sampling + full intermediate-VALUE capture with
-   its confirm/size/TTL constraints) — remaining ~1 week
+   is transient (any overlay rebuild clears it). **P3 shipped**
+   (item complete): full intermediate-VALUE capture behind the
+   `capture-values?` submit flag — the editor's "+ capture values"
+   second-step checkbox unlocks only with Trace path checked and
+   requires an explicit confirm dialog with an estimated cost line
+   (constraint 3); values ride the trace entries through the same
+   streaming-JSON safety machinery as `:result` persistence (4 KB
+   per-entry cap with `:value-truncated?`, 16 MB total in-memory
+   budget with oldest-first drop + `:values-dropped?`,
+   secret-touching fns never read — `{:hidden :secret}` stays);
+   path-view badges gain an "= value" chip opening a per-fn value
+   popover. Plus ambient session sampling (constraint 2):
+   `compile-eager/set-trace-sampling!` (runtime-only atom, default
+   0.01, resets on restart, a 100% rate requires
+   `{:confirm-full true}`) samples fns in the selective traced set
+   once per top-level execution at bind time — DELIBERATELY
+   backend/REPL-only for now: no ambient-sampling UI ships until a
+   real need arises, since the constraint is about protecting the
+   user from capture cost, not about UI completeness
 5. ~~**Free-arg aliases**~~ — SHIPPED (the `slot.source-slot-id`
    rename model; see § Future Work entry, kept as the design record)
 (The routes-API + static-lint-against-drift item shipped as `window.API` +

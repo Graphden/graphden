@@ -223,7 +223,45 @@ function startPolling(execId, resultHostEl) {
 
 // === Submit ================================================================
 
-async function submitExecution(fnEntity, args, persist, trace, resultHostEl, cancelBtn) {
+// Debug P3 — estimated cost line for the capture-values confirm dialog
+// (PHILOSOPHY § Debugging constraint 3). Counts the fn's forward
+// ref-closure over whatever graphData currently holds (the selected
+// fn's subtree is loaded with it; the sidebar is lazy, so this is a
+// lower bound on fns — the wording stays "up to ~N KB" per the 4 KB
+// per-entry cap, honest in both directions).
+function estimateTraceClosureSize(fnId) {
+  const seen = new Set();
+  const stack = [fnId];
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const fn = lookups?.fnMap?.get(id);
+    (fn?.['parent-ids'] || []).forEach((p) => stack.push(p));
+    (lookups?.bindingsByFn?.get(id) || []).forEach((b) => {
+      if (b['ref-fn-id']) stack.push(b['ref-fn-id']);
+      (lookups?.itemsByBinding?.get(b.id) || []).forEach((it) => {
+        if (it['ref-fn-id']) stack.push(it['ref-fn-id']);
+      });
+    });
+  }
+  return seen.size;
+}
+
+
+function confirmCaptureValues(fnEntity) {
+  const n = Math.max(1, estimateTraceClosureSize(fnEntity.id));
+  return window.confirm(
+    'Capture intermediate values for this run?\n\n'
+    + 'Every traversed fn\'s return value will be recorded, up to 4 KB '
+    + 'each. Estimated cost: up to ~' + (n * 4) + ' KB (~' + n
+    + ' fn' + (n === 1 ? '' : 's') + ' in this fn\'s reach).\n\n'
+    + 'Values that touch :secret-typed data are never captured.');
+}
+
+
+async function submitExecution(fnEntity, args, persist, trace, captureValues,
+                               resultHostEl, cancelBtn) {
   resultHostEl.textContent = '';
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
   try {
@@ -233,7 +271,8 @@ async function submitExecution(fnEntity, args, persist, trace, resultHostEl, can
       body: JSON.stringify({ 'fn-id': fnEntity.id,
                               'args': args,
                               'persist?': persist,
-                              'trace?': trace }),
+                              'trace?': trace,
+                              'capture-values?': captureValues }),
     });
     const body = await r.json().catch(() => null);
     resultHostEl.textContent = '';
@@ -343,6 +382,7 @@ async function showExecutePopover(fnEntity, anchorEl) {
   const confirmCb = el.querySelector('.execute-confirm-checkbox');
   const persistCb = el.querySelector('.execute-persist-checkbox');
   const traceCb = el.querySelector('.execute-trace-checkbox');
+  const captureCb = el.querySelector('.execute-capture-values-checkbox');
   const runBtn = el.querySelector('.execute-run-btn');
   const cancelBtn = el.querySelector('.execute-cancel-btn');
   const resultHost = el.querySelector('.execute-result-host');
@@ -394,6 +434,27 @@ async function showExecutePopover(fnEntity, anchorEl) {
     });
   }
 
+  // Capture-values second-step control (Debug P3, PHILOSOPHY
+  // § Debugging constraint 3): the server emits the checkbox disabled;
+  // it only unlocks while "Trace path" is checked, and checking it
+  // requires the explicit confirm dialog (with an estimated cost line)
+  // before it sticks — declining reverts the checkbox.
+  if (traceCb && captureCb) {
+    traceCb.addEventListener('change', () => {
+      if (traceCb.checked) {
+        captureCb.disabled = false;
+      } else {
+        captureCb.checked = false;
+        captureCb.disabled = true;
+      }
+    });
+    captureCb.addEventListener('change', () => {
+      if (captureCb.checked && !confirmCaptureValues(fnEntity)) {
+        captureCb.checked = false;
+      }
+    });
+  }
+
   // History toggle handler — needs resultHost in scope so panel
   // rows can expand their full result into it.
   let historyLoaded = false;
@@ -428,7 +489,8 @@ async function showExecutePopover(fnEntity, anchorEl) {
       }
     }
     await submitExecution(fnEntity, args, persistCb.checked,
-                          !!traceCb?.checked, resultHost, cancelBtn);
+                          !!traceCb?.checked, !!captureCb?.checked,
+                          resultHost, cancelBtn);
     // Run completed — the new row (if persisted) belongs in History.
     // Invalidate the cached panel so the next toggle re-fetches; if the
     // panel is currently OPEN, refresh it in-place so the user sees the

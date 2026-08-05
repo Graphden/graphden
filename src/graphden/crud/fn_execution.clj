@@ -215,7 +215,8 @@
                             (:user-id parsed) (:args parsed) free-slots))
                     [fut trace path-trace]
                     (persist/run-future exec-ctx fn-id executor-args cancel-flag release
-                                        {:trace? (:trace? parsed)})]
+                                        {:trace? (:trace? parsed)
+                                         :capture-values? (:capture-values? parsed)})]
                 [row fut trace path-trace])
               (catch Exception t
                 (release)

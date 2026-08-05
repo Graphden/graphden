@@ -24,7 +24,8 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.util.json-size :as json-size]))
 
 
 ;; =============================================================================
@@ -109,34 +110,13 @@
 
 
 (defn json-bytes-within?
-  "Serialize `value` to UTF-8 JSON through a streaming writer that counts
-   bytes and ABORTS the moment the count exceeds `limit` — so an oversize
-   (or unserializable) value is refused WITHOUT materialising the whole
-   JSON string in memory. Returns true iff `value` serialises to ≤ `limit`
-   UTF-8 bytes. (`json/generate-string` + `count` would fully realise a
-   500 MB result string before a 5 MB cap could reject it.)"
+  "True iff `value` serialises to ≤ `limit` UTF-8 JSON bytes, measured
+   through the streaming, abort-at-limit counter
+   (`graphden.util.json-size` — extracted so the Debug-P3 value-capture
+   seam shares the machinery) — an oversize (or unserializable) value
+   is refused WITHOUT materialising the whole JSON string in memory."
   [value ^long limit]
-  (let [counter (java.util.concurrent.atomic.AtomicLong.)
-        os (proxy [java.io.OutputStream] []
-             (write
-               ([b]
-                (when (> (java.util.concurrent.atomic.AtomicLong/.incrementAndGet counter) limit)
-                  (throw (ex-info "oversize" {::oversize true}))))
-               ([_b _off len]
-                (when (> (java.util.concurrent.atomic.AtomicLong/.addAndGet counter (long len)) limit)
-                  (throw (ex-info "oversize" {::oversize true}))))))
-        w (java.io.OutputStreamWriter. os java.nio.charset.StandardCharsets/UTF_8)]
-    (try
-      (json/generate-stream value w)
-      (java.io.Writer/.flush w)
-      true
-      (catch clojure.lang.ExceptionInfo e
-        (when-not (::oversize (ex-data e))
-          (log/warn e "Result JSON-encode failed — treating as oversize"))
-        false)
-      (catch Exception e
-        (log/warn e "Result JSON-encode failed — treating as oversize")
-        false))))
+  (some? (json-size/json-bytes-up-to value limit)))
 
 
 (defn jsonize-result
@@ -194,12 +174,17 @@
 
 
 (defn snapshot-path-trace
-  "Read the captured execution-path entries from `path-trace-atom`
+  "Read the captured execution-path state from `path-trace-atom`
    (Debug P1 — bound as `cr/*path-trace*` by `run-future` when the
-   submission carried `trace?`) into the row's `:path-trace` jsonb
-   shape: `{:entries [{:fn-id … :cache-hit? … :duration-ms …} …]}`.
+   submission carried `trace?`; shape per `ce/new-path-trace`) into
+   the row's `:path-trace` jsonb shape:
+   `{:entries [{:fn-id … :cache-hit? … :duration-ms … (:value …)} …]}`.
    nil for an absent atom or an empty capture, so callers `(when …)`
    over it like `snapshot-runtime-effects`.
+
+   Debug-P3 value entries have their internal `ce/value-bytes-key`
+   accounting stripped; a capture-time oldest-first drop (the 16 MB
+   in-memory budget) surfaces as `:values-dropped? true`.
 
    Byte-capped at `max-path-trace-bytes` via the same streaming
    `json-bytes-within?` counter the result cap uses: oversize traces
@@ -207,18 +192,22 @@
    `:path-truncated? true` INSIDE the json — no extra column."
   [path-trace-atom]
   (when path-trace-atom
-    (when-let [entries (seq @path-trace-atom)]
-      ;; Stringify fn-ids at the boundary — jsonb roundtrips UUIDs as
-      ;; strings anyway; doing it here keeps the byte count honest and
-      ;; the wire shape explicit.
-      (loop [v (mapv #(update % :fn-id str) entries) truncated? false]
-        (let [payload (cond-> {:entries v}
-                        truncated? (assoc :path-truncated? true))]
-          (cond
-            (json-bytes-within? payload max-path-trace-bytes) payload
-            (= 1 (count v)) nil   ; single unserializable/oversize entry — refuse
-            :else (recur (subvec v (max 1 (quot (count v) 10)))
-                         true)))))))
+    (let [{:keys [entries values-dropped?]} @path-trace-atom]
+      (when (seq entries)
+        ;; Stringify fn-ids at the boundary — jsonb roundtrips UUIDs as
+        ;; strings anyway; doing it here keeps the byte count honest and
+        ;; the wire shape explicit.
+        (loop [v (mapv #(-> % (update :fn-id str) (dissoc ce/value-bytes-key))
+                       entries)
+               truncated? false]
+          (let [payload (cond-> {:entries v}
+                          truncated? (assoc :path-truncated? true)
+                          values-dropped? (assoc :values-dropped? true))]
+            (cond
+              (json-bytes-within? payload max-path-trace-bytes) payload
+              (= 1 (count v)) nil   ; single unserializable/oversize entry — refuse
+              :else (recur (subvec v (max 1 (quot (count v) 10)))
+                           true))))))))
 
 
 (defn resolve-ref-version-id
@@ -626,24 +615,36 @@
 
    `opts` (optional): `:trace?` — Debug P1 execution-path capture
    opt-in from the submit body. When true, `cr/*path-trace*` is bound
-   to a fresh vector-atom alongside `*effect-trace*`, AND
-   `ce/*traced-fn-ids*` is bound to the `ce/trace-all` sentinel so
+   to fresh state (`ce/new-path-trace`) alongside `*effect-trace*`,
+   AND `ce/*traced-fn-ids*` is bound to the `ce/trace-all` sentinel so
    every `:ref` frame of THIS execution records (Debug P2 — submitting
    fn X with `trace?` is the user explicitly selecting X's subtree,
    PHILOSOPHY § Debugging constraint 1; the capture stays bounded by
-   the 10k-entry + 256 KB caps). Absent/false → NO binding at all, so
-   the executor's seam pays only its nil-check. The root-level
-   `set-traced-fn-ids!` set stays the selective hook for programmatic
-   captures / P3 ambient sampling.
+   the 10k-entry + 256 KB caps). `:capture-values?` (Debug P3, behind
+   the UI's explicit confirm — constraint 3) IMPLIES `trace?` and
+   additionally puts the trace state in value-capture mode (4 KB
+   per-entry + 16 MB total budgets in `compile-eager`).
+
+   Neither flag set → the AMBIENT-SAMPLING decision runs (Debug P3,
+   constraint 2): when `fn-id` is in the selective `*traced-fn-ids*`
+   set, `ce/ambient-sample?` draws ONCE here at binding time; a win
+   binds `cr/*path-trace*` (path-only — never values) WITHOUT touching
+   `*traced-fn-ids*`, so only frames of selectively-traced fns record.
+   A loss (or an fn outside the set) → NO binding at all, so the
+   executor's seam pays only its nil-check.
 
    Returns `[future trace-atom path-trace-atom]` — the reaper needs
    the trace atoms to read the captured sets after the future resolves
-   (`path-trace-atom` nil unless `:trace?`)."
+   (`path-trace-atom` nil unless traced or sampled)."
   ([ctx fn-id args cancel-flag release]
    (run-future ctx fn-id args cancel-flag release nil))
-  ([ctx fn-id args cancel-flag release {:keys [trace?]}]
+  ([ctx fn-id args cancel-flag release {:keys [trace? capture-values?]}]
    (let [trace (atom #{})
-         path-trace (when trace? (atom []))
+         explicit? (or (true? trace?) (true? capture-values?))
+         path-trace (cond
+                      explicit? (ce/new-path-trace
+                                  {:capture-values? (true? capture-values?)})
+                      (ce/ambient-sample? fn-id) (ce/new-path-trace))
          watchdog (promise)
          bf (bound-fn* ; capture clojure.tools.logging MDC etc.
              (fn []
@@ -651,10 +652,19 @@
                          #(when @cancel-flag
                             (throw (InterruptedException. "execution cancelled")))
                          cr/*effect-trace* trace]
-                 (if path-trace
+                 (cond
+                   ;; Explicit trace?/capture-values? submit — the run's own
+                   ;; traversal is the selected subtree (trace-all sentinel).
+                   (and path-trace explicit?)
                    (binding [cr/*path-trace* path-trace
                              ce/*traced-fn-ids* (atom ce/trace-all)]
                      (cr/execute ctx fn-id args))
+                   ;; Ambient-sampled — the selective set keeps gating which
+                   ;; frames record; only the per-execution var binds.
+                   path-trace
+                   (binding [cr/*path-trace* path-trace]
+                     (cr/execute ctx fn-id args))
+                   :else
                    (cr/execute ctx fn-id args)))))
          fut (future
                (try

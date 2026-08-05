@@ -845,20 +845,24 @@
 
 
 (def ^:dynamic *path-trace*
-  "Atom holding a vector of execution-path entries (see
-   `compile-eager/call-with-cache` for the recorded shape:
-   `{:fn-id … :cache-hit? … :duration-ms …}` or `{:fn-id … :hidden
-   :secret}`), bound by the fn-execution future wrapper WHEN the
-   submitted execution opted in via the request's `trace?` flag. `nil`
-   (the default) means no tracing context — the seam in
-   `call-with-cache` does a single nil-check and measures nothing.
+  "Atom holding per-execution path-trace state — `{:entries [...]}`
+   plus, in value-capture mode, `:capture-values?` and the byte
+   accounting (see `compile-eager/new-path-trace`; entry shapes:
+   `{:fn-id … :cache-hit? … :duration-ms … (:value …)}` or `{:fn-id …
+   :hidden :secret}`). Bound by the fn-execution future wrapper WHEN
+   the submitted execution opted in via the request's `trace?` /
+   `capture-values?` flags, or when an ambient-sampling draw won
+   (Debug P3). `nil` (the default) means no tracing context — the
+   seam in `call-with-cache` does a single nil-check and measures
+   nothing.
 
-   Debug/observability P1 (PHILOSOPHY § Debugging and Observability):
-   capture is DOUBLY opt-in — this var (per-execution `trace?`) AND
-   the fn appearing in `compile-eager`'s `traced-fn-ids` set (per-fn).
-   The ~1% ambient sampling and full intermediate-VALUE capture from
-   that section are P3 — NOT implemented; only fn-ids, cache-hit flags
-   and durations are recorded, never values."
+   Debug/observability P1–P3 (PHILOSOPHY § Debugging and
+   Observability): capture is DOUBLY opt-in — this var (per-execution)
+   AND the fn appearing in `compile-eager`'s `traced-fn-ids` set (per
+   fn; the `trace-all` sentinel covers explicit-`trace?` runs).
+   Values are recorded ONLY in `:capture-values?` mode (behind the
+   UI's explicit confirm), under 4 KB-per-entry / 16 MB-total budgets;
+   plain traces record fn-ids, cache-hit flags and durations only."
   nil)
 
 

@@ -368,6 +368,25 @@ base-fn is absent from the graph (vault package not installed) — the
 row would be unexecutable.
 
 
+## Debug/Trace Errors (Debug P3)
+
+Thrown by `compile-eager/set-trace-sampling!` — the REPL/programmatic
+surface of ambient trace sampling (PHILOSOPHY § Debugging
+constraint 2). Not reachable over HTTP.
+
+### `:trace/invalid-sample-rate`
+
+The rate passed to `set-trace-sampling!` is not a number in
+`[0.0, 1.0]`.
+
+### `:trace/full-sampling-requires-confirm`
+
+A full (≥ 1.0) ambient sample rate was requested without the explicit
+`{:confirm-full true}` second argument — the programmatic mirror of
+the UI's "confirm before full capture" doctrine. The current rate is
+left unchanged.
+
+
 ## Error Handling Example
 
 ```clojure

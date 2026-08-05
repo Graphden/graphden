@@ -108,7 +108,11 @@ All endpoints require bearer-token auth (`auth-required-middleware`).
   "fn-name":    "add",
   "args":       {"a": 1, "b": {"ref": "uuid"}, "c": [1, 2, 3]},
   "timeout-ms": 10000,         // default 10000, cap 60000
-  "persist?":   false          // default false
+  "persist?":   false,         // default false
+  "trace?":     false,         // default false — Debug P1 path capture
+  "capture-values?": false     // default false — Debug P3 value capture
+                               //   (implies trace?; the editor sets it only
+                               //   behind an explicit confirm dialog)
 }
 ```
 

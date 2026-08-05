@@ -24,7 +24,8 @@
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
     [graphden.executor.runtime :as rt]
-    [graphden.util.counters :as counters]))
+    [graphden.util.counters :as counters]
+    [graphden.util.json-size :as json-size]))
 
 
 ;; =============================================================================
@@ -101,12 +102,78 @@
    Mirrors `set-always-fresh-fn-ids!` — call with the ids a user
    explicitly selected for tracing; capture additionally requires the
    per-execution `trace?` flag (which binds
-   `compile-runtime/*path-trace*`). Editor-submitted `trace?` runs
-   bypass this set via the `trace-all` execution-scoped binding (see
+   `compile-runtime/*path-trace*`) OR an ambient-sampling win (Debug
+   P3 — see `ambient-sample?`). Editor-submitted `trace?` runs bypass
+   this set via the `trace-all` execution-scoped binding (see
    `trace-all`); the root-level set remains the selective hook for
-   programmatic captures and the P3 ambient-sampling design — absent."
+   programmatic captures and ambient sampling."
   [ids]
   (reset! *traced-fn-ids* (set ids)))
+
+
+;; =============================================================================
+;; Ambient session sampling (Debug P3 — PHILOSOPHY § Debugging constraint 2)
+;; =============================================================================
+
+;; ^:dynamic for the same parallel-kaocha isolation reason as the other
+;; trace vars (see `kaocha.plugin.parallel/isolation-vars`). RUNTIME-ONLY
+;; state by constraint 2's wording ("tunable per session, never persisted
+;; as 100%"): an atom in executor memory, resets to the 1% default on
+;; every restart — there is deliberately NO config key, env var, or
+;; stored field that could persist a full-capture rate.
+(def ^:dynamic *trace-sample-rate*
+  "Session-scoped ambient sample rate (0.0–1.0, default 0.01) for fns in
+   the `*traced-fn-ids*` selective set. A top-level execution of such an
+   fn WITHOUT an explicit `trace?` submit gets its path captured with
+   this probability — decided ONCE at `run-future` binding time
+   (`ambient-sample?`), never per-node. Tune via `set-trace-sampling!`."
+  (atom 0.01))
+
+
+(defn trace-sample-rate-isolation-seed
+  "Seed value for `kaocha.plugin.parallel`'s per-NS-thread isolation
+   binding of `*trace-sample-rate*` — the 0.01 session default (the
+   plugin's generic `{}` seed would break the numeric read)."
+  []
+  0.01)
+
+
+(defn set-trace-sampling!
+  "Set the ambient trace sample rate (Debug P3, constraint 2). `rate`
+   must be in [0.0, 1.0]. A FULL rate (>= 1.0) additionally requires
+   `{:confirm-full true}` — the programmatic mirror of the UI's
+   \"confirm before full capture\" doctrine (constraint 3): sampling
+   is the default, 100% is an explicit \"I really want this\".
+
+   Runtime atom only — never persisted; restarts reset to 0.01."
+  ([rate] (set-trace-sampling! rate nil))
+  ([rate {:keys [confirm-full]}]
+   (when-not (and (number? rate) (<= 0.0 (double rate) 1.0))
+     (throw (ex-info "trace sample rate must be a number in [0.0, 1.0]"
+                     {:type :trace/invalid-sample-rate :rate rate})))
+   (when (and (>= (double rate) 1.0) (not (true? confirm-full)))
+     (throw (ex-info "full (100%) ambient sampling requires {:confirm-full true}"
+                     {:type :trace/full-sampling-requires-confirm :rate rate})))
+   (reset! *trace-sample-rate* (double rate))))
+
+
+(defn ambient-sample?
+  "The Debug-P3 ambient-sampling decision, made ONCE per top-level
+   execution at `run-future` binding time (never per-node): true iff
+   `fn-id` is in the SELECTIVE `*traced-fn-ids*` set (not the
+   `trace-all` sentinel — that's the explicit-`trace?` path) AND a
+   single `rand` draw wins at `*trace-sample-rate*`. Rate 0 never
+   samples and 1.0 always does, both WITHOUT consulting `rand` — so
+   tests at the extremes are deterministic."
+  [fn-id]
+  (let [ids @*traced-fn-ids*]
+    (and (not (identical? trace-all ids))
+         (contains? ids fn-id)
+         (let [r (double @*trace-sample-rate*)]
+           (cond
+             (<= r 0.0) false
+             (>= r 1.0) true
+             :else (< (rand) r))))))
 
 
 (defn- fa-key-for-cache
@@ -189,10 +256,89 @@
   10000)
 
 
+(def max-captured-value-bytes
+  "Debug P3 — per-entry cap on a captured intermediate VALUE, measured
+   as UTF-8 JSON bytes through the same streaming counter the result
+   persistence caps use. A value over the cap (or unserializable —
+   callables, atoms) is NOT captured; the entry carries
+   `:value-truncated? true` instead."
+  4096)
+
+
+(def ^:dynamic *max-captured-value-total-bytes*
+  "Debug P3 — total in-memory budget for captured values across one
+   execution's trace buffer (PHILOSOPHY § Debugging constraint 5's
+   per-session size limit, 16 MB per its example). Enforced AT CAPTURE
+   TIME: past the budget, the OLDEST entries drop first and the
+   snapshot carries `:values-dropped? true` so the user is told.
+   Dynamic so tests can trip it without allocating 16 MB."
+  (* 16 1024 1024))
+
+
+(def value-bytes-key
+  "Internal per-entry accounting key (`::value-bytes`) — the measured
+   JSON byte size of the entry's captured `:value`, kept so the
+   drop-oldest budget enforcement can subtract a dropped entry without
+   re-serializing it. Namespaced so the persist-side snapshot can
+   strip it from the wire shape."
+  ::value-bytes)
+
+
+(defn new-path-trace
+  "Fresh per-execution path-trace state for `compile-runtime/*path-trace*`:
+   `{:entries []}` plus, in value-capture mode (Debug P3),
+   `:capture-values? true` and the running `:value-bytes` total. One
+   atom per execution, bound by `crud.fn-execution.persist/run-future`,
+   released for GC when the completion reaper snapshots it — the
+   in-memory buffer's lifetime IS the execution's (constraint 5's TTL
+   half for buffers; persisted rows ride `:fn-execution`'s sweeper)."
+  ([] (new-path-trace nil))
+  ([{:keys [capture-values?]}]
+   (atom (cond-> {:entries []}
+           capture-values? (assoc :capture-values? true :value-bytes 0)))))
+
+
+(defn render-captured-value
+  "Debug P3 — render one fresh call's return into capture-entry fields,
+   through the SAME safety machinery as `:result` persistence (the
+   streaming JSON byte counter): within `max-captured-value-bytes` →
+   `{:value v, value-bytes-key n}`; oversize or unserializable →
+   `{:value-truncated? true}` (no value — nothing partial leaks).
+   NEVER called for secret-touching fns — their branch in
+   `path-traced-fresh-call` records `{:hidden :secret}` without
+   reading the value at all (constraint 4)."
+  [v]
+  (if-some [n (json-size/json-bytes-up-to v max-captured-value-bytes)]
+    {:value v value-bytes-key n}
+    {:value-truncated? true}))
+
+
 (defn- record-path-entry!
+  "Append `entry` to the trace state unless the entry-count cap is hit.
+   Entries carrying a captured value (`value-bytes-key` present)
+   additionally enforce the total value-bytes budget: when the running
+   total would exceed `*max-captured-value-total-bytes*`, the OLDEST
+   entries drop first (a contiguous suffix survives — same direction as
+   the persist-side byte cap) and `:values-dropped?` marks the state."
   [trace entry]
-  (when (< (count @trace) max-path-trace-entries)
-    (swap! trace conj entry)))
+  (swap! trace
+         (fn [{:keys [entries value-bytes] :as st}]
+           (if (>= (count entries) max-path-trace-entries)
+             st
+             (let [b (long (or (get entry value-bytes-key) 0))]
+               (if (zero? b)
+                 (update st :entries conj entry)
+                 (loop [es entries
+                        total (long (or value-bytes 0))
+                        dropped? false]
+                   (if (and (seq es) (> (+ total b) *max-captured-value-total-bytes*))
+                     (recur (subvec es 1)
+                            (- total (long (or (get (nth es 0) value-bytes-key) 0)))
+                            true)
+                     (cond-> (assoc st
+                                    :entries (conj es entry)
+                                    :value-bytes (+ total b))
+                       dropped? (assoc :values-dropped? true))))))))))
 
 
 (defn- active-path-trace
@@ -224,27 +370,47 @@
 
 (defn- path-traced-fresh-call
   "Invoke `(child fa ctx)` recording a fresh-call entry into `trace`:
-   `{:fn-id … :cache-hit? false :duration-ms <wall ms>}`. Recording is
-   in a `finally` so a THROWING frame still lands in the trace (the
-   failing call is the one being debugged). `:duration-ms` measures the
-   immediate invocation only — lazily-forced children account to
-   whichever frame forces them. Secret skip (capture-time, per
-   PHILOSOPHY § Debugging constraint 4): a fn whose rich-type touches
-   `:secret` records `{:fn-id … :hidden :secret}` — no duration, no
-   cache info."
+   `{:fn-id … :cache-hit? false :duration-ms <wall ms>}`. A THROWING
+   frame still lands in the trace (the failing call is the one being
+   debugged) — recorded on the `finally` path, without a value.
+   `:duration-ms` measures the immediate invocation only — lazily-
+   forced children account to whichever frame forces them.
+
+   Value capture (Debug P3, constraint 3): when the trace state was
+   built with `:capture-values?` (the `capture-values?` submit flag
+   behind the UI's explicit confirm), a SUCCESSFUL return additionally
+   records `render-captured-value`'s fields — `:value` within the
+   4 KB per-entry cap, `:value-truncated? true` past it. Cache hits
+   record no value (the fresh entry for the same `[fn-id fa]` already
+   carries it).
+
+   Secret skip (capture-time, per PHILOSOPHY § Debugging constraint
+   4): a fn whose rich-type touches `:secret` records `{:fn-id …
+   :hidden :secret}` — no duration, no cache info, and the return
+   value is NEVER read into the capture buffer (the renderer is not
+   invoked on this branch, in either mode)."
   [trace ref-id child fa ctx]
   (if (@touches-secret?-fn ref-id)
     (do (record-path-entry! trace {:fn-id ref-id :hidden :secret})
         (child fa ctx))
-    (let [t0 (System/nanoTime)]
+    (let [capture? (:capture-values? @trace)
+          t0 (System/nanoTime)
+          recorded? (volatile! false)
+          record! (fn [value-fields]
+                    (record-path-entry!
+                      trace
+                      (merge {:fn-id ref-id
+                              :cache-hit? false
+                              :duration-ms (quot (- (System/nanoTime) t0)
+                                                 1000000)}
+                             value-fields)))]
       (try
-        (child fa ctx)
+        (let [v (child fa ctx)]
+          (vreset! recorded? true)
+          (record! (when capture? (render-captured-value v)))
+          v)
         (finally
-          (record-path-entry! trace
-                              {:fn-id ref-id
-                               :cache-hit? false
-                               :duration-ms (quot (- (System/nanoTime) t0)
-                                                  1000000)}))))))
+          (when-not @recorded? (record! nil)))))))
 
 
 (defn- fresh-call

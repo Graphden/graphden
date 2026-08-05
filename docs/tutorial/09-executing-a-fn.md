@@ -242,13 +242,45 @@ Persisted traced runs keep their path: in the History panel,
 rows with a recorded path show a `path` button that replays
 the same highlight.
 
-Two things the trace never contains:
+### Capturing values
 
-- **Values.** Only fn ids, timings and cache flags are
-  recorded — never the data flowing through.
-- **Secrets.** A fn that touches `:secret`-typed data (lesson
-  07) shows a red `secret` badge instead of timings — the
-  capture pipeline redacts it at record time.
+By default the trace records only fn ids, timings and cache
+flags — never the data flowing through. When you need the
+data too, there is a second step:
+
+1. Tick `Trace path` first. That unlocks the `+ capture
+   values` checkbox next to it (it stays greyed out
+   otherwise).
+2. Tick `+ capture values`. A confirmation dialog appears
+   with an estimated cost line — something like `Estimated
+   cost: up to ~48 KB (~12 fns in this fn's reach)`. This is
+   the expensive mode, so graphden asks explicitly; declining
+   the dialog unticks the box.
+3. Run, then `Show path on canvas`. Traversed cards now wear
+   a second chip under the timing badge: `= value`. Click it
+   to see that fn's captured return value, pretty-printed.
+   When a fn ran several times, you see the last value (the
+   popover says `Last of N captured invocations`).
+
+Limits you may run into, each reported rather than silent:
+
+- A single value larger than 4 KB is not captured — the chip
+  shows `= 4KB+` and its popover explains the cap.
+- If all captured values together exceed the total budget
+  (16 MB), the oldest entries are dropped first and the
+  bottom panel says `some values dropped`.
+- A fn that touches `:secret`-typed data (lesson 07) shows a
+  red `secret` badge, no timings and **no value chip** — its
+  value is never even read by the capture machinery, in
+  either mode.
+
+What the trace never contains:
+
+- **Values, unless you explicitly confirmed capture.** A
+  plain `Trace path` run records fn ids, timings and cache
+  flags only.
+- **Secrets.** The capture pipeline redacts secret-touching
+  fns at record time, values included.
 
 ## What we glossed over
 

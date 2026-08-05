@@ -116,6 +116,12 @@
     ;; always-fresh above: tests calling `set-traced-fn-ids!` on
     ;; parallel NS-threads must not clobber each other's sets.
     graphden.executor.compile-eager/*traced-fn-ids*
+    ;; Debug-P3 ambient sample rate — sibling of the traced set: tests
+    ;; calling `set-trace-sampling!` on parallel NS-threads must not
+    ;; leak a 1.0 rate into a sibling whose selectively-traced fns
+    ;; would then all record. Has a seeder entry (the numeric 0.01
+    ;; default — the `{}` default seed would break the numeric read).
+    graphden.executor.compile-eager/*trace-sample-rate*
     ;; rich-types-registry's thread-local override. Integration tests
     ;; that bootstrap their own package set (`compile-packages-test`,
     ;; `execute-http-test`, `smoke-pass-test`) write per-fn `:return` /
@@ -196,7 +202,9 @@
 ;; consumers crash. Default seed is `{}`; add entries here when an
 ;; isolation var needs a richer initial state.
 (def ^:private isolation-var-seeders
-  '{graphden.executor.registry.core/*rich-types-override*
+  '{graphden.executor.compile-eager/*trace-sample-rate*
+    graphden.executor.compile-eager/trace-sample-rate-isolation-seed
+    graphden.executor.registry.core/*rich-types-override*
     graphden.executor.registry.core/snapshot-for-isolation
     graphden.executor.registry/*registry-override*
     graphden.executor.registry/snapshot-for-isolation

@@ -1,6 +1,6 @@
-// Editor Path View (Debug P2) — read-only canvas rendering of an
-// execution's captured `:path-trace` (Debug P1 data; see
-// docs/PHILOSOPHY.md § Debugging and Observability).
+// Editor Path View (Debug P2+P3) — read-only canvas rendering of an
+// execution's captured `:path-trace` (Debug P1 data + P3 captured
+// values; see docs/PHILOSOPHY.md § Debugging and Observability).
 //
 // Entry points (all exported on `window` for the other execute
 // modules + browser tests):
@@ -42,9 +42,14 @@ function _pathViewLayer() {
 // --- Aggregation ----------------------------------------------------------
 
 // `pathTrace` arrives as the JSON shape of the row's :path-trace jsonb:
-// {entries: [{('fn-id'): uuid, ('cache-hit?'): bool, ('duration-ms'): n}
+// {entries: [{('fn-id'): uuid, ('cache-hit?'): bool, ('duration-ms'): n,
+//             (value): any?, ('value-truncated?'): bool?}
 //            | {('fn-id'): uuid, hidden: 'secret'}],
-//  ('path-truncated?'): bool?}
+//  ('path-truncated?'): bool?, ('values-dropped?'): bool?}
+// Value fields exist only for capture-values? runs (Debug P3) — the
+// LAST captured value per fn wins the badge popover (most recent
+// invocation is the one being debugged); secret entries never carry
+// one, matching the capture-time redaction.
 function aggregatePathTrace(entries) {
   const byFn = new Map();
   for (const e of entries) {
@@ -52,7 +57,8 @@ function aggregatePathTrace(entries) {
     if (!fnId) continue;
     let agg = byFn.get(fnId);
     if (!agg) {
-      agg = { count: 0, fresh: 0, hits: 0, totalMs: 0, maxMs: 0, hidden: false };
+      agg = { count: 0, fresh: 0, hits: 0, totalMs: 0, maxMs: 0, hidden: false,
+              hasValue: false, lastValue: undefined, valueTruncated: false };
       byFn.set(fnId, agg);
     }
     agg.count += 1;
@@ -65,6 +71,12 @@ function aggregatePathTrace(entries) {
       const ms = typeof e['duration-ms'] === 'number' ? e['duration-ms'] : 0;
       agg.totalMs += ms;
       if (ms > agg.maxMs) agg.maxMs = ms;
+      if ('value' in e) {
+        agg.hasValue = true;
+        agg.lastValue = e.value;
+      } else if (e['value-truncated?']) {
+        agg.valueTruncated = true;
+      }
     }
   }
   return byFn;
@@ -94,6 +106,74 @@ function pathBadgeTitle(agg) {
 }
 
 
+// --- Captured-value popover (Debug P3) ------------------------------------
+//
+// Singleton popover opened from a node's value badge — shows the LAST
+// captured return value for that fn (pretty-printed JSON via
+// textContent, never innerHTML), or the truncation note when the value
+// exceeded the 4 KB per-entry cap. graph-first-exception: renders a
+// value already present in the client-held trace payload — a server
+// round-trip would re-send data the page already has.
+
+let _pathValuePopoverEl = null;
+let _pathValuePopoverAnchor = null;
+
+
+function _hidePathValuePopover() {
+  if (_pathValuePopoverEl) _pathValuePopoverEl.style.display = 'none';
+  _pathValuePopoverAnchor = null;
+}
+
+
+function _showPathValuePopover(anchorEl, fnName, agg) {
+  if (!_pathValuePopoverEl) {
+    const el = document.createElement('div');
+    el.className = 'path-value-popover';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', 'Captured value');
+    document.body.appendChild(el);
+    _pathValuePopoverEl = el;
+    installPopoverDismiss({
+      getEl: () => _pathValuePopoverEl,
+      getAnchor: () => _pathValuePopoverAnchor,
+      isVisible: () => !!_pathValuePopoverEl
+                       && _pathValuePopoverEl.style.display !== 'none',
+      onDismiss: _hidePathValuePopover,
+    });
+  }
+  const el = _pathValuePopoverEl;
+  el.textContent = '';
+  const head = document.createElement('div');
+  head.className = 'path-value-popover-head';
+  head.textContent = fnName ? fnName + ' — captured value' : 'Captured value';
+  el.appendChild(head);
+  if (agg.hasValue) {
+    const pre = document.createElement('pre');
+    pre.className = 'path-value-popover-body';
+    let text;
+    try { text = JSON.stringify(agg.lastValue, null, 2); }
+    catch (_) { text = String(agg.lastValue); }
+    pre.textContent = text === undefined ? 'null' : text;
+    el.appendChild(pre);
+    if (agg.fresh > 1) {
+      const note = document.createElement('div');
+      note.className = 'path-value-popover-note';
+      note.textContent = 'Last of ' + agg.fresh + ' captured invocations.';
+      el.appendChild(note);
+    }
+  } else {
+    const note = document.createElement('div');
+    note.className = 'path-value-popover-note';
+    note.textContent = 'Value not captured — it exceeded the 4 KB per-value '
+      + 'cap (or could not be serialized).';
+    el.appendChild(note);
+  }
+  el.style.display = '';
+  anchorBelowClamped(el, anchorEl, { fallbackW: 320, fallbackH: 160 });
+  _pathValuePopoverAnchor = anchorEl;
+}
+
+
 // --- Panel ----------------------------------------------------------------
 
 function _pathViewOffCanvasLabel(fnId) {
@@ -103,7 +183,7 @@ function _pathViewOffCanvasLabel(fnId) {
 }
 
 
-function _showPathViewPanel(highlightedCount, offCanvasIds, truncated) {
+function _showPathViewPanel(highlightedCount, offCanvasIds, truncated, valuesDropped) {
   if (_pathViewPanelEl) _pathViewPanelEl.remove();
   const panel = document.createElement('div');
   panel.className = 'path-view-panel';
@@ -131,6 +211,15 @@ function _showPathViewPanel(highlightedCount, offCanvasIds, truncated) {
     panel.appendChild(trunc);
   }
 
+  if (valuesDropped) {
+    const dropped = document.createElement('span');
+    dropped.className = 'path-view-truncated';
+    dropped.textContent = '· some values dropped';
+    dropped.title = 'Captured values hit the total 16 MB budget — the oldest '
+      + 'entries were dropped first.';
+    panel.appendChild(dropped);
+  }
+
   const clearBtn = document.createElement('button');
   clearBtn.type = 'button';
   clearBtn.className = 'path-view-clear';
@@ -156,6 +245,8 @@ function clearExecutionPathView() {
     el.classList.remove('path-highlighted');
   });
   document.querySelectorAll('.path-trace-badge').forEach((el) => el.remove());
+  document.querySelectorAll('.path-value-badge').forEach((el) => el.remove());
+  _hidePathValuePopover();
   if (_pathViewPanelEl) {
     _pathViewPanelEl.remove();
     _pathViewPanelEl = null;
@@ -184,11 +275,31 @@ function showExecutionPathView(pathTrace) {
     badge.textContent = pathBadgeText(agg);
     badge.title = pathBadgeTitle(agg);
     overlay.appendChild(badge);
+    // Debug P3 — captured-value affordance. Secret nodes never get one
+    // (their entries carry no value by capture-time redaction).
+    if (!agg.hidden && (agg.hasValue || agg.valueTruncated)) {
+      const valBadge = document.createElement('button');
+      valBadge.type = 'button';
+      valBadge.className = 'path-value-badge';
+      valBadge.textContent = agg.hasValue ? '= value' : '= 4KB+';
+      valBadge.title = agg.hasValue
+        ? 'Show this fn\'s captured return value'
+        : 'Value not captured — over the 4 KB per-value cap';
+      valBadge.setAttribute('aria-label',
+        'Captured value for ' + (_pathViewOffCanvasLabel(fnId) || 'fn'));
+      valBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
+      valBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _showPathValuePopover(valBadge, _pathViewOffCanvasLabel(fnId), agg);
+      });
+      overlay.appendChild(valBadge);
+    }
   });
 
   const offCanvasIds = [...byFn.keys()].filter((id) => !matched.has(id));
   layer.classList.add('path-view-active');
-  _showPathViewPanel(matched.size, offCanvasIds, !!pathTrace['path-truncated?']);
+  _showPathViewPanel(matched.size, offCanvasIds, !!pathTrace['path-truncated?'],
+                     !!pathTrace['values-dropped?']);
 }
 
 

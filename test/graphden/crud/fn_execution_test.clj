@@ -1316,13 +1316,77 @@
       (is (nat-int? (:duration-ms entry))))))
 
 
+(deftest apply-capture-values-persists-values-test
+  ;; Debug P3 — `capture-values?` (the flag behind the editor's explicit
+  ;; confirm) implies trace? and additionally lands each fresh frame's
+  ;; RETURN VALUE in the persisted `:path-trace` entries.
+  (let [storage (create-full-storage)
+        {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-vals")
+        c (test-ctx storage)
+        result (apply-and-await!
+                 c {:fn-id (:id wrapped) :args {:a 20 :b 22}
+                    :timeout-ms 5000 :persist? true :capture-values? true})
+        exec-id (some-> (:execution-id result) java.util.UUID/fromString)
+        entry-of (fn [payload]
+                   (->> (:entries payload)
+                        (filter #(= (str (:id target)) (:fn-id %)))
+                        first))]
+    (testing "capture-values? ALONE implies tracing — no trace? sent"
+      (is (= :succeeded (:status result)))
+      (is (= 42 (:result result)))
+      (let [entry (entry-of (:path-trace result))]
+        (is (some? entry) (pr-str (:path-trace result)))
+        (is (= 42 (:value entry)) "the ref frame's return value is captured")
+        (is (not (:value-truncated? entry)))))
+    (testing "row persists the value inside :path-trace jsonb"
+      (let [row-entry (entry-of (:path-trace (sp/read-entity storage :fn-execution exec-id)))]
+        (is (= 42 (:value row-entry)))
+        (testing "internal byte accounting never reaches the wire"
+          (is (not-any? #(str/includes? (name %) "value-bytes")
+                        (keys row-entry))))))))
+
+
+(deftest apply-sampled-run-without-trace-flag-test
+  ;; Debug P3 constraint 2 — ambient sampling: an fn in the SELECTIVE
+  ;; traced set, submitted WITHOUT trace?, records when the session
+  ;; sample rate wins (deterministic at rate 1.0 — the decision is a
+  ;; single draw at run-future binding time, never per-node). The
+  ;; SUBMITTED fn's membership drives the draw; the set then still
+  ;; gates which frames record — so the user's selected subtree
+  ;; (wrapped + target here) goes in whole.
+  (let [storage (create-full-storage)
+        {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-smpl")
+        c (test-ctx storage)
+        result (binding [ce/*traced-fn-ids* (atom #{(:id wrapped) (:id target)})
+                         ce/*trace-sample-rate* (atom 0.01)]
+                 (ce/set-trace-sampling! 1.0 {:confirm-full true})
+                 (apply-and-await!
+                   c {:fn-id (:id wrapped) :args {:a 2 :b 3}
+                      :timeout-ms 5000 :persist? true}))
+        exec-id (some-> (:execution-id result) java.util.UUID/fromString)
+        entry (->> (:entries (:path-trace result))
+                   (filter #(= (str (:id target)) (:fn-id %)))
+                   first)]
+    (testing "sampled run produces a :path-trace row without any trace? submit"
+      (is (= :succeeded (:status result)))
+      (is (= 5 (:result result)))
+      (is (some? entry) (pr-str (:path-trace result)))
+      (is (false? (:cache-hit? entry)))
+      (testing "sampling is path-only — never values"
+        (is (not (contains? entry :value))))
+      (is (some? (:path-trace (sp/read-entity storage :fn-execution exec-id)))))))
+
+
 (deftest apply-without-trace-flag-records-nothing-test
   (let [storage (create-full-storage)
         {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-off")
         c (test-ctx storage)
         ;; fn IS in the traced set — but the submission didn't opt in,
-        ;; so no atom is bound and nothing records.
-        result (binding [ce/*traced-fn-ids* (atom #{(:id target)})]
+        ;; so no atom is bound and nothing records. Sample rate pinned
+        ;; to 0 — at the 0.01 default the P3 ambient draw would record
+        ;; a path 1% of runs and flake this assertion.
+        result (binding [ce/*traced-fn-ids* (atom #{(:id target)})
+                         ce/*trace-sample-rate* (atom 0.0)]
                  (apply-and-await!
                    c {:fn-id (:id wrapped) :args {:a 3 :b 4}
                       :timeout-ms 5000 :persist? true}))

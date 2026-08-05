@@ -1032,13 +1032,57 @@ per-fn aggregate badges (invocation count, total/max duration, cache
 hits, "[hidden — secret]"), off-canvas fns are listed without being
 force-loaded, and the view clears on any canvas rebuild.
 
-The constraints below stay in force for what remains: ambient ~1 %
-sampling and full intermediate-VALUE capture (constraints 2–3) are P3
-and NOT implemented — nothing captures values today.
+**Implemented (P3)** — ambient sampling + full intermediate-VALUE
+capture; every constraint below now has an enforcement site:
 
-**Non-negotiable constraints when this lands** — captured early so a
-future implementation cannot accidentally make production
-unreliable:
+- **Constraint 1 (per-fn opt-in)** — unchanged from P1/P2: the
+  per-execution `trace?` flag (execution-scoped `trace-all` sentinel)
+  or membership in the runtime-only selective set
+  (`compile-eager/set-traced-fn-ids!`). Still no global switch
+  reachable from the UI.
+- **Constraint 2 (sampling by default)** —
+  `compile-eager/set-trace-sampling!` (session-scoped runtime atom
+  `*trace-sample-rate*`, default 0.01, resets on restart — NEVER
+  persisted: no config key, env var, or stored field exists for it).
+  An fn in the selective set submitted WITHOUT `trace?` gets its path
+  captured at the rate; the draw happens ONCE per top-level execution
+  at `run-future` binding time (`ambient-sample?`), never per-node,
+  and sampled captures are path-only — never values. A full (100 %)
+  rate refuses without an explicit `{:confirm-full true}` second
+  argument — the programmatic mirror of the UI confirm. Backend +
+  REPL surface only, deliberately: no ambient-sampling UI ships until
+  a real need (the constraint protects the user from cost, not UI
+  completeness — see ROADMAP).
+- **Constraint 3 (confirm before full value capture)** — the
+  `capture-values?` submit flag (implies `trace?`). The editor's
+  "+ capture values" checkbox is a second-step control: disabled
+  until "Trace path" is checked, and checking it opens an explicit
+  confirm dialog with an estimated cost line ("up to ~N KB", from the
+  fn's client-known ref-closure size × the 4 KB per-value cap);
+  declining reverts it. Captured values render through the same
+  streaming JSON byte counter as `:result` persistence
+  (`graphden.util.json-size`, via
+  `compile-eager/render-captured-value`).
+- **Constraint 4 (`:secret` auto-skip)** — unchanged mechanism,
+  extended guarantee: a secret-touching fn's frame records
+  `{:hidden :secret}` and its value is never read into the capture
+  buffer — the value renderer is not invoked on that branch (unit
+  test asserts the renderer probe stays at zero).
+- **Constraint 5 (bounds + expiry)** — per-entry 4 KB value cap
+  (`:value-truncated? true` marker), 16 MB total value budget
+  enforced AT CAPTURE TIME with oldest-first drop
+  (`:values-dropped? true` tells the user), on top of the P1
+  10k-entry capture cap and 256 KB persist-side byte cap. The TTL
+  half, read honestly: the "1 hour after last view" example is about
+  capture BUFFERS — here the in-memory buffer is a per-execution atom
+  whose lifetime IS the execution (snapshotted and released when the
+  completion reaper fires), so there is no long-lived buffer to
+  expire; persisted `:path-trace` rows ride `:fn-execution`'s
+  existing 7/30-day TTL sweeper.
+
+**Non-negotiable constraints** (kept verbatim from before the
+implementation — they remain the contract any future change must
+honour):
 
 1. **Per-fn opt-in, not global switch.** A user enables capture on a
    specific fn-id (or a small subtree they explicitly select). There

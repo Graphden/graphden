@@ -132,11 +132,13 @@
 
 
 (def ^:private fn-execution-path-trace-field-uuid
-  ;; Debug/observability P1 — execution-path capture. Filled on
-  ;; terminal status only when the submission opted in via `trace?`
-  ;; (which scopes capture to that execution's own traversal — the
-  ;; `trace-all` sentinel; the runtime traced set gates only
-  ;; programmatic captures that bind `*path-trace*` directly).
+  ;; Debug/observability P1+P3 — execution-path capture. Filled on
+  ;; terminal status when the submission opted in via `trace?` /
+  ;; `capture-values?` (which scope capture to that execution's own
+  ;; traversal — the `trace-all` sentinel), or when an ambient-sampling
+  ;; draw won for a selectively-traced fn (P3; the runtime traced set
+  ;; also gates programmatic captures that bind `*path-trace*`
+  ;; directly).
   #uuid "c39fc6a2-73d6-45a7-b062-07c2de5a7b42")
 
 
@@ -291,9 +293,11 @@
                       :touched-secret? {:uuid fn-execution-touched-secret-field-uuid
                                         :type :bool
                                         :nullable? true}
-                      ;; Debug P1 execution-path capture:
-                      ;; `{:entries [{:fn-id :cache-hit? :duration-ms}|
-                      ;;             {:fn-id :hidden}] :path-truncated?}`.
+                      ;; Debug P1+P3 execution-path capture:
+                      ;; `{:entries [{:fn-id :cache-hit? :duration-ms
+                      ;;              (:value | :value-truncated?)?}|
+                      ;;             {:fn-id :hidden}]
+                      ;;   :path-truncated? :values-dropped?}`.
                       ;; Snapshotted on terminal status from the
                       ;; `*path-trace*` atom (opt-in `trace?` submits
                       ;; only); byte-capped (256 KB) with oldest-first

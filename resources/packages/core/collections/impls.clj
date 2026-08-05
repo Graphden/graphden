@@ -11,7 +11,9 @@
     [clojure.math :as math]
     [clojure.walk]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
+    [graphden.types.check.literals :as lit]
     [graphden.types.core :as types]))
 
 
@@ -581,6 +583,107 @@
       default-ret)))
 
 
+;; --- :pairs->map ------------------------------------------------------------
+;; Static field reconstruction — the entry-list counterpart of
+;; `:zipmap`'s literal-keys branch. When EVERY item of `:entries` is a
+;; statically-known 2-element pair whose KEY half is a literal
+;; keyword/string, the result is the record `{k1 T1 … kn Tn}` (later
+;; pairs override earlier on a duplicate key — `into {}` semantics).
+;; The canonical case is web/ring-adapter's `:internal-request`: five
+;; `[:field <extractor>]` `:list` entries plug into one `:pairs->map`,
+;; and reconstructing the record lets its author-declared
+;; `:return-type :ring-request-shape` be PROVED by subtyping instead
+;; of merely asserted over the wide `[:map :any :any]`.
+;;
+;; Recognised entry shapes (anything else — a dynamic entries ref, an
+;; append-form, a computed key — degrades the WHOLE result to the
+;; declared fallback; no partial records, no guessing):
+;;   - fn-ref item (bare keyword / `{:ref :x}`) whose fn-def roots at
+;;     `:list` with a 2-element `:items` binding whose first item is a
+;;     literal `{:value <kw-or-str>}`. The value-half type comes from
+;;     the recorded `:elem-types` (position 1 — the checker's narrowed
+;;     view), falling back to re-deriving it from the raw item form.
+;;   - literal pair items — `{:value [k v]}`, or a raw `[k v]` vector
+;;     (the package parser stores a raw-vector list item as ONE
+;;     literal value, so keywords nested in it are data, not refs).
+;; Secret-taint stays central: the registry's `:taint-propagate?` flag
+;; wraps the result when any input is tainted (unchanged), and a
+;; per-field `[:secret …]` inside a value type passes through as-is.
+
+(defn- pair-value-static-type
+  "Static type of a pair's VALUE half from its raw binding form —
+   author-pinned `:type` first, literal classification second, the
+   ref's recorded return third. `:any` when nothing is known (an
+   unknown VALUE type doesn't break record reconstruction — only an
+   unknown KEY does)."
+  [v-form]
+  (or (when (map? v-form)
+        (or (some-> (:type v-form) types/resolve-alias)
+            (when (contains? v-form :value)
+              (lit/classify-literal (:value v-form)))
+            (when-let [r (:ref v-form)]
+              (:return (registry/rich-type-of r)))))
+      (when (keyword? v-form)
+        (:return (registry/rich-type-of v-form)))
+      (when-not (or (map? v-form) (keyword? v-form))
+        (lit/classify-literal v-form))
+      :any))
+
+
+(defn- entry-ref-static-field
+  "`[field-kw value-type]` when `ref-kw` names a `:list`-rooted fn-def
+   whose resolved `:items` binding is a 2-element pair with a literal
+   key half; nil otherwise."
+  [ref-kw]
+  (when-let [info (registry/rich-type-of ref-kw)]
+    (when (= :list (registry/root-base-fn-name ref-kw))
+      (let [items-info (get-in info [:resolved-bindings :items])
+            raw (:value items-info)
+            et (:elem-types items-info)]
+        (when (and (vector? raw) (= 2 (count raw)))
+          (let [[k-form v-form] raw
+                k (when (and (map? k-form) (contains? k-form :value))
+                    (field-keyword-from-literal (:value k-form)))]
+            (when k
+              [k (or (when (and (sequential? et) (= 2 (count et)))
+                       (nth et 1))
+                     (pair-value-static-type v-form))])))))))
+
+
+(defn- entry-static-field
+  "`[field-kw value-type]` for one raw `:entries` item; nil when the
+   pair (or its key half) isn't statically known."
+  [item]
+  (cond
+    (keyword? item)
+    (entry-ref-static-field item)
+
+    (and (map? item) (:ref item) (not (contains? item :value)))
+    (entry-ref-static-field (:ref item))
+
+    (and (map? item) (vector? (:value item)) (= 2 (count (:value item))))
+    (let [[k v] (:value item)
+          field (field-keyword-from-literal k)]
+      (when field [field (or (lit/classify-literal v) :any)]))
+
+    (and (vector? item) (= 2 (count item)))
+    (let [[k v] item
+          field (field-keyword-from-literal k)]
+      (when field [field (or (lit/classify-literal v) :any)]))
+
+    :else nil))
+
+
+(defn pairs->map-return-rule
+  [bindings-info default-ret]
+  (let [entries-form (get-in bindings-info [:entries :value])
+        fields (when (and (vector? entries-form) (seq entries-form))
+                 (mapv entry-static-field entries-form))]
+    (if (and (seq fields) (every? some? fields))
+      (into {} fields)
+      default-ret)))
+
+
 ;; --- :update-in / :merge-in -------------------------------------------------
 ;; Preserve the input map's shape.
 ;;
@@ -949,5 +1052,6 @@
                :nav-types-rule update-in-nav-rule}
    :list {:impl list-fn :return-type-rule list-return-rule :taint-propagate? true}
    :vec {:impl vec-fn :taint-propagate? true}
-   :pairs->map {:impl pairs->map-fn :taint-propagate? true}
+   :pairs->map {:impl pairs->map-fn :return-type-rule pairs->map-return-rule
+                :taint-propagate? true}
    :position-in {:impl position-in-fn :taint-propagate? true}})

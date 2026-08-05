@@ -191,3 +191,44 @@
                                 :parent :dissoc
                                 :args {:map :stub-list-fn
                                        :key {:value :foo}}})))))
+
+
+;; -----------------------------------------------------------------------------
+;; :internal-request — the :pairs->map static-field-reconstruction
+;; payoff. Its five entries are `:list`-built pairs with literal keys,
+;; so the rule COMPUTES the exact `:ring-request-shape` record and the
+;; author's declared `:return-type` is verified by subtyping (it used
+;; to be deferred — the rule had no static reconstruction).
+
+(deftest internal-request-return-is-proved-ring-request-shape
+  ;; Seed the real base-fns (incl. :list / :pairs->map with their
+  ;; type-rules); names colliding with the fixture's synthetic
+  ;; :get-in / :dissoc are overridden by the real declarations.
+  (doseq [[fn-name fn-def] (:base-fn-defs loaded)]
+    (registry/record-rich-types! fn-name fn-def))
+  (let [by-name (into {} (map (juxt :name identity)) (:fn-defs loaded))
+        ;; NB `:identity` opens the chain — it's itself a fn-def
+        ;; (`:parent :const`), and relying on an ambient registry entry
+        ;; for it is order-dependent across sibling test nses.
+        chain [:identity
+               :ring-request :ring-request-field
+               :ring-method :ring-uri :ring-query-string
+               :ring-headers :ring-body-input-stream
+               :ring-method-entry :ring-uri-entry
+               :ring-query-string-entry :ring-headers-entry
+               :ring-body-entry]
+        shape (types/resolve-alias :ring-request-shape)]
+    (doseq [n chain]
+      (is (some? (by-name n)) (str n " exists in core+web fn-defs"))
+      (check/check-fn-def! (by-name n)))
+    (testing "the rule COMPUTES the record (declaration stripped — no
+              author-assertion hatch involved)"
+      (check/check-fn-def! (-> (by-name :internal-request)
+                               (dissoc :return-type)
+                               (assoc :name :internal-request-underived)))
+      (is (= shape
+             (:return (registry/rich-type-of :internal-request-underived)))
+          "computed return IS the :ring-request-shape record"))
+    (testing "the shipped declaration passes as a PROVED subtype"
+      (is (some? (check/check-fn-def! (by-name :internal-request))))
+      (is (= shape (:return (registry/rich-type-of :internal-request)))))))

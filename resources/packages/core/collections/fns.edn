@@ -51,7 +51,7 @@
   ;; Until sequence-literal bindings propagate through a rename into a
   ;; HOF-adjacent `:coll`, this stays a base-fn.
   {:name :pairs->map
-   :description "Build a map from a sequence of `[key value]` pairs (or `:pair` results). Later pairs override earlier ones with the same key."
+   :description "Build a map from a sequence of `[key value]` pairs (or `:pair` results). Later pairs override earlier ones with the same key. The per-call `pairs->map-return-rule` reconstructs the exact record `{k1 T1 …}` when the whole entry list is statically known (literal pairs, or `:list`-built entry refs whose key halves are literal keywords/strings) — any dynamic entry or computed key falls back to the declared wide map."
    :args {:entries {:type [:list :any] :description "Sequence of two-element pairs."}}
    :return-type [:map :any :any]}
 

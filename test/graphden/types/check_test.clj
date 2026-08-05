@@ -1245,6 +1245,96 @@
         "registry records the declared (tightened) shape")))
 
 
+;; -----------------------------------------------------------------------------
+;; :pairs->map — static field reconstruction (the :zipmap counterpart
+;; for entry lists). Full static knowledge → record; ANY unknown key
+;; → the declared [:map :any :any] fallback (no partial records).
+
+(deftest pairs->map-literal-pairs-reconstruct-record
+  (testing "whole-binding literal pair list → exact record, later pair wins"
+    (check/check-fn-def! {:name :pm-lit
+                          :parent :pairs->map
+                          :args {:entries {:value [[:a 1] [:b "x"] [:a "y"]]}}})
+    (is (= {:a :text :b :text}
+           (:return (registry/rich-type-of :pm-lit)))
+        "keys from literal halves; duplicate :a takes the LATER value type"))
+  (testing "raw vector items inside a vector binding are literal pairs too"
+    (check/check-fn-def! {:name :pm-raw
+                          :parent :pairs->map
+                          :args {:entries [[:a 1] [:b true]]}})
+    (is (= {:a :int :b :bool}
+           (:return (registry/rich-type-of :pm-raw))))))
+
+
+(deftest pairs->map-list-entry-refs-reconstruct-record
+  (testing "fn-ref entries built via :list with literal key halves → record"
+    (registry/record-rich-types-raw!
+      :pm-text-src {:args {} :return :text})
+    ;; Entry fn-defs — checked first (topo order), so their
+    ;; :resolved-bindings land in the registry for the rule to read.
+    (check/check-fn-def! {:name :pm-entry-a
+                          :parent :list
+                          :args {:items [{:value :alpha} :pm-text-src]}})
+    (check/check-fn-def! {:name :pm-entry-b
+                          :parent :list
+                          :args {:items [{:value :beta} {:value 7}]}})
+    (check/check-fn-def! {:name :pm-refs
+                          :parent :pairs->map
+                          :args {:entries [:pm-entry-a :pm-entry-b]}})
+    (is (= {:alpha :text :beta :int}
+           (:return (registry/rich-type-of :pm-refs)))
+        "field types come from the entries' recorded value-half types")))
+
+
+(deftest pairs->map-any-unknown-key-degrades-whole-result
+  (testing "one dynamic-key entry among static ones → declared fallback"
+    (registry/record-rich-types-raw!
+      :pm-kw-src {:args {} :return :keyword})
+    (check/check-fn-def! {:name :pm-entry-static
+                          :parent :list
+                          :args {:items [{:value :alpha} {:value 1}]}})
+    (check/check-fn-def! {:name :pm-entry-dynkey
+                          :parent :list
+                          :args {:items [:pm-kw-src {:value 2}]}})
+    (check/check-fn-def! {:name :pm-mixed
+                          :parent :pairs->map
+                          :args {:entries [:pm-entry-static :pm-entry-dynkey]}})
+    (is (= [:map :any :any]
+           (:return (registry/rich-type-of :pm-mixed)))
+        "no partial records — the computed-key entry degrades everything"))
+  (testing "entries bound to a dynamic list-returning ref → declared fallback"
+    (registry/record-rich-types-raw!
+      :pm-dyn-entries {:args {} :return [:list :any]})
+    (check/check-fn-def! {:name :pm-dynamic
+                          :parent :pairs->map
+                          :args {:entries :pm-dyn-entries}})
+    (is (= [:map :any :any]
+           (:return (registry/rich-type-of :pm-dynamic))))))
+
+
+(deftest pairs->map-secret-value-marker-survives-reconstruction
+  (testing "a [:secret T] value half stays marked inside the record field"
+    (registry/record-rich-types-raw!
+      :pm-secret-src {:args {} :return [:secret :text]})
+    (check/check-fn-def! {:name :pm-secret-entry
+                          :parent :list
+                          :args {:items [{:value :token} :pm-secret-src]}})
+    (check/check-fn-def! {:name :pm-secret-map
+                          :parent :pairs->map
+                          :args {:entries [:pm-secret-entry]}})
+    (let [ret (:return (registry/rich-type-of :pm-secret-map))
+          ;; The central `:taint-propagate?` pass may additionally wrap
+          ;; the whole record — accept either form, the field marker is
+          ;; what this test pins.
+          inner (if (types-core/secret-type? ret)
+                  (types-core/secret-inner ret)
+                  ret)]
+      (is (types-core/contains-secret? ret)
+          "marker not dropped by reconstruction")
+      (is (= [:secret :text] (:token inner))
+          "the :token field carries the per-field marker"))))
+
+
 (deftest sweep-allowlist-accepts-exact-match
   (testing "actual failure set equals the allowlist → no throw"
     (is (= :ok

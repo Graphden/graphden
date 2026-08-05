@@ -196,8 +196,9 @@
    :args {:items [{:value :body} :ring-body-input-stream]}}
 
   {:name :internal-request
-   :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`. Author-declared `:return-type :ring-request-shape` deferred — `:pairs->map`'s rule has no static field reconstruction yet, so the type-checker can't prove the computed return is a record."
+   :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`, whose static field reconstruction rule proves the computed return IS this record (every entry is a `:list`-built pair with a literal key), so the declared `:return-type :ring-request-shape` is verified by subtyping, not merely asserted."
    :parent :pairs->map
+   :return-type :ring-request-shape
    :args {:entries [:ring-method-entry
                     :ring-uri-entry
                     :ring-query-string-entry

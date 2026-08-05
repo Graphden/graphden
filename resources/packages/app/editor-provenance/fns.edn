@@ -870,6 +870,7 @@
            :to-set "Declared signature — duplicates dropped, element type preserved: [:list a] → [:list a]."
            :flatten "Nested lists collapsed one level per pass — element type LUB'd across the nesting."
            :zipmap "Literal keys zipped with per-item value types — a record shape when every key is a literal keyword."
+           :pairs->map "Statically-known [key value] entries folded into a record shape when every key half is a literal; any dynamic entry or computed key falls back to the wide map."
            :select-keys "Literal key subset of a known record — the result carries exactly those fields."
            :update-keys "Keys mapped through `:f` — [:map <f's return> V]."
            :update-vals "Values mapped through `:f` — [:map K <f's return>]."

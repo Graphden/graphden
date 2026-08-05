@@ -396,6 +396,26 @@ value side to `:any` keeps `record-to-map` unification through
 type-rule: result = type(a) ∪ type(b)
 ```
 
+### zipmap / pairs->map — static field reconstruction
+
+```
+zipmap:     if every :keys item is a literal keyword/string,
+            result = record {k1 T1 …} with Ti from :vals per-item types
+pairs->map: if EVERY :entries item is a statically-known 2-element pair
+            whose KEY half is a literal keyword/string,
+            result = record {k1 T1 …} (later pair wins on a duplicate key)
+```
+
+`:pairs->map` recognises literal pairs (`{:value [k v]}` / raw `[k v]`
+vectors) and fn-ref entries built via `:list` with a literal
+`{:value <key>}` first item — the canonical case being
+web/ring-adapter's `:internal-request`, whose five `[:field
+<extractor>]` entries reconstruct exactly `:ring-request-shape`, so its
+declared `:return-type` is proved by subtyping rather than asserted.
+ANY entry that doesn't yield a literal key (a dynamic entries ref, an
+append-form, a computed key) degrades the WHOLE result to the declared
+`[:map :any :any]` — no partial records.
+
 ### Degradation
 
 When a key is a `ref-id` (computed value), the system knows the key's TYPE (`:text`) but not its VALUE. Type-rules that need the value degrade to `:jsonb` with a warning:

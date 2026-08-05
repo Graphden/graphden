@@ -92,19 +92,31 @@
       (let [errors-by-fn (merge (diag/branch-errors source-branch-id)
                                 (diag/branch-errors target-branch-id))]
         (when (seq errors-by-fn)
-          (let [fn-ids (vec (keys errors-by-fn))
+          ;; Judge ONLY the fns the identity read returns. `base-storage`
+          ;; is deliberately the UNWRAPPED handle — identity rows are
+          ;; cross-branch, so a fn that exists only on the SOURCE branch
+          ;; still resolves — but on a multi-tenant pod the unwrap lands
+          ;; on OrgScopedStorage (it sits BENEATH versioning, ADR §3.0),
+          ;; so the read is org-scoped: a foreign org's fn-ids in the
+          ;; shared branch's diagnostics bucket come back absent. Those
+          ;; must neither block this requester's merge nor surface (even
+          ;; as bare UUIDs) in the violation message — the store itself
+          ;; has no org dimension to consult.
+          (let [all-ids (vec (keys errors-by-fn))
                 ;; read-entities returns {id → row} already.
-                rows-by-id (sp/read-entities base-storage :fn fn-ids)
+                rows-by-id (sp/read-entities base-storage :fn all-ids)
+                fn-ids (filterv #(contains? rows-by-id %) all-ids)
                 fn-names (mapv #(or (:name (get rows-by-id %)) (str %)) fn-ids)]
-            (throw (ex-info (str "Merge blocked: target branch forbids invalid fns"
-                                 " — unresolved type errors on: "
-                                 (str/join ", " (sort fn-names)))
-                            {:type :merge-protection-violation
-                             :reason :forbid-invalid
-                             :invalid-fn-names fn-names
-                             :invalid-fn-ids fn-ids
-                             :source-branch-id source-branch-id
-                             :target-branch-id target-branch-id}))))))))
+            (when (seq fn-ids)
+              (throw (ex-info (str "Merge blocked: target branch forbids invalid fns"
+                                   " — unresolved type errors on: "
+                                   (str/join ", " (sort fn-names)))
+                              {:type :merge-protection-violation
+                               :reason :forbid-invalid
+                               :invalid-fn-names fn-names
+                               :invalid-fn-ids fn-ids
+                               :source-branch-id source-branch-id
+                               :target-branch-id target-branch-id})))))))))
 
 
 (defn validate-merge!

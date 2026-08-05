@@ -435,6 +435,23 @@ Proven (storage-test).
   (`tenancy/storage.clj`): previously "no cross-org ref" was an emergent
   consequence of the read filter, now it is a write-time check. See
   [SCALING.md](SCALING.md).
+- **`:graph-cache` reads are org-SLICED (2026-08).** The Design-B ctx's
+  `:graph-cache` is primed org-agnostically (`prime-graph-cache!` off
+  `:compile-storage`), and the editor's read paths (`cached-or-load-graph` →
+  sidebar `:tree`/`:search`, `/api/types*`, layout) served that atom
+  DIRECTLY — OrgScopedStorage never saw a cache hit, so a tenant could
+  enumerate every org's fn names/namespaces/binding values. Closed
+  read-side: `types-api/org-visible-slice` filters each cache read to
+  {own, public/un-owned} rows (mirrors the decorator's `visible?`);
+  the cache itself keeps the FULL graph (a tenant's miss-fill goes
+  through `:compile-storage` so it can't poison the shared cache with a
+  narrow slice). Platform tier / single-tenant = identity pass-through.
+  Same class of fix on the org-dimensionless type-diagnostics store:
+  the panel, the `:tree`/`:subtree` error counts and the
+  `:forbid-invalid?` merge gate all drop diagnostics whose fn the
+  org-scoped read doesn't return. Pinned by
+  `crud/org-visible-graph-test`, `packages/app/editor-panels-test`,
+  `merge/core-test/forbid-invalid-ignores-invisible-fns-test`.
 - **Follow-ups:**
   - **per-org branch-names** — `UNIQUE (org-id, name) NULLS NOT DISTINCT`
     (PG 15+). Different orgs reuse a name without cross-org collision/leak;

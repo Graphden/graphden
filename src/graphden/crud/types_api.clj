@@ -18,6 +18,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tctx]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs])
   (:import
@@ -41,12 +42,43 @@
      :list-items (vec (sp/query-entities storage :binding-list-item {}))}))
 
 
+(defn org-visible-slice
+  "Restrict a graph dump to rows the CURRENT org may see — its own rows
+   plus the un-owned / public platform rows — mirroring OrgScopedStorage's
+   read predicate (`(or org-id public) ∈ {public, current-org}`). The
+   shared `:graph-cache` is primed org-AGNOSTICALLY by the compiler
+   (`prime-graph-cache!` reads the privileged compile storage), so serving
+   it raw to a tenant request would enumerate every org's fn names,
+   namespaces and binding values through the sidebar `:tree`/`:search`,
+   the type datalist and `/api/graph/entities`. Platform-tier viewers
+   (public org / operator / single-tenant, where `*current-org*` is
+   unbound) get the dump unchanged — the common single-tenant case stays
+   a no-op."
+  [graph]
+  (let [org (tctx/current-org)]
+    (if (tctx/platform-tier? org)
+      graph
+      (let [vis? (fn [row]
+                   (contains? #{tctx/public-org org}
+                              (or (:org-id row) tctx/public-org)))
+            slice (fn [g k] (cond-> g (contains? g k) (update k #(filterv vis? %))))]
+        (reduce slice graph [:fns :slots :fn-slots :bindings :list-items])))))
+
+
 (defn cached-or-load-graph
+  "The shared per-ctx graph snapshot, restricted to the current org's
+   visibility (see `org-visible-slice`). The cache itself always holds
+   the FULL org-agnostic graph: a hit slices per read; a miss loads via
+   the privileged `:compile-storage` handle (same source
+   `prime-graph-cache!` uses) so one tenant's miss can never poison the
+   shared cache with its narrower slice for every other reader."
   [ctx]
-  (or (exec-ctx/cached-graph ctx)
-      (let [data (load-graph-entities-uncached (request/require-storage ctx))]
-        (exec-ctx/fill-graph-cache! ctx data)
-        data)))
+  (org-visible-slice
+    (or (exec-ctx/cached-graph ctx)
+        (let [data (load-graph-entities-uncached
+                     (or (:compile-storage ctx) (request/require-storage ctx)))]
+          (exec-ctx/fill-graph-cache! ctx data)
+          data))))
 
 
 (defn compute-fn-role
@@ -145,11 +177,19 @@
   [ctx]
   (let [raw-snapshot (registry/rich-types-snapshot)
         graph (cached-or-load-graph ctx)
-        [cs cg cr] @rich-types-with-type-rows-cache]
-    (if (and (identical? cs raw-snapshot) (identical? cg graph))
+        ;; The org rides the identity key: `cached-or-load-graph` now
+        ;; returns a per-org SLICE (fresh vectors per read for tenants),
+        ;; so `identical?` on the slice would never hit for them. Keying
+        ;; on the org + the raw cache identity keeps single-tenant hits
+        ;; reference-stable and gives adjacent same-org tenant calls a
+        ;; hit window too (last-org-wins single entry, deliberately small).
+        org (tctx/current-org)
+        raw (or (exec-ctx/cached-graph ctx) graph)
+        [cs cg co cr] @rich-types-with-type-rows-cache]
+    (if (and (identical? cs raw-snapshot) (identical? cg raw) (= co org))
       cr
       (let [result (rich-types-with-type-rows-uncached raw-snapshot graph)]
-        (reset! rich-types-with-type-rows-cache [raw-snapshot graph result])
+        (reset! rich-types-with-type-rows-cache [raw-snapshot raw org result])
         result))))
 
 

@@ -22,6 +22,7 @@
    storage, parse a request, build the cytoscape element lists, or
    grid-place them."
   (:require
+    [graphden.crud.types-api :as types-api]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
@@ -37,16 +38,14 @@
    so we cannot re-query per request. Invalidation is driven by CRUD
    mutation defbase's calling `invalidate-graph-cache!` after writing."
   [ctx]
-  (or (some-> (exec-ctx/cached-graph ctx) lgraph/ensure-synth-args)
-      ;; Cache miss → an actual storage read. Record `:db` HERE (not
-      ;; unconditionally) so the effect trace + gate see the DB access
-      ;; only when it really happens — a warm-cache hit performs no
-      ;; effect. Closes the coverage gap the effect-gate audit found.
-      (do
-        (cr/record-effect! :db)
-        (let [data (lgraph/load-graph-entities-uncached (:storage ctx))]
-          (exec-ctx/fill-graph-cache! ctx data)
-          data))))
+  ;; Record `:db` only on a real cache miss (the effect trace + gate see
+  ;; the DB access only when it happens — the effect-gate audit's coverage
+  ;; fix), then delegate to the shared org-visibility-sliced reader: the
+  ;; raw cache is org-AGNOSTIC, and layout must see exactly the viewer's
+  ;; own + public rows like every other graph read (`org-visible-slice`).
+  (when-not (exec-ctx/cached-graph ctx)
+    (cr/record-effect! :db))
+  (lgraph/ensure-synth-args (types-api/cached-or-load-graph ctx)))
 
 
 (defbase _load-graph-cached

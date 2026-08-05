@@ -277,6 +277,36 @@
         (sp/close storage)))))
 
 
+(deftest forbid-invalid-ignores-invisible-fns-test
+  ;; The diagnostics store has no org dimension — on a multi-tenant pod
+  ;; a shared branch's bucket also holds fn-ids the requester's
+  ;; org-scoped read can't see (and, single-tenant, ids whose fn is
+  ;; gone). Those must neither block the merge nor leak into the
+  ;; violation message. Simulated here by recording under an id the
+  ;; storage has no row for — exactly what the scoped read returns for
+  ;; a foreign org's fn.
+  (testing "recorded diagnostics whose fn the storage can't see don't gate the merge"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [{:keys [storage base fn-id]} (create-test-storage)
+            main-id (vs/current-branch-id storage)
+            source (vs/create-branch! storage "feature")
+            invisible-id (java.util.UUID/randomUUID)]
+        (sp/update-entity base :branch main-id {:forbid-invalid? true})
+        (diag/record! main-id invisible-id [{:message "foreign org's broken fn"}])
+        (mp/validate-branch-policy! storage (:id source))
+        (is true "invisible-only diagnostics → merge proceeds")
+        (testing "mixed: a visible broken fn still blocks, naming ONLY itself"
+          (diag/record! main-id fn-id [{:message "own broken fn"}])
+          (try
+            (mp/validate-branch-policy! storage (:id source))
+            (is false "validate-branch-policy! should have thrown")
+            (catch clojure.lang.ExceptionInfo e
+              (is (= ["test-fn"] (:invalid-fn-names (ex-data e)))
+                  "the invisible id appears neither as a name nor a UUID")
+              (is (not (re-find #"foreign" (ex-message e)))))))
+        (sp/close storage)))))
+
+
 ;; === Conflict resolution apply path ===
 ;;
 ;; Exercises `versioning.storage.merge/apply-resolutions!` — the

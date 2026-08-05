@@ -767,8 +767,18 @@
        ;; the sidebar's per-namespace warning chip.
        (let [ns-of-fn (when (seq @diag-counts)
                         (into {} (map (juxt :id :namespace-id)) (:fns base)))
+             ;; Count ONLY fns present in `base` (the viewer's own+public
+             ;; slice). The diagnostics store is keyed branch×fn with no
+             ;; org dimension, so on the shared default branch it also
+             ;; holds foreign orgs' fn-ids — those must not surface as
+             ;; phantom per-namespace error counts. A viewer's own
+             ;; diagnosed fn (named OR anonymous) is always in `base`, and
+             ;; a legitimately namespace-less root fn maps to nil — kept,
+             ;; because `contains?` (not `get`) does the dropping.
              ns-err (reduce (fn [m [fid n]]
-                              (update m (get ns-of-fn fid) (fnil + 0) n))
+                              (if (contains? ns-of-fn fid)
+                                (update m (get ns-of-fn fid) (fnil + 0) n)
+                                m))
                             {} @diag-counts)
              counts (->> (:fns base)
                          (filter :name)

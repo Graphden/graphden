@@ -26,8 +26,21 @@
         fn-ids (vec (keys errs))
         fn-rows (when (seq fn-ids) (sp/read-entities storage :fn fn-ids))]
     (->> errs
-         (mapcat (fn [[fn-id diags]]
-                   (let [fn-name (or (:name (get fn-rows fn-id)) (str fn-id))]
+         ;; DROP diagnostics whose fn the org-scoped read didn't return.
+         ;; The store is keyed branch×fn with no org dimension, and on a
+         ;; multi-tenant pod every org shares the default branch — so a
+         ;; foreign org's fn-ids land in the same bucket. Emitting them
+         ;; (even UUID-named) leaks the diagnostic body (expected/actual
+         ;; types, source file/line) across orgs. An own-org fn ALWAYS
+         ;; joins (the recorder ran under this same scoped storage), so
+         ;; nothing legitimate is lost. An anonymous own fn joins too —
+         ;; the UUID fallback below is for its nil `:name`, not for
+         ;; missing rows.
+         (keep (fn [[fn-id diags]]
+                 (when-let [row (get fn-rows fn-id)]
+                   [fn-id (:name row) diags])))
+         (mapcat (fn [[fn-id fn-name diags]]
+                   (let [fn-name (or fn-name (str fn-id))]
                      (map (fn [d]
                             {:fn-id (str fn-id)
                              :fn-name fn-name

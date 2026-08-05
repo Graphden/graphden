@@ -767,9 +767,14 @@ earlier in this section's text):
   ANY internal resolution → block — this also closes DNS-rebind); `check-target!`
   is called in `web/http-client` before dial, when `*allowed-effects*` is restricted
   (a tenant). This is a **deny-internal baseline**, not a tier allowlist — it applies to
-  any tenant that has `:network` at all (a paid plan). **Residual
-  (documented in the code):** the dial goes by HOSTNAME → the rebind window between check and
-  dial is closed by pinning to the verified IP (a hardening follow-up).
+  any tenant that has `:network` at all (a paid plan). **The DNS-rebind TOCTOU
+  is CLOSED** (not a residual): the restricted tenant HTTP client is built with
+  `egress/validating-dns` as its OkHttp `Dns` (`web/http-client/impls.clj` —
+  `.dns egress/validating-dns`), which re-runs `resolve-public-ips` AT CONNECT
+  TIME and dials exactly those verified public addresses while keeping the
+  hostname for SNI / Host / cert verification. There is no second, unvalidated
+  resolution between check and dial, so a name that is public at `check-target!`
+  and internal at dial is rejected by the connect-time lookup.
 
 - **Row-cap (protecting the shared DB from abuse), TWO ceilings.** `tenancy/plan.clj`
   `plans` = `{:effects :max-fns :max-list-items}` (free 500/50000, network

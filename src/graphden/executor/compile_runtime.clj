@@ -395,6 +395,44 @@
     (f)))
 
 
+(defonce ^:private full-compile-semaphore
+  ;; Process-wide bound on CONCURRENT full compiles. A full read-graph +
+  ;; compile-all holds the whole graph, its lookups AND the new registry
+  ;; live at once (measured 49.8 s at 4137 fns) — and nothing used to stop
+  ;; several of them running together: the per-branch build monitor dedupes
+  ;; one branch only, so two cold branches, or a cold-branch build racing
+  ;; the epoch heal's `heal-stale-ctxs!`, each ran their own compile-all.
+  ;; Two such working sets exhausted the prod heap on 2026-08-05
+  ;; (ExitOnOutOfMemoryError, ~20 min outage). One permit serializes them;
+  ;; queued compiles just wait — correctness is unaffected.
+  ;; `GRAPHDEN_MAX_CONCURRENT_COMPILES` widens it for hosts with heap to
+  ;; spare (mirrors the `GRAPHDEN_MAX_CACHED_BRANCHES` knob pattern).
+  ;; j.u.c.Semaphore, not `locking`: a blocked virtual-thread waiter
+  ;; UNMOUNTS from its carrier (same JDK-21 pinning rationale as
+  ;; `call-with-invalidation-lock` above).
+  (java.util.concurrent.Semaphore.
+    (max 1 (or (some-> (System/getenv "GRAPHDEN_MAX_CONCURRENT_COMPILES")
+                       parse-long)
+               1))))
+
+
+(defn call-with-compile-permit
+  "Run thunk `f` holding a full-compile permit. DEADLOCK-FREE BY
+   CONSTRUCTION: callers hold the permit only across the pure
+   read-graph → compile-all section, which acquires no locks — so a
+   permit holder never waits on a lock, and a lock holder waiting for a
+   permit (the `rebuild!` path, entered under the ctx's
+   invalidation-lock) can always be satisfied. Keep it that way: never
+   take `call-with-invalidation-lock` (or any other lock) inside `f`.
+   Counts `:registry/compile-queued` when the permit isn't immediately
+   available — the observable signal that compiles are stacking up."
+  [f]
+  (when-not (java.util.concurrent.Semaphore/.tryAcquire full-compile-semaphore)
+    (counters/count! :registry/compile-queued)
+    (java.util.concurrent.Semaphore/.acquire full-compile-semaphore))
+  (try (f) (finally (java.util.concurrent.Semaphore/.release full-compile-semaphore))))
+
+
 (defn rebuild-optimistic!
   "Stale-while-revalidate rebuild for the epoch heal: read + compile
    OUTSIDE the invalidation lock (concurrent write requests' delta
@@ -406,19 +444,26 @@
    read-your-writes. Returns true when the swap happened.
 
    Alias re-registration runs outside the lock too — it is idempotent
-   and per-name, so a transiently-ahead alias view is harmless."
+   and per-name, so a transiently-ahead alias view is harmless.
+
+   The read + compile runs under the full-compile permit (released
+   BEFORE the swap takes the lock — see `call-with-compile-permit`'s
+   ordering contract)."
   [ctx unchanged?]
   (if-let [f (impl :rebuild-optimistic!)]
     (f ctx unchanged?)
     (let [_ (counters/count! :registry/rebuild)
-          storage (compile-storage ctx)
-          graph (read-graph storage (:executor-orgs ctx))
-          _ (register-type-aliases-from-db! graph)
-          base-fns (:base-fns ctx)
-          lookups (assoc (l/cached-build-lookups graph)
-                         :base-fns base-fns)
-          _ (prime-always-fresh! (:fns graph))
-          compiled (ce/compile-all lookups)]
+          {:keys [graph compiled]}
+          (call-with-compile-permit
+            (fn []
+              (let [storage (compile-storage ctx)
+                    graph (read-graph storage (:executor-orgs ctx))
+                    _ (register-type-aliases-from-db! graph)
+                    base-fns (:base-fns ctx)
+                    lookups (assoc (l/cached-build-lookups graph)
+                                   :base-fns base-fns)
+                    _ (prime-always-fresh! (:fns graph))]
+                {:graph graph :compiled (ce/compile-all lookups)})))]
       (call-with-invalidation-lock
         ctx
         (fn []
@@ -450,14 +495,21 @@
       (call-with-invalidation-lock
         ctx
         (fn []
-          (let [storage (compile-storage ctx)
-                graph (read-graph storage (:executor-orgs ctx))
-                _ (register-type-aliases-from-db! graph)
-                base-fns (:base-fns ctx)
-                lookups (assoc (l/cached-build-lookups graph)
-                               :base-fns base-fns)
-                _ (prime-always-fresh! (:fns graph))
-                compiled (ce/compile-all lookups)]
+          ;; Permit INSIDE the ctx lock: safe because permit holders never
+          ;; wait on locks (`call-with-compile-permit`'s contract), so a
+          ;; lock-holding waiter here can't deadlock — and the reentrant
+          ;; `invalidate-graph-cache! → rebuild!` path keeps working.
+          (let [{:keys [graph compiled]}
+                (call-with-compile-permit
+                  (fn []
+                    (let [storage (compile-storage ctx)
+                          graph (read-graph storage (:executor-orgs ctx))
+                          _ (register-type-aliases-from-db! graph)
+                          base-fns (:base-fns ctx)
+                          lookups (assoc (l/cached-build-lookups graph)
+                                         :base-fns base-fns)
+                          _ (prime-always-fresh! (:fns graph))]
+                      {:graph graph :compiled (ce/compile-all lookups)})))]
             (reset! (:compiled-registry ctx) compiled)
             (prime-graph-cache! ctx graph)
             (prime-compile-deps! ctx graph)

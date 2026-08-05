@@ -39,6 +39,7 @@ Run N containers against one Postgres, put a load balancer in front.
 | Concern | Mechanism | Where |
 |---|---|---|
 | Each pod compiles its own registry | `rebuild!` at boot | `executor/compile_runtime.clj` |
+| A pod never runs two full compiles at once (each holds the whole graph + lookups + a fresh registry live — two working sets OOM'd prod on 2026-08-05: cold-branch build racing the epoch heal) | process-wide `full-compile-semaphore`, 1 permit (`GRAPHDEN_MAX_CONCURRENT_COMPILES` widens); queued compiles count `:registry/compile-queued`. Held only across the pure read+compile section — never across a lock (`call-with-compile-permit`'s deadlock-freedom contract) | `executor/compile_runtime.clj` |
 | A write on pod A reaches pod B | `NOTIFY graphden_events` → delta invalidate (LATENCY optimization) | `storage/postgres/notify.clj`, `system/init/services.clj` `on-notify` |
 | A skipped/lost invalidation self-heals (client abort mid-request, a write path with no NOTIFY, a dropped NOTIFY) | graph EPOCH: a PG sequence bumped BEFORE every graph-shaped write; the branch-router validates its cached ctxs against it on fetch (TTL ≈1s) and full-invalidates stale ones. Eager invalidate + NOTIFY stay as the fast path; correctness no longer depends on them | `storage/postgres/graph_epoch.clj`, `system/branch_router.clj` `validate-graph-epoch!` |
 | Only one pod runs a cron | `:cardinality :singleton` + `pg_try_advisory_lock` | `services/reconciler.clj` |

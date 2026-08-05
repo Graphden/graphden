@@ -30,10 +30,12 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.fn-execution.stats :as exec-stats]
+    [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.runtime :as rt]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.schema.executions.schema :as es]
@@ -1231,6 +1233,84 @@
           (is (some? row))
           (is (= #{"env" "io"}
                  (set (:runtime-effects row))))))
+      (finally nil))))
+
+
+;; ============================================================================
+;; Debug P1 — execution-path capture through the whole submit path:
+;; `trace?` on the body → run-future binds `*path-trace*` → the
+;; compile-eager seam records the traced `:ref` invocation → persist
+;; snapshots the atom onto the row's `:path-trace` jsonb → the status
+;; read (get-execution ≡ GET /api/execute/:id) returns it.
+;; ============================================================================
+
+(defn- make-ref-chain-fn!
+  "Wrapper whose single `:x` slot is REF-BOUND to a pure add composed
+   fn — gives the execution a `:ref` invocation for the path-trace
+   seam to observe (top-level closures don't pass `call-with-cache`;
+   ref targets do). The add's `:a`/`:b` frees propagate up through
+   the ref. Returns `{:wrapped … :target …}`."
+  [storage suffix]
+  (let [{composed :composed} (make-pure-add-fn! storage suffix)
+        wrap-base-name (str "trace-wrap-" suffix)
+        impl-fn (fn [args _ctx] (rt/resolve-arg args :x))]
+    (exec/register-base-fn! (keyword wrap-base-name) impl-fn)
+    (let [wrap-base (setup/create-base-fn! storage wrap-base-name :int)
+          slot-x (setup/create-slot! storage "x" :int)]
+      (setup/attach-slot! storage (:id wrap-base) (:id slot-x) 0)
+      (let [wrapped (setup/create-composed-fn!
+                      storage (str "my-trace-wrap-" suffix) (:id wrap-base))]
+        (setup/bind-ref! storage (:id wrapped) (:id slot-x) (:id composed))
+        {:wrapped wrapped :target composed}))))
+
+
+(deftest apply-captures-path-trace-test
+  (let [storage (create-full-storage)
+        {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-on")
+        c (test-ctx storage)
+        result (binding [ce/*traced-fn-ids* (atom #{(:id target)})]
+                 (apply-and-await!
+                   c {:fn-id (:id wrapped) :args {:a 1 :b 2}
+                      :timeout-ms 5000 :persist? true :trace? true}))
+        exec-id (some-> (:execution-id result) java.util.UUID/fromString)
+        entry-of (fn [payload]
+                   (->> (:entries payload)
+                        (filter #(= (str (:id target)) (:fn-id %)))
+                        first))]
+    (try
+      (testing "inline response carries the callee sequence"
+        (is (= :succeeded (:status result)))
+        (is (= 3 (:result result)))
+        (let [entry (entry-of (:path-trace result))]
+          (is (some? entry) (pr-str (:path-trace result)))
+          (is (false? (:cache-hit? entry)))
+          (is (nat-int? (:duration-ms entry)))))
+      (testing "row persists :path-trace jsonb (keywordized roundtrip)"
+        (let [row (sp/read-entity storage :fn-execution exec-id)]
+          (is (some? (entry-of (:path-trace row))))
+          (is (not (:path-truncated? (:path-trace row))))))
+      (testing "status read (GET /api/execute/:id) returns it additively"
+        (is (some? (entry-of (:path-trace (fn-exec/get-execution c exec-id))))))
+      (finally nil))))
+
+
+(deftest apply-without-trace-flag-records-nothing-test
+  (let [storage (create-full-storage)
+        {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-off")
+        c (test-ctx storage)
+        ;; fn IS in the traced set — but the submission didn't opt in,
+        ;; so no atom is bound and nothing records.
+        result (binding [ce/*traced-fn-ids* (atom #{(:id target)})]
+                 (apply-and-await!
+                   c {:fn-id (:id wrapped) :args {:a 3 :b 4}
+                      :timeout-ms 5000 :persist? true}))
+        exec-id (some-> (:execution-id result) java.util.UUID/fromString)]
+    (try
+      (testing "no trace? → no :path-trace anywhere"
+        (is (= :succeeded (:status result)))
+        (is (= 7 (:result result)))
+        (is (nil? (:path-trace result)))
+        (is (nil? (:path-trace (sp/read-entity storage :fn-execution exec-id)))))
       (finally nil))))
 
 

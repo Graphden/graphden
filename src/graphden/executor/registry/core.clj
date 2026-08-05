@@ -583,6 +583,33 @@
    (get-in (rich-type-of-id fn-id) [:args arg-name])))
 
 
+(defn touches-secret?
+  "True iff the fn's rich-type carries a hide-result marker (the seeded
+   `:secret`, or a graph-declared one) on its return OR on any of its
+   declared arg slots — i.e. the fn either PRODUCES or CONSUMES a
+   secret (e.g. `:sql-exec` whose `:password` slot is `[:secret :text]`
+   but whose return is plain `:int`).
+
+   Keyed by fn IDENTITY: per-namespace names may repeat, and a secret
+   decision read off a same-named neighbour would mis-classify.
+
+   Lives HERE (not in `crud.fn-execution.persist`, its original home)
+   so both consumers can reach it cycle-free: persist's audit trail
+   (`stamp-touched-secret`) requires this ns already, and
+   `compile-eager`'s path-trace capture-time secret skip reaches it via
+   a `requiring-resolve` delay (a direct require would cycle through
+   interface → compile-runtime → compile-eager)."
+  [fn-id]
+  (when fn-id
+    (when-let [rt (rich-type-of-id fn-id)]
+      (boolean
+        (or (types/contains-hide-result-marker? (or (:return rt) :any))
+            (some (fn [[_ arg-entry]]
+                    (types/contains-hide-result-marker?
+                      (or (some-> arg-entry :type) arg-entry)))
+                  (:args rt)))))))
+
+
 (defn rich-type-of
   ;; §4 Risk-2: a tenant prefers its OWN per-org entry; the compile / public
   ;; path (no tenant org bound) and single-tenant fall through to the global —

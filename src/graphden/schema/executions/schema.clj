@@ -131,6 +131,13 @@
   #uuid "5d9b6c0a-c3f4-49a8-9c01-0b1e8b5e4a2c")
 
 
+(def ^:private fn-execution-path-trace-field-uuid
+  ;; Debug/observability P1 — execution-path capture. Filled on
+  ;; terminal status only when the submission opted in via `trace?`
+  ;; AND at least one traversed fn was in the runtime traced set.
+  #uuid "c39fc6a2-73d6-45a7-b062-07c2de5a7b42")
+
+
 (def ^:private fn-execution-org-id-field-uuid
   ;; Tenant owner (§3.0 B2 / §4 org-scoped executions). NULL ≡ public.
   ;; Stamped by OrgScopedStorage at create-time; the conveyed *current-org*
@@ -282,6 +289,18 @@
                       :touched-secret? {:uuid fn-execution-touched-secret-field-uuid
                                         :type :bool
                                         :nullable? true}
+                      ;; Debug P1 execution-path capture:
+                      ;; `{:entries [{:fn-id :cache-hit? :duration-ms}|
+                      ;;             {:fn-id :hidden}] :path-truncated?}`.
+                      ;; Snapshotted on terminal status from the
+                      ;; `*path-trace*` atom (opt-in `trace?` submits
+                      ;; only); byte-capped (256 KB) with oldest-first
+                      ;; truncation — the marker lives INSIDE the json,
+                      ;; no extra column. `:fn-execution` is
+                      ;; non-versioned, so this is a plain column.
+                      :path-trace {:uuid fn-execution-path-trace-field-uuid
+                                   :type :jsonb
+                                   :nullable? true}
                       ;; Tenant owner (§4 org-scoped executions). NULL ≡ public.
                       :org-id {:uuid fn-execution-org-id-field-uuid
                                :type :text

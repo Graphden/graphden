@@ -68,12 +68,14 @@
    one. Pure on `base-outcome`; side effects scoped to `ctx`.
 
    `ctx` keys: `:storage` `:row` `:fn-id` `:declared-effects`
-   `:runtime-effects` `:stats` (the Phase C1 rollup ctx, bumped here so the
-   inline arms count exactly once — the async arms bump in
-   `record-completion!`)."
-  [base-outcome {:keys [storage row fn-id declared-effects runtime-effects stats]}]
+   `:runtime-effects` `:path-trace` (the Debug-P1 snapshot when the
+   submission carried `trace?`) `:stats` (the Phase C1 rollup ctx,
+   bumped here so the inline arms count exactly once — the async arms
+   bump in `record-completion!`)."
+  [base-outcome {:keys [storage row fn-id declared-effects runtime-effects path-trace stats]}]
   (let [outcome (->> (cond-> base-outcome
-                       runtime-effects (assoc :runtime-effects runtime-effects))
+                       runtime-effects (assoc :runtime-effects runtime-effects)
+                       path-trace (assoc :path-trace path-trace))
                      (persist/stamp-touched-secret fn-id)
                      (persist/redact-outcome fn-id)
                      (persist/scrub-outcome fn-id))]
@@ -205,14 +207,16 @@
             ;; every execution with `:over-capacity` while nothing runs.
             ;; `release` is idempotent, so the future's finally re-calling it
             ;; is a no-op.
-            [row fut trace]
+            [row fut trace path-trace]
             (try
               (let [row (when pre-persisted?
                           (persist/create-pending-with-args!
                             storage fn-version-id declared-eff
                             (:user-id parsed) (:args parsed) free-slots))
-                    [fut trace] (persist/run-future exec-ctx fn-id executor-args cancel-flag release)]
-                [row fut trace])
+                    [fut trace path-trace]
+                    (persist/run-future exec-ctx fn-id executor-args cancel-flag release
+                                        {:trace? (:trace? parsed)})]
+                [row fut trace path-trace])
               (catch Exception t
                 (release)
                 (throw t)))
@@ -220,11 +224,12 @@
             result (try (deref fut (:timeout-ms parsed) ::pending)
                         (catch java.util.concurrent.ExecutionException ee
                           {::ex (java.util.concurrent.ExecutionException/.getCause ee)}))
-            ;; Closure (not eager) — only the inline-success/failure
-            ;; branches snapshot the trace; timeout branches hand the atom
-            ;; off to `record-completion!` which snapshots when the future
-            ;; resolves.
-            runtime-eff (fn [] (persist/snapshot-runtime-effects trace))]
+            ;; Closures (not eager) — only the inline-success/failure
+            ;; branches snapshot the traces; timeout branches hand the
+            ;; atoms off to `record-completion!` which snapshots when the
+            ;; future resolves.
+            runtime-eff (fn [] (persist/snapshot-runtime-effects trace))
+            path-snapshot (fn [] (persist/snapshot-path-trace path-trace))]
         (cond
           ;; Timeout AND we haven't pre-persisted — persist lazily so the
           ;; client gets an id to poll. record-completion! tails the future
@@ -234,13 +239,13 @@
                     storage fn-version-id declared-eff
                     (:user-id parsed) (:args parsed) free-slots)]
             (persist/register-future! (:id r) fut cancel-flag)
-            (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx)
+            (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx path-trace)
             {:status :pending :execution-id (str (:id r))})
 
           ;; Timeout AND we pre-persisted — record-completion's tail-future
           ;; fills in :result; client polls our row.
           (= ::pending result)
-          (do (persist/record-completion! storage (:id row) fn-id fut trace declared-eff stats-ctx)
+          (do (persist/record-completion! storage (:id row) fn-id fut trace declared-eff stats-ctx path-trace)
               {:status :pending :execution-id (str (:id row))})
 
           ;; Inline failure — write outcome to the row synchronously (if
@@ -256,6 +261,7 @@
                :error-data (ex-data cause)}
               {:storage storage :row row :fn-id fn-id
                :declared-effects declared-eff :runtime-effects (runtime-eff)
+               :path-trace (path-snapshot)
                :stats stats-ctx}))
 
           ;; Inline success — same: write synchronously so the GET endpoint
@@ -267,6 +273,7 @@
                 {:status :succeeded :result result}
                 {:storage storage :row row :fn-id fn-id
                  :declared-effects declared-eff :runtime-effects (runtime-eff)
+                 :path-trace (path-snapshot)
                  :stats stats-ctx})
               (assoc :declared-effects declared-eff)))))))
 

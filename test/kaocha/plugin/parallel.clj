@@ -112,6 +112,10 @@
     ;; timing-sensitive tests (clock read twice → see same value via
     ;; memo) flake under parallel runs.
     graphden.executor.compile-eager/*always-fresh-fn-ids*
+    ;; Debug-P1 path-trace per-fn opt-in set — same shape/rationale as
+    ;; always-fresh above: tests calling `set-traced-fn-ids!` on
+    ;; parallel NS-threads must not clobber each other's sets.
+    graphden.executor.compile-eager/*traced-fn-ids*
     ;; rich-types-registry's thread-local override. Integration tests
     ;; that bootstrap their own package set (`compile-packages-test`,
     ;; `execute-http-test`, `smoke-pass-test`) write per-fn `:return` /

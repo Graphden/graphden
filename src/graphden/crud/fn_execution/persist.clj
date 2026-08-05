@@ -34,6 +34,7 @@
 (def max-args-bytes      (* 256 1024))      ; 256 KB total args
 (def max-error-chars     4096)              ; 4 KB
 (def max-error-data-bytes (* 64 1024))      ; 64 KB
+(def max-path-trace-bytes (* 256 1024))     ; 256 KB Debug-P1 path trace
 
 
 ;; =============================================================================
@@ -191,6 +192,34 @@
     (some-> @trace-atom seq (->> (mapv name)))))
 
 
+(defn snapshot-path-trace
+  "Read the captured execution-path entries from `path-trace-atom`
+   (Debug P1 — bound as `cr/*path-trace*` by `run-future` when the
+   submission carried `trace?`) into the row's `:path-trace` jsonb
+   shape: `{:entries [{:fn-id … :cache-hit? … :duration-ms …} …]}`.
+   nil for an absent atom or an empty capture, so callers `(when …)`
+   over it like `snapshot-runtime-effects`.
+
+   Byte-capped at `max-path-trace-bytes` via the same streaming
+   `json-bytes-within?` counter the result cap uses: oversize traces
+   drop OLDEST entries first (10% of the vector per round) and carry
+   `:path-truncated? true` INSIDE the json — no extra column."
+  [path-trace-atom]
+  (when path-trace-atom
+    (when-let [entries (seq @path-trace-atom)]
+      ;; Stringify fn-ids at the boundary — jsonb roundtrips UUIDs as
+      ;; strings anyway; doing it here keeps the byte count honest and
+      ;; the wire shape explicit.
+      (loop [v (mapv #(update % :fn-id str) entries) truncated? false]
+        (let [payload (cond-> {:entries v}
+                        truncated? (assoc :path-truncated? true))]
+          (cond
+            (json-bytes-within? payload max-path-trace-bytes) payload
+            (= 1 (count v)) nil   ; single unserializable/oversize entry — refuse
+            :else (recur (subvec v (max 1 (quot (count v) 10)))
+                         true)))))))
+
+
 (defn resolve-ref-version-id
   "`{:ref \"uuid-str\"}` → current `:fn-version-id` for that fn (or nil
    if the fn has no version row). Used by `persist-args!` to write
@@ -309,24 +338,16 @@
          (types/contains-hide-result-marker? ret))))
 
 
-(defn touches-secret?
-  "True iff the fn's rich-type carries the `:secret` marker on
-   its return OR on any of its declared arg slots. Broader than
+(def touches-secret?
+  "True iff the fn's rich-type carries the `:secret` marker on its
+   return OR on any of its declared arg slots. Broader than
    `tainted-fn?`: `tainted-fn?` only fires when the fn RETURNS a
-   secret; `touches-secret?` also fires when the fn CONSUMES one
-   (e.g. `:sql-exec` whose `:password` slot is `[:secret :text]`
-   but whose return is plain `:int`). Used by the audit trail to
-   flag executions that fed a secret into a side-effecting sink.
-   Keyed by fn IDENTITY — see `tainted-fn?`."
-  [fn-id]
-  (when fn-id
-    (when-let [rt (registry/rich-type-of-id fn-id)]
-      (boolean
-        (or (types/contains-hide-result-marker? (or (:return rt) :any))
-            (some (fn [[_ arg-entry]]
-                    (types/contains-hide-result-marker?
-                      (or (some-> arg-entry :type) arg-entry)))
-                  (:args rt)))))))
+   secret; `touches-secret?` also fires when the fn CONSUMES one.
+   Used by the audit trail (`stamp-touched-secret`) AND by
+   compile-eager's path-trace secret skip — the predicate MOVED to
+   `registry.core/touches-secret?` so compile-eager reaches it without
+   requiring crud; this alias keeps the historical callsites."
+  registry/touches-secret?)
 
 
 (defn stamp-touched-secret
@@ -442,7 +463,9 @@
                (:runtime-effects outcome)
                (assoc :runtime-effects (:runtime-effects outcome))
                (:touched-secret? outcome)
-               (assoc :touched-secret? true))]
+               (assoc :touched-secret? true)
+               (:path-trace outcome)
+               (assoc :path-trace (:path-trace outcome)))]
     (sp/update-entity storage :fn-execution execution-id body)))
 
 
@@ -600,28 +623,42 @@
    (`*max-execution-wall-ms*`) hard-kills a runaway; the finally cancels it
    on normal completion.
 
-   Returns `[future trace-atom]` — the reaper needs the trace atom to
-   read the captured effect set after the future resolves."
-  [ctx fn-id args cancel-flag release]
-  (let [trace (atom #{})
-        watchdog (promise)
-        bf (bound-fn* ; capture clojure.tools.logging MDC etc.
-            (fn []
-              (binding [cr/*cancel-check*
-                        #(when @cancel-flag
-                           (throw (InterruptedException. "execution cancelled")))
-                        cr/*effect-trace* trace]
-                (cr/execute ctx fn-id args))))
-        fut (future
-              (try
-                (bf)
-                (finally
-                  ;; @watchdog blocks only until the request thread delivers
-                  ;; it (microseconds after this future was created).
-                  (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
-                  (when release (release)))))]
-    (deliver watchdog (arm-deadline! *max-execution-wall-ms* cancel-flag fut))
-    [fut trace]))
+   `opts` (optional): `:trace?` — Debug P1 execution-path capture
+   opt-in from the submit body. When true, `cr/*path-trace*` is bound
+   to a fresh vector-atom alongside `*effect-trace*`; absent/false →
+   NO binding at all, so the executor's seam pays only its nil-check.
+   (Per-fn selection still applies via `compile-eager`'s
+   `traced-fn-ids`; ambient sampling is P3 — not implemented.)
+
+   Returns `[future trace-atom path-trace-atom]` — the reaper needs
+   the trace atoms to read the captured sets after the future resolves
+   (`path-trace-atom` nil unless `:trace?`)."
+  ([ctx fn-id args cancel-flag release]
+   (run-future ctx fn-id args cancel-flag release nil))
+  ([ctx fn-id args cancel-flag release {:keys [trace?]}]
+   (let [trace (atom #{})
+         path-trace (when trace? (atom []))
+         watchdog (promise)
+         bf (bound-fn* ; capture clojure.tools.logging MDC etc.
+             (fn []
+               (binding [cr/*cancel-check*
+                         #(when @cancel-flag
+                            (throw (InterruptedException. "execution cancelled")))
+                         cr/*effect-trace* trace]
+                 (if path-trace
+                   (binding [cr/*path-trace* path-trace]
+                     (cr/execute ctx fn-id args))
+                   (cr/execute ctx fn-id args)))))
+         fut (future
+               (try
+                 (bf)
+                 (finally
+                   ;; @watchdog blocks only until the request thread delivers
+                   ;; it (microseconds after this future was created).
+                   (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
+                   (when release (release)))))]
+     (deliver watchdog (arm-deadline! *max-execution-wall-ms* cancel-flag fut))
+     [fut trace path-trace])))
 
 
 (defn log-effect-drift!
@@ -666,7 +703,9 @@
    write outcome to the row + clean up registry. `trace-atom` is the
    `*effect-trace*` atom from `run-future`; we snapshot it onto the
    row's `:runtime-effects` field alongside the terminal status, and
-   warn-log if it diverges from `declared-effects`.
+   warn-log if it diverges from `declared-effects`. `path-trace-atom`
+   (nil-able) is the `*path-trace*` atom when the submission opted in
+   via `trace?` — snapshotted onto `:path-trace` the same way.
 
    `fn-id` is consulted by `redact-outcome` (via the id-keyed registry)
    to hide the result body when the fn-def's effective return-type is
@@ -674,41 +713,51 @@
    inline-success path in `apply-execute` redacts independently. Both
    write the same shape to the row."
   ([storage execution-id fn-id fut trace-atom declared-effects]
-   (record-completion! storage execution-id fn-id fut trace-atom declared-effects nil))
-  ([storage execution-id fn-id ^java.util.concurrent.Future fut trace-atom declared-effects stats-ctx]
+   (record-completion! storage execution-id fn-id fut trace-atom declared-effects nil nil))
+  ([storage execution-id fn-id fut trace-atom declared-effects stats-ctx]
+   (record-completion! storage execution-id fn-id fut trace-atom declared-effects stats-ctx nil))
+  ([storage execution-id fn-id ^java.util.concurrent.Future fut trace-atom declared-effects stats-ctx path-trace-atom]
    (future
      (try
        (let [result @fut
-             runtime-eff (snapshot-runtime-effects trace-atom)]
+             runtime-eff (snapshot-runtime-effects trace-atom)
+             path (snapshot-path-trace path-trace-atom)]
          (log-effect-drift! execution-id declared-effects runtime-eff)
          (write-finished! storage execution-id
                           (->> (cond-> {:status :succeeded :result result}
-                                 runtime-eff (assoc :runtime-effects runtime-eff))
+                                 runtime-eff (assoc :runtime-effects runtime-eff)
+                                 path (assoc :path-trace path))
                                (stamp-touched-secret fn-id)
                                (redact-outcome fn-id)
                                (scrub-outcome fn-id)))
          (bump-usage! stats-ctx fn-id :succeeded))
        (catch java.util.concurrent.ExecutionException ee
          (let [cause (java.util.concurrent.ExecutionException/.getCause ee)
-               runtime-eff (snapshot-runtime-effects trace-atom)]
+               runtime-eff (snapshot-runtime-effects trace-atom)
+               path (snapshot-path-trace path-trace-atom)]
            (log-effect-drift! execution-id declared-effects runtime-eff)
            (if (instance? InterruptedException cause)
              (do (write-finished! storage execution-id
                                   (cond-> {:status :cancelled}
-                                    runtime-eff (assoc :runtime-effects runtime-eff)))
+                                    runtime-eff (assoc :runtime-effects runtime-eff)
+                                    path (assoc :path-trace path)))
                  (bump-usage! stats-ctx fn-id :cancelled))
              (do (write-finished! storage execution-id
                                   (->> (cond-> {:status :failed
                                                 :error (or (ex-message cause) (str cause))
                                                 :error-data (when (ex-data cause)
                                                               (ex-data cause))}
-                                         runtime-eff (assoc :runtime-effects runtime-eff))
+                                         runtime-eff (assoc :runtime-effects runtime-eff)
+                                         path (assoc :path-trace path))
                                        (stamp-touched-secret fn-id)
                                        (redact-outcome fn-id)
                                        (scrub-outcome fn-id)))
                  (bump-usage! stats-ctx fn-id :failed)))))
        (catch java.util.concurrent.CancellationException _
-         (write-finished! storage execution-id {:status :cancelled})
+         (let [path (snapshot-path-trace path-trace-atom)]
+           (write-finished! storage execution-id
+                            (cond-> {:status :cancelled}
+                              path (assoc :path-trace path))))
          (bump-usage! stats-ctx fn-id :cancelled))
        (catch Exception e
          (log/warn e "Unexpected error reaping execution" execution-id))

@@ -193,6 +193,50 @@
 
 
 ;; =============================================================================
+;; snapshot-path-trace — read-side of the Debug-P1 path-trace atom
+;; =============================================================================
+
+(deftest snapshot-path-trace-nil-atom
+  (is (nil? (persist/snapshot-path-trace nil))
+      "no trace? opt-in → nil so callers' (when …) doesn't fire"))
+
+
+(deftest snapshot-path-trace-empty-vector
+  (is (nil? (persist/snapshot-path-trace (atom [])))
+      "opted-in but nothing captured (fn set empty) also returns nil"))
+
+
+(deftest snapshot-path-trace-within-cap
+  (let [id (random-uuid)
+        out (persist/snapshot-path-trace
+              (atom [{:fn-id id :cache-hit? false :duration-ms 3}
+                     {:fn-id id :cache-hit? true}]))]
+    (testing "wire shape: {:entries […]} with fn-ids stringified"
+      (is (= [{:fn-id (str id) :cache-hit? false :duration-ms 3}
+              {:fn-id (str id) :cache-hit? true}]
+             (:entries out)))
+      (is (not (contains? out :path-truncated?))))))
+
+
+(deftest snapshot-path-trace-oversize-truncates-oldest-first
+  ;; ~70 bytes/entry × 8000 ≈ 560 KB > the 256 KB cap → oldest entries
+  ;; drop; the marker rides INSIDE the json.
+  (let [entries (mapv (fn [i]
+                        {:fn-id (random-uuid)
+                         :cache-hit? false
+                         :duration-ms i})
+                      (range 8000))
+        out (persist/snapshot-path-trace (atom entries))]
+    (is (true? (:path-truncated? out)))
+    (is (< (count (:entries out)) 8000))
+    (testing "the NEWEST entry survives; the oldest went first"
+      (is (= 7999 (:duration-ms (last (:entries out)))))
+      (is (pos? (:duration-ms (first (:entries out))))))
+    (testing "the truncated payload actually fits the byte budget"
+      (is (persist/json-bytes-within? out persist/max-path-trace-bytes)))))
+
+
+;; =============================================================================
 ;; declared-effects-of — registry lookup
 ;; =============================================================================
 

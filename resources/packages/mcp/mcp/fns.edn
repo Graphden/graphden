@@ -257,12 +257,15 @@
   {:name :_mcp-exec-parsed
    :description "The execute pipeline's parsed-request shape, built from tool arguments instead of an HTTP body. Overriding :execute's :parsed slot (closer-fn-wins) skips its own body parse — re-entering the Ring handler with a synthesized request would collide with the OUTER :request free arg the MCP dispatch itself reads."
    :parent :zipmap
+   ;; :trace? is carried as false — the MCP tool doesn't expose path
+   ;; tracing (debug P1); the parsed record must still satisfy the
+   ;; execute pipeline's shape.
    :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
-                 {:value :timeout-ms} {:value :persist?}]
+                 {:value :timeout-ms} {:value :persist?} {:value :trace?}]
           :vals [{:parent :parse-uuid :args {:string nil}}
                  {:parent :to-str :args {:value :_mcp-read-fn-name}}
                  {:parent :coalesce :args {:value :_mcp-exec-args :default {}}}
-                 {:value 10000} {:value false}]}}
+                 {:value 10000} {:value false} {:value false}]}}
 
   {:name :_mcp-exec-validation
    :description "The execute pipeline's stage-2 guard cond, fed my parsed map — :_execute-validation binds :parsed at itself (closer-fn-wins), so overriding :execute from outside can't reach it; this child rebinds it directly."

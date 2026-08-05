@@ -65,6 +65,32 @@
   (reset! *always-fresh-fn-ids* (set ids)))
 
 
+;; ^:dynamic for the same parallel-kaocha isolation reason as
+;; `*always-fresh-fn-ids*` above (see `kaocha.plugin.parallel/isolation-vars`).
+(def ^:dynamic *traced-fn-ids*
+  "Debug/observability P1 — the per-fn half of the execution-path
+   capture opt-in: only `:ref` invocations whose target fn-id is in
+   this set record entries into `compile-runtime/*path-trace*`.
+
+   RUNTIME-ONLY state, deliberately NOT a stored fn field:
+   PHILOSOPHY § \"Per-fn debug/trace toggles are not a stored field\"
+   rejects `fn.trace_enabled` — trace is a runtime decoration applied
+   by the executor when asked, not a property of the fn entity. The
+   set lives in executor memory and resets on restart, exactly like
+   `always-fresh-fn-ids`."
+  (atom #{}))
+
+
+(defn set-traced-fn-ids!
+  "Replace the set of path-traced fn-ids (Debug P1 per-fn opt-in).
+   Mirrors `set-always-fresh-fn-ids!` — call with the ids a user
+   explicitly selected for tracing; capture additionally requires the
+   per-execution `trace?` flag (which binds
+   `compile-runtime/*path-trace*`). Ambient sampling is P3 — absent."
+  [ids]
+  (reset! *traced-fn-ids* (set ids)))
+
+
 (defn- fa-key-for-cache
   "Project `fa` to the subset the ref-target actually reads —
    `ref-frees` from `r/cache-projection-frees`. The walker is a
@@ -106,6 +132,109 @@
   5000)
 
 
+;; =============================================================================
+;; Execution-path capture (Debug/observability P1) — the seam.
+;;
+;; `call-with-cache` is the single choke point every `:ref` invocation
+;; passes through, so it is where the path trace records. Both vars it
+;; consults live elsewhere: `*path-trace*` in `compile-runtime` (per-
+;; execution opt-in, bound by `crud.fn-execution.persist/run-future`)
+;; and `*traced-fn-ids*` above (per-fn opt-in). The `requiring-resolve`
+;; delays below break the load cycle the direct `:require`s would
+;; create (compile-eager ← compile-runtime ← interface ← registry.core)
+;; — same precedent as `rich-type-of-id-or-stale-name-fn` /
+;; `make-single-arg-callable-fn` further down this file.
+;; =============================================================================
+
+(def ^:private path-trace-var
+  "Var-object handle to `compile-runtime/*path-trace*`. Deref the delay
+   for the Var, deref the Var for its thread-bound value — reading
+   through the Var object honours `binding` frames, so the hot path
+   pays one delay-field read + one Var read, nothing else, when
+   tracing is off."
+  (delay (requiring-resolve 'graphden.executor.compile-runtime/*path-trace*)))
+
+
+(def ^:private touches-secret?-fn
+  "Var handle to `registry.core/touches-secret?` — the shared registry-
+   based secret predicate (also used by persist-side redaction). Called
+   only on the already-opted-in slow path, never when tracing is off."
+  (delay (requiring-resolve 'graphden.executor.registry.core/touches-secret?)))
+
+
+(def max-path-trace-entries
+  "Hard capture-time cap on entries in one execution's path trace —
+   keeps a traced fn inside a hot loop from growing the atom without
+   bound (the persist side additionally byte-caps what lands on the
+   row). Oldest entries are KEPT (recording stops at the cap); the
+   persist-side byte cap is the oldest-first-drop half."
+  10000)
+
+
+(defn- record-path-entry!
+  [trace entry]
+  (when (< (count @trace) max-path-trace-entries)
+    (swap! trace conj entry)))
+
+
+(defn- active-path-trace
+  "The bound `*path-trace*` atom when path capture applies to `ref-id`,
+   else nil. First check is the nil-check on the var — the entire cost
+   of the feature for untraced executions; the set membership test only
+   runs once a trace atom is bound (same cheap `contains?` shape as the
+   always-fresh check)."
+  [ref-id]
+  (when-some [trace (deref ^clojure.lang.Var @path-trace-var)]
+    (when (contains? @*traced-fn-ids* ref-id)
+      trace)))
+
+
+(defn- record-path-hit!
+  "Record a cache-hit entry: `{:fn-id … :cache-hit? true}` — NO
+   `:duration-ms` (none was spent; absence, not 0, so a reader can
+   distinguish 'free' from 'sub-millisecond'). Secret-touching fns
+   record `{:fn-id … :hidden :secret}` with no cache info at all."
+  [trace ref-id]
+  (record-path-entry! trace
+                      (if (@touches-secret?-fn ref-id)
+                        {:fn-id ref-id :hidden :secret}
+                        {:fn-id ref-id :cache-hit? true})))
+
+
+(defn- path-traced-fresh-call
+  "Invoke `(child fa ctx)` recording a fresh-call entry into `trace`:
+   `{:fn-id … :cache-hit? false :duration-ms <wall ms>}`. Recording is
+   in a `finally` so a THROWING frame still lands in the trace (the
+   failing call is the one being debugged). `:duration-ms` measures the
+   immediate invocation only — lazily-forced children account to
+   whichever frame forces them. Secret skip (capture-time, per
+   PHILOSOPHY § Debugging constraint 4): a fn whose rich-type touches
+   `:secret` records `{:fn-id … :hidden :secret}` — no duration, no
+   cache info."
+  [trace ref-id child fa ctx]
+  (if (@touches-secret?-fn ref-id)
+    (do (record-path-entry! trace {:fn-id ref-id :hidden :secret})
+        (child fa ctx))
+    (let [t0 (System/nanoTime)]
+      (try
+        (child fa ctx)
+        (finally
+          (record-path-entry! trace
+                              {:fn-id ref-id
+                               :cache-hit? false
+                               :duration-ms (quot (- (System/nanoTime) t0)
+                                                  1000000)}))))))
+
+
+(defn- fresh-call
+  "One fresh `(child fa ctx)` invocation — through the path-trace seam
+   when capture applies to `ref-id`, bare otherwise."
+  [ref-id child fa ctx]
+  (if-some [trace (active-path-trace ref-id)]
+    (path-traced-fresh-call trace ref-id child fa ctx)
+    (child fa ctx)))
+
+
 (defn- call-with-cache
   "Invoke `(child fa ctx)` through the per-execute memo. Cache key is
    `[ref-id projected-fa]` where projected-fa is `fa` restricted to
@@ -115,16 +244,24 @@
 
    The cache clears itself when it reaches `call-cache-max-size` —
    prevents pathological per-request growth (see the size constant's
-   doc for the empirical motivation)."
+   doc for the empirical motivation).
+
+   Debug P1: every arm passes the path-trace seam (`fresh-call` /
+   `record-path-hit!`) — zero work beyond one nil-check unless the
+   execution bound `*path-trace*` AND `ref-id` is in `*traced-fn-ids*`.
+   Entries land in COMPLETION order (a callee's entry precedes its
+   caller's)."
   [ref-id ref-frees child fa ctx]
   (let [^java.util.HashMap cache (::call-cache ctx)]
     (if (or (nil? cache) (contains? @*always-fresh-fn-ids* ref-id))
-      (child fa ctx)
+      (fresh-call ref-id child fa ctx)
       (let [k [ref-id (fa-key-for-cache ref-frees fa)]
             cached (java.util.HashMap/.get cache k)]
         (if (some? cached)
-          (when-not (identical? cached ::nil) cached)
-          (let [v (child fa ctx)]
+          (do (when-some [trace (active-path-trace ref-id)]
+                (record-path-hit! trace ref-id))
+              (when-not (identical? cached ::nil) cached))
+          (let [v (fresh-call ref-id child fa ctx)]
             (when (>= (java.util.HashMap/.size cache) call-cache-max-size)
               (java.util.HashMap/.clear cache))
             (java.util.HashMap/.put cache k (if (nil? v) ::nil v))

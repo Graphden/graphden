@@ -6,12 +6,13 @@
   ;; ---------------------------------------------------------------------
 
   {:name :_execute-parsed-shape
-   :description "Output of `:_execute-parsed` — the request body normalised to `{:fn-id :fn-name :args :timeout-ms :persist?}`."
+   :description "Output of `:_execute-parsed` — the request body normalised to `{:fn-id :fn-name :args :timeout-ms :persist? :trace?}`."
    :type {:fn-id      :uuid
           :fn-name    :text
           :args       :jsonb
           :timeout-ms :int
-          :persist?   :bool}}
+          :persist?   :bool
+          :trace?     :bool}}
 
   {:name :_execute-rejection-shape
    :description "Output of `:_execute-validation` — `{:ok false :error :error-data}` rejection or nil."
@@ -48,6 +49,9 @@
   {:name :_execute-body-persist
    :parent :get :args {:coll :_execute-body :key {:value :persist?} :default nil}}
 
+  {:name :_execute-body-trace
+   :parent :get :args {:coll :_execute-body :key {:value :trace?} :default nil}}
+
   ;; Field-level transforms.
 
   {:name :_execute-fn-id
@@ -77,19 +81,26 @@
    :parent :equal?
    :args {:a :_execute-body-persist :b {:value true}}}
 
+  {:name :_execute-trace
+   :description "`:trace?` — Debug-P1 execution-path capture opt-in, same strict `true?` semantics as `:_execute-persist`. When true, the apply stage binds a path-trace atom around the run; capture additionally requires the traced fn to be in the executor's runtime traced set (`set-traced-fn-ids!`). Ambient sampling / full-value capture are P3 — not implemented."
+   :parent :equal?
+   :args {:a :_execute-body-trace :b {:value true}}}
+
   {:name :_execute-parsed
-   :description "Stage 1 — JSON body → `{:fn-id :fn-name :args :timeout-ms :persist?}`. Per-field graph composition over `:parse-json-body` + `:get` + (`:parse-uuid` / `:coalesce` / nil-safe `:to-str` / `:equal? true`) — admin-extensible without touching Clojure."
+   :description "Stage 1 — JSON body → `{:fn-id :fn-name :args :timeout-ms :persist? :trace?}`. Per-field graph composition over `:parse-json-body` + `:get` + (`:parse-uuid` / `:coalesce` / nil-safe `:to-str` / `:equal? true`) — admin-extensible without touching Clojure."
    :parent :zipmap
    :args {:keys [{:value :fn-id}
                  {:value :fn-name}
                  {:value :args}
                  {:value :timeout-ms}
-                 {:value :persist?}]
+                 {:value :persist?}
+                 {:value :trace?}]
           :vals [:_execute-fn-id
                  :_execute-fn-name
                  :_execute-args
                  :_execute-timeout-ms
-                 :_execute-persist]}}
+                 :_execute-persist
+                 :_execute-trace]}}
 
   ;; --- C23: stage 2 of execute as a graph `:cond`. Each guard is
   ;; its own `:_execute-*-err` rejection-builder, with a thin

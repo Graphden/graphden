@@ -70,7 +70,15 @@ Launch-order refinements agreed 2026-07-20:
    See § Future Work → Error Tolerance.
 4. **Debug/observability** with the PHILOSOPHY § Debugging
    constraints (per-fn opt-in, sampling, `:secret` auto-skip,
-   size/TTL limits) — ~1.5 weeks
+   size/TTL limits) — **P1 shipped**: execution-path capture — the
+   opt-in `trace?` submit flag + the runtime-only per-fn traced set
+   (`compile-eager/set-traced-fn-ids!`); per-`:ref` entries
+   `{fn-id, cache-hit?, duration-ms}` with capture-time `:secret`
+   skip, snapshotted into `:fn-execution.path-trace` (256 KB cap,
+   oldest-first truncation). **P2 pending** (editor UI rendering of
+   the trace); **P3 pending** (~1% ambient sampling + full
+   intermediate-VALUE capture with its confirm/size/TTL
+   constraints) — remaining ~1 week
 5. ~~**Free-arg aliases**~~ — SHIPPED (the `slot.source-slot-id`
    rename model; see § Future Work entry, kept as the design record)
 (The routes-API + static-lint-against-drift item shipped as `window.API` +

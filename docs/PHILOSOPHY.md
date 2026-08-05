@@ -1006,6 +1006,21 @@ free-arg" ergonomics, which Shape 1 trades for working-today.
 - Node highlighting in visual UI
 - Time-travel debugging (replay execution with cached intermediate results)
 
+**Implemented (P1)** — execution-path capture: the first approach
+shipped as the `trace?` flag on the `/api/execute` submit body plus a
+runtime-only per-fn traced set
+(`graphden.executor.compile-eager/set-traced-fn-ids!` — deliberately
+NOT a stored fn field, per § "Per-fn debug/trace toggles are not a
+stored field"). Each traversed `:ref` invocation of a traced fn
+records `{fn-id, cache-hit?, duration-ms}` (secret-touching fns record
+a `:hidden` entry instead — constraint 4 below, applied at capture
+time), snapshotted onto the `:fn-execution` row's `:path-trace` field
+with a 256 KB byte cap and oldest-first truncation (constraint 5's
+size half). The constraints below stay in force for what remains:
+UI rendering is P2; ambient ~1 % sampling and full
+intermediate-VALUE capture (constraints 2–3) are P3 and NOT
+implemented — nothing captures values today.
+
 **Non-negotiable constraints when this lands** — captured early so a
 future implementation cannot accidentally make production
 unreliable:

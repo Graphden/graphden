@@ -844,6 +844,24 @@
   nil)
 
 
+(def ^:dynamic *path-trace*
+  "Atom holding a vector of execution-path entries (see
+   `compile-eager/call-with-cache` for the recorded shape:
+   `{:fn-id … :cache-hit? … :duration-ms …}` or `{:fn-id … :hidden
+   :secret}`), bound by the fn-execution future wrapper WHEN the
+   submitted execution opted in via the request's `trace?` flag. `nil`
+   (the default) means no tracing context — the seam in
+   `call-with-cache` does a single nil-check and measures nothing.
+
+   Debug/observability P1 (PHILOSOPHY § Debugging and Observability):
+   capture is DOUBLY opt-in — this var (per-execution `trace?`) AND
+   the fn appearing in `compile-eager`'s `traced-fn-ids` set (per-fn).
+   The ~1% ambient sampling and full intermediate-VALUE capture from
+   that section are P3 — NOT implemented; only fn-ids, cache-hit flags
+   and durations are recorded, never values."
+  nil)
+
+
 (def ^:dynamic *allowed-effects*
   "Set of effect categories the current execution is permitted to
    perform, or `nil` (the default) for UNRESTRICTED. Bound by
@@ -864,8 +882,8 @@
 ;; layer registers the vars that MUST cross the thread boundary; `future-fn`
 ;; captures + re-establishes them. Kept HERE (not in tenancy) so
 ;; core/concurrency stays tenancy-free — tenancy adds `*current-org*` at load.
-;; `*effect-trace*` / `*cancel-check*` are DELIBERATELY not conveyed: they are
-;; per-top-level-request state, not a persistent worker's.
+;; `*effect-trace*` / `*path-trace*` / `*cancel-check*` are DELIBERATELY not
+;; conveyed: they are per-top-level-request state, not a persistent worker's.
 
 (defonce ^:private conveyed-dynamic-vars (atom #{#'*allowed-effects*}))
 

@@ -9,6 +9,14 @@ a `:fn` entity (no impl, no parents).
 `refinement`, `record`, `union`, `variant`, `list`, `type
 alias`, `inline vs named`, `[:secret T]`.
 
+One doctrine to carry through the lesson: when the checker finds
+a subtype mismatch in something you save, that's a recorded
+DIAGNOSTIC on the fn — not a save-blocker (the write lands; the
+fn is flagged and refuses to execute until fixed) — with two
+exceptions that still hard-reject the save: structural violations
+(cycles, name collisions, MI arg-name clashes) and secret-flow
+violations (`[:secret T]` into a plain slot).
+
 ## Types are fn-rows
 
 The data layer doesn't have a separate "type" table. A type-row
@@ -269,7 +277,7 @@ The provenance ↳ badge shows where the type came from.
 
 ## Type UX in the editor
 
-Three affordances make the type system usable without ever
+Four affordances make the type system usable without ever
 typing a structural form by hand:
 
 **1. The compatible-type select.** Click an arg's type-chip on
@@ -300,6 +308,17 @@ datalist of every named type-row, each labeled with its kind
 (`refinement` / `record` / `union` / `variant` / `list`) plus
 the primitives — so "base type" and "element type" inputs offer
 real names instead of trusting your memory.
+
+**4. Warnings on save, not blocked saves.** A write whose
+aggregate type-check fails still lands; the failure is recorded
+as a per-branch diagnostic. You see it as: the ⚠ badge on the
+fn-card's root row, the per-branch "Type errors" sidebar panel
+listing every flagged fn (click-through to the fn), per-namespace
+⚠ counts on the sidebar tree rows, and a REFUSAL when you try to
+execute the fn (clear message naming the fn and the first error).
+Fixing the offending binding clears all of it. Structural and
+secret-flow violations are the exception — those still reject the
+save itself.
 
 ### Try it
 

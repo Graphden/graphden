@@ -1236,9 +1236,13 @@ and returned the diagnostic as a 400; error-tolerance Phase 2
 flipped that: the row is KEPT, the failure is recorded in the
 per-branch diagnostics store (`graphden.types.diagnostics`,
 cleared when a later write fixes the fn), and the 200 response
-carries `:type-warnings [{…diagnostic…}]` additively. Only the
-structural gates (cycles, name collisions, terminal / list-closed,
-MI, reparent-cross-branch) still reject a user write; the package
+carries `:type-warnings [{…diagnostic…}]` additively. Two classes
+stay hard rejects on a user write: the structural gates (cycles,
+name collisions, terminal / list-closed, MI, reparent-cross-branch)
+AND secret-flow subtype violations — a diagnostic whose types carry
+the `:secret` marker rolls the write back and returns the legacy
+400 (`secret-diagnostic?` in `crud/type-check`; rationale in
+SECRETS.md § Flow protection vs Error Tolerance). The package
 corpus stays hard-gated at sync time by the sweep allowlist.
 `parse-fn-from-form` resolves `return-type` form values via
 storage lookup with explicit error on unknown names.

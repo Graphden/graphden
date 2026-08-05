@@ -783,12 +783,14 @@ The tutorial lives in `docs/tutorial/` ([index here](docs/tutorial/README.md)).
 It is a per-block, growing set of text lessons — Block 0 in
 [ROADMAP § Roadmap by Blocks](docs/ROADMAP.md#roadmap-by-blocks-current-plan).
 
-**When you finish (or are about to finish) a feature that maps to a
-tutorial lesson, propose to the user that the relevant lesson(s) be
-added or updated.** Don't add or rewrite lessons unilaterally —
-propose, get sign-off, then write.
+**Lessons are maintained LIKE CODE (user decision 2026-08-05).** When
+a change alters user-visible behaviour that a lesson describes — or
+unlocks a ⏳ planned lesson — update/add the lesson **in the same
+landing**, through the gate, no proposal or sign-off step. The user
+reviews the live lessons post-hoc, the same way they review any other
+landed change.
 
-**A feature maps to a tutorial lesson if:**
+**A change maps to a tutorial lesson if:**
 
 - It introduces a concept a new user would encounter in the editor
   (e.g. a new entity kind, a new arg type, a new editor affordance,
@@ -799,33 +801,17 @@ propose, get sign-off, then write.
   `docs/tutorial/README.md` that just became writable because the
   feature shipped.
 
-**Don't propose lessons for:**
+**Don't touch lessons for:**
 
 - Internal refactors that don't change user-visible behaviour.
 - Bug fixes (unless the fix changes a documented behaviour).
 - Performance work, caching, infra.
 - Anything happening only behind a feature flag or only in tests.
 
-**How to propose:**
-
-- Name the specific lesson(s) by number/title from the index.
-- Say what feature just landed and which concept that lesson would
-  introduce or update.
-- One-sentence sketch of what the lesson would walk through. Don't
-  draft the full lesson until the user agrees.
-
-Example:
-
-> Block 1 storage base-fns landed. This unlocks Lesson 11
-> (Packages — namespaces, fns.edn, impls.clj, deps) because users
-> now have something concrete to call into. Lesson would walk
-> through writing your own `:pg-query`-using fn-def from scratch.
-> Want me to draft it?
-
-If a lesson would document a feature that **partially** landed, do
-NOT write the lesson yet — keep it ⏳ planned, propose again when the
-feature is complete enough that the lesson can be paste-into-the-editor
-correct.
+**The hard bar stays:** every lesson step must be paste-into-the-editor
+correct against the tree it lands with. Never document a **partially**
+landed feature — keep its lesson ⏳ planned and write it only when the
+feature is complete enough for the lesson to be verified end-to-end.
 
 ## Developer Tour Maintenance
 

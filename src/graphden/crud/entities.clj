@@ -1446,22 +1446,26 @@
       (:fn-id (sp/read-entity storage :binding binding-id)))))
 
 
-(defn- post-write-type-warnings
+(defn- post-write-type-rej
   "Post-write whole-fn type-check for binding mutations. A binding can
    be individually valid yet break the OWNING fn-def's aggregate
    check. Error-tolerance Phase 2: the just-written row is KEPT even
    when the check fails — `type-check-fn-after-mutation!` records the
    failure in the per-branch diagnostics store (and clears it again
-   once a later write fixes the fn), and the structured diagnostics
-   come back here as a vector the caller surfaces additively as
-   `:type-warnings` on the success envelope. nil when the check passes
-   or doesn't apply to this entity type."
+   once a later write fixes the fn) — EXCEPT for the security
+   carve-out: a SECRET-involving diagnostic (`:secret? true` on the
+   returned rej — a `[:secret …]` flow laundered into a plain slot)
+   is not recorded, and the caller must roll the write back and
+   return the pre-Phase-2 hard `{:error …}` envelope. Non-secret
+   failures come back as `{:diagnostic …}` the caller surfaces
+   additively as `:type-warnings` on the success envelope. nil when
+   the check passes or doesn't apply to this entity type."
   [storage type-str entity-data id-uuid]
   (when (#{"binding" "binding-list-item"} type-str)
     (when-let [fn-id (post-write-type-check-fn-id
                        storage type-str entity-data id-uuid)]
-      (when-let [rej (tc/type-check-fn-after-mutation! storage fn-id)]
-        [(:diagnostic rej)]))))
+      (tc/type-check-fn-after-mutation! storage fn-id
+                                        {:reject-secret? true}))))
 
 
 (defn apply-create-core
@@ -1480,18 +1484,34 @@
    so the outer graph can dispatch on the shape and run invalidate /
    notify / response uniformly. Structural gates (cycles, name
    collisions, terminal / list-closed, MI) still reject BEFORE this
-   fn runs — only the TYPE check became non-blocking."
+   fn runs — only the TYPE check became non-blocking. SECURITY
+   CARVE-OUT: a SECRET-flow type failure (laundering a `[:secret …]`
+   value into a plain slot) keeps the pre-Phase-2 behaviour — the
+   just-created row is deleted and the diagnostic message comes back
+   as `{:error …}` (a 400 on the wire); the guarantee must not rest
+   on the derived diagnostics store (docs/SECRETS.md)."
   [{:keys [entity-type type-str form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
         create-result (try-create-or-error storage entity-type entity-data type-str)]
     (if (:created create-result)
-      (let [warnings (post-write-type-warnings
-                       storage type-str entity-data nil)]
-        (when (and (= type-str "binding")
-                   (contains? form-data :rename-to))
-          (forward-rename-slot! storage form-data entity-data))
-        (cond-> create-result
-          warnings (assoc :type-warnings warnings)))
+      (let [rej (post-write-type-rej storage type-str entity-data nil)]
+        (if (:secret? rej)
+          ;; Hard reject: roll back the just-created row (logged, not
+          ;; swallowed — an orphan surviving the rejection must be
+          ;; visible) and surface the diagnostic message as the error.
+          ;; The rename-slot side-effect deliberately hasn't run yet,
+          ;; so no orphan renamed-view slot is left behind either.
+          (do (try (sp/delete-entity storage entity-type (:created create-result))
+                   (catch Exception e
+                     (log/warn e "Rollback delete-entity failed after secret-flow type-check rejection"
+                               {:entity-type entity-type
+                                :id (:created create-result)})))
+              {:error (:reason rej)})
+          (do (when (and (= type-str "binding")
+                         (contains? form-data :rename-to))
+                (forward-rename-slot! storage form-data entity-data))
+              (cond-> create-result
+                rej (assoc :type-warnings [(:diagnostic rej)])))))
       ;; Preserve the error's :http-status (409 collisions, 403
       ;; capability — the central web.errors mapping) alongside the
       ;; human message.
@@ -1515,10 +1535,18 @@
      `{:error <msg>}` on write failure
    The rename-slot failure is logged but never escalated — the
    binding row is still useful without the rename slot, matching the
-   legacy behaviour."
+   legacy behaviour. SECURITY CARVE-OUT: a SECRET-flow type failure
+   restores the touched fields from the pre-update row and returns
+   the diagnostic message as `{:error …}` (a 400 on the wire) —
+   secret laundering never persists, warn-and-persist is for
+   ordinary type errors only (docs/SECRETS.md)."
   [{:keys [entity-type type-str id-uuid form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
         error-msg (volatile! nil)
+        ;; Pre-image for the secret carve-out rollback. Only binding-
+        ;; family rows are type-checked, so only those pay the read.
+        pre-row (when (and id-uuid (#{"binding" "binding-list-item"} type-str))
+                  (sp/read-entity storage entity-type id-uuid))
         updated (try (sp/update-entity storage entity-type id-uuid entity-data)
                      (catch Exception e
                        (log/error e "update-entity failed for"
@@ -1529,23 +1557,37 @@
                        ;; exactly the message the user can act on.
                        (vreset! error-msg (some-> (ex-data e) :reason))
                        nil))]
-    (when (and updated (= type-str "binding") id-uuid
-               (contains? form-data :rename-to))
-      (try
-        (when-let [existing (sp/read-entity storage :binding id-uuid)]
-          (ensure-rename-slot! storage
-                               (:fn-id existing)
-                               (:slot-id existing)
-                               (when-not (str/blank? (:rename-to form-data))
-                                 (str (:rename-to form-data)))))
-        (catch Exception e
-          (log/error e "ensure-rename-slot! failed"))))
-    (if updated
-      (let [warnings (post-write-type-warnings
-                       storage type-str entity-data id-uuid)]
-        (cond-> {:updated id-uuid}
-          warnings (assoc :type-warnings warnings)))
-      {:error (or @error-msg "Failed to update entity")})))
+    (if-not updated
+      {:error (or @error-msg "Failed to update entity")}
+      (let [rej (post-write-type-rej storage type-str entity-data id-uuid)]
+        (if (:secret? rej)
+          ;; Hard reject: restore every field the update touched from
+          ;; the pre-image, then surface the diagnostic message. The
+          ;; rename-slot side-effect below deliberately hasn't run yet.
+          (do (if pre-row
+                (try (sp/update-entity
+                       storage entity-type id-uuid
+                       (into {} (map (fn [[k _]] [k (get pre-row k)]))
+                             entity-data))
+                     (catch Exception e
+                       (log/warn e "Rollback restore failed after secret-flow type-check rejection"
+                                 {:entity-type entity-type :id id-uuid})))
+                (log/warn "No pre-image to restore after secret-flow type-check rejection"
+                          {:entity-type entity-type :id id-uuid}))
+              {:error (:reason rej)})
+          (do (when (and (= type-str "binding") id-uuid
+                         (contains? form-data :rename-to))
+                (try
+                  (when-let [existing (sp/read-entity storage :binding id-uuid)]
+                    (ensure-rename-slot! storage
+                                         (:fn-id existing)
+                                         (:slot-id existing)
+                                         (when-not (str/blank? (:rename-to form-data))
+                                           (str (:rename-to form-data)))))
+                  (catch Exception e
+                    (log/error e "ensure-rename-slot! failed"))))
+              (cond-> {:updated id-uuid}
+                rej (assoc :type-warnings [(:diagnostic rej)]))))))))
 
 
 ;; === Re-exports from sub-namespaces ==========================================

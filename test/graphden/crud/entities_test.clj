@@ -1017,6 +1017,142 @@
       (finally (sp/close storage)))))
 
 
+;; ============================================================================
+;; error-tolerance SECURITY CARVE-OUT — secret-flow violations stay HARD
+;;
+;; Phase 2 made type failures warn-and-persist; the compensating gate
+;; (execute refusal) reads the DERIVED diagnostics store — too thin
+;; for a security class. A diagnostic whose types carry the `:secret`
+;; marker (laundering a `[:secret …]` flow into a plain slot) must
+;; keep the pre-Phase-2 behaviour: write rolled back, `{:error …}`
+;; (400 on the wire), NO store record. See docs/SECRETS.md § Flow
+;; protection vs Error Tolerance.
+;; ============================================================================
+
+(deftest create-secret-laundering-binding-hard-rejected-test
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "etsec-base")
+              slot  (setup/create-slot! storage "s" :text)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              _     (registry/record-rich-types-raw!
+                      :etsec-base {:return :int :args {:s :text} :effects #{}})
+              ;; A secret-returning ref — same deterministic-id contract
+              ;; as the other stubs, so the name-keyed registry entry
+              ;; and the row agree on identity.
+              leaf  (setup/create-base-fn! storage "etsec-leaf" :text)
+              _     (registry/record-rich-types-raw!
+                      :etsec-leaf {:return [:secret :text] :args {} :effects #{}})
+              child (setup/create-composed-fn! storage "etsec-child" (:id base))
+              r     (entities/apply-create-core
+                      {:entity-type :binding
+                       :type-str "binding"
+                       :form-data {}
+                       :entity-data {:fn-id (:id child) :slot-id (:id slot)
+                                     :ref-fn-id (:id leaf)}}
+                      c)]
+          (testing "the laundering write is HARD-rejected — {:error}, no :created"
+            (is (nil? (:created r)))
+            (is (nil? (:type-warnings r)))
+            (is (string? (:error r)))
+            (is (re-find #"(?i)type-check failed" (:error r))
+                "the error message IS the diagnostic message"))
+          (testing "the row does not exist (rolled back)"
+            (is (empty? (sp/query-entities storage :binding {:fn-id (:id child)}))))
+          (testing "NO store diagnostic recorded for the rejected write"
+            (is (nil? (diag/errors-for-fn nil (:id child)))))
+          (testing "regression pair: an ORDINARY type violation still warns+persists"
+            (let [child2 (setup/create-composed-fn! storage "etsec-child2" (:id base))
+                  r2 (entities/apply-create-core
+                       {:entity-type :binding
+                        :type-str "binding"
+                        :form-data {}
+                        :entity-data {:fn-id (:id child2) :slot-id (:id slot)
+                                      :value 42
+                                      :value-present true}}
+                       c)]
+              (is (some? (:created r2)))
+              (is (nil? (:error r2)))
+              (is (vector? (:type-warnings r2)))
+              (is (some? (sp/read-entity storage :binding (:created r2)))
+                  "the ordinary type-breaking row survived")
+              (is (= (:type-warnings r2)
+                     (diag/errors-for-fn nil (:id child2)))
+                  "and its diagnostic IS recorded"))))
+        (finally (sp/close storage))))))
+
+
+(deftest update-secret-laundering-binding-hard-rejected-restores-test
+  ;; The update core has no row to delete — the carve-out restores the
+  ;; touched fields from the pre-update image instead.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "etsecu-base")
+              slot  (setup/create-slot! storage "s" :text)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              _     (registry/record-rich-types-raw!
+                      :etsecu-base {:return :int :args {:s :text} :effects #{}})
+              leaf  (setup/create-base-fn! storage "etsecu-leaf" :text)
+              _     (registry/record-rich-types-raw!
+                      :etsecu-leaf {:return [:secret :text] :args {} :effects #{}})
+              child (setup/create-composed-fn! storage "etsecu-child" (:id base))
+              bind  (setup/bind-value! storage (:id child) (:id slot) "hello")
+              r     (entities/apply-update-core
+                      {:entity-type :binding
+                       :type-str "binding"
+                       :id-uuid (:id bind)
+                       :form-data {}
+                       :entity-data {:ref-fn-id (:id leaf)}}
+                      c)]
+          (testing "the laundering update is HARD-rejected"
+            (is (nil? (:updated r)))
+            (is (string? (:error r)))
+            (is (re-find #"(?i)type-check failed" (:error r))))
+          (testing "the touched field was restored from the pre-image"
+            (let [row (sp/read-entity storage :binding (:id bind))]
+              (is (nil? (:ref-fn-id row)) "ref-fn-id back to nil")
+              (is (= "hello" (:value row)) "original value untouched")))
+          (testing "NO store diagnostic recorded"
+            (is (nil? (diag/errors-for-fn nil (:id child))))))
+        (finally (sp/close storage))))))
+
+
+(deftest seq-append-secret-laundering-item-hard-rejected-test
+  ;; The sequence-append core rolls back BOTH the item and the
+  ;; synthetic host binding it materialised for it.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "etsecs-base")
+              slot  (setup/create-slot! storage "nums" :any)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              _     (registry/record-rich-types-raw!
+                      :etsecs-base {:return :int :args {:nums [:list :text]}
+                                    :effects #{}})
+              leaf  (setup/create-base-fn! storage "etsecs-leaf" :text)
+              _     (registry/record-rich-types-raw!
+                      :etsecs-leaf {:return [:secret :text] :args {} :effects #{}})
+              child (setup/create-composed-fn! storage "etsecs-child" (:id base))
+              r     (entities/apply-seq-append-core
+                      {:fn-id (:id child) :body {:ref (str (:id leaf))}}
+                      {:fn-id (:id child) :slot-id (:id slot) :synthetic true}
+                      c)]
+          (testing "the laundering append is HARD-rejected"
+            (is (nil? (:created r)))
+            (is (string? (:error r)))
+            (is (re-find #"(?i)type-check failed" (:error r))))
+          (testing "item AND synthetic host binding rolled back"
+            (is (empty? (sp/query-entities storage :binding {:fn-id (:id child)}))))
+          (testing "NO store diagnostic recorded"
+            (is (nil? (diag/errors-for-fn nil (:id child))))))
+        (finally (sp/close storage))))))
+
+
 ;; Security-critical: strip-impl-of hides a fn's composition (parent-ids +
 ;; bindings) from a viewer without :view-impl, while leaving its signature
 ;; visible and every non-hidden fn fully intact. A leak here = a tenant

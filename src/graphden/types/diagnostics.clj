@@ -53,8 +53,13 @@
 (def ^:private diagnostic-keys
   "The meaningful structured keys a `:types/check-failed` (or other
    typed crud failure) carries in its ex-data. `:source-file` /
-   `:source-line` are the flattened `*source-info*` stamp."
+   `:source-line` are the flattened `*source-info*` stamp.
+   `:declared` / `:computed` are the return-type-mismatch pair
+   (`enforce-declared-return!`) — retained so type-carrying keys
+   survive into the store for every failure shape (the secret
+   carve-out's `secret-diagnostic?` folds over them too)."
   [:type :fn-name :parent-name :arg-name :binding :expected :actual
+   :declared :computed
    :reason :constraint :source-file :source-line :source-info])
 
 

@@ -87,6 +87,18 @@ in the registry) neither the banner nor the checkbox appears —
 the popover opens straight to the form (or the "No free
 arguments" note) with Run enabled.
 
+## The type-error gate
+
+The effect gate's sibling: a fn whose current branch carries
+recorded TYPE diagnostics (the ⚠ badge / "Type errors" panel —
+Lesson 03) is refused at submit. The run comes back rejected
+with a clear message — "Execution refused: fn '…' has unresolved
+type errors — …" — naming the fn and the first error. There's
+nothing to acknowledge away here: fix the fn or its bindings
+(the fixing save clears the diagnostic), then run. This is the
+flip side of type errors not blocking saves: you can keep a
+half-typed sketch in the graph, but it won't execute.
+
 ## The persist toggle
 
 By default, PURE runs are kept in memory only — visible for

@@ -192,6 +192,14 @@ secret-tainted, it can ONLY land in slots that are also
 typed `[:secret …]`. Plain `:text` sinks (like a log statement
 or a response body) are sync-time errors.
 
+> **Deliberately exempt from Error Tolerance.** Ordinary type
+> mismatches save anyway with a recorded diagnostic and only
+> refuse to execute (Lessons 03 / 05). Secret-flow violations are
+> a SECURITY class and keep the hard save-time reject: the write
+> is rolled back and the API answers 400 — the guarantee must not
+> depend on the derived diagnostics store. See
+> `docs/SECRETS.md` § Flow protection vs Error Tolerance.
+
 ### Per-base-fn `:taint-propagate?`
 
 For base-fns that handle user data (e.g. `:str`,

@@ -22,15 +22,19 @@
     [graphden.storage.protocol.core :as sp]))
 
 
-(defn- post-write-warnings
+(defn- post-write-rej
   "Error-tolerance Phase 3 (Gap A): the same post-write aggregate
    type-check the binding create/update cores run — records / clears
-   the owner's per-branch diagnostic and returns the `:type-warnings`
-   vector (or nil when clean) for the success envelope."
+   the owner's per-branch diagnostic and returns the full rej map
+   (or nil when clean). A `:secret? true` rej is the SECURITY
+   CARVE-OUT (secret-flow violation, NOT recorded in the store) —
+   the caller must roll the write back and return `{:error …}`;
+   non-secret rejs surface additively as `:type-warnings
+   [(:diagnostic rej)]` on the success envelope."
   [storage owner-fn-id]
   (when owner-fn-id
-    (when-let [rej (tc/type-check-fn-after-mutation! storage owner-fn-id)]
-      [(:diagnostic rej)])))
+    (tc/type-check-fn-after-mutation! storage owner-fn-id
+                                      {:reject-secret? true})))
 
 
 (defn find-sequence-binding
@@ -138,7 +142,9 @@
    <int> :fn-id <fn-id>}` on success (plus `:type-warnings
    [<diagnostic> …]` when the item landed but the owning fn now fails
    the aggregate type-check — error-tolerance Phase 3) or `{:error
-   <reason>}` on pre-write validation rejection. The graph composition
+   <reason>}` on pre-write validation rejection OR on a secret-flow
+   type failure (hard reject: item + synthetic binding rolled back —
+   the security carve-out). The graph composition
    around this primitive dispatches on the returned shape and runs
    invalidate + response.
 
@@ -188,14 +194,29 @@
             {:error (:reason pre-rej)})
           (do (sp/create-entity storage :binding-list-item new-item)
               ;; Post-write whole-fn type-check (Phase 3, Gap A) — the
-              ;; item is KEPT either way; a failure is recorded in the
-              ;; per-branch diagnostics store and surfaced additively.
-              (let [warnings (post-write-warnings
-                               storage (or (:fn-id seq-binding) fn-id))]
-                (cond-> {:created (:id new-item)
-                         :position new-pos
-                         :fn-id fn-id}
-                  warnings (assoc :type-warnings warnings)))))))))
+              ;; item is KEPT on an ordinary failure (recorded in the
+              ;; per-branch diagnostics store, surfaced additively).
+              ;; SECURITY CARVE-OUT: a secret-flow failure rolls the
+              ;; item (and the synthetic host binding) back and hard-
+              ;; rejects — see docs/SECRETS.md.
+              (let [rej (post-write-rej
+                          storage (or (:fn-id seq-binding) fn-id))]
+                (if (:secret? rej)
+                  (do (try (sp/delete-entity storage :binding-list-item
+                                             (:id new-item))
+                           (catch Exception e
+                             (log/warn e "seq-append: item rollback failed after secret-flow rejection"
+                                       {:item-id (:id new-item)})))
+                      (when synthetic?
+                        (try (sp/delete-entity storage :binding binding-id)
+                             (catch Exception e
+                               (log/warn e "seq-append: synthetic-binding rollback failed"
+                                         {:binding-id binding-id}))))
+                      {:error (:reason rej)})
+                  (cond-> {:created (:id new-item)
+                           :position new-pos
+                           :fn-id fn-id}
+                    rej (assoc :type-warnings [(:diagnostic rej)]))))))))))
 
 
 (defn load-seq-remove-item
@@ -224,7 +245,8 @@
    pre-write validation, write the binding-list-item row. Returns
    `{:updated <item-id>}` on success (plus `:type-warnings` — the
    Phase-3 post-write check, record-or-clear) or `{:error <reason>}`
-   on pre-write rejection."
+   on pre-write rejection OR on a secret-flow type failure (hard
+   reject: the item's fields are restored — the security carve-out)."
   [parsed item ctx]
   (let [storage (request/require-storage ctx)
         item-id (:item-id parsed)
@@ -237,9 +259,22 @@
       (do (sp/update-entity storage :binding-list-item item-id changes)
           ;; Post-write whole-fn type-check (Phase 3, Gap A) — same
           ;; record-or-clear semantics as the binding update core.
+          ;; SECURITY CARVE-OUT: a secret-flow failure restores the
+          ;; item's pre-update fields and hard-rejects.
           (let [owner-fn-id (some->> (:binding-id item)
                                      (sp/read-entity storage :binding)
                                      :fn-id)
-                warnings (post-write-warnings storage owner-fn-id)]
-            (cond-> {:updated item-id}
-              warnings (assoc :type-warnings warnings)))))))
+                rej (post-write-rej storage owner-fn-id)]
+            (if (:secret? rej)
+              (do (try (sp/update-entity
+                         storage :binding-list-item item-id
+                         (select-keys (merge {:value nil :ref-fn-id nil
+                                              :literal nil}
+                                             item)
+                                      (keys changes)))
+                       (catch Exception e
+                         (log/warn e "seq-update: item restore failed after secret-flow rejection"
+                                   {:item-id item-id})))
+                  {:error (:reason rej)})
+              (cond-> {:updated item-id}
+                rej (assoc :type-warnings [(:diagnostic rej)]))))))))

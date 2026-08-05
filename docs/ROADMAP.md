@@ -419,7 +419,12 @@ store repopulates after a JVM restart.**
   type-warnings}` body when warnings exist; the legacy HTML body
   otherwise). The pre-write single-binding guard is unhooked from
   the create/update validation chains (kept as the on-demand
-  `:type-check-binding-rej` validator). Structural gates — cycles,
+  `:type-check-binding-rej` validator). SECURITY CARVE-OUT:
+  secret-flow subtype violations (`[:secret …]` laundered into a
+  plain slot) stay HARD save-time rejects — write rolled back, 400,
+  no store record; the guarantee must not rest on the derived
+  diagnostics store (see SECRETS.md § Flow protection vs Error
+  Tolerance). Structural gates — cycles,
   name collisions, terminal / list-closed, MI, reparent-cross-branch
   — still hard-reject, and the package corpus is still gated at sync
   time by `assert-sweep-failures-match-allowlist!` (a broken

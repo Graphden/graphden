@@ -112,15 +112,21 @@ child as a free argument. Bindings still resolve closest-wins.
 
 ### MI restrictions
 
-The type-checker rejects MI when:
+Two failure modes guard an MI parent set:
 
-- Two parents bind the SAME slot to incompatible values (silent
-  conflict). One side has to back off.
-- Two parents declare slots with the same name but incompatible
-  types.
-
-These are sync-time errors, so you'll find out before the row
-lands in the DB.
+- **Arg-name collision** — two parents expose DIFFERENT slots
+  under the same user-visible name. This is a structural gate:
+  the save itself is rejected, in the editor and at package sync
+  alike. The name has to be disambiguated (rename one side)
+  before the row lands.
+- **Conflicting contracts on a SHARED slot** — both parents bind
+  the same inherited slot to incompatible values, or pin it to
+  incompatible types (neither a subtype of the other). This is a
+  TYPE error: at package sync it fails the load; in the editor
+  the fn still SAVES, and the conflict surfaces as a recorded
+  diagnostic — ⚠ badge on the card, an entry in the "Type
+  errors" panel (Lesson 03) — with execution refused until one
+  side backs off.
 
 ## The fn-card as a chain visualizer
 

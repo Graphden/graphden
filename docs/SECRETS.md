@@ -116,6 +116,24 @@ return-type to be `[:secret T]` even when the fn-def declared plain
 *registered* return-type carries the marker so downstream type-check
 refuses to drop it.
 
+**Flow protection vs Error Tolerance (security carve-out).** Secret
+subtype violations remain HARD save-time rejects, deliberately exempt
+from the Error Tolerance flip (ROADMAP Block 3) that made ordinary
+type failures warn-and-persist. A user write that launders a
+`[:secret …]` flow into a plain slot is rolled back (create: row
+deleted; update: fields restored; sequence append/update and tighten:
+same revert shapes) and returns the pre-tolerance `{:error …}` / 400
+envelope, with NO entry recorded in the diagnostics store — the row
+doesn't exist. The reasoning: the warn-and-persist path's compensating
+gate is execute-refusal over the *derived, in-memory* diagnostics
+store (best-effort, bounded post-restart recompute) — acceptable for
+iteration ergonomics, too thin for a security class. The secret
+guarantee must not depend on the derived store, so it stays enforced
+at the write, like the structural gates (cycles, name collisions, MI).
+Detection is `graphden.crud.type-check/secret-diagnostic?` — the
+diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
+`:computed`) folded with `contains-secret?`.
+
 ## Audited base-fns (T3)
 
 | Package | Status |

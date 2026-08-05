@@ -113,8 +113,14 @@ narrower type. Useful for asserting a contract at a chain hop
 without forcing a rename.
 
 Constraint: descendant overrides can only NARROW (subtype of
-the inherited type). The type-checker rejects widening at sync
-time — "you can't promise less than your parent did."
+the inherited type) — "you can't promise less than your parent
+did." A widening is a type ERROR, but it does not block the
+save: the write succeeds and the failure is recorded as a
+per-branch type diagnostic. The fn's card gets a ⚠ badge, the
+fn shows up in the sidebar's "Type errors" panel, and trying to
+EXECUTE it is refused until you fix the type. (Structural
+violations — cycles, name collisions — and secret-flow
+violations still reject the save outright.)
 
 ## Try it
 
@@ -133,9 +139,28 @@ time — "you can't promise less than your parent did."
    (narrowed). The provenance ↳ badge shows where each came from
    — `:input` from `:tutorial-renamed-input`'s slot,
    `:non-blank-text` from the type-override binding.
-4. Try widening: change `:type` to `:any`. Save. The editor
-   shows a type-checker error: `:any` is not a subtype of
-   `:text`.
+4. Try widening: click the arg's type-chip. The compatible-type
+   select offers only types that NARROW `:text` — `:any` isn't
+   even listed. Widening is a type error, and while a type error
+   would no longer block the save (it records a diagnostic —
+   below), the select simply doesn't offer one.
+5. So break a type the way it actually happens — with a value.
+   Create `{:name :tutorial-bad-port :parent :http-server}` and
+   click its `:port` arg (type `port`, a refined `:int` —
+   1..65535). The number widget opens; type `-1`. The live
+   status flips to ✗ (refinement violated) — but Save still
+   LANDS. The fn is now flagged: its card root row gains a ⚠
+   badge (hover: "1 type error on this fn — see the Type errors
+   panel") and the sidebar's "Type errors" panel lists
+   `:tutorial-bad-port` with the refinement diagnostic.
+6. Press ▶, tick the side-effects acknowledgement, and hit Run
+   (no need to fill the free args — the refusal fires before
+   anything executes): execution is REFUSED — "unresolved type
+   errors", naming the fn and the mismatch. The graph keeps
+   your work-in-progress, but won't run it.
+7. Edit `:port` again to `8081`. The fixing save clears the
+   recorded diagnostic — the ⚠ badge and the panel entry
+   disappear.
 
 ## What we glossed over
 

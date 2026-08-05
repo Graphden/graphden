@@ -106,7 +106,7 @@ parent `:future`'s stopper interrupts.
 ### Common bind-failures
 
 The type-checker enforces the `[:fn {} :any]` slot shape on
-`:body`. Two binds that look reasonable but get rejected:
+`:body`. Two binds that look reasonable but trip you up:
 
 - **Bind to a base-fn directly**:
   `{:args {:body :current-time-ms}}` — also accepted (`:int`
@@ -116,10 +116,15 @@ The type-checker enforces the `[:fn {} :any]` slot shape on
   daemon — fine for a smoke test, surprising for a service.
 
 - **Bind to a literal**:
-  `{:args {:body "tick"}}` — rejected at sync time. A literal
-  text isn't a callable; you can't invoke `"tick"` as a thunk.
-  The hint suggests "bind a fn-ref or an inline `{:parent
-  …}`". Use the `:my-tick` indirection or write an inline
+  `{:args {:body "tick"}}` — a type error. A literal text isn't
+  a callable; you can't invoke `"tick"` as a thunk. In the
+  editor the SAVE still lands (type errors record a diagnostic
+  instead of blocking — Lesson 03): the fn gets the ⚠ badge,
+  the "Type errors" panel lists it with the hint ("bind a
+  fn-ref or an inline `{:parent …}`"), and executing it is
+  refused until fixed. In a package's `fns.edn` the same
+  mistake still hard-fails the sync. Either way the fix is the
+  `:my-tick` indirection or an inline
   `{:parent :const :args {:value "tick"}}` directly inside
   `:body`.
 
@@ -347,6 +352,8 @@ safe defaults plus `:process` and `:network`; a service that reaches for an
 effect it *doesn't* grant — `:raw-sql` (the shared platform Postgres), or the
 host-level `:io` / `:env` — throws `:execution/forbidden-effect` in its own
 worker and fails to start, the same gate a one-shot execute runs under.
+(A one-shot ▶ run also passes the TYPE-error gate — a fn with recorded type
+diagnostics refuses to execute; see Lesson 09.)
 
 ```bash
 # create — dedicated tier only; 403 :service/tier-required otherwise

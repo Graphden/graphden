@@ -41,6 +41,12 @@
   [storage binding-id b new-c _effects-vec]
   (let [hash-hex (records/digest-hex "SHA-1" (pr-str new-c))
         new-id (records/anonymous-fn-id hash-hex)
+        pre-override (:type-override-fn-id b)
+        ;; Track whether WE materialised the anon fn-row this call. A
+        ;; pre-existing row is a shared dedup target (some other binding
+        ;; may already point at it), so it must survive a secret-flow
+        ;; rejection here; a freshly-created one is rolled back with
+        ;; the binding revert.
         created? (nil? (sp/read-entity storage :fn new-id))]
     ;; Find or create. Storage upsert is the natural fit — same
     ;; id ⇒ same row, no orphan duplicates.
@@ -69,12 +75,24 @@
     ;; pre-checks in `tighten-fn-type-impl!` (widening rejection,
     ;; bound-callable effect escape) stay hard rejections — they
     ;; guard the tighten operation's own contract, not fn validity.
-    (let [post-rej (tc/type-check-fn-after-mutation! storage (:fn-id b))]
-      {:status 200
-       :result (cond-> {:type-override-fn-id new-id
-                        :constraint new-c
-                        :fn-id (:fn-id b)}
-                 post-rej (assoc :type-warnings [(:diagnostic post-rej)]))})))
+    ;; SECURITY CARVE-OUT: a SECRET-involving aggregate failure keeps
+    ;; the pre-Phase-2 shape — revert the override (and the anon
+    ;; fn-row we just materialised), no store record, hard 400.
+    (let [post-rej (tc/type-check-fn-after-mutation! storage (:fn-id b)
+                                                     {:reject-secret? true})]
+      (if (:secret? post-rej)
+        (do (sp/update-entity storage :binding binding-id
+                              {:type-override-fn-id pre-override})
+            (when created?
+              (sp/delete-entity storage :fn new-id))
+            {:status 400
+             :reason (str "Tightening rejected by post-write type-check "
+                          "(secret-flow violation): " (:reason post-rej))})
+        {:status 200
+         :result (cond-> {:type-override-fn-id new-id
+                          :constraint new-c
+                          :fn-id (:fn-id b)}
+                   post-rej (assoc :type-warnings [(:diagnostic post-rej)]))}))))
 
 
 (defn tighten-fn-type-impl!

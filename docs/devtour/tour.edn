@@ -487,15 +487,21 @@
     {:ns graphden.crud.entities :defn apply-create-core
      :say "The atomic core for generic creates: create-or-humanise-error, a
            post-create whole-fn type-check, and the rename-slot side-effect.
-           Since error-tolerance Phase 2 a type-check failure no longer rolls
-           the row back — the write is kept and the diagnostics surface as
-           `:type-warnings` on the success envelope."}
+           Since error-tolerance Phase 2 an ORDINARY type-check failure no
+           longer rolls the row back — the write is kept and the diagnostics
+           surface as `:type-warnings` on the success envelope. One class is
+           carved out: a SECRET-flow diagnostic still deletes the row and
+           returns the legacy `{:error …}` (the guarantee must not rest on
+           the derived diagnostics store — docs/SECRETS.md)."}
     {:ns graphden.crud.type-check :defn type-check-fn-after-mutation!
      :say "Reconstructs the touched fn-def and runs `check-fn-def!` after a
            mutation, recording failures in (and clearing fixes from) the
            per-branch diagnostics store. This is the type-check-on-write that
            `apply-create-core` relies on — an ill-typed fn persists, but never
-           silently: every save re-derives its diagnostics."
+           silently: every save re-derives its diagnostics. The
+           `:reject-secret?` option is the security carve-out: a
+           secret-involving failure is flagged `:secret? true` and NOT
+           recorded — the caller rolls the write back and hard-rejects."
      :see [[:types "check-fn-def!"]]}
     {:ns graphden.crud.entities :defn notify-after-write!
      :say "The post-persist step: invalidate caches and broadcast a NOTIFY delta

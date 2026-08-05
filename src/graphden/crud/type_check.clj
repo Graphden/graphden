@@ -288,10 +288,19 @@
                               (when-let [src (:source-slot-id s)]
                                 [src s]))))
                     own-fn-slots)
-              ;; Resolve any ref-targets in bindings into fn-by-id so
-              ;; binding-shape-for-edn can name them.
-              ref-ids (->> own-bindings
-                           (keep :ref-fn-id)
+              ;; Resolve any ref-targets in bindings AND their list
+              ;; items into fn-by-id so binding-shape-for-edn can name
+              ;; them. Item refs were missed originally — a ref item
+              ;; reconstructed as `nil` ("literal nil"), so the checker
+              ;; compared `:null` against the element type instead of
+              ;; the ref's return type (wrong diagnostic, and a
+              ;; secret-returning item ref escaped the secret
+              ;; carve-out's detection).
+              item-rows (when (seq own-bindings)
+                          (sp/query-entities storage :binding-list-item
+                                             {:binding-id (mapv :id own-bindings)}))
+              ref-ids (->> (concat (keep :ref-fn-id own-bindings)
+                                   (keep :ref-fn-id item-rows))
                            distinct
                            (remove #(contains? fn-by-id %)))
               fn-by-id+refs (cond-> fn-by-id
@@ -328,6 +337,27 @@
             (assoc :lambda-params (mapv keyword (:lambda-params own)))))))))
 
 
+(defn secret-diagnostic?
+  "True when a structured type-check diagnostic involves the `:secret`
+   information-flow marker — any of its type-carrying keys
+   (`:expected` / `:actual` from binding mismatches, `:declared` /
+   `:computed` from return-type mismatches) contains `[:secret …]`
+   anywhere in the type tree (`types/contains-secret?` — the same
+   nested-aware fold the checker itself uses).
+
+   This is the Error-Tolerance SECURITY CARVE-OUT detector: a
+   diagnostic matching it describes a secret-flow subtype violation
+   (e.g. a `[:secret :text]` return laundered into a plain `:text`
+   slot), which must stay a HARD save-time reject — the warn-and-
+   persist path would leave the guarantee resting on the best-effort
+   derived diagnostics store (see docs/SECRETS.md § Flow protection
+   vs Error Tolerance). There is no secret-specific `:reason` tag in
+   the checker; the marker in the types IS the signal."
+  [diagnostic]
+  (boolean (some #(some-> (get diagnostic %) types/contains-secret?)
+                 [:expected :actual :declared :computed])))
+
+
 (defn type-check-fn-after-mutation!
   "Run `check-fn-def!` on the affected fn-id after a CRUD mutation
    touched its bindings/slots. Returns nil on success or
@@ -342,33 +372,58 @@
 
    Also keeps the per-branch diagnostics store fresh: failure records,
    success clears, the fn's entry under the storage's current branch
-   (nil branch-id for an unversioned/base storage = default branch)."
-  [storage fn-id]
-  (with-org-alias-view*
-    (fn []
-      (let [result
-            (try
-              (when-let [fn-def (reconstruct-fn-def storage fn-id)]
-                (types-check/check-fn-def! fn-def))
-              nil
-              (catch clojure.lang.ExceptionInfo e
-                ;; `.getMessage` is nullable; `str` keeps the response field a
-                ;; string instead of a JSON-`null` the client would render as
-                ;; "rejected, no reason".
-                {:reason (str (Throwable/.getMessage e))
-                 :diagnostic (diag/from-ex e)})
-              (catch Exception e
-                ;; Defensive: any unexpected error during reconstruction is
-                ;; surfaced (better than silent broken state, worse than
-                ;; nothing).
-                (let [msg (str "type-check error: " (Throwable/.getMessage e))]
-                  {:reason msg
-                   :diagnostic {:message msg}})))
-            branch-id (vs/current-branch-id storage)]
-        (if result
-          (diag/record! branch-id fn-id [(:diagnostic result)])
-          (diag/clear-fn! branch-id fn-id))
-        result))))
+   (nil branch-id for an unversioned/base storage = default branch).
+
+   SECURITY CARVE-OUT (`:reject-secret?` option): when the failing
+   diagnostic is secret-involving (`secret-diagnostic?`) the result
+   carries `:secret? true`, and with `{:reject-secret? true}` the
+   store is left UNTOUCHED — the caller commits to rolling the write
+   back and returning a hard error, so no diagnostic should describe
+   a row that won't exist (and the fn's prior entry, describing the
+   restored prior state, stays valid). Callers WITHOUT the option
+   (the boot/restart recompute sweep, delete re-derivation, secret
+   rotation) keep recording secret diagnostics — for rows that DO
+   persist, the recorded entry is what the execute-refusal gate
+   reads."
+  ([storage fn-id]
+   (type-check-fn-after-mutation! storage fn-id nil))
+  ([storage fn-id {:keys [reject-secret?]}]
+   (with-org-alias-view*
+     (fn []
+       (let [result
+             (try
+               (when-let [fn-def (reconstruct-fn-def storage fn-id)]
+                 (types-check/check-fn-def! fn-def))
+               nil
+               (catch clojure.lang.ExceptionInfo e
+                 ;; `.getMessage` is nullable; `str` keeps the response field a
+                 ;; string instead of a JSON-`null` the client would render as
+                 ;; "rejected, no reason".
+                 {:reason (str (Throwable/.getMessage e))
+                  :diagnostic (diag/from-ex e)})
+               (catch Exception e
+                 ;; Defensive: any unexpected error during reconstruction is
+                 ;; surfaced (better than silent broken state, worse than
+                 ;; nothing).
+                 (let [msg (str "type-check error: " (Throwable/.getMessage e))]
+                   {:reason msg
+                    :diagnostic {:message msg}})))
+             secret? (boolean (some-> result :diagnostic secret-diagnostic?))
+             result (cond-> result
+                      (and result secret?) (assoc :secret? true))
+             branch-id (vs/current-branch-id storage)]
+         (cond
+           (nil? result)
+           (diag/clear-fn! branch-id fn-id)
+
+           ;; Secret carve-out: the caller rolls the write back, so the
+           ;; store must not gain an entry for a row that won't exist.
+           (and secret? reject-secret?)
+           nil
+
+           :else
+           (diag/record! branch-id fn-id [(:diagnostic result)]))
+         result)))))
 
 
 (defn type-check-binding-direct!

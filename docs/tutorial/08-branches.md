@@ -133,6 +133,33 @@ fork `dev` from `main`, `dev` correctly inherits `main`'s
 sticky-local web-server config, because you EXPLICITLY chose to
 fork.
 
+## Merge policy: `:forbid-invalid?`
+
+A branch can opt in to a merge-time QUALITY gate. Pass
+`"forbid-invalid?": true` when creating it (API-only for now —
+the editor's branch popover doesn't expose the flag yet):
+
+```bash
+curl -X POST "$BASE/api/branches" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "release", "forbid-invalid?": true}'
+```
+
+While either the SOURCE or the TARGET branch carries recorded
+type diagnostics (the "Type errors" panel's content — Lesson 03),
+merging INTO such a branch is refused with a 409
+(`:merge-protection-violation`) whose message names the broken
+fns: "Merge blocked: target branch forbids invalid fns —
+unresolved type errors on: …". Fix the flagged fns (or merge into
+a branch without the flag) and retry.
+
+Contrast with `:branch-local?` above — that's a different KIND of
+gate: `:branch-local?` is per-FN and silently SKIPS config-like
+fns while the merge succeeds; `:forbid-invalid?` is per-BRANCH
+and blocks the WHOLE merge while type errors exist anywhere on
+either side. One scopes what propagates; the other enforces
+when propagation may happen at all.
+
 ## Try it (sticky-local edition)
 
 1. On `main`, find `:web-server` (the editor's own server). Note

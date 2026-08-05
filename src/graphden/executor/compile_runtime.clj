@@ -416,6 +416,28 @@
                1))))
 
 
+(def ^:dynamic *compile-permit-override*
+  "Parallel-test seam. nil (production) = the global
+   `full-compile-semaphore`. The kaocha parallel plugin binds
+   `(atom :bypass)` — the suite runs ~a hundred tiny per-namespace
+   rebuilds, and funnelling those micro-graphs through ONE global permit
+   convoys unrelated namespaces (166 s waits; time-window execution
+   tests missed their polling deadlines — 17 failures, gate
+   20260805-212257). The production bound targets whole-platform
+   compiles, which the suite never runs concurrently anyway. A test of
+   the permit mechanism itself binds a fresh `Semaphore` here to get a
+   deterministic bound regardless of the env knob. IDeref values are
+   deref'd (the plugin wraps every seed in an atom)."
+  nil)
+
+
+(defn compile-permit-isolation-seed
+  "Seeder for the parallel plugin's isolation binding — see
+   `*compile-permit-override*`."
+  []
+  :bypass)
+
+
 (defn call-with-compile-permit
   "Run thunk `f` holding a full-compile permit. DEADLOCK-FREE BY
    CONSTRUCTION: callers hold the permit only across the pure
@@ -427,10 +449,18 @@
    Counts `:registry/compile-queued` when the permit isn't immediately
    available — the observable signal that compiles are stacking up."
   [f]
-  (when-not (java.util.concurrent.Semaphore/.tryAcquire full-compile-semaphore)
-    (counters/count! :registry/compile-queued)
-    (java.util.concurrent.Semaphore/.acquire full-compile-semaphore))
-  (try (f) (finally (java.util.concurrent.Semaphore/.release full-compile-semaphore))))
+  (let [ov *compile-permit-override*
+        ov (if (instance? clojure.lang.IDeref ov) @ov ov)
+        sem (cond
+              (nil? ov) full-compile-semaphore
+              (instance? java.util.concurrent.Semaphore ov) ov
+              :else nil)]
+    (if (nil? sem)
+      (f)
+      (do (when-not (java.util.concurrent.Semaphore/.tryAcquire sem)
+            (counters/count! :registry/compile-queued)
+            (java.util.concurrent.Semaphore/.acquire sem))
+          (try (f) (finally (java.util.concurrent.Semaphore/.release sem)))))))
 
 
 (defn rebuild-optimistic!

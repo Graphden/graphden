@@ -17,28 +17,41 @@
 
 (deftest permit-bounds-concurrency
   (testing "racing holders serialize — max observed concurrency is 1"
-    (let [inside (atom 0)
-          max-seen (atom 0)
-          run (fn []
-                (cr/call-with-compile-permit
-                  (fn []
-                    (let [n (swap! inside inc)]
-                      (swap! max-seen max n)
-                      (Thread/sleep 30)
-                      (swap! inside dec)
-                      :done))))
-          threads (mapv #(doto (Thread. ^Runnable run (str "permit-" %)) .start)
-                        (range 4))]
-      (doseq [^Thread t threads] (Thread/.join t 5000))
-      (is (zero? @inside) "every holder exited")
-      (is (= 1 @max-seen)
-          "the default single permit never admits two compiles at once"))))
+    ;; Bind a FRESH single-permit semaphore: deterministic regardless of
+    ;; the GRAPHDEN_MAX_CONCURRENT_COMPILES env and of the parallel
+    ;; plugin's `:bypass` seed (this test overrides the override).
+    ;; `bound-fn` carries the binding onto the raced threads.
+    (binding [cr/*compile-permit-override* (java.util.concurrent.Semaphore. 1)]
+      (let [inside (atom 0)
+            max-seen (atom 0)
+            run (bound-fn []
+                  (cr/call-with-compile-permit
+                    (fn []
+                      (let [n (swap! inside inc)]
+                        (swap! max-seen max n)
+                        (Thread/sleep 30)
+                        (swap! inside dec)
+                        :done))))
+            threads (mapv #(doto (Thread. ^Runnable run (str "permit-" %)) .start)
+                          (range 4))]
+        (doseq [^Thread t threads] (Thread/.join t 5000))
+        (is (zero? @inside) "every holder exited")
+        (is (= 1 @max-seen)
+            "a single permit never admits two compiles at once")))))
 
 
 (deftest permit-released-on-throw
   (testing "an exceptional compile releases the permit for the next caller"
-    (is (thrown? clojure.lang.ExceptionInfo
-          (cr/call-with-compile-permit
-            (fn [] (throw (ex-info "compile blew up" {}))))))
-    (is (= :ok (cr/call-with-compile-permit (fn [] :ok)))
-        "the permit is available again")))
+    (binding [cr/*compile-permit-override* (java.util.concurrent.Semaphore. 1)]
+      (is (thrown? clojure.lang.ExceptionInfo
+            (cr/call-with-compile-permit
+              (fn [] (throw (ex-info "compile blew up" {}))))))
+      (is (= :ok (cr/call-with-compile-permit (fn [] :ok)))
+          "the permit is available again"))))
+
+
+(deftest permit-bypass-runs-without-bounding
+  (testing "the parallel plugin's :bypass seed (atom-wrapped, as bound
+            by the plugin) short-circuits the permit entirely"
+    (binding [cr/*compile-permit-override* (atom :bypass)]
+      (is (= :ran (cr/call-with-compile-permit (fn [] :ran)))))))

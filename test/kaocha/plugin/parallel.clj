@@ -193,7 +193,14 @@
     ;; entries into another NS's counts. Default `{}` seed (no seeder
     ;; entry) — an empty store is the correct fresh-thread state, the
     ;; entries are derived, not configuration.
-    graphden.types.diagnostics/*diagnostics-override*])
+    graphden.types.diagnostics/*diagnostics-override*
+    ;; Full-compile permit bypass: the suite's ~hundred tiny
+    ;; per-namespace rebuilds must not convoy behind the ONE global
+    ;; permit meant for whole-platform compiles (unrelated namespaces
+    ;; waited 166s; time-window execution tests missed their polling
+    ;; deadlines — gate 20260805-212257, 17 failures). Seeded `:bypass`
+    ;; — permit-mechanism tests bind their own Semaphore instead.
+    graphden.executor.compile-runtime/*compile-permit-override*])
 
 
 ;; Per-var seeders. Some isolation atoms must start non-empty — the
@@ -221,7 +228,9 @@
     graphden.system.route-collection/*active-collection-override*
     graphden.system.route-collection/active-collection-isolation-seed
     graphden.storage.protocol.redaction/*sensitive-fields-override*
-    graphden.storage.protocol.redaction/sensitive-fields-isolation-seed})
+    graphden.storage.protocol.redaction/sensitive-fields-isolation-seed
+    graphden.executor.compile-runtime/*compile-permit-override*
+    graphden.executor.compile-runtime/compile-permit-isolation-seed})
 
 
 (defn- seed-for

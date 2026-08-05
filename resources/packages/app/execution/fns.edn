@@ -82,7 +82,7 @@
    :args {:a :_execute-body-persist :b {:value true}}}
 
   {:name :_execute-trace
-   :description "`:trace?` — Debug-P1 execution-path capture opt-in, same strict `true?` semantics as `:_execute-persist`. When true, the apply stage binds a path-trace atom around the run; capture additionally requires the traced fn to be in the executor's runtime traced set (`set-traced-fn-ids!`). Ambient sampling / full-value capture are P3 — not implemented."
+   :description "`:trace?` — Debug-P1 execution-path capture opt-in, same strict `true?` semantics as `:_execute-persist`. When true, the apply stage binds a path-trace atom around the run scoped to THIS execution's own traversal (the `trace-all` sentinel — running a fn with trace on IS the explicit subtree selection of PHILOSOPHY § Debugging constraint 1); the runtime traced set (`set-traced-fn-ids!`) gates only programmatic captures. Ambient sampling / full-value capture are P3 — not implemented."
    :parent :equal?
    :args {:a :_execute-body-trace :b {:value true}}}
 

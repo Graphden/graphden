@@ -20,6 +20,7 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.stats :as stats]
     [graphden.crud.request :as request]
+    [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
@@ -625,10 +626,15 @@
 
    `opts` (optional): `:trace?` — Debug P1 execution-path capture
    opt-in from the submit body. When true, `cr/*path-trace*` is bound
-   to a fresh vector-atom alongside `*effect-trace*`; absent/false →
-   NO binding at all, so the executor's seam pays only its nil-check.
-   (Per-fn selection still applies via `compile-eager`'s
-   `traced-fn-ids`; ambient sampling is P3 — not implemented.)
+   to a fresh vector-atom alongside `*effect-trace*`, AND
+   `ce/*traced-fn-ids*` is bound to the `ce/trace-all` sentinel so
+   every `:ref` frame of THIS execution records (Debug P2 — submitting
+   fn X with `trace?` is the user explicitly selecting X's subtree,
+   PHILOSOPHY § Debugging constraint 1; the capture stays bounded by
+   the 10k-entry + 256 KB caps). Absent/false → NO binding at all, so
+   the executor's seam pays only its nil-check. The root-level
+   `set-traced-fn-ids!` set stays the selective hook for programmatic
+   captures / P3 ambient sampling.
 
    Returns `[future trace-atom path-trace-atom]` — the reaper needs
    the trace atoms to read the captured sets after the future resolves
@@ -646,7 +652,8 @@
                             (throw (InterruptedException. "execution cancelled")))
                          cr/*effect-trace* trace]
                  (if path-trace
-                   (binding [cr/*path-trace* path-trace]
+                   (binding [cr/*path-trace* path-trace
+                             ce/*traced-fn-ids* (atom ce/trace-all)]
                      (cr/execute ctx fn-id args))
                    (cr/execute ctx fn-id args)))))
          fut (future

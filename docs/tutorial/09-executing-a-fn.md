@@ -211,6 +211,45 @@ Two side effects of this:
 5. Click `Repeat` on the persisted row — the form pre-fills,
    you run again, get the same result.
 
+## Tracing an execution
+
+The execute popover also has a `Trace path` checkbox (off by
+default — tracing adds a small capture cost to the run). When
+checked, the run records which fns it traversed: one entry per
+internal fn call, with the time each call took and whether it
+was served from the per-run cache.
+
+Try it:
+
+1. Open ▶ on a composed fn (anything that references other
+   fns — `:str-len` wrapped in your own fn-def works).
+2. Tick `Trace path` (and `Save to history` if you want the
+   trace to survive the page).
+3. Run. Under the result you get a `Show path on canvas`
+   button — click it.
+4. The traversed fn cards light up with a blue ring, each
+   wearing a small badge: `12ms` (time spent in that fn),
+   `3× 12ms` (called 3 times, 12 ms total — loops and shared
+   subtrees re-enter the same fn), or `cache` (the result was
+   reused, no time spent).
+5. A small panel at the bottom of the screen summarises the
+   path. If the run traversed fns that aren't currently drawn
+   on the canvas, it says `not on canvas: N fns` — hover it
+   for their names. Click `✕ clear` (or navigate anywhere) to
+   restore normal rendering.
+
+Persisted traced runs keep their path: in the History panel,
+rows with a recorded path show a `path` button that replays
+the same highlight.
+
+Two things the trace never contains:
+
+- **Values.** Only fn ids, timings and cache flags are
+  recorded — never the data flowing through.
+- **Secrets.** A fn that touches `:secret`-typed data (lesson
+  07) shows a red `secret` badge instead of timings — the
+  capture pipeline redacts it at record time.
+
 ## What we glossed over
 
 - **Branch-aware execution** — the active branch picks which

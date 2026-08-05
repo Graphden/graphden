@@ -168,12 +168,20 @@
                                   :title "Automatically saved — runs that produce side effects are always persisted for audit trail."}
                           [:input {:type "checkbox" :class "execute-persist-checkbox"
                                    :checked "checked" :disabled "disabled"}]
-                          [:span " Save to history"]]]}
+                          [:span " Save to history"]]
+                         [:label {:class "execute-option-label"
+                                  :title "Record which fns this run traverses (with per-call durations and cache hits). Off by default — tracing adds a small capture cost to the run."}
+                          [:input {:type "checkbox" :class "execute-trace-checkbox"}]
+                          [:span " Trace path"]]]}
           :else {:value [:div {:class "execute-options-row"}
                          [:label {:class "execute-option-label"
                                   :title "When checked, this run is saved to fn-execution storage. Pure fast runs are NOT saved by default — tick this for runs you want to keep."}
                           [:input {:type "checkbox" :class "execute-persist-checkbox"}]
-                          [:span " Save to history"]]]}}}
+                          [:span " Save to history"]]
+                         [:label {:class "execute-option-label"
+                                  :title "Record which fns this run traverses (with per-call durations and cache hits). Off by default — tracing adds a small capture cost to the run."}
+                          [:input {:type "checkbox" :class "execute-trace-checkbox"}]
+                          [:span " Trace path"]]]}}}
 
   {:name :_xp-actions
    :parent :if
@@ -386,6 +394,35 @@
           :attrs :_partial-eh-row-repeat-attrs
           :children ["Repeat"]}}
 
+  ;; "path" button (Debug P2) — rendered only for rows whose execution
+  ;; captured a `:path-trace` (submitted with the "Trace path" box on).
+  ;; Carries `data-execution-id`; the post-swap JS handler fetches the
+  ;; row JSON and highlights the traversed fns on the canvas
+  ;; (`editor-path-view.js`).
+  {:name :_partial-eh-row-path-trace
+   :parent :get
+   :args {:coll {:as :item} :key {:value :path-trace} :default nil}}
+
+  {:name :_partial-eh-row-path-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "execute-history-path-btn"
+                        :title "Show this run's execution path on the canvas"}}
+          :key {:value :data-execution-id}
+          :value :_partial-eh-row-id}}
+
+  {:name :_partial-eh-row-path-btn-el
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_partial-eh-row-path-attrs
+          :children ["path"]}}
+
+  {:name :_partial-eh-row-path-btn
+   :parent :if
+   :args {:test :_partial-eh-row-path-trace
+          :then :_partial-eh-row-path-btn-el
+          :else :_hidden-span}}
+
   ;; Preview text dispatch by status. JSON-stringifying the result
   ;; server-side keeps the format identical to what `shortPreview`
   ;; produced in JS. Error path picks `:error`; cancelled is literal.
@@ -429,7 +466,8 @@
           :attrs {:value {:class "execute-history-row-head"}}
           :children [:_partial-eh-row-status-span
                      :_partial-eh-row-ts-span
-                     :_partial-eh-row-repeat-btn]}}
+                     :_partial-eh-row-repeat-btn
+                     :_partial-eh-row-path-btn]}}
 
   {:name :_partial-eh-row-attrs
    :parent :assoc

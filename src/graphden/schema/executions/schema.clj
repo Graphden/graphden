@@ -134,7 +134,9 @@
 (def ^:private fn-execution-path-trace-field-uuid
   ;; Debug/observability P1 — execution-path capture. Filled on
   ;; terminal status only when the submission opted in via `trace?`
-  ;; AND at least one traversed fn was in the runtime traced set.
+  ;; (which scopes capture to that execution's own traversal — the
+  ;; `trace-all` sentinel; the runtime traced set gates only
+  ;; programmatic captures that bind `*path-trace*` directly).
   #uuid "c39fc6a2-73d6-45a7-b062-07c2de5a7b42")
 
 

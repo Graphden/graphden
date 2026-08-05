@@ -76,6 +76,21 @@
       (is (empty? @trace)))))
 
 
+(deftest trace-all-sentinel-records-every-frame-test
+  ;; Debug P2 — run-future binds `(atom ce/trace-all)` for `trace?`
+  ;; submissions: every :ref frame of that execution records without a
+  ;; per-fn membership test.
+  (let [trace (atom [])
+        a (random-uuid)
+        b (random-uuid)]
+    (binding [cr/*path-trace* trace
+              ce/*traced-fn-ids* (atom ce/trace-all)]
+      (call-with-cache a #{} (fn [_fa _ctx] :x) {} (fresh-ctx))
+      (call-with-cache b #{} (fn [_fa _ctx] :y) {} (fresh-ctx))
+      (is (= [a b] (mapv :fn-id @trace)))
+      (is (= [false false] (mapv :cache-hit? @trace))))))
+
+
 (deftest zero-work-when-var-unbound-test
   ;; Structural zero-alloc assertion: with `*path-trace*` nil (the
   ;; production default), the recorder must never be INVOKED — not

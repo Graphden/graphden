@@ -1294,6 +1294,28 @@
       (finally nil))))
 
 
+(deftest apply-trace-flag-alone-captures-subtree-test
+  ;; Debug P2 — the editor checkbox scenario: `trace?` on the body with
+  ;; NO fn in the runtime traced set. run-future's execution-scoped
+  ;; `trace-all` binding makes the run's own traversal the selected
+  ;; subtree, so the ref frame records anyway.
+  (let [storage (create-full-storage)
+        {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-all")
+        c (test-ctx storage)
+        result (apply-and-await!
+                 c {:fn-id (:id wrapped) :args {:a 5 :b 6}
+                    :timeout-ms 5000 :persist? true :trace? true})
+        entry (->> (:entries (:path-trace result))
+                   (filter #(= (str (:id target)) (:fn-id %)))
+                   first)]
+    (testing "trace? alone (empty traced set) still captures the path"
+      (is (= :succeeded (:status result)))
+      (is (= 11 (:result result)))
+      (is (some? entry) (pr-str (:path-trace result)))
+      (is (false? (:cache-hit? entry)))
+      (is (nat-int? (:duration-ms entry))))))
+
+
 (deftest apply-without-trace-flag-records-nothing-test
   (let [storage (create-full-storage)
         {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-off")

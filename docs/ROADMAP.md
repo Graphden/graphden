@@ -75,10 +75,19 @@ Launch-order refinements agreed 2026-07-20:
    (`compile-eager/set-traced-fn-ids!`); per-`:ref` entries
    `{fn-id, cache-hit?, duration-ms}` with capture-time `:secret`
    skip, snapshotted into `:fn-execution.path-trace` (256 KB cap,
-   oldest-first truncation). **P2 pending** (editor UI rendering of
-   the trace); **P3 pending** (~1% ambient sampling + full
-   intermediate-VALUE capture with its confirm/size/TTL
-   constraints) — remaining ~1 week
+   oldest-first truncation). **P2 shipped**: editor path-view —
+   the "Trace path" checkbox on the execute popover (a `trace?`
+   submission binds the execution-scoped `trace-all` sentinel, so
+   the run's own traversal is the explicitly-selected subtree of
+   constraint 1); history rows with a trace get a "path" button,
+   result panes a "Show path on canvas" affordance —
+   `editor-path-view.js` highlights the traversed fn cards (accent
+   ring + per-fn aggregate badge: count × total/max duration,
+   cache-hit, `[hidden — secret]`), dims the rest, and lists
+   off-canvas fns in a bottom-centre panel with ✕ clear; the view
+   is transient (any overlay rebuild clears it). **P3 pending**
+   (~1% ambient sampling + full intermediate-VALUE capture with
+   its confirm/size/TTL constraints) — remaining ~1 week
 5. ~~**Free-arg aliases**~~ — SHIPPED (the `slot.source-slot-id`
    rename model; see § Future Work entry, kept as the design record)
 (The routes-API + static-lint-against-drift item shipped as `window.API` +

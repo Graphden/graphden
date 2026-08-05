@@ -1016,10 +1016,25 @@ records `{fn-id, cache-hit?, duration-ms}` (secret-touching fns record
 a `:hidden` entry instead — constraint 4 below, applied at capture
 time), snapshotted onto the `:fn-execution` row's `:path-trace` field
 with a 256 KB byte cap and oldest-first truncation (constraint 5's
-size half). The constraints below stay in force for what remains:
-UI rendering is P2; ambient ~1 % sampling and full
-intermediate-VALUE capture (constraints 2–3) are P3 and NOT
-implemented — nothing captures values today.
+size half).
+
+**Implemented (P2)** — the second approach (node highlighting) plus
+the UI half of the first: the execute popover's "Trace path" checkbox
+(off by default) submits `trace?`, which binds the execution-scoped
+`trace-all` sentinel — running a specific fn with the box checked IS
+the "small subtree they explicitly select" of constraint 1 (capture
+admits only frames actually reached inside that one execution, and
+stays bounded by the P1 caps; there is still no global switch). The
+per-fn traced set remains the selective gate for programmatic
+captures and the P3 ambient-sampling hook. `editor-path-view.js`
+renders a stored trace read-only: traversed fn cards highlight with
+per-fn aggregate badges (invocation count, total/max duration, cache
+hits, "[hidden — secret]"), off-canvas fns are listed without being
+force-loaded, and the view clears on any canvas rebuild.
+
+The constraints below stay in force for what remains: ambient ~1 %
+sampling and full intermediate-VALUE capture (constraints 2–3) are P3
+and NOT implemented — nothing captures values today.
 
 **Non-negotiable constraints when this lands** — captured early so a
 future implementation cannot accidentally make production

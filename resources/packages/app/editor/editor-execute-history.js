@@ -82,6 +82,10 @@ function makeRowExpander(resultHostEl) {
         appendRuntimeEffectsStrip(resultHostEl,
                                   body['runtime-effects'],
                                   body['declared-effects']);
+        // Traced run (Debug P2) — offer the canvas path highlight.
+        if (typeof appendPathViewAffordance === 'function') {
+          appendPathViewAffordance(resultHostEl, body['path-trace']);
+        }
       }
     } catch (e) {
       resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
@@ -99,6 +103,24 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();   // don't bubble to row-click expand
       await applyHistoryArgs(fnEntity, btn.getAttribute('data-execution-id'));
+    });
+  });
+  // "path" button (Debug P2) — only present on rows whose execution
+  // captured a :path-trace. One JSON fetch pulls the trace, then
+  // `showExecutionPathView` (editor-path-view.js) highlights the
+  // traversed fn cards on the canvas.
+  panel.querySelectorAll('.execute-history-path-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();   // don't bubble to row-click expand
+      if (typeof showExecutionPathView !== 'function') return;
+      try {
+        const r = await authFetch(
+          API.api_execute_id(btn.getAttribute('data-execution-id')),
+          { method: 'GET' });
+        if (!r.ok) return;
+        const row = await r.json();
+        showExecutionPathView(row['path-trace']);
+      } catch (_) {}
     });
   });
   panel.querySelectorAll('.execute-history-row[data-execution-id]').forEach((row) => {

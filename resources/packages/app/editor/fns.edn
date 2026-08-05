@@ -70,6 +70,10 @@
                   "packages/app/editor/editor-edit-modes-type.js"
                   "packages/app/editor/editor-edit-reparent.js"
                   "packages/app/editor/editor-execute-result.js"
+                  ;; Canvas path-highlight for traced runs (Debug P2) —
+                  ;; loaded before the execute modules that call its
+                  ;; window-exported entry points.
+                  "packages/app/editor/editor-path-view.js"
                   "packages/app/editor/editor-execute-history.js"
                   "packages/app/editor/editor-execute.js"
                   "packages/app/editor/editor-fn-versions.js"

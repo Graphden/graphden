@@ -193,6 +193,9 @@ async function pollOnce(execId, resultHostEl) {
       appendRuntimeEffectsStrip(resultHostEl,
                                 row['runtime-effects'],
                                 row['declared-effects']);
+      if (typeof appendPathViewAffordance === 'function') {
+        appendPathViewAffordance(resultHostEl, row['path-trace']);
+      }
       stopPolling();
       return;
     }
@@ -220,7 +223,7 @@ function startPolling(execId, resultHostEl) {
 
 // === Submit ================================================================
 
-async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn) {
+async function submitExecution(fnEntity, args, persist, trace, resultHostEl, cancelBtn) {
   resultHostEl.textContent = '';
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
   try {
@@ -229,7 +232,8 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 'fn-id': fnEntity.id,
                               'args': args,
-                              'persist?': persist }),
+                              'persist?': persist,
+                              'trace?': trace }),
     });
     const body = await r.json().catch(() => null);
     resultHostEl.textContent = '';
@@ -282,6 +286,11 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
     appendRuntimeEffectsStrip(resultHostEl,
                               body?.['runtime-effects'],
                               body?.['declared-effects']);
+    // Traced run (Debug P2) — the inline response carries the captured
+    // :path-trace; offer the canvas highlight right from the result pane.
+    if (typeof appendPathViewAffordance === 'function') {
+      appendPathViewAffordance(resultHostEl, body?.['path-trace']);
+    }
   } catch (e) {
     resultHostEl.textContent = '';
     resultHostEl.appendChild(renderErrorPane('Network error: ' + e.message));
@@ -333,6 +342,7 @@ async function showExecutePopover(fnEntity, anchorEl) {
   const historyHost = el.querySelector('.execute-history-host');
   const confirmCb = el.querySelector('.execute-confirm-checkbox');
   const persistCb = el.querySelector('.execute-persist-checkbox');
+  const traceCb = el.querySelector('.execute-trace-checkbox');
   const runBtn = el.querySelector('.execute-run-btn');
   const cancelBtn = el.querySelector('.execute-cancel-btn');
   const resultHost = el.querySelector('.execute-result-host');
@@ -417,7 +427,8 @@ async function showExecutePopover(fnEntity, anchorEl) {
         args[a.slotName] = v;
       }
     }
-    await submitExecution(fnEntity, args, persistCb.checked, resultHost, cancelBtn);
+    await submitExecution(fnEntity, args, persistCb.checked,
+                          !!traceCb?.checked, resultHost, cancelBtn);
     // Run completed — the new row (if persisted) belongs in History.
     // Invalidate the cached panel so the next toggle re-fetches; if the
     // panel is currently OPEN, refresh it in-place so the user sees the

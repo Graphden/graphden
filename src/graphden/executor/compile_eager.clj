@@ -65,12 +65,27 @@
   (reset! *always-fresh-fn-ids* (set ids)))
 
 
+(def trace-all
+  "Sentinel value for `*traced-fn-ids*` (Debug P2). An execution-scoped
+   `(binding [*traced-fn-ids* (atom trace-all)] …)` means every `:ref`
+   frame of THAT execution records — no per-fn set test. Bound by
+   `crud.fn-execution.persist/run-future` alongside `*path-trace*` when
+   the submission opted in via `trace?`: running a specific fn with the
+   trace box checked IS the \"small subtree they explicitly select\"
+   from PHILOSOPHY § Debugging constraint 1 — the sentinel admits only
+   frames actually reached inside that one execution, a strict subset
+   of the fn's ref-closure, at zero closure-computation cost."
+  ::trace-all)
+
+
 ;; ^:dynamic for the same parallel-kaocha isolation reason as
 ;; `*always-fresh-fn-ids*` above (see `kaocha.plugin.parallel/isolation-vars`).
 (def ^:dynamic *traced-fn-ids*
   "Debug/observability P1 — the per-fn half of the execution-path
    capture opt-in: only `:ref` invocations whose target fn-id is in
-   this set record entries into `compile-runtime/*path-trace*`.
+   this set record entries into `compile-runtime/*path-trace*` (or,
+   when the atom holds the `trace-all` sentinel, every `:ref` frame of
+   the execution that bound it — the Debug-P2 editor path).
 
    RUNTIME-ONLY state, deliberately NOT a stored fn field:
    PHILOSOPHY § \"Per-fn debug/trace toggles are not a stored field\"
@@ -86,7 +101,10 @@
    Mirrors `set-always-fresh-fn-ids!` — call with the ids a user
    explicitly selected for tracing; capture additionally requires the
    per-execution `trace?` flag (which binds
-   `compile-runtime/*path-trace*`). Ambient sampling is P3 — absent."
+   `compile-runtime/*path-trace*`). Editor-submitted `trace?` runs
+   bypass this set via the `trace-all` execution-scoped binding (see
+   `trace-all`); the root-level set remains the selective hook for
+   programmatic captures and the P3 ambient-sampling design — absent."
   [ids]
   (reset! *traced-fn-ids* (set ids)))
 
@@ -180,13 +198,16 @@
 (defn- active-path-trace
   "The bound `*path-trace*` atom when path capture applies to `ref-id`,
    else nil. First check is the nil-check on the var — the entire cost
-   of the feature for untraced executions; the set membership test only
-   runs once a trace atom is bound (same cheap `contains?` shape as the
-   always-fresh check)."
+   of the feature for untraced executions; the per-fn test only runs
+   once a trace atom is bound (same cheap `contains?` shape as the
+   always-fresh check). The `trace-all` sentinel (execution-scoped,
+   bound by `run-future` for `trace?` submissions — Debug P2) short-
+   circuits the membership test: every frame of that execution records."
   [ref-id]
   (when-some [trace (deref ^clojure.lang.Var @path-trace-var)]
-    (when (contains? @*traced-fn-ids* ref-id)
-      trace)))
+    (let [ids @*traced-fn-ids*]
+      (when (or (identical? trace-all ids) (contains? ids ref-id))
+        trace))))
 
 
 (defn- record-path-hit!

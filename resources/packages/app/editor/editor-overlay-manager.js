@@ -190,6 +190,11 @@ function createPlaceholderOverlay(node, container) {
  * Create all node overlays
  */
 function createNodeOverlays() {
+  // The execution-path view (editor-path-view.js) anchors badges +
+  // classes on the CURRENT overlay set — a rebuild invalidates that
+  // mapping, so the transient view clears rather than go stale.
+  if (typeof clearExecutionPathView === 'function') clearExecutionPathView();
+
   // Find the node that has active preview - we should NOT remove its overlay
   // to prevent mouseleave events during rebuild
   let preservedOverlayId = null;

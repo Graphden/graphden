@@ -4073,6 +4073,18 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   cursor: pointer;
 }
 .execute-history-repeat-btn:hover { background: var(--hover-bg); }
+/* "path" button — same chip styling as Repeat; only rendered on rows
+   whose execution captured a :path-trace (Debug P2). */
+.execute-history-path-btn {
+  padding: 1px 6px;
+  font-family: inherit; font-size: 10px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.execute-history-path-btn:hover { background: var(--hover-bg); }
 .execute-history-preview {
   font-family: monospace; font-size: 10.5px;
   color: var(--card-fg);
@@ -4081,6 +4093,92 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* =========================================================================
+   EXECUTION PATH VIEW (Debug P2) — transient canvas highlight of a
+   traced run's :path-trace. Traversed fn cards wear an accent ring +
+   a compact per-fn timing badge; the rest of the canvas dims while
+   the view is active. Cleared by the ✕ panel action or any overlay
+   rebuild (relayout / fn switch / branch switch).
+   ========================================================================= */
+
+#graph-layer.path-view-active .node-overlay:not(.path-highlighted) {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+.node-overlay.path-highlighted {
+  box-shadow: 0 0 0 3px var(--accent);
+}
+/* Per-fn aggregate badge — count × total duration / "cache" / "secret".
+   Sits INSIDE the card (overlays clip via overflow:hidden), top-right
+   over the header band, so it carries its own opaque ground for
+   contrast. */
+.path-trace-badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  z-index: 6;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--accent);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+/* Secret-hidden node — a11y-strong error tone (the --error-fg-strong
+   precedent from the type-errors panel). */
+.path-trace-badge-secret {
+  color: var(--error-fg-strong);
+  border-color: var(--error-fg-strong);
+}
+
+/* Summary panel — the editor-busy banner slot (bottom-centre), but
+   interactive: carries the ✕ clear action. */
+.path-view-panel {
+  position: fixed;
+  bottom: 16px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 10002;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-family: inherit; font-size: 12px;
+  box-shadow: var(--shadow-lg);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.path-view-off-canvas,
+.path-view-truncated { color: var(--muted-fg); }
+.path-view-clear {
+  padding: 1px 6px;
+  font-family: inherit; font-size: 11px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.path-view-clear:hover,
+.path-view-clear:focus-visible { background: var(--hover-bg); outline: none; }
+
+/* "Show path on canvas" affordance appended under a traced run's
+   result pane (inline run, poll completion, history row expand). */
+.execute-path-affordance { margin-top: 6px; }
+.execute-show-path-btn {
+  padding: 2px 8px;
+  font-family: inherit; font-size: 10.5px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.execute-show-path-btn:hover,
+.execute-show-path-btn:focus-visible { background: var(--hover-bg); outline: none; }
 
 /* =========================================================================
    SECRETS — sidebar section + 🔒 indicator + create / rotate popover.

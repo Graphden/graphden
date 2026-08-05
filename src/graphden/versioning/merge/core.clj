@@ -1,16 +1,26 @@
 (ns graphden.versioning.merge.core
-  "Merge protection for bindings carrying sensitive values.
+  "Merge protection policies.
 
-   When merging branches, bindings marked `merge-protected` should not
-   transfer from source to target. The trait is associated via the
-   `binding-trait` entity (see `graphden.schema.traits.schema`).
+   Two independent gates, both surfaced as `:merge-protection-violation`:
 
-   Use cases:
-   - Production credentials should stay on production branch.
-   - Environment-specific secrets shouldn't leak across branches."
+   1. Trait-based — bindings marked `merge-protected` should not
+      transfer from source to target. The trait is associated via the
+      `binding-trait` entity (see `graphden.schema.traits.schema`).
+      Use cases: production credentials stay on the production branch;
+      environment-specific secrets don't leak across branches.
+
+   2. Branch policy (error-tolerance Phase 5) — a branch whose row has
+      `:forbid-invalid?` truthy refuses merges INTO it while recorded
+      type diagnostics (`graphden.types.diagnostics`) exist on either
+      the source or the target branch. Pragmatic v1: the diagnostics
+      store is DERIVED state (empty after a JVM restart until checks
+      re-record), so the gate judges what is RECORDED — absence means
+      allow. See docs/ROADMAP.md § Error Tolerance."
   (:require
+    [clojure.string :as str]
     [graphden.schema.traits.schema :as vts]
     [graphden.storage.protocol.core :as sp]
+    [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -62,8 +72,44 @@
      :blocked? (boolean (seq transfers))}))
 
 
+(defn validate-branch-policy!
+  "Error-tolerance Phase 5 gate. When the TARGET branch (the wrapper's
+   current branch) has `:forbid-invalid?` truthy, throw
+   `:merge-protection-violation` if either the source or the target
+   branch currently has recorded type diagnostics — naming the broken
+   fns. Judged on what is RECORDED in the derived per-branch store
+   (`graphden.types.diagnostics`): absence of entries means allow (the
+   honest contract — see the ns docstring). No-op when the flag is
+   unset. Wired both here (for `validate-merge!` / `safe-merge-branch!`)
+   and in the live `:merge-branch!` base-fn (`app/branches/impls.clj`),
+   which calls it after switching to the target."
+  [versioned-storage source-branch-id]
+  (let [base-storage (vs/unwrap versioned-storage)
+        target-branch-id (vs/current-branch-id versioned-storage)
+        target-row (when target-branch-id
+                     (sp/read-entity base-storage :branch target-branch-id))]
+    (when (:forbid-invalid? target-row)
+      (let [errors-by-fn (merge (diag/branch-errors source-branch-id)
+                                (diag/branch-errors target-branch-id))]
+        (when (seq errors-by-fn)
+          (let [fn-ids (vec (keys errors-by-fn))
+                ;; read-entities returns {id → row} already.
+                rows-by-id (sp/read-entities base-storage :fn fn-ids)
+                fn-names (mapv #(or (:name (get rows-by-id %)) (str %)) fn-ids)]
+            (throw (ex-info (str "Merge blocked: target branch forbids invalid fns"
+                                 " — unresolved type errors on: "
+                                 (str/join ", " (sort fn-names)))
+                            {:type :merge-protection-violation
+                             :reason :forbid-invalid
+                             :invalid-fn-names fn-names
+                             :invalid-fn-ids fn-ids
+                             :source-branch-id source-branch-id
+                             :target-branch-id target-branch-id}))))))))
+
+
 (defn validate-merge!
   [versioned-storage source-branch-id]
+  (validate-branch-policy! versioned-storage source-branch-id)
   (let [{:keys [protected-transfers blocked?]}
         (detect-protected-transfers versioned-storage source-branch-id)]
     (when blocked?

@@ -968,17 +968,24 @@
    Arguments:
    - versioned-storage: VersionedStorage instance
    - branch-name: Name for the new branch (must be unique)
-   - opts: Optional map with :base-branch-id to fork from a different branch"
+   - opts: Optional map with :base-branch-id to fork from a different
+     branch, and :forbid-invalid? to set the merge-policy flag
+     (error-tolerance Phase 5 — merges INTO the branch are refused
+     while recorded type diagnostics exist on either side)."
   ([versioned-storage branch-name]
    (create-branch! versioned-storage branch-name {}))
-  ([versioned-storage branch-name {:keys [base-branch-id]}]
+  ([versioned-storage branch-name {:keys [base-branch-id forbid-invalid?]}]
    (let [parent-id (or base-branch-id (:branch-id versioned-storage))]
      (epoch/bump! (:base-storage versioned-storage) :branch)
      (sp/create-entity (:base-storage versioned-storage) :branch
-                       {:id (random-uuid)
-                        :name branch-name
-                        :base-branch-id parent-id
-                        :created-at (now)}))))
+                       (cond-> {:id (random-uuid)
+                                :name branch-name
+                                :base-branch-id parent-id
+                                :created-at (now)}
+                         ;; cond-> (not a bare assoc): an absent optional key
+                         ;; must not surface as an explicit nil column write.
+                         (some? forbid-invalid?)
+                         (assoc :forbid-invalid? (boolean forbid-invalid?)))))))
 
 
 (defn switch-branch

@@ -303,13 +303,14 @@
    :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :branch} :default {:value ""}}}}}
 
   {:name :_mcp-create-branch-parsed
-   :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main."
+   :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main. `:forbid-invalid?` is carried as nil — the MCP tool doesn't expose the branch policy flag (yet); the parsed record must still satisfy the pipeline's shape."
    :parent :zipmap
-   :args {:keys [{:value :branch-name} {:value :base-ref}]
+   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?}]
           :vals [{:parent :to-str
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :name} :default {:value ""}}}}}
                  {:parent :to-str
-                  :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :base} :default {:value "main"}}}}}]}}
+                  :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :base} :default {:value "main"}}}}}
+                 {:parent :const :args {:value nil}}]}}
 
   {:name :_mcp-tool-create-branch
    :description "create-branch tool — the SAME guards POST /api/branches runs (blank name, name taken, base missing), so a bad request reads as feedback the model can act on."

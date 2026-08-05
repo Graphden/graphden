@@ -12,6 +12,7 @@
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.system.branch-router :as br]
+    [graphden.versioning.merge.core :as merge-policy]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]))
 
@@ -78,15 +79,18 @@
 
 (defbase create-branch!
   "Single library call over `vs/create-branch!` — write a new branch
-   row off `:branch-name` + `:base-branch-id` and return the row.
-   Atomic §3.1 boundary; the response-shape building lives in
-   graph (`:_create-branch-apply` → `:as-json-branch` + `:zipmap`
-   envelope), not here."
-  [branch-name base-branch-id]
+   row off `:branch-name` + `:base-branch-id` (+ the optional
+   `:forbid-invalid?` merge-policy flag, error-tolerance Phase 5) and
+   return the row. Atomic §3.1 boundary; the response-shape building
+   lives in graph (`:_create-branch-apply` → `:as-json-branch` +
+   `:zipmap` envelope), not here."
+  [branch-name base-branch-id forbid-invalid?]
   (cr/record-effect! :db)
   (let [row (vs/create-branch! (request/require-storage ctx)
                                branch-name
-                               {:base-branch-id base-branch-id})]
+                               (cond-> {:base-branch-id base-branch-id}
+                                 (some? forbid-invalid?)
+                                 (assoc :forbid-invalid? forbid-invalid?)))]
     ;; A fresh branch needs no invalidation (its ctx builds lazily),
     ;; but the epoch bump must still be NOTED — un-noted it ages past
     ;; grace and triggers a spurious heal ~10s after every branch
@@ -203,6 +207,13 @@
   [source-branch-id target-branch-id resolutions]
   (cr/record-effect! :db)
   (let [storage (vs/switch-branch (request/require-storage ctx) target-branch-id)
+        ;; Error-tolerance Phase 5 — when the TARGET branch row carries
+        ;; `:forbid-invalid?`, refuse while recorded type diagnostics
+        ;; exist on either side (throws :merge-protection-violation;
+        ;; the graph `:on-throw` case-dispatch renders the envelope).
+        ;; Part of the atomic boundary: it must judge the same
+        ;; switched-to-target storage the merge itself uses.
+        _ (merge-policy/validate-branch-policy! storage source-branch-id)
         result (vs/merge-branch! storage source-branch-id
                                  {:conflict-resolutions resolutions})]
     ;; Invalidate only the fns the merge touched (source's version

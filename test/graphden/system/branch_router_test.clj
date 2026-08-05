@@ -22,6 +22,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.schema.executions.schema :as es]
@@ -35,6 +36,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
+    [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -594,3 +596,52 @@
         (testing "and main still computes 3 — the delta did not corrupt the base"
           (is (= 3 (exec/execute base-ctx cid {})))))
       (finally (sp/close storage)))))
+
+
+;; =============================================================================
+;; Ctx-build diagnostics recompute (error-tolerance)
+;; =============================================================================
+
+(deftest ^:integration ctx-build-recheck-repopulates-user-diagnostics-test
+  ;; Simulates the post-restart state: the derived diagnostics store is
+  ;; EMPTY while an editor-authored fn (random id) is broken in storage.
+  ;; The ctx-build recompute must re-record it; a package-derived
+  ;; sibling (deterministic uuid-v5(ns, name) id) must be SKIPPED —
+  ;; the boot sync sweep owns those. Runs the private worker
+  ;; synchronously (the production hook fires it on a future with
+  ;; conveyed bindings, so the store semantics are identical).
+  (exec/with-isolated-rich-types
+    (fn []
+      (binding [diag/*diagnostics-override* (atom {})]
+        (let [vstorage (setup/create-versioned-test-storage)]
+          (try
+            (let [branch-id (vs/current-branch-id vstorage)
+                  base (setup/create-base-fn! vstorage "rchk-base" :int)
+                  slot (setup/create-slot! vstorage "n" :int)
+                  _ (setup/attach-slot! vstorage (:id base) (:id slot) 0)
+                  _ (registry/record-rich-types-raw!
+                      :rchk-base {:return :int :args {:n :int} :effects #{}})
+                  ;; EDITOR-authored: random id ≠ deterministic derivation.
+                  broken (sp/create-entity vstorage :fn
+                                           {:id (random-uuid)
+                                            :name "rchk-user-broken"
+                                            :parent-ids [(:id base)]})
+                  _ (setup/bind-value! vstorage (:id broken) (:id slot) "not-an-int")
+                  ;; PACKAGE-authored sibling: id IS uuid-v5(ns-path, name),
+                  ;; equally broken — out of scope for the recompute.
+                  ns-row (sp/create-entity vstorage :ns {:name "pkgroot"})
+                  det-id (records/fn-id "pkgroot" :rchk-pkg-broken)
+                  _ (sp/create-entity vstorage :fn
+                                      {:id det-id
+                                       :name "rchk-pkg-broken"
+                                       :namespace-id (:id ns-row)
+                                       :parent-ids [(:id base)]})
+                  _ (setup/bind-value! vstorage det-id (:id slot) "also-bad")]
+              (is (nil? (diag/errors-for-fn branch-id (:id broken)))
+                  "post-restart baseline: nothing recorded")
+              (#'br/recheck-user-fns! {:storage vstorage} branch-id)
+              (is (seq (diag/errors-for-fn branch-id (:id broken)))
+                  "editor-authored broken fn re-recorded by the ctx-build recheck")
+              (is (nil? (diag/errors-for-fn branch-id det-id))
+                  "package-derived id skipped — the boot sweep owns those"))
+            (finally (sp/close (vs/unwrap vstorage)))))))))

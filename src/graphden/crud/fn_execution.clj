@@ -34,11 +34,16 @@
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.types.diagnostics :as diag]
+    [graphden.versioning.storage.core :as vs]))
 
 
 ;; Re-export: tests + the cancel endpoint look up futures by id.
 (def lookup-future persist/lookup-future)
+
+
+(declare apply-execute*)
 
 
 ;; =============================================================================
@@ -85,11 +90,37 @@
       row (assoc :execution-id (str (:id row))))))
 
 
+(defn- type-error-rejection
+  "Error-tolerance Phase 4 — the submit-time refusal built when `fn-row`
+   has RECORDED type diagnostics on the current branch (400 via the
+   standard `:rejected` envelope, reason `:unresolved-type-errors`).
+
+   Judged on what the derived per-branch store has RECORDED: the store
+   is empty after a JVM restart until checks re-record (the branch
+   router's ctx-build recompute repopulates editor-authored fns
+   asynchronously), so absence of an entry means ALLOW — the honest
+   contract for derived state. Returns nil when execution may proceed."
+  [storage fn-row]
+  (let [fn-id (:id fn-row)
+        diags (diag/errors-for-fn (vs/current-branch-id storage) fn-id)]
+    (when (seq diags)
+      {:ok false :status :rejected
+       :error (str "Execution refused: fn '" (or (:name fn-row) fn-id)
+                   "' has unresolved type errors — "
+                   (:message (first diags)))
+       :http-status 400
+       :error-data {:reason :unresolved-type-errors
+                    :fn-id (str fn-id)
+                    :diagnostics (vec diags)}})))
+
+
 (defn apply-execute
   "Stage 3 — submit the future, deref with timeout. Returns one of:
      {:status :succeeded :result … :execution-id? :declared-effects …}
      {:status :pending :execution-id …}
      {:status :failed :error … :error-data … :execution-id?}
+     {:ok false :status :rejected …} — submit-time refusal (recorded
+       type errors, capacity cap) before any row/future exists.
 
    Persistence policy:
    - Pre-create row when we know we need polling capability
@@ -104,133 +135,140 @@
    ;; through the 3-arity, so the request does ONE resolve, not two.
    (apply-execute ctx parsed (lookup/resolve-fn (request/require-storage ctx) parsed)))
   ([ctx parsed fn-row]
-   (let [storage (request/require-storage ctx)
-         ;; A tenant's SUBMITTED fn is untrusted graph code, so it runs
-         ;; effect-restricted: carry the cloud allow-list on the ctx and the
-         ;; executor gates it via `record-effect!` (compile-runtime honours
-         ;; `:allowed-effects`). Only the user-fn execution (`run-future`) uses
-         ;; this ctx — the platform lookups above and the request handler around
-         ;; us stay UNRESTRICTED, because that trusted machinery reads storage
-         ;; through `:pg-query` (a `:raw-sql`-recording base-fn) which must not
-         ;; be gated. Public org ≡ platform / single-tenant → no restriction.
-         exec-ctx (cond-> ctx
-                    (not= (tc/current-org) tc/public-org)
-                    ;; Per-org effect allow-list resolved from the org's plan
-                    ;; (task #4) — free stays locked, a paid tier widens it
-                    ;; (e.g. +:network). Falls back to the locked default when
-                    ;; no plan resolver is installed.
-                    (assoc :allowed-effects (cr/cloud-allowed-effects-for (tc/current-org))))
-         fn-id (:id fn-row)
-         fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
-         ;; Cached: this call was ~1.3–1.9 s uncached and runs once per
-         ;; request. Safe here because /api/execute runs after CRUD writes
-         ;; (which invalidate), never during one. See lookup ns.
-         free-slots (lookup/free-arg-slot-map-cached ctx fn-id)
-         declared-eff (persist/declared-effects-of fn-id)
-         need-persist? (or (:persist? parsed) (seq declared-eff))
-         executor-args (into {}
-                             (keep (fn [[k v]]
-                                     (when (contains? free-slots (keyword k))
-                                       [(keyword k)
-                                        (if (persist/ref-arg? v)
-                                          (persist/parse-ref-fn-id v)
-                                          v)])))
-                             (:args parsed))
-         cancel-flag (atom false)
-         ;; A tenant's per-org cap is enforced FLEET-WIDE (counting pending
-         ;; rows in shared storage); the public/platform org keeps the per-pod
-         ;; atom. `storage` is the org-scoped request storage, so the fleet
-         ;; count sees only this org's own rows.
-         org (tc/current-org)
-         ;; Rollup context (Phase C1): raw pool + org + submit time — threaded
-         ;; to every terminal transition so `usage-stat` counts each run once,
-         ;; with duration, no matter which arm finishes it. nil pool (bare test
-         ;; ctx) → bumps are no-ops.
-         stats-ctx {:pool (:pool (:pg-storage ctx))
-                    :org org
-                    :start-ms (System/currentTimeMillis)}
-         release (persist/acquire-execution-slot! storage org (not= org tc/public-org))]
-     (if (nil? release)
-       ;; Global or per-org concurrency cap hit — reject WITHOUT creating a
-       ;; row or a future, so a client can't pile unbounded compute onto the
-       ;; shared JVM. Reuses the standard rejection envelope.
-       {:ok false :status :rejected
-        :error "Execution capacity exceeded — retry shortly"
-        :http-status 429
-        :error-data {:reason :over-capacity}}
-       (let [pre-persisted? need-persist?
-             ;; Between `acquire-execution-slot!` and `run-future` (whose
-             ;; future's `finally` takes ownership of `release`), the pending-
-             ;; row write can throw (DB blip / unique / RLS reject). Release
-             ;; the slot on any such throw or the permit leaks permanently —
-             ;; the org (then the JVM) would eventually hit the cap and reject
-             ;; every execution with `:over-capacity` while nothing runs.
-             ;; `release` is idempotent, so the future's finally re-calling it
-             ;; is a no-op.
-             [row fut trace]
-             (try
-               (let [row (when pre-persisted?
-                           (persist/create-pending-with-args!
-                             storage fn-version-id declared-eff
-                             (:user-id parsed) (:args parsed) free-slots))
-                     [fut trace] (persist/run-future exec-ctx fn-id executor-args cancel-flag release)]
-                 [row fut trace])
-               (catch Exception t
-                 (release)
-                 (throw t)))
-             _   (when row (persist/register-future! (:id row) fut cancel-flag))
-             result (try (deref fut (:timeout-ms parsed) ::pending)
-                         (catch java.util.concurrent.ExecutionException ee
-                           {::ex (java.util.concurrent.ExecutionException/.getCause ee)}))
-             ;; Closure (not eager) — only the inline-success/failure
-             ;; branches snapshot the trace; timeout branches hand the atom
-             ;; off to `record-completion!` which snapshots when the future
-             ;; resolves.
-             runtime-eff (fn [] (persist/snapshot-runtime-effects trace))]
-         (cond
-           ;; Timeout AND we haven't pre-persisted — persist lazily so the
-           ;; client gets an id to poll. record-completion! tails the future
-           ;; to update the row when it finally resolves.
-           (and (= ::pending result) (not pre-persisted?))
-           (let [r (persist/create-pending-with-args!
-                     storage fn-version-id declared-eff
-                     (:user-id parsed) (:args parsed) free-slots)]
-             (persist/register-future! (:id r) fut cancel-flag)
-             (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx)
-             {:status :pending :execution-id (str (:id r))})
+   (or (type-error-rejection (request/require-storage ctx) fn-row)
+       (apply-execute* ctx parsed fn-row))))
 
-           ;; Timeout AND we pre-persisted — record-completion's tail-future
-           ;; fills in :result; client polls our row.
-           (= ::pending result)
-           (do (persist/record-completion! storage (:id row) fn-id fut trace declared-eff stats-ctx)
-               {:status :pending :execution-id (str (:id row))})
 
-           ;; Inline failure — write outcome to the row synchronously (if
-           ;; persisted) so the polling-by-id case is consistent. Redaction
-           ;; lifts a tainted fn-def's :error/:error-data into a generic
-           ;; hidden form so the secret doesn't leak via the exception
-           ;; message (a string that may have wrapped the value).
-           (and (map? result) (::ex result))
-           (let [cause (::ex result)]
-             (finalize-inline-outcome
-               {:status :failed
-                :error (or (ex-message cause) (str cause))
-                :error-data (ex-data cause)}
-               {:storage storage :row row :fn-id fn-id
-                :declared-effects declared-eff :runtime-effects (runtime-eff)
-                :stats stats-ctx}))
+(defn- apply-execute*
+  "The post-admission body of `apply-execute` — see its docstring."
+  [ctx parsed fn-row]
+  (let [storage (request/require-storage ctx)
+        ;; A tenant's SUBMITTED fn is untrusted graph code, so it runs
+        ;; effect-restricted: carry the cloud allow-list on the ctx and the
+        ;; executor gates it via `record-effect!` (compile-runtime honours
+        ;; `:allowed-effects`). Only the user-fn execution (`run-future`) uses
+        ;; this ctx — the platform lookups above and the request handler around
+        ;; us stay UNRESTRICTED, because that trusted machinery reads storage
+        ;; through `:pg-query` (a `:raw-sql`-recording base-fn) which must not
+        ;; be gated. Public org ≡ platform / single-tenant → no restriction.
+        exec-ctx (cond-> ctx
+                   (not= (tc/current-org) tc/public-org)
+                   ;; Per-org effect allow-list resolved from the org's plan
+                   ;; (task #4) — free stays locked, a paid tier widens it
+                   ;; (e.g. +:network). Falls back to the locked default when
+                   ;; no plan resolver is installed.
+                   (assoc :allowed-effects (cr/cloud-allowed-effects-for (tc/current-org))))
+        fn-id (:id fn-row)
+        fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
+        ;; Cached: this call was ~1.3–1.9 s uncached and runs once per
+        ;; request. Safe here because /api/execute runs after CRUD writes
+        ;; (which invalidate), never during one. See lookup ns.
+        free-slots (lookup/free-arg-slot-map-cached ctx fn-id)
+        declared-eff (persist/declared-effects-of fn-id)
+        need-persist? (or (:persist? parsed) (seq declared-eff))
+        executor-args (into {}
+                            (keep (fn [[k v]]
+                                    (when (contains? free-slots (keyword k))
+                                      [(keyword k)
+                                       (if (persist/ref-arg? v)
+                                         (persist/parse-ref-fn-id v)
+                                         v)])))
+                            (:args parsed))
+        cancel-flag (atom false)
+        ;; A tenant's per-org cap is enforced FLEET-WIDE (counting pending
+        ;; rows in shared storage); the public/platform org keeps the per-pod
+        ;; atom. `storage` is the org-scoped request storage, so the fleet
+        ;; count sees only this org's own rows.
+        org (tc/current-org)
+        ;; Rollup context (Phase C1): raw pool + org + submit time — threaded
+        ;; to every terminal transition so `usage-stat` counts each run once,
+        ;; with duration, no matter which arm finishes it. nil pool (bare test
+        ;; ctx) → bumps are no-ops.
+        stats-ctx {:pool (:pool (:pg-storage ctx))
+                   :org org
+                   :start-ms (System/currentTimeMillis)}
+        release (persist/acquire-execution-slot! storage org (not= org tc/public-org))]
+    (if (nil? release)
+      ;; Global or per-org concurrency cap hit — reject WITHOUT creating a
+      ;; row or a future, so a client can't pile unbounded compute onto the
+      ;; shared JVM. Reuses the standard rejection envelope.
+      {:ok false :status :rejected
+       :error "Execution capacity exceeded — retry shortly"
+       :http-status 429
+       :error-data {:reason :over-capacity}}
+      (let [pre-persisted? need-persist?
+            ;; Between `acquire-execution-slot!` and `run-future` (whose
+            ;; future's `finally` takes ownership of `release`), the pending-
+            ;; row write can throw (DB blip / unique / RLS reject). Release
+            ;; the slot on any such throw or the permit leaks permanently —
+            ;; the org (then the JVM) would eventually hit the cap and reject
+            ;; every execution with `:over-capacity` while nothing runs.
+            ;; `release` is idempotent, so the future's finally re-calling it
+            ;; is a no-op.
+            [row fut trace]
+            (try
+              (let [row (when pre-persisted?
+                          (persist/create-pending-with-args!
+                            storage fn-version-id declared-eff
+                            (:user-id parsed) (:args parsed) free-slots))
+                    [fut trace] (persist/run-future exec-ctx fn-id executor-args cancel-flag release)]
+                [row fut trace])
+              (catch Exception t
+                (release)
+                (throw t)))
+            _   (when row (persist/register-future! (:id row) fut cancel-flag))
+            result (try (deref fut (:timeout-ms parsed) ::pending)
+                        (catch java.util.concurrent.ExecutionException ee
+                          {::ex (java.util.concurrent.ExecutionException/.getCause ee)}))
+            ;; Closure (not eager) — only the inline-success/failure
+            ;; branches snapshot the trace; timeout branches hand the atom
+            ;; off to `record-completion!` which snapshots when the future
+            ;; resolves.
+            runtime-eff (fn [] (persist/snapshot-runtime-effects trace))]
+        (cond
+          ;; Timeout AND we haven't pre-persisted — persist lazily so the
+          ;; client gets an id to poll. record-completion! tails the future
+          ;; to update the row when it finally resolves.
+          (and (= ::pending result) (not pre-persisted?))
+          (let [r (persist/create-pending-with-args!
+                    storage fn-version-id declared-eff
+                    (:user-id parsed) (:args parsed) free-slots)]
+            (persist/register-future! (:id r) fut cancel-flag)
+            (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx)
+            {:status :pending :execution-id (str (:id r))})
 
-           ;; Inline success — same: write synchronously so the GET endpoint
-           ;; immediately returns :succeeded, no race window. Redaction
-           ;; lifts a tainted fn-def's :result into nil + `:tainted? true`
-           ;; so the JSON response carries metadata only.
-           :else
-           (-> (finalize-inline-outcome
-                 {:status :succeeded :result result}
-                 {:storage storage :row row :fn-id fn-id
-                  :declared-effects declared-eff :runtime-effects (runtime-eff)
-                  :stats stats-ctx})
-               (assoc :declared-effects declared-eff))))))))
+          ;; Timeout AND we pre-persisted — record-completion's tail-future
+          ;; fills in :result; client polls our row.
+          (= ::pending result)
+          (do (persist/record-completion! storage (:id row) fn-id fut trace declared-eff stats-ctx)
+              {:status :pending :execution-id (str (:id row))})
+
+          ;; Inline failure — write outcome to the row synchronously (if
+          ;; persisted) so the polling-by-id case is consistent. Redaction
+          ;; lifts a tainted fn-def's :error/:error-data into a generic
+          ;; hidden form so the secret doesn't leak via the exception
+          ;; message (a string that may have wrapped the value).
+          (and (map? result) (::ex result))
+          (let [cause (::ex result)]
+            (finalize-inline-outcome
+              {:status :failed
+               :error (or (ex-message cause) (str cause))
+               :error-data (ex-data cause)}
+              {:storage storage :row row :fn-id fn-id
+               :declared-effects declared-eff :runtime-effects (runtime-eff)
+               :stats stats-ctx}))
+
+          ;; Inline success — same: write synchronously so the GET endpoint
+          ;; immediately returns :succeeded, no race window. Redaction
+          ;; lifts a tainted fn-def's :result into nil + `:tainted? true`
+          ;; so the JSON response carries metadata only.
+          :else
+          (-> (finalize-inline-outcome
+                {:status :succeeded :result result}
+                {:storage storage :row row :fn-id fn-id
+                 :declared-effects declared-eff :runtime-effects (runtime-eff)
+                 :stats stats-ctx})
+              (assoc :declared-effects declared-eff)))))))
 
 
 ;; =============================================================================

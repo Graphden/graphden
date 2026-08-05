@@ -40,6 +40,7 @@
    :constraint-violation/position-collision 409
    :constraint-violation/unique 409
    :merge-conflict 409
+   :merge-protection-violation 409
    :user/exists 409
    ;; authz
    :authz/forbidden 403
@@ -77,7 +78,8 @@
   #{"validation-error" "constraint-violation" "type-check" "packages"
     "refinement" "capability" "execution" "execution-error"
     "graph-error" "secrets" "authz" "user" "grant" "domain"
-    "merge-conflict" "not-found" "vault" "quota"})
+    "merge-conflict" "merge-protection-violation" "not-found" "vault"
+    "quota"})
 
 
 (defn status-for

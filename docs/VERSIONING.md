@@ -143,11 +143,11 @@ read endpoints sit behind it too (matches `/api/services`).
 |--------|------------------------------------------|---------------------------------------|--------------------------------------|
 | GET    | `/api/branches`                          |                                       | `{ok, count, branches: [{id, name, base-branch-id, created-at}]}` |
 | GET    | `/api/branches/:ref`                     |                                       | `{ok, branch}` or `{ok: false, error}` |
-| POST   | `/api/branches`                          | `{name, base-branch-id?}`             | `{ok, branch}`                       |
+| POST   | `/api/branches`                          | `{name, base-branch-id?, forbid-invalid??}` | `{ok, branch}`                       |
 | DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}` |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
 | GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
-| POST   | `/api/branches/:ref/merge`               | `{source, conflict-resolutions?}`     | `{ok, merge}` or `{ok: false, reason: :merge-conflict, conflicts}` |
+| POST   | `/api/branches/:ref/merge`               | `{source, conflict-resolutions?}`     | `{ok, merge}`, `{ok: false, reason: :merge-conflict, conflicts}`, or `{ok: false, reason: :merge-protection-violation, error, invalid-fns}` (409 — target's `forbid-invalid?` policy over recorded type diagnostics, or a protected-binding transfer) |
 | GET    | `/api/fns/:fn-id/versions`               |                                       | `{ok, fn-id, count, versions}` — each entry carries `:execution-count` (runs that anchored to that exact version row) |
 | GET    | `/api/executions?fn-id=X`                |                                       | `{ok, executions}` — runs of X **as it resolves on the current branch** (not all-versions). Defaults to 20 rows, capped at 100 |
 | GET    | `/api/executions?fn-version-id=Y`        |                                       | `{ok, executions}` — runs of the SPECIFIC version row (drives the `⌛` panel's per-version expand) |
@@ -332,6 +332,20 @@ Open gaps: port allocation is OS-level (two branches binding
 collision detection across branches isn't implemented; the
 running-atom is a single in-process map (no multi-pod
 coordination beyond the existing advisory locks).
+
+### `:forbid-invalid?` — branch merge policy (error-tolerance Phase 5)
+
+The `:branch` row carries a nullable boolean `:forbid-invalid?`
+(non-versioned entity — a plain column, no version mirror). When set
+on the merge TARGET, `versioning.merge.core/validate-branch-policy!`
+(run by the live `:merge-branch!` base-fn after the target switch, and
+by `validate-merge!`) refuses the merge while recorded type
+diagnostics (`graphden.types.diagnostics`) exist on either the source
+or the target branch — `:merge-protection-violation`, 409, message
+naming the broken fns. The store is DERIVED (in-memory): the gate
+judges what is recorded, absence = allow. Set at create time via
+`POST /api/branches` `{forbid-invalid?: true}`; no editor UI yet
+(backend only — the branch popover may expose it later).
 
 ### `:branch-local?` — runtime-config that doesn't propagate on merge
 

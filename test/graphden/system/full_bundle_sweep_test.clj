@@ -34,8 +34,15 @@
     (try
       ;; Sweep ON, allowlist gate ON — an un-allowlisted type-check
       ;; failure anywhere in the superset throws here.
+      ;; The FULL prod boot set — including the OPTIONAL packages
+      ;; (registry, mcp) and app-base. 2026-08-05 lesson: they were
+      ;; absent here, so a cross-package record-shape break (mcp's
+      ;; create-branch parsed vs the widened :_create-branch-data
+      ;; shape) passed this test and killed the CANDIDATE image boot
+      ;; in the landing gate's e2e phase instead.
       (pkg-sync/bootstrap-from-packages! storage
-                                         ["core" "storage" "web" "app"]
+                                         ["core" "storage" "web" "app-base"
+                                          "app" "registry" "mcp"]
                                          {:skip-type-check? false})
       (let [ctx (exec/create-context {:storage storage})]
         ;; Eager compile of EVERY fn — the production

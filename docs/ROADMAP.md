@@ -63,11 +63,11 @@ Launch-order refinements agreed 2026-07-20:
    sidebar — ~3-4 days
 2. **Workspaces** (namespace M:N self-link + UI scoping) — ~1 week
 3. **Error tolerance** (type mismatches as derived diagnostics, not
-   silent swallow) — phases 0–3 shipped (structured diagnostics +
+   silent swallow) — SHIPPED, all phases (structured diagnostics +
    per-branch store + non-blocking user CRUD writes with
-   `:type-warnings` + the editor surfaces: branch error panel,
-   per-fn ⚠ badge, per-namespace counts); branch policy gates
-   remain — ~1 day. See § Future Work → Error Tolerance.
+   `:type-warnings` + the editor surfaces + execute refusal +
+   `:forbid-invalid?` branch merge policy + the ctx-build recompute).
+   See § Future Work → Error Tolerance.
 4. **Debug/observability** with the PHILOSOPHY § Debugging
    constraints (per-fn opt-in, sampling, `:secret` auto-skip,
    size/TTL limits) — ~1.5 weeks
@@ -395,12 +395,13 @@ Execute function: calculate-report
 **Goal**: A graph with type errors can be saved and iterated on — sketch
 the structure first, fix details later — without errors being silent.
 
-**Current state — phases 0–3 SHIPPED; pending: execute-refusal + branch
-policy gates (phases 4-5), and a boot/ctx-build recompute for USER fns
-(the in-memory store re-records package fns via the sweep at boot, but a
-user fn broken before a JVM restart stays absent from the panel until
-its next write re-checks it — derived-data contract, needs the branch
-ctx build to re-run checks for editor-authored fns).**
+**Current state — ALL phases SHIPPED (0–5 plus the ctx-build
+recompute). Validity stays a DERIVED fact: the store is in-memory, and
+both policy gates below judge what is RECORDED (absence = allow). The
+package sweep re-records first-party fns at boot; the branch router's
+ctx-build recompute re-checks a branch's editor-authored fns (async,
+bounded at 500, off-switch `branch-router/*recheck-user-fns?*`) so the
+store repopulates after a JVM restart.**
 
 - *Phase 0 (done)*: the CRUD check guards return structured
   diagnostics — `type-check-fn-after-mutation!` /
@@ -433,24 +434,29 @@ ctx build to re-run checks for editor-authored fns).**
   append/update cores run the same post-write check (+ additive
   `:type-warnings`), and a binding / binding-list-item DELETE re-runs
   the owner's check (an fn delete drops its stored entry).
-- *Still true / pending*: a failing fn's computed rich type drops
-  from the registry (its effect strip / computed return go missing in
-  the editor).
-
-**What's needed (remaining phases):**
-
-- Branch policy gates: a protected branch may forbid invalid fns
-  (block merge); execution of an invalid fn is refused with a clear
-  "unresolved type errors" message rather than a runtime crash.
+- *Phase 4 (done)*: execute refusal. `apply-execute` consults the
+  store for the resolved fn on the current branch BEFORE acquiring an
+  execution slot; recorded diagnostics → the standard rejection
+  envelope (`400`, `:error-data {:reason :unresolved-type-errors
+  :diagnostics […]}`, message naming the fn + first error) instead of
+  a runtime crash. See ERROR_CODES.md.
+- *Phase 5 (done)*: branch merge policy. The `:branch` row gained a
+  nullable `:forbid-invalid?` boolean (non-versioned entity — no
+  mirror work; POST /api/branches accepts it). When the merge TARGET
+  has it set, `versioning.merge.core/validate-branch-policy!`
+  (called from `validate-merge!` AND from the live `:merge-branch!`
+  base-fn after the target switch) refuses while recorded diagnostics
+  exist on either side — `:merge-protection-violation`, 409 envelope
+  naming the fns. Backend only; the editor branch popover may expose
+  the flag later.
+- *Ctx-build recompute (done)*: closes the former restart caveat —
+  see the current-state note above for the mechanism and bounds.
+- *Still true*: a failing fn's computed rich type drops from the
+  registry (its effect strip / computed return go missing in the
+  editor).
 - NO `is_draft` flag — a branch IS the unit of work-in-progress. A WIP
   branch holds WIP fns; "draft-ness" is branch policy, not a per-fn
   column. Validity is a derived fact, not stored state.
-
-**Depends on**: the branches/versions system (already present) plus the
-user/role system below.
-
-**Complexity**: Medium. Mostly diagnostics plumbing + editor surface;
-no new entity kinds.
 
 ---
 

@@ -22,8 +22,10 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
+    [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
+    [graphden.packages.records :as records]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.route-collection :as rc]
@@ -269,6 +271,109 @@
                                    {:target-branch-id branch-id} {:limit 1}))))
 
 
+;; === Ctx-build diagnostics recompute (error-tolerance, ROADMAP § Error
+;; Tolerance) ==================================================================
+;;
+;; The per-branch type-diagnostics store (`graphden.types.diagnostics`) is
+;; DERIVED, in-memory state: after a JVM restart the package sync sweep
+;; re-records first-party fns, but an EDITOR-AUTHORED fn broken before the
+;; restart would stay absent — invisible in the error panel and, worse,
+;; admitted by the Phase 4 execute-refusal gate (absence = allow). Closing
+;; that gap here: whenever a branch ctx is built (boot seed of the default
+;; branch, lazy build / LRU re-build of any other), re-run the post-mutation
+;; check for the branch's editor-authored fns ASYNCHRONOUSLY so the store
+;; repopulates without blocking the request that triggered the build.
+
+(def ^:dynamic *recheck-user-fns?*
+  "Off-switch for the ctx-build diagnostics recompute (default on).
+   Bind false in tests that must not see background type-check writes."
+  true)
+
+
+(def ^:private max-user-fn-recheck
+  "Upper bound on how many editor-authored fns one ctx build will
+   re-check. A branch beyond this logs a warn and skips — the ROADMAP
+   restart caveat then still applies to it (huge editor graphs are
+   rare; the bound keeps a pathological branch from soaking a core)."
+  500)
+
+
+(defn- user-authored-fn-ids
+  "IDs of the branch's editor-authored composed fns — named, non-anon
+   rows whose id is NOT the deterministic package derivation
+   `uuid-v5(ns-path, name)` (see docs/adr/ADR-identity-model.md: the
+   package-sync world derives ids from names; the editor world mints
+   `random-uuid`s). Package fns are excluded because the sync sweep
+   already re-records them at boot."
+  [storage]
+  (let [fn-rows (sp/query-entities storage :fn {})
+        ns-by-id (into {}
+                       (map (juxt :id identity))
+                       (sp/query-entities storage :ns {}))
+        ns-path (fn ns-path
+                  [nsid]
+                  (when-let [r (ns-by-id nsid)]
+                    (if-let [p (:parent-id r)]
+                      (str (ns-path p) "." (:name r))
+                      (:name r))))]
+    (into []
+          (keep (fn [row]
+                  (when (and (:name row)
+                             (seq (:parent-ids row))
+                             (nil? (:anonymous-hash row))
+                             (not (str/starts-with? (:name row) "_anon-"))
+                             (not= (:id row)
+                                   (some-> (:namespace-id row)
+                                           ns-path
+                                           (records/fn-id (keyword (:name row))))))
+                    (:id row))))
+          fn-rows)))
+
+
+(defn- recheck-user-fns!
+  "Re-run `type-check-fn-after-mutation!` for every editor-authored fn
+   visible on `branch-ctx`'s branch, repopulating the per-branch
+   diagnostics store (failure records, success clears). Best-effort:
+   any throw is logged and swallowed — a diagnostics gap must never
+   fail a ctx build or a request."
+  [branch-ctx branch-id]
+  (try
+    (let [storage (:storage branch-ctx)
+          ids (user-authored-fn-ids storage)]
+      (cond
+        (empty? ids) nil
+
+        (> (count ids) max-user-fn-recheck)
+        (log/warn "skipping ctx-build diagnostics recompute — user-fn count over bound"
+                  {:branch-id branch-id :count (count ids)
+                   :cap max-user-fn-recheck})
+
+        :else
+        (do (doseq [id ids]
+              (try
+                (type-check/type-check-fn-after-mutation! storage id)
+                (catch Exception t
+                  (log/debug t "ctx-build diagnostics recheck failed for fn"
+                             {:branch-id branch-id :fn-id id}))))
+            (log/debug "ctx-build diagnostics recompute done"
+                       {:branch-id branch-id :checked (count ids)}))))
+    (catch Exception t
+      ;; Includes storages a test hand-constructed without :fn/:ns tables.
+      (log/debug t "ctx-build diagnostics recompute failed"
+                 {:branch-id branch-id}))))
+
+
+(defn- schedule-user-fn-recheck!
+  "Fire `recheck-user-fns!` on a background future. `future` conveys
+   the caller's dynamic bindings (org context, the diagnostics-store
+   override the parallel test plugin binds), so the recompute records
+   into the same store the triggering thread would."
+  [branch-ctx branch-id]
+  (when *recheck-user-fns?*
+    (future (recheck-user-fns! branch-ctx branch-id)))
+  nil)
+
+
 (defn- build-actual-entry!
   "Lazy-compile per-branch ctx + Ring callable. Fast path: when the
    branch is graph-identical to its base (no own version rows, no
@@ -313,6 +418,9 @@
       ;;    seedable here), or cold start with no base registry → full compile.
       :else
       (cr/rebuild! branch-ctx))
+    ;; Error-tolerance: repopulate the branch's derived diagnostics for
+    ;; editor-authored fns (async; see § Ctx-build diagnostics recompute).
+    (schedule-user-fn-recheck! branch-ctx branch-id)
     {:ctx branch-ctx
      :handler (compose-branch-handler branch-ctx handler-fn-id optional-handler-fn-ids)
      :built-at (java.time.Instant/now)
@@ -776,6 +884,10 @@
        ;; heal over boot-sync bumps the build already absorbed.
        (swap! (epoch-state) update :w max
               (or (epoch/current (vs/unwrap (:storage base-ctx))) 0))
+       ;; The default branch's ctx never goes through build-actual-entry!,
+       ;; so schedule its diagnostics recompute here — this is the hook
+       ;; that closes the ROADMAP restart caveat for the main branch.
+       (schedule-user-fn-recheck! base-ctx default-branch-id)
        (log/info "Branch router ready" {:default-branch-id default-branch-id
                                         :handler-fn-name handler-fn-name
                                         :max-size (or max-size

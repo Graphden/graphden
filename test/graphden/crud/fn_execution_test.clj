@@ -49,6 +49,7 @@
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.init.cleanup :as cleanup]
     [graphden.tenancy.context :as tc]
+    [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc]))
 
@@ -241,6 +242,54 @@
         (testing "no fn-execution row was persisted (pure + ¬persist?)"
           (is (empty? (sp/query-entities storage :fn-execution {})))))
       (finally nil))))
+
+
+(deftest execute-refused-on-recorded-type-errors-test
+  ;; Error-tolerance Phase 4 — recorded diagnostics on the current
+  ;; branch refuse submission BEFORE any row / future / capacity slot
+  ;; exists. Clearing the entry (what a fixing write's re-check does)
+  ;; re-admits; an fn with NO recorded entry is allowed by absence —
+  ;; the derived-store contract.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (create-full-storage)
+          {composed :composed} (make-pure-add-fn! storage "typerr")
+          branch-id (vs/current-branch-id storage)
+          c (test-ctx storage)]
+      (testing "recorded diagnostics → :rejected envelope, nothing persisted"
+        (diag/record! branch-id (:id composed)
+                      [{:message "Type mismatch on arg :a"
+                        :expected :int :actual :text :arg-name :a}])
+        (let [out (fn-exec/apply-execute c {:fn-id (:id composed)
+                                            :args {:a 1 :b 2}
+                                            :timeout-ms 5000 :persist? true})]
+          (is (false? (:ok out)))
+          (is (= :rejected (:status out)))
+          (is (= 400 (:http-status out)))
+          (is (= :unresolved-type-errors (get-in out [:error-data :reason])))
+          (is (str/includes? (:error out) "my-test-add-typerr")
+              "message names the fn")
+          (is (str/includes? (:error out) "Type mismatch on arg :a")
+              "message carries the first recorded error")
+          (is (= 1 (count (get-in out [:error-data :diagnostics]))))
+          (is (empty? (sp/query-entities storage :fn-execution {}))
+              "refusal precedes persistence — no row even with :persist? true")))
+      (testing "clearing the recorded entry (fn fixed) re-admits execution"
+        (diag/clear-fn! branch-id (:id composed))
+        (let [out (apply-and-await! c {:fn-id (:id composed)
+                                       :args {:a 1 :b 2}
+                                       :timeout-ms 5000 :persist? false})]
+          (is (contains? #{:succeeded :pending} (:status out)))
+          (when (= :succeeded (:status out))
+            (is (= 3 (:result out))))))
+      (testing "an fn never checked (fresh id, no recorded entry) is allowed"
+        (let [{fresh :composed} (make-pure-add-fn! storage "typerr-fresh")
+              ;; Fresh ctx: `test-ctx` snapshots the base-fn registry,
+              ;; and the fresh base impl was registered after `c` above.
+              out (apply-and-await! (test-ctx storage)
+                                    {:fn-id (:id fresh)
+                                     :args {:a 2 :b 3}
+                                     :timeout-ms 5000 :persist? false})]
+          (is (contains? #{:succeeded :pending} (:status out))))))))
 
 
 (deftest usage-rollup-bump-and-read-roundtrip-test

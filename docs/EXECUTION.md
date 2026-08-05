@@ -200,6 +200,13 @@ Hitting either cap rejects the request without creating a row or future:
 `{:ok false :status :rejected :error-data {:reason :over-capacity}}`. See
 [SCALING.md § Fleet-wide per-org quota](SCALING.md).
 
+A second submit-time refusal precedes even the cap check (error-tolerance
+Phase 4): an fn with RECORDED type diagnostics on the current branch is
+rejected with `{:ok false :status :rejected :http-status 400 :error-data
+{:reason :unresolved-type-errors :diagnostics […]}}` — the message names
+the fn + its first error. See [ERROR_CODES.md](ERROR_CODES.md)
+§ execute rejection.
+
 ## Wire caps
 
 | Field                   | Cap     | Behaviour on overflow                          |

@@ -26,6 +26,7 @@
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.types.diagnostics :as diag]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.merge.core :as mp]
     [graphden.versioning.storage.core :as vs]
@@ -210,6 +211,70 @@
       (mp/safe-merge-branch! storage (:id source))
       (is true "merge succeeded with no protected bindings")
       (sp/close storage))))
+
+
+;; === Branch policy: :forbid-invalid? (error-tolerance Phase 5) ===
+;;
+;; The gate judges the RECORDED per-branch diagnostics store, so the
+;; tests seed it directly via `diag/record!` (the same rows the CRUD
+;; post-mutation check writes) under the parallel-safe override.
+
+(deftest forbid-invalid-off-merge-unchanged-test
+  (testing "diagnostics recorded but target has no :forbid-invalid? → merge proceeds"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [{:keys [storage fn-id]} (create-test-storage)
+            source (vs/create-branch! storage "feature")]
+        (diag/record! (:id source) fn-id [{:message "broken on source"}])
+        (mp/safe-merge-branch! storage (:id source))
+        (is true "merge proceeded — policy off by default")
+        (sp/close storage)))))
+
+
+(deftest forbid-invalid-blocks-broken-source-test
+  (testing "policy on + recorded diagnostics on source → blocked naming the fn; cleared → merges"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [{:keys [storage fn-id]} (create-test-storage)
+            ;; Create the protected target WITH the flag (exercises the
+            ;; vs/create-branch! opt-passing) and fork the source off it.
+            protected (vs/create-branch! storage "protected"
+                                         {:forbid-invalid? true})
+            target (vs/switch-branch storage (:id protected))
+            source (vs/create-branch! target "feature")]
+        (is (true? (:forbid-invalid? protected))
+            "create-branch! persists the flag")
+        (diag/record! (:id source) fn-id [{:message "Type mismatch on arg :x"}])
+        (try
+          (mp/validate-branch-policy! target (:id source))
+          (is false "validate-branch-policy! should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :merge-protection-violation (:type (ex-data e))))
+            (is (= :forbid-invalid (:reason (ex-data e))))
+            (is (= ["test-fn"] (:invalid-fn-names (ex-data e))))
+            (is (re-find #"test-fn" (ex-message e))
+                "message names the broken fn")))
+        (is (thrown? clojure.lang.ExceptionInfo
+              (mp/safe-merge-branch! target (:id source)))
+            "the full safe-merge path is gated too")
+        ;; Fix (clear the recorded entry) → merge proceeds.
+        (diag/clear-fn! (:id source) fn-id)
+        (mp/safe-merge-branch! target (:id source))
+        (is true "merge proceeded after the fn was fixed")
+        (sp/close storage)))))
+
+
+(deftest forbid-invalid-blocks-broken-target-test
+  (testing "policy on + recorded diagnostics on the TARGET itself → blocked"
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [{:keys [storage base fn-id]} (create-test-storage)
+            main-id (vs/current-branch-id storage)
+            source (vs/create-branch! storage "feature")]
+        ;; :branch is non-versioned — flip the flag with a plain update.
+        (sp/update-entity base :branch main-id {:forbid-invalid? true})
+        (diag/record! main-id fn-id [{:message "broken on target"}])
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"unresolved type errors"
+              (mp/validate-branch-policy! storage (:id source))))
+        (sp/close storage)))))
 
 
 ;; === Conflict resolution apply path ===

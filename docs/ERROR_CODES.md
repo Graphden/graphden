@@ -21,6 +21,7 @@ shape, self-hosted included.
 | `:constraint-violation/position-collision` | 409 |
 | `:constraint-violation/unique` | 409 |
 | `:merge-conflict` (POST /api/branches/:ref/merge) | 409 |
+| `:merge-protection-violation` (POST /api/branches/:ref/merge — protected-binding transfer OR the target branch's `:forbid-invalid?` policy over recorded type diagnostics) | 409 |
 | `:user/exists` | 409 |
 | `:user/invalid`, `:grant/invalid-capability`, `:domain/unverified` (tenancy control-plane) | 400 |
 | execute already-running-as-service | 409 |
@@ -50,7 +51,8 @@ sync),
 `:branch-router/handler-not-found`, `:storage-error/unsupported-opts`
 (500 — internal misuse), `:packages/unresolved-ref`,
 421 `misdirected-request` (off-shard, tenancy), execute
-`:rejected` / `:over-capacity` / `:args-too-large` reasons.
+`:rejected` / `:over-capacity` / `:args-too-large` /
+`:unresolved-type-errors` reasons.
 Drift between `web.errors/status-for-type` and this doc is pinned by
 `graphden.web.errors-doc-test`.
 
@@ -193,7 +195,44 @@ same `(binding-id, position)` in the current branch's resolved view.
 - `:branch-id` - The branch the delete was attempted on
 - `:child-branch-ids` - IDs of the child branches blocking the delete
 
+### `:merge-protection-violation`
+
+**Component:** versioning (`graphden.versioning.merge.core`)
+**Description:** A merge into the target branch was refused by a
+protection policy. Two flavours share the type: (a) trait-based — a
+`merge-protected` binding would transfer from source to target;
+(b) branch policy (error-tolerance Phase 5) — the target branch's
+`:forbid-invalid?` flag is set and recorded type diagnostics exist on
+the source or the target branch. The Phase 5 gate judges the DERIVED
+in-memory diagnostics store (`graphden.types.diagnostics`): absence of
+recorded entries means allow.
+**Ex-data keys:**
+
+- `:reason` - `:forbid-invalid` for the branch-policy flavour (absent for the trait flavour)
+- `:invalid-fn-names`, `:invalid-fn-ids` - the fns with recorded diagnostics (branch-policy flavour)
+- `:protected-transfers` - the offending bindings (trait flavour)
+- `:source-branch-id`, `:target-branch-id`
+
+**HTTP:** 409 — the merge handler's `:on-throw` builds the JSON envelope
+`{:ok false :reason :merge-protection-violation :error … :invalid-fns […]}`.
+
 ## Execution Errors
+
+### execute rejection `:unresolved-type-errors`
+
+**Component:** crud/fn-execution (`apply-execute`, error-tolerance Phase 4)
+**Description:** POST /api/execute refused at SUBMIT time (no row, no
+future) because the target fn has RECORDED type diagnostics on the
+current branch. Not an exception — the standard rejection envelope
+`{:ok false :status :rejected :http-status 400 :error "Execution
+refused: fn '<name>' has unresolved type errors — <first error>"
+:error-data {:reason :unresolved-type-errors :fn-id … :diagnostics
+[…]}}`. Judged on what the derived per-branch store has recorded
+(absence = allow); the branch router's ctx-build recompute repopulates
+editor-authored fns after a restart.
+**Solution:** Fix the fn (the editor's type-errors panel lists the
+diagnostics); the next successful check clears the entry and execution
+proceeds.
 
 ### `:execution/forbidden-effect`
 

@@ -73,6 +73,15 @@
   #uuid "04050607-0809-4456-9f0a-3b4c5d6e7f80")
 
 
+(def ^:private branch-forbid-invalid-field-uuid
+  ;; Error-tolerance Phase 5 — branch merge policy. When true, merging
+  ;; INTO this branch is refused while either side carries recorded
+  ;; type diagnostics (`versioning.merge.core/validate-branch-policy!`).
+  ;; Plain nullable boolean on a NON-versioned entity: no version
+  ;; mirror, no codec known-values (those are enum-only concerns).
+  #uuid "c7251e69-b9eb-469e-b936-0cca96cc874f")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :branch-merge
 ;; =============================================================================
@@ -549,7 +558,13 @@
                       ;; Tenant owner (§4). NULL ≡ public (main).
                       :org-id {:uuid branch-org-id-field-uuid
                                :type :text
-                               :nullable? true}})
+                               :nullable? true}
+                      ;; Merge policy (error-tolerance Phase 5): truthy →
+                      ;; merges INTO this branch are refused while recorded
+                      ;; type diagnostics exist on either side. NULL ≡ off.
+                      :forbid-invalid? {:uuid branch-forbid-invalid-field-uuid
+                                        :type :bool
+                                        :nullable? true}})
       (ds/add-constraint :branch {:type :unique :fields [:org-id :name]
                                   :nulls-not-distinct? true})
 

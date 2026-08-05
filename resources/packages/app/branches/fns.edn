@@ -813,11 +813,18 @@
           :then nil
           :else :_create-branch-base-str}}
 
+  {:name :_create-branch-forbid-invalid
+   :description "Raw `:forbid-invalid?` flag from the body (nil when missing) — the error-tolerance Phase 5 merge-policy opt-in. Threaded through `:parsed` into `:_create-branch-apply-row`; nil leaves the column unwritten."
+   :parent :get
+   :args {:coll :_create-branch-body
+          :key {:value :forbid-invalid?}
+          :default nil}}
+
   {:name :_create-branch-parsed
-   :description "Parse POST /api/branches body into `{:branch-name :base-ref}`. Pure graph composition over `:parse-json-body` + `:get` + `:to-str` + `:str-trim` + `:if` + `:zipmap`."
+   :description "Parse POST /api/branches body into `{:branch-name :base-ref :forbid-invalid?}`. Pure graph composition over `:parse-json-body` + `:get` + `:to-str` + `:str-trim` + `:if` + `:zipmap`."
    :parent :zipmap
-   :args {:keys [{:value :branch-name} {:value :base-ref}]
-          :vals [:_create-branch-name :_create-branch-base-ref]}}
+   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?}]
+          :vals [:_create-branch-name :_create-branch-base-ref :_create-branch-forbid-invalid]}}
 
   {:name :_create-branch-name-blank?
    :description "Guard #1 — `:name` missing or blank. `:blank?` is nil-safe, so it covers both cases in one call."
@@ -928,9 +935,10 @@
   ;; composition below — admins can swap the envelope or per-row
   ;; shape without touching Clojure.
   {:name :create-branch!
-   :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` and returns the row."
+   :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` (+ optional `:forbid-invalid?` merge-policy flag) and returns the row."
    :args {:branch-name {:type :text :description "New branch's display name."}
-          :base-branch-id {:type :uuid :description "Parent branch's id; the new branch forks from this point."}}
+          :base-branch-id {:type :uuid :description "Parent branch's id; the new branch forks from this point."}
+          :forbid-invalid? {:type :nullable-bool :required false :description "Error-tolerance Phase 5 merge policy: truthy → merges INTO this branch are refused while recorded type diagnostics exist on either side. Absent/nil ≡ off."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -945,7 +953,11 @@
                            :args {:value {:parent :get
                                           :args {:coll {:as :resolved-parent}
                                                  :key {:value :id}
-                                                 :default nil}}}}}}
+                                                 :default nil}}}}
+          :forbid-invalid? {:parent :get :type :nullable-bool
+                            :args {:coll {:as :parsed}
+                                   :key {:value :forbid-invalid?}
+                                   :default nil}}}}
 
   {:name :_create-branch-apply-shaped
    :description "Stage 2 — reshape the new row via the shared `:as-json-branch` converter (stringified ids + created-at)."
@@ -1466,7 +1478,7 @@
   ;; dispatch on `:type` from `(ex-data e)` uses the new `:ex-data`
   ;; primitive in `core.system`.
   {:name :merge-branch!
-   :description "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` — switches to target then folds source in. Throws ex-info `{:type :merge-conflict :conflicts [...]}` when resolutions don't cover every conflict; other failures surface as plain Exception."
+   :description "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` — switches to target then folds source in. Throws ex-info `{:type :merge-conflict :conflicts [...]}` when resolutions don't cover every conflict, or `{:type :merge-protection-violation :invalid-fn-names [...]}` when the target branch's `:forbid-invalid?` policy refuses recorded type diagnostics (error-tolerance Phase 5); other failures surface as plain Exception."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}
           :resolutions {:type :nullable-keyword-map :required false :description "Per-conflict resolution map; absent for first-attempt merges."}}
@@ -1574,6 +1586,27 @@
                  {:parent :as-json-branch :args {:branch-row {:as :source}}}
                  :_merge-apply-ex-conflicts]}}
 
+  {:name :_merge-apply-err-protection
+   :description "Merge-protection envelope (error-tolerance Phase 5 + trait gate) — `{:ok false :reason :merge-protection-violation :http-status 409 :error \"…\" :invalid-fns […]}`. `:error` is the thrown message (names the broken fns for the `:forbid-invalid?` policy); `:invalid-fns` is the ex-data's `:invalid-fn-names` (empty for the trait-transfer flavour, which carries `:protected-transfers` instead)."
+   :parent :zipmap
+   :return-type {:ok :bool
+                 :reason :keyword
+                 :http-status :int
+                 :error :text
+                 :invalid-fns :any}
+   :args {:keys [{:value :ok} {:value :reason} {:value :http-status :literal? true}
+                 {:value :error} {:value :invalid-fns}]
+          :vals [{:value false}
+                 {:value :merge-protection-violation}
+                 {:value 409}
+                 {:parent :coalesce
+                  :args {:value {:parent :throwable-message :args {:ex {:as :exception}}}
+                         :default "Merge blocked by branch policy"}}
+                 {:parent :get
+                  :args {:coll :_merge-apply-ex-data
+                         :key {:value :invalid-fn-names}
+                         :default []}}]}}
+
   {:name :_merge-apply-err-generic-msg
    :description "Fallback message — `(or (.getMessage e) \"Unknown error\")`."
    :parent :coalesce
@@ -1587,13 +1620,13 @@
           :vals [{:value false} :_merge-apply-err-generic-msg]}}
 
   {:name :_merge-apply-clauses
-   :description "Dynamic `:case` clauses map — `{:merge-conflict <ref>}`. Built via `:zipmap` so the result-vec entry is a ref (resolving to the conflict envelope), not a literal keyword."
+   :description "Dynamic `:case` clauses map — `{:merge-conflict <ref> :merge-protection-violation <ref>}`. Built via `:zipmap` so each result-vec entry is a ref (resolving to its envelope), not a literal keyword."
    :parent :zipmap
-   :args {:keys [{:value :merge-conflict}]
-          :vals [:_merge-apply-err-conflict]}}
+   :args {:keys [{:value :merge-conflict} {:value :merge-protection-violation}]
+          :vals [:_merge-apply-err-conflict :_merge-apply-err-protection]}}
 
   {:name :_merge-apply-on-throw
-   :description "`:try`'s `:on-throw` handler — dispatches on `(:type (ex-data e))` via `:case`. The `:merge-conflict` clause builds the structured 409-style payload; default falls through to a generic `{:ok false :error <message>}`."
+   :description "`:try`'s `:on-throw` handler — dispatches on `(:type (ex-data e))` via `:case`. The `:merge-conflict` clause builds the structured 409-style payload; `:merge-protection-violation` builds the 409 branch-policy/trait envelope; default falls through to a generic `{:ok false :error <message>}`."
    :parent :case
    :args {:value :_merge-apply-ex-type
           :clauses :_merge-apply-clauses

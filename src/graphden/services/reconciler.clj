@@ -40,6 +40,7 @@
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.tenancy.context :as tctx]
     [graphden.versioning.storage.resolution :as res])
   (:import
     (java.sql
@@ -390,6 +391,9 @@
     true))
 
 
+(declare ^:private reconcile-once!*)
+
+
 (defn reconcile-once!
   "One pass: read enabled `:service` rows, compute diff vs
    `running-atom`'s contents, start missing + stop removed. Mutates
@@ -427,110 +431,127 @@
   ([ctx running-atom]
    (reconcile-once! ctx running-atom {}))
   ([ctx running-atom start-opts]
-   (locking reconcile-monitor
-     ;; First, heal the lock connection if it dropped. A dead connection
-     ;; released every advisory lock this pod held, so on reconnect we must
-     ;; re-assert ownership BEFORE the diff below trusts `:locked?` entries.
-     (when-let [holder (:service-locks-holder ctx)]
-       (when (pg-lock/ensure-live! holder)
-         (reassert-lock-ownership! (pg-lock/holder-conn holder) running-atom)))
-     ;; Drop stale ::not-our-lock placeholders so every lock-gated service
-     ;; we don't currently own is RE-ATTEMPTED this pass. This is what makes
-     ;; the periodic reconcile tick heal a crashed owner: the crash released
-     ;; its advisory slot (no NOTIFY), and here a sibling re-acquires it. A
-     ;; service still fully held by siblings is simply re-marked ::not-our-lock
-     ;; below, so the placeholder is transient, recomputed each pass.
-     (swap! running-atom (fn [m] (into {} (remove (fn [[_ v]] (= ::not-our-lock v))) m)))
-     (let [storage (:storage ctx)
-           lock-conn (lock-conn-from-ctx ctx)
-           ;; Shard filter (task #6): drop tenant services whose org this pod
-           ;; doesn't serve, so a dedicated tenant's services run only on its
-           ;; own cgroup-limited pod, never on a shared compile-all pod.
-           enabled-services (filterv #(service-in-shard? (:executor-orgs ctx) %)
-                                     (sp/query-entities storage :service {:enabled? true}))
-           enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
-           running          @running-atom
-           {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)
-                                                    (keys running))
-           ;; Config drift: a service that is enabled AND already running
-           ;; but whose running entry no longer matches the desired row —
-           ;; its :fn-id / :branch-id / :restart-policy was edited via a
-           ;; `:service` PUT. The membership diff misses these (the id is in
-           ;; both sets), so the edit was silently ignored until a pod
-           ;; restart. Stop+restart them to pick it up. `map?` skips the
-           ;; ::not-our-lock placeholder.
-           drifted (filterv (fn [sid]
-                              (let [entry (get running sid)
-                                    svc (get enabled-by-id sid)]
-                                (and (map? entry)
-                                     (or (not= (:fn-id entry) (:fn-id svc))
-                                         (not= (:branch-id entry)
-                                               (effective-branch-id svc))
-                                         (not= (:restart-policy entry)
-                                               (:restart-policy svc))
-                                         (not= (:cardinality entry)
-                                               (svc-schema/service-cardinality svc))
-                                         ;; pool-size edit (e.g. 3→2): the pod on
-                                         ;; the now-out-of-range slot restarts and
-                                         ;; fails to re-acquire, shrinking the pool.
-                                         (not= (:pool-size entry)
-                                               (svc-schema/effective-pool-size svc))))))
-                            (keys enabled-by-id))
-           to-stop  (vec (concat to-stop drifted))
-           to-start (vec (concat to-start drifted))
-           not-our-lock (atom [])]
-       (doseq [sid to-stop]
-         (stop-and-forget! lock-conn running-atom sid))
-       (doseq [sid to-start]
-         (let [svc (get enabled-by-id sid)
-               svc-ctx (ctx-for-service ctx svc)
-               branch-ctx-failed? (= ::branch-ctx-failed svc-ctx)
-               ;; `:per-pod` services (listeners behind a load balancer) skip
-               ;; the lock entirely — every pod runs its own (pool-size nil).
-               ;; `:singleton` races for slot 0 (pool-size 1); `:pool` races for
-               ;; the first free of its N slots. `slot` = the acquired slot, or
-               ;; nil when a sibling holds every slot (or no lock connection).
-               pool-size (svc-schema/effective-pool-size svc)
-               lock-gated? (some? pool-size)
-               slot (when (and lock-gated? (some? lock-conn))
-                      (acquire-pool-slot! lock-conn sid pool-size))
-               acquired? (or (not lock-gated?) (some? slot) (nil? lock-conn))]
-           (cond
-             ;; Branch ctx unavailable — error already logged; leave
-             ;; the row un-started so the periodic tick retries. Any
-             ;; acquired slot is NOT held for a start we didn't make.
-             branch-ctx-failed?
-             (do (swap! not-our-lock conj sid)
-                 (when (some? slot)
-                   (try (pg-lock/release-slot! lock-conn sid slot)
-                        (catch Exception e
-                          (log/warn e "advisory lock release failed — continuing"
-                                    {:service-id sid :slot slot})))))
+   ;; The reconciler is a PLATFORM actor — pin the pass to the platform
+   ;; org regardless of the CALLER's thread bindings. The edge-triggered
+   ;; pass fires from CRUD writes on an abort-shield thread that CONVEYS
+   ;; the requester's `*current-org*`; under a TENANT binding the
+   ;; `:service` read below returns [] (`:service` is tenant-forbidden in
+   ;; OrgScopedStorage), so desired = ∅ and the pass STOPPED every
+   ;; running service — on prod (2026-08-05) a demo org's fn create shut
+   ;; down the platform web-server until the next periodic tick (which
+   ;; runs unbound = platform) restarted it: a ~15 s total outage any
+   ;; tenant write could trigger. Binding here makes every trigger path
+   ;; (edge, NOTIFY, tick, CRaC resume) behave like the tick.
+   (tctx/with-org tctx/public-org
+                  (reconcile-once!* ctx running-atom start-opts))))
 
-             acquired?
-             (let [entry (start-service! svc-ctx svc start-opts)
-                   ;; Record the EFFECTIVE :branch-id (row's, or the router's
-                   ;; default for legacy nil-branch rows) so stop time and
-                   ;; `restart-services-on-branch!` can tell which branch this
-                   ;; run belonged to. :cardinality mirrors the row so drift
-                   ;; detection sees an admin flipping it. :locked? = THIS pod
-                   ;; holds a slot; :pool-slot = which one (for release +
-                   ;; reassert).
-                   eff-branch (effective-branch-id svc)
-                   entry' (cond-> (assoc entry
-                                         :cardinality (svc-schema/service-cardinality svc)
-                                         :pool-size pool-size
-                                         :locked? (some? slot)
-                                         :pool-slot slot)
-                            eff-branch (assoc :branch-id eff-branch))]
-               (swap! running-atom assoc sid entry'))
 
-             :else
-             (do (swap! not-our-lock conj sid)
-                 (swap! running-atom assoc sid ::not-our-lock)))))
-       {:started (vec (remove (set @not-our-lock) to-start))
-        :stopped to-stop
-        :not-our-lock @not-our-lock}))))
+(defn- reconcile-once!*
+  [ctx running-atom start-opts]
+  (locking reconcile-monitor
+    ;; First, heal the lock connection if it dropped. A dead connection
+    ;; released every advisory lock this pod held, so on reconnect we must
+    ;; re-assert ownership BEFORE the diff below trusts `:locked?` entries.
+    (when-let [holder (:service-locks-holder ctx)]
+      (when (pg-lock/ensure-live! holder)
+        (reassert-lock-ownership! (pg-lock/holder-conn holder) running-atom)))
+    ;; Drop stale ::not-our-lock placeholders so every lock-gated service
+    ;; we don't currently own is RE-ATTEMPTED this pass. This is what makes
+    ;; the periodic reconcile tick heal a crashed owner: the crash released
+    ;; its advisory slot (no NOTIFY), and here a sibling re-acquires it. A
+    ;; service still fully held by siblings is simply re-marked ::not-our-lock
+    ;; below, so the placeholder is transient, recomputed each pass.
+    (swap! running-atom (fn [m] (into {} (remove (fn [[_ v]] (= ::not-our-lock v))) m)))
+    (let [storage (:storage ctx)
+          lock-conn (lock-conn-from-ctx ctx)
+          ;; Shard filter (task #6): drop tenant services whose org this pod
+          ;; doesn't serve, so a dedicated tenant's services run only on its
+          ;; own cgroup-limited pod, never on a shared compile-all pod.
+          enabled-services (filterv #(service-in-shard? (:executor-orgs ctx) %)
+                                    (sp/query-entities storage :service {:enabled? true}))
+          enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
+          running          @running-atom
+          {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)
+                                                   (keys running))
+          ;; Config drift: a service that is enabled AND already running
+          ;; but whose running entry no longer matches the desired row —
+          ;; its :fn-id / :branch-id / :restart-policy was edited via a
+          ;; `:service` PUT. The membership diff misses these (the id is in
+          ;; both sets), so the edit was silently ignored until a pod
+          ;; restart. Stop+restart them to pick it up. `map?` skips the
+          ;; ::not-our-lock placeholder.
+          drifted (filterv (fn [sid]
+                             (let [entry (get running sid)
+                                   svc (get enabled-by-id sid)]
+                               (and (map? entry)
+                                    (or (not= (:fn-id entry) (:fn-id svc))
+                                        (not= (:branch-id entry)
+                                              (effective-branch-id svc))
+                                        (not= (:restart-policy entry)
+                                              (:restart-policy svc))
+                                        (not= (:cardinality entry)
+                                              (svc-schema/service-cardinality svc))
+                                        ;; pool-size edit (e.g. 3→2): the pod on
+                                        ;; the now-out-of-range slot restarts and
+                                        ;; fails to re-acquire, shrinking the pool.
+                                        (not= (:pool-size entry)
+                                              (svc-schema/effective-pool-size svc))))))
+                           (keys enabled-by-id))
+          to-stop  (vec (concat to-stop drifted))
+          to-start (vec (concat to-start drifted))
+          not-our-lock (atom [])]
+      (doseq [sid to-stop]
+        (stop-and-forget! lock-conn running-atom sid))
+      (doseq [sid to-start]
+        (let [svc (get enabled-by-id sid)
+              svc-ctx (ctx-for-service ctx svc)
+              branch-ctx-failed? (= ::branch-ctx-failed svc-ctx)
+              ;; `:per-pod` services (listeners behind a load balancer) skip
+              ;; the lock entirely — every pod runs its own (pool-size nil).
+              ;; `:singleton` races for slot 0 (pool-size 1); `:pool` races for
+              ;; the first free of its N slots. `slot` = the acquired slot, or
+              ;; nil when a sibling holds every slot (or no lock connection).
+              pool-size (svc-schema/effective-pool-size svc)
+              lock-gated? (some? pool-size)
+              slot (when (and lock-gated? (some? lock-conn))
+                     (acquire-pool-slot! lock-conn sid pool-size))
+              acquired? (or (not lock-gated?) (some? slot) (nil? lock-conn))]
+          (cond
+            ;; Branch ctx unavailable — error already logged; leave
+            ;; the row un-started so the periodic tick retries. Any
+            ;; acquired slot is NOT held for a start we didn't make.
+            branch-ctx-failed?
+            (do (swap! not-our-lock conj sid)
+                (when (some? slot)
+                  (try (pg-lock/release-slot! lock-conn sid slot)
+                       (catch Exception e
+                         (log/warn e "advisory lock release failed — continuing"
+                                   {:service-id sid :slot slot})))))
+
+            acquired?
+            (let [entry (start-service! svc-ctx svc start-opts)
+                  ;; Record the EFFECTIVE :branch-id (row's, or the router's
+                  ;; default for legacy nil-branch rows) so stop time and
+                  ;; `restart-services-on-branch!` can tell which branch this
+                  ;; run belonged to. :cardinality mirrors the row so drift
+                  ;; detection sees an admin flipping it. :locked? = THIS pod
+                  ;; holds a slot; :pool-slot = which one (for release +
+                  ;; reassert).
+                  eff-branch (effective-branch-id svc)
+                  entry' (cond-> (assoc entry
+                                        :cardinality (svc-schema/service-cardinality svc)
+                                        :pool-size pool-size
+                                        :locked? (some? slot)
+                                        :pool-slot slot)
+                           eff-branch (assoc :branch-id eff-branch))]
+              (swap! running-atom assoc sid entry'))
+
+            :else
+            (do (swap! not-our-lock conj sid)
+                (swap! running-atom assoc sid ::not-our-lock)))))
+      {:started (vec (remove (set @not-our-lock) to-start))
+       :stopped to-stop
+       :not-our-lock @not-our-lock})))
 
 
 (defn restart-services-on-branch!

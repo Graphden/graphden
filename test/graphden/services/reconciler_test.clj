@@ -35,6 +35,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
+    [graphden.tenancy.context :as tctx]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as vres]))
 
@@ -214,6 +215,46 @@
           (is (= [{:suffix "stop-disabled"}] @stops)))
         (testing "running atom now empty"
           (is (zero? (count @running)))))
+      (finally (sp/close storage)))))
+
+
+(deftest reconcile-pass-pins-the-platform-org-test
+  ;; Regression for the 2026-08-05 prod outage window: the edge-triggered
+  ;; pass fires from CRUD writes on an abort-shield thread that CONVEYS
+  ;; the requester's `*current-org*`. Under a tenant binding the
+  ;; OrgScoped `:service` read returns [] (`:service` is
+  ;; tenant-forbidden), so desired = ∅ and the pass stopped EVERY running
+  ;; service — a demo org's fn create shut down the platform web-server
+  ;; until the next periodic tick. The pass must pin the platform org:
+  ;; asserted here through the started fn's own view of `current-org`,
+  ;; and through the pass not stopping anything a tenant binding can't
+  ;; see. (The [] read itself is tenancy-repo behaviour; its end-to-end
+  ;; twin lives there.)
+  (let [storage (create-full-storage)
+        seen-org (atom nil)
+        base-name "test-org-observer"
+        _ (exec/register-base-fn! (keyword base-name)
+                                  (fn [_args _ctx]
+                                    (reset! seen-org (tctx/current-org))
+                                    (fn [])))
+        base (setup/create-base-fn! storage base-name :any)
+        composed (setup/create-composed-fn! storage "my-test-org-observer" (:id base))
+        svc (make-service-row! storage (:id composed) true)
+        c (test-ctx storage)
+        running (atom {})]
+    (try
+      (tctx/with-org "acme"
+                     (let [r (recon/reconcile-once! c running)]
+                       (testing "the pass starts the service even under a tenant caller binding"
+                         (is (= [(:id svc)] (:started r)))
+                         (is (= [] (:stopped r))))))
+      (testing "the pass (and the service start) ran platform-bound"
+        (is (= tctx/public-org @seen-org)))
+      (tctx/with-org "acme"
+                     (let [r (recon/reconcile-once! c running)]
+                       (testing "a repeat pass under a tenant binding stops NOTHING"
+                         (is (= [] (:stopped r)))
+                         (is (= 1 (count @running))))))
       (finally (sp/close storage)))))
 
 

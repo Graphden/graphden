@@ -338,7 +338,7 @@
                 `tenancy.context/byo-org?`."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
            execute-guard app-router set-org-handler verify-domain user-ops
-           executor-orgs byo-executor? fleet-forward fleet-command]}]
+           my-tokens executor-orgs byo-executor? fleet-forward fleet-command]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -386,10 +386,15 @@
       ;; `:invoke-verify-domain` base-fn calls so a tenant can prove ownership
       ;; of its own custom domain (DNS-TXT) and flip it verified. Addon-only.
       (cond-> verify-domain (assoc :verify-domain verify-domain))
-      ;; User-model seam (§4.1) — `{:create-user … :login …}` the
+      ;; User-model seam — `{:create-user … :login …}` the
       ;; `:invoke-create-user` / `:invoke-login` base-fns call. Login mints a
       ;; session `:token`; the storage-token-provider resolves it. Addon-only.
       (cond-> user-ops (assoc :user-ops user-ops))
+      ;; Self-serve API-token seam — `{:mint … :list … :revoke …}` the
+      ;; tenancy-admin `:invoke-{mint,list,revoke}-my-token` base-fns call so
+      ;; a tenant can manage long-lived bearers for its OWN org (MCP / API
+      ;; clients) without the operator. Addon-only.
+      (cond-> my-tokens (assoc :my-tokens my-tokens))
       ;; Executor shard — which orgs' fns this pod compiles. Read by
       ;; `compile-runtime/read-graph`. nil ⇒ the whole graph. A collection
       ;; becomes a set (which is itself the membership predicate); a fn is

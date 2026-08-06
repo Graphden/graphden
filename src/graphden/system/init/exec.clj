@@ -101,7 +101,7 @@
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
              execute-guard app-router set-org-handler verify-domain user-ops
-             executor-orgs byo-executor? executor-id]}]
+             my-tokens executor-orgs byo-executor? executor-id]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -157,8 +157,11 @@
                    set-org-handler (assoc :set-org-handler set-org-handler)
                    ;; Self-serve DNS-verify seam (§3.4 #2) — addon-only.
                    verify-domain (assoc :verify-domain verify-domain)
-                   ;; User-model seam (§4.1) — create-user / login. Addon-only.
+                   ;; User-model seam — create-user / login. Addon-only.
                    user-ops (assoc :user-ops user-ops)
+                   ;; Self-serve API-token seam — mint/list/revoke a tenant's
+                   ;; own long-lived bearers. Addon-only.
+                   my-tokens (assoc :my-tokens my-tokens)
                    ;; Executor shard — the orgs whose fns THIS pod compiles.
                    ;; Absent ⇒ the whole graph (self-hosted / single-tenant).
                    ;; A collection or predicate from an addon passes through;

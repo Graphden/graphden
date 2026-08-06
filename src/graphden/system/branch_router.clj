@@ -145,9 +145,13 @@
       ;; Inherit the self-serve DNS-verify seam (§3.4 #2) — the
       ;; `:invoke-verify-domain` base-fn runs in the per-branch handler ctx.
       (:verify-domain base-ctx) (assoc :verify-domain (:verify-domain base-ctx))
-      ;; Inherit the user-model seam (§4.1) — `:invoke-login` / `:invoke-create-user`
+      ;; Inherit the user-model seam — `:invoke-login` / `:invoke-create-user`
       ;; run in the per-branch handler ctx.
-      (:user-ops base-ctx) (assoc :user-ops (:user-ops base-ctx)))))
+      (:user-ops base-ctx) (assoc :user-ops (:user-ops base-ctx))
+      ;; Inherit the self-serve API-token seam — the
+      ;; `:invoke-{mint,list,revoke}-my-token` base-fns run in the per-branch
+      ;; handler ctx.
+      (:my-tokens base-ctx) (assoc :my-tokens (:my-tokens base-ctx)))))
 
 
 (defn- ring-callable-for-ctx

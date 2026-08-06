@@ -1,5 +1,6 @@
 (ns graphden.tenancy.context
-  "Current-organization binding for tenant scoping (PLATFORM_PLAN §3.0).
+  "Current-organization binding for tenant scoping
+   (docs/TENANCY_SEAM.md § Context).
 
    This is the core-side SEAM the tenancy addon's `OrgScopedStorage` reads
    to scope every row. It mirrors the `*allowed-effects*` pattern exactly:

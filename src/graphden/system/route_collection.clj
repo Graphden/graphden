@@ -1,6 +1,7 @@
 (ns graphden.system.route-collection
   "Process-wide ORDERED COLLECTION of fall-through routers — the runtime
-   half of the route-collection seam (PLATFORM_PLAN §2.1 / §6).
+   half of the route-collection seam (docs/TENANCY_SEAM.md
+   § Route-collection seam).
 
    The core handler chain consults this collection before its own
    branch-resolution chain (`graphden.system.branch-router/dispatch`).

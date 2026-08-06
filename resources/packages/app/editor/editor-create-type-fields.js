@@ -3,15 +3,15 @@
 // :and/:or combinator, advanced-JSON toggle), list, union, and the
 // drag-reorderable pair-row lists behind variant / record — plus the
 // prefill parsers that reshape an existing type-row back into the
-// form. Split out of editor-create-type.js (which keeps the popover
-// lifecycle, shell, and submit dispatch).
+// form. The popover lifecycle, shell, and submit dispatch live in
+// editor-create-type.js.
 //
 // Depends on: editor-create-type.js globals (TYPE_KINDS context),
 // editor-literal-types.js helpers. Loaded immediately BEFORE
 // editor-create-type.js in `_editor-script-paths`.
 
-// graph-first-exception: split out of editor-create-type.js — the covering
-// rationale lives there (per-kind form built client-side: tab state-carry,
+// graph-first-exception: the covering rationale lives in
+// editor-create-type.js (per-kind form built client-side: tab state-carry,
 // prefill parsing, drag-reorderable pair rows are all client-only state).
 function buildKindFields(kind, datalistId, prefill) {
   if (kind === 'refinement') return buildRefinementFields(datalistId, prefill);

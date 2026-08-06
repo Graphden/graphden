@@ -307,14 +307,16 @@
    - :allowed-effects  Optional set of effect categories this context
                 permits (e.g. `#{:db :time}`). When set, `record-effect!`
                 throws `:execution/forbidden-effect` for any effect
-                outside it — the cloud sandbox boundary (PLATFORM_PLAN
-                §5). `nil`/absent (the default) = unrestricted
-                (self-hosted / mixed).
+                outside it — the cloud sandbox boundary
+                (docs/TENANCY_SEAM.md § Effect gate). `nil`/absent (the
+                default) = unrestricted (self-hosted / mixed).
    - :auth-provider  Optional `graphden.auth.provider/AuthProvider` — the
-                authentication seam (§3.0). Read by the
+                authentication seam (docs/TENANCY_SEAM.md § Auth seam).
+                Read by the
                 `:authenticate-request` base-fn. Absent → that base-fn
                 fails closed (`{:authenticated? false}`).
-   - :request-scope  Optional request-scope seam (§3.0 B4) — a fn
+   - :request-scope  Optional request-scope seam (docs/TENANCY_SEAM.md
+                § Context) — a fn
                 `(fn [ctx request thunk] …)` the branch-router's `dispatch`
                 wraps each handler call with. The tenancy addon uses it to
                 authenticate + bind `*current-org*`. Absent → `dispatch`

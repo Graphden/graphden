@@ -1,5 +1,5 @@
 (ns graphden.executor.effect-gating-test
-  "Runtime effect gate (PLATFORM_PLAN §5) — a context with
+  "Runtime effect gate (docs/TENANCY_SEAM.md § Effect gate) — a context with
    `:allowed-effects` makes `record-effect!` throw
    `:execution/forbidden-effect` for any effect outside the set. The
    cloud sandbox boundary: env / io / network excluded for cloud orgs,

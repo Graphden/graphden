@@ -1,4 +1,4 @@
-// Editor — operator Orgs-admin sidebar section (org-RBAC / PLATFORM_PLAN §3.4).
+// Editor — operator Orgs-admin sidebar section (org-RBAC).
 //
 // Server-rendered via GET /partials/orgs-admin (a table of every org: name |
 // plan | a plan-change / ban control). This is the OPERATOR's outside-in org

@@ -3,10 +3,7 @@
    layered on top of it: vault client, auth provider, the
    `ExecutionContext`, the compiled registry, the per-branch router, the
    backend↔frontend URL drift check, the api-routes JS cache, and the
-   demo-branches seeder.
-
-   Split out of `graphden.system.core` (which now only loads this ns for
-   its `defmethod` side effects). No behaviour change."
+   demo-branches seeder."
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
@@ -64,7 +61,7 @@
 ;; Executor Context
 ;; =============================================================================
 
-;; Authentication seam (PLATFORM_PLAN §3.0 / §4.1). Core wires the default
+;; Authentication seam (docs/TENANCY_SEAM.md § Auth seam). Core wires the default
 ;; single-token provider; the tenancy addon overrides this key with a
 ;; session/JWT provider. Everything downstream (the `:authenticate-request`
 ;; base-fn → `:request-authenticated?` → auth middleware) is provider-

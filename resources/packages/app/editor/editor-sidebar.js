@@ -23,7 +23,7 @@ const expandedNamespaces = new Set();
 
 // Current search/filter text (raw; server search is case-insensitive).
 let searchFilter = '';
-// Server-side search state. The sidebar no longer holds a full-fns mirror
+// Server-side search state. The sidebar holds no full-fns mirror
 // to filter client-side; typing in the box hits ?scope=search. `_searchResults`
 // is null while a query is in flight (or no query active), else the matched
 // light fn rows; `_searchSeq` drops stale responses that arrive out of order.
@@ -321,8 +321,7 @@ function buildFnItem(fn) {
     entityId: fn.id
   });
   if (desc) actions.appendChild(desc);
-  // Secret rows get Rotate + Delete — the CRUD that used to live in the
-  // separate Secrets section. Auth-gated inside the helper.
+  // Secret rows get Rotate + Delete. Auth-gated inside the helper.
   if (isSecret && typeof buildSecretRowActions === 'function') {
     buildSecretRowActions(actions, fn);
   }
@@ -455,8 +454,8 @@ function renderNsNode(container, name, node, path, searchMode) {
 }
 
 /**
- * Search input handler — debounced server-side search (?scope=search),
- * since the sidebar no longer holds every fn to filter client-side.
+ * Search input handler — debounced server-side search (?scope=search);
+ * the sidebar holds no full-fns list to filter client-side.
  */
 function onSearchInput(value) {
   searchFilter = value.trim();

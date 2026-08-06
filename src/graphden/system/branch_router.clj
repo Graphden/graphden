@@ -1023,7 +1023,8 @@
         ;; itself stays org-agnostic (Design B) — keyed by branch-id alone.
         (let [request-scope (:request-scope base-ctx)
               run (fn []
-                    ;; Route-collection seam (PLATFORM_PLAN §2.1 / §6): consult
+                    ;; Route-collection seam (docs/TENANCY_SEAM.md
+                    ;; § Route-collection seam): consult
                     ;; every installed fall-through router FIRST, INSIDE the
                     ;; request-scope so `*current-org*` is bound — the tenancy
                     ;; org-admin panels (grants/users/…) AND the optional

@@ -8,8 +8,8 @@
   :init (do
           ;; Lint paths cover: src + test (classpath sources) AND
           ;; resources/packages (impls.clj files loaded via load-file —
-          ;; previously un-linted, see .clj-kondo/config.edn for the
-          ;; namespace-name-mismatch carve-out).
+          ;; see .clj-kondo/config.edn for the namespace-name-mismatch
+          ;; carve-out).
           ;; `development/` is on the :dev classpath (deps.edn :extra-paths) and
           ;; the GitHub workflow lints it — it must not be invisible to `bb ci`,
           ;; or local-green/CI-red is structural.
@@ -129,9 +129,9 @@
 
           (defn instance-up!
             "(Re)start the instance from the image that is ALREADY built, then
-             wait + verify + smoke. Split out of `bb rebuild` so the landing gate
-             can refresh the develop instance from the image it built in the
-             feature worktree, without paying for a second uberjar."
+             wait + verify + smoke. Lets the landing gate refresh the develop
+             instance from the image it built in the feature worktree, without
+             paying for a second uberjar."
             []
             (p/shell "docker-compose up -d executor")
             (await-healthy-then-verify!)))
@@ -309,6 +309,14 @@
   devtour-check
   {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}
+
+  ai-context-sync
+  {:doc "CI guard: docs/AI_CONTEXT.md must be byte-identical to its classpath copy resources/packages/mcp/mcp/ai-context.md (the MCP server serves the latter at graphden://ai-context). The unit suite pins this too (mcp-doc-sync-test), but units are diff-scoped OUT of a docs-only change — this cheap check keeps the guard on that path. Fix by copying the edited file over the other."
+   :task (let [a (slurp "docs/AI_CONTEXT.md")
+               b (slurp "resources/packages/mcp/mcp/ai-context.md")]
+           (when-not (= a b)
+             (println "ai-context-sync: docs/AI_CONTEXT.md differs from resources/packages/mcp/mcp/ai-context.md — copy the edited one over the other")
+             (System/exit 1)))}
 
   actionlint
   {:doc "Lint GitHub Actions workflows via Docker rhysd/actionlint:1.7.7."
@@ -716,7 +724,7 @@
 
    Why unit-only: the integration suite (cron / services / secrets / storage / executor-runtime / branch-router / per-handler graph tests) doesn't add useful per-NS attribution under cloverage. Empirical 2026-06-23 finding: every CRUD NS that integration would exercise (`crud.entities`, `crud.fn-execution.*`, `crud.branches`, etc.) reports 0% form/line anyway — `cr/execute`'s pre-compiled closure cache (built by `cr/rebuild!`) holds already-resolved fn objects and never re-derefs through the instrumented vars. Confirmed identical under BOTH kaocha-cloverage AND a 2h32m sequential direct `clj -M:cloverage` audit (per-NS 0% identical). So adding integration to the cloverage pass costs ~30 min wall for ~0% useful per-NS signal; it ran via `bb test` / `bb test-integration` un-instrumented anyway. See `[[feedback_coverage_measurement]]` for the full reasoning.
 
-   What the unit-only number tells you: 'do we need more UNIT tests?'. Low coverage for NSes like `system.demo-branches` (2.98%), `system.branch-router` (5.29%), `versioning.merge.core` (3.36%) here is BY DESIGN — those code paths get their gap-filling from integration tests, which we trust based on their pass/fail signal rather than cloverage attribution. See `docs/E2E_SCENARIO_COVERAGE.md` for the e2e side of the audit."
+   What the unit-only number tells you: 'do we need more UNIT tests?'. Low coverage for NSes like `system.demo-branches` (2.98%), `system.branch-router` (5.29%), `versioning.merge.core` (3.36%) here is BY DESIGN — those code paths get their gap-filling from integration tests, which we trust based on their pass/fail signal rather than cloverage attribution."
    :task (do (assert-gate-only! "bb coverage")
              (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit"))}
 

@@ -2,7 +2,7 @@
   "Bindings resolution + classifier-item constructors for the layout
    pipeline.
 
-   Extracted from `graphden.layout.graph`. Holds:
+   Holds:
 
    - `resolve-arg-name` / `arg-ids-from` — arg-row inspection helpers;
    - the five classifier-item constructors (`ref-item-from-arg` /

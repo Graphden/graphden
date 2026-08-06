@@ -983,16 +983,13 @@
           (sp/close storage))))))
 
 
-;; === Arg descendant validation on update/delete ===
-
-^:integration
-;; The legacy `arg-descendant-validation-test` was deleted alongside
-;; the `:arg` table — slots are immutable post-create, so there's no
-;; analogous "block update/delete with descendants" constraint to test.
+;; Slots are immutable post-create, so there is no "block update/delete
+;; with descendants" constraint to test.
 
 
 ;; === Create-entities with heterogeneous fields (different records have different fields) ===
 
+^:integration
 (deftest batch-create-entities-heterogeneous-fields-test
   (testing "create-entities handles records with different field sets"
     (let [storage (setup/create-test-storage)

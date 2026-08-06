@@ -1,4 +1,4 @@
-;; Stand-in tenancy-addon config fragment (PLATFORM_PLAN §3.0 prereq #2).
+;; Stand-in tenancy-addon config fragment (docs/TENANCY_SEAM.md § Addon config manifest).
 ;; A real addon ships this on the classpath via its deps.edn and names it
 ;; in GRAPHDEN_ADDON_CONFIGS. It (a) requires its Clojure ns so the
 ;; init-key defmethods load, (b) adds its own component, and (c) redefines

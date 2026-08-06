@@ -23,8 +23,8 @@
 // ============================================================================
 
 // The secret-leaf base-fn id. UUIDs are content-addressed and stable across
-// branches, so once resolved it's cached for the page. The sidebar no longer
-// holds a full-fns mirror to scan, so it's resolved by name via the server
+// branches, so once resolved it's cached for the page. The sidebar holds
+// no full-fns mirror to scan, so it's resolved by name via the server
 // (primeSecretLeafId, called from initGraph / loadGraphData) — keeping
 // isSecretFn() synchronous for per-row classification.
 let _primedSecretLeafId = null;
@@ -120,12 +120,12 @@ async function loadSecrets() {
 // ============================================================================
 // TREE ROW INTEGRATION
 // ============================================================================
-// Secrets no longer get a separate sidebar section — they render inside
-// the namespace tree (lock-badged by `isSecretFn`, filtered by the
-// "secrets" eye toggle). These helpers give a tree secret-row its vault
-// path + Rotate / Delete actions — the CRUD that used to live in the
-// section. "+ New secret" is the `#secret-add-btn` in the filter bar,
-// wired straight to `openCreateSecretForm`.
+// Secrets render inside the namespace tree (lock-badged by
+// `isSecretFn`, filtered by the "secrets" eye toggle) — no separate
+// sidebar section. These helpers give a tree secret-row its vault
+// path + Rotate / Delete actions. "+ New secret" is the
+// `#secret-add-btn` in the filter bar, wired straight to
+// `openCreateSecretForm`.
 //
 // `_secretsList` (from `loadSecrets`, primed by the sidebar) is
 // query-backed + latency-sensitive (the version-resolution scan behind

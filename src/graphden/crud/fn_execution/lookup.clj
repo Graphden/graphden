@@ -1,10 +1,7 @@
 (ns graphden.crud.fn-execution.lookup
   "Read-only helpers for the /api/execute pipeline — resolve fn-id /
    fn-version-id from the request shape, look up the free-arg slot
-   map for a fn. No DB writes happen here.
-
-   Extracted from `graphden.crud.fn-execution` so the
-   parse/validate/apply orchestrator can stay focused on policy."
+   map for a fn. No DB writes happen here."
   (:require
     [graphden.crud.fn-execution.free-arg-cache :as fac]
     [graphden.crud.request :as request]

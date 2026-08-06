@@ -951,8 +951,9 @@
 (def ^:dynamic *allowed-effects*
   "Set of effect categories the current execution is permitted to
    perform, or `nil` (the default) for UNRESTRICTED. Bound by
-   `execute` from the context's `:allowed-effects` (PLATFORM_PLAN §5
-   cloud sandbox). When a non-nil set is in effect, `record-effect!`
+   `execute` from the context's `:allowed-effects` — the cloud sandbox
+   (docs/TENANCY_SEAM.md § Effect gate). When a non-nil set is in
+   effect, `record-effect!`
    throws `:execution/forbidden-effect` for any category outside it —
    the runtime half of the effect gate (the build-time registry filter
    is the belt-and-suspenders second layer)."
@@ -994,7 +995,8 @@
 
 (def ^:dynamic *execute-authorized*
   "True once the ctx's `:execute-guard` (the tenancy addon's per-namespace
-   execute check, PLATFORM_PLAN §4.2) has run for THIS top-level execute, so
+   execute check, docs/TENANCY_SEAM.md § Execute guard) has run for THIS
+   top-level execute, so
    the recursive sub-fn `execute` calls don't re-run it. Default false →
    the next top-level `execute` consults the guard."
   false)
@@ -1002,7 +1004,7 @@
 
 (def cloud-forbidden-effects
   "The security-sensitive effect categories a cloud sandbox must forbid
-   (PLATFORM_PLAN §5). A cloud org context should set its
+   (docs/TENANCY_SEAM.md § Effect gate). A cloud org context should set its
    `:allowed-effects` to the full effect vocabulary MINUS this set.
 
    Verified by the effect-gate coverage audit: every base-fn that
@@ -1220,7 +1222,8 @@
    reaper which writes `:status :cancelled`."
   [ctx fn-id named-args]
   (check-cancel!)
-  ;; Per-namespace execute gate (§4.2): consult the ctx's `:execute-guard`
+  ;; Per-namespace execute gate (docs/TENANCY_SEAM.md § Execute guard):
+  ;; consult the ctx's `:execute-guard`
   ;; ONCE per top-level execute (the recursion flag keeps it off the hot
   ;; sub-fn path), then re-enter. The guard throws `:authz/forbidden` on a
   ;; denied tenant execute; absent (core / system / admin) → no-op.

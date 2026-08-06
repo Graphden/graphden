@@ -847,4 +847,55 @@
            (target compiles first, placement epoch bumps to reroute, source evicts
            last). How an abstract `move` decision safely becomes a live cell
            migration across pods."}]}
+
+  {:id :platform
+   :title "Platform seams & hardening"
+   :status :toured
+   :summary "The seams the multi-tenant addon plugs into (docs/TENANCY_SEAM.md)
+             and the hardening layers the core itself carries — effect gate,
+             SSRF egress guard, alerting, BYO executor."
+   :paths ["src/graphden/tenancy/" "src/graphden/auth/" "src/graphden/clients/"
+           "src/graphden/monitoring/" "src/graphden/byo.clj"
+           "src/graphden/system/sse.clj"]
+   :after [:services]
+   :steps
+   [{:ns graphden.tenancy.context :defn platform-tier?
+     :say "The one tenancy namespace that lives in core: `*current-org*` is the
+           per-request thread-local the private addon binds, and this predicate
+           is how core code asks `am I the platform, or a tenant?` without
+           depending on the policy. Everything org-scoped downstream keys off
+           this seam."}
+    {:ns graphden.auth.provider :defn single-token-provider
+     :say "Auth is provider-driven: core ships this single-token default behind
+           the `:auth/provider` Integrant key, and the addon swaps in its
+           session/user provider. Note the constant-time compare — the default
+           is small, but it is still a real credential check."}
+    {:ns graphden.executor.compile-runtime :defn cloud-forbidden-effects
+     :say "The effect gate's registry of what a sandboxed graph must NOT do —
+           env / io / network / process / raw-sql — with the docstring
+           explaining why `:raw-sql` exists separately from `:db`. The gate
+           mechanism (`record-effect!` throwing outside `*allowed-effects*`)
+           lives in core; the addon only chooses the policy sets."}
+    {:ns graphden.clients.egress :defn check-target!
+     :say "The SSRF egress guard a tenant's outbound call passes before dialing:
+           fail-closed resolution of the hostname, rejecting loopback / RFC1918 /
+           link-local / cloud-metadata targets. Pair it with `validating-dns`
+           below in the same file — the connect-time re-check that closes the
+           DNS-rebind TOCTOU."}
+    {:ns graphden.monitoring.alerts :defn decide
+     :say "The built-in alerter's pure policy: given the last window's counters
+           and the previous state, decide fire / resolve / stay quiet. All the
+           side effects (scheduler, webhook POST) live elsewhere — this is the
+           testable core of docs/MONITORING.md's second alerting path."}
+    {:ns graphden.system.sse :defn start-relay!
+     :say "The SSE invalidation relay: the hosted side fans branch/org
+           invalidation events out to subscribed external executors so a BYO
+           executor's compiled registry stays fresh without polling. The
+           freshness half of the BYO story."}
+    {:ns graphden.byo :defn start-byo!
+     :say "The customer-hosted executor assembly: RemoteStorage over HTTP as the
+           read-only graph source, the SSE source for invalidation, and a direct
+           http-server — the same core, assembled for someone else's hardware.
+           Closes the platform block: the seams above are exactly what make this
+           assembly possible."}]}
 ]}

@@ -1,5 +1,5 @@
-;; Server-side lookups for partial renderers — Phase 0 of the
-;; HTMX migration plan (docs/EDITOR_HTMX_MIGRATION_PLAN.md).
+;; Server-side lookups for partial renderers — see the row-actions
+;; partial reference (docs/EDITOR_ROW_ACTIONS.md).
 ;;
 ;; Each fn-def here reads a single piece of graph state and is the
 ;; canonical primitive for partials that need it. Reads go through
@@ -13,7 +13,7 @@
 
 
 {:namespace "app.lookups"
- :description "Server-side lookups for partial renderers — read fn rows / namespace paths / usage counts / request auth state. Primitives for the HTMX-migration row-actions + tooltip partials (docs/EDITOR_HTMX_MIGRATION_PLAN.md)."
+ :description "Server-side lookups for partial renderers — read fn rows / namespace paths / usage counts / request auth state. Primitives for the row-actions + tooltip partials (docs/EDITOR_ROW_ACTIONS.md)."
  :fns
  [;; =============================================================================
   ;; AUTH — per-partial request auth check

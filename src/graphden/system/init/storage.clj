@@ -1,11 +1,7 @@
 (ns graphden.system.init.storage
   "Integrant init-keys for the storage stack: schema build, Postgres
    pool, LISTEN/NOTIFY transport, SSE relay, service-lock connection,
-   and the VersionedStorage decorator.
-
-   Split out of `graphden.system.core` (which now only loads this ns for
-   its `defmethod` side effects). No behaviour change — these are the
-   same init-keys, verbatim."
+   and the VersionedStorage decorator."
   (:require
     [clojure.tools.logging :as log]
     [graphden.schema.executions.schema :as es]
@@ -53,7 +49,8 @@
                  ;; (docs/FLEET_RFC.md §6.1). Refs :fn (logical). Non-versioned —
                  ;; control-plane routing state that mutates in place.
                  (placement/extend-builder))]
-    ;; Addon schema-extension seam (PLATFORM_PLAN §3.0): each `extensions`
+    ;; Addon schema-extension seam (docs/TENANCY_SEAM.md § Storage & schema
+    ;; seams): each `extensions`
     ;; entry is a `(builder → builder)` fn — the tenancy addon adds its
     ;; `:grant` entity here without editing core. Absent → core schema.
     (ds/build (reduce (fn [b extend] (extend b)) base (or extensions [])))))
@@ -174,14 +171,15 @@
 ;; Versioned Storage Decorator
 ;; =============================================================================
 
-;; Tenancy storage seam (PLATFORM_PLAN §3.0). Core wires an IDENTITY
+;; Tenancy storage seam (docs/TENANCY_SEAM.md § Storage & schema seams).
+;; Core wires an IDENTITY
 ;; passthrough of the base storage; the tenancy addon overrides this key
 ;; with an `OrgScopedStorage` decorator that injects the per-request
 ;; `org-id` filter. Placement is deliberate: it sits BENEATH versioning
 ;; (`Versioned(OrgScoped(Postgres))`), so the branch-router's `vs/unwrap`
 ;; (which strips the VersionedStorage to rebuild a per-branch view) lands
 ;; on the OrgScoped layer and the tenant filter survives — closing the
-;; ADR §3.0 nuance-1 `vs/unwrap` leak. (RLS is still the belt-and-
+;; `vs/unwrap` leak. (RLS is still the belt-and-
 ;; suspenders second layer.)
 (defmethod ig/init-key :app/storage [_ {:keys [base]}]
   base)

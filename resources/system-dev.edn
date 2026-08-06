@@ -52,7 +52,7 @@
  {:address #or [#env VAULT_ADDR ""]
   :token #or [#env VAULT_TOKEN ""]}
 
- ;; Auth seam (PLATFORM_PLAN §3.0) — default single-token provider.
+ ;; Auth seam (docs/TENANCY_SEAM.md § Auth seam) — default single-token provider.
  :auth/provider
  {:token #or [#env AUTH_TOKEN ""]}
 

@@ -322,11 +322,9 @@
   "Pure: given a raw arg row + the active binding state, return the
    rendered item map (`ref-item-from-arg` / `ref-item-from-bnd` /
    `value-item-from-arg` / `value-item-from-bnd` / `unset-item-from-arg`)
-   or `nil` to skip (the slot is covered by another emission).
-
-   Extracted from `collect-fn-args`'s inner `mapv` so the 7-arm cond
-   that classifies arg-vs-binding state lives in one named place
-   instead of being buried inside a let.
+   or `nil` to skip (the slot is covered by another emission). The
+   7-arm cond that classifies arg-vs-binding state lives here, in one
+   named place.
 
    `binding-applies?` / `bound-by-chain?` / `binding-goes-to-child?`
    are the closure predicates from `collect-fn-args`; they encapsulate

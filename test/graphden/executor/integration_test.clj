@@ -98,11 +98,9 @@
           (sp/close storage))))))
 
 
-;; Depth-limit, timeout, and cache-eviction integration tests were
-;; removed alongside the legacy queue. Those invariants (max-depth
-;; enforcement, per-call timeout checks, result-cache eviction) are not
-;; yet implemented in the compile executor — revive these tests when
-;; parity lands.
+;; Max-depth enforcement, per-call timeout checks, and result-cache
+;; eviction are not yet implemented in the compile executor — add
+;; integration coverage when parity lands.
 
 
 ;; === Nested Composition Test ===

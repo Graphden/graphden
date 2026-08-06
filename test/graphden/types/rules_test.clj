@@ -1,10 +1,9 @@
 (ns graphden.types.rules-test
-  "Unit tests for the per-base-fn type-rules. The rules used to live as
-   name-dispatched `defmethod`s in `graphden.types.rules`; they are now
-   plain `defn`s next to each base-fn's `defbase` in its impls.clj.
-   Those impls.clj files are resources the package loader eval's — not
-   classpath namespaces — so we load the core package once and resolve
-   the rule fns from the resulting namespaces."
+  "Unit tests for the per-base-fn type-rules — plain `defn`s next to
+   each base-fn's `defbase` in its impls.clj. Those impls.clj files are
+   resources the package loader eval's — not classpath namespaces — so
+   we load the core package once and resolve the rule fns from the
+   resulting namespaces."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]

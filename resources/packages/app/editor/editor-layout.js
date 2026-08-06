@@ -106,8 +106,8 @@ const OPTIONAL_STRIP_HEIGHT = 17;
 // additions row-height computation underestimates fn-card height and
 // taller cards bleed into the row below.
 //
-// Namespace surface moved into a left-pinned `ns` badge on every
-// fn-name row, so it no longer occupies a dedicated strip.
+// The namespace surface is a left-pinned `ns` badge on every
+// fn-name row — it occupies no dedicated strip.
 const METADATA_STRIP_HEIGHT = 17;
 const USE_SITE_HEADER_HEIGHT = 21;
 

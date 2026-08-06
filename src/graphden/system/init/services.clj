@@ -2,10 +2,7 @@
   "Integrant init-key for the `:service` reconciler: package-service
    seeding, the NOTIFY dispatch callback (reconcile / cache-invalidate /
    execution-cancel), the periodic reconcile ticker, plus the
-   init/halt/suspend lifecycle.
-
-   Split out of `graphden.system.core` (which now only loads this ns for
-   its `defmethod` side effects). No behaviour change."
+   init/halt/suspend lifecycle."
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]

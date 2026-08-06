@@ -460,8 +460,8 @@
               (println (:output r))
               (println))))
 
-        ;; Coverage report moved to `bb coverage` — bb ci runs the
-        ;; plain tests suite for speed.
+        ;; Coverage lives in `bb coverage` — bb ci runs the plain
+        ;; tests suite for speed.
 
         ;; Final summary
         (let [elapsed (/ (- (System/currentTimeMillis) start-time) 1000.0)

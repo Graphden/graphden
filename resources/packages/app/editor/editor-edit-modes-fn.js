@@ -1,9 +1,9 @@
 // Editor Edit Modes (fn-level) — inline edit popovers that act on a
 // WHOLE fn-def: extend (create child), rename, declared-effects
 // contract (server-rendered form), return-type, namespace move, plus
-// the shared patchFnFieldInState state-patcher. Split out of
-// editor-edit-modes.js (which keeps the popover skeleton, value /
-// secret / rename / sequence modes and the network helpers).
+// the shared patchFnFieldInState state-patcher. The popover skeleton,
+// value / secret / rename / sequence modes and the network helpers
+// live in editor-edit-modes.js.
 
 // --- fn rename (Phase 1) ---
 //

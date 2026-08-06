@@ -1,11 +1,10 @@
 {:namespace "app.editor"
- :description "Row-actions popover partial — server-rendered per-row action buttons for the 4 contexts (col-header / cell / use-site-arg / root-row). See docs/EDITOR_HTMX_MIGRATION_PLAN.md."
+ :description "Row-actions popover partial — server-rendered per-row action buttons for the 4 contexts (col-header / cell / use-site-arg / root-row). See docs/EDITOR_ROW_ACTIONS.md."
  :fns
  [;; ---------------------------------------------------------------------
-  ;; row-actions popover content. Phase A1 of the HTMX migration
-  ;; (docs/EDITOR_HTMX_MIGRATION_PLAN.md) — server-renders the
-  ;; per-row action buttons (ns / i / ↗ for col-header today; cell
-  ;; / use-site / root-row added in A2-A4). JS owns the lifecycle
+  ;; row-actions popover content — see the row-actions partial
+  ;; reference (docs/EDITOR_ROW_ACTIONS.md). Server-renders the
+  ;; per-row action buttons for the 4 contexts. JS owns the lifecycle
   ;; (hover/click/dismiss/position) + the post-swap dispatch from
   ;; `data-action="…"` attrs to the existing edit-mode handlers.
   ;;

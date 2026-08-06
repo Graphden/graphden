@@ -1,4 +1,4 @@
-// Editor — Users-admin sidebar section (PLATFORM_PLAN §4.1).
+// Editor — Users-admin sidebar section.
 //
 // Server-rendered via GET /partials/users-admin (a table of every user:
 // username | org — password hashes are stripped server-side). Only shown to
@@ -12,9 +12,8 @@
 //
 // Shown only to a user who may MANAGE users in their org (org-RBAC: the owner
 // or a holder of the `manage-users` capability — surfaced in the capabilities
-// header). This replaces the old "any authenticated user" gate, so a plain
-// member no longer sees an empty/denied panel, and the operator (public org,
-// no org-management caps) no longer sees a cross-org user list.
+// header). A plain member never sees an empty/denied panel, and the operator
+// (public org, no org-management caps) never sees a cross-org user list.
 //
 // Globals consumed: isAuthenticated, graphdenTenancyActive, graphdenHasCap, htmx.
 

@@ -130,8 +130,6 @@
     ;; `(empty? v) → :empty-map` instead of `:jsonb` so a `{}` literal
     ;; subtypes any structural map shape (`[:map K V]`, record-type,
     ;; `:jsonb`) without bouncing off the `:jsonb ⊄ [:map …]` rule.
-    ;; Drove `(74 → 63)` failures on the topo-sorted sweep. See
-    ;; `docs/TYPE_CHECK_BACKLOG.md` § "In-session pass (2026-06-07)".
     (is (= :empty-map (lit/classify-literal {})))))
 
 

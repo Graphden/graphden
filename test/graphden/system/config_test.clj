@@ -1,6 +1,7 @@
 (ns graphden.system.config-test
-  "The addon-manifest merge (PLATFORM_PLAN §3.0 prereq #2) — an addon
-   config fragment splices into the system config without a core edit."
+  "The addon-manifest merge (docs/TENANCY_SEAM.md § Addon config
+   manifest) — an addon config fragment splices into the system config
+   without a core edit."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.system.config :as config]

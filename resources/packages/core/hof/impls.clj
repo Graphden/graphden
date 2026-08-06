@@ -2,8 +2,7 @@
   "Implementations for core/hof base functions.
 
    `:fn`-type args arrive as already-wrapped single-arg callables (via
-   compile.clj/hof-wrap under the new executor, or via make-single-arg-
-   callable under the legacy queue — both normalised by the loader)."
+   compile.clj/hof-wrap, normalised by the loader)."
   (:refer-clojure :exclude [some-fn])
   (:require
     [graphden.executor.defbase :refer [defbase]]))

@@ -2,10 +2,7 @@
   "Integrant init-key for the leader-locked fleet placement controller
    (docs/FLEET_RFC.md §6.3). Reads live cell weights + the executor set
    and applies the pure `control-loop/plan-tick` decision on a periodic,
-   advisory-lock-gated tick.
-
-   Split out of `graphden.system.core` (which now only loads this ns for
-   its `defmethod` side effects). No behaviour change."
+   advisory-lock-gated tick."
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]

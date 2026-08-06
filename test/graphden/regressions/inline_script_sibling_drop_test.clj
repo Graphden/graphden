@@ -38,11 +38,8 @@
 
 
 (use-fixtures :once
-  ;; Moved to `setup/ensure-build-hashes-fixture`. It was a private helper here,
-  ;; and `packages.app.page-test` was quietly living off the file it left on
-  ;; disk — so page-test passed or failed on whether THIS namespace had run
-  ;; first, which kaocha randomises. A shared precondition belongs in the shared
-  ;; place, stated by every namespace that needs it.
+  ;; A shared precondition belongs in the shared place — every namespace
+  ;; that needs the build-hashes file states this fixture itself.
   setup/ensure-build-hashes-fixture
   (pth/create-container-fixture #'*container*)
   exec/with-clean-registry

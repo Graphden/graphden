@@ -50,10 +50,10 @@ function structEq(a, b) {
 // structural (records, maps, tuples, fn-types, refinement-constraint
 // implication) answers false: the authoritative /api/types/candidates
 // response upgrades those a moment later, and it only ever upgrades —
-// a conservative miss self-heals, a false positive would stick. A full
-// structural mirror of the backend `subtype?` used to live here; it
-// was redundant with the server call and drifted from
-// src/graphden/types/core.clj. Don't grow it back.
+// a conservative miss self-heals, a false positive would stick. Don't
+// grow a full structural mirror of the backend `subtype?` here — it
+// would be redundant with the server call and drift from
+// src/graphden/types/core.clj.
 function clientSubtype(sub, sup) {
   // :sequence (storage primitive) ≡ [:list :any]
   if (sub === 'sequence') sub = ['list', 'any'];
@@ -185,8 +185,8 @@ function buildLookups(data) {
     nsPathMap.set(id, parts.join('.'));
   });
 
-  // Deletability sets. The sidebar no longer holds a full-fns mirror to
-  // count against, so the whole-graph reverse-ref tallies come from the
+  // Deletability sets. The sidebar holds no full-fns mirror to count
+  // against, so the whole-graph reverse-ref tallies come from the
   // SERVER instead of a client scan:
   //   - fnUsedAsParent / fnUsedAsRef: read off each fn row's
   //     `:used-as-parent-count` / `:used-as-ref-count`, which the

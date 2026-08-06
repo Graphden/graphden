@@ -1,5 +1,5 @@
 (ns graphden.auth.provider
-  "Pluggable authentication seam (PLATFORM_PLAN §3.0 / §4.1).
+  "Pluggable authentication seam (docs/TENANCY_SEAM.md § Auth seam).
 
    The authentication DECISION — Ring request → principal — is an
    injectable component. Core ships the default single-token provider;

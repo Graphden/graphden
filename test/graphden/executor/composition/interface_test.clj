@@ -41,11 +41,6 @@
     storage))
 
 
-;; The legacy `resolve-arg-name` (walk source-id chain) was deleted
-;; alongside the :arg entity. Tests below that needed it have been
-;; removed.
-
-
 (deftest sync-fns-to-storage-3-arity-accepts-ns-id-map
   (testing "3-arity variant threads ns-id-map through to core — exercised by system init-key"
     (let [storage (create-test-storage)]
@@ -157,8 +152,7 @@
                                       [{:base-a {:args {} :return-type :int :impl (fn [_ _] 1)}
                                         :base-b {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])
           ;; Wrong order: wrapper depends on target but appears first.
-          ;; Sync's topo-sort handles it transparently — the legacy
-          ;; "log a warning about order" hook was retired.
+          ;; Sync's topo-sort handles it transparently.
           fn-composition-data [{:name :wrapper :parent :base-b :args {:ref :target}}
                                {:name :target :parent :base-a}]
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)]

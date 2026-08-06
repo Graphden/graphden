@@ -1,9 +1,7 @@
 (ns graphden.executor.composition.core-test
   "Unit tests for composition core — pure/internal functions that
-   don't require storage. Most tests for the legacy `:arg`-table
-   pipeline have been removed; the surviving tests cover the new
-   slot/fn-slot/binding model's pure helpers (deps, validation,
-   parsing)."
+   don't require storage. Covers the slot/fn-slot/binding model's
+   pure helpers (deps, validation, parsing)."
   (:require
     [clojure.test :refer [deftest is testing]]
     [clojure.tools.logging]

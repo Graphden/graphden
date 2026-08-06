@@ -2,10 +2,9 @@
   "Tighten-fn-effects CRUD — narrows an `[:fn args ret]` slot type to
    `[:fn args ret #{eff-set}]` by writing a new anonymous fn-row whose
    `:constraint` carries the narrower shape, then pointing the
-   binding's `:type-override-fn-id` at it. Extracted from
-   `crud/entities` so the parent ns stays focused on generic CRUD;
-   `apply-tighten-core` is re-exported through `crud.entities` so
-   `web/crud/impls.clj` can call it via the `entities/` alias.
+   binding's `:type-override-fn-id` at it. `apply-tighten-core` is
+   re-exported through `crud.entities` so `web/crud/impls.clj` can
+   call it via the `entities/` alias.
 
    Phase 8 carved out a 4-arity `[:fn args ret #{eff-set}]` form so a
    slot whose callable should stay pure (or only do certain effects)

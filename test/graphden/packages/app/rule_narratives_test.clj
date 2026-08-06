@@ -1,11 +1,9 @@
 (ns graphden.packages.app.rule-narratives-test
   "Contract tests for the return-type-rule popover's narrative table
-   (`:_rtr-narratives` in `resources/packages/app/editor-provenance/fns.edn`) —
-   the graph-resident successor of the JS `ruleNarrators` map that
-   used to live in `editor-provenance-popover.js`.
+   (`:_rtr-narratives` in `resources/packages/app/editor-provenance/fns.edn`).
 
-   The roster below is HAND-MAINTAINED (inherited from the retired
-   browser test): it guards prose drift and keeps roster == map-keys
+   The roster below is HAND-MAINTAINED: it guards prose drift and
+   keeps roster == map-keys
    in both directions. Since taint became a registry FLAG
    (`:taint-propagate?`) and shadow rules were replaced by declared
    signatures, \"has a narrative-worthy rule\" IS now observable from

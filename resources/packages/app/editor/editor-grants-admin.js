@@ -1,4 +1,4 @@
-// Editor — org-admin Grants sidebar section (PLATFORM_PLAN §6).
+// Editor — org-admin Grants sidebar section.
 //
 // Server-rendered via GET /partials/grants-admin (a table of every grant:
 // subject | capability | namespace). Only shown to authenticated users when

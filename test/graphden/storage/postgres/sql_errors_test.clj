@@ -244,11 +244,9 @@
       (is (instance? SQLException (ex-cause wrapped))))))
 
 
-;; The legacy `discover-graph-cte` / `load-entities-batch` postgres
-;; helpers were removed alongside the recursive-CTE graph traversal
-;; that targeted the old `:arg` table. The new slot/binding traversal
-;; goes through the generic protocol-level resolver — its tests live
-;; in graphden.versioning.storage.core-test (integration).
+;; The slot/binding graph traversal goes through the generic
+;; protocol-level resolver — its tests live in
+;; graphden.versioning.storage.core-test (integration).
 
 
 ;; === Mock-based SQL Error Tests ===
@@ -316,10 +314,6 @@
           (catch clojure.lang.ExceptionInfo e
             (is (= :query-timeout (:type (ex-data e))))
             (is (= :read-entities (:operation (ex-data e))))))))))
-
-
-;; Postgres-specific graph operation tests removed alongside the
-;; legacy CTE traversal — see comment above.
 
 
 ;; === DDL Error Tests ===

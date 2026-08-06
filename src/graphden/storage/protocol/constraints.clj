@@ -102,9 +102,3 @@
                         {:type :constraint-violation/dependency-cycle
                          :owner-fn-id owner-fn-id
                          :ref-fn-id ref-fn-id}))))))
-
-
-;; The legacy `validate-no-arg-descendants-impl` (source-id chain
-;; protection on the deleted `:arg` table) has been removed. Slots in
-;; the new model are immutable post-create, and bindings carry no
-;; descendant chain — there is no analogous constraint to enforce.

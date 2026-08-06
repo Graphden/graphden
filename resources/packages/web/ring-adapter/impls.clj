@@ -1,6 +1,6 @@
 (ns graphden.packages.web.ring-adapter.impls
   "Base-fns for the Ring adapter. Currently just the auth seam
-   (PLATFORM_PLAN §3.0 / §4.1): `:authenticate-request` delegates the
+   (docs/TENANCY_SEAM.md § Auth seam): `:authenticate-request` delegates the
    authentication decision to the context's pluggable `:auth-provider`,
    so the auth middleware is identical whether core's single-token
    provider or the tenancy addon's session/JWT provider is wired."

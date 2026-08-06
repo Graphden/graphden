@@ -1,10 +1,9 @@
 (ns graphden.types.check.literals
   "Pure literal-and-refinement reasoning + shape introspection helpers.
 
-   Split out of `graphden.types.check` because every function here is
-   PURE (no dynamic vars, no global state, no recursion into the
-   type-checker) and FIVE namespaces outside the type-checker call
-   into this surface directly:
+   Every function here is PURE (no dynamic vars, no global state, no
+   recursion into the type-checker), and FIVE namespaces outside the
+   type-checker call into this surface directly:
 
    - `executor.registry.core` — `literal-satisfies-refinement?` (via
      `requiring-resolve`) + `constraint-compatible-with-base?`

@@ -8,8 +8,7 @@
    chains like the rule-owner walk read COMPOSED fn-defs' entries).
 
    Used by the editor-partials suites (return-type-rule, layout
-   strip-facts, execute/datalist shells); extracted from three
-   copies of the same 5-clause stack."
+   strip-facts, execute/datalist shells)."
   (:require
     [clojure.test :as t]
     [graphden.executor.interface :as exec]

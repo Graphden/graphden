@@ -253,9 +253,9 @@
    entity and inserted in one batch per type. Stamped at `merge-ts` + 1ms
    so resolutions are DETERMINISTICALLY strictly-later than the merge
    record (target-timestamp = `merge-ts`) → `pick-latest-candidate`
-   prefers the resolution over the merge-surfaced source. (Previously a
-   second `(now)` read, which made 'resolution wins' depend on wall-clock
-   monotonicity between the two writes.) The +1ms epsilon survives
+   prefers the resolution over the merge-surfaced source — a second
+   `(now)` read here would make 'resolution wins' depend on wall-clock
+   monotonicity between the two writes. The +1ms epsilon survives
    Postgres timestamptz microsecond truncation."
   [base-storage conflicts conflict-resolutions target-branch-id merge-ts]
   (let [ts (Instant/.plusMillis merge-ts 1)

@@ -10,7 +10,8 @@
   :pool-size #long #or [#env DB_POOL_SIZE "10"]
   :schema #ig/ref :db/schema}
 
- ;; Tenancy storage seam (PLATFORM_PLAN §3.0). Identity passthrough by
+ ;; Tenancy storage seam (docs/TENANCY_SEAM.md § Storage & schema
+ ;; seams). Identity passthrough by
  ;; default; the tenancy addon overrides :app/storage with an org-scoped
  ;; decorator. Sits BENEATH versioning so the branch-router's vs/unwrap
  ;; keeps the tenant filter.
@@ -81,7 +82,7 @@
  {:address #or [#env VAULT_ADDR ""]
   :token #or [#env VAULT_TOKEN ""]}
 
- ;; Authentication seam (PLATFORM_PLAN §3.0). Default single-token
+ ;; Authentication seam (docs/TENANCY_SEAM.md § Auth seam). Default single-token
  ;; provider; the tenancy addon overrides this key with session/JWT.
  :auth/provider
  {:token #or [#env AUTH_TOKEN ""]}

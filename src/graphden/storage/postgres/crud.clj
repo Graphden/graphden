@@ -507,9 +507,9 @@
 
 (defn- build-batch-update-sql
   "Assemble the `UPDATE … FROM (VALUES …)` JDBC tuple for a batch
-   UPDATE. Pure HoneySQL composition — extracted from
-   `update-entities` so the parent function reads as the
-   orchestrator (validate → build → execute → verify → junctions).
+   UPDATE. Pure HoneySQL composition — the caller `update-entities`
+   reads as the orchestrator (validate → build → execute → verify →
+   junctions).
 
    Returns `[sql-string param1 param2 …]` suitable for `batch-execute!`.
 

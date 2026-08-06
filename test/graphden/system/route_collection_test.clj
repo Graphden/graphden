@@ -1,5 +1,6 @@
 (ns graphden.system.route-collection-test
-  "Unit tests for the route-collection seam (PLATFORM_PLAN §6) — the JVM-wide
+  "Unit tests for the route-collection seam (docs/TENANCY_SEAM.md
+   § Route-collection seam) — the JVM-wide
    ORDERED COLLECTION of fall-through routers. `br/dispatch` calls
    `dispatch-first` on EVERY request, so the nil-safety contract here is what
    keeps single-tenant (no optional package / addon) a transparent

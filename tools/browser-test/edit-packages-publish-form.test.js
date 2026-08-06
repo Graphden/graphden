@@ -1,10 +1,6 @@
 // Real HTMX form-submit e2e on the SINGLE-TENANT stack.
 //
-// Closes the PLATFORM_PLAN § "browser-driven admin panels" coverage gap:
-// every real hx-post FORM submit used to be browser-tested only through
-// the multi-tenant grants/users panels (visible only with the tenancy
-// addon), while the single-tenant stack checked hx-* attributes +
-// handler-return at the integration level. The packages panel's
+// The packages panel's
 // "Publish a namespace" form is a genuine `<form hx-post>` served on the
 // plain stack, so this file drives it end-to-end through HTMX itself:
 // fill inputs → submit button → HTMX intercepts, form-encodes, POSTs

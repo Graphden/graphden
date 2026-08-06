@@ -20,8 +20,8 @@
    Branches version the WHOLE graph per-entity, mutably, resolved along a
    `base_branch_id` chain — they have no bundle identity, no immutability,
    and `:fn-version` ≠ a behavioural snapshot (binding edits don't
-   re-anchor it). The branch synergy (docs/VERSIONING.md, PLATFORM_PLAN
-   §2.4) is for the INSTALL-STAGING step — install a version onto a branch,
+   re-anchor it). The branch synergy (docs/VERSIONING.md) is for the
+   INSTALL-STAGING step — install a version onto a branch,
    test, merge — NOT for STORING the registry. The two are orthogonal.
 
    NOT versioned: a published row is immutable by contract (the publish

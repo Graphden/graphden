@@ -1,9 +1,8 @@
 // Editor Graph View — the seam between the editor and the graph.
 // Depends on: editor-graph-model.js (`graph`), editor-viewport.js (`viewport`).
 //
-// Every module outside the render pipeline talks to the graph through `gv`. The
-// calls used to be spread across seven files and reached straight into
-// cytoscape; they were all the same handful — read the viewport, read a node's
+// Every module outside the render pipeline talks to the graph through `gv` —
+// the same small handful of calls: read the viewport, read a node's
 // position and size, walk a node's edges, light an edge bundle.
 //
 // The element shape (`id()` / `data()` / `position()` / `width()` / `height()`)

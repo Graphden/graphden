@@ -1,7 +1,8 @@
 // Editor Edit Modes (type-level) — inline edit popovers around a
 // slot's TYPE: the compatible-type select (server-rendered option
 // list), the arg-type flip with its picker-chaining rollback, and the
-// free-arg literal-vs-ref binder. Split out of editor-edit-modes.js.
+// free-arg literal-vs-ref binder. The popover skeleton and the shared
+// network helpers live in editor-edit-modes.js.
 
 // --- arg type flip (Phase 2) ---
 //

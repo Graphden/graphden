@@ -178,18 +178,15 @@ async function showProvenancePopover(arg, anchorEl) {
 }
 
 
-// NOTE: the section-builder helpers that used to live here
-// (appendPopoverSection / appendEffectConstraintSection /
-// appendClosedEnumSection) are gone — every section of both
-// provenance popovers ships pre-rendered from the server partials.
+// NOTE: every section of both provenance popovers ships pre-rendered
+// from the server partials — there are no client-side section builders.
 
 // Return-type variant — anchored to the `↳` glyph on a fn-card's
 // return-type strip when an ancestor base-fn's :return-type-rule
 // computed this fn's return type. Server-rendered at
 // `GET /partials/return-type-rule?fn=<name>` — the rule-owner walk,
 // the per-rule narrative prose, and the Inputs table all ship from
-// the partial (the former ~185-line JS `ruleNarrators` mirror of the
-// `types/check.clj` rule semantics lives in the graph now, as
+// the partial (the rule narratives live in the graph, as
 // `:_rtr-narratives`). JS mounts + anchors only, reusing the same
 // singleton element and dismiss handler as the slot-narrowing
 // popover above.
@@ -205,8 +202,7 @@ async function showReturnTypeRulePopover(fnName, anchorEl) {
     return;
   }
   // The partial renders the intro only when a rule-owning ancestor
-  // exists — a header-only response means nothing to show (same UX
-  // the old client-side rule-owner bail gave).
+  // exists — a header-only response means nothing to show.
   const probe = document.createElement('div');
   probe.innerHTML = html;
   if (!probe.querySelector('.provenance-popover-intro')) return;

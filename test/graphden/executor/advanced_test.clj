@@ -64,17 +64,13 @@
 ;; The guards protect against future code changes that might bypass these checks.
 
 
-;; === Large Value Truncation Tests ===
-
-;; Type-mismatch value-truncation and depth-limit tests were removed
-;; alongside the legacy queue. Those invariants (max-depth enforcement,
-;; arg value type validation with truncated error payloads) are not yet
-;; implemented in the compile executor — re-introduce once parity lands.
+;; Max-depth enforcement and arg-value type validation (with truncated
+;; error payloads) are not implemented in the compile executor — add
+;; coverage once parity lands.
 
 
-;; The legacy max-depth / timeout-ms validation was retired with the
-;; queue executor; the remaining context-level validation (`storage`
-;; presence + protocol satisfaction) lives in `context_test.clj`.
+;; Context-level validation (`storage` presence + protocol
+;; satisfaction) lives in `context_test.clj`.
 
 
 ;; === Additional Timestamp Type Tests ===
@@ -100,8 +96,8 @@
       (sp/close storage))))
 
 
-;; Timeout validation tests were removed along with the legacy queue
-;; executor. Re-introduce once compile enforces per-call timeouts.
+;; The compile executor does not enforce per-call timeouts — add
+;; timeout-validation coverage when it does.
 
 
 ;; === Execute Args Validation Tests ===

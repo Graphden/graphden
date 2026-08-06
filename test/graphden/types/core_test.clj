@@ -363,9 +363,8 @@
     ;; `:merge`'s `:maps` slot is `[:list [:map a :any]]`; per-element
     ;; check matches a concrete record like `{:data-binding-id :text}`
     ;; against `[:map a :any]`. Without typevar tolerance, the
-    ;; subtype-check fails on `(subtype? :keyword a)`. Closes the
-    ;; `:_value-form-root-attrs` type-check sweep failure documented
-    ;; in TYPE_CHECK_BACKLOG.md.
+    ;; subtype-check fails on `(subtype? :keyword a)` — the
+    ;; `:_value-form-root-attrs` case.
     (is (t/subtype? {:data-binding-id :text} [:map 'a :any]))
     (is (t/subtype? {:a :int :b :text} [:map 'a 'b]))
     (is (t/subtype? {} [:map 'a 'b]) "empty record fits any parametric map"))

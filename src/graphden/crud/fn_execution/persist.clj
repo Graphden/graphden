@@ -9,10 +9,7 @@
    - `run-future` — submit the executor invocation as a future with
      the `*cancel-check*` dyn-var bound.
    - `record-completion!` — tail-future that observes outcome and
-     writes the terminal row state.
-
-   Extracted from `graphden.crud.fn-execution` so the
-   parse/validate/apply orchestrator stays focused on policy."
+     writes the terminal row state."
   (:require
     [cheshire.core :as json]
     [clojure.set]
@@ -334,9 +331,9 @@
    `tainted-fn?`: `tainted-fn?` only fires when the fn RETURNS a
    secret; `touches-secret?` also fires when the fn CONSUMES one.
    Used by the audit trail (`stamp-touched-secret`) AND by
-   compile-eager's path-trace secret skip — the predicate MOVED to
+   compile-eager's path-trace secret skip — the predicate lives in
    `registry.core/touches-secret?` so compile-eager reaches it without
-   requiring crud; this alias keeps the historical callsites."
+   requiring crud; this var is an alias for the crud-side callsites."
   registry/touches-secret?)
 
 

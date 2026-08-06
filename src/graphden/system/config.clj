@@ -1,6 +1,6 @@
 (ns graphden.system.config
   "Configuration loading with Aero reader tags + the addon-manifest merge
-   (PLATFORM_PLAN §3.0 prerequisite #2).
+   (docs/TENANCY_SEAM.md § Addon config manifest).
 
    The core system config lives in `system-<profile>.edn`. An optional
    ADDON (a deps.edn dependency — the impl-channel) splices itself in by

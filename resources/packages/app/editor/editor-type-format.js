@@ -3,10 +3,10 @@
 // refinement-constraint text + alias resolution, and the shared
 // `appendResolutionSection` DOM renderer (4-tier resolution +
 // inheritance chain, consumed by the type-expand panel and the
-// mismatch explainer). Split out of editor-literal-types.js, which
-// keeps the RESOLUTION + keystroke-VALIDATION half
+// mismatch explainer). The RESOLUTION + keystroke-VALIDATION half
 // (expectedSlotType / slotTypeProvenance / validateLiteralAgainstType
-// / the nav-type walk). Loaded immediately AFTER
+// / the nav-type walk) lives in editor-literal-types.js. Loaded
+// immediately AFTER
 // editor-literal-types.js in `_editor-script-paths`.
 
 // Render a structural type as a NATURAL-LANGUAGE string for the

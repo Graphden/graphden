@@ -3,10 +3,10 @@
 // (refine→base+constraint, list→element, map/tuple, union→branches,
 // record→fields, fn→args/ret/effects), the subtype-chain breadcrumb,
 // and the small type-grammar readers they share (typeKindLabel /
-// resolveOneHop / refinementChain / constraintToString). Split out of
-// editor-overlay-type-expand.js, which keeps the fixed-position host
-// lifecycle (pan/zoom re-anchor, expandedTypePaths persistence) and
-// the edit affordances (tighten / rename / promote / usages).
+// resolveOneHop / refinementChain / constraintToString). The
+// fixed-position host lifecycle (pan/zoom re-anchor, expandedTypePaths
+// persistence) and the edit affordances (tighten / rename / promote /
+// usages) live in editor-overlay-type-expand.js.
 //
 // Loaded immediately BEFORE editor-overlay-type-expand.js in
 // `_editor-script-paths`.

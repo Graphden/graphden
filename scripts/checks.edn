@@ -54,6 +54,11 @@
  {:name "lychee"        :bb "lychee"        :timeout  60000 :group :docs
   :relevant ["\\.md$" "^\\.lychee"]}
  {:name "typos"         :bb "typos"         :timeout  60000 :group :docs}
+ ;; The unit suite's mcp-doc-sync-test pins the same pair, but tests-unit is
+ ;; diff-scoped OUT of a docs-only change — without this check, editing only
+ ;; docs/AI_CONTEXT.md lands green locally and reddens develop on GitHub CI.
+ {:name "ai-context-sync" :bb "ai-context-sync" :timeout 30000 :group :docs
+  :relevant ["^docs/AI_CONTEXT\\.md$" "^resources/packages/mcp/mcp/ai-context\\.md$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
   :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"]}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}

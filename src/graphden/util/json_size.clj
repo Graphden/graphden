@@ -1,9 +1,9 @@
 (ns graphden.util.json-size
   "Streaming UTF-8 JSON byte measurement with an abort-at-limit guard.
 
-   Extracted from `graphden.crud.fn-execution.persist` (Debug P3) so the
-   executor's value-capture seam can enforce its per-entry byte cap
-   through the SAME machinery the `:result` persistence caps use,
+   Lives in `util` so the executor's value-capture seam can enforce
+   its per-entry byte cap through the SAME machinery the `:result`
+   persistence caps use (`graphden.crud.fn-execution.persist`),
    without an executor→crud dependency. The point of streaming: a
    500 MB result string must be REFUSED by a 5 KB cap without ever
    materialising the JSON in memory — `json/generate-string` + `count`

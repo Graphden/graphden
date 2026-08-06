@@ -38,9 +38,9 @@
                   "packages/app/editor/editor-branches.js"
                   "packages/app/editor/editor-branch-diff.js"
                   "packages/app/editor/editor-create.js"
-                  ;; Per-kind field builders + prefill parsers — split out of
-                  ;; editor-create-type.js; loaded first so the popover shell
-                  ;; can call buildKindFields at open time.
+                  ;; Per-kind field builders + prefill parsers — loaded before
+                  ;; editor-create-type.js so the popover shell can call
+                  ;; buildKindFields at open time.
                   "packages/app/editor/editor-create-type-fields.js"
                   "packages/app/editor/editor-create-type.js"
                   "packages/app/editor/editor-data.js"
@@ -48,8 +48,7 @@
                   ;; SVG edge layer — needs `taxiBendX` from editor-layout.js.
                   "packages/app/editor/editor-edges-svg.js"
                   "packages/app/editor/editor-literal-types.js"
-                  ;; Presentation half of the type helpers — split out of
-                  ;; editor-literal-types.js.
+                  ;; Presentation half of the type helpers.
                   "packages/app/editor/editor-type-format.js"
                   "packages/web/runtime/graphden-forms.js"
                   "packages/app/editor/editor-value-form.js"
@@ -64,8 +63,8 @@
                   "packages/app/editor/editor-namespace-picker.js"
                   "packages/app/editor/editor-edit-validation.js"
                   "packages/app/editor/editor-edit-modes.js"
-                  ;; fn-level + type-level edit modes — split out of
-                  ;; editor-edit-modes.js (which keeps the skeleton).
+                  ;; fn-level + type-level edit modes (the skeleton lives
+                  ;; in editor-edit-modes.js).
                   "packages/app/editor/editor-edit-modes-fn.js"
                   "packages/app/editor/editor-edit-modes-type.js"
                   "packages/app/editor/editor-edit-reparent.js"
@@ -81,7 +80,7 @@
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
                   ;; Structural type-interpretation half of the inline
-                  ;; `▸/▾` panel — split out of editor-overlay-type-expand.js.
+                  ;; `▸/▾` panel.
                   "packages/app/editor/editor-type-expand-render.js"
                   "packages/app/editor/editor-overlay-type-expand.js"
                   "packages/app/editor/editor-provenance-popover.js"

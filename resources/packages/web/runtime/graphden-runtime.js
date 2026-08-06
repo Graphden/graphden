@@ -3,9 +3,7 @@
 // the contact-demo page, and any future fn-def-built page that
 // needs `data-action="X"` click routing.
 //
-// The dispatch + fetch-and-swap pattern was extracted from
-// editor-row-actions.js during the HTMX Phase-A migration so
-// component fn-defs / partials register their `data-action`
+// Component fn-defs / partials register their `data-action`
 // handlers via `registerActionHandler`, then any partial fetched
 // through `loadPartial` automatically dispatches clicks to them.
 //

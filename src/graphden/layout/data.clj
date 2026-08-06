@@ -1,8 +1,7 @@
 (ns graphden.layout.data
   "Data-loading + slot-view synthesis for the layout pipeline (Stage 1).
 
-   Extracted from `graphden.layout.graph` so the graph-building cluster
-   stays focused on the build-graph-elements algorithm. Holds:
+   Holds:
 
    - `synth-arg-id` — deterministic UUID for (fn-id, slot-id) anchor
      identity;

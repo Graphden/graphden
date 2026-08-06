@@ -63,7 +63,7 @@ function switchToBranch(name) {
 // keeps wire shape stable for anyone running the legacy single-branch
 // backend. /partials/* is in the same boat as /api/*: server-rendered
 // fragments that read per-branch graph state.
-// Capability signal (PLATFORM_PLAN §4.3). The tenancy addon stamps
+// Capability signal. The tenancy addon stamps
 // `X-Graphden-Capabilities` (a comma-list like "write,execute") on every
 // /api response. We read it off each response and toggle body classes the
 // editor CSS uses to hide affordances a tenant isn't granted. The header is

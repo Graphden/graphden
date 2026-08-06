@@ -1,8 +1,8 @@
 // Editor Overlay (fn rows) — the four row renderers the fn-card
 // dispatch loop draws with: the use-site header and the
-// column-below-MI / MI / single-fn ancestor rows. Split out of
-// editor-overlay-fn.js, which keeps the paint state machine, hover
-// wiring, and `createFnOverlay` itself. Loaded immediately BEFORE
+// column-below-MI / MI / single-fn ancestor rows. The paint state
+// machine, hover wiring, and `createFnOverlay` itself live in
+// editor-overlay-fn.js. Loaded immediately BEFORE
 // editor-overlay-fn.js in `_editor-script-paths`.
 
 // --- Per-row render helpers used by createFnOverlay's visibleLevels loop ---

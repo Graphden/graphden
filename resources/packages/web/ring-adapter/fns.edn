@@ -276,7 +276,7 @@
           :defaults :default-security-headers}}
 
   ;; =============================================================================
-  ;; AUTH SEAM (PLATFORM_PLAN §3.0) — the authentication DECISION delegates
+  ;; AUTH SEAM (docs/TENANCY_SEAM.md § Auth seam) — the authentication DECISION delegates
   ;; to the context's pluggable `:auth-provider`. Core wires the default
   ;; single-token provider; the tenancy addon swaps it for session/JWT.
   ;; The middleware + `:request-authed?` read ONLY `:request-authenticated?`,

@@ -2332,11 +2332,11 @@
 ;;
 ;; The set of fn-def names that are KNOWN to fail the type-check
 ;; sweep due to architectural gaps documented in
-;; `docs/TYPE_SYSTEM_DECISIONS.md` and `docs/TYPE_CHECK_BACKLOG.md`.
+;; `docs/TYPE_SYSTEM_DECISIONS.md`.
 ;; Each name here is a piece of known debt — runtime is unaffected,
 ;; the editor's effect/return strips for these names may be missing.
 ;;
-;; The sync-time check in `system.core/sync-fn-entities-from-packages!`
+;; The sync-time check in `packages.sync/sync-fn-entities-from-packages!`
 ;; gates on this set:
 ;;   - Any failure NOT in this set is a REGRESSION — throws hard.
 ;;   - Any name in this set that's NO LONGER failing is STALE — also
@@ -2364,7 +2364,7 @@
   ;; Closed 2026-06-16 — sweep down to 0 after applying author
   ;; type-assertions for runtime-guaranteed nullability narrowings
   ;; that the type-checker can't (yet) see through control-flow
-  ;; guards. See `docs/TYPE_CHECK_BACKLOG.md` for the running ledger.
+  ;; guards.
   ;;
   ;; 2026-06-19 — Phase #170 extended to recognize `:is-a?` predicates
   ;; in `:if` / `:cond` clauses (`direct-predicate-of-ref` +
@@ -2426,7 +2426,7 @@
 
 ;; -----------------------------------------------------------------------------
 ;; Phase α'  caller-context narrowings + Phase #170 control-flow ref-return
-;; overrides moved to `graphden.types.check.narrowing`. The dynamic vars
+;; overrides live in `graphden.types.check.narrowing`. The dynamic vars
 ;; `*caller-narrowings*` + `*ref-return-overrides*` defined above stay here
 ;; (consumed deep inside `check-fn-def!` and bound from narrowing's
 ;; `check-fn-def-with-narrowings!`).

@@ -1,8 +1,6 @@
 (ns graphden.crud.entities.seq
   "Sequence-binding CRUD — the append / remove / update flows for
-   `binding-list-item` rows. Extracted from `crud/entities` so the
-   parent ns stays focused on generic CRUD + record/list-type creation
-   + update + delete. The `apply-*-core` / `load-*` / `find-*` helpers
+   `binding-list-item` rows. The `apply-*-core` / `load-*` / `find-*` helpers
    are re-exported through `crud.entities` so `web/crud/impls.clj` can
    call them via the `entities/` alias.
 

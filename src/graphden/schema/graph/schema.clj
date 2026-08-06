@@ -231,7 +231,7 @@
 
 
 ;; =============================================================================
-;; Field UUIDs — :org-id (tenancy, PLATFORM_PLAN §3.0 B2)
+;; Field UUIDs — :org-id (tenancy — docs/TENANCY_SEAM.md § Storage & schema seams)
 ;; Identity-level column on every graph entity. NULL ≡ the shared "public"
 ;; org (core writes leave it NULL; the addon's OrgScopedStorage stamps the
 ;; current org). NOT versioned — tenant ownership doesn't vary per branch,

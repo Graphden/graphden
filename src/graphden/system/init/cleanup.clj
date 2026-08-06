@@ -3,9 +3,7 @@
    `:fn-execution` rows past their per-status TTL and force-cancels
    zombie `:pending` rows older than 1h.
 
-   Split out of `graphden.system.core` (which now only loads this ns for
-   its `defmethod` side effects). No behaviour change. `sweep-executions!`
-   and `as-instant` stay public / test-reachable as before."
+   `sweep-executions!` and `as-instant` are public / test-reachable."
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]

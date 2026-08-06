@@ -58,9 +58,9 @@ function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
 //
 // `stripFacts` carries the server-computed facts the layout response
 // attaches to each fn-node (`graphden.layout.strip-facts`):
-// `returnTypeAlias` / `ruleOwner` / `branchLocal`. The inheritance /
-// registry / branch-local walks that used to live here re-derived
-// server-owned reasoning and are gone.
+// `returnTypeAlias` / `ruleOwner` / `branchLocal`. Don't add client-side
+// inheritance / registry / branch-local walks here — they would
+// re-derive server-owned reasoning.
 function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   const cardFnEntity = lookups?.fnMap?.get(originalFnId);
   if (!cardFnEntity) return;

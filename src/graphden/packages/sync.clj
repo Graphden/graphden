@@ -15,9 +15,8 @@
    integrant init-keys (in `graphden.system.init.packages`) call the same
    helpers, so any drift stays localized here.
 
-   Extracted verbatim from system.core — no behaviour change. Kept under
-   `packages/` (not `system/`) because it is package-domain logic, not
-   integrant lifecycle wiring."
+   Kept under `packages/` (not `system/`) because it is package-domain
+   logic, not integrant lifecycle wiring."
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
@@ -133,8 +132,7 @@
             ;; references (`:list-entities :where :_storage-where-map`)
             ;; saw a bare keyword the alias registry didn't know about,
             ;; so the type-checker treated it as opaque and a literal
-            ;; `{:value {}}` failed against it. See
-            ;; `docs/TYPE_CHECK_BACKLOG.md` § "Re-audit (2026-06-07)".
+            ;; `{:value {}}` failed against it.
             (and (:map fd) (map? (:map fd)))
             (let [{:keys [key value]} (:map fd)]
               (when (and key value) [:map key value]))
@@ -405,7 +403,7 @@
       (log/warn "Type-check sweep: " (count @failures)
                 "fn-defs failed (DEBUG-logged) — runtime unaffected,"
                 " editor effect/return strips may be missing for those names —"
-                " docs/TYPE_CHECK_BACKLOG.md"))
+                " docs/TYPE_SYSTEM_DECISIONS.md"))
     (when-not skip-allowlist-gate?
       (types-check/assert-sweep-failures-match-allowlist!
         (set (keys @failures))

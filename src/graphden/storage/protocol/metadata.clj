@@ -7,6 +7,7 @@
    - Type compatibility and change detection"
   (:require
     [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.schema.fields.types :as ft]
     [graphden.schema.protocol.protocol :as ds]))
 
@@ -66,6 +67,33 @@
       (throw (ex-info (str "Destructive change: " item-type " removed")
                       {:type :destructive-change
                        :removed (vec (map get-name-fn removed))})))))
+
+
+(defn warn-removed!
+  "Rollback-tolerant sibling of `check-removed!`: an item the DB knows
+   that the current schema does NOT declare is LOGGED and LEFT in place,
+   never thrown on.
+
+   Rationale (2026-08-06 outage class): the diff `old-uuids - new-uuids`
+   cannot tell an intentional forward removal apart from an OLD image
+   booting against a DB a NEWER image already migrated (e.g. a rolled-back
+   deploy where the newer code had added `token.label`). Throwing crashed
+   boot on the rollback and forced a `DROP SCHEMA` recovery — total data
+   loss. Leaving the unknown column/entity/enum-value is HARMLESS: the
+   additive migration (`generic_migration.clj`) never drops it (only
+   explicit `retire-field` DROPs a column), and code that doesn't declare
+   it simply never reads it. Re-adding the field later finds the data
+   intact.
+
+   Returns the set of removed UUIDs (for callers/tests)."
+  [item-type old-uuids new-uuids get-name-fn]
+  (let [removed (set/difference old-uuids new-uuids)]
+    (when (seq removed)
+      (log/warn (str "Schema no longer declares " (count removed) " " item-type
+                     " the DB retains — leaving them in place (forward-compat / "
+                     "rollback-tolerant). Use `retire-field` to intentionally DROP. "
+                     "Retained: " (pr-str (vec (map get-name-fn removed))))))
+    removed))
 
 
 (defn check-type-change!
@@ -234,35 +262,44 @@
 
 
 (defn check-all-removals!
-  "Checks for any destructive removals (entities, fields, enums, enum-values).
-   Throws on first removal found.
+  "Reconciles items the DB knows but the current schema no longer declares
+   (entities, fields, enums, enum-values) in a ROLLBACK-TOLERANT way: each
+   such item is LOGGED and LEFT in place (`warn-removed!`), never thrown on.
 
-   Field-level retirements declared via `retire-field` on the schema
-   builder are EXEMPT from the rejection — their UUIDs are filtered
-   out before the diff is computed, since the schema author already
-   acknowledged the loss and the migration will issue a DROP COLUMN."
+   Why not throw: the old-vs-new diff cannot distinguish an intentional
+   forward removal from an OLD image booting against a DB a NEWER image
+   already migrated. Throwing crashed boot on any rollback and forced a
+   `DROP SCHEMA` recovery (the 2026-08-06 outage). Leaving the unknown
+   object is harmless — the additive migration never drops it; only an
+   explicit `retire-field` issues a DROP COLUMN.
+
+   Field-level retirements declared via `retire-field` are filtered out of
+   the field diff (they are handled by the DROP-COLUMN path, not warned).
+
+   Returns a map of {item-type → removed-uuid-set} for observability/tests."
   [old-metadata schema]
-  ;; Check entities
-  (let [old-entity-uuids (set (keys (:entities old-metadata)))
-        new-entity-uuids (into #{} (map #(ds/entity-uuid schema %)) (ds/entities schema))]
-    (check-removed! "entities" old-entity-uuids new-entity-uuids
+  {:entities
+   (let [old-entity-uuids (set (keys (:entities old-metadata)))
+         new-entity-uuids (into #{} (map #(ds/entity-uuid schema %)) (ds/entities schema))]
+     (warn-removed! "entities" old-entity-uuids new-entity-uuids
                     #(get (:entities old-metadata) %)))
-  ;; Check fields — minus declared retirements.
-  (let [retired (collect-retired-field-uuids schema)
-        old-field-uuids (set/difference (set (keys (:fields old-metadata))) retired)
-        new-field-uuids (collect-field-uuids schema)]
-    (check-removed! "fields" old-field-uuids new-field-uuids
+   :fields
+   ;; minus declared retirements (those take the explicit DROP-COLUMN path).
+   (let [retired (collect-retired-field-uuids schema)
+         old-field-uuids (set/difference (set (keys (:fields old-metadata))) retired)
+         new-field-uuids (collect-field-uuids schema)]
+     (warn-removed! "fields" old-field-uuids new-field-uuids
                     #(get (:fields old-metadata) %)))
-  ;; Check enums
-  (let [old-enum-uuids (set (keys (:enums old-metadata)))
-        new-enum-uuids (into #{} (map (fn [[_ {:keys [uuid]}]] uuid)) (ds/enums schema))]
-    (check-removed! "enums" old-enum-uuids new-enum-uuids
+   :enums
+   (let [old-enum-uuids (set (keys (:enums old-metadata)))
+         new-enum-uuids (into #{} (map (fn [[_ {:keys [uuid]}]] uuid)) (ds/enums schema))]
+     (warn-removed! "enums" old-enum-uuids new-enum-uuids
                     #(get (:enums old-metadata) %)))
-  ;; Check enum values
-  (let [old-value-uuids (set (keys (:enum-values old-metadata)))
-        new-value-uuids (collect-enum-value-uuids schema)]
-    (check-removed! "enum values" old-value-uuids new-value-uuids
-                    #(get (:enum-values old-metadata) %))))
+   :enum-values
+   (let [old-value-uuids (set (keys (:enum-values old-metadata)))
+         new-value-uuids (collect-enum-value-uuids schema)]
+     (warn-removed! "enum values" old-value-uuids new-value-uuids
+                    #(get (:enum-values old-metadata) %)))})
 
 
 (defn compute-entity-changes

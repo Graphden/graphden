@@ -145,8 +145,18 @@
 
 ;; === Destructive changes tests ===
 
-(deftest destructive-changes-test
-  (testing "removing entity throws"
+;; === Rollback-tolerant removal contract (P0.1 / 2026-08-06 outage class) ===
+;;
+;; An item the DB knows that the current schema no longer declares is LEFT in
+;; place and LOGGED, never thrown on — otherwise an OLD image booting against a
+;; DB a NEWER image already migrated (a rolled-back deploy) crashes at "Building
+;; schema" and forces a `DROP SCHEMA` recovery. Intentional DROPs still go
+;; through the explicit `retire-field` path (covered elsewhere). These assert
+;; the tolerant path: re-init with something removed SUCCEEDS and prior data
+;; survives.
+
+(deftest removals-are-rollback-tolerant-test
+  (testing "removing an entity does NOT throw — the old table is left in place"
     (let [storage (setup/create-test-storage)
           schema1 (-> (mds/create-builder)
                       (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
@@ -159,28 +169,31 @@
           _ (sp/initialize storage schema1)
           schema2 (th/make-schema)]
       (try
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Destructive change: entities removed"
-              (sp/initialize storage schema2)))
+        (is (some? (sp/initialize storage schema2))
+            "re-init with :post dropped from the schema must not throw")
         (finally
           (sp/close storage)))))
 
-  (testing "removing field throws"
+  (testing "removing a field does NOT throw AND the entity's data survives"
     (let [storage (setup/create-test-storage)
           schema1 (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                   :type :text}
                                            :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
                                                    :type :text}})
           _ (sp/initialize storage schema1)
+          eid #uuid "00000000-0000-0000-0000-0000000000aa"
+          _ (sp/upsert-entities storage :user [{:id eid :name "Ada" :email "ada@x.io"}])
           schema2 (th/make-schema)]
       (try
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Destructive change: fields removed"
-              (sp/initialize storage schema2)))
+        (is (some? (sp/initialize storage schema2))
+            "re-init with :email dropped from the schema must not throw")
+        ;; the row (and its still-declared :name) survive the tolerant re-init
+        (is (= "Ada" (:name (sp/read-entity storage :user eid)))
+            "prior data must survive — the migration never dropped the column/row")
         (finally
           (sp/close storage)))))
 
-  (testing "removing enum throws"
+  (testing "removing an enum does NOT throw"
     (let [storage (setup/create-test-storage)
           schema1 (th/make-schema :enum-name :status
                                   :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
@@ -189,13 +202,12 @@
           _ (sp/initialize storage schema1)
           schema2 (th/make-schema)]
       (try
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Destructive change: enums removed"
-              (sp/initialize storage schema2)))
+        (is (some? (sp/initialize storage schema2))
+            "re-init with the enum dropped from the schema must not throw")
         (finally
           (sp/close storage)))))
 
-  (testing "removing enum value throws"
+  (testing "removing an enum value does NOT throw"
     (let [storage (setup/create-test-storage)
           schema1 (th/make-schema :enum-name :status
                                   :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
@@ -209,9 +221,8 @@
                                   :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
                                                  :value :active}])]
       (try
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Destructive change: enum values removed"
-              (sp/initialize storage schema2)))
+        (is (some? (sp/initialize storage schema2))
+            "re-init with an enum value dropped from the schema must not throw")
         (finally
           (sp/close storage))))))
 

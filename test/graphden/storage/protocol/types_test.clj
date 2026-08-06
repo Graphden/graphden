@@ -219,12 +219,13 @@
 
 
 (deftest check-all-removals!-test
-  (testing "empty old metadata and empty schema doesn't throw"
+  ;; Returns {item-type → removed-uuid-set}; nothing removed → all-empty sets.
+  (testing "empty old metadata and empty schema — nothing removed"
     (let [empty-metadata {:entities {} :fields {} :enums {} :enum-values {}}
           schema (-> (mds/create-builder) ds/build)]
-      (is (nil? (storage/check-all-removals! empty-metadata schema)))))
+      (is (every? empty? (vals (storage/check-all-removals! empty-metadata schema))))))
 
-  (testing "matching metadata and schema doesn't throw"
+  (testing "matching metadata and schema — nothing removed"
     (let [schema (-> (mds/create-builder)
                      (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000010"
                                   [{:uuid #uuid "00000000-0000-0000-0000-000000000011" :value :active}])
@@ -232,7 +233,22 @@
                                     {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
                      ds/build)
           metadata (storage/build-metadata-from-schema schema)]
-      (is (nil? (storage/check-all-removals! metadata schema))))))
+      (is (every? empty? (vals (storage/check-all-removals! metadata schema))))))
+
+  (testing "an item present in metadata but dropped from schema is RETURNED, not thrown"
+    (let [schema1 (-> (mds/create-builder)
+                      (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                     {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                      (ds/add-entity :post #uuid "00000000-0000-0000-0000-000000000003"
+                                     {:title {:uuid #uuid "00000000-0000-0000-0000-000000000004" :type :text}})
+                      ds/build)
+          metadata (storage/build-metadata-from-schema schema1)
+          schema2 (-> (mds/create-builder)
+                      (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                     {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                      ds/build)
+          result (storage/check-all-removals! metadata schema2)]
+      (is (contains? (:entities result) #uuid "00000000-0000-0000-0000-000000000003")))))
 
 
 (deftest protocols-defined-test
@@ -305,6 +321,24 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= :destructive-change (:type (ex-data e))))
         (is (= [:removed-field] (:removed (ex-data e))))))))
+
+
+;; === warn-removed! tests (rollback-tolerant sibling — never throws) ===
+
+(deftest warn-removed!-test
+  (testing "no removals returns empty, does not throw"
+    (is (= #{} (storage/warn-removed! "entities"
+                                      #{#uuid "00000000-0000-0000-0000-000000000001"}
+                                      #{#uuid "00000000-0000-0000-0000-000000000001"}
+                                      identity))))
+
+  (testing "removed items are RETURNED (not thrown) so the caller leaves them in place"
+    (is (= #{#uuid "00000000-0000-0000-0000-000000000002"}
+           (storage/warn-removed! "fields"
+                                  #{#uuid "00000000-0000-0000-0000-000000000001"
+                                    #uuid "00000000-0000-0000-0000-000000000002"}
+                                  #{#uuid "00000000-0000-0000-0000-000000000001"}
+                                  identity)))))
 
 
 ;; === compute-*-changes tests ===

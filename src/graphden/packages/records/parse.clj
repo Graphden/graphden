@@ -783,26 +783,41 @@
 (defn- attach-fn-meta
   "Post-process step that copies fn-def-level metadata onto the first
    record of every parser's output (which is always the `:fn` row).
-   Handles authored-only columns: `:expects-effects`, `:lambda-params` and
-   `:branch-local?`. Both pass through verbatim — they're identity-
-   level on `:fn` (not versioned), so a single write at parse-time
-   suffices."
+   Handles authored columns `:expects-effects`, `:lambda-params` and
+   `:branch-local?`.
+
+   `:expects-effects` and `:lambda-params` are VERSION-DATA fields
+   (`schema/versioned/schema.clj`) — they reconcile on the version plane
+   on CHANGE. They must ALSO reconcile on REMOVAL: the versioned upsert
+   does `merged = (merge current data)`, so a field the incoming record
+   OMITS keeps its stale value. Therefore emit both UNCONDITIONALLY — a
+   fn-def that drops the key writes an explicit CLEARED value, which
+   overwrites the stale value instead of leaking it into every compiled
+   context. (Empirically confirmed: a declarative re-sync that dropped a
+   handler's `:lambda-params` left the old `[:request :limit]` compiling
+   until a DB reset — the 2026-08-06 outage class.) The cleared value is
+   each field's canonical absent form: `nil` for `:lambda-params`, `[]`
+   for `:expects-effects` (the storage default an effectless fn round-
+   trips to). An explicitly-declared `:lambda-params []` (\"handler, no
+   free args\") stays distinct from an omitted key.
+
+   `:branch-local?` is a monotonic-OR IDENTITY flag (different
+   semantics — never silently cleared), so it stays gated on presence."
   [records fn-def]
-  (cond-> records
-    (:expects-effects fn-def)
-    (update 0 assoc :expects-effects
-            (vec (map #(if (keyword? %) (name %) (str %))
-                      (:expects-effects fn-def))))
-
-    ;; `[]` is a meaningful declaration ("everything captured") —
-    ;; gate on key presence, not truthiness-of-content.
-    (contains? fn-def :lambda-params)
-    (update 0 assoc :lambda-params
-            (vec (map #(if (keyword? %) (name %) (str %))
+  (-> records
+      ;; `[]` is the canonical "no effects" (the storage default an
+      ;; effectless fn round-trips to), so emit it — NOT nil — when the
+      ;; fn-def omits the key: that both matches the canonical form AND
+      ;; clears a stale `[:db]` on removal (`[:db]` → omit → `[]`).
+      (update 0 assoc :expects-effects
+              (mapv #(if (keyword? %) (name %) (str %))
+                    (or (:expects-effects fn-def) [])))
+      (update 0 assoc :lambda-params
+              (when (contains? fn-def :lambda-params)
+                (mapv #(if (keyword? %) (name %) (str %))
                       (:lambda-params fn-def))))
-
-    (contains? fn-def :branch-local?)
-    (update 0 assoc :branch-local? (boolean (:branch-local? fn-def)))))
+      (cond-> (contains? fn-def :branch-local?)
+        (update 0 assoc :branch-local? (boolean (:branch-local? fn-def))))))
 
 
 (defn parse-fn-def

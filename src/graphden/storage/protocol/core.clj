@@ -430,6 +430,7 @@
 
 
 (def check-removed! metadata/check-removed!)
+(def warn-removed! metadata/warn-removed!)
 (def check-type-change! metadata/check-type-change!)
 (def check-nullable-change! metadata/check-nullable-change!)
 (def build-metadata-from-schema metadata/build-metadata-from-schema)

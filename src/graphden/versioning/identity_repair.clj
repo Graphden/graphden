@@ -85,6 +85,49 @@
      @n)))
 
 
+(defn inbound-refs
+  "Rows OUTSIDE `fn-id`'s own owned subgraph that reference `fn-id`.
+   Returns a seq of `{:entity :id :field}` descriptors — EMPTY means the
+   fn is unreferenced and can be purged safely. Mirrors the exact ref
+   surface `repoint-refs!` fills, minus the fn's own rows (which vanish
+   with the purge and so are not real inbound refs):
+
+   - `:binding`/`:binding-version` owned iff `:fn-id` == fn-id;
+   - list-item (+ version) owned iff its `:binding-id` is one of fn-id's
+     own bindings;
+   - `:slot` is globally shared — never owned, always an external ref;
+   - other `:fn` rows' type-FKs + `:parent-ids` (the fn's own outbound
+     refs, i.e. the row with `:id` == fn-id, are skipped).
+
+   Conservative by construction: it errs toward REPORTING a ref (leave
+   the fn) rather than missing one (which would purge a live target)."
+  [storage fn-id]
+  (let [base (base-of storage)
+        own-binding-ids (into #{} (map :id)
+                              (sp/query-entities base :binding {:fn-id fn-id}))
+        owned? (fn [entity row]
+                 (case entity
+                   (:binding :binding-version) (= fn-id (:fn-id row))
+                   (:binding-list-item :binding-list-item-version)
+                   (contains? own-binding-ids (:binding-id row))
+                   false))
+        hits (volatile! [])]
+    (doseq [[entity fields] ref-fields
+            row (sp/query-entities base entity {})
+            :when (not (owned? entity row))
+            field fields
+            :when (= fn-id (get row field))]
+      (vswap! hits conj {:entity entity :id (:id row) :field field}))
+    (doseq [f (sp/query-entities base :fn {})
+            :when (not= (:id f) fn-id)]
+      (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id]
+              :when (= fn-id (get f field))]
+        (vswap! hits conj {:entity :fn :id (:id f) :field field}))
+      (when (some #{fn-id} (:parent-ids f))
+        (vswap! hits conj {:entity :fn :id (:id f) :field :parent-ids})))
+    @hits))
+
+
 (defn purge-fn-subgraph!
   "Remove `fn-id`'s whole owned subgraph at the base plane: its
    bindings (+ their list-items and version rows), fn-slots (+

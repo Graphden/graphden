@@ -90,23 +90,67 @@
       (finally (sp/close storage)))))
 
 
-(deftest leaves-ambiguous-and-removed-alone
+(deftest purges-unreferenced-removal-keeps-referenced-one
+  ;; P0.2: a fn dropped from a synced package's EDN (0 same-name
+  ;; candidates) is DEAD identity — purge it when nothing references it,
+  ;; but LEAVE it (loud) when something still does.
   (let [storage (setup/create-test-storage)]
     (try
       (let [pkga (ns-row! storage "pkgb" nil)
             m1 (ns-row! storage "pkgb.a" (:id pkga))
-            ;; a package row whose name is NOT in the new sync at all —
-            ;; genuine removal, must be left (logged) untouched
-            removed-id (records/fn-id "pkgb.a" :gone-fn)
+            ;; (1) removed AND unreferenced → purged
+            gone-id (records/fn-id "pkgb.a" :gone-fn)
             _ (sp/create-entity storage :fn
-                                {:id removed-id :name "gone-fn"
+                                {:id gone-id :name "gone-fn"
                                  :namespace-id (:id m1)
                                  :parent-ids []})
+            ;; (2) removed BUT still referenced by a caller's binding → left
+            used-id (records/fn-id "pkgb.a" :still-used-fn)
+            _ (sp/create-entity storage :fn
+                                {:id used-id :name "still-used-fn"
+                                 :namespace-id (:id m1)
+                                 :parent-ids []})
+            base (setup/create-base-fn! storage "rm-caller-base")
+            slot (setup/create-slot! storage "f" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+            caller (setup/create-composed-fn! storage "rm-caller" (:id base))
+            _ (sp/create-entity storage :binding
+                                {:fn-id (:id caller) :slot-id (:id slot)
+                                 :ref-fn-id used-id})
             n (pkg-sync/reconcile-moved-identities!
                 storage {:packages [{:name "pkgb"}]} [])]
+        (is (= 2 n) "both removals counted as leftovers")
+        (is (nil? (sp/read-entity storage :fn gone-id))
+            "unreferenced dead identity is purged (no DB reset needed)")
+        (is (some? (sp/read-entity storage :fn used-id))
+            "a still-referenced removal is left in place, not silently deleted"))
+      (finally (sp/close storage)))))
+
+
+(deftest leaves-ambiguous-move-alone
+  ;; >1 same-name candidate in the synced set = a move we cannot resolve;
+  ;; the leftover is counted, warned, and left untouched.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkga (ns-row! storage "pkgc" nil)
+            m1 (ns-row! storage "pkgc.a" (:id pkga))
+            m2 (ns-row! storage "pkgc.b" (:id pkga))
+            m3 (ns-row! storage "pkgc.c" (:id pkga))
+            leftover-id (records/fn-id "pkgc.a" :amb-fn)
+            _ (sp/create-entity storage :fn
+                                {:id leftover-id :name "amb-fn"
+                                 :namespace-id (:id m1)
+                                 :parent-ids []})
+            ;; two just-synced same-name candidates → ambiguous
+            cand1 {:id (records/fn-id "pkgc.b" :amb-fn) :name "amb-fn"
+                   :namespace-id (:id m2) :parent-ids []}
+            cand2 {:id (records/fn-id "pkgc.c" :amb-fn) :name "amb-fn"
+                   :namespace-id (:id m3) :parent-ids []}
+            n (pkg-sync/reconcile-moved-identities!
+                storage {:packages [{:name "pkgc"}]} [cand1 cand2])]
         (is (= 1 n) "counted as a leftover")
-        (is (some? (sp/read-entity storage :fn removed-id))
-            "but NOT purged — removal is the author's call, not ours"))
+        (is (some? (sp/read-entity storage :fn leftover-id))
+            "ambiguous move target left untouched"))
       (finally (sp/close storage)))))
 
 

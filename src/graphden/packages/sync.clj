@@ -443,13 +443,24 @@
    - its ns-path's root segment belongs to a package being synced
      (partial test bundles must not judge other packages' rows);
    - EXACTLY ONE just-synced fn carries the same bare name (the
-     unambiguous move target; 0 candidates = genuine package
-     removal, >1 = ambiguous — both logged and left alone).
+     unambiguous move target). 0 candidates = genuine package REMOVAL;
+     >1 = ambiguous move (left alone, warned).
 
-   For each leftover: repoint every ref (identity + all branch
+   For a MOVE (1 candidate): repoint every ref (identity + all branch
    version rows, in place) at the new id, purge the ghost's own
-   subgraph, and drop its registry entry. Runs BEFORE the
-   compiled-registry build, so there is nothing stale to invalidate."
+   subgraph, and drop its registry entry.
+
+   For a REMOVAL (0 candidates): purge the dead identity too — but ONLY
+   when nothing else references it (`idrepair/inbound-refs` empty), so a
+   still-used fn dropped from EDN stays LOUD instead of being deleted out
+   from under its referrer. This stops removed package fns from lingering
+   name/id-resolvable and being loaded into every compiled context (a
+   stale-def compile-crash + a slow forever-growth that pushed operators
+   toward DB resets). Deterministic ids make an over-eager purge
+   self-healing on the next full sync.
+
+   Runs BEFORE the compiled-registry build, so there is nothing stale to
+   invalidate."
   [storage packages synced-fn-rows]
   (if-let [f *reconcile-moved-override*]
     (f storage packages synced-fn-rows)
@@ -462,7 +473,21 @@
   [storage packages synced-fn-rows]
   (let [base (idrepair/base-of storage)
         package-roots (into #{} (map :name) (:packages packages))
-        synced-ids (into #{} (keep :id) synced-fn-rows)
+        ;; The COMPLETE expected package-identity set — not just the
+        ;; composed `synced-fn-rows`. `synced-fn-rows` is ONLY the
+        ;; composed fn-defs + type-rows; base-fns sync via a SEPARATE
+        ;; pass and are absent from it, so keying the removal test on
+        ;; `synced-fn-rows` alone would flag EVERY base-fn (`add`, `eq`,
+        ;; `map`, …) as a genuine removal and purge them. `compute-all-
+        ;; fn-name-ids` derives the deterministic id of every named
+        ;; def in the loaded packages (base + composed + type) under its
+        ;; qualified key; its UUID values are exactly "the ids that
+        ;; SHOULD exist after this sync". Union the actual synced rows in
+        ;; too (post-move-reconcile ids). A deterministic-id row absent
+        ;; from THIS set is a real removal.
+        expected-ids (into (into #{} (keep :id) synced-fn-rows)
+                           (filter uuid?)
+                           (vals (compute-all-fn-name-ids packages)))
         synced-by-name (group-by :name (filter :name synced-fn-rows))
         ns-rows (sp/query-entities base :ns {})
         ns-by-id (into {} (map (juxt :id identity)) ns-rows)
@@ -483,7 +508,7 @@
                          ;; test bootstrap).
                          (nil? (:anonymous-hash row))
                          (not (str/starts-with? (:name row) "_anon-"))
-                         (not (contains? synced-ids (:id row))))
+                         (not (contains? expected-ids (:id row))))
               :let [path (some-> (:namespace-id row) ns-path)
                     root (some-> path (str/split #"\.") first)]
               :when (and path
@@ -502,11 +527,32 @@
             (registry-core/unregister-rich-type! (keyword (:name row))
                                                  (:id row)))
           (if (empty? candidates)
-            ;; A 0-candidate leftover is a genuine REMOVAL (or a
-            ;; reduced-set test sync) — expected, the author's call,
-            ;; never a move. debug, not operator-warn.
-            (log/debug "package identity leftover: removed from package"
-                       {:name (:name row) :id (:id row)})
+            ;; A 0-candidate leftover is a genuine REMOVAL (its package
+            ;; is being synced — the `package-roots` guard above — but no
+            ;; fn of that name remains). Left in the DB it stays
+            ;; name/id-resolvable AND is loaded into every compiled
+            ;; context, so a stale def whose deps changed incompatibly can
+            ;; fail the whole-graph `compile-all` (a boot crash) — and it
+            ;; accumulates forever, which is what pushed operators toward a
+            ;; DB reset. Purge it — but ONLY when nothing else references
+            ;; it (`inbound-refs` empty); a still-referenced removal is the
+            ;; author dropping a fn that is in use, which must stay LOUD,
+            ;; not be silently deleted out from under its referrer.
+            ;; Safe against a false positive: package fns carry a
+            ;; deterministic `uuid-v5(ns,name)` id, so the next full sync
+            ;; re-creates an over-eagerly-purged leaf identically.
+            (let [refs (idrepair/inbound-refs storage (:id row))]
+              (if (empty? refs)
+                (do
+                  (log/info "purging removed package identity (unreferenced dead code)"
+                            {:name (:name row) :id (:id row)})
+                  (idrepair/purge-fn-subgraph! storage (:id row))
+                  (registry-core/unregister-rich-type! (keyword (:name row))
+                                                       (:id row)))
+                (log/warn "package identity removed from EDN but STILL REFERENCED — left in place"
+                          {:name (:name row) :id (:id row)
+                           :reason :removed-but-referenced
+                           :referenced-by (count refs)})))
             ;; >1 same-name candidates — a move we cannot resolve
             ;; safely. THE signal this reconciler exists for.
             (log/warn "package identity leftover NOT auto-reconciled"

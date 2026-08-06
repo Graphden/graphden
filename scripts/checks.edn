@@ -45,6 +45,12 @@
   :relevant ["^Dockerfile"]}
  {:name "actionlint"    :bb "actionlint"    :timeout  60000 :group :infra
   :relevant ["^\\.github/workflows/"]}
+ ;; Same-repo dual pin: an external package's git coord lives in BOTH deps.edn
+ ;; (dev/test resolution) and resources/executor-packages.edn (uberjar bundle).
+ ;; Tests always resolve the in-tree :local/root override, so a divergence is
+ ;; invisible until `bb rebuild` ships it — this keeps the two in lockstep.
+ {:name "pkg-pin-sync"  :bb "pkg-pin-sync"  :timeout  30000 :group :infra
+  :relevant ["^deps\\.edn$" "^resources/executor-packages\\.edn$"]}
  ;; The scoping mechanism guards itself: selector partition semantics +
  ;; checks.edn shape/regex validity + the canonical path→check drift table.
  {:name "ci-selftest"   :bb "ci-test"       :timeout  60000 :group :infra

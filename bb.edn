@@ -318,6 +318,24 @@
              (println "ai-context-sync: docs/AI_CONTEXT.md differs from resources/packages/mcp/mcp/ai-context.md — copy the edited one over the other")
              (System/exit 1)))}
 
+  pkg-pin-sync
+  {:doc "CI guard: every external package pinned by git coord in BOTH resources/executor-packages.edn (what build.clj bundles into the uberjar) and deps.edn (what dev/test resolve) must agree on :git/url and :git/sha. The two are edited independently, so a bump that touches only one ships a jar whose package differs from what the suite tested. Fix by copying the bumped coord to the other file."
+   :task (let [deps (:deps (clojure.edn/read-string (slurp "deps.edn")))
+               manifest (:packages (clojure.edn/read-string (slurp "resources/executor-packages.edn")))
+               drift (for [{:keys [name lib coord]} manifest
+                           :let [dep-coord (get deps lib)]
+                           :when (and (:git/sha coord) (:git/sha dep-coord)
+                                      (not= (select-keys coord [:git/url :git/sha])
+                                            (select-keys dep-coord [:git/url :git/sha])))]
+                       (str "pkg-pin-sync: " name " (" lib ") — executor-packages.edn pins "
+                            (pr-str (select-keys coord [:git/url :git/sha]))
+                            " but deps.edn pins "
+                            (pr-str (select-keys dep-coord [:git/url :git/sha]))
+                            " — bump both together"))]
+           (when (seq drift)
+             (run! println drift)
+             (System/exit 1)))}
+
   actionlint
   {:doc "Lint GitHub Actions workflows via Docker rhysd/actionlint:1.7.7."
    :task (p/shell "docker" "run" "--rm"

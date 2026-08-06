@@ -421,14 +421,14 @@
          (vec (repeat (cond-> n lim (min lim)) {:status :pending})))))))
 
 
-(deftest acquire-execution-slot-caps-concurrency
-  ;; The global (per-pod) + per-org concurrency caps gate execution futures so
-  ;; one client can't pile unbounded compute onto the shared JVM. This test
-  ;; drives the PUBLIC/platform path (tenant? = false), where the per-org cap
-  ;; is the local atom — no storage needed.
+(deftest acquire-execution-slot-caps-per-org
+  ;; P1.2: the GLOBAL per-pod bound moved to the bounded execution POOL
+  ;; (park-then-503, see `execution-pool-parks-then-rejects`), so
+  ;; `acquire-execution-slot!` now enforces ONLY the per-org fairness slice —
+  ;; it no longer rejects at `*max-concurrent-executions*`. PUBLIC/platform
+  ;; path (tenant? = false): per-org cap is the local atom, no storage needed.
   (reset! @#'persist/live-executions {:total 0 :by-org {}})
-  (binding [persist/*max-concurrent-executions* 3
-            persist/*max-concurrent-executions-per-org* 2]
+  (binding [persist/*max-concurrent-executions-per-org* 2]
     (let [acq (fn [org] (persist/acquire-execution-slot! nil org false))
           a1 (acq "orgA")
           a2 (acq "orgA")
@@ -437,15 +437,44 @@
         (is (fn? a1))
         (is (fn? a2))
         (is (nil? a3) "org A's per-org cap of 2 blocks a 3rd slot"))
-      (testing "a different org takes the last global slot, then all reject"
-        (let [b1 (acq "orgB")]
-          (is (fn? b1) "org B takes the 3rd (global) slot")
-          (is (nil? (acq "orgB")) "global cap of 3 now blocks everyone")
-          (b1)))
+      (testing "a different org has its OWN slice, independent of org A"
+        (let [b1 (acq "orgB")
+              b2 (acq "orgB")]
+          (is (fn? b1))
+          (is (fn? b2) "org B's 2-slice is unaffected by org A being full")
+          (is (nil? (acq "orgB")) "org B's own per-org cap still applies")
+          (b1) (b2)))
       (testing "release frees a slot for the capped org"
         (a1)
         (is (fn? (acq "orgA")) "after a release org A can acquire again"))))
   (reset! @#'persist/live-executions {:total 0 :by-org {}}))
+
+
+(deftest execution-pool-parks-then-rejects
+  ;; P1.2 core: at the thread cap, submissions PARK in the bounded queue;
+  ;; only a FULL queue refuses (RejectedExecutionException → the caller maps
+  ;; it to 503). 1 worker + queue-cap 1 ⇒ 1 running + 1 parked accepted, the
+  ;; 3rd refused. Proves "queue, don't reject" AND the bounded-503 boundary.
+  (let [pool (persist/make-execution-pool 1 1)
+        gate (promise)
+        started (java.util.concurrent.CountDownLatch. 1)
+        block (fn [] (java.util.concurrent.CountDownLatch/.countDown started) @gate)]
+    (try
+      (let [f1 (java.util.concurrent.ExecutorService/.submit pool ^Callable block)]
+        ;; ensure f1 is RUNNING on the sole worker (not still queued) so the
+        ;; next submit parks in the queue rather than starting a thread.
+        (java.util.concurrent.CountDownLatch/.await started)
+        (let [f2 (java.util.concurrent.ExecutorService/.submit pool ^Callable block)]
+          (testing "queue full → the 3rd submit is refused (→ 503)"
+            (is (thrown? java.util.concurrent.RejectedExecutionException
+                  (java.util.concurrent.ExecutorService/.submit pool ^Callable block))))
+          (deliver gate :done)
+          (testing "the running AND the parked submission both complete"
+            (is (= :done (java.util.concurrent.Future/.get
+                           f1 2 java.util.concurrent.TimeUnit/SECONDS)))
+            (is (= :done (java.util.concurrent.Future/.get
+                           f2 2 java.util.concurrent.TimeUnit/SECONDS))))))
+      (finally (java.util.concurrent.ThreadPoolExecutor/.shutdownNow pool)))))
 
 
 (deftest acquire-execution-slot-fleet-per-org-cap

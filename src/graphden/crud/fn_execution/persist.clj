@@ -468,10 +468,11 @@
 ;;
 ;; TWO caps, with DIFFERENT scopes:
 ;;
-;; - GLOBAL (`*max-concurrent-executions*`): per-POD. It protects THIS JVM's
-;;   soloExecutor from thread exhaustion, so it MUST be per-process — an
-;;   atom-counted slot, released when the computation finishes (not when the
-;;   HTTP response returns; the future outlives the deref-timeout).
+;; - GLOBAL (`*max-concurrent-executions*`): per-POD. Enforced by the bounded
+;;   execution POOL below (`make-execution-pool`), NOT this atom: at the
+;;   thread cap executions PARK in the pool queue, and only a full queue
+;;   refuses (503). The atom still TRACKS `:total` for observability but no
+;;   longer rejects on it.
 ;;
 ;; - PER-ORG (`*max-concurrent-executions-per-org*`): tenant fairness / quota.
 ;;   For a TENANT this is FLEET-WIDE — counted from the shared `:fn-execution`
@@ -489,7 +490,11 @@
 ;; =============================================================================
 
 (def ^:dynamic *max-concurrent-executions*
-  "Global, PER-POD cap on concurrently-running fn-execution futures."
+  "Global, PER-POD cap on concurrently-RUNNING fn-executions. Sizes the
+   bounded execution pool's worker count (`make-execution-pool`); overflow
+   PARKS in the pool queue rather than being rejected. NOT an admission
+   reject anymore — see `acquire-execution-slot!` (per-org only) and the
+   bounded-pool section below."
   (or (some-> (System/getenv "GRAPHDEN_MAX_CONCURRENT_EXECUTIONS") parse-long) 128))
 
 
@@ -532,12 +537,15 @@
   [storage org tenant?]
   (let [[old new] (swap-vals!
                     live-executions
-                    (fn [{:keys [total by-org] :as st}]
-                      (if (and (< total *max-concurrent-executions*)
-                               ;; Tenants gate per-org on the fleet count below;
-                               ;; public gates on the local atom here.
-                               (or tenant?
-                                   (< (get by-org org 0) *max-concurrent-executions-per-org*)))
+                    (fn [{:keys [by-org] :as st}]
+                      ;; PER-ORG fairness only — the GLOBAL per-pod bound moved
+                      ;; to the bounded execution pool (park-then-503), so this
+                      ;; no longer rejects at `*max-concurrent-executions*`.
+                      ;; Tenants gate per-org on the fleet count below; public
+                      ;; gates on the local atom here. `:total` is still tracked
+                      ;; for observability.
+                      (if (or tenant?
+                              (< (get by-org org 0) *max-concurrent-executions-per-org*))
                         (-> st (update :total inc) (update-in [:by-org org] (fnil inc 0)))
                         st)))]
     (when (not= old new)
@@ -559,6 +567,81 @@
           ;; Fleet-wide per-org budget is full — give the global slot back.
           (do (release) nil)
           release)))))
+
+
+;; =============================================================================
+;; Bounded execution pool — QUEUE, don't reject (P1.2).
+;;
+;; Executions used to run on Clojure's UNBOUNDED soloExecutor, gated only by
+;; the atom cap above (`*max-concurrent-executions*`): the 129th concurrent
+;; run was REJECTED (HTTP 429). Operators asked for the opposite — queue the
+;; work, don't drop it. This bounded `ThreadPoolExecutor` is that queue:
+;;
+;;   - `*max-concurrent-executions*` worker threads run at once (the GLOBAL
+;;     per-pod concurrency bound — the atom above now enforces only the
+;;     PER-ORG fairness slice);
+;;   - `*max-execution-queue*` executions PARK in the queue at the thread cap
+;;     (core == max, so overflow queues instead of spawning threads);
+;;   - only when the QUEUE itself fills does submission refuse
+;;     (`RejectedExecutionException` → HTTP 503 + Retry-After) — never an
+;;     unbounded queue, which would OOM and defeat "don't crash under load".
+;;
+;; The returned `java.util.concurrent.Future` supports `.get`/`.cancel`/
+;; `.isDone`, so `future-cancel` / `future-done?` keep working unchanged; the
+;; two blocking-deref sites (`apply-execute*`, `record-completion!`) use
+;; `.get`. Daemon threads: a stuck execution must never block JVM shutdown.
+;; =============================================================================
+
+(def ^:dynamic *max-execution-queue*
+  "Bounded wait-queue depth in front of the execution thread pool. At the
+   thread cap executions PARK here; when THIS fills, submission refuses
+   (503 + Retry-After)."
+  (or (some-> (System/getenv "GRAPHDEN_MAX_EXECUTION_QUEUE") parse-long) 256))
+
+
+(defonce ^:private exec-thread-counter (java.util.concurrent.atomic.AtomicLong. 0))
+
+
+(defn make-execution-pool
+  "A bounded execution pool: `threads` core==max daemon workers draining a
+   bounded `LinkedBlockingQueue` of `queue-cap`. core==max + a bounded queue
+   gives park-then-reject: overflow queues, and a full queue trips the
+   default AbortPolicy (`RejectedExecutionException` on submit). Idle workers
+   time out (60 s) so a quiet pod isn't holding `threads` threads."
+  ^java.util.concurrent.ThreadPoolExecutor [threads queue-cap]
+  (let [tf (reify java.util.concurrent.ThreadFactory
+             (newThread
+               [_ r]
+               (doto (Thread. ^Runnable r)
+                 (Thread/.setDaemon true)
+                 (Thread/.setName (str "gd-exec-"
+                                       (java.util.concurrent.atomic.AtomicLong/.getAndIncrement
+                                         exec-thread-counter))))))]
+    (doto (java.util.concurrent.ThreadPoolExecutor.
+            (int threads) (int threads)
+            60 java.util.concurrent.TimeUnit/SECONDS
+            (java.util.concurrent.LinkedBlockingQueue. (int queue-cap))
+            tf)
+      (java.util.concurrent.ThreadPoolExecutor/.allowCoreThreadTimeOut true))))
+
+
+(defonce ^:private default-execution-pool
+  (delay (make-execution-pool *max-concurrent-executions* *max-execution-queue*)))
+
+
+(def ^:dynamic *execution-pool-override*
+  "Test seam (mirrors `*compile-permit-override*`): bind a small
+   `make-execution-pool` to assert queue-full → 503 deterministically. nil
+   (production) = the shared `default-execution-pool` sized from the env
+   knobs."
+  nil)
+
+
+(defn current-execution-pool
+  "The execution pool a submit should use — the test override or the shared
+   default."
+  ^java.util.concurrent.ExecutorService []
+  (or *execution-pool-override* @default-execution-pool))
 
 
 (def ^:dynamic *max-execution-wall-ms*
@@ -663,14 +746,22 @@
                      (cr/execute ctx fn-id args))
                    :else
                    (cr/execute ctx fn-id args)))))
-         fut (future
-               (try
-                 (bf)
-                 (finally
-                   ;; @watchdog blocks only until the request thread delivers
-                   ;; it (microseconds after this future was created).
-                   (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
-                   (when release (release)))))]
+         ;; Submit to the BOUNDED execution pool (P1.2) — not Clojure's
+         ;; unbounded soloExecutor. A saturated pool (all workers busy AND the
+         ;; queue full) throws `RejectedExecutionException` HERE, on the
+         ;; submitting thread, which `apply-execute*` maps to 503 + Retry-After.
+         ;; The returned j.u.c.Future supports `.get`/`.cancel`/`.isDone`.
+         fut (java.util.concurrent.ExecutorService/.submit
+               (current-execution-pool)
+               ^Callable
+               (fn []
+                 (try
+                   (bf)
+                   (finally
+                     ;; @watchdog blocks only until the request thread delivers
+                     ;; it (microseconds after this future was created).
+                     (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
+                     (when release (release))))))]
      (deliver watchdog (arm-deadline! *max-execution-wall-ms* cancel-flag fut))
      [fut trace path-trace])))
 
@@ -733,7 +824,7 @@
   ([storage execution-id fn-id ^java.util.concurrent.Future fut trace-atom declared-effects stats-ctx path-trace-atom]
    (future
      (try
-       (let [result @fut
+       (let [result (java.util.concurrent.Future/.get fut)
              runtime-eff (snapshot-runtime-effects trace-atom)
              path (snapshot-path-trace path-trace-atom)]
          (log-effect-drift! execution-id declared-effects runtime-eff)

@@ -1145,26 +1145,48 @@
 
 
 (defn run-with-timeout
-  "Run `thunk` in a future bounded by `timeout-ms`. Returns its value, or
-   `::timeout` (cancelling the future) when it overruns, or `::error` when it
-   throws. Generic — the caller arranges cooperative cancellation (bind
-   `*cancel-check*` inside the thunk so an interrupted execute aborts). Lives
-   here, next to `execute`, so both the cloud app-router and a BYO executor
-   bound a handler through the same helper without either depending on the
-   other.
+  "Run `thunk` bounded by `timeout-ms`. Returns its value, or `::timeout`
+   (cancelling the run) when it overruns, `::error` when it throws, or
+   `::rejected` when a bounded `executor` is SATURATED. Generic — the caller
+   arranges cooperative cancellation (bind `*cancel-check*` inside the thunk so
+   an interrupted execute aborts). Lives here, next to `execute`, so both the
+   cloud app-router and a BYO executor bound a handler through the same helper
+   without either depending on the other.
+
+   `executor` (optional `java.util.concurrent.ExecutorService`): when given,
+   the run is SUBMITTED to it — pass the shared bounded execution pool
+   (`persist/current-execution-pool`) so the FaaS app-router / BYO handler
+   paths QUEUE under load and shed with `::rejected` → 503 instead of piling
+   unbounded soloExecutor threads (P1.3). When nil (the default), the legacy
+   unbounded `future` (Clojure's soloExecutor) runs it — back-compatible for
+   existing callers, which never see `::rejected`.
 
    CALLER CONTRACT: the sentinels are keywords in THIS namespace —
-   `:graphden.executor.compile-runtime/{timeout,error}`. Callers MUST match
-   them QUALIFIED (`::cr/timeout` via an alias, or the fully-qualified form),
-   never bare `::timeout`/`::error` — a bare `::error` resolves to the
+   `:graphden.executor.compile-runtime/{timeout,error,rejected}`. Callers MUST
+   match them QUALIFIED (`::cr/timeout` via an alias, or the fully-qualified
+   form), never bare `::timeout`/`::error` — a bare `::error` resolves to the
    caller's OWN namespace, compiles fine, and silently never matches, so an
    errored/timed-out handler leaks the raw sentinel instead of a 5xx."
-  [timeout-ms thunk]
-  (let [fut (future (thunk))
-        result (try (deref fut timeout-ms ::timeout)
-                    (catch Exception _ ::error))]
-    (when (identical? result ::timeout) (future-cancel fut))
-    result))
+  ([timeout-ms thunk] (run-with-timeout timeout-ms thunk nil))
+  ([timeout-ms thunk executor]
+   (if executor
+     (if-let [fut (try (java.util.concurrent.ExecutorService/.submit
+                         ^java.util.concurrent.ExecutorService executor
+                         ^Callable thunk)
+                       (catch java.util.concurrent.RejectedExecutionException _ nil))]
+       (let [result (try (java.util.concurrent.Future/.get
+                           fut (long timeout-ms) java.util.concurrent.TimeUnit/MILLISECONDS)
+                         (catch java.util.concurrent.TimeoutException _ ::timeout)
+                         (catch Exception _ ::error))]
+         (when (identical? result ::timeout)
+           (java.util.concurrent.Future/.cancel fut true))
+         result)
+       ::rejected)
+     (let [fut (future (thunk))
+           result (try (deref fut timeout-ms ::timeout)
+                       (catch Exception _ ::error))]
+       (when (identical? result ::timeout) (future-cancel fut))
+       result))))
 
 
 (defn record-effect!

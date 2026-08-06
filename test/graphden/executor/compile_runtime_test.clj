@@ -515,3 +515,29 @@
           (is (= 7 (exec/execute ctx child-id {:a 3 :b 4}))
               "the closure compiled from the cache computes the same result")))
       (finally (sp/close storage)))))
+
+
+(deftest run-with-timeout-executor-path
+  ;; P1.3: `run-with-timeout` with an `executor` submits to that bounded pool
+  ;; and QUEUES / sheds under load (→ ::rejected) instead of piling unbounded
+  ;; soloExecutor threads. The 2-arity (no executor) keeps the legacy path.
+  (let [pool (java.util.concurrent.Executors/newFixedThreadPool 1)]
+    (try
+      (testing "executor path returns the thunk value"
+        (is (= 42 (cr/run-with-timeout 1000 (fn [] 42) pool))))
+      (testing "overrun on the executor path → ::timeout"
+        (is (identical? ::cr/timeout
+                        (cr/run-with-timeout 50 (fn [] (Thread/sleep 500) :late) pool))))
+      (testing "throw on the executor path → ::error"
+        (is (identical? ::cr/error
+                        (cr/run-with-timeout 1000 (fn [] (throw (ex-info "boom" {}))) pool))))
+      (finally (java.util.concurrent.ExecutorService/.shutdownNow pool))))
+  (testing "a saturated (shut-down) executor → ::rejected, not a crash"
+    (let [pool (java.util.concurrent.Executors/newFixedThreadPool 1)]
+      (java.util.concurrent.ExecutorService/.shutdown pool)
+      (is (identical? ::cr/rejected
+                      (cr/run-with-timeout 1000 (fn [] 1) pool)))))
+  (testing "no executor → the legacy soloExecutor path is unchanged"
+    (is (= 7 (cr/run-with-timeout 1000 (fn [] 7))))
+    (is (identical? ::cr/timeout
+                    (cr/run-with-timeout 50 (fn [] (Thread/sleep 500) :late))))))

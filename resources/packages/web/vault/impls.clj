@@ -24,6 +24,25 @@
                       {:type :vault/not-configured}))))
 
 
+(defn- operator-only!
+  "The raw vault ops take an ARBITRARY path against the JVM-wide platform
+   token, so they bypass per-org secret isolation (the KV namespace is flat) —
+   they are PLATFORM-ONLY. Refuse a restricted (tenant) graph execution:
+   `cr/*allowed-effects*` is non-nil ONLY inside the cloud sandbox, nil for the
+   unrestricted platform ctx. (The operator's `/api/secrets` CRUD calls the
+   vault client DIRECTLY, not these base-fns, so it is unaffected.) Without
+   this, a paid-tier tenant — which carries `:network` — could compose
+   `{:parent :vault-get :args {:path \"other-org/secret\"}}` and read (or
+   `:vault-put` overwrite) another org's secret. `:secret-leaf` is EXEMPT: its
+   path is bound at COMPILE time from an operator-authored `:secret`, never
+   tenant-arbitrary."
+  [op]
+  (when (some? cr/*allowed-effects*)
+    (throw (ex-info (str "Vault " op " is operator-only — a tenant graph cannot "
+                         "read or write raw secret paths (per-org isolation)")
+                    {:type :vault/operator-only :op op}))))
+
+
 (defbase secret-leaf
   [in]
   ;; The `:in` arg is auto-derefed by the executor at arg-resolution
@@ -41,30 +60,35 @@
 
 (defbase vault-put
   [path value]
+  (operator-only! "put")
   (cr/record-effect! :network)
   (vault/put-secret (require-client! ctx) path value))
 
 
 (defbase vault-delete
   [path]
+  (operator-only! "delete")
   (cr/record-effect! :network)
   (vault/delete-secret (require-client! ctx) path))
 
 
 (defbase vault-get
   [path]
+  (operator-only! "get")
   (cr/record-effect! :network)
   (vault/get-secret (require-client! ctx) path))
 
 
 (defbase vault-metadata-get
   [path]
+  (operator-only! "metadata-get")
   (cr/record-effect! :network)
   (vault/get-metadata (require-client! ctx) path))
 
 
 (defbase vault-metadata-put
   [path metadata]
+  (operator-only! "metadata-put")
   (cr/record-effect! :network)
   (vault/put-metadata (require-client! ctx) path metadata))
 

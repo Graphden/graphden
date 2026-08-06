@@ -5,12 +5,13 @@ Thank you for your interest in contributing to Graphden!
 ## How to contribute
 
 1. Fork the repository.
-2. Create a feature branch from `main`.
+2. Create a feature branch from `develop` (the integration branch; `main`
+   tracks releases).
 3. Make your changes and add tests where appropriate.
 4. Ensure all checks pass:
    - `bb lint`
    - `bb test`
-5. Open a pull request against the `main` branch.
+5. Open a pull request against the `develop` branch.
 
 ## Contributor License Agreement (CLA)
 

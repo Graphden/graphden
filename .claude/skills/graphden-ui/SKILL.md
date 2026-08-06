@@ -97,16 +97,16 @@ If any of these fail, **fix before reporting**. Don't ship "the build is green" 
 - **Cytoscape pan/zoom returns LIVE refs.** Snapshot via primitives (`const x = cy.pan().x`); reading `.x` later sees mutations from later writes. Saved as a memory; don't rediscover.
 - **Theme-dark must mirror every new token.** When you add a `--my-token` to `:root`, also add it to `body.theme-dark` — otherwise dark theme inherits the light value and looks broken under a dark page bg.
 - **No new build steps.** No bundler, no transpiler, no TypeScript. Plain ES2017+ that the browser executes directly. If you want types, JSDoc — biome reads them.
-- **Script load order matters.** New file must be added to `app/editor/fns.edn :_editor-script-paths`, in dependency order. The list lives at `docs/CLAUDE.md` "Frontend Module Structure".
+- **Script load order matters.** New file must be added to `app/editor/fns.edn :_editor-script-paths`, in dependency order. The list lives in `docs/EDITOR_MODULES.md`.
 - **`__BUILD_HASH__` placeholder** — lives in `editor-state.js` only, substituted at build time. Don't delete it; otherwise `window.BUILD_HASH` becomes the literal string.
 
 ---
 
 ## 4. When to add a new editor-*.js file vs. extend an existing one
 
-Add a new file when the new responsibility is genuinely orthogonal (a new overlay type, a new picker, a new edit mode). Extend an existing file when it's a feature of an existing concern. The file map in `CLAUDE.md` "Frontend Module Structure" is the source of truth — keep it updated.
+Add a new file when the new responsibility is genuinely orthogonal (a new overlay type, a new picker, a new edit mode). Extend an existing file when it's a feature of an existing concern. The file map in `docs/EDITOR_MODULES.md` is the source of truth — keep it updated.
 
-Hard cap: a file > 800 lines is a code smell. As of 2026-07-19 every editor module is under the cap (the former three >1100-line files each split along a natural seam: literal-types → type-format, edit-modes → -fn/-type, overlay-type-expand → type-expand-render; overlay-fn → -rows likewise). Keep it that way — split along a concern boundary before a file crosses 800.
+Hard cap: a file > 800 lines is a code smell — split along a concern boundary before a file crosses it (past splits went along natural seams: type resolution vs presentation, fn-level vs type-level edit modes, host lifecycle vs rendering).
 
 ---
 
@@ -167,14 +167,10 @@ to client-side JS only when graph+htmx would HURT one of:
 
 **When refactoring is required AND it's a big job, DO IT, don't
 defer.** "This is a multi-PR effort" / "leave it to a follow-up
-session" / "let me just add a TODO" — these are the dodge. Per
-[[feedback_no_excuse_for_pre_existing]] / `feedback_no_halfmeasures`,
-the answer is plan it, present the plan, then execute. Past
-examples in this codebase: scope=subtree backend + editor migration
-(commits `bec65163` + `55bee689`, 2026-06-22 — multi-day in
-isolation but landed in one session after the third attempt found
-the right architecture); execute-result popover server-rendered
-partial (commit `5ba77e3a`, 2026-06-20).
+session" / "let me just add a TODO" — these are the dodge. The
+answer is plan it, present the plan, then execute. Multi-day
+migrations of this kind have repeatedly landed in one session once
+the right architecture was found.
 
 **Detection (auditable):**
 

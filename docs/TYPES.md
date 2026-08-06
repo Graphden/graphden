@@ -1449,8 +1449,7 @@ post-α'-precision-surfaced 11 nullability gaps closed via author
 `:type T` annotations on binding forms (each guarded by an
 upstream nil-check at runtime). Sweep at zero;
 `allowed-type-check-failures` is `#{}` and the Phase E hard-gate
-stays armed both directions. See `docs/TYPE_CHECK_BACKLOG.md`
-§ 2026-06-16 entries for the closure ledger, and
+stays armed both directions. See
 `docs/TYPE_SYSTEM_DECISIONS.md` for the rejected alternative
 phases (β / γ / #170 v2) with rationale.
 

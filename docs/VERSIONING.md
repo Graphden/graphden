@@ -422,13 +422,13 @@ keeps its inline 📍 badge on the same rows.
   `evict-lru-if-full` keyed on `:last-used`); tune via the
   `GRAPHDEN_MAX_CACHED_BRANCHES` env var (read by `:exec/branch-router`
   into `create-router`'s `:max-size`).
-- ~~`resolve-branch-id` ref-cache TOCTOU~~ — CLOSED: a branch deleted
-  between the FIRST (uncached) resolution's DB read and its cache write
-  used to leave the dead id cached (the delete's value-sweep had already
-  run). `resolve-branch-id` now re-reads AFTER the cache write: a delete
-  landing before the recheck is seen (entry dropped, nil/new id
-  returned); one landing after it sees the now-present entry and sweeps
-  it. Costs one extra read per cache miss only. Covered by the
+- `resolve-branch-id` re-reads AFTER its ref-cache write (one extra read
+  per cache miss only). This closes a TOCTOU: without the recheck, a
+  branch deleted between the first (uncached) resolution's DB read and
+  its cache write leaves the dead id cached, because the delete's
+  value-sweep has already run. A delete landing before the recheck is
+  seen (entry dropped, nil/new id returned); one landing after it sees
+  the now-present entry and sweeps it. Covered by the
   `ref-cache-toctou-*` tests in `branch_router_test`.
 - The `:exec/branch-router` is unit-tested at the dispatcher level
   (`branch-router-test`: header / query parsing, default fallback,

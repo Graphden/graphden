@@ -239,7 +239,8 @@ proceeds.
 **Component:** executor (effect sandbox)
 **Description:** A base-fn impl tried to perform a side effect not
 permitted by the execution context's `:allowed-effects` set — the
-runtime half of the cloud effect gate (PLATFORM_PLAN §5). Thrown by
+runtime half of the cloud effect gate
+([TENANCY_SEAM.md § Effect gate](TENANCY_SEAM.md#effect-gate)). Thrown by
 `record-effect!` BEFORE the impl performs the effect. Only fires when the
 context restricts effects; an unrestricted context (`:allowed-effects`
 nil — self-hosted / mixed) never throws this.

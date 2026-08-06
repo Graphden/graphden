@@ -145,41 +145,41 @@ chain can be queried/indexed independently of scalar bindings.
 
 | Document | Purpose | When to read |
 |----------|---------|--------------|
-| [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, module mapping | Before making architectural decisions |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical details, execution model, examples | When implementing features |
-| [docs/PACKAGES.md](docs/PACKAGES.md) | Package system, module structure, loading | When adding base-fns or fn-defs |
-| [docs/TYPES.md](docs/TYPES.md) | Type system design & semantics — type hierarchy, inference, narrowing, refinements, variants, control-flow narrowing (Phase #170 v1), canonical author `:type T` assertion sites | When working with arg types |
-| [docs/TYPE_SYSTEM_DECISIONS.md](docs/TYPE_SYSTEM_DECISIONS.md) | ADR for the type system — current sweep-at-zero state, the root architectural tension (slots are global identities vs structurally-different flows), three alternatives (α/β/γ), why β was attempted + reverted, why #170 v2 + γ were rejected, outcome table | Before proposing a type-system change — read this first to avoid retrying paths that already closed |
-| [docs/TYPE_CHECK_BACKLOG.md](docs/TYPE_CHECK_BACKLOG.md) | Historical ledger of per-failure closures during the sweep-to-zero work | When tracing the history of a specific type-check fix |
-| [docs/adr/ADR-identity-model.md](docs/adr/ADR-identity-model.md) | fn identity ADR — ids are identity, names are PER-NAMESPACE labels; the two authoring worlds (package sync `uuid-v5(ns,name)` deterministic ids + rename-breaks-identity vs editor `random-uuid` + rename-preserves-identity) and why both stay; the id-keyed rich-types registry (`rich-type-of-id` primary, name index for the checker/boundaries); the per-ns migration ladder (alias registry → anon-hash+ns → qualified fns.edn refs → relax global name validation) | Before keying ANY new registry/cache/dispatch by fn NAME, changing id derivation, or advancing the per-namespace-names migration |
-| [docs/adr/AUDIT-name-vs-id-resolution.md](docs/adr/AUDIT-name-vs-id-resolution.md) | id-vs-name resolution audit — the closure ledger: which internal name-resolution is FRAGILE (all fixed: root-branch, call-cache key, authz-subject P1, layout synth-slot) vs BENIGN / deliberate-by-design (type-alias registry, hybrid `fa`, anon-hash, export serialization) across executor/crud/storage/types/tenancy/layout; the CI-guard (`id_resolution_guard_test`) that regression-proofs it; and why re-keying the type checker was NOT done | Before proposing that an internal mechanism resolve/match/dispatch by NAME instead of id, auditing id-vs-name usage, or touching authz-subject / branch-root / sequence-slot / layout synth-slot identity |
-| [docs/adr/ADR-parent-set-identity.md](docs/adr/ADR-parent-set-identity.md) | Parent-set = structural identity ADR — why `:parent-ids` stays an UNVERSIONED identity junction guarded by `reparent-cross-branch-rej` (root-branch + no diverging versions), why versioning it was rejected (parent-set defines the slot closure; branch-varying closures re-architect fn-slot/MI/free-args + hot-path cost), and the copy-on-write fork door for branch-local inheritance | Before touching `reparent-cross-branch-rej`, proposing versioned parent-ids, or designing any branch-local inheritance feature |
-| [docs/adr/ADR-versioning-vs-offtheshelf.md](docs/adr/ADR-versioning-vs-offtheshelf.md) | Why the bespoke branch/versioning system stays on Postgres and is NOT replaced by Dolt / Datomic / XTDB / temporal tables — the 3-layer decomposition (store+resolve vs domain merge policy vs live per-branch execution routing), the branches≠time-travel distinction, the Postgres coupling (DISTINCT ON, advisory locks, branch-scoped NOTIFY, RLS) a DB swap would forfeit, and the two follow-through findings (fork-point LCA fix; branch-chain-walk-kept-portable) | Before proposing to adopt an off-the-shelf versioned/temporal DB, replace `VersionedStorage`, or "just use git/Dolt/Datomic" for the branch model |
-| [docs/PERF_BUDGETS.md](docs/PERF_BUDGETS.md) | The performance **regression gate** — why it counts structural events (registry full-clears, fixture bootstraps, SQL round trips) rather than timing them: every perf fix this repo shipped was a count that moved, while both attempts at a timing win measured as noise or worse. Covers `bb perf` / `bb perf-update` + the committed `perf/budgets.edn` reference set (the `bb visual` loop), what may be budgeted (ONLY counters invariant to test count) vs merely reported as trend, `pg_stat_statements` per-scenario SQL counting + why its warm-up and dbid filter are load-bearing, and the first per-NS fixture-vs-assertion readings (fixture cost is concentrated in 3 NSes, and the unit suite is ~1:1, not the 360:1 folklore) | Before adding any perf assertion, touching `graphden.util.counters` / `kaocha.plugin/perf` / `graphden.perf.*` / `scripts/perf.clj` / `perf/budgets.edn`, or when `bb perf` fails |
-| [docs/PERF_NOTES.md](docs/PERF_NOTES.md) | Executor hot-path performance investigation — current measurements within budget, "smear not hot frame" diagnosis from 2026-05, two attempted point-fixes that didn't help (one made things slower), 4-step real-fix sketch held in reserve | Before allocating multi-commit performance work — re-benchmark first; the 2026-05 flame-graph predates eager-compile |
+| [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, module mapping | Before architectural decisions |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Data model, execution model, examples | When implementing features |
+| [docs/PACKAGES.md](docs/PACKAGES.md) | Package system, module format, composition best practices | When adding base-fns or fn-defs |
+| [docs/TYPES.md](docs/TYPES.md) | Type-system semantics — hierarchy, inference, narrowing, refinements, author `:type` sites | When working with arg types |
+| [docs/TYPE_SYSTEM_DECISIONS.md](docs/TYPE_SYSTEM_DECISIONS.md) | Type-system ADR — sweep-at-zero state + the rejected alternatives (α/β/γ, #170 v2) with rationale | Before proposing ANY type-system change — avoids retrying closed paths |
+| [docs/adr/ADR-identity-model.md](docs/adr/ADR-identity-model.md) | fn identity ADR — ids are identity, names are per-namespace labels; the two authoring worlds; the id-keyed rich-types registry | Before keying any new registry/cache/dispatch by fn NAME or changing id derivation |
+| [docs/adr/AUDIT-name-vs-id-resolution.md](docs/adr/AUDIT-name-vs-id-resolution.md) | Closure audit of internal name-vs-id resolution + the `id_resolution_guard_test` CI guard | Before making an internal mechanism resolve/match/dispatch by NAME instead of id |
+| [docs/adr/ADR-parent-set-identity.md](docs/adr/ADR-parent-set-identity.md) | Why `:parent-ids` stays an UNVERSIONED identity junction (guarded by `reparent-cross-branch-rej`); the copy-on-write fork door | Before touching `reparent-cross-branch-rej` or proposing versioned parent-ids / branch-local inheritance |
+| [docs/adr/ADR-versioning-vs-offtheshelf.md](docs/adr/ADR-versioning-vs-offtheshelf.md) | Why the branch/versioning system stays bespoke on Postgres — not Dolt / Datomic / XTDB / temporal tables | Before proposing an off-the-shelf versioned DB or replacing `VersionedStorage` |
+| [docs/PERF_BUDGETS.md](docs/PERF_BUDGETS.md) | The perf regression gate — budgets structural COUNTS (full-clears, SQL round trips), not timings; `bb perf` / `perf/budgets.edn` | Before adding any perf assertion, or when `bb perf` fails |
+| [docs/PERF_NOTES.md](docs/PERF_NOTES.md) | Executor hot-path investigation — two failed point-fixes, real-fix sketch held in reserve | Before allocating perf work — re-benchmark first |
 | [docs/LAYOUT.md](docs/LAYOUT.md) | Graph-editor layout pipeline (Stages 1–7) | When touching layout impl or editor frontend |
+| [docs/EDITOR_MODULES.md](docs/EDITOR_MODULES.md) | Per-module map of the editor frontend + JS load order | Before touching any `editor-*.js` / `web/runtime/*.js` |
+| [docs/EDITOR_ROW_ACTIONS.md](docs/EDITOR_ROW_ACTIONS.md) | As-shipped row-actions partial contract (4 contexts, query-param matrix) + why the other popovers stay JS | When extending the row-actions partial or considering another popover migration |
+| [docs/PARTIALS.md](docs/PARTIALS.md) | Graph-native HTML partials at `GET /partials/*` — HTMX wiring, recipe, gotchas | When wiring a new server-rendered popover/panel |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
-| [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
+| [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Canonical error `:type` keywords | When handling errors |
 | [docs/EXTENDING.md](docs/EXTENDING.md) | HOF semantics, custom storage, schema extensions | When extending below the package layer |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning |
-| [docs/AI_CONTEXT.md](docs/AI_CONTEXT.md) | The AI-author guide the MCP server serves at `graphden://ai-context` (Block 9.3) — entity model + fn-def authoring for an EXTERNAL AI. Not CLAUDE.md (that's for devs working ON graphden). Its classpath copy `resources/packages/mcp/mcp/ai-context.md` is kept identical by `mcp-doc-sync-test` | When editing what the AI is taught, or adding an MCP tool the guide should mention |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Shipped vs planned, by block | For project planning |
+| [docs/AI_CONTEXT.md](docs/AI_CONTEXT.md) | The guide served to EXTERNAL AI authors at `graphden://ai-context`; its classpath copy is kept byte-identical by `mcp-doc-sync-test` | When changing what the AI is taught — edit BOTH copies |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
-| [docs/EXECUTION.md](docs/EXECUTION.md) | Function execution feature: schema, HTTP API, cancel/TTL/UI | When touching `/api/execute*` or the editor's Run popover |
-| [docs/MONITORING.md](docs/MONITORING.md) | Observability (Phase C): usage rollups (`:usage-stat`), the recent-failures error viewer, and the two alerting paths — external Prometheus/Alertmanager over `/metrics` + the opt-in built-in domain alerter (`:exec/alert-scheduler`, `GRAPHDEN_ALERT_WEBHOOK`; pure policy in `graphden.monitoring.alerts`) | When touching stats/error-log/counters, the alerter, or adding a metric |
-| [docs/SERVICES.md](docs/SERVICES.md) | Phase 1 service registry: `:service` schema (incl. `:cardinality` — `:singleton` advisory-lock-gated vs `:per-pod` listeners), reconciler (edge-triggered on CRUD/NOTIFY **plus** a level-triggered periodic tick for crash-failover + out-of-band drift), supervisor, HTTP API, legacy fallback + displacement, roadmap to cron | When touching `services/`, `:exec/service-reconciler`, or anything that needs to know what services are |
-| [docs/SCALING.md](docs/SCALING.md) | Multi-executor fleet: why the shard key is the **org** and not fn-popularity, what multi-pod does (NOTIFY delta-invalidation, advisory-lock singletons + reconnect/reassert, per-pod listeners, cross-pod cancel, level-triggered reconcile tick), per-branch invalidation via `collect-branch-chain`, `:executor-orgs` predicate on the ctx, `421 Misdirected Request` off-shard, the **fleet-wide per-org quota**, and the full **external/BYO executor** (`graphden.byo` + `RemoteStorage` over HTTP + SSE relay/source + `:org.execution-mode`) — all SHIPPED; only a real BYO executor on a second physical machine (§ Still open) remains | Before touching `services/reconciler`, `system/branch_router` invalidation, `storage/{postgres/notify,remote/*}`, `system/sse`, `byo.clj`, `compile_runtime/read-graph`, or the `:executor-orgs` checks in `tenancy/{addon,app_router}`; and before proposing any distribution work |
-| [docs/FLEET_RFC.md](docs/FLEET_RFC.md) | Dynamic fleet: load-based placement + rebalancing. **Phases 0-3 core SHIPPED** (`fleet.{placement,router,command,metrics,controller,packer,rebalance,control-loop,discovery}` + `:exec/fleet-controller` + Helm chart) — the fleet auto-places tenant cells + rebalances sustained imbalance under a leader-locked controller over a k8s StatefulSet with SRV membership. The **cell** (root fn + forward ref-closure) is the placement unit (services stay with the reconciler, NOT the fleet controller; an org app is one cell today; single-call distributed execution is a non-goal); load/evict reuses the live compiled-registry atom + `compile-subset`; footprint/start track = **CRaC-first, GraalVM shelved**; §9: graph **hot-reload is already shipped**, this adds placement not freshness. **§7.1 tenant-service isolation**: the effect gate (task #6 parts 1+3, shipped) bounds a tenant service's CAPABILITY but not its CPU/heap/threads — safe always-on tenant services need a RESOURCE boundary below the JVM (L1 = dedicated `:executor-orgs #{org}` shard + Helm cgroup limits, both shipped; L2 = CRaC per-cell + scale-to-zero), which is why services are the paid tier + the concrete #6-parts-2/4 (Option B) enable-path. Still open: overlap-accounting + per-route split (T4.5, evidence-gated), scale-to-zero (T5.3, CRaC-gated) | Before proposing ANY dynamic-placement / autoscaling / rebalancing / hot-reload / native-image work, touching `fleet/*` or `:exec/fleet-controller`, picking a k8s/Knative/serverless/CRaC substrate, or designing tenant-service resource isolation |
-| [docs/FLEET_DEPLOY.md](docs/FLEET_DEPLOY.md) | Operational how-to for the dynamic fleet: `helm install deploy/helm/graphden`, the StatefulSet + headless-SRV-discovery + leader-locked controller model, HPA, controller tuning (`GRAPHDEN_FLEET_*`), how a request forward-hops to its cell's holder, and the **§ Dedicated tenant shard** runbook (task #6 / FLEET_RFC §7.1 — `executorOrgs`=`public,<org>` + tight cgroup `resources.limits`; the reconciler's `service-in-shard?` keeps a tenant service ON its own shard, never on a shared compile-all pod) | When deploying/operating a multi-pod fleet, editing the Helm chart, provisioning a dedicated tenant, or wiring the `GRAPHDEN_EXECUTOR_ID` / `GRAPHDEN_FLEET_DNS` / `GRAPHDEN_EXECUTOR_ORGS` / `GRAPHDEN_INTERNAL_TOKEN` env |
-| [docs/VERSIONING.md](docs/VERSIONING.md) | Branches surface — per-branch ExecutionContext routing, HTTP API (`/api/branches`, diff, merge, conflicts), editor UI (branch chip + popover + ⌛ history + conflict modal), demo seeder + env toggle, known gaps | When touching `system/branch_router`, `crud/branches`, `web.branch-router`, `app.branches`, `editor-branches.js`, `editor-fn-versions.js`, or the demo seeder |
-| [docs/CLOSURE_CAPTURE.md](docs/CLOSURE_CAPTURE.md) | Closure-capture extension to the fn-graph model: call-site vs captured args, wrap-time capture contract, type-checker propagation, as-shipped commit map | Before touching `hof-wrap` / `hof-lambda-params` / `ref-free-args` / `free-arg-slot-map`; needed to understand why `:schedule` works |
-| [docs/RECURSION.md](docs/RECURSION.md) | Graph-level recursion: Approach A (`:fix` Y-combinator) is SHIPPED (`core/recursion`, depth-guarded, used by `storage/branches` `:branch-chain`); Approach B (lazy ref resolution) is the road not taken. | When considering recursion-related work; runtime cycle/recursion model is in ARCHITECTURE.md § Part 3 |
-| [docs/SECRETS.md](docs/SECRETS.md) | `:secret` information-flow type-marker — asymmetric subtyping (`T ⊆ [:secret T]` but NOT `[:secret T] ⊆ T`), per-base-fn `:return-type-rule` propagation (`taint-with-secret-if-tainted` / `wrap-with-taint`), executor-side `/api/execute` hide on `:secret`-marked return, editor "Result hidden" pane + history badge, current Secrets-panel admin UX (creating fn-defs with `parent :vault-get`), audit of which base-fns propagate vs not | When touching `types/core` secret-type code, adding a new base-fn that handles user data, marking a sink's slot as `[:secret …]`, or wiring secret-flow protection in a new place |
-| [docs/PARTIALS.md](docs/PARTIALS.md) | Graph-native HTML partials: how editor popovers / panels get content from fn-defs returning hiccup at `GET /partials/*`; HTMX 2.x wiring (auth bridge + post-swap process); recipe for adding a new partial; list of common gotchas (`:parse-uuid` slot, JSONB keyword roundtrip, inline-anon limits, `fn-ref` in `:value` literal) | When migrating an editor JS module to server-rendered hiccup, OR when wiring a new popover from scratch |
-| [docs/EDITOR_HTMX_MIGRATION_PLAN.md](docs/EDITOR_HTMX_MIGRATION_PLAN.md) | As-shipped reference for the row-actions partial: per-context (`col-header` / `cell` / `use-site-arg` / `root-row`) query-param matrix + JS dispatcher contract. Documents what shipped in Phase A (8 commits) and why Phase B/C/edge-label were deferred (server has no data the client doesn't). | When extending the row-actions partial OR considering another graphData-backed popover for migration |
-| [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Distributing packages: the three module kinds (Type-1 fns-only / Type-2 impl+fns / Type-3 core-swap), the in-graph registry (publish / reference-install + pin / update-rollback ref-rewrite / fork), external Type-2 packages via `resources/executor-packages.edn` + a git coord, whole-graph export (`GET /api/export/graph`), the swap-seam matrix, and § 15.1 **as-built repo map** (what stays in the monorepo vs `graphden-{mathx,examples,cloud}`) | When touching the `registry` package, `packages/{loader,export}`, `executor-packages.edn`, `external-packages/`, or deciding whether something belongs in its own repo |
-| [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) | Multi-tenant platform ADR — orgs / RLS / grants, the **two-layer tenant effect gate** (§5: `cloud-request-allowed-effects` at the request, `default-cloud-allowed-effects` on the exec ctx), the `:execute-guard` admission seam, monetisation via packages | When touching `tenancy/`, the effect gate, or an admission/quota policy |
-| [docs/devtour/README.md](docs/devtour/README.md) | The **developer code-tour** — a navigable, symbol-anchored read of the *host codebase* by block (executor → storage → versioning → types → crud → packages → web → services → tenancy); how `tour.edn` + `bb devtour` bake real source into `docs/devtour/index.html`, the `:ns` / `:file` / `:dispatch` anchor forms, and the `bb devtour-check` drift guard. See **Developer Tour Maintenance** below | When onboarding to the codebase, or when you rename / move / delete a top-level form a tour step anchors (CI goes red) or add a subsystem worth a step |
+| [docs/EXECUTION.md](docs/EXECUTION.md) | `/api/execute*` schema, cancel/TTL, Run popover | When touching execution API or its UI |
+| [docs/MONITORING.md](docs/MONITORING.md) | Usage rollups, error viewer, both alerting paths (Prometheus + built-in alerter) | When touching stats/error-log/counters or adding a metric |
+| [docs/SERVICES.md](docs/SERVICES.md) | `:service` registry — schema, cardinality, reconciler, supervisor, HTTP API | When touching `services/` or `:exec/service-reconciler` |
+| [docs/SCALING.md](docs/SCALING.md) | Static fleet — org-keyed shards, NOTIFY invalidation, `:executor-orgs`, `421`, per-org quota, BYO executor | Before touching reconciler / branch-router invalidation / `storage/remote` / `system/sse` / `byo.clj`, or proposing distribution work |
+| [docs/FLEET_RFC.md](docs/FLEET_RFC.md) | Dynamic fleet design — cell placement, rebalancing controller, CRaC track, tenant-service resource isolation; what is shipped vs evidence-gated | Before ANY autoscaling / placement / hot-reload / native-image work or touching `fleet/*` |
+| [docs/FLEET_DEPLOY.md](docs/FLEET_DEPLOY.md) | Fleet ops — Helm chart, SRV discovery, controller tuning, dedicated-tenant-shard runbook | When deploying/operating a multi-pod fleet or provisioning a dedicated tenant |
+| [docs/VERSIONING.md](docs/VERSIONING.md) | Branches surface — per-branch ctx routing, HTTP API, editor UI, known gaps | When touching branch code (`branch_router`, `crud/branches`, `editor-branches.js`, …) |
+| [docs/CLOSURE_CAPTURE.md](docs/CLOSURE_CAPTURE.md) | Closure capture — call-site vs captured args, wrap-time capture contract, checker propagation | Before touching `hof-wrap` / `hof-lambda-params` / `ref-free-args` / `free-arg-slot-map` |
+| [docs/RECURSION.md](docs/RECURSION.md) | Graph recursion — `:fix` (shipped) vs lazy ref resolution (road not taken) | When considering recursion-related work |
+| [docs/SECRETS.md](docs/SECRETS.md) | `:secret` taint marker — asymmetric subtyping, propagation rules, hide-at-sink, Secrets-panel UX | When touching secret-type code or adding a base-fn that handles user data |
+| [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Module kinds (fns-only / impl+fns / core-swap), registry lifecycle, export, § 15.1 as-built repo map | When touching `registry` / `packages/{loader,export}` / `executor-packages.edn`, or deciding what belongs in its own repo |
+| [docs/TENANCY_SEAM.md](docs/TENANCY_SEAM.md) | The core seams the tenancy addon plugs into — context, auth, addon manifest, storage/schema, route collection, effect gate, execute guard | When touching `tenancy/context.clj`, the effect gate, an admission/quota seam, or any `:tenancy/*` init-key |
+| [docs/devtour/README.md](docs/devtour/README.md) | The developer code-tour — symbol-anchored read of the codebase; `bb devtour` bake + `bb devtour-check` drift guard | When onboarding, or when a toured top-level form is renamed/moved/deleted (CI goes red) |
 
 ## Common Commands
 
@@ -279,76 +279,12 @@ string `"__BUILD_HASH__"`.
 
 ### Frontend Module Structure
 
-The editor frontend is split into modules for better maintainability:
-
-| File | Purpose |
-|------|---------|
-| `editor-state.js` | Global variables, constants, `BUILD_HASH` placeholder |
-| `web/runtime/graphden-popover.js` | Platform-shared popover primitives (NOT editor-specific) — `anchorBelowClamped` viewport-clamped positioner + `installPopoverDismiss` outside-pointerdown/Esc handler. Pure DOM (no cy/graphData/editor-state); bundled into BOTH the editor bundle and the standalone `/assets/graphden-runtime.js` (see `:_graphden-runtime-js-paths`) so user-composed pages can build info/form popovers too. |
-| `editor-busy.js` | Visible feedback for multi-step user actions (reparent / extend / delete cascades) — `withBusy(opKey, label, fn)` helper + bottom-centre banner |
-| `editor-prefs.js` | Theme + sidebar-collapsed prefs (localStorage) |
-| `editor-auth.js` | `authFetch`, `isAuthenticated`, login popover |
-| `editor-branches.js` | Branch-aware fetch wrap (every `/api/*` call carries `X-Graphden-Branch`), current-branch state (URL `?branch=` + localStorage), top-bar branch chip + popover (list / create / switch / Δ diff / ⇢ merge / × delete), `switchToBranch` reloads to invalidate caches, conflict-resolution modal for `:reason :merge-conflict` merge responses |
-| `editor-branch-diff.js` | Full-viewport modal opened from the Δ button. Fetches `GET /api/branches/:current/diff?against=:other`, groups entries by `:change` (added-in-source / added-in-target / modified), renders per-entity-type previews; rows where entity-name is `:fn` are clickable and navigate to that fn via `selectFn` |
-| `editor-create.js` | Inline-input row helper, fn / namespace creation |
-| `editor-create-type-fields.js` | Per-kind form-field builders for the create/edit-type popover (refinement constraint builder, drag-reorderable pair-row lists for variant/record, prefill parsers) — split out of `editor-create-type.js` |
-| `editor-create-type.js` | Type-row creation popover (refinement / record / union / variant / list) — lifecycle, shell, kind tabs, submit dispatch; server-fed name datalist via `GET /partials/type-name-datalist`; field builders live in `editor-create-type-fields.js` |
-| `editor-data.js` | Data utilities, lookups, inheritance, free-args |
-| `editor-layout.js` | Grid layout client + pixel positioning. Owns `taxiBendX` — the single source of truth for where a taxi edge turns (graph coords), called by the SVG edge path and the edge-label anchor alike; when they each kept their own copy, a dragged node put the label on the wrong side of the bend. Also `computeRowCenters`, shared by the estimated sizing pass and the measured reflow. **`calculateNodeSize` only estimates** — a card's real height is measured off the DOM by `reflowFromMeasuredHeights`, because the effects strip wraps to as many chip rows as it needs. |
-| `editor-literal-types.js` | Type RESOLUTION + keystroke-VALIDATION half of the type helpers (`expectedSlotType` / `slotTypeProvenance` / `validateLiteralAgainstType` / nav-type walk; the validators mirror `graphden.types.check` deliberately — sub-100ms keystroke path) |
-| `editor-type-format.js` | Type PRESENTATION half — `formatTypeHumanReadable` / `formatTypeHint` / `compactTypeChipText` / `shortTypeLabel` / `refinementConstraintText` / `resolveRefinementAlias` + the shared `appendResolutionSection` renderer. Split out of `editor-literal-types.js` |
-| `web/runtime/graphden-forms.js` | Platform-shared form runtime (NOT editor-specific) — hiccup→DOM `renderHiccup` (createElement-only, no innerHTML), `collectFormValue`/`fillFormValue`, `initUnions`, `installTextareaEnterGuard`, `hydrateWidgets` (mounts `window.GraphdenFormWidgets`). Pure DOM + the widget registry; bundled into BOTH the editor and `/assets/graphden-runtime.js` so user pages can render server-sent forms. |
-| `editor-value-form.js` | Editor-COUPLED half of the value-edit popover — fetches `POST /api/value-form`, live-validates against the slot type, orchestrates render (via `graphden-forms.js`), saves through the binding/sequence write helpers, singleton read-only value viewer. The generic render/collect/fill/widget core lives in `web/runtime/graphden-forms.js`. |
-| `editor-widget-rating.js` | Tier-2 custom value-form widget — a 1-5 slider, registered on `window.GraphdenFormWidgets`; reference example for adding widgets |
-| `editor-tooltips.js` | Description-tooltip + full-name popover + icon-reason popover singletons (the last is the disabled-with-reason surface the row-actions ✎/+/✕ buttons open) |
-| `editor-icons.js` | Sidebar / edge-label icon factories (`createDescriptionBadge`, `createOpenInNewTabButton`, `createMoreActionsTrigger`, `applyActionIconBox`). In-card badge/action rendering lives in the server-rendered `:partial-row-actions`. |
-| `web/runtime/graphden-runtime.js` | Platform-shared client primitives (NOT editor-specific) — `registerActionHandler(action, fn)` / `bindActionDispatch(host)` / `loadPartial(host, url, opts)`. Component fn-defs / partials / graph-composed pages reuse the same dispatch / fetch-and-swap surface. Bundled into both the editor JS bundle and `/assets/graphden-runtime.js` (the standalone user-page runtime — see `:_graphden-runtime-js-paths`). Sandbox-tested via `tools/runtime-test/runtime.test.js` (no browser). |
-| `web/runtime/graphden-actions-builtin.js` | Three platform-provided action handlers: `navigate` (sets `window.location.href` from `data-href`), `submit-form` (finds the nearest `<form>` ancestor, POSTs via fetch, swaps the response into `data-target` or back into the form), and `custom` (evaluates `data-custom-handler` as `(btn, event, host) => …`). Registered via `graphden-runtime.js`'s `registerActionHandler`. Sandbox-tested in `tools/runtime-test/actions-builtin.test.js`. |
-| `editor-row-actions.js` | Singleton popover anchored OUTSIDE the card (right of the `⋯` trigger). Server-rendered content via `:partial-row-actions` for 4 contexts (`col-header` / `cell` / `use-site-arg` / `root-row` — see `docs/EDITOR_HTMX_MIGRATION_PLAN.md`); JS owns the lifecycle (hover-show, click-pin, fade-out, cy.zoom/pan re-anchor). Consumes `graphden-runtime.js` — registers its 10 `data-action="…"` handlers via `registerActionHandler` at load time; `loadRowActionsContent` is a thin URL-builder over `loadPartial`. Also holds the `_rowActionsUseSiteArgs` registry that lets the dispatcher recover rich `useSiteArg` objects by `binding-id`. |
-| `editor-drag.js` | Drag handle for any overlay |
-| `editor-fn-picker.js` | Type-aware fn-picker popover |
-| `editor-namespace-picker.js` | Namespace picker popover (Phase 5 ns-move) |
-| `editor-edit-validation.js` | Structural pre-checks: `wouldCycle`, `miCollisionCheck` |
-| `editor-edit-modes.js` | Inline edit popover SKELETON (`openInlineEditPopover`) + value / secret / arg-rename / sequence modes + the shared network helpers and `openLiteralVsRefChooser` |
-| `editor-edit-modes-fn.js` | fn-level edit modes — extend / rename / declared-effects (server form via `GET /partials/expects-effects-form`) / return-type / namespace-move + `patchFnFieldInState`. Split out of `editor-edit-modes.js` |
-| `editor-edit-modes-type.js` | type-level edit modes — compatible-type select (server option list via `GET /partials/compatible-type-options`), arg-type flip with picker-chaining rollback, free-arg binder. Split out of `editor-edit-modes.js` |
-| `editor-edit-reparent.js` | Phase 3 re-parent cascade + parent-set editor popover |
-| `editor-execute-result.js` | Pure render helpers shared by the execute popover — scalar / list / record / pending / error / oversize JSON panes. No state. |
-| `editor-path-view.js` | Execution path view (Debug P2+P3) — read-only canvas rendering of a traced run's `:path-trace`: highlights traversed fn cards (accent ring + per-fn aggregate badge: invocation count, total/max duration, cache-hit, `[hidden — secret]`), dims the rest, bottom-centre summary panel with off-canvas count + truncation/values-dropped notes + ✕ clear. Capture-values runs additionally get an `= value` chip per node opening a singleton value popover (last captured return, pretty-printed; `= 4KB+` marks a per-entry-cap truncation; secret nodes never carry one). Transient — any overlay rebuild clears it (hook in `createNodeOverlays`). Exposes `showExecutionPathView` / `clearExecutionPathView` / `appendPathViewAffordance` consumed by the execute modules. |
-| `editor-execute-history.js` | Execute popover history panel — mounts the server-rendered `GET /partials/execute-history` (+ `GET /partials/execute-result` per row-expand); JS owns row-expand toggling, Repeat re-fill via the orchestrator's `argFormHosts`, and the per-row "path" button that hands a traced run's `:path-trace` to `editor-path-view.js`. |
-| `editor-execute.js` | Execute popover orchestrator — ▶ entry mounts the server shell (`GET /partials/execute-popover`: header, effects banner, free-arg hosts from the backend's `:free-arg-slot-map`, options, action bar); JS mounts `/api/value-form` widgets into the hosts and owns the run/poll/cancel state machine + branch pill. |
-| `editor-fn-versions.js` | `⌛` history popover anchored to the fn-card root row. Fetches `GET /api/fns/:fn-id/versions`, renders a per-branch timeline (latest first), each row has a `switch` button that jumps the editor to that branch via `switchToBranch`. |
-| `editor-service-popover.js` | Service-status popover anchored to a fn-card. Mounts the server-rendered `GET /partials/service-popover` (create / start / stop / delete a `:service` for the fn, plus `:enabled?` / `:restart-policy` / `:cardinality` / `:branch-id` controls); JS owns anchored positioning + dismissal only and collects the radio/checkbox values into the save `PUT`/`POST`. Holds a per-fn `_servicePopoverCache` Map, cleared via `invalidateServicePopoverCache()` on save/delete so the next open re-fetches fresh desired-state. |
-| `editor-secrets.js` | Secret CRUD helpers integrated INTO the namespace tree (no separate section). Exposes `isSecretFn(fn)` (parents exactly `[:secret-leaf]`) for the sidebar's kind classification + 🔒 badge, `secretRecordForFn(fn-id)` (name + vault path from the primed `/api/secrets` list), and `buildSecretRowActions(actionsEl, fn)` (per-row rotate ↻ + delete × on secret tree rows, auth-gated). The New-secret form (name + path + value + description, value write-only) opens from `#secret-add-btn` in the filter bar via `openCreateSecretForm`. Backed by `/api/secrets/*`. |
-| `editor-grants-admin.js` | Org-admin Grants sidebar section (PLATFORM_PLAN §6). Server-rendered via `GET /partials/grants-admin` (table of subject \| capability \| namespace); JS mounts the partial + owns the collapsible section lifecycle. Backed by `/api/grants`. |
-| `editor-users-admin.js` | Users-admin sidebar section (PLATFORM_PLAN §4.1). Server-rendered via `GET /partials/users-admin` (table of username \| org; password hashes stripped server-side); JS mounts the partial + section lifecycle. Backed by `/api/users`. |
-| `editor-packages.js` | Packages sidebar section (PACKAGE_DISTRIBUTION 3e). Server-rendered via `GET /partials/packages-panel`: the current branch's `:package-install` pins (per-row `×` uninstall + a `↑` update/rollback form: a version text input prefilled with the current version, submitting form-encoded `{name, version}` — accepts exact / `latest` / a semver constraint, symmetric so an older version rolls back with ref-rewrite) PLUS a native `<details>` "browse" of the registry index (each published version an Install button + a Fork button — Fork copies the fns into the graph copy-on-write and shows a transient notice, since fork writes no pin) PLUS a native `<details>` "Publish a namespace" form (name / version / ns-root → export the subtree + write an immutable `:package-version`; the handler `:do`s export+publish FIRST then renders — export-namespace's full-graph read returns empty if forced lazily inside the hiccup render). All mutations swap the refreshed `[data-packages-panel]` root (`hx-swap="outerHTML"`) — install/uninstall transition the installed table ↔ empty-state. JS mounts the partial + owns the collapsible section lifecycle only. NOT tenancy-gated (packages exist single-tenant). Backed by `/api/packages/{installed,uninstall,panel-install,panel-update,panel-fork,panel-publish}` (the panel's HTML-returning variants; the JSON `/api/packages/{install,update,fork,publish}` remain the programmatic API). |
-| `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
-| `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random / process / raw-sql) + the canonical effect tag |
-| `editor-type-expand-render.js` | Structural type-interpretation half of the inline `▸/▾` panel — per-kind constituent rows (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), subtype-chain breadcrumb, and the type-grammar readers (`typeKindLabel` / `refinementChain` / `constraintToString`). Split out of `editor-overlay-type-expand.js` |
-| `editor-overlay-type-expand.js` | Host lifecycle + edit affordances of the inline `▸/▾` panel — `position:fixed` hosts re-anchored on pan/zoom, `expandedTypePaths` persistence, effect-tightening widgets, promote-anonymous / rename-fn-type-arg actions, `makeEffectsReadOnly`. Rendering lives in `editor-type-expand-render.js` |
-| `editor-provenance-popover.js` | Click-driven singleton popover for BOTH `↳` provenance badges. Slot-narrowing variant fetches `GET /partials/provenance?binding-id=…`; return-type-rule variant fetches `GET /partials/return-type-rule?fn=…` (rule-owner walk + `:_rtr-narratives` prose + Inputs table all server-rendered). JS owns the singleton lifecycle, anchoring, and post-swap binding of `[data-explainer-close]` + `a[data-fn-id]` → `selectFn` navigation |
-| `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator, type-narrowing `↳` provenance badge). Column-flex outer: inline row of value+chip+trigger+mismatch sits over a drag-handle docked below. Exports `createTypeChip` (stacks base+constraint for refinements), `getTypeNarrowingInfo` (detects both `:type-override` and ref-return narrowing), and `createProvenanceBadge` (the `↳` glyph reused by edge-label overlays) |
-| `editor-overlay-edge-label.js` | Edge-label overlay (rename click, type-chip + inline-expand trigger, stacked type-narrowing chain, description badge, sequence add/remove, `↳` provenance badge for ref-binding narrowing). Anchored AFTER the taxi-bend so the shared part of a branching edge stays visible |
-| `editor-overlay-fn-rows.js` | The four fn-card row renderers (use-site header, column-below-MI / MI / single-fn rows). Split out of `editor-overlay-fn.js` |
-| `editor-overlay-fn.js` | Fn-overlay assembly — paint state machine, hover wiring, `createFnOverlay` (row rendering lives in `editor-overlay-fn-rows.js`) |
-| `editor-overlay-strips.js` | Bottom-of-card metadata strips — return-type (refinement variant stacks `→ base` over `(constraint)`) / effects / parents / ns / optional-args (each entry on the wire is `{:name :slot-id}`; the strip emits one span per `?name`, title carries the arg-type from rich-types + the declaring ancestor via `findSlotDeclaringFn`) / HOF-captured-args, sign-in CTA |
-| `editor-overlay-manager.js` | Base `createOverlay` factory, placeholder-overlay binder, `createNodeOverlays` lifecycle. Owns `#graph-layer` — the single div that carries `translate(pan) scale(zoom)` for every overlay at once. Overlays are laid out in **graph coordinates**, so `applyViewportTransform()` (O(1), on `gv.onViewportChange`) is separate from `syncOverlayGeometry()` (O(n), only when a node moves or an overlay resizes). `updateOverlayPositions()` calls both; use it after a layout / animation frame / drag, never on pan-zoom. |
-| `editor-stats.js` | Stats sidebar section (Phase C) — mounts the server-rendered `GET /partials/stats` (the org's 7-day run rollups from `:usage-stat`: headline totals, per-day trend table, top-fns table; fn names are native `#hash` links). Auth-gated, org-scoped by construction. Mirrors `editor-errors.js`. |
-| `editor-errors.js` | Errors sidebar section (Phase C2) — mounts the server-rendered `GET /partials/error-log` (the org's recent failed executions, write-side scrubbed; fn names are native `#hash` links). Auth-gated, not tenancy-gated. Mirrors `editor-packages.js`. |
-| `editor-type-errors.js` | Type-errors sidebar section (error-tolerance Phase 3) — mounts the server-rendered `GET /partials/type-errors` (the current branch's recorded type diagnostics from the per-branch store; fn names are native `#hash` links). Auth-gated, not tenancy-gated. Mirrors `editor-errors.js`. |
-| `editor-apps.js` | Apps sidebar section (Track C4b/C5) — mounts the server-rendered `GET /partials/apps-panel` (the current tenant org's named apps, `:app-route` rows: the app's live `<label>.graphden.app` URL + the fn it serves). Table + a `hx-post` create form + per-row delete, all swapping the refreshed panel into `[data-apps-panel]`; JS is only the collapsible section shell. Auth-gated, org-scoped by `current-org`. Backed by the tenancy-admin `apps` module over the C4a `/api/orgs/apps` seams. Mirrors `editor-errors.js`. |
-| `editor-sidebar.js` | Namespace tree + entity list + filter. **Lazy**: the tree paints from `?scope=tree` (namespaces + counts, O(namespaces)); each namespace's fn leaves load on expand via `loadNamespaceFns` → `?scope=namespace`; the filter box is a debounced server search (`?scope=search`), not a client scan. The client never holds a full-fns mirror — `graphData.fns` is an accumulating cache (subtree + expanded namespaces + searches), and reverse-ref delete-gate counts come from the server (`used-as-*-count` on each fn row + `:tree` counts). Name→id resolution (deep-link, type-override, secret-leaf, fn-picker pick) goes through `resolveFnByName`/`?scope=search`; the type-aware fn-picker pulls its compatible set from `/api/types/candidates`. |
-| `editor-expansion.js` | spec→state→preview machine for ancestor row click/hover |
-| `editor-ui.js` | Selection + navigation controls + the shared `previewDebounceTimer` |
-| `editor-graph-model.js` | The graph itself — two Maps (`nodes`, `edges`) plus a RAF position tween. No library: this is all cytoscape had been reduced to. Exposes `window.graph` for browser tests. |
-| `editor-viewport.js` | Pan / zoom, and the gestures that change them (wheel zooms about the cursor, background drag pans, one finger pans, two pinch). A press inside `#graph-layer` belongs to a card or an edge and never pans. |
-| `editor-graph-view.js` | `gv` — the seam every other module reads the graph through. Element shape is `id()/data()/position()/width()/height()`; `fnNodes()` / `argNodes()` / `placeholderNodes()` replace cytoscape selectors. |
-| `editor-edges-svg.js` | SVG edge layer inside `#graph-layer`. One visible path + one fat transparent one per edge, so the path IS its hit-zone and `elementsFromPoint` returns every edge under the cursor (overlapping vertical runs included). Stroke widths ride the groups, not the paths. |
-| `editor-render.js` | Turns a backend layout into the graph: diff, add/remove, measured-height reflow, tween. `fitInVisibleArea` fits to the area the sidebar doesn't cover. |
-| `editor-main.js` | Entry point, init |
-
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → graph-model → viewport → graph-view → graphden-popover (web/runtime) → busy → prefs → auth → branches → branch-diff → create → create-type-fields → create-type → data → layout → edges-svg → literal-types → type-format → graphden-forms (web/runtime) → value-form → widget-rating → tooltips → icons → runtime → actions-builtin → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-modes-fn → edit-modes-type → edit-reparent → execute-result → path-view → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → type-expand-render → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn-rows → overlay-fn → overlay-strips → overlay-manager → secrets → grants-admin → users-admin → packages → stats → errors → type-errors → apps → sidebar → expansion → ui → render → main
+The editor frontend is split into ~60 modules. The per-module map (what each
+`editor-*.js` / `web/runtime/*.js` file owns) and the load order live in
+[docs/EDITOR_MODULES.md](docs/EDITOR_MODULES.md) — read it before touching
+editor JS. Platform-shared runtime files (`web/runtime/graphden-*.js`) are
+bundled into BOTH the editor bundle and the standalone
+`/assets/graphden-runtime.js` served to user-composed pages.
 
 ### Browser Test Tool
 
@@ -445,8 +381,8 @@ for sequence elements).
 | `:fn-name` | `ref-fn-id` on the binding/item row | Reference to another fn |
 
 **Key principle:** A slot whose `type-fn-id` resolves to `:fn` IS the HOF marker —
-the executor passes the fn-id directly instead of executing it. The legacy `:is-fn`
-flag was retired in #15b; effective slot type drives the dispatch.
+the executor passes the fn-id directly instead of executing it. There is no
+separate flag; effective slot type drives the dispatch.
 
 ### Base Function Arg Types
 
@@ -592,150 +528,49 @@ docs/                                  # Documentation
 
 ```
 src/graphden/
-├── packages/           # Package loader for resources/packages/
-│   ├── loader.clj      # load-packages, load-module-fns, load-module-impls
-│   └── sync.clj        # package→storage sync (NOT wiring): register-type-
-│                       #   aliases!, sync-fn-entities!, reconcile-moved-
-│                       #   identities!, bootstrap-from-packages! — lifted out
-│                       #   of system/core (the :exec/base-fns + :exec/fn-
-│                       #   entities init-keys are thin shells over it)
+├── packages/           # Package loader + package→storage sync (loader.clj, sync.clj)
 ├── executor/           # Executor, registry, compile pipeline, composition
-│   ├── interface.clj
-│   ├── registry/
-│   ├── compile/        # deps, lookups, renames, bindings
-│   └── composition/
 ├── crud/               # Entity/branch/secret CRUD, type-check, request parsing
-│   ├── entities/       # apply-*-body/-core/-rollback write units
-│   └── fn_execution/   # /api/execute* lookup + persist
-├── types/              # Type system — core (subtype/unify/narrow), check
-│   ├── core/
-│   └── check/
+├── types/              # Type system — core (subtype/unify/narrow) + check
 ├── schema/             # Protocol, malli, graph, versioned, traits, fields
-│   ├── protocol/
-│   ├── malli/
-│   ├── graph/
-│   ├── versioned/
-│   ├── traits/
-│   └── fields/
-├── storage/            # Protocol, postgres
-│   ├── protocol/
-│   ├── postgres/
-│   └── remote/         # RemoteStorage (read-only HTTP leaf) + SSE source — BYO
+├── storage/            # Protocol, postgres, remote (RemoteStorage + SSE source — BYO)
 ├── versioning/         # Storage decorator, merge protection
-│   ├── storage/
-│   └── merge/
-├── layout/             # Graph-editor layout pipeline (Stages 1–7)
-├── services/           # Service registry — reconciler + supervisor
-├── fleet/              # Dynamic fleet (docs/FLEET_RFC.md) — placement table +
-│                       #   forward-hop router, cell load/evict metrics, LPT
-│                       #   packer, churn-min rebalancer, control-loop (sustained
-│                       #   hysteresis), directed cell-command transport,
-│                       #   DNS-SRV discovery. Driven by :exec/fleet-controller.
-├── tenancy/            # OPEN-CORE SPLIT: only context.clj lives here now — the
-│                       #   `*current-org*` thread-local + platform-tier? /
-│                       #   platform-admin? seams that core CRUD reads. The
-│                       #   multi-tenant POLICY (OrgScoped storage, grants/authz,
-│                       #   RLS, plan/tier, users, the addon, app-router + apps,
-│                       #   domains, operator bootstrap) + the `tenancy-admin`
-│                       #   package + the addon config + the tenancy tests moved
-│                       #   to the PRIVATE `graphden-tenancy` repo, pulled into
-│                       #   graphden-cloud as a git-dep. See its README.
+├── layout/             # Graph-editor layout pipeline (docs/LAYOUT.md)
+├── services/           # Service registry — reconciler + supervisor (docs/SERVICES.md)
+├── fleet/              # Dynamic fleet — placement, rebalance, control loop (docs/FLEET_RFC.md)
+├── tenancy/            # ONLY context.clj — the seam core reads (docs/TENANCY_SEAM.md);
+│                       #   the multi-tenant POLICY lives in the private graphden-tenancy
+│                       #   repo, pulled into graphden-cloud as a git-dep
 ├── auth/               # Pluggable auth-provider seam
-├── clients/            # External clients (vault / OpenBao) + SSRF egress guard
-│                       #   (egress.clj — deny-internal classifier for tenant :network)
-├── util/               # Small shared helpers (backoff — reconnect policy)
-├── system/             # Integrant lifecycle management
-│   ├── interface.clj   # start!, stop!, read-config
-│   ├── config.clj      # Aero config loading
-│   ├── sse.clj         # SSE invalidation relay (BYO freshness, per-org fan-out)
-│   ├── core.clj        # THIN loader — :require's init/* for their defmethod
-│   │                   #   side effects (init-keys live there now, not here)
-│   ├── init/           # ig/init-key impls split by concern: storage / packages
-│   │                   #   / exec / services / fleet / cleanup
-│   ├── branch_router.clj  # per-branch ExecutionContext + Ring dispatch; serves
-│   │                       #   the OPTIONAL registry/mcp per-branch handlers
-│   │                       #   (compose-branch-handler) alongside the main one
-│   └── route_collection.clj  # ordered collection of fall-through routers — the
-│                             #   tenancy addon's branch-agnostic seam (renamed
-│                             #   from tenancy_router). NOT used for registry/mcp
-│                             #   (those need per-branch freshness → branch_router)
-├── executor_runtime/   # Main entry point
-│   └── core.clj        # -main, shutdown hooks
-├── byo.clj             # BYO executor assembly (RemoteStorage + SSE source +
-│                       #   direct http-server); `-main` for a customer-hosted
-│                       #   executor. See docs/SCALING.md § External / BYO.
-└── crac.clj            # CRaC checkpoint integration — quiesce!/resume! the pool
-                        #   + LISTEN + advisory-lock + services around a
-                        #   checkpoint; `-main` for the restore image. See
-                        #   development/crac/README.md.
+├── clients/            # Vault/OpenBao client + SSRF egress guard (egress.clj)
+├── util/               # Small shared helpers
+├── system/             # Integrant lifecycle — config, init/* (per-concern init-keys),
+│                       #   branch_router (per-branch ctx + dispatch; also serves the
+│                       #   optional registry/mcp per-branch handlers), route_collection
+│                       #   (the addon's fall-through router seam), sse (BYO relay)
+├── executor_runtime/   # Main entry point (-main, shutdown hooks)
+├── byo.clj             # BYO executor assembly (docs/SCALING.md § External / BYO)
+└── crac.clj            # CRaC checkpoint integration (development/crac/README.md)
 
-;; NOTE (open-core split): the tenancy POLICY — src/graphden/tenancy/* (except
-;; context.clj), the `tenancy-admin` package below, and the addon config
-;; fragments (resources/graphden/tenancy/{addon,faas}.edn) — moved to the
-;; PRIVATE `graphden-tenancy` repo, pulled into graphden-cloud as a git-dep.
-;; The dirs/packages described in the rest of this file's tenancy entries no
-;; longer exist in THIS repo; they document what graphden-tenancy provides + the
-;; seams (context.clj + the :exec/context slots) it plugs into. The tenancy docs
-;; (PLATFORM_PLAN.md, SCALING.md, …) stay here.
-
-resources/packages/     # First-party package definitions (EDN + Clojure impls)
-├── core/               # Core primitives (arithmetic, logic, HOF, etc.)
-│   ├── package.edn     # Package metadata + dependencies
-│   ├── arithmetic/     # {fns.edn, impls.clj}
-│   ├── logic/
-│   ├── hof/
-│   ├── collections/
-│   ├── strings/
-│   └── system/
+resources/packages/     # First-party packages (fns.edn + impls.clj per module)
+├── core/               # Core primitives (arithmetic, logic, hof, collections, strings, system)
 ├── storage/            # Storage primitives (pg, protocol, versioned, branches)
-├── web/                # Web primitives (http, routing, html)
-│   ├── package.edn
-│   ├── http/
-│   ├── reitit/
-│   ├── html/
-│   ├── crud/
-│   └── graph/
-├── app-base/           # App-server FOUNDATION: the reitit route-building
-│                       #   vocabulary (`:route` / method + auth route templates,
-│                       #   `app.common` helpers). Deps core+web (NO app dep), so
-│                       #   the tenancy addon / registry reach the templates
-│                       #   without the editor. ns's stay `app.common` /
-│                       #   `app.routes.*` (identity = ns string, not dir).
-├── registry/           # OPTIONAL package — in-graph publish / install / fork /
-│                       #   export. ns stays `app.registry`. Routes served
-│                       #   per-branch via branch_router (`:_registry-ring-
-│                       #   response`), NOT app's `:all`; drop from :package-names
-│                       #   to omit (editor hides Packages panel via window.API).
-├── mcp/                # OPTIONAL package — the `/mcp` JSON-RPC AI endpoint. ns
-│                       #   stays `app.mcp`. Served per-branch (`:_mcp-ring-
-│                       #   response`); drop from :package-names to omit.
-├── tenancy-admin/      # Org-admin fn-defs (auth, grants, users, registration)
-│                       #   — loaded only when the tenancy addon is wired
-└── app/                # Application server (editor UI + routes + server chain).
-    ├── package.edn     #   Deps core+web+storage+app-base; startup-fn :web-server.
-    ├── editor/         # Editor UI assembly — assets/page/chrome fn-defs + JS/CSS,
-    │                   #   shared partial helpers, effect-explainer + auth-form partials
-    ├── editor-row-actions/  # row-actions popover partial (4 contexts)
-    ├── editor-provenance/   # mismatch-explainer + provenance + return-type-rule partials
-    ├── editor-execute/      # execute popover / result / history / effects-strip partials
-    ├── editor-edit-forms/   # type-name datalist, compatible-type options, expects-effects
-    │                        #   form, fn-picker incompat partials
-    ├── editor-branches/     # fn-versions, branch-diff, merge-conflicts partials
-    ├── editor-panels/       # error-log + stats sidebar-panel partials
-    ├── lookups/ execution/ branches/ secrets/ …  # app content
-    ├── routes/ route-groups/  # main router aggregation (no registry/mcp refs)
-    └── server/         # web-server root + the `_app-ring-response` handler chain
+├── web/                # Web primitives (http, reitit, html, crud, graph, runtime JS)
+├── app-base/           # Route-building vocabulary shared by app + addon/registry (no app dep)
+├── registry/           # OPTIONAL — in-graph publish/install/fork/export; routes served
+│                       #   per-branch via branch_router; drop from :package-names to omit
+├── mcp/                # OPTIONAL — the /mcp JSON-RPC AI endpoint; same per-branch serving
+└── app/                # Application server — editor UI + JS/CSS, the editor partial
+                        #   modules (editor-row-actions / editor-provenance /
+                        #   editor-execute / editor-edit-forms / editor-branches /
+                        #   editor-panels), lookups / execution / branches / secrets,
+                        #   routes + route-groups, server (the handler chain)
 
-external-packages/      # Packages kept OUT of the prod `resources` tree
-├── mathx/              # External Type-2 (impl+fns) — also its own repo,
-│                       #   pulled in by the git coord in the manifest below
-└── examples/           # Pedagogical fn-defs — dev/test only (an :extra-paths
-                        #   entry in the :dev/:test aliases), never in prod
-
-resources/executor-packages.edn   # The operator's manifest of EXTERNAL Type-2
-                                  # packages: {:name :lib :coord}. build.clj
-                                  # bundles them; :app/packages loads them.
-                                  # See docs/PACKAGE_DISTRIBUTION.md § 5.
+external-packages/      # Kept OUT of the prod resources tree: mathx (Type-2 impl+fns,
+                        #   also its own repo), examples (dev/test only)
+resources/executor-packages.edn   # Operator manifest of EXTERNAL Type-2 packages;
+                                  #   build.clj bundles, :app/packages loads
+                                  #   (docs/PACKAGE_DISTRIBUTION.md § 5)
 ```
 
 ## Packages System

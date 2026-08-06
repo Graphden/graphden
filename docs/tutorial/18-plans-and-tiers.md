@@ -102,7 +102,7 @@ demo](../PLANS.md).
 
 - **The two-layer effect gate** — how a tier's effect set actually
   gates a submitted graph vs a trusted request
-  ([PLATFORM_PLAN.md §5](../PLATFORM_PLAN.md)).
+  ([TENANCY_SEAM.md § Effect gate](../TENANCY_SEAM.md#effect-gate)).
 - **The egress guard internals** — SSRF classification + the
   per-org rate/size caps ([SECURITY_MODEL.md](../SECURITY_MODEL.md)).
 - **Fleet placement** — how an org is sharded to a pod, which is why

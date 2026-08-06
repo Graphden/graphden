@@ -10,8 +10,7 @@ would clean this up", the analysis that closed those paths is
 one click away.
 
 For how the type system works in practice, see
-[TYPES.md](TYPES.md). For the per-failure-closure ledger
-(historical), see [TYPE_CHECK_BACKLOG.md](TYPE_CHECK_BACKLOG.md).
+[TYPES.md](TYPES.md).
 
 ## Current state — 2026-06-16
 

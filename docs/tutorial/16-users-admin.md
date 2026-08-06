@@ -15,7 +15,7 @@ on password reset.
 
 The Users panel is part of the **tenancy addon** (the
 multi-tenant platform layer — see
-[docs/PLATFORM_PLAN.md](../PLATFORM_PLAN.md)). A single-tenant
+[docs/SECURITY_MODEL.md](../SECURITY_MODEL.md)). A single-tenant
 graphden has no `:user` rows to manage, so the section never
 mounts.
 
@@ -112,8 +112,8 @@ degradation itself is worth seeing.)
 ## What we glossed over
 
 - **Where accounts come from besides this panel** — the
-  registration flow and org provisioning
-  ([docs/PLATFORM_PLAN.md §4](../PLATFORM_PLAN.md)).
+  registration flow and org provisioning (lesson
+  [19 — Signing up & in](19-signing-up-and-in.md)).
 - **Session/token mechanics** — how bearer tokens are hashed at
   rest and matched per-request.
 - **Personal namespaces** — every user implicitly owns

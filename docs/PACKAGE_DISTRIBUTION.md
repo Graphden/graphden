@@ -1,12 +1,9 @@
 # PACKAGE_DISTRIBUTION.md — Distributable packages: the three module kinds
 
-> Status: **DESIGN / IN-PROGRESS** on branch `feature/distributable-packages`.
-> This document is the plan-of-record for splitting graphden into
-> distributable modules. It is the concrete, decision-fixed successor to
-> [PLATFORM_PLAN.md § 2 (Packages)](PLATFORM_PLAN.md) — read PLATFORM_PLAN
-> first for the wider org/tenancy framing. The business/license framing is
-> open-core AGPL: no app-store commission, and cloud-shared users cannot ship
-> custom Clojure impls.
+> The decision-fixed reference for distributing graphden as modules; the
+> wider org/tenancy framing is [TENANCY_SEAM.md](TENANCY_SEAM.md). The
+> business/license framing is open-core AGPL: no app-store commission, and
+> cloud-shared users cannot ship custom Clojure impls.
 >
 > **Nothing here starts from zero.** The registry (`:package-version` +
 > publish/list/fetch/install), the round-trip exporter, the tenancy addon
@@ -37,8 +34,8 @@
 
 ## 1. The three module kinds
 
-These map 1:1 onto the two distribution *channels* in PLATFORM_PLAN § 2.1 plus
-the "swap a core component" case, and onto the DISTRIBUTION.md package tiers.
+Two distribution *channels* (data vs code) plus the "swap a core component"
+case:
 
 | Kind | Contents | Distribution channel | Who installs in cloud | Security boundary |
 |---|---|---|---|---|
@@ -46,7 +43,7 @@ the "swap a core component" case, and onto the DISTRIBUTION.md package tiers.
 | **2. impl+fns** | `impls.clj` (Clojure primitives) + optional `fns.edn` | deps.edn git-dep / Maven coordinate → classpath | **nobody** — we build it into the cloud image; tenants may only add its *fns* as a Type-1 reference | the impl is *our* code, compiled into *our* executor |
 | **3. core-swap** | Clojure code replacing a core component (storage / auth / schema / executor / type-system / versioning) | deps.edn git-dep + Integrant addon config (`GRAPHDEN_ADDON_CONFIGS`) | n/a — self-hosted / cloud-operator only | it *is* the security/enforcement layer; cannot itself be a graph-package |
 
-**Load-bearing invariant (PLATFORM_PLAN § 2.1):** every fns-package
+**Load-bearing invariant:** every fns-package
 transitively depends on at least one impl-package, because the eldest ancestor
 of any fn is a base-fn with an impl. That transitive dependency becomes a
 *declared* package dependency (see § 4.4).
@@ -108,14 +105,15 @@ implementation tasks.
 - **Effect-gate** — `record-effect!` throws when an effect is outside the
   request's `:allowed-effects`. Cloud-forbidden set:
   `#{:env :io :network :process :raw-sql}`. This — not "no impl" — is the
-  real cloud security boundary (PLATFORM_PLAN § 5).
+  real cloud security boundary
+  ([TENANCY_SEAM.md § Effect gate](TENANCY_SEAM.md#effect-gate)).
 
 ### 2.4 Branch versioning — the staging + rollback engine
 
 - Per-branch `ExecutionContext`, per-branch version rows, merge via
   `:branch-merge` records (no row copy — source versions become visible via
   resolution), `branch-local?` for runtime-config fns. `docs/VERSIONING.md`.
-- **This is the package-upgrade staging engine** (PLATFORM_PLAN § 2.4): test
+- **This is the package-upgrade staging engine**: test
   a new package version on a branch, merge to main, revert to roll back. We
   reuse it wholesale (§ 4.3) rather than inventing package-version staging.
 
@@ -128,8 +126,7 @@ out to close.
    constraints; the loader resolves them (§ 4.4).
 2. ✓ Reference-install (§ 4.2, Tasks 3+4) — `install-package` now installs by
    REFERENCE (materialize-once under `<ns>@<version>` + a `:package-install`
-   pin), NOT by copying rows — the PLATFORM_PLAN § 2.8 "install = grant of
-   visibility" model.
+   pin), NOT by copying rows — the "install = grant of visibility" model.
 3. ✓ `:package-install` **pin** entity + update/rollback ref-rewrite (Tasks 3+4).
 4. ✓ Type-2 external-package **manifest** + docs (Task 5) — proven by `mathx`
    via git coord (§ 5.1).
@@ -509,8 +506,8 @@ version input covers update/rollback.)
   `export-test/{roundtrip-unspellable-ns-duplicates,wire-edn-text-roundtrip}`,
   `registry-test/export-graph-base-fn-and-handler`.
   - The paywall/billing **gate** stays a cloud-control-plane concern (closed
-    source, per DISTRIBUTION.md) — the open-core executor just exposes the
-    capability; the control plane decides who may call it.
+    source) — the open-core executor just exposes the capability; the control
+    plane decides who may call it.
 - **Secret-path policy** (both export AND publish): vault paths
   (`:override-kind :secret-path` bindings) are **stripped by default** and
   manifested in `:secrets` + `:secret-paths-included?` on the bundle — the
@@ -736,7 +733,7 @@ to *add* packages — not breaking up our first-party code. First-party packages
 build artifact (Task 7 publishes it; the monorepo can emit multiple artifacts).
 
 - **Extract only** genuinely-independent things: third-party packages (external
-  by nature) and noise/domain/example packages (PLATFORM_PLAN § 2.9). Candidate
+  by nature) and noise/domain/example packages. Candidate
   first extraction as a mechanism proof: the `examples` package.
 - **Inner-loop for co-developed external packages:** Clojure `:local/root`
   override in a gitignored `deps.local.edn` — edit the package's working copy in
@@ -749,7 +746,7 @@ build artifact (Task 7 publishes it; the monorepo can emit multiple artifacts).
 - **Polylith:** not adopted. It organises a monorepo (the opposite of "extract"),
   and swappability already comes from protocols + Integrant. `:local/root` +
   the manifest solve the multi-repo-pain the design question raised. Revisit
-  only if internal component sprawl becomes a real problem. (PLATFORM_PLAN § 2.2.)
+  only if internal component sprawl becomes a real problem.
 
 ### 15.1 As-built repo map
 
@@ -811,8 +808,8 @@ smoke depends on it; it stays.
 ## 16. Cloud assembly = self-hosted core + private addons
 
 Our cloud is not a fork — it is the **same self-hosted core + our addons +
-a restriction policy** (PLATFORM_PLAN § 3.0 ADR: "Cloud vs self-hosted = mode,
-not code. One binary."). Internally we operate the cloud as self-hosted admins
+a restriction policy** ("cloud vs self-hosted = mode, not code, one binary" —
+[TENANCY_SEAM.md](TENANCY_SEAM.md)). Internally we operate the cloud as self-hosted admins
 (platform-admin behind a VPN). Our cloud build is literally the best dogfood of
 Track B (§ 12): a thin project depending on `graphden-core` + the addons.
 

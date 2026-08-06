@@ -772,11 +772,12 @@ From the round-1 + round-2 sessions:
 
 ## 15. Integration tests — `test/graphden/integration/`
 
-The integration suite sits in `test/graphden/integration/` (11 NSes as
-of 2026-07-05). Each — `^:integration` meta, goes through a
-shared PG testcontainer + golden-bootstrap. This is the most expensive
-testing (`bb test` integration takes ~70% of wall-time), so
-quality here is critical.
+The integration suite sits in `test/graphden/integration/` (enumerate with
+`ls test/graphden/integration/` — do not trust a remembered count). Each —
+`^:integration` meta, goes through a shared PG testcontainer +
+golden-bootstrap. This is the most expensive testing (`bb test` integration
+takes ~70% of wall-time), so quality here is critical. (The tenancy-policy
+integration suite lives in the private `graphden-tenancy` repo, not here.)
 
 ### 15.1 Coverage matrix — which user-flows MUST be covered
 
@@ -793,8 +794,8 @@ List of critical user-flows and their coverage:
 | **Branches** (create, switch, diff, merge) | `branches-lifecycle-test` | — |
 | **Services** (full reconciler lifecycle for HTTP server) | `http-server-service-lifecycle-test` | — |
 | **Auth middleware** (real bearer-token request → 200 / 401) | `auth-middleware-test` | — |
-| Tenancy (FaaS addon-active harness) | `faas-app-test` | — |
-| Admin grants (per-request-scope router) | `grants-admin-test` | — |
+| Optional packages (registry/mcp present vs dropped) | `optional-packages-dispatch-test` | — |
+| Security response headers on every route class | `security-headers-test` | — |
 
 All critical flows are currently covered. For a NEW critical flow: set up an
 integration test (a sentinel for regression) OR explicitly justify why

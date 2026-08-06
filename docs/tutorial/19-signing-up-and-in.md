@@ -55,7 +55,7 @@ So the tenant username/org fields you see on the cloud simply do
 not exist in a self-hosted build — the tenancy package that
 carries them isn't loaded. Nothing is hidden; each deployment
 ships exactly the form it needs. (The mechanics live in
-[docs/PLATFORM_PLAN.md § 4.1](../PLATFORM_PLAN.md) and
+[docs/TENANCY_SEAM.md § Auth seam](../TENANCY_SEAM.md#auth-seam) and
 [docs/DEPLOYMENT.md § Authentication](../DEPLOYMENT.md).)
 
 ## Try it

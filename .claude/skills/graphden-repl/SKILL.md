@@ -93,7 +93,7 @@ If the redefinition **confirms** the hypothesis — port it into the file and do
 ## 5. When the REPL doesn't help (you need `bb rebuild`)
 
 - Final deploy into Docker (without it, prod won't see the changes).
-- Changes to `.js`/`.css` (the frontend comes from the jar — needs a rebuild + `BUILD_TIMESTAMP`).
+- Changes to `.js`/`.css` (the frontend comes from the jar — needs a rebuild; verify via `window.BUILD_HASH` / `bb verify`).
 - Changes to `deps.edn` / `bb.edn` / `package.edn` dependencies.
 - Changes to `system.edn` / Aero / Integrant keys that aren't picked up by `dev/reset`.
 - When testing something that depends on rebuilding the uberjar.

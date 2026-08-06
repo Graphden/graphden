@@ -482,7 +482,7 @@ When the natural verb-prefix form clashes with a base-fn or sibling, swap to ver
 | `get-entity-route` | `entity-get` | `get-entity` is a `web.crud` base-fn |
 | `delete-entity-route` | `entity-delete` | `delete-entity` is a `web.crud` base-fn |
 
-In the sidebar, `entity-create`, `entity-update`, `entity-delete` cluster together; `create-entity`, `update-entity`, `delete-entity` would split the domain in two (the `create-entity` / `update-entity` base-fns themselves were retired once consumers migrated onto direct `:pg-query` + `:decode-row` compositions, but the naming guidance still applies for the surviving `get-entity` / `delete-entity` pair).
+In the sidebar, `entity-create`, `entity-update`, `entity-delete` cluster together; `create-entity`, `update-entity`, `delete-entity` would split the domain in two.
 
 ### Extract a sub-namespace when a group shares a long prefix
 

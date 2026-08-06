@@ -7,6 +7,10 @@ not publish exploit paths. Report vulnerabilities **privately** per the org's
 SECURITY policy (private disclosure via GitHub Security Advisories), never a
 public issue.
 
+(Contributor view: the multi-tenant *policy* is an optional addon from the
+private `graphden-tenancy` repo; the core seams it plugs into are documented
+in [TENANCY_SEAM.md](TENANCY_SEAM.md).)
+
 ## Trust model
 
 - The **platform operator** is trusted — runs the executor, owns the Postgres,

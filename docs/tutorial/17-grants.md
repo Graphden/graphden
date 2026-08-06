@@ -121,10 +121,11 @@ are the *subjects* of grants, not their administrators.
 
 - **How `can?` composes implication + scope** — the pure
   decision function and its default-deny shape
-  (`src/graphden/tenancy/grant.clj`).
+  (`graphden.tenancy.grant`, in the private `graphden-tenancy` repo).
 - **The two-layer tenant effect gate** — grants say *who may*,
   the effect gate says *what kinds of side effects* cloud code
-  may perform at all ([docs/PLATFORM_PLAN.md §5](../PLATFORM_PLAN.md)).
+  may perform at all
+  ([docs/TENANCY_SEAM.md § Effect gate](../TENANCY_SEAM.md#effect-gate)).
 - **Groups** — the design sketch allows group subjects; the
   panel today handles user subjects only.
 

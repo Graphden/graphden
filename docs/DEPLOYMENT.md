@@ -226,9 +226,9 @@ boot.
 **Only relevant when running the tenancy addon (the cloud / multi-tenant
 deployment).** Single-tenant deployments can ignore this section.
 
-The tenancy addon installs Postgres Row-Level-Security policies
-(`org_isolation`, `FORCE ROW LEVEL SECURITY` — see
-`graphden.tenancy.rls`) as a defense-in-depth layer **underneath**
+The tenancy addon (the private `graphden-tenancy` repo) installs Postgres
+Row-Level-Security policies (`org_isolation`, `FORCE ROW LEVEL SECURITY` —
+see `graphden.tenancy.rls`) as a defense-in-depth layer **underneath**
 `OrgScopedStorage`: even a raw SQL query that bypasses the storage
 decorator is confined to the connection's `graphden.current_org`. The
 addon also wraps the pool (`:tenancy/datasource-wrap`) so every borrowed

@@ -3,7 +3,7 @@
 How graphden runs on more than one executor process, and what is still
 missing. Companion to [SERVICES.md](SERVICES.md) (what a service is),
 [VERSIONING.md](VERSIONING.md) (per-branch contexts) and
-[PLATFORM_PLAN.md](PLATFORM_PLAN.md) (orgs, RLS, the effect gate).
+[TENANCY_SEAM.md](TENANCY_SEAM.md) (orgs, RLS, the effect gate).
 
 This document is the STATIC layer — fixed `:executor-orgs` shards + the `421`
 backstop. The DYNAMIC layer built on top of it (automatic load-based placement,
@@ -107,9 +107,8 @@ carry `org-id = "public"`, not NULL.
 What this buys:
 
 - **Memory / compile time** scale with the orgs a pod serves, not with the
-  tenant count. A shared pod used to compile every tenant's fns into one
-  registry (`compile-storage` reads org-agnostically, PLATFORM_PLAN §4
-  "Design B").
+  tenant count (without a shard predicate `compile-storage` reads
+  org-agnostically, so every tenant's fns land in one registry).
 - **Dedicated capacity** for a paying org = a pod set whose predicate is
   `#{"public" "that-org"}`. No new mechanism.
 - **Bring-your-own executor** = the same, on the customer's hardware.

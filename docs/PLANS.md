@@ -2,7 +2,8 @@
 
 Graphden's cloud stratifies tenants into tiers. A tier is a slug on the org
 (`:plan`) that resolves to (a) the side **effects** its graph may use and
-(b) its **quota** ceilings — the source of truth is `graphden.tenancy.plan`.
+(b) its **quota** ceilings — the source of truth is `graphden.tenancy.plan`
+(in the private `graphden-tenancy` repo).
 
 **Pricing** is published at [graphden.dev](https://graphden.dev) (or contact
 `licensing@graphden.dev`); this page documents what each tier *includes*, not

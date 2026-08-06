@@ -24,19 +24,27 @@
      new global-mutable surface gets used by tests in parallel.
 
    IMPLEMENTATION GOTCHA: kaocha lazy-loads
-   `kaocha.type.clojure.test` / `kaocha.type.ns` from `testable/run`
-   via `try-load-third-party-lib`. Without an EAGER require at the
-   top of THIS NS, kaocha's own
+   `kaocha.type.clojure.test` / `kaocha.type.ns` / `kaocha.type.var`
+   from `testable/run` via `try-load-third-party-lib` — and their
+   `s/def` specs the plan validator (`kaocha.specs/assert-spec`)
+   resolves are registered by those same NSs. Without an EAGER require
+   at the top of THIS NS, two things break, both order-dependent (so
+   they FLAKE under `:randomize`): (1) kaocha's own
    `(defmethod testable/-run :kaocha.type/clojure.test ...)` loads
-   LATER and silently clobbers our defmethod. The `:require` below
-   forces them loaded BEFORE we register."
+   LATER and silently clobbers our defmethod; (2) plan validation hits
+   `Unable to resolve spec: :kaocha.type/var` when a
+   `:kaocha.type/var` testable is validated before its NS lazy-loads.
+   The `:require` below forces all three type NSs loaded up front —
+   THIS plugin is loaded by every suite (graphden AND tenancy), so the
+   pre-load covers both."
   {:clj-kondo/config '{:linters {:unresolved-symbol {:level :off}}}}
   (:require
     [clojure.test :as t]
     [kaocha.plugin :refer [defplugin]]
     [kaocha.testable :as testable]
     [kaocha.type.clojure.test]
-    [kaocha.type.ns])
+    [kaocha.type.ns]
+    [kaocha.type.var])
   (:import
     (java.util.concurrent
       Callable

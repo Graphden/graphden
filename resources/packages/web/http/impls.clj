@@ -213,6 +213,28 @@
     (and (string? cc) (boolean (re-find #"\bimmutable\b" cc)))))
 
 
+(defn- http-server-tuning
+  "Pod-level http-kit tuning read from env at the adapter boundary (NOT
+   graph composition — it is per-deployment, like `DB_POOL_SIZE` /
+   `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS`). Two knobs guard against
+   crash-under-load:
+
+   - `:thread` — worker threads. http-kit's default is 4; a request
+     that derefs a slow execution (`fn-execution` waits up to
+     `:timeout-ms`, ~10 s) HOLDS its worker for the wait, so 4 slow
+     execs pin the whole pool and starve `/health` → autoheal restarts a
+     live pod. A larger pool (default 32) raises that threshold ~8×.
+     Reconcile with `DB_POOL_SIZE` so workers can't outrun DB
+     connections.
+   - `:queue-size` — accept queue past the workers. http-kit's default
+     is 20480 (effectively unbounded memory). A bounded queue (default
+     512) makes an overloaded pod return 503 at the HTTP-accept layer
+     instead of piling connections toward OOM."
+  []
+  {:thread (or (some-> (System/getenv "GRAPHDEN_HTTP_THREADS") parse-long) 32)
+   :queue-size (or (some-> (System/getenv "GRAPHDEN_HTTP_QUEUE_SIZE") parse-long) 512)})
+
+
 (defbase http-server
   [handler port]
   (cr/record-effect! :network)
@@ -230,7 +252,7 @@
     (fn [req]
       (binding [epoch/*request-bump-log* (atom [])]
         (handler req)))
-    {:port port}))
+    (assoc (http-server-tuning) :port port)))
 
 
 (defbase http-stop

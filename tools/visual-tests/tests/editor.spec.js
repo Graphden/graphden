@@ -232,10 +232,19 @@ test.describe('Editor — visual baselines', () => {
       await page.locator('#sidebar-expand-floating').click();
       await page.waitForTimeout(250);  // slide-in animation
     }
-    // Click any collapsed namespace arrow to expand it. We don't
-    // care WHICH namespace — the snapshot tests rendering of
-    // expanded children styling, not the specific contents.
-    const arrow = page.locator('.ns-arrow.collapsed').first();
+    // The URL-hash selection (#web-server) auto-expands the tree down
+    // to the selected fn and marks its row `.selected` — WAIT for that
+    // to have happened before the screenshot, or the expansion state races
+    // the screenshot (the residual ~0.03-0.05 flake this file carried).
+    await page.waitForSelector('#side-menu .selected', {timeout: 10000});
+    // Expand the "core" namespace SPECIFICALLY. This used to click the
+    // first `.ns-arrow.collapsed` ("we don't care WHICH") — but which
+    // namespace comes first collapsed varies with viewport and demo-DB
+    // state, and an `anon-*` namespace full of uuid-named fns once won
+    // the race, so the snapshot compared unstable content. `core` is
+    // package-defined: always present, stable children.
+    const arrow = page.locator(
+      '.ns-header[data-ns-path="core"] .ns-arrow.collapsed');
     if (await arrow.count()) {
       await arrow.click();
       await page.waitForTimeout(150);

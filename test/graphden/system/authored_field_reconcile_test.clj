@@ -37,10 +37,14 @@
       (is (contains? row :lambda-params) "key must be present, not absent")
       (is (nil? (:lambda-params row)) ":lambda-params clears to nil (its canonical absent)")
       (is (contains? row :expects-effects))
-      (is (= [] (:expects-effects row)) ":expects-effects clears to [] (canonical no-effects)")))
+      (is (nil? (:expects-effects row))
+          ":expects-effects clears to nil (no contract) — [] would stamp pinned purity")))
   (testing "[] stays a meaningful declaration, distinct from omitted"
     (is (= [] (:lambda-params (first (attach-fn-meta [{:name "h"}]
-                                                     {:lambda-params []})))))))
+                                                     {:lambda-params []})))))
+    (is (= [] (:expects-effects (first (attach-fn-meta [{:name "h"}]
+                                                       {:expects-effects #{}}))))
+        ":expects-effects #{} = pinned purity, emitted as []")))
 
 
 (deftest lambda-params-removal-reconciles-through-the-version-plane

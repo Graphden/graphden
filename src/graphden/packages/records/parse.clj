@@ -796,22 +796,26 @@
    context. (Empirically confirmed: a declarative re-sync that dropped a
    handler's `:lambda-params` left the old `[:request :limit]` compiling
    until a DB reset — the 2026-08-06 outage class.) The cleared value is
-   each field's canonical absent form: `nil` for `:lambda-params`, `[]`
-   for `:expects-effects` (the storage default an effectless fn round-
-   trips to). An explicitly-declared `:lambda-params []` (\"handler, no
-   free args\") stays distinct from an omitted key.
+   `nil` for BOTH fields: for `:expects-effects` the empty vector is NOT
+   an absent form but a meaningful contract (`[]` = pinned purity — the
+   drift checker rejects every computed effect; `nil` = no contract,
+   checker off), so clearing to `[]` would stamp a purity contract on
+   every undeclared fn (the editor's expects-effects form renders
+   exactly that distinction). An explicitly-declared empty collection
+   (`:lambda-params []` \"handler, no free args\", `:expects-effects
+   #{}` \"pinned purity\") stays distinct from an omitted key.
 
    `:branch-local?` is a monotonic-OR IDENTITY flag (different
    semantics — never silently cleared), so it stays gated on presence."
   [records fn-def]
   (-> records
-      ;; `[]` is the canonical "no effects" (the storage default an
-      ;; effectless fn round-trips to), so emit it — NOT nil — when the
-      ;; fn-def omits the key: that both matches the canonical form AND
-      ;; clears a stale `[:db]` on removal (`[:db]` → omit → `[]`).
+      ;; nil = no contract, [] = pinned purity — an omitted key must
+      ;; clear to nil (still explicit, so the versioned merge overwrites
+      ;; a stale `[:db]` on removal: `[:db]` → omit → nil).
       (update 0 assoc :expects-effects
-              (mapv #(if (keyword? %) (name %) (str %))
-                    (or (:expects-effects fn-def) [])))
+              (when (contains? fn-def :expects-effects)
+                (mapv #(if (keyword? %) (name %) (str %))
+                      (:expects-effects fn-def))))
       (update 0 assoc :lambda-params
               (when (contains? fn-def :lambda-params)
                 (mapv #(if (keyword? %) (name %) (str %))

@@ -521,10 +521,10 @@
     (cond-> (assoc body :name (keyword (:name fnr)))
       (:namespace-id fnr) (assoc :namespace (:namespace-id fnr))
       (:description fnr)   (assoc :description (:description fnr))
-      ;; `[]` is truthy to the parser's `attach-fn-meta`, so an empty
-      ;; effect list is a present key that must round-trip — gate on
-      ;; key presence, not `seq`.
-      (contains? fnr :expects-effects)
+      ;; nil = no contract (attach-fn-meta's explicit clear — omit on
+      ;; export); `[]` = pinned purity, a present key that must
+      ;; round-trip — gate on `some?`, not `seq`.
+      (some? (:expects-effects fnr))
       (assoc :expects-effects (mapv keyword (:expects-effects fnr)))
       (some? (:lambda-params fnr))
       (assoc :lambda-params (mapv keyword (:lambda-params fnr)))

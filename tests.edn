@@ -85,15 +85,20 @@
  ;; answers it on every run, and the answer is: no, and it matters which suite
  ;; you ask about.
  ;;
- ;;   integration   3210 s fixture vs  335 s assertions across 69 NSes   ~10:1
- ;;   unit           237 s fixture vs  306 s assertions across 158 NSes   ~1:1
+ ;;   integration   4841 s fixture vs  966 s assertions across 71 NSes    ~5:1
+ ;;   unit           341 s fixture vs  607 s assertions across 165 NSes   ~1:1.8
  ;;
- ;; So the old conclusion — the fixture is the target, per-test tuning is noise —
- ;; holds for INTEGRATION and is wrong for UNIT, which is not fixture-dominated
- ;; at all. The 360:1 was one namespace's numbers generalised to a suite. Such
- ;; namespaces are real (grants-admin-test 292 s/0.5 s, auth-middleware-test
- ;; 144 s/0.2 s, effect-gating-test 79 s/0.1 s) — the cost is concentrated in a
- ;; handful, not smeared, which is precisely why the top-25 is worth printing.
+ ;; (2026-08-07 gate run, post fixture-diet landing. Earlier: 3210/335/69
+ ;; and 237/306/158.) So the old conclusion — the fixture is the target,
+ ;; per-test tuning is noise — holds for INTEGRATION and is wrong for UNIT,
+ ;; which is not fixture-dominated at all. The 360:1 was one namespace's
+ ;; numbers generalised to a suite. Concentration, not smear, is still the
+ ;; pattern — which is precisely why the top-25 is worth printing — but
+ ;; read the big integration fixture numbers carefully: they are largely
+ ;; LOCK-WAIT on the two shared per-package-set warm-up chains (golden
+ ;; bootstrap → cached sweep → first compile, once per JVM × set), not
+ ;; per-NS work. See memory `project_test_fixture_economics` and
+ ;; test-infra.shared-bootstrap.
  ;;
  ;; Numbers here are per-thread and overlap under `:kaocha/parallelism`; they
  ;; rank namespaces, they do not sum to wall-clock. See docs/PERF_BUDGETS.md.

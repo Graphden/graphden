@@ -1003,7 +1003,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       echo; echo "(e2e skipped — see the scope step above)"
     else
       step "bb test-e2e"
-      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+      # WTQ_FLAKE_STRICT=1 — at the LANDING gate a file that passes only on
+      # retry (or leaks entities) is a red result, not a green one. The
+      # retry-masked default stays for ad-hoc runs; here it bounces the
+      # branch, because a flake that lands rides every later gate, and the
+      # historical pattern was retries papering over one file's leak while
+      # every investigation chased the victim file (run-edit-tests.sh
+      # documents that case).
+      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
     fi
 
     if [ "$NEED_INTEGRATION" = 1 ]; then

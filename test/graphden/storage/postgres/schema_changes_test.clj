@@ -6,7 +6,8 @@
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.test-helpers :as th]))
+    [graphden.storage.protocol.test-helpers :as th]
+    [next.jdbc :as jdbc]))
 
 
 (use-fixtures :once (setup/container-fixture))
@@ -307,5 +308,76 @@
         ;; reconciles the column to the schema.
         (is (some? (sp/create-entity storage :user {:name "alice" :email nil}))
             "a nil write the schema now permits succeeds")
+        (finally
+          (sp/close storage))))))
+
+
+;; === Index maintenance across init/migration passes ===
+
+(defn- index-names-on
+  "Set of PG index names currently on `table` (via pg_indexes)."
+  [storage table]
+  (into #{}
+        (map :pg_indexes/indexname)
+        (jdbc/execute! (:pool storage)
+                       ["SELECT indexname FROM pg_indexes WHERE tablename = ?"
+                        table])))
+
+
+(deftest retired-index-dropped-on-migration-test
+  (testing "an index named in migration/retired-indexes is dropped by the next
+            initialize pass, idempotently"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema)]
+      (try
+        (sp/initialize storage schema)
+        ;; Simulate a cross-version dev DB: the retired NAME exists (its
+        ;; definition is irrelevant — the drop is by name only).
+        (jdbc/execute! (:pool storage)
+                       ["CREATE INDEX \"idx_fn_namespace_id_name_unique\" ON \"user\" (name)"])
+        (is (contains? (index-names-on storage "user")
+                       "idx_fn_namespace_id_name_unique"))
+        (sp/initialize storage schema)
+        (is (not (contains? (index-names-on storage "user")
+                            "idx_fn_namespace_id_name_unique"))
+            "the migration pass drops the retired index")
+        (sp/initialize storage schema)
+        (is (not (contains? (index-names-on storage "user")
+                            "idx_fn_namespace_id_name_unique"))
+            "a further pass with the index already gone stays clean")
+        (finally
+          (sp/close storage))))))
+
+
+(deftest indexed-field-has-index-from-first-init-test
+  (testing "an :indexed? field's index exists right after FIRST init — not only
+            after the next boot's migration pass"
+    (let [storage (setup/create-test-storage)
+          nuuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema (th/make-schema :fields {:name {:uuid nuuid :type :text
+                                                 :indexed? true}})]
+      (try
+        (sp/initialize storage schema)
+        (is (contains? (index-names-on storage "user") "idx_user_name")
+            "fresh DB carries the declared index immediately")
+        (finally
+          (sp/close storage))))))
+
+
+(deftest newly-flagged-indexed-field-gains-index-on-migration-test
+  (testing ":indexed? added to an EXISTING table's field lands on
+            already-migrated DBs (ensure-field-indexes! gap-close)"
+    (let [storage (setup/create-test-storage)
+          nuuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (th/make-schema :fields {:name {:uuid nuuid :type :text}})
+          _ (sp/initialize storage schema1)
+          schema2 (th/make-schema :fields {:name {:uuid nuuid :type :text
+                                                  :indexed? true}})]
+      (try
+        (is (not (contains? (index-names-on storage "user") "idx_user_name"))
+            "no index before the flag lands")
+        (sp/initialize storage schema2)
+        (is (contains? (index-names-on storage "user") "idx_user_name")
+            "the migration pass creates the newly-declared index")
         (finally
           (sp/close storage))))))

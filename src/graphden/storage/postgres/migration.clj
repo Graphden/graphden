@@ -65,6 +65,12 @@
   (run! #(create-single-entity! tx schema %) (ds/entities schema))
   ;; Junction tables (require entity tables to exist for FKs)
   (run! #(create-entity-junction-tables! tx schema %) (ds/entities schema))
+  ;; `:indexed?` field indexes. Only `ensure-field-indexes!` (the
+  ;; migration pass) created these, so a FRESH database ran without its
+  ;; declared indexes until the next boot's migration healed it — e.g.
+  ;; fn-name lookups scanning unindexed on a first deploy.
+  (run! #(ddl/create-field-indexes! tx % (ds/entity-fields schema %))
+        (ds/entities schema))
   ;; Save metadata
   (metadata/save-metadata-in-tx! tx schema)
   ;; Return changes

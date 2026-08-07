@@ -19,6 +19,7 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry :as registry-base]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
     [graphden.executor.runtime :as rt]
     [graphden.executor.test-setup :as setup]
@@ -282,3 +283,33 @@
                                         {:slot-body :body :slot-flag :flag})]
       (is (not (contains? result :slot-body)))
       (is (false? (get result :slot-flag))))))
+
+
+;; ============================================================================
+;; compile-all cache key — the rich-types dimension (8cbd2c6f)
+;; ============================================================================
+
+(deftest cache-key-discriminates-on-ambient-rich-types-test
+  ;; The classcast class this prevents: `produces-callable?` (fed by the
+  ;; swept `:return-type` entries) drives HOF-wrap decisions, so a caller
+  ;; compiling under swept types must NOT be served a sibling\'s compile
+  ;; made over the identical graph rows under unswept types. Guarded at
+  ;; the integration level by the golden-clone suites that surfaced the
+  ;; original 17 errors; this pins the contract directly on the key fn.
+  (let [cache-key #'ce/compile-all-cache-key
+        lookups {:fn-map {} :slot-map {} :fn-slots-by-fn {}
+                 :bindings-by-fn {} :items-by-binding {} :base-fns {}}
+        k-under (fn [rich-types]
+                  (binding [registry-core/*rich-types-override* (atom rich-types)]
+                    (cache-key lookups)))]
+    (testing "identical graph, different ambient rich-types -> different keys"
+      (is (not= (k-under {})
+                (k-under {:some-fn-id {:return-type :int}}))))
+    (testing "value-equal snapshots share a key even as distinct objects"
+      (is (= (k-under {:a {:return-type :text}})
+             (k-under {:a {:return-type :text}}))
+          "sharing is by VALUE - equal swept snapshots reuse one compile"))
+    (testing "the graph shape still discriminates as before"
+      (binding [registry-core/*rich-types-override* (atom {})]
+        (is (not= (cache-key lookups)
+                  (cache-key (assoc lookups :base-fns {:add (fn [_ _])}))))))))

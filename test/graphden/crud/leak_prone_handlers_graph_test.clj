@@ -1,14 +1,16 @@
-(ns ^:integration ^:serial graphden.crud.leak-prone-handlers-graph-test
-  "`^:serial` — kept DEFENSIVELY; root cause never found. The
-  list-secrets handler execution intermittently threw a nil-callable
-  NPE (`invoke-fn` `(func arg)`, func=nil) only under the parallel
-  runner, and the shared-state source resisted an extensive
-  investigation (see memory `project_parallel_test_races` for the
-  ruled-out candidates + repro recipe). The once-observed interaction
-  with the smoke-pass NS predates the isolation-vars coverage —
-  smoke-pass is now deliberately un-pinned (7ef9d307) with its
-  mutations bound per NS-thread, so that mechanism no longer explains
-  anything. Pin stays until a root cause is pinned down.
+(ns ^:integration graphden.crud.leak-prone-handlers-graph-test
+  "`^:serial` pin LIFTED (2026-08-07) after 8cbd2c6f gave the
+  compile-all cache a rich-types-aware key. The pin was defensive: an
+  intermittent nil-callable NPE (`invoke-fn` `(func arg)`, func=nil)
+  only under the parallel runner, root cause never found (memory
+  `project_parallel_test_races` holds the ruled-out candidates; the
+  smoke-pass theory was already retired in 7ef9d307). The cache-key
+  bug matches the fingerprint exactly: a compile served under a
+  SIBLING thread's rich-types resolves a callable-producing ref
+  wrongly, and only concurrency can interleave the two — so the best
+  explanation is now fixed. If the NPE ever recurs here, re-pin AND
+  note it at `compile-all-cache-key`, because a recurrence would
+  falsify this attribution.
 
   Graph-path tests for HTTP handlers historically prone to the
    `feedback_optional_slot_free_arg_leak` failure mode — fn-defs that
@@ -29,35 +31,16 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.graph-harness :as gh :refer [*graph*]]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
 
-(def ^:dynamic *graph* nil)
-
-
-(defn- graph-fixture
-  [t]
-  (exec/with-clean-registry
-    #(let [graph (setup/bootstrap-crud-graph-from-golden!)
-           storage (:storage graph)]
-       (try
-         (binding [*graph* graph]
-           (t))
-         (finally (sp/close storage))))))
-
-
 (use-fixtures :once
   (setup/create-container-fixture)
-  graph-fixture)
-
-
-(defn- via
-  [fn-name request]
-  (setup/via-graph *graph* fn-name request))
+  (gh/graph-fixture (str (ns-name *ns*))))
 
 
 ;; =============================================================================
@@ -84,10 +67,10 @@
 
 (deftest list-secrets-handler-no-where-clause-leak-test
   (testing "GET /api/secrets runs the list-secrets graph chain without leaking the Ring request into the where clause"
-    (let [response (via :list-secrets-handler
-                        {:uri "/api/secrets"
-                         :request-method :get
-                         :headers {}})]
+    (let [response (gh/via :list-secrets-handler
+                           {:uri "/api/secrets"
+                            :request-method :get
+                            :headers {}})]
       (is (= 200 (:status response))
           "happy path returns 200; a 500 with `Unknown field 'request-method'`
            means a `:where {:value {}}` pin on a `:storage-query-identities`
@@ -106,10 +89,10 @@
 
 (deftest partial-secret-create-form-handler-renders-the-form-test
   (testing "GET /partials/secret-create-form returns the New-secret form markup"
-    (let [response (via :_partial-secret-create-form-handler
-                        {:uri "/partials/secret-create-form"
-                         :request-method :get
-                         :headers {}})
+    (let [response (gh/via :_partial-secret-create-form-handler
+                           {:uri "/partials/secret-create-form"
+                            :request-method :get
+                            :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
       (is (str/includes? body "New secret"))
@@ -122,11 +105,11 @@
 
 (deftest partial-secret-rotate-form-handler-renders-title-from-params-test
   (testing "GET /partials/secret-rotate-form?name=&path= renders the rotate form + title from the query params"
-    (let [response (via :_partial-secret-rotate-form-handler
-                        {:uri "/partials/secret-rotate-form"
-                         :request-method :get
-                         :query-string "name=db-pw&path=kv/db"
-                         :headers {}})
+    (let [response (gh/via :_partial-secret-rotate-form-handler
+                           {:uri "/partials/secret-rotate-form"
+                            :request-method :get
+                            :query-string "name=db-pw&path=kv/db"
+                            :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
       (is (str/includes? body "Rotate db-pw"))
@@ -139,10 +122,10 @@
   ;; Phase C2 — the error-log partial renders end-to-end (fresh DB → the
   ;; empty state; the row rendering is covered by the fn-execution roundtrip).
   (testing "GET /partials/error-log renders (empty state on a fresh DB)"
-    (let [response (via :_partial-error-log-handler
-                        {:uri "/partials/error-log"
-                         :request-method :get
-                         :headers {}})
+    (let [response (gh/via :_partial-error-log-handler
+                           {:uri "/partials/error-log"
+                            :request-method :get
+                            :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
       (is (str/includes? body "No failed runs")))))
@@ -157,10 +140,10 @@
   ;; what this covers; the recording write-paths are covered in
   ;; `entities_test`.
   (testing "GET /partials/type-errors renders the empty state on a clean store"
-    (let [response (via :_partial-type-errors-handler
-                        {:uri "/partials/type-errors"
-                         :request-method :get
-                         :headers {}})
+    (let [response (gh/via :_partial-type-errors-handler
+                           {:uri "/partials/type-errors"
+                            :request-method :get
+                            :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
       (is (str/includes? body "No type errors"))))
@@ -175,10 +158,10 @@
         (diag/record! branch-id (:id target)
                       [{:message "expected :int, got :text"
                         :arg-name :port}])
-        (let [response (via :_partial-type-errors-handler
-                            {:uri "/partials/type-errors"
-                             :request-method :get
-                             :headers {}})
+        (let [response (gh/via :_partial-type-errors-handler
+                               {:uri "/partials/type-errors"
+                                :request-method :get
+                                :headers {}})
               body (str (:body response))]
           (is (= 200 (:status response)))
           (is (str/includes? body "href=\"#web-server\"")
@@ -193,10 +176,10 @@
             (admin password only — the tenant variant ships with the tenancy
             addon, which shadows this path; a `:list` fragment — direct flex
             children)"
-    (let [response (via :_partial-auth-form-handler
-                        {:uri "/partials/auth-form"
-                         :request-method :get
-                         :headers {}})
+    (let [response (gh/via :_partial-auth-form-handler
+                           {:uri "/partials/auth-form"
+                            :request-method :get
+                            :headers {}})
           body (str (:body response))]
       (is (= 200 (:status response)))
       (is (str/includes? body "id=\"auth-password-input\""))
@@ -225,10 +208,10 @@
 
 (deftest list-services-handler-returns-services-without-leak-test
   (testing "GET /api/services returns the services list — no `:where`-via-closure leak"
-    (let [response (via :list-services-handler
-                        {:uri "/api/services"
-                         :request-method :get
-                         :headers {}})
+    (let [response (gh/via :list-services-handler
+                           {:uri "/api/services"
+                            :request-method :get
+                            :headers {}})
           body (cheshire/parse-string (:body response) true)]
       (is (= 200 (:status response))
           "happy path returns 200; if 500 with `Unknown field 'request-method'`,
@@ -270,10 +253,10 @@
 
 (deftest list-secrets-handler-returns-json-without-leak-test
   (testing "GET /api/secrets — JSON list; no `:where`-via-closure leak"
-    (let [response (via :list-secrets-handler
-                        {:uri "/api/secrets"
-                         :request-method :get
-                         :headers {}})]
+    (let [response (gh/via :list-secrets-handler
+                           {:uri "/api/secrets"
+                            :request-method :get
+                            :headers {}})]
       (is (no-where-clause-leak? response)
           "if 500 with `Unknown field 'request-method'`, the pin on
            `_list-secrets-leaf-rows-identities` or
@@ -289,11 +272,11 @@
 
 (deftest create-secret-handler-reaches-identity-query-without-leak-test
   (testing "POST /api/secrets — minimal body; no `:where`-via-closure leak"
-    (let [response (via :create-secret-handler
-                        {:uri "/api/secrets"
-                         :request-method :post
-                         :headers {"content-type" "application/json"}
-                         :body "{\"name\":\"leak-test-secret\",\"path\":\"kv/leak-test\",\"value\":\"x\"}"})]
+    (let [response (gh/via :create-secret-handler
+                           {:uri "/api/secrets"
+                            :request-method :post
+                            :headers {"content-type" "application/json"}
+                            :body "{\"name\":\"leak-test-secret\",\"path\":\"kv/leak-test\",\"value\":\"x\"}"})]
       (is (no-where-clause-leak? response)
           "if 500 with `Unknown field 'request-method'`, the pin on
            `_secret-leaf-rows-identities` was removed; non-leak failures
@@ -309,12 +292,12 @@
 
 (deftest rotate-secret-handler-reaches-identity-query-without-leak-test
   (testing "POST /api/secrets/:id/rotate — non-existent id; no `:where`-via-closure leak"
-    (let [response (via :rotate-secret-handler
-                        {:uri "/api/secrets/00000000-0000-0000-0000-000000000000/rotate"
-                         :request-method :post
-                         :headers {"content-type" "application/json"}
-                         :body "{\"value\":\"new-val\"}"
-                         :path-params {:fn-id "00000000-0000-0000-0000-000000000000"}})]
+    (let [response (gh/via :rotate-secret-handler
+                           {:uri "/api/secrets/00000000-0000-0000-0000-000000000000/rotate"
+                            :request-method :post
+                            :headers {"content-type" "application/json"}
+                            :body "{\"value\":\"new-val\"}"
+                            :path-params {:fn-id "00000000-0000-0000-0000-000000000000"}})]
       (is (no-where-clause-leak? response)
           "if 500 with `Unknown field 'request-method'`, the pin on
            `_rotate-secret-binding-identities` was removed"))))
@@ -332,11 +315,11 @@
 
 (deftest delete-secret-handler-reaches-identity-queries-without-leak-test
   (testing "DELETE /api/secrets/:id — non-existent id; no `:where`-via-closure leak"
-    (let [response (via :delete-secret-handler
-                        {:uri "/api/secrets/00000000-0000-0000-0000-000000000000"
-                         :request-method :delete
-                         :headers {}
-                         :path-params {:fn-id "00000000-0000-0000-0000-000000000000"}})]
+    (let [response (gh/via :delete-secret-handler
+                           {:uri "/api/secrets/00000000-0000-0000-0000-000000000000"
+                            :request-method :delete
+                            :headers {}
+                            :path-params {:fn-id "00000000-0000-0000-0000-000000000000"}})]
       (is (no-where-clause-leak? response)
           "if 500 with `Unknown field 'request-method'`, one of the three
            pins on the usage-check + cascade chain was removed"))))
@@ -351,11 +334,11 @@
 
 (deftest create-inline-binding-handler-reaches-identity-query-without-leak-test
   (testing "POST /api/secrets/inline-bind — minimal body; no `:where`-via-closure leak"
-    (let [response (via :create-inline-binding-handler
-                        {:uri "/api/secrets/inline-bind"
-                         :request-method :post
-                         :headers {"content-type" "application/json"}
-                         :body "{\"target-fn-id\":\"00000000-0000-0000-0000-000000000000\",\"slot-id\":\"00000000-0000-0000-0000-000000000000\",\"path\":\"kv/leak-test\",\"value\":\"x\"}"})]
+    (let [response (gh/via :create-inline-binding-handler
+                           {:uri "/api/secrets/inline-bind"
+                            :request-method :post
+                            :headers {"content-type" "application/json"}
+                            :body "{\"target-fn-id\":\"00000000-0000-0000-0000-000000000000\",\"slot-id\":\"00000000-0000-0000-0000-000000000000\",\"path\":\"kv/leak-test\",\"value\":\"x\"}"})]
       (is (no-where-clause-leak? response)
           "if 500 with `Unknown field 'request-method'`, the pin on
            `_inline-bind-existing-identities` was removed"))))
@@ -373,12 +356,12 @@
 
 (deftest delete-entity-fn-handler-reaches-identity-queries-without-leak-test
   (testing "DELETE /api/entities/fn/:id — non-existent id; no `:where`-via-closure leak"
-    (let [response (via :delete-entity-handler
-                        {:uri "/api/entities/fn/00000000-0000-0000-0000-000000000000"
-                         :request-method :delete
-                         :headers {}
-                         :path-params {:entity-type "fn"
-                                       :id "00000000-0000-0000-0000-000000000000"}})]
+    (let [response (gh/via :delete-entity-handler
+                           {:uri "/api/entities/fn/00000000-0000-0000-0000-000000000000"
+                            :request-method :delete
+                            :headers {}
+                            :path-params {:entity-type "fn"
+                                          :id "00000000-0000-0000-0000-000000000000"}})]
       (is (no-where-clause-leak? response)
           "if 500 with `Unknown field 'request-method'`, one of the two
            pins on the ref-cleanup cascade was removed"))))

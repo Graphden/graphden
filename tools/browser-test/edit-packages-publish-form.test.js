@@ -64,13 +64,21 @@ const BH = {'X-Graphden-Branch': BRANCH};
     // The response swaps the WHOLE [data-packages-panel] via outerHTML.
     // The swapped-in browse list must now offer the just-published
     // version (its Install button's hx-post carries name+version).
+    //
+    // 60s (was 30s): the publish request is SYNCHRONOUS whole-package
+    // work server-side (materialize + sweep + recompile of a changed
+    // graph), and its latency swings with the executor's load window —
+    // measured 17s..30s+ across gate runs. Under WTQ_FLAKE_STRICT a
+    // borderline bound IS a flake source, so the bound reflects the
+    // operation's honest worst case; the poll still returns the moment
+    // the swap lands.
     await page.waitForFunction((pkg) => {
       const sec = document.querySelector('.sidebar-packages');
       if (!sec || !sec.querySelector('[data-packages-panel]')) return false;
       const posts = [...sec.querySelectorAll('.packages-install-btn')]
         .map((b) => b.getAttribute('hx-post') || '');
       return posts.some((p) => p.includes('name=' + pkg) && p.includes('version=1.0.0'));
-    }, PKG, {timeout: 30000, polling: 150});
+    }, PKG, {timeout: 60000, polling: 150});
     assert(true, 'panel outerHTML swap landed and lists ' + PKG + '@1.0.0');
 
     // Server-side truth, not just DOM: the freshly-rendered partial on

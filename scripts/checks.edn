@@ -51,6 +51,11 @@
  ;; invisible until `bb rebuild` ships it — this keeps the two in lockstep.
  {:name "pkg-pin-sync"  :bb "pkg-pin-sync"  :timeout  30000 :group :infra
   :relevant ["^deps\\.edn$" "^resources/executor-packages\\.edn$"]}
+ ;; No :relevant — always runs (like gitleaks): the drift it guards against is
+ ;; typically introduced OUTSIDE this repo's diff (an edit to the sibling
+ ;; standalone repo), so no changed-path pattern here could scope it. Sub-second
+ ;; when the siblings are absent (GitHub CI) — each pair just skips.
+ {:name "pkg-copy-sync" :bb "pkg-copy-sync" :timeout  30000 :group :infra}
  ;; The scoping mechanism guards itself: selector partition semantics +
  ;; checks.edn shape/regex validity + the canonical path→check drift table.
  {:name "ci-selftest"   :bb "ci-test"       :timeout  60000 :group :infra

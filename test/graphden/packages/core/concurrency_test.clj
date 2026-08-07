@@ -178,7 +178,13 @@
         body-fn (fn [] (reset! started? true))
         stopper ((impl-of :future) {:body (delay body-fn)} nil)]
     (testing "body runs in the background"
-      (Thread/sleep 50)
+      ;; Poll-with-deadline instead of a fixed sleep — under parallel-test
+      ;; CPU contention a fixed 50 ms wait can starve the worker thread
+      ;; before it ever runs the body (same pattern as the stopper test).
+      (let [deadline (+ (System/currentTimeMillis) 2000)]
+        (while (and (not @started?)
+                    (< (System/currentTimeMillis) deadline))
+          (Thread/sleep 20)))
       (is @started?))
     (testing "stopper is callable"
       (is (fn? stopper)))

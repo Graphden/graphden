@@ -9,10 +9,10 @@
    flagged).
 
    This guard pins the reviewed set of taint-propagating base-fns (and the
-   total base-fn count). Adding, removing, or re-flagging a base-fn trips it,
-   forcing a conscious decision about the new fn's taint behaviour before the
-   change can land. It loads packages as pure data (no DB), so it runs in the
-   unit suite."
+   full base-fn name set). Adding, removing, or re-flagging a base-fn trips
+   it, forcing a conscious decision about the new fn's taint behaviour before
+   the change can land. It loads packages as pure data (no DB), so it runs in
+   the unit suite."
   (:require
     [clojure.set :as set]
     [clojure.test :refer [deftest is]]
@@ -24,40 +24,82 @@
   ["core" "storage" "web" "app-base" "app" "registry" "mcp"])
 
 
-(def ^:private golden-total
-  "Total base-fn count across `package-set`. A change means a base-fn was added
-   or removed — review its taint behaviour, then update this number."
-  ;; +1 (283): `:auth-active?` (web.ring-adapter) — reads whether an auth
-  ;; provider is wired on the ctx and returns a bool. It handles NO caller
-  ;; content (no `[:secret …]` input flows through it), so it does NOT declare
-  ;; `:taint-propagate?` and stays OUT of `golden-tainted`.
-  ;; +1 (284): `:usage-fn-stats` (app.execution) — aggregate rollup read
-  ;; (counts + durations); no caller content passes through → not tainting.
-  ;; +1 (285): `:recent-failures` (app.execution) — failed-execution listing;
-  ;; returns write-side-scrubbed rows, no caller content → not tainting.
-  ;; -1 (284): `:http-get` + `:http-get-with-authorization` (method-hardcoded
-  ;; base-fn pair) collapsed into ONE universal `:http-request` primitive
-  ;; (method as data; per-method fn-def presets keep the old names). Sinks,
-  ;; not taint-propagators, before and after — `golden-tainted` unchanged.
-  ;; ±0 (284): `:sha256-hex` (algorithm-hardcoded) became the `:digest-hex`
-  ;; primitive (algorithm as data; `:sha256-hex` lives on as a fn-def
-  ;; preset). Content-transforming — the propagator flag moves with it:
-  ;; `golden-tainted` swaps :sha256-hex → :digest-hex.
-  ;; +3 (287): `:usage-org-summary` / `:usage-org-daily` /
-  ;; `:usage-org-fn-stats` (app.execution) — org-scoped :usage-stat rollup
-  ;; reads for the editor's Stats panel. Counts + durations only; NO caller
-  ;; content flows through them (same posture as `:usage-fn-stats`) → not
-  ;; tainting, `golden-tainted` unchanged.
-  ;; +1 (288): `:usage-all-org-stats` (app.execution) — the OPERATOR-only
-  ;; cross-org rollup (tenant ctx gets [] impl-side). Same counts-only
-  ;; posture → not tainting.
-  ;; +1 (289): `:type-diagnostics-list` (app.editor panels) — reads the
-  ;; per-branch type-diagnostics store (fn names, arg names, check
-  ;; messages). Diagnostics are PRE-execution check ex-data over stored
-  ;; graph rows; resolved secret values never appear there (a secret
-  ;; binding's :binding shows the resolver form / vault path, not the
-  ;; resolved value) → not tainting, `golden-tainted` unchanged.
-  289)
+(def ^:private golden-base-fns
+  "Every base-fn name across `package-set`, pinned as a SET so a trip names
+   exactly which fn appeared or disappeared (this used to be an integer
+   count, which forced arithmetic plus a review-comment ledger here to
+   explain each ±1). For each ADDED name ask \"does it pass/transform caller
+   content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
+   entry; a REMOVED name just leaves both sets."
+  #{:_apply-create-list-type-body :_apply-create-record-type-body
+    :_apply-create-record-type-rollback :_apply-create-secret-body
+    :_apply-inline-bind-body :_apply-secret-rollback
+    :_apply-update-record-type-body :_apply-update-record-type-rollback
+    :_execute-apply :_layout-build-apply :_layout-place-apply
+    :_layout-strip-facts-apply :_load-graph-cached :_parse-layout-body
+    :_reconcile-services-apply :_rotate-secret-not-owned?
+    :_seq-append-load-binding :_seq-remove-load-item
+    :_seq-update-load-item :_slot-effective-type-raw
+    :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
+    :assert-some :assoc :assoc-in :atom :auth-active?
+    :authenticate-request :blank? :brotli-bytes :build-form :byte-count
+    :byte-len :cached-api-routes-js :call :call-noargs
+    :cancel-execution! :case :cell :chain-has-process-effect?
+    :classify-literal :closed-enum-of :coalesce :comp
+    :compatible-type-names :concat :cond :conj :cons :const
+    :constant-time-equal? :constantly :contains? :count
+    :counters-snapshot :create-branch! :create-entity :cron-fire-after
+    :cron-parse :current-branch-id :current-branch-router
+    :current-slot-value :current-time-ms :declarable-effect-categories
+    :decode-row :delete-branch! :delete-entity :deref
+    :describe-type-mismatch :detect-conflicts :diff-branches
+    :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
+    :distinct :div :do :drop :effective-branch-local? :empty? :env :eq
+    :equal? :error-boundary-wrap :error-http-status :every? :ex-data
+    :ex-info :export-graph :export-namespace :extract-entity-params
+    :filter :filter-xf :find-first :first :fix :flatten
+    :fn-names-with-tag :fn-type-bound-effects :fork-package-fns
+    :free-arg-slot-map :free-memory :future :get :get-entity
+    :get-execution :get-in :graph-rows :group-by :gt :gte :gzip-bytes
+    :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
+    :http-request :http-server :http-stop :if :into
+    :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
+    :json-envelope-response :json-to-type :jvm-uptime-ms :keys
+    :keyword-to-str :list :list-all-graph-entities :log-warn
+    :loop-until-interrupted :lt :lte :map :map-xf
+    :materialize-package-fns :max-memory :merge :merge-branch!
+    :middleware :missing-package-dependencies :mod :mul :name :neg :neq
+    :nil? :non-blank? :not :notify-after-write :or :os-arch
+    :os-load-average :os-name :os-processors :package-upsert-pin
+    :package-version-materialized? :pairs->map :parse-constraint
+    :parse-edn :parse-int :parse-json :parse-uuid :pg-execute
+    :pg-notify :pg-query :pg-tx :pick-encoding :position-in :postwalk
+    :pr-str :publish-package-apply :query-entities :query-param
+    :query-ref-many-owners :range :re-find? :read-resource-or-nil
+    :realize-request-body :recent-failures :reduce :render-hiccup
+    :render-prometheus :repeat :reset :resolve-branch-ref :resolve-fn
+    :resolve-fn-version-id :resolve-form :resolve-package-version
+    :resolve-type-fn-id :response-immutable? :rest :reverse
+    :rich-type-of-name :ring-create-default-handler :ring-handler
+    :ring-route-paths :ring-router :routes->js-bundle
+    :rule-owner-of-name :running-entry :secret-leaf :select-keys
+    :service-blocking-free-args :sleep :sleep-until-ms
+    :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
+    :sql-query :storage-query-identities :str :str-contains? :str-join
+    :str-len :str-lower :str-replace :str-split :str-starts-with?
+    :str-to-keyword :str-to-uuid :str-trim :str-upper
+    :stringify-response-headers :strip-hidden-impl :sub :subs :subtype?
+    :swap :sync-fn-defs-branch! :system-property :take :thread-count
+    :throw :throwable-class-name :throwable-message :to-json-string
+    :to-set :to-str :total-memory :transduce :try :try-apply-create
+    :try-apply-seq-append :try-apply-seq-update :try-apply-tighten
+    :try-apply-update :type-check-binding-rej :type-diagnostics-list
+    :type-name-kinds :update-entity :update-in :update-keys
+    :update-package-apply :update-vals :url-decode :usage-all-org-stats
+    :usage-fn-stats :usage-org-daily :usage-org-fn-stats
+    :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
+    :vault-get :vault-metadata-get :vault-metadata-put :vault-put :vec
+    :version-qualified-ns :write-rej :zero? :zipmap})
 
 
 (def ^:private golden-tainted
@@ -82,11 +124,15 @@
 
 (deftest taint-propagate-set-has-not-drifted
   (let [defs (:base-fn-defs (loader/load-packages package-set))
+        names (set (keys defs))
         tainted (set (keep (fn [[nm d]] (when (:taint-propagate? d) nm)) defs))]
-    (is (= golden-total (count defs))
-        (str "base-fn count changed (" (count defs) " vs " golden-total
-             "). A base-fn was added/removed — review its taint behaviour "
-             "(does it pass/transform caller content?) and update golden-total."))
+    (is (= golden-base-fns names)
+        (str "base-fn set changed. Added (review taint behaviour — does it "
+             "pass/transform caller content? if yes it needs "
+             ":taint-propagate? + a golden-tainted entry): "
+             (sort (set/difference names golden-base-fns))
+             ". Removed: " (sort (set/difference golden-base-fns names))
+             ". Then update golden-base-fns."))
     (is (= golden-tainted tainted)
         (str "taint-propagate set drifted — this can silently (de)classify "
              "secrets. Newly-tainted (verify intended): "

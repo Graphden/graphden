@@ -1,12 +1,13 @@
 (ns graphden.storage.postgres.notify-test
   "Tests for the LISTEN/NOTIFY transport.
 
-   `payload-roundtrip-test` is a pure codec round-trip (unit-suite).
-   The 3 other deftests are tagged per-deftest `^:integration` —
+   `payload-roundtrip-test` and `make-emitter-swallows-a-notify-failure`
+   are pure unit tests. The rest are tagged per-deftest `^:integration` —
    they run against the shared PG test container using TWO listeners
    sharing one channel to simulate the multi-pod case: one writer
    pod NOTIFYs, sibling pod's listener thread observes."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.postgres.notify :as pg-notify]
@@ -37,6 +38,22 @@
         pw (HikariDataSource/.getPassword pool)]
     (HikariDataSource/.close pool)
     {:jdbc-url u :username un :password pw}))
+
+
+(defn- await-until
+  "Poll `pred` every 20 ms until it returns truthy or `timeout-ms`
+   elapses. Returns the final `pred` result — truthy on success,
+   falsey on timeout. Deterministic replacement for the fixed
+   post-emit `Thread/sleep`: waits exactly as long as delivery takes
+   (typically one ~250 ms poll window) yet never flakes on a loaded
+   host, where a fixed sleep either wastes time or expires early."
+  [timeout-ms pred]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (or (pred)
+          (when (< (System/currentTimeMillis) deadline)
+            (Thread/sleep 20)
+            (recur))))))
 
 
 ;; ============================================================================
@@ -131,9 +148,7 @@
                              ["SELECT pg_notify('graphden_events', ?)"
                               "service:write:event-1"])
               (finally (Connection/.close writer-conn))))
-          ;; Allow the listener's 250 ms poll window to fire +
-          ;; dispatch headroom.
-          (Thread/sleep 400)
+          (await-until 10000 #(seq @received))
           (is (= [{:kind :service :op :write :id "event-1"}] @received)))
 
         (finally
@@ -162,7 +177,7 @@
                            ["SELECT pg_notify('graphden_events', ?)"
                             "fn:invalidate:abc"])
             (finally (Connection/.close writer-conn))))
-        (Thread/sleep 400)
+        (await-until 10000 #(and (seq @seen-a) (seq @seen-b)))
         (is (= [{:kind :fn :op :invalidate :id "abc"}] @seen-a))
         (is (= [{:kind :fn :op :invalidate :id "abc"}] @seen-b))
         (finally
@@ -183,23 +198,35 @@
         ;; loop would spin on the dead conn forever (permanently deaf).
         (Connection/.close @(:conn-atom listener))
         ;; The loop hits the dead conn, classifies it as a connection
-        ;; error, and reconnects (first backoff is 1s) — give it headroom.
-        (Thread/sleep 2000)
-        ;; Emit AFTER the reconnect: only a connection that has re-run
-        ;; LISTEN on a fresh session
-        ;; will observe this notification.
+        ;; error, and reconnects (first backoff is 1s). Reconnect
+        ;; completion isn't observable directly, so emit a FRESH event
+        ;; every 200 ms until one is observed: an emit is only delivered
+        ;; to a session that has re-run LISTEN, so the first observed
+        ;; event proves the reconnect worked — no fixed sleep to outgrow
+        ;; the backoff on a loaded host.
         (let [writer-conn (java.sql.DriverManager/getConnection
                             ^String (:jdbc-url pg-opts)
                             (:username pg-opts)
-                            (:password pg-opts))]
+                            (:password pg-opts))
+              deadline (+ (System/currentTimeMillis) 15000)]
           (try
-            (jdbc/execute! writer-conn
-                           ["SELECT pg_notify('graphden_events', ?)"
-                            "fn:invalidate:after-reconnect"])
+            (loop [i 0]
+              (jdbc/execute! writer-conn
+                             ["SELECT pg_notify('graphden_events', ?)"
+                              (str "fn:invalidate:after-reconnect-" i)])
+              (when (and (empty? @received)
+                         (< (System/currentTimeMillis) deadline))
+                (Thread/sleep 200)
+                (recur (inc i))))
             (finally (Connection/.close writer-conn))))
-        (Thread/sleep 500)
-        (is (= [{:kind :fn :op :invalidate :id "after-reconnect"}] @received)
+        (is (seq @received)
             "event delivered on the reconnected connection")
+        (is (every? (fn [e]
+                      (and (= :fn (:kind e))
+                           (= :invalidate (:op e))
+                           (str/starts-with? (:id e) "after-reconnect-")))
+                    @received)
+            "every delivered event is one of the post-drop emits")
         (finally
           (pg-notify/unregister! listener cb)
           (pg-notify/close-listener! listener))))))
@@ -217,7 +244,15 @@
                                         (fn [event] (swap! received conj event)))]
       (try
         (pg-notify/unregister! listener callback)
-        (let [writer-conn (java.sql.DriverManager/getConnection
+        ;; A fixed post-emit sleep can only ever prove "nothing arrived
+        ;; YET". Instead register a sentinel callback and emit a second
+        ;; event AFTER the should-be-ignored one: dispatch is ordered, so
+        ;; once the sentinel event is observed the ignored one has
+        ;; already been dispatched — to nobody.
+        (let [sentinel (atom [])
+              sentinel-cb (pg-notify/register!
+                            listener (fn [e] (swap! sentinel conj e)))
+              writer-conn (java.sql.DriverManager/getConnection
                             ^String (:jdbc-url pg-opts)
                             (:username pg-opts)
                             (:password pg-opts))]
@@ -225,8 +260,13 @@
             (jdbc/execute! writer-conn
                            ["SELECT pg_notify('graphden_events', ?)"
                             "service:write:should-be-ignored"])
-            (finally (Connection/.close writer-conn))))
-        (Thread/sleep 400)
+            (jdbc/execute! writer-conn
+                           ["SELECT pg_notify('graphden_events', ?)"
+                            "service:write:sentinel"])
+            (finally (Connection/.close writer-conn)))
+          (is (await-until 10000 #(seq @sentinel))
+              "sentinel callback observed the later event")
+          (pg-notify/unregister! listener sentinel-cb))
         (is (= [] @received) "no fire because the callback was unregistered")
         (finally
           (pg-notify/close-listener! listener))))))

@@ -336,6 +336,46 @@
              (run! println drift)
              (System/exit 1)))}
 
+  pkg-copy-sync
+  {:doc "CI guard: the in-tree copies of external packages (external-packages/{mathx,examples}/resources — what the suite and lint actually exercise via :override-deps / test paths) must be byte-identical to their standalone repos' resources/ trees. pkg-pin-sync guards the git-sha PIN; this guards the CONTENT — the hole through which examples/invoke-vs-call silently drifted for 3 weeks. Standalone repos are looked up as sibling checkouts (../<repo> from the main checkout, ../../<repo> from a worktree); a pair whose repo is absent (e.g. GitHub CI) SKIPS — the check guards the box the release flow runs on. Fix by syncing the edited side over the other, then committing both."
+   :task (let [rel-files (fn [root]
+                           (->> (fs/glob root "**")
+                                (filter fs/regular-file?)
+                                (map (fn [p] (str (fs/relativize root p))))
+                                (set)))
+               check-pair (fn [copy-dir repo-name]
+                            (let [sibling (->> ["../" "../../"]
+                                               (map (fn [up] (fs/path up repo-name "resources")))
+                                               (filter fs/directory?)
+                                               (first))]
+                              (if-not sibling
+                                (do (println (str "pkg-copy-sync: " repo-name
+                                                  " not checked out as a sibling — skipped"))
+                                    [])
+                                (let [copy-set (rel-files copy-dir)
+                                      repo-set (rel-files sibling)
+                                      only-copy (sort (remove repo-set copy-set))
+                                      only-repo (sort (remove copy-set repo-set))
+                                      differing (->> (filter repo-set copy-set)
+                                                     (remove (fn [rel]
+                                                               (= (slurp (str (fs/path copy-dir rel)))
+                                                                  (slurp (str (fs/path sibling rel))))))
+                                                     (sort))
+                                      describe (fn [suffix]
+                                                 (fn [rel] (str "pkg-copy-sync: " rel " " suffix)))]
+                                  (concat
+                                    (map (describe (str "only in " copy-dir)) only-copy)
+                                    (map (describe (str "only in " sibling)) only-repo)
+                                    (map (describe (str "differs between " copy-dir
+                                                        " and " sibling))
+                                         differing))))))
+               drift (concat (check-pair "external-packages/mathx/resources" "graphden-mathx")
+                             (check-pair "external-packages/examples/resources" "graphden-examples"))]
+           (when (seq drift)
+             (run! println drift)
+             (println "pkg-copy-sync: sync the edited side over the other (the monorepo copy is canonical for edits made here), then commit both.")
+             (System/exit 1)))}
+
   actionlint
   {:doc "Lint GitHub Actions workflows via Docker rhysd/actionlint:1.7.7."
    :task (p/shell "docker" "run" "--rm"

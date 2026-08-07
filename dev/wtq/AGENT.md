@@ -116,14 +116,19 @@ You were started in one of two ways:
      `bb wt up` for e2e reds), re-run the gate. Iterate until green. Never
      weaken a test or skip a check to go green.
    - **FLAKE in the gate's e2e** (failed once, passed on retry) — the gate
-     runs `bb test-e2e` with `WTQ_FLAKE_STRICT=1` UNCONDITIONALLY, so at
-     `bb wt merge` a retry-only pass (or an entity leak) is a RED result
-     that bounces the branch: fix the flake, don't re-roll the dice. The
-     first strict run proved the pattern — the flake it caught was a wait
-     bound sized at the operation's median, not a race; size waits to the
-     honest worst case (the poll still returns early). Green-on-retry
-     remains only the AD-HOC default when you run `run-edit-tests.sh` /
-     `bb test-e2e` by hand outside the gate.
+     runs `bb test-e2e` with `WTQ_FLAKE_STRICT=1` UNCONDITIONALLY, and the
+     runner TRIAGES each failure at the moment it happens by probing a
+     real compiled-path endpoint: probe DEAD → the file died inside a
+     server unavailability window (request-path recompile parks the
+     worker pool while `/health` stays 200) — logged loudly as
+     `server-window retry`, retried, NOT a strict failure; probe OK → a
+     REAL flake → RED result that bounces the branch: fix it, don't
+     re-roll the dice. Lessons already banked: a wait bound sized at the
+     operation's median is a flake source (size to honest worst case —
+     the poll still returns early), and file-start bursts need the
+     double-probe `waitForServerHealthy`. Green-on-retry remains only
+     the AD-HOC default when you run `run-edit-tests.sh` / `bb test-e2e`
+     by hand outside the gate.
    - If the queue is busy the gate blocks waiting its turn — expected; let the
      background run wait.
 

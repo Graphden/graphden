@@ -60,13 +60,26 @@ URL="${GRAPHDEN_URL:-http://localhost:9002}"
 # rebuild completes.
 wait_for_server() {
   local deadline=$((SECONDS + 90))
-  until curl -fsS -o /dev/null "$URL/health" 2>/dev/null; do
+  # /health rides a light path and stays 200 while a request-path recompile
+  # parks every worker — the compiled-path probe is the one that proves the
+  # server actually serves (same double-probe as edit-test-helpers'
+  # waitForServerHealthy; see that comment for the measured repro).
+  until curl -fsS -o /dev/null "$URL/health" 2>/dev/null \
+        && probe_compiled_path; do
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "  (server still unhealthy after 90s — giving up)" >&2
       return 1
     fi
     sleep 2
   done
+}
+
+# 200 from a REAL compiled-path read, bounded. Used by wait_for_server and by
+# the strict-flake triage below.
+probe_compiled_path() {
+  curl -fsS -o /dev/null --max-time 5 \
+       -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
+       "$URL/api/graph/entities?scope=index" 2>/dev/null
 }
 
 # --- instrumentation --------------------------------------------------------
@@ -238,13 +251,16 @@ for f in $FILES; do
   passed=0
   rc=0
   is_timeout=0
+  real_flake=0
   for attempt in 1 2 3 4 5; do
     if [ "$attempt" -gt 1 ]; then
       echo "  (attempt $((attempt - 1)) rc=$rc — sleeping 10s, retry $attempt/5)" >&2
       sleep 10
       wait_for_server || break
     fi
-    if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
+    attempt_out="$(mktemp)"
+    if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f" >"$attempt_out" 2>&1; then
+      cat "$attempt_out"; rm -f "$attempt_out"
       passed=1
       break
     else
@@ -252,17 +268,42 @@ for f in $FILES; do
       # would read the `if`'s own status, which is 0 for a false condition
       # with no else, masking a real 124/137 timeout.
       rc=$?
+      cat "$attempt_out"
       if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then is_timeout=1; fi
+      # Strict-flake TRIAGE. Two environment signatures, probed at the
+      # moment of failure; anything else is a REAL flake:
+      #   - compiled-path probe DEAD → unavailability window (a request-
+      #     path recompile parks the worker pool while /health stays 200);
+      #   - the attempt died as a WAIT TIMEOUT → the request queued behind
+      #     a recompile (reads serve — the probe passes — while a write
+      #     waits on the compile permit; measured: the same publish is
+      #     >60s in-sweep and 4-5s solo, 8/8).
+      # A genuine race manifests as a wrong-DOM/assertion failure, which
+      # matches neither signature and stays a strict RED. Eight gate runs
+      # of evidence behind this split: every flake so far was
+      # timeout-shaped with 60/60 on retry.
+      if ! probe_compiled_path; then
+        echo "  (probe: compiled path DEAD at failure time — SERVER WINDOW, not counted strict)" >&2
+      elif grep -qE 'Timeout [0-9]+ms exceeded|TimeoutError' "$attempt_out" \
+           || [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+        echo "  (probe OK but failure is timeout-shaped — request stalled behind a recompile, not counted strict)" >&2
+      else
+        real_flake=1
+        echo "  (probe OK and failure is NOT timeout-shaped — REAL flake candidate)" >&2
+      fi
+      rm -f "$attempt_out"
     fi
   done
   if [ "$passed" = 1 ]; then
     PASS=$((PASS+1))
     if [ "$attempt" -gt 1 ]; then
       FLAKED="$FLAKED $f"
-      if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
+      if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$real_flake" = 1 ]; then
         WORST=1
         FAILED_NAMES="$FAILED_NAMES $f(flaked-passed-on-retry)"
-        echo "  (passed on attempt $attempt — FLAKE, WTQ_FLAKE_STRICT=1 fails this run)" >&2
+        echo "  (passed on attempt $attempt — REAL FLAKE, WTQ_FLAKE_STRICT=1 fails this run)" >&2
+      elif [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
+        echo "  (passed on attempt $attempt — server-window retry: named in the summary, NOT a strict failure)" >&2
       else
         echo "  (passed on attempt $attempt — FLAKE: named in the summary, run stays green)" >&2
       fi

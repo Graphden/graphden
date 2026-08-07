@@ -16,7 +16,8 @@
 // that argument).
 
 const {chromium} = require('playwright');
-const {assert, newContext, nodeApi, nodeApiJson} = require('./edit-test-helpers');
+const {assert, newContext, nodeApi, nodeApiJson, waitForServerHealthy} =
+  require('./edit-test-helpers');
 
 
 const RUN_ID = process.pid.toString(36) + Date.now().toString(36);
@@ -58,6 +59,14 @@ const BH = {'X-Graphden-Branch': BRANCH};
     // (documented intent in its fns.edn header; the panel lifecycle e2e
     // publishes it too).
     await page.fill('.packages-publish-form input[name="ns-root"]', 'app.contact-demo');
+    // The publish is SYNCHRONOUS whole-package work server-side and can
+    // queue behind a full-graph recompile a PREVIOUS sweep file kicked
+    // off — measured >60s first-attempt / ~5s on retry (bimodal, so no
+    // fixed bound is honest against it). Absorb any in-flight stall
+    // BEFORE the click, the same pattern service-lifecycle uses for its
+    // Save: /health stalls with the compile, so this waits it out and
+    // the bounded swap-wait below then measures only the publish itself.
+    await waitForServerHealthy();
     // A REAL click on the submit button — HTMX owns everything after it.
     await page.click('.packages-publish-form button');
 

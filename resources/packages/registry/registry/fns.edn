@@ -324,6 +324,11 @@
    :args {:test :_fpv-row-nil?
           :then {:value nil}
           :else :_fpv-decorated}
+   ;; DELIBERATELY wide (type-drift warns): the computed narrow form
+   ;; ([:union :null {:id :text :published-at :text}]) is checker
+   ;; imprecision — the :assoc chain loses the base row's bundle fields
+   ;; (:name :version :fns …), which consumers genuinely read. Declaring
+   ;; the computed shape would misdescribe the value.
    :return-type :nullable-keyword-map}
 
   {:name :_fetch-pkg-name
@@ -512,14 +517,15 @@
    :parent :get :args {:coll {:as :pair} :key {:value 1}}}
   ;; Declared :keyword-map (not the computed literal record): `:reduce`'s
   ;; type-var `a` pins init = func-return = fold-return to ONE type, and
-  ;; the accumulator genuinely alternates between the base envelope and
-  ;; the wrapped shape — :keyword-map is the honest common contract.
+  ;; The ACC input alternates between the base envelope and the wrapped
+  ;; shape (hence its :any), but THIS fn's own output is always exactly
+  ;; the four zipmapped keys — declare that.
   {:name :_inst-wrapped-one
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :dependency}]
           :vals [{:value false} {:value "dependency-install-failed"}
                  :_inst-wrap-ancestor :_inst-wrap-acc]}
-   :return-type :keyword-map}
+   :return-type {:ok :bool :reason :text :name :any :dependency :any}}
   {:name :_inst-parents-rev
    :parent :reverse
    :args {:coll {:ref :_inst-op-parents :type [:list :any]}}}
@@ -939,7 +945,12 @@
    :args {:clauses [:_pkgv-row-nil?     :_pkgv-err-not-found
                     :_pkgv-missing-any? :_pkgv-err-missing
                     {:value true}       :_fork-do-ok]}
-   :return-type :keyword-map}
+   ;; The three cond branches' envelopes, verbatim — ok | missing-deps |
+   ;; not-found. Matches the computed union (type-drift sweep).
+   :return-type [:union {:ok :bool :name :any :version [:union :null :text]
+                         :forked :int}
+                 {:ok :bool :reason :text :missing [:list :keyword]}
+                 {:ok :bool :reason :text :name :any :requested :any}]}
 
   {:name :_fork-body
    :description "Parsed JSON body of POST /api/packages/fork — `{:name :version}`."
@@ -1000,7 +1011,12 @@
    :args {:clauses [:_pkgv-row-nil?     :_pkgv-err-not-found
                     :_pkgv-missing-any? :_pkgv-err-missing
                     {:value true}       :_mat-ok]}
-   :return-type :keyword-map}
+   ;; The three cond branches' envelopes, verbatim — ok | missing-deps |
+   ;; not-found. Matches the computed union (type-drift sweep).
+   :return-type [:union {:ok :bool :name :any :version [:union :null :text]
+                         :namespace :text :materialized :int}
+                 {:ok :bool :reason :text :missing [:list :keyword]}
+                 {:ok :bool :reason :text :name :any :requested :any}]}
 
   ;; ---------------------------------------------------------------------
   ;; Package pins — per-branch desired-state "this branch uses P at V".
@@ -1023,7 +1039,7 @@
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :package-name} {:value :version} {:value :branch-id}]
           :vals [{:value true} {:as :pkg-name} {:as :pkg-version} :_pin-branch-text]}
-   :return-type :keyword-map}
+   :return-type {:ok :bool :package-name :any :version :any :branch-id :text}}
 
   ;; Installed list — pure graph composition: this branch's pins,
   ;; reshaped per-row for clean JSON.
@@ -1054,7 +1070,8 @@
    :description "Every package pinned on the current branch — `[{:package-name :version :branch-id :installed-at} …]`. Powers GET /api/packages/installed and the editor's installed list. Pure graph composition."
    :parent :map
    :args {:func :_inst-entry :coll :_inst-rows}
-   :return-type [:list :keyword-map]}
+   :return-type [:list {:package-name :any :version :any
+                        :branch-id :text :installed-at :text}]}
 
   ;; Uninstall — pure graph composition: find the pin (shared
   ;; `:_pin-row` lookup), delete it when present, return the

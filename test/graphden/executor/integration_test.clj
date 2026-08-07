@@ -89,11 +89,12 @@
         (let [double-fn (first (sp/query-entities storage :fn {:name "double-fn"}))
               ctx (exec/create-context {:storage storage})
               result (exec/execute ctx (:id double-fn) nil)]
-          (is (= 20 result))
-          ;; Per-execute DRY memo: both `:a` and `:b` reference
-          ;; `:value-fn`, so the impl fires exactly once for the
-          ;; whole `execute` call (the second ref hits the cache).
-          (is (= 1 @call-count)))
+          ;; Composition correctness only. The per-execute DRY-memo
+          ;; contract (the impl fires ONCE for two sibling refs) is
+          ;; pinned where it lives — `compile-eager-test/
+          ;; dry-memo-shares-result-across-sibling-refs-test`; this
+          ;; block used to re-assert `@call-count == 1`, a duplicate.
+          (is (= 20 result)))
         (finally
           (sp/close storage))))))
 

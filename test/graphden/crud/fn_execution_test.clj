@@ -38,40 +38,23 @@
     [graphden.executor.runtime :as rt]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
-    [graphden.schema.executions.schema :as es]
-    [graphden.schema.graph.schema :as gds]
-    [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.protocol :as ds]
-    [graphden.schema.services.schema :as svcs]
-    [graphden.schema.stats.schema :as stats-schema]
-    [graphden.schema.traits.schema :as vts]
-    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.init.cleanup :as cleanup]
     [graphden.tenancy.context :as tc]
+    [graphden.test-infra.schemas :as schemas]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc]))
 
 
 (defn- full-schema
+  ;; :stats? — the Phase C1 rollups apply-execute bumps at every
+  ;; terminal transition; without the :usage-stat table each bump
+  ;; degrades to a warn-log and the rollup tests can't roundtrip.
   []
-  (-> (mds/create-builder)
-      (gds/extend-builder)
-      (vts/extend-builder)
-      (vds/extend-builder)
-      (es/extend-builder)
-      ;; :service rows needed by the already-running rejection path
-      ;; (exercised through the graph in the integration suite) —
-      ;; fixture mirrors the system/core.clj chain.
-      (svcs/extend-builder)
-      ;; :usage-stat — the Phase C1 rollups apply-execute bumps at every
-      ;; terminal transition; without the table each bump degrades to a
-      ;; warn-log and the rollup tests can't roundtrip.
-      (stats-schema/extend-builder)
-      (ds/build)))
+  (schemas/full-schema {:stats? true}))
 
 
 ;; Shared-storage fixture: 52 tests in this ns used to drop+recreate
@@ -1527,52 +1510,11 @@
       (finally nil))))
 
 
-;; ============================================================================
-;; log-effect-drift! — backend warn-log when runtime-observed effects
-;; diverge from declared. Captures `clojure.tools.logging` output and
-;; asserts both directions (widened: runtime ∉ declared, unobserved:
-;; declared ∉ runtime) are surfaced under the same canonical marker.
-;; ============================================================================
-
-(deftest log-effect-drift-emits-warn-on-mismatch-test
-  ;; `with-redefs` modifies a root binding (NOT thread-local), so under
-  ;; parallel test load any other NS that logs while we hold the redef
-  ;; pollutes our `logs` atom. We filter on the canonical marker
-  ;; `:execution/effect-drift` to count ONLY this test's emissions.
-  (let [logs (atom [])
-        capture (fn [_ns level _throwable msg]
-                  (swap! logs conj {:level level :msg (str msg)})
-                  ;; log*'s contract is nil — returning swap!'s vector
-                  ;; from a redef'd GLOBAL log* poisons parallel NSes
-                  ;; that assert on a log/warn caller's return.
-                  nil)
-        drift-logs (fn [] (filter #(re-find #":execution/effect-drift" (:msg %)) @logs))]
-    (with-redefs [clojure.tools.logging/log* capture]
-      (testing "no log when declared == runtime"
-        (reset! logs [])
-        (#'persist/log-effect-drift!
-         (random-uuid) ["db"] ["db"])
-        (is (empty? (drift-logs))))
-      (testing "widened (runtime ∉ declared) triggers warn with the marker"
-        (reset! logs [])
-        (#'persist/log-effect-drift!
-         (random-uuid) ["db"] ["db" "network"])
-        (let [matches (drift-logs)]
-          (is (= 1 (count matches)))
-          (is (= :warn (:level (first matches))))
-          (is (re-find #":widened \[\"?network\"?\]" (:msg (first matches))))))
-      (testing "unobserved (declared ∉ runtime) also triggers warn"
-        (reset! logs [])
-        (#'persist/log-effect-drift!
-         (random-uuid) ["db" "network"] ["db"])
-        (let [matches (drift-logs)]
-          (is (= 1 (count matches)))
-          (is (re-find #":unobserved \[\"?network\"?\]" (:msg (first matches))))))
-      (testing "empty/nil sides → no log (pure fn, no instrumentation, etc.)"
-        (reset! logs [])
-        (#'persist/log-effect-drift!
-         (random-uuid) nil nil)
-        (is (empty? (drift-logs)))))))
+;; `log-effect-drift!` is unit-tested in
+;; `graphden.crud.fn-execution.persist-test` via a THREAD-LOCAL
+;; `log/*logger-factory*` capture — this file used to hold a
+;; `with-redefs clojure.tools.logging/log*` version whose global root
+;; rebind was a documented parallel-suite hazard.
 
 
 (deftest record-effect-noop-outside-trace-test
@@ -2057,88 +1999,7 @@
       (is (= ["io"] (:runtime-effects row))))))
 
 
-;; ============================================================================
-;; jsonize-* / truncate-error — pure size-cap helpers
-;;
-;; Existing tests cover the truncation path indirectly through
-;; `apply-failed-path-truncates-error-data-test` and
-;; `apply-truncates-oversize-result-test`, but the pure helpers had
-;; no direct unit tests. These pin down the [ok? value] contract
-;; and the fallback shape for oversize error-data.
-;; ============================================================================
-
-(deftest jsonize-result-within-cap-test
-  (testing "small result returns [true result]"
-    (is (= [true {:a 1 :b "hi"}]
-           (persist/jsonize-result {:a 1 :b "hi"}))))
-  (testing "nil is well within cap"
-    (is (= [true nil] (persist/jsonize-result nil)))))
-
-
-(deftest jsonize-result-oversize-test
-  (testing "oversize result returns [false nil] — caller sets :result-truncated?"
-    (let [huge-string (str/join (repeat (inc persist/max-result-bytes) \x))
-          [ok? v] (persist/jsonize-result huge-string)]
-      (is (false? ok?))
-      (is (nil? v)))))
-
-
-(deftest jsonize-error-data-within-cap-test
-  (testing "small error-data returns the original map"
-    (let [data {:type :foo :context {:x 1 :y "two"}}]
-      (is (= data (persist/jsonize-error-data data))))))
-
-
-(deftest jsonize-error-data-oversize-test
-  (testing "oversize error-data falls back to {:type … :truncated true}"
-    (let [huge (str/join (repeat (inc persist/max-error-data-bytes) \x))
-          data {:type :explosion :context {:dump huge}}
-          out  (persist/jsonize-error-data data)]
-      (is (= {:type :explosion :truncated true} out))
-      (is (not (contains? out :context))
-          "huge :context field dropped on the truncation fallback"))))
-
-
-(deftest jsonize-error-data-keeps-nil-type-on-truncation-test
-  (testing "fallback preserves whatever was in :type (nil included)"
-    (let [huge (str/join (repeat (inc persist/max-error-data-bytes) \x))
-          data {:context huge}
-          out  (persist/jsonize-error-data data)]
-      (is (= {:type nil :truncated true} out)))))
-
-
-(deftest truncate-error-test
-  (testing "short string passes through unchanged"
-    (is (= "boom" (persist/truncate-error "boom"))))
-  (testing "exactly at cap → unchanged"
-    (let [s (str/join (repeat persist/max-error-chars \a))]
-      (is (= s (persist/truncate-error s)))
-      (is (= persist/max-error-chars (count (persist/truncate-error s))))))
-  (testing "over cap → truncated with ellipsis suffix"
-    (let [s (str/join (repeat (+ persist/max-error-chars 100) \a))
-          out (persist/truncate-error s)]
-      (is (= (inc persist/max-error-chars) (count out))
-          "kept exactly max-error-chars + 1 char for the ellipsis")
-      (is (str/ends-with? out "…"))))
-  (testing "non-string input is coerced via str"
-    (is (= "42" (persist/truncate-error 42)))
-    (is (= "" (persist/truncate-error nil)))))
-
-
-;; ============================================================================
-;; ref-arg? — pure predicate
-;; ============================================================================
-
-(deftest ref-arg-predicate-test
-  (testing "map with :ref key → true"
-    (is (true? (persist/ref-arg? {:ref "abc"})))
-    (is (true? (persist/ref-arg? {:ref nil}))
-        "even nil-valued :ref counts as a ref-shape (parse-uuid downstream)"))
-  (testing "map without :ref → false"
-    (is (false? (persist/ref-arg? {:value 1})))
-    (is (false? (persist/ref-arg? {}))))
-  (testing "non-map values → false"
-    (is (false? (persist/ref-arg? 42)))
-    (is (false? (persist/ref-arg? "a")))
-    (is (false? (persist/ref-arg? nil)))
-    (is (false? (persist/ref-arg? [1 2 3])))))
+;; The pure size-cap helpers (jsonize-result / jsonize-error-data /
+;; truncate-error / ref-arg?) are unit-tested in
+;; `graphden.crud.fn-execution.persist-test` — their dedicated ns. This
+;; file keeps only the storage-backed persist coverage.

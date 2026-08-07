@@ -57,6 +57,12 @@
     (is (str/ends-with? out "…"))))
 
 
+(deftest truncate-error-exactly-at-cap-unchanged
+  (let [s (str/join (repeat persist/max-error-chars \a))]
+    (is (= s (persist/truncate-error s))
+        "size == cap is within budget — no ellipsis, no clamp")))
+
+
 ;; =============================================================================
 ;; jsonize-result — [ok? value] tuple, rejects oversize
 ;; =============================================================================
@@ -64,7 +70,9 @@
 (deftest jsonize-result-small-passes
   (let [[ok v] (persist/jsonize-result {:a 1 :b [2 3]})]
     (is ok)
-    (is (= {:a 1 :b [2 3]} v))))
+    (is (= {:a 1 :b [2 3]} v)))
+  (is (= [true nil] (persist/jsonize-result nil))
+      "nil result is well within cap and keeps its identity"))
 
 
 (deftest jsonize-result-oversize-rejected
@@ -103,6 +111,13 @@
         out (persist/jsonize-error-data {:type :too-big :details huge})]
     (is (= {:type :too-big :truncated true} out)
         "oversize payload collapses to the bare canonical type tag")))
+
+
+(deftest jsonize-error-data-keeps-nil-type-on-truncation
+  (let [huge (str/join (repeat (inc persist/max-error-data-bytes) \x))
+        out (persist/jsonize-error-data {:context huge})]
+    (is (= {:type nil :truncated true} out)
+        "the fallback preserves whatever was in :type — nil included")))
 
 
 ;; =============================================================================
@@ -372,7 +387,9 @@
           "runtime added :io that wasn't declared → one warn line")
       (is (= :warn (:level (first @calls))))
       (is (re-find #":execution/effect-drift" (:msg (first @calls)))
-          "the canonical grep-marker rides the line"))))
+          "the canonical grep-marker rides the line")
+      (is (re-find #":widened \[\"?io\"?\]" (:msg (first @calls)))
+          "the line names the widened direction with the offending effect"))))
 
 
 (deftest log-effect-drift-unobserved-warns
@@ -380,7 +397,9 @@
     (binding [log/*logger-factory* (capturing-log-factory calls)]
       (persist/log-effect-drift! "exec-id" ["db" "env"] ["db"])
       (is (= 1 (count @calls))
-          "declared :env never fired at runtime → warn"))))
+          "declared :env never fired at runtime → warn")
+      (is (re-find #":unobserved \[\"?env\"?\]" (:msg (first @calls)))
+          "the line names the unobserved direction with the missing effect"))))
 
 
 (deftest size-caps-sanity

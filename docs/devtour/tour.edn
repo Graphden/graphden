@@ -108,9 +108,12 @@
     {:ns graphden.executor.compile-eager :defn compile-all
      :say "Topologically orders every impl-backed fn and compiles each in
            dependency order into `{fn-id -> (fn [fa ctx])}`, cached process-wide
-           by (graph-shape × base-fn set). Dependency order matters: by the time
-           a parent compiles, its children's callables already exist to be
-           wired in."
+           by (graph-shape × base-fn set × ambient rich-types) — the rich-types
+           component is load-bearing: `produces-callable?` HOF-wrap decisions
+           depend on the swept `:return-type` entries, so callers under
+           different types must not share a compile. Dependency order matters:
+           by the time a parent compiles, its children's callables already
+           exist to be wired in."
      :see [[:executor "compile-fn"]]}
 
     {:ns graphden.executor.compile-eager :defn compile-fn

@@ -78,7 +78,7 @@ The invariants that are gated today:
 | Counter | Max | Catches |
 |---------|-----|---------|
 | `:fixture/container-boot` | 1 | a caller bypassing the shared container (~3 s each) |
-| `:fixture/golden-bootstrap` | 2 | a namespace inventing a new package set (~14 s each); two are expected — `[core web app]` + `[core web app registry mcp]` |
+| `:fixture/golden-bootstrap` | 3 | a namespace inventing a new package set (~14 s each); three are sanctioned — `[core web app]`, `[core web app registry mcp]` (registry/export/mcp suites), and the cheap `[core]` (~3 s, pure-core NSes) |
 | `:fixture/type-check-sweep` | 0 | the ~40 s sweep leaking into the unit suite |
 | `:registry/delta-fell-back-to-rebuild` | 0 | a delta silently becoming a full rebuild |
 | `:sql/graph-entities-tree` | 1 | the sidebar's first paint reading rows it doesn't paint |

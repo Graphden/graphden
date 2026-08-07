@@ -115,11 +115,15 @@ You were started in one of two ways:
      run — `bb ci` for unit reds, a single `node <file>.test.js` against
      `bb wt up` for e2e reds), re-run the gate. Iterate until green. Never
      weaken a test or skip a check to go green.
-   - **FLAKE note in the e2e summary** (failed once, passed on retry) — the
-     run stays green by default, but the flake is named: investigate it in
-     this session if it's plausibly yours, or report it onward. Set
-     `WTQ_FLAKE_STRICT=1` to restore flake-fails-the-run (the multi-agent
-     default economics: one hidden break re-queues everyone).
+   - **FLAKE in the gate's e2e** (failed once, passed on retry) — the gate
+     runs `bb test-e2e` with `WTQ_FLAKE_STRICT=1` UNCONDITIONALLY, so at
+     `bb wt merge` a retry-only pass (or an entity leak) is a RED result
+     that bounces the branch: fix the flake, don't re-roll the dice. The
+     first strict run proved the pattern — the flake it caught was a wait
+     bound sized at the operation's median, not a race; size waits to the
+     honest worst case (the poll still returns early). Green-on-retry
+     remains only the AD-HOC default when you run `run-edit-tests.sh` /
+     `bb test-e2e` by hand outside the gate.
    - If the queue is busy the gate blocks waiting its turn — expected; let the
      background run wait.
 

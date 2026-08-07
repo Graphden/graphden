@@ -222,6 +222,16 @@
   @(target-rich-types-atom))
 
 
+(defn effective-rich-types
+  "PUBLIC snapshot of the active rich-types map (override when bound,
+   global otherwise). Exists for `compile-eager`'s compile-all cache
+   key: compiled closures depend on rich-types (`produces-callable?`
+   drives HOF-wrap decisions), so two callers with identical graphs
+   but different ambient types must NOT share a compile."
+  []
+  (rich-types-view))
+
+
 ;; §4 Risk-2 (rich-types): the NAME INDEX is still bare-name-keyed, so two
 ;; orgs' same-named composed fns collide there (last-write-wins on the
 ;; index; the id-keyed entries themselves never collide — org fns have

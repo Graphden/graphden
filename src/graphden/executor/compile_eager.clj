@@ -1126,11 +1126,28 @@
   (atom []))
 
 
+(def ^:private effective-rich-types-fn
+  ;; requiring-resolve — same cycle-avoidance as
+  ;; `rich-type-of-id-or-stale-name-fn` above.
+  (delay (requiring-resolve
+           'graphden.executor.registry.core/effective-rich-types)))
+
+
 (defn- compile-all-cache-key
-  "Hash of (graph shape × base-fn name set). Same key ⇒ same compile
-   output. Picks the same per-entity field set the registry already
-   relies on for identity (mutable timestamps / generated UUIDs that
-   don't affect compile output stay out)."
+  "Hash of (graph shape × base-fn name set × ambient rich-types).
+   Same key ⇒ same compile output. Picks the same per-entity field set
+   the registry already relies on for identity (mutable timestamps /
+   generated UUIDs that don't affect compile output stay out).
+
+   Rich-types are IN the key because compile output depends on them:
+   `produces-callable?` (fed by the swept `:return-type` entries)
+   decides whether a HOF wrap captures the produced callable or the
+   builder closure. Keyed without them, a caller compiling under
+   swept types could be served a compile made under unswept types by
+   a sibling with the identical graph — the served closures then
+   classcast at execute time (`AFunction cannot be cast to
+   Associative`), which is exactly how the fixture-diet landing
+   failed. Value-hash (not identity) so equal snapshots still share."
   [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding
            base-fns]}]
   (hash [(set (vals fn-map))
@@ -1138,7 +1155,8 @@
          (set (mapcat val fn-slots-by-fn))
          (set (mapcat val bindings-by-fn))
          (set (mapcat val items-by-binding))
-         (set (keys base-fns))]))
+         (set (keys base-fns))
+         (@effective-rich-types-fn)]))
 
 
 (defn compile-all

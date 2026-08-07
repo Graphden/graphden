@@ -15,33 +15,17 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
-
-
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
+    [graphden.test-infra.exec-harness :as eh :refer [*context*]]))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
-  (fn [t]
-    (exec/with-clean-registry
-      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-         (try
-           (binding [*context* (:ctx graph)
-                     *storage* (:storage graph)]
-             (t))
-           (finally (sp/close (:storage graph))))))))
-
-
-(defn- fn-id
-  [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (eh/exec-fixture (str (ns-name *ns*))))
 
 
 (defn- run
   [nm args]
-  (exec/execute *context* (fn-id nm) args))
+  (exec/execute *context* (eh/fn-id nm) args))
 
 
 (defn- stream-of

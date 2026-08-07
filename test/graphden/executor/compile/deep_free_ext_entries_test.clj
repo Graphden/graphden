@@ -8,23 +8,13 @@
    `:body`) BOTH surface."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
+    [graphden.executor.compile.test-support :as support]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
-
-
-(defn- lookups-for
-  [storage]
-  (l/build-lookups
-    {:fns        (sp/query-entities storage :fn {})
-     :slots      (sp/query-entities storage :slot {})
-     :fn-slots   (sp/query-entities storage :fn-slot {})
-     :bindings   (sp/query-entities storage :binding {})
-     :list-items (sp/query-entities storage :binding-list-item {})}))
 
 
 (deftest single-free-arg-emits-chain-leaf-slot-id-test
@@ -40,7 +30,7 @@
                                      :parent base
                                      :bindings {"a" {:value 10}}})
               entries (r/deep-free-ext-entries (-> fn1 :fn :id)
-                                               (lookups-for storage))]
+                                               (support/lookups-for storage))]
           (is (= 1 (count entries))
               "only :b is free — :a is value-bound and covered by slot-id")
           (is (= :b (:ext-name (first entries))))
@@ -74,7 +64,7 @@
                                        :parent base-f
                                        :bindings {"y" {:ref fn-g}}})
               entries (r/deep-free-ext-entries (-> fn-f :fn :id)
-                                               (lookups-for storage))
+                                               (support/lookups-for storage))
               ext-names (mapv :ext-name entries)
               slot-ids  (set (map :slot-id entries))
               sid-f-x   (-> base-f :slots (get "x") :id)
@@ -87,7 +77,7 @@
               "the two entries hold the two distinct chain-leaf slot-ids")
           (testing "legacy name-keyed walker hides the collision"
             (is (= [:x] (r/deep-free-ext-names (-> fn-f :fn :id)
-                                               (lookups-for storage)))
+                                               (support/lookups-for storage)))
                 "deep-free-ext-names dedupes by name and emits one")))
         (finally (sp/close storage))))))
 
@@ -122,7 +112,7 @@
                             {:binding-id (:id list-bn) :position 0
                              :value {:as "alpha"} :literal nil})
           (let [entries (r/deep-free-ext-entries (:id f-fn)
-                                                 (lookups-for storage))]
+                                                 (support/lookups-for storage))]
             (is (= [{:ext-name :alpha :slot-id (:id alpha-slot)}]
                    entries)
                 "ext-name :alpha + slot-id is the owner's rename slot")))
@@ -144,7 +134,7 @@
               _        (setup/attach-slot! storage (:id base-f) (:id s-callee) 0)
               f-fn     (setup/create-composed-fn! storage "dfe-hof-f" (:id base-f))
               _        (setup/bind-ref! storage (:id f-fn) (:id s-callee) (:id t-fn))]
-          (is (= [] (r/deep-free-ext-entries (:id f-fn) (lookups-for storage)))
+          (is (= [] (r/deep-free-ext-entries (:id f-fn) (support/lookups-for storage)))
               "T's frees do NOT bubble up through the HOF boundary"))
         (finally (sp/close storage))))))
 
@@ -166,7 +156,7 @@
                                        :parent base-c
                                        :bindings {"s" {:ref d}}})
               entries (r/deep-free-ext-entries (-> c :fn :id)
-                                               (lookups-for storage))]
+                                               (support/lookups-for storage))]
           (is (= 1 (count entries)))
           (is (= :inner (:ext-name (first entries))))
           (is (= (-> base-d :slots (get "inner") :id)
@@ -184,7 +174,7 @@
                                      :slots [{:name "a" :type :int}]})
               fn1  (setup/build-fn! storage
                                     {:name "dfe-memo-1" :parent base})
-              lookups (lookups-for storage)
+              lookups (support/lookups-for storage)
               r1 (r/deep-free-ext-entries (-> fn1 :fn :id) lookups)
               r2 (r/deep-free-ext-entries (-> fn1 :fn :id) lookups)]
           (is (identical? r1 r2)
@@ -216,7 +206,7 @@
                                        :parent base-f
                                        :bindings {"y" {:ref fn-g}}})
               proj    (r/cache-projection-frees (-> fn-f :fn :id)
-                                                (lookups-for storage))
+                                                (support/lookups-for storage))
               sid-f-x (-> base-f :slots (get "x") :id)
               sid-g-x (-> base-g :slots (get "x") :id)]
           (is (contains? proj :x)

@@ -17,21 +17,15 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities]
     [graphden.executor.compile-runtime :as cr-runtime]
-    [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
-    [graphden.packages.records :as records]
     [graphden.schema.services.schema :as svcs]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
-    [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
     [graphden.tenancy.context :as tctx]
-    [graphden.test-infra.schemas :as schemas]
-    [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as vres]))
 
 
@@ -48,25 +42,6 @@
   ;; teardown of the whole rich-types-registry — see check-test for
   ;; the same fix.
   exec/with-isolated-rich-types)
-
-
-(defn- create-full-storage
-  []
-  (pth/clean-database-fast! @(resolve 'graphden.executor.test-setup/*container*))
-  (let [container @(resolve 'graphden.executor.test-setup/*container*)
-        storage (pg/create-storage (pth/get-container-config container))]
-    (sp/initialize storage (schemas/full-schema))
-    (sp/upsert-entities storage :fn
-                        (mapv #(dissoc % :kind) (records/boot-primitive-records)))
-    (let [branch (sp/create-entity storage :branch
-                                   {:name "test-branch"
-                                    :created-at (java.time.Instant/now)})]
-      (vs/->VersionedStorage storage (:id branch)))))
-
-
-(defn- test-ctx
-  [storage]
-  (ctx/create-context {:storage storage :base-fns (exec/get-default-registry)}))
 
 
 ;; ============================================================================
@@ -153,13 +128,13 @@
 
 
 (deftest reconcile-once-starts-enabled-services-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "start" calls stops)
         svc (make-service-row! storage (:id composed) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (let [r (recon/reconcile-once! c running)]
@@ -176,13 +151,13 @@
 
 
 (deftest reconcile-once-stops-disabled-services-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "stop-disabled" calls stops)
         svc (make-service-row! storage (:id composed) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       ;; First pass — starts the service.
@@ -214,7 +189,7 @@
   ;; and through the pass not stopping anything a tenant binding can't
   ;; see. (The [] read itself is tenancy-repo behaviour; its end-to-end
   ;; twin lives there.)
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         seen-org (atom nil)
         base-name "test-org-observer"
         _ (exec/register-base-fn! (keyword base-name)
@@ -224,7 +199,7 @@
         base (setup/create-base-fn! storage base-name :any)
         composed (setup/create-composed-fn! storage "my-test-org-observer" (:id base))
         svc (make-service-row! storage (:id composed) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (tctx/with-org "acme"
@@ -243,13 +218,13 @@
 
 
 (deftest reconcile-once-idempotent-when-running-matches-desired-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "idem" calls stops)]
     (make-service-row! storage (:id composed) true)
-    (let [c (test-ctx storage)
+    (let [c (setup/default-registry-ctx storage)
           running (atom {})]
       (try
         (recon/reconcile-once! c running)
@@ -267,13 +242,13 @@
   ;; Editing a RUNNING service's :fn-id must restart it. The membership
   ;; diff alone treats the row as unchanged (still enabled + running) and
   ;; would silently ignore the edit until a pod restart.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {a :composed} (make-trackable-fn! storage "drift-a" calls stops)
         {b :composed} (make-trackable-fn! storage "drift-b" calls stops)
         svc (make-service-row! storage (:id a) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (recon/reconcile-once! c running)
@@ -295,7 +270,7 @@
 
 
 (deftest stop-all-drains-running-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         ;; Two DIFFERENT fns (different suffixes / impls) — the model
@@ -305,7 +280,7 @@
         {b :composed} (make-trackable-fn! storage "drain-b" calls stops)]
     (make-service-row! storage (:id a) true)
     (make-service-row! storage (:id b) true)
-    (let [c (test-ctx storage)
+    (let [c (setup/default-registry-ctx storage)
           running (atom {})]
       (try
         (recon/reconcile-once! c running)
@@ -325,7 +300,7 @@
 ;; ============================================================================
 
 (deftest service-roundtrips-through-generic-crud-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         {composed :composed}
         (make-trackable-fn! storage "crud-rt" (atom []) (atom []))
         svc-row (sp/create-entity storage :service
@@ -364,7 +339,7 @@
   ;; `entities/chain-has-process-effect?`) — same code paths the
   ;; defbase wrappers `free-arg-slot-map` and
   ;; `chain-has-process-effect?` invoke.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         ;; A base-fn with one declared but unbound slot — composed
         ;; instance inherits the slot as a free arg.
         base-name "test-needs-arg"
@@ -374,7 +349,7 @@
         port-slot (setup/create-slot! storage "port" :int)
         _ (setup/attach-slot! storage (:id base) (:id port-slot) 0)
         composed (setup/create-composed-fn! storage composed-name (:id base))
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         free-arg-slot-map (requiring-resolve
                             'graphden.crud.fn-execution.lookup/free-arg-slot-map)
         chain-process? (requiring-resolve
@@ -429,14 +404,14 @@
   ;; carry it so `restart-services-on-branch!` can identify which
   ;; entries belong to a merge target. Tested without a router so the
   ;; ctx fallback is exercised but the metadata is the focus.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "branch-record" calls stops)
         feat-id (random-uuid)
         svc (make-service-row! storage (:id composed) true feat-id)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (recon/reconcile-once! c running)
@@ -457,13 +432,13 @@
   ;; router` is nil (tests without `:exec/branch-router` init-key).
   ;; The service starts against the base ctx regardless of its
   ;; `:branch-id` value — same as the legacy single-branch path.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "no-router" calls stops)
         _ (make-service-row! storage (:id composed) true (random-uuid))
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (br/clear-active-router!)
@@ -477,7 +452,7 @@
   ;; `restart-services-on-branch!` stops + re-starts ONLY services
   ;; whose recorded `:branch-id` matches the target. Services on
   ;; other branches (or with no branch-id) are left running.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls-a (atom [])
         stops-a (atom [])
         calls-b (atom [])
@@ -490,7 +465,7 @@
         branch-y (random-uuid)
         _svc-a (make-service-row! storage (:id a-composed) true branch-x)
         _svc-b (make-service-row! storage (:id b-composed) true branch-y)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (br/clear-active-router!)
@@ -519,14 +494,14 @@
   ;; so a default-branch `restart-services-on-branch!` (post-merge
   ;; invalidation) restarts it instead of leaving a stale closure
   ;; running — before normalization such rows were silently skipped.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "legacy-nil-branch" calls stops)
         _svc (make-service-row! storage (:id composed) true nil)
         default-id (random-uuid)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       ;; Minimal "router": the reconciler only reads `:default-branch-id`
@@ -551,7 +526,7 @@
 
 (deftest start-failure-is-recorded-as-nil-stopper-test
   (testing "if the impl throws on start, the service is still tracked"
-    (let [storage (create-full-storage)
+    (let [storage (setup/create-branch-versioned-test-storage)
           base-name "test-failing-svc"
           composed-name "my-test-failing-svc"
           impl-fn (fn [_args _ctx]
@@ -563,7 +538,7 @@
                                   {:fn-id (:id composed)
                                    :enabled? true
                                    :restart-policy :never})  ; no retries
-            c (test-ctx storage)
+            c (setup/default-registry-ctx storage)
             running (atom {})]
         (try
           (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})
@@ -584,7 +559,7 @@
 ;; ============================================================================
 
 (deftest supervisor-retries-on-start-failure-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         ;; Impl that fails the first N times then succeeds — lets us
         ;; assert the supervisor's retry loop without sleeping real
         ;; backoff time.
@@ -604,7 +579,7 @@
                                 {:fn-id (:id composed)
                                  :enabled? true
                                  :restart-policy :always})
-          c (test-ctx storage)
+          c (setup/default-registry-ctx storage)
           running (atom {})]
       (try
         ;; Backoff 0ms so the test is fast — supervisor still loops the
@@ -624,7 +599,7 @@
 
 (deftest supervisor-respects-policy-never-test
   (testing ":never policy → single attempt regardless of failure"
-    (let [storage (create-full-storage)
+    (let [storage (setup/create-branch-versioned-test-storage)
           attempt-counter (atom 0)
           base-name "test-fail-never-svc"
           composed-name "my-test-fail-never-svc"
@@ -638,7 +613,7 @@
                                   {:fn-id (:id composed)
                                    :enabled? true
                                    :restart-policy :never})
-            c (test-ctx storage)
+            c (setup/default-registry-ctx storage)
             running (atom {})]
         (try
           (recon/reconcile-once! c running {:max-retries 99 :backoff-ms 0})
@@ -653,7 +628,7 @@
 
 (deftest supervisor-exhausts-retries-and-gives-up-test
   (testing "permanently-failing :always service → bounded attempts, then give up"
-    (let [storage (create-full-storage)
+    (let [storage (setup/create-branch-versioned-test-storage)
           attempt-counter (atom 0)
           base-name "test-permafail-svc"
           composed-name "my-test-permafail-svc"
@@ -667,7 +642,7 @@
                                   {:fn-id (:id composed)
                                    :enabled? true
                                    :restart-policy :always})
-            c (test-ctx storage)
+            c (setup/default-registry-ctx storage)
             running (atom {})]
         (try
           (recon/reconcile-once! c running {:max-retries 3 :backoff-ms 0})
@@ -691,7 +666,7 @@
   ;; reverse-dep index where edits to fn-X transitively-affect ONLY
   ;; A. Call the restart hook with seeds #{fn-X}. Expect A to stop +
   ;; restart, B untouched.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls-a (atom [])
         stops-a (atom [])
         calls-b (atom [])
@@ -702,7 +677,7 @@
         (make-trackable-fn! storage "restart-dep-b" calls-b stops-b)
         _svc-a (make-service-row! storage (:id a-composed) true)
         _svc-b (make-service-row! storage (:id b-composed) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})
         ;; Fake reverse-dep index: edits to `dep-fn-id` cascade only
         ;; to A. Empty for everything else.
@@ -747,13 +722,13 @@
   ;; Cold start path: `:compile-deps` is nil (registry not built yet)
   ;; — the hook returns the canonical empty diff without touching
   ;; the running atom.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "restart-dep-cold" calls stops)
         _svc (make-service-row! storage (:id composed) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (br/clear-active-router!)
@@ -778,13 +753,13 @@
 
 (deftest restart-services-depending-on-empty-seeds-noop-test
   ;; Empty seed set — even with deps populated, no work to do.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed}
         (make-trackable-fn! storage "restart-dep-empty" calls stops)
         _svc (make-service-row! storage (:id composed) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (br/clear-active-router!)
@@ -811,7 +786,7 @@
   ;; REAL `compile-runtime/rebuild!` → `build-reverse-deps` →
   ;; `restart-services-depending-on!` chain so a regression in any
   ;; link shows up here.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         up-calls (atom [])
         up-stops (atom [])
         down-calls (atom [])
@@ -842,7 +817,7 @@
           {:base base :composed composed})
         _svc-up (make-service-row! storage (:id up-composed) true)
         _svc-down (make-service-row! storage (:id down-composed) true)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})]
     (try
       (br/clear-active-router!)
@@ -890,7 +865,7 @@
 (deftest nil-returning-service-is-a-success-not-a-failure-test
   (testing "a fire-and-forget service whose fn returns nil starts OK (nil is a
             valid stopper) — it must NOT be retried or stamped start-failed"
-    (let [storage (create-full-storage)
+    (let [storage (setup/create-branch-versioned-test-storage)
           base-name "test-fireforget-svc"
           composed-name "my-test-fireforget-svc"
           ;; returns nil — a legitimate fire-and-forget service (no stopper)
@@ -902,7 +877,7 @@
                                   {:fn-id (:id composed)
                                    :enabled? true
                                    :restart-policy :on-failure})
-            c (test-ctx storage)
+            c (setup/default-registry-ctx storage)
             running (atom {})]
         (try
           (recon/reconcile-once! c running {:max-retries 3 :backoff-ms 0})
@@ -962,11 +937,11 @@
   "A ctx that looks like it has a lock connection, so the reconciler
    takes the multi-pod code path instead of the nil-conn fallback."
   [storage]
-  (assoc (test-ctx storage) :service-locks-connection ::fake-conn))
+  (assoc (setup/default-registry-ctx storage) :service-locks-connection ::fake-conn))
 
 
 (deftest singleton-service-runs-on-exactly-one-pod-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "singleton" calls stops)
@@ -999,7 +974,7 @@
 
 
 (deftest per-pod-service-runs-on-every-pod-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "per-pod" calls stops)
@@ -1032,7 +1007,7 @@
 
 
 (deftest stop-releases-only-locks-this-pod-holds-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "release" calls stops)
@@ -1059,7 +1034,7 @@
 
 
 (deftest cardinality-flip-restarts-the-service-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "flip" calls stops)
@@ -1092,7 +1067,7 @@
 
 (deftest pool-service-runs-on-exactly-N-pods-test
   (testing ":pool with :pool-size 2 runs on 2 of 3 pods, each on a distinct slot"
-    (let [storage (create-full-storage)
+    (let [storage (setup/create-branch-versioned-test-storage)
           calls (atom [])
           stops (atom [])
           {composed :composed} (make-trackable-fn! storage "pool" calls stops)
@@ -1127,7 +1102,7 @@
 
 (deftest not-our-lock-is-retried-so-a-crashed-owner-fails-over-test
   (testing "an idle pod re-attempts the lock each pass; when the owner's slot frees, it takes over"
-    (let [storage (create-full-storage)
+    (let [storage (setup/create-branch-versioned-test-storage)
           calls (atom [])
           stops (atom [])
           {composed :composed} (make-trackable-fn! storage "failover" calls stops)
@@ -1162,7 +1137,7 @@
 
 (deftest pool-shrink-restarts-out-of-range-slot-test
   (testing "shrinking :pool-size drifts the entry so the pod re-evaluates its slot"
-    (let [storage (create-full-storage)
+    (let [storage (setup/create-branch-versioned-test-storage)
           calls (atom [])
           stops (atom [])
           {composed :composed} (make-trackable-fn! storage "shrink" calls stops)
@@ -1195,7 +1170,7 @@
 ;; ============================================================================
 
 (deftest reassert-keeps-services-we-re-acquire-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "reassert-keep" calls stops)
@@ -1220,7 +1195,7 @@
 
 
 (deftest reassert-stops-a-service-a-sibling-stole-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "reassert-yield" calls stops)
@@ -1249,7 +1224,7 @@
   ;; (`:service-locks-holder` → ensure-live! → reassert-lock-ownership!), which
   ;; had no coverage — deleting that call would leave every other test green
   ;; while a reconnected pod double-ran a singleton a sibling stole.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "reassert-glue" calls stops)
@@ -1282,14 +1257,14 @@
 
 
 (deftest per-pod-service-is-untouched-by-reassert-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])
         stops (atom [])
         {composed :composed} (make-trackable-fn! storage "reassert-perpod" calls stops)
         svc (sp/create-entity storage :service
                               {:fn-id (:id composed) :enabled? true
                                :restart-policy :always :cardinality :per-pod})
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         pod (atom {})]
     (try
       (recon/reconcile-once! c pod)
@@ -1313,7 +1288,7 @@
   ;; be churned. The 4-arity hook restarts an entry only when the
   ;; edited branch is on the entry's branch CHAIN (itself or an
   ;; ancestor); the 3-arity stays conservative.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         calls-same (atom [])
         stops-same (atom [])
         calls-sib (atom [])
@@ -1326,7 +1301,7 @@
         sibling-branch (random-uuid)
         _svc-same (make-service-row! storage (:id same-composed) true edit-branch)
         _svc-sib (make-service-row! storage (:id sib-composed) true sibling-branch)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         running (atom {})
         dep-fn-id (random-uuid)]
     (try

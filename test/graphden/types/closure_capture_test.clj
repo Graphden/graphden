@@ -38,18 +38,12 @@
     [graphden.executor.compile.lookups :as compile-lookups]
     [graphden.executor.compile.renames :as renames]
     [graphden.executor.composition.deps :as comp-deps]
-    [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.loader :as loader]
-    [graphden.packages.records :as records]
-    [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.test-infra.schemas :as schemas]
-    [graphden.types.check :as check]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.types.check :as check]))
 
 
 (use-fixtures :once
@@ -57,25 +51,6 @@
   ;; `record-rich-types(-raw)!` writes by this ns leak into sibling
   ;; integration tests otherwise — see check-test for the same fix.
   exec/with-isolated-rich-types)
-
-
-(defn- create-full-storage
-  []
-  (pth/clean-database-fast! @(resolve 'graphden.executor.test-setup/*container*))
-  (let [container @(resolve 'graphden.executor.test-setup/*container*)
-        storage (pg/create-storage (pth/get-container-config container))]
-    (sp/initialize storage (schemas/full-schema))
-    (sp/upsert-entities storage :fn
-                        (mapv #(dissoc % :kind) (records/boot-primitive-records)))
-    (let [branch (sp/create-entity storage :branch
-                                   {:name "test-branch"
-                                    :created-at (java.time.Instant/now)})]
-      (vs/->VersionedStorage storage (:id branch)))))
-
-
-(defn- test-ctx
-  [storage]
-  (ctx/create-context {:storage storage :base-fns (exec/get-default-registry)}))
 
 
 ;; ============================================================================
@@ -100,7 +75,7 @@
   ;; `{:captured-x <slot-id>}` even though :outer's inheritance chain
   ;; doesn't own a `:captured-x` slot — it's transitively captured
   ;; through the :body ref to :inner.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         _ (exec/register-base-fn! :test-base-inner (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-base-outer (fn [_ _] :ok))
         base-inner (setup/create-base-fn! storage "test-base-inner" :any)
@@ -116,7 +91,7 @@
                                          "test-outer-binds-inner"
                                          (:id base-outer))
         _ (setup/bind-ref! storage (:id outer) (:id slot-body) (:id inner))
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing ":captured-x surfaces as a free-arg of :outer via the :body ref"
         (let [free (lookup/free-arg-slot-map c (:id outer))]
@@ -142,7 +117,7 @@
   ;;   :hof-base — base-fn with one HOF slot :func typed [:fn {:item :any} :any]
   ;;   :callback — fn-def parent=:cb-base (leaves :item + :captured free)
   ;;   :outer    — fn-def parent=:hof-base, binds :func to :callback
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         _ (exec/register-base-fn! :test-cb-base (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-hof-base (fn [_ _] :ok))
         cb-base (setup/create-base-fn! storage "test-cb-base" :any)
@@ -156,7 +131,7 @@
         callback (setup/create-composed-fn! storage "test-hof-callback" (:id cb-base))
         outer (setup/create-composed-fn! storage "test-hof-outer" (:id hof-base))
         _ (setup/bind-ref! storage (:id outer) (:id func-slot) (:id callback))
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "HOF call-site :item is NOT free; genuinely-captured :captured IS"
         (let [free (lookup/free-arg-slot-map c (:id outer))]
@@ -177,7 +152,7 @@
   ;; blocks in BOTH — a genuinely unstartable fn is still rejected. This is
   ;; what stops the `:service` guard from falsely rejecting a whole-app
   ;; listener whose 45 free args are all below its `:handler` HOF slot.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         _ (exec/register-base-fn! :test-cb-base2 (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-hof-base2 (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-direct-base (fn [_ _] :ok))
@@ -196,7 +171,7 @@
         _ (setup/bind-ref! storage (:id listener) (:id func-slot) (:id callback))
         ;; unstartable-shaped: a direct operand left unbound
         unstartable (setup/create-composed-fn! storage "test-sbfa-unstartable" (:id direct-base))
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "listener: the callback's captured arg is HOF-lifted → NOT service-blocking"
         (is (contains? (lookup/free-arg-slot-map c (:id listener)) :captured2)
@@ -233,7 +208,7 @@
   ;; After the fix, `free-arg-slot-map` on :outer-fn must be empty —
   ;; the binding on the rename slot has to cancel the underlying
   ;; :original free arg surfaced by the ref walk.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         _ (exec/register-base-fn! :test-rename-inner-base (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-rename-outer-base (fn [_ _] :ok))
         inner-base (setup/create-base-fn! storage "test-rename-inner-base" :any)
@@ -253,7 +228,7 @@
         inner-fn (setup/create-composed-fn! storage "test-rename-inner" (:id inner-base))
         outer-fn (setup/create-composed-fn! storage "test-rename-outer" (:id outer-base))
         _ (setup/bind-ref! storage (:id outer-fn) (:id body-slot) (:id inner-fn))
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "without the rename-binding :original surfaces as a free arg"
         (let [free (lookup/free-arg-slot-map c (:id outer-fn))]
@@ -309,7 +284,7 @@
   ;;
   ;; Without the policy, `hof-lambda-params` at the wrap site
   ;; returns `[:injected]` — bug. With the policy, it returns `[]`.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         _ (exec/register-base-fn! :test-wrap-base (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-injected (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-env-binder-base (fn [_ _] :ok))
@@ -382,7 +357,7 @@
   ;; `:cron-next-after.:cron` (source = `:cron-parse.:cron`) is what
   ;; the ref-walk hits via `:_next-fire-ms`'s inheritance, so
   ;; `bound-roots` must collapse both ends of the chain.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         _ (exec/register-base-fn! :test-rename-up-inner-base (fn [_ _] :ok))
         _ (exec/register-base-fn! :test-rename-up-outer-base (fn [_ _] :ok))
         inner-base (setup/create-base-fn! storage "test-rename-up-inner-base" :any)
@@ -402,7 +377,7 @@
         inner-fn (setup/create-composed-fn! storage "test-rename-up-inner" (:id inner-base))
         outer-fn (setup/create-composed-fn! storage "test-rename-up-outer" (:id outer-base))
         _ (setup/bind-ref! storage (:id outer-fn) (:id body-slot) (:id inner-fn))
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "binding the SOURCE slot closes the rename slot too"
         (setup/bind-value! storage (:id outer-fn) (:id orig-slot) 99)
@@ -444,7 +419,7 @@
   ;;      closure with the snapshotted args. :test-inner sees
   ;;      :captured-arg "X" as a free-arg, returns it.
   ;; Result: "X" — the captured arg flowed through the HOF wrap.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         runner-impl (fn [args _] ((:body args)))
         identity-impl (fn [args _] (:captured-arg args))
         _ (exec/register-base-fn! :test-runner runner-impl)
@@ -458,7 +433,7 @@
         inner (setup/create-composed-fn! storage "test-inner-cap" (:id id-base))
         outer (setup/create-composed-fn! storage "test-outer-cap" (:id runner))
         _ (setup/bind-ref! storage (:id outer) (:id slot-body) (:id inner))
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "free-arg-slot-map surfaces :captured-arg via the :body ref"
         (let [free (lookup/free-arg-slot-map c (:id outer))]
@@ -625,10 +600,10 @@
   ;; A base-fn with no slots reports an empty free-arg map. Test
   ;; storage doesn't load packages so we synthesize the leaf-fn
   ;; inline (no slots attached).
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         _impl (exec/register-base-fn! :test-no-slots (fn [_ _] :ok))
         base (setup/create-base-fn! storage "test-no-slots" :any)
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (is (= {} (lookup/free-arg-slot-map c (:id base)))
           "no slots → no free args")
@@ -636,7 +611,7 @@
 
 
 (deftest ^:hof-regression existing-free-arg-slot-map-for-no-parent-fn-test
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         ;; Build a small base-fn with two slots, neither bound.
         impl-fn (fn [args _ctx] (+ (:a args) (:b args)))
         _ (exec/register-base-fn! :test-needs-two-slots impl-fn)
@@ -645,7 +620,7 @@
         slot-b (setup/create-slot! storage "b" :int)
         _ (setup/attach-slot! storage (:id base) (:id slot-a) 0)
         _ (setup/attach-slot! storage (:id base) (:id slot-b) 1)
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "a fn with unbound slots reports them as free args"
         (let [free (lookup/free-arg-slot-map c (:id base))]
@@ -657,7 +632,7 @@
   ;; When a slot is BOUND to a value or fn-ref, it's not free — even if
   ;; the bound fn-ref itself has free args. Current behavior; closure-
   ;; capture commit 2 expands this for HOF bindings specifically.
-  (let [storage (create-full-storage)
+  (let [storage (setup/create-branch-versioned-test-storage)
         impl-fn (fn [_args _ctx] :ok)
         _ (exec/register-base-fn! :test-bound-slot impl-fn)
         base (setup/create-base-fn! storage "test-bound-slot" :any)
@@ -667,7 +642,7 @@
                                             "test-bound-slot-composed"
                                             (:id base))
         _ (setup/bind-value! storage (:id composed) (:id slot-x) 42)
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "bound slot doesn't surface as a free arg"
         (is (= {} (lookup/free-arg-slot-map c (:id composed)))))

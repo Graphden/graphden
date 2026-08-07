@@ -113,6 +113,32 @@
     (vs/wrap-with-versioning storage "main")))
 
 
+(defn create-branch-versioned-test-storage
+  "Full NON-packages schema + primitives, versioned on a FRESH explicit
+   branch. Differs from `create-versioned-test-storage` on two axes its
+   two consumers rely on: the branch is a just-created row (not the
+   resolved \"main\"), and the packages schema is absent. Was duplicated
+   verbatim in closure-capture-test and reconciler-test."
+  []
+  (pth/clean-database-fast! *container*)
+  (let [storage (pg/create-storage (pth/get-container-config *container*))]
+    (sp/initialize storage (schemas/full-schema))
+    (sp/upsert-entities storage :fn
+                        (mapv #(dissoc % :kind) (records/boot-primitive-records)))
+    (let [branch (sp/create-entity storage :branch
+                                   {:name "test-branch"
+                                    :created-at (java.time.Instant/now)})]
+      (vs/->VersionedStorage storage (:id branch)))))
+
+
+(defn default-registry-ctx
+  "ExecutionContext over `storage` with the full default base-fn
+   registry — the common test-ctx shape (was triplicated)."
+  [storage]
+  (exec-ctx/create-context {:storage storage
+                            :base-fns (exec/get-default-registry)}))
+
+
 ;; ============================================================================
 ;; Test helpers — slot/fn-slot/binding model
 ;; ============================================================================

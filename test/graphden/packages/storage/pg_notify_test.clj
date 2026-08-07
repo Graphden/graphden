@@ -6,28 +6,12 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
-
-
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
+    [graphden.test-infra.exec-harness :as eh :refer [*context* *storage*]]))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
-  (fn [t]
-    (exec/with-clean-registry
-      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-         (try
-           (binding [*context* (:ctx graph)
-                     *storage* (:storage graph)]
-             (t))
-           (finally (sp/close (:storage graph))))))))
-
-
-(defn- fn-id
-  [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (eh/exec-fixture (str (ns-name *ns*))))
 
 
 (deftest pg-notify-delivers-payload-to-emitter
@@ -51,7 +35,7 @@
           :parent :pg-notify
           :args {:event :_notify-test-event}}])
 
-      (let [r (exec/execute probe-ctx (fn-id "notify-test-emit") {})]
+      (let [r (exec/execute probe-ctx (eh/fn-id "notify-test-emit") {})]
         (testing ":pg-notify returns nil"
           (is (nil? r) "impl returns nil (matches declared :return-type :null)"))
 
@@ -74,4 +58,4 @@
           :args {:event :_notify-test-event-2}}])
 
       (testing "doesn't throw — falls through to nil"
-        (is (nil? (exec/execute probe-ctx (fn-id "notify-test-emit-2") {})))))))
+        (is (nil? (exec/execute probe-ctx (eh/fn-id "notify-test-emit-2") {})))))))

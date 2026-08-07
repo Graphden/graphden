@@ -29,28 +29,12 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
-
-
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
+    [graphden.test-infra.exec-harness :as eh :refer [*context*]]))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
-  (fn [t]
-    (exec/with-clean-registry
-      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-         (try
-           (binding [*context* (:ctx graph)
-                     *storage* (:storage graph)]
-             (t))
-           (finally (sp/close (:storage graph))))))))
-
-
-(defn- fn-id
-  [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (eh/exec-fixture (str (ns-name *ns*))))
 
 
 (def ^:private a-response
@@ -59,8 +43,8 @@
 
 (deftest put-then-get-roundtrips-across-executes
   (testing "store under a key, then a SEPARATE execute reads it back (cell persists)"
-    (let [put (fn-id "response-cache-put-if!")
-          get (fn-id "response-cache-get")
+    (let [put (eh/fn-id "response-cache-put-if!")
+          get (eh/fn-id "response-cache-get")
           k   ["/rc-roundtrip" "get" ""]]
       (is (nil? (exec/execute *context* get {:key k}))
           "miss before anything is stored")
@@ -73,8 +57,8 @@
 
 (deftest put-if-false-does-not-store-but-returns-value
   (testing "`:when? false` is a no-op but still passes the value through"
-    (let [put (fn-id "response-cache-put-if!")
-          get (fn-id "response-cache-get")
+    (let [put (eh/fn-id "response-cache-put-if!")
+          get (eh/fn-id "response-cache-get")
           k   ["/rc-noop" "get" ""]]
       (is (= a-response
              (exec/execute *context* put {:key k :value a-response :when? false}))
@@ -85,8 +69,8 @@
 
 (deftest capacity-eviction-keeps-the-cell-bounded
   (testing "flush-all-at-64 keeps the cache map from growing without bound"
-    (let [put     (fn-id "response-cache-put-if!")
-          current (fn-id "_response-cache-current")]
+    (let [put     (eh/fn-id "response-cache-put-if!")
+          current (eh/fn-id "_response-cache-current")]
       (dotimes [i 70]
         (exec/execute *context* put {:key [(str "/rc-evict-" i)]
                                      :value a-response

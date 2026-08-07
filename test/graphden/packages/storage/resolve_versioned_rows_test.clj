@@ -20,12 +20,9 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.exec-harness :as eh :refer [*context* *storage*]]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as res]))
-
-
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
 
 
 ;; Fixture shape: the heavy package bootstrap is shared across the JVM
@@ -35,19 +32,7 @@
 ;; kaocha pool's base-fn impl atom from sibling NSes.
 (use-fixtures :once
   (setup/create-container-fixture)
-  (fn [t]
-    (exec/with-clean-registry
-      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-         (try
-           (binding [*context* (:ctx graph)
-                     *storage* (:storage graph)]
-             (t))
-           (finally (sp/close (:storage graph))))))))
-
-
-(defn- fn-id
-  [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (eh/exec-fixture (str (ns-name *ns*))))
 
 
 (defn- main-branch-id
@@ -159,7 +144,7 @@
     (doseq [{:keys [public-name entity-name]} call-shapes]
       (testing (str (name entity-name)
                     " — graph output matches Clojure resolve-all-entities")
-        (let [via-graph   (exec/execute *context* (fn-id (name public-name)) {})
+        (let [via-graph   (exec/execute *context* (eh/fn-id (name public-name)) {})
               via-clojure (res/resolve-all-entities
                             (vs/unwrap *storage*) entity-name
                             (main-branch-id) {})]

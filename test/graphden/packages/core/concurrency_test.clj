@@ -12,30 +12,11 @@
    require — same path the runtime takes."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.compile-runtime :as cr]))
+    [graphden.executor.compile-runtime :as cr]
+    [graphden.test-infra.impls :as impls]))
 
 
-(def ^:dynamic *impls* nil)
-
-
-(defn- load-concurrency-impls-fixture
-  [f]
-  (binding [*impls* ((requiring-resolve 'graphden.packages.loader/load-module-impls)
-                     "core" "concurrency")]
-    (f)))
-
-
-(use-fixtures :once load-concurrency-impls-fixture)
-
-
-(defn- impl-of
-  [kw]
-  (let [entry (get *impls* kw)]
-    ;; impls map values are either bare fns OR {:impl … :*-rule …}
-    ;; — the registry merges with the rule shape for :do.
-    (or (and (map? entry) (:impl entry))
-        (and (fn? entry) entry)
-        (throw (ex-info (str "No impl for " kw) {:available (keys *impls*)})))))
+(use-fixtures :once (impls/impls-fixture "core" "concurrency"))
 
 
 ;; ============================================================================
@@ -47,21 +28,21 @@
     (let [order (atom [])
           step  (fn [v] (delay (do (swap! order conj v) v)))
           steps [(step :a) (step :b) (step :c)]
-          result ((impl-of :do) {:steps (delay steps)} nil)]
+          result ((impls/impl-of :do) {:steps (delay steps)} nil)]
       (is (= :c result) "returns last step's value")
       (is (= [:a :b :c] @order) "side effects fired in declaration order"))))
 
 
 (deftest do-with-empty-steps-test
   (testing "no steps → nil"
-    (is (nil? ((impl-of :do) {:steps (delay [])} nil)))))
+    (is (nil? ((impls/impl-of :do) {:steps (delay [])} nil)))))
 
 
 (deftest do-forces-every-step-not-just-last-test
   (testing "all steps run — :do is for side effects, not just last-value"
     (let [counter (atom 0)
           step (delay (swap! counter inc))]
-      ((impl-of :do) {:steps (delay [step step step])} nil)
+      ((impls/impl-of :do) {:steps (delay [step step step])} nil)
       ;; Forced once (a delay caches), so counter increments once even
       ;; though we list it three times. Matches Clojure delay semantics.
       ;; Use distinct delays for distinct side effects.
@@ -75,7 +56,7 @@
 (deftest sleep-blocks-the-current-thread-test
   (testing "sleep ~50ms blocks at least 40ms (allows 20% slack)"
     (let [t0 (System/nanoTime)]
-      ((impl-of :sleep) {:ms (delay 50)} nil)
+      ((impls/impl-of :sleep) {:ms (delay 50)} nil)
       (let [elapsed-ms (/ (- (System/nanoTime) t0) 1000000.0)]
         (is (>= elapsed-ms 40)
             (str "expected >=40ms blocking, got " elapsed-ms "ms"))))))
@@ -83,16 +64,16 @@
 
 (deftest sleep-non-positive-is-noop-test
   (testing "0 ms / negative — returns immediately, no exception"
-    (is (nil? ((impl-of :sleep) {:ms (delay 0)} nil)))
-    (is (nil? ((impl-of :sleep) {:ms (delay -10)} nil)))))
+    (is (nil? ((impls/impl-of :sleep) {:ms (delay 0)} nil)))
+    (is (nil? ((impls/impl-of :sleep) {:ms (delay -10)} nil)))))
 
 
 (deftest sleep-honors-interrupt-test
   (testing "sleeping thread interrupted → InterruptedException propagates"
     (let [thrown (atom nil)
           ;; Capture impl in the parent's dynamic-binding scope; the
-          ;; child thread doesn't inherit `*impls*`.
-          sleep-impl (impl-of :sleep)
+          ;; child thread doesn't inherit `impls/*impls*`.
+          sleep-impl (impls/impl-of :sleep)
           t (Thread. ^Runnable
              (fn []
                (try (sleep-impl {:ms (delay 5000)} nil)
@@ -112,7 +93,7 @@
 
 (deftest sleep-until-ms-blocks-until-target-test
   (testing "blocks until the given epoch-ms — wakes within slack window"
-    (let [impl (impl-of :sleep-until-ms)
+    (let [impl (impls/impl-of :sleep-until-ms)
           t0 (System/currentTimeMillis)
           target (+ t0 80)]
       (impl {:target-ms (delay target)} nil)
@@ -131,7 +112,7 @@
 
 (deftest sleep-until-ms-target-in-past-is-noop-test
   (testing "target ≤ now → returns immediately, no exception"
-    (let [impl (impl-of :sleep-until-ms)
+    (let [impl (impls/impl-of :sleep-until-ms)
           t0 (System/nanoTime)]
       (is (nil? (impl {:target-ms (delay 0)} nil))
           "target=0 (epoch) is way in the past → no-op")
@@ -154,7 +135,7 @@
 (deftest sleep-until-ms-honors-interrupt-test
   (testing "interrupted while blocking → InterruptedException propagates"
     (let [thrown (atom nil)
-          impl (impl-of :sleep-until-ms)
+          impl (impls/impl-of :sleep-until-ms)
           far-target (+ (System/currentTimeMillis) 5000)
           t (Thread. ^Runnable
              (fn []
@@ -176,7 +157,7 @@
 (deftest future-spawns-body-and-returns-stopper-test
   (let [started? (atom false)
         body-fn (fn [] (reset! started? true))
-        stopper ((impl-of :future) {:body (delay body-fn)} nil)]
+        stopper ((impls/impl-of :future) {:body (delay body-fn)} nil)]
     (testing "body runs in the background"
       ;; Poll-with-deadline instead of a fixed sleep — under parallel-test
       ;; CPU contention a fixed 50 ms wait can starve the worker thread
@@ -204,7 +185,7 @@
                         (Thread/sleep 50)
                         (recur))
                       (catch InterruptedException _ nil)))
-          stopper ((impl-of :future) {:body (delay body-fn)} nil)]
+          stopper ((impls/impl-of :future) {:body (delay body-fn)} nil)]
       ;; Poll-with-deadline instead of a fixed sleep — under
       ;; parallel-test CPU contention a fixed 120 ms wait can starve
       ;; the worker thread of every iteration before we ever read it.
@@ -229,7 +210,7 @@
 
 (deftest future-body-throwing-doesnt-crash-spawner-test
   (testing "body that throws is logged, stopper still returned cleanly"
-    (let [stopper ((impl-of :future)
+    (let [stopper ((impls/impl-of :future)
                    {:body (delay (fn [] (throw (ex-info "boom" {}))))}
                    nil)]
       (Thread/sleep 50)
@@ -244,7 +225,7 @@
 (deftest loop-until-interrupted-runs-body-until-stopped-test
   (testing "body runs many times; interrupt unwinds cleanly"
     (let [iters (atom 0)
-          loop-impl (impl-of :loop-until-interrupted)
+          loop-impl (impls/impl-of :loop-until-interrupted)
           body-fn (fn []
                     (swap! iters inc)
                     (Thread/sleep 20))
@@ -281,8 +262,8 @@
   "Test helper — invoke the two-step composition directly against the
    atomic impls so the assertion can name `next-ms` plainly."
   [cron-str now-ms]
-  (let [parse (impl-of :cron-parse)
-        fire-after (impl-of :cron-fire-after)
+  (let [parse (impls/impl-of :cron-parse)
+        fire-after (impls/impl-of :cron-fire-after)
         expr (parse {:cron (delay cron-str)} nil)]
     (fire-after {:expr (delay expr) :now-ms (delay now-ms)} nil)))
 
@@ -312,7 +293,7 @@
 
 (deftest cron-parse-rejects-bad-expression-test
   (testing "malformed cron throws :cron/parse-error with the original text — at parse, not at fire-after"
-    (let [parse (impl-of :cron-parse)
+    (let [parse (impls/impl-of :cron-parse)
           thrown (try (parse {:cron (delay "garbage")} nil)
                       :no-throw
                       (catch clojure.lang.ExceptionInfo e
@@ -324,7 +305,7 @@
 (deftest loop-until-interrupted-exits-on-isinterrupted-flag-test
   (testing "body that returns normally → loop checks isInterrupted on next iter"
     (let [iters (atom 0)
-          loop-impl (impl-of :loop-until-interrupted)
+          loop-impl (impls/impl-of :loop-until-interrupted)
           ;; Body returns fast (no blocking sleep) — exit path is
           ;; via Thread.isInterrupted check between iterations, NOT
           ;; via InterruptedException from within body.
@@ -394,7 +375,7 @@
       ;; :process is allowed (so `:future` may spawn) but :network is NOT —
       ;; the worker must inherit THAT restriction across the thread boundary.
       (binding [cr/*allowed-effects* #{:db :process}]
-        ((impl-of :future) {:body (delay body-fn)} nil))
+        ((impls/impl-of :future) {:body (delay body-fn)} nil))
       (is (= :execution/forbidden-effect (deref result 2000 :timeout))
           "the gate crossed the thread boundary — worker rejected :network"))))
 
@@ -409,6 +390,6 @@
                              (try (cr/record-effect! :network) :allowed
                                   (catch Exception _ :threw))))]
       ;; *allowed-effects* unbound (nil) → no gate
-      ((impl-of :future) {:body (delay body-fn)} nil)
+      ((impls/impl-of :future) {:body (delay body-fn)} nil)
       (is (= :allowed (deref result 2000 :timeout))
           "no restriction in scope → worker runs :network freely"))))

@@ -16,28 +16,13 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.exec-harness :as eh :refer [*context* *storage*]]
     [graphden.versioning.storage.core :as vs]))
-
-
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
-  (fn [t]
-    (exec/with-clean-registry
-      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-         (try
-           (binding [*context* (:ctx graph)
-                     *storage* (:storage graph)]
-             (t))
-           (finally (sp/close (:storage graph))))))))
-
-
-(defn- fn-id
-  [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (eh/exec-fixture (str (ns-name *ns*))))
 
 
 (deftest storage-query-identities-returns-fn-rows-with-parent-ids
@@ -49,7 +34,7 @@
         :args {:entity-type {:value "fn"}
                :where {:value {}}}}])
 
-    (let [via-graph (exec/execute *context* (fn-id "sqi-test-rows") {})
+    (let [via-graph (exec/execute *context* (eh/fn-id "sqi-test-rows") {})
           via-base  (sp/query-entities (vs/unwrap *storage*) :fn {})
           composed-rows (filter #(seq (:parent-ids %)) via-graph)]
 
@@ -81,7 +66,7 @@
         :args {:entity-type {:value "fn"}
                :where {:value {:name "add"}}}}])
 
-    (let [rows (exec/execute *context* (fn-id "sqi-where-rows") {})]
+    (let [rows (exec/execute *context* (eh/fn-id "sqi-where-rows") {})]
       (testing "exactly one row returned for the base-fn `:add`"
         (is (= 1 (count rows)))
         (is (= "add" (:name (first rows))))))))

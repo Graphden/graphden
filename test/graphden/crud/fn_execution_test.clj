@@ -32,7 +32,6 @@
     [graphden.crud.fn-execution.stats :as exec-stats]
     [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.runtime :as rt]
@@ -138,11 +137,6 @@
       (vs/->VersionedStorage storage (:id branch)))))
 
 
-(defn- test-ctx
-  [storage]
-  (ctx/create-context {:storage storage :base-fns (exec/get-default-registry)}))
-
-
 (defn- apply-and-await!
   "Drop-in replacement for `fn-exec/apply-execute` that guarantees
    `:result` is materialised before returning. `fn-exec/apply-execute`
@@ -214,7 +208,7 @@
 (deftest apply-inline-for-fast-pure-fn-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "inline")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a 1 :b 2}
@@ -239,7 +233,7 @@
     (let [storage (create-full-storage)
           {composed :composed} (make-pure-add-fn! storage "typerr")
           branch-id (vs/current-branch-id storage)
-          c (test-ctx storage)]
+          c (setup/default-registry-ctx storage)]
       (testing "recorded diagnostics → :rejected envelope, nothing persisted"
         (diag/record! branch-id (:id composed)
                       [{:message "Type mismatch on arg :a"
@@ -270,7 +264,7 @@
         (let [{fresh :composed} (make-pure-add-fn! storage "typerr-fresh")
               ;; Fresh ctx: `test-ctx` snapshots the base-fn registry,
               ;; and the fresh base impl was registered after `c` above.
-              out (apply-and-await! (test-ctx storage)
+              out (apply-and-await! (setup/default-registry-ctx storage)
                                     {:fn-id (:id fresh)
                                      :args {:a 2 :b 3}
                                      :timeout-ms 5000 :persist? false})]
@@ -337,7 +331,7 @@
   ;; the ctx carries :pg-storage (the raw pool), mirroring prod.
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "rollup")
-        c (assoc (test-ctx storage) :pg-storage @shared-storage)
+        c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
         result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a 2 :b 3}
@@ -353,7 +347,7 @@
   ;; recent-failures listing with its (write-side scrubbed) error text.
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "errlog")
-        c (assoc (test-ctx storage) :pg-storage @shared-storage)
+        c (assoc (setup/default-registry-ctx storage) :pg-storage @shared-storage)
         ;; :b "boom" → the impl's (+ a b) throws inline → :failed row
         ;; (persist? true so the row is written even for the inline arm).
         result (apply-and-await!
@@ -400,7 +394,7 @@
                                        {:args {:secret-arg {:type [:secret :text]}}
                                         :return-type :int
                                         :effects #{:io}})
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (testing "execute → row carries :touched-secret? true"
       (let [r (apply-and-await!
                 c {:fn-id (:id composed)
@@ -418,7 +412,7 @@
 (deftest apply-leaves-touched-secret-nil-for-non-secret-fns-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "no-secret")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         r (apply-and-await!
             c {:fn-id (:id composed)
                :args {:a 1 :b 2}
@@ -450,7 +444,7 @@
         composed (setup/create-composed-fn! storage composed-name (:id base))
         _ (registry/record-rich-types! (keyword composed-name)
                                        {:args {} :return-type :any :effects #{:raw-sql}})
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         run #(apply-and-await! c {:fn-id (:id composed) :args {}
                                   :timeout-ms 5000 :persist? true})]
     (testing "platform / public execution is unrestricted — the :raw-sql fn runs"
@@ -487,7 +481,7 @@
         _ (registry/record-rich-types! (keyword composed-name)
                                        {:args {}
                                         :return-type [:secret :text]})
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (testing "inline succeeded response carries :tainted? without value"
       (let [r (apply-and-await!
                 c {:fn-id (:id composed)
@@ -511,7 +505,7 @@
 (deftest apply-persists-when-persist-flag-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "persist")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a 4 :b 5}
@@ -530,7 +524,7 @@
 (deftest apply-persists-args-rows-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "args")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a 7 :b 8}
@@ -552,7 +546,7 @@
 (deftest get-execution-returns-row-with-args-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "getex")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         sub (apply-and-await!
               c {:fn-id (:id composed) :args {:a 10 :b 20}
                  :timeout-ms 5000 :persist? true})
@@ -579,7 +573,7 @@
 (deftest cancel-execution-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "cancel")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         sub (apply-and-await!
               c {:fn-id (:id composed) :args {:a 1 :b 2}
                  :timeout-ms 5000 :persist? true})
@@ -618,7 +612,7 @@
                                :started-at (java.time.Instant/now)
                                :status :pending})
         emitted (atom [])
-        c (assoc (test-ctx storage) :notify-emitter #(swap! emitted conj %))]
+        c (assoc (setup/default-registry-ctx storage) :notify-emitter #(swap! emitted conj %))]
     (testing "no local future → emit execution:cancel so the owning pod acts"
       (fn-exec/cancel-execution! c (:id row))
       (is (= [{:kind :execution :op :cancel :id (str (:id row))}] @emitted)))
@@ -665,7 +659,7 @@
                               {:fn-version-id vid
                                :started-at (java.time.Instant/now)
                                :status :pending})
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (testing "cancel returns :ok even when futures-registry has no entry"
         (let [resp (fn-exec/cancel-execution! c (:id row))]
@@ -717,7 +711,7 @@
 (deftest cancel-actually-interrupts-running-future-test
   (let [storage (create-full-storage)
         {composed :composed} (make-slow-cancelable-fn! storage "real-cancel")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         ;; Short timeout — fn takes ~5s, timeout flips to pending fast.
         ;; Bypass the await-helper here: this test wants the :pending
         ;; intermediate state, polling the row to :cancelled itself.
@@ -790,7 +784,7 @@
         ;; Fn sleeps 600ms. timeout-ms 100 forces the pending flip;
         ;; tail-future writes :succeeded ~500ms later.
         {composed :composed} (make-slow-pure-fn! storage "tail-write" 600)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         ;; Bypass the await-helper: this test EXPECTS :pending and
         ;; polls the tail-write itself.
         sub (fn-exec/apply-execute c {:fn-id (:id composed)
@@ -832,7 +826,7 @@
 (deftest list-executions-empty-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "list-empty")
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (is (= [] (fn-exec/list-executions-for-fn c (:id composed)))
           "fn that was never run has no history rows")
@@ -842,7 +836,7 @@
 (deftest list-executions-returns-recent-runs-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "list-runs")
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       ;; Three persisted runs — varying :b so we can identify them.
       (doseq [b [10 20 30]]
@@ -869,7 +863,7 @@
   ;; the CURRENT branch — older versions live behind the `⌛` panel.
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "list-branch-iso")
-        parent-ctx (test-ctx storage)
+        parent-ctx (setup/default-registry-ctx storage)
         ;; one run on the parent (test-branch)
         _ (apply-and-await! parent-ctx {:fn-id (:id composed)
                                         :args {:a 1 :b 1}
@@ -879,14 +873,14 @@
     (try
       (testing "before child override: child inherits parent's version → sees the run"
         (let [rows (fn-exec/list-executions-for-fn
-                     (test-ctx child-storage) (:id composed))]
+                     (setup/default-registry-ctx child-storage) (:id composed))]
           (is (= 1 (count rows))
               "no own version yet → resolves to parent's version → shared run")))
 
       ;; Edit fn on child → new version anchors subsequent runs.
       (sp/update-entity child-storage :fn (:id composed)
                         {:description "edited on child"})
-      (let [child-ctx (test-ctx child-storage)]
+      (let [child-ctx (setup/default-registry-ctx child-storage)]
         (apply-and-await! child-ctx {:fn-id (:id composed)
                                      :args {:a 2 :b 2}
                                      :timeout-ms 5000 :persist? true}))
@@ -898,14 +892,14 @@
 
       (testing "child sees only its own version's run, not the parent's"
         (let [child-rows (fn-exec/list-executions-for-fn
-                           (test-ctx child-storage) (:id composed))]
+                           (setup/default-registry-ctx child-storage) (:id composed))]
           (is (= 1 (count child-rows)))
           (is (= 4 (:result (first child-rows))) "2 + 2 from child run")))
 
       (testing "list-executions-for-fn-version explicitly targets a version row"
         (let [parent-vid (lookup/resolve-fn-version-id parent-ctx (:id composed))
               child-vid (lookup/resolve-fn-version-id
-                          (test-ctx child-storage) (:id composed))]
+                          (setup/default-registry-ctx child-storage) (:id composed))]
           (is (not= parent-vid child-vid))
           (is (= 2 (:result (first (fn-exec/list-executions-for-fn-version
                                      parent-ctx parent-vid))))
@@ -919,7 +913,7 @@
 (deftest list-executions-caps-at-twenty-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "list-cap")
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (dotimes [i 25]
         (apply-and-await! c {:fn-id (:id composed)
@@ -1080,7 +1074,7 @@
         ;; Small context — within error-data cap; exercises the
         ;; non-truncated branch first.
         {composed :composed} (make-throwing-fn! storage "fail-small" 16)
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 5000 :persist? true})
@@ -1105,7 +1099,7 @@
         ;; 70 KB context — exceeds 64 KB error-data cap. Should trigger
         ;; the truncation fallback: data shrinks to {:type :truncated true}.
         {composed :composed} (make-throwing-fn! storage "fail-big" (* 70 1024))
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 5000 :persist? true})
@@ -1155,7 +1149,7 @@
   (let [storage (create-full-storage)
         ;; 6 MB string — over 5 MB cap.
         {composed :composed} (make-big-result-fn! storage "trunc" (* 6 1024 1024))
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 30000 :persist? true})
@@ -1201,7 +1195,7 @@
 (deftest apply-captures-runtime-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-effectful-fn! storage "rt-eff")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 5000 :persist? true})
@@ -1250,7 +1244,7 @@
 (deftest apply-captures-path-trace-test
   (let [storage (create-full-storage)
         {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-on")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (binding [ce/*traced-fn-ids* (atom #{(:id target)})]
                  (apply-and-await!
                    c {:fn-id (:id wrapped) :args {:a 1 :b 2}
@@ -1284,7 +1278,7 @@
   ;; subtree, so the ref frame records anyway.
   (let [storage (create-full-storage)
         {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-all")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id wrapped) :args {:a 5 :b 6}
                     :timeout-ms 5000 :persist? true :trace? true})
@@ -1305,7 +1299,7 @@
   ;; RETURN VALUE in the persisted `:path-trace` entries.
   (let [storage (create-full-storage)
         {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-vals")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id wrapped) :args {:a 20 :b 22}
                     :timeout-ms 5000 :persist? true :capture-values? true})
@@ -1339,7 +1333,7 @@
   ;; (wrapped + target here) goes in whole.
   (let [storage (create-full-storage)
         {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-smpl")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (binding [ce/*traced-fn-ids* (atom #{(:id wrapped) (:id target)})
                          ce/*trace-sample-rate* (atom 0.01)]
                  (ce/set-trace-sampling! 1.0 {:confirm-full true})
@@ -1363,7 +1357,7 @@
 (deftest apply-without-trace-flag-records-nothing-test
   (let [storage (create-full-storage)
         {:keys [wrapped target]} (make-ref-chain-fn! storage "pt-off")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         ;; fn IS in the traced set — but the submission didn't opt in,
         ;; so no atom is bound and nothing records. Sample rate pinned
         ;; to 0 — at the 0.01 default the P3 ambient draw would record
@@ -1411,7 +1405,7 @@
           (let [base (setup/create-base-fn! storage add-name :keyword)]
             {:composed (setup/create-composed-fn! storage composed-name (:id base))
              :composed-name composed-name}))
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         ;; Note: persist?=false — relying on declared-effects to force persistence.
         result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
@@ -1455,7 +1449,7 @@
         ;; the args (we don't care about the runtime result — only the
         ;; row structure persisted).
         {composed :composed} (make-pure-add-fn! storage "list-args")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a [10 20 30]      ; sequential — spawns item rows
@@ -1495,7 +1489,7 @@
 (deftest apply-pure-fn-has-no-runtime-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "pure-eff")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         result (apply-and-await!
                  c {:fn-id (:id composed) :args {:a 1 :b 2}
                     :timeout-ms 5000 :persist? true})
@@ -1540,7 +1534,7 @@
 (deftest list-executions-http-envelope-shape-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "http-shape")
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       (doseq [b [10 20]]
         (apply-and-await! c {:fn-id (:id composed)
@@ -1569,7 +1563,7 @@
 (deftest list-executions-http-envelope-empty-fn-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "http-empty")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         rows (fn-exec/list-executions-for-fn c (:id composed))
         envelope {:ok true :executions rows}
         wire (-> envelope (json/generate-string) (json/parse-string true))]
@@ -1585,7 +1579,7 @@
   (let [storage (create-full-storage)
         {a-composed :composed} (make-pure-add-fn! storage "list-iso-a")
         {b-composed :composed} (make-pure-add-fn! storage "list-iso-b")
-        c (test-ctx storage)]
+        c (setup/default-registry-ctx storage)]
     (try
       ;; Two runs of A, three of B — list for A should return only 2.
       (dotimes [_ 2]
@@ -1617,7 +1611,7 @@
         {composed :composed slot-a :slot-a slot-b :slot-b}
         (make-pure-add-fn! storage "ref-scalar")
         {target :composed} (make-pure-add-fn! storage "ref-scalar-target")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)
         free-slots {:a (:id slot-a) :b (:id slot-b)}]
@@ -1646,7 +1640,7 @@
   (let [storage (create-full-storage)
         {composed :composed slot-a :slot-a slot-b :slot-b}
         (make-pure-add-fn! storage "ref-unresolved")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)
         free-slots {:a (:id slot-a) :b (:id slot-b)}
@@ -1671,7 +1665,7 @@
         (make-pure-add-fn! storage "ref-list")
         {target-a :composed} (make-pure-add-fn! storage "ref-list-target-a")
         {target-b :composed} (make-pure-add-fn! storage "ref-list-target-b")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)
         free-slots {:a (:id slot-a) :b (:id slot-b)}]
@@ -1715,7 +1709,7 @@
   (let [storage (create-full-storage)
         {composed :composed slot-a :slot-a slot-b :slot-b}
         (make-pure-add-fn! storage "ref-skip")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)
         free-slots {:a (:id slot-a) :b (:id slot-b)}]
@@ -1743,7 +1737,7 @@
 (deftest write-finished-cancelled-without-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "wf-cancel")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)]
     (try
@@ -1763,7 +1757,7 @@
 (deftest write-finished-cancelled-with-runtime-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "wf-cancel-eff")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)]
     (try
@@ -1795,7 +1789,7 @@
         ;; for this test, then fork off a child.
         {composed :composed} (make-pure-add-fn! storage "chain-walk")
         parent-version-id (lookup/resolve-fn-version-id
-                            (test-ctx storage) (:id composed))
+                            (setup/default-registry-ctx storage) (:id composed))
         child-branch (vs/create-branch! storage "chain-walk-child")
         child-storage (vs/switch-branch storage (:id child-branch))]
     (try
@@ -1803,7 +1797,7 @@
         (is (some? parent-version-id)))
 
       (testing "inherited-from-parent version resolves through chain walk"
-        (let [child-ctx (test-ctx child-storage)
+        (let [child-ctx (setup/default-registry-ctx child-storage)
               resolved (lookup/resolve-fn-version-id child-ctx (:id composed))]
           (is (some? resolved)
               "child must NOT return nil for a fn it inherits from parent")
@@ -1815,9 +1809,9 @@
         (sp/update-entity child-storage :fn (:id composed)
                           {:description "edited on child"})
         (let [child-resolved (lookup/resolve-fn-version-id
-                               (test-ctx child-storage) (:id composed))
+                               (setup/default-registry-ctx child-storage) (:id composed))
               parent-resolved (lookup/resolve-fn-version-id
-                                (test-ctx storage) (:id composed))]
+                                (setup/default-registry-ctx storage) (:id composed))]
           (is (not= parent-version-id child-resolved)
               "child sees its newly-written version")
           (is (= parent-version-id parent-resolved)
@@ -1828,7 +1822,7 @@
 (deftest write-finished-succeeded-with-runtime-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "wf-succ-eff")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)]
     (try
@@ -1853,7 +1847,7 @@
 (deftest write-finished-failed-without-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "wf-fail")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)]
     (try
@@ -1873,7 +1867,7 @@
 (deftest write-finished-failed-with-runtime-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "wf-fail-eff")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)]
     (try
@@ -1895,7 +1889,7 @@
   ;; variant was tested for :succeeded.
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "wf-succ-no-eff")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)]
     (try
@@ -1918,7 +1912,7 @@
   (let [storage (create-full-storage)
         {composed :composed slot-a :slot-a slot-b :slot-b}
         (make-pure-add-fn! storage "cpwa")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         free-slots {:a (:id slot-a) :b (:id slot-b)}
         row (persist/create-pending-with-args! storage version-id
@@ -1948,7 +1942,7 @@
 (deftest record-completion-failed-future-writes-failed-row-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "rc-fail")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)
         ;; A future that throws on @deref — ExecutionException with the
@@ -1967,7 +1961,7 @@
 (deftest record-completion-cancelled-future-writes-cancelled-row-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "rc-cancel")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)
         ;; Wrap an InterruptedException in an ExecutionException — that
@@ -1984,7 +1978,7 @@
 (deftest record-completion-success-with-runtime-effects-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "rc-ok")
-        c (test-ctx storage)
+        c (setup/default-registry-ctx storage)
         version-id (lookup/resolve-fn-version-id c (:id composed))
         exec-row (persist/create-pending-row! storage version-id nil nil)
         trace (atom #{:io})

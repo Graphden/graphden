@@ -11,31 +11,14 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.impls :as impls]
     [graphden.types.diagnostics :as diag])
   (:import
     (java.util
       UUID)))
 
 
-(def ^:dynamic *impls* nil)
-
-
-(defn- load-panels-impls-fixture
-  [f]
-  (binding [*impls* ((requiring-resolve 'graphden.packages.loader/load-module-impls)
-                     "app" "editor-panels")]
-    (f)))
-
-
-(use-fixtures :once load-panels-impls-fixture)
-
-
-(defn- impl-of
-  [kw]
-  (let [entry (get *impls* kw)]
-    (or (and (map? entry) (:impl entry))
-        (and (fn? entry) entry)
-        (throw (ex-info (str "No impl for " kw) {:available (keys *impls*)})))))
+(use-fixtures :once (impls/impls-fixture "app" "editor-panels"))
 
 
 (defn- stub-storage
@@ -54,7 +37,7 @@
   (let [own-id (UUID/randomUUID)
         foreign-id (UUID/randomUUID)
         ctx {:storage (stub-storage {own-id {:id own-id :name "my-broken-fn"}})}
-        f (impl-of :type-diagnostics-list)]
+        f (impls/impl-of :type-diagnostics-list)]
     (binding [diag/*diagnostics-override* (atom {})]
       ;; Both orgs' recorders write into the SAME nil-branch bucket.
       (diag/record! nil own-id [{:message "Type mismatch on arg :x" :arg-name :x}])
@@ -71,7 +54,7 @@
 (deftest anonymous-own-fn-keeps-uuid-fallback
   (let [anon-id (UUID/randomUUID)
         ctx {:storage (stub-storage {anon-id {:id anon-id :name nil}})}
-        f (impl-of :type-diagnostics-list)]
+        f (impls/impl-of :type-diagnostics-list)]
     (binding [diag/*diagnostics-override* (atom {})]
       (diag/record! nil anon-id [{:message "broken anonymous"}])
       (is (= [(str anon-id)] (mapv :fn-name (f {} ctx)))

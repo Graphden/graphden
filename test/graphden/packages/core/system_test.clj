@@ -9,28 +9,11 @@
    `load-module-impls` so the defbase-generated symbols become
    reachable WITHOUT a normal require — same path the runtime takes."
   (:require
-    [clojure.test :refer [deftest is testing use-fixtures]]))
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.test-infra.impls :as impls]))
 
 
-(def ^:dynamic *impls* nil)
-
-
-(defn- load-system-impls-fixture
-  [f]
-  (binding [*impls* ((requiring-resolve 'graphden.packages.loader/load-module-impls)
-                     "core" "system")]
-    (f)))
-
-
-(use-fixtures :once load-system-impls-fixture)
-
-
-(defn- impl-of
-  [kw]
-  (let [entry (get *impls* kw)]
-    (or (and (map? entry) (:impl entry))
-        (and (fn? entry) entry)
-        (throw (ex-info (str "No impl for " kw) {:available (keys *impls*)})))))
+(use-fixtures :once (impls/impls-fixture "core" "system"))
 
 
 ;; ============================================================================
@@ -47,14 +30,14 @@
 
 (deftest call-noargs-invokes-the-callable-test
   (testing "(func) is invoked; its return is the impl's return"
-    (let [impl (impl-of :call-noargs)
+    (let [impl (impls/impl-of :call-noargs)
           callable (fn [] :ok)]
       (is (= :ok (impl {:func (delay callable)} nil))))))
 
 
 (deftest call-noargs-propagates-callable-return-test
   (testing "return value is whatever the callable returns — any shape"
-    (let [impl (impl-of :call-noargs)]
+    (let [impl (impls/impl-of :call-noargs)]
       (is (= 42 (impl {:func (delay (fn [] 42))} nil)))
       (is (= [1 2 3] (impl {:func (delay (fn [] [1 2 3]))} nil)))
       (is (nil? (impl {:func (delay (fn [] nil))} nil)))
@@ -63,7 +46,7 @@
 
 (deftest call-noargs-propagates-callable-exception-test
   (testing "if the callable throws, the impl re-throws (no swallow)"
-    (let [impl (impl-of :call-noargs)
+    (let [impl (impls/impl-of :call-noargs)
           thrown (try (impl {:func (delay (fn [] (throw (ex-info "boom" {:k 1}))))}
                             nil)
                       :no-throw
@@ -74,7 +57,7 @@
 
 (deftest call-noargs-invokes-fresh-each-time-test
   (testing "each invocation calls the callable again — no result caching"
-    (let [impl (impl-of :call-noargs)
+    (let [impl (impls/impl-of :call-noargs)
           counter (atom 0)
           ticking (fn [] (swap! counter inc))]
       (impl {:func (delay ticking)} nil)
@@ -89,7 +72,7 @@
 ;; ============================================================================
 
 (deftest render-prometheus-formats-numeric-leaves-test
-  (let [impl (impl-of :render-prometheus)]
+  (let [impl (impls/impl-of :render-prometheus)]
     (testing "numeric leaves flatten + prefix graphden_; nested maps join with _"
       (is (= "graphden_heap_mb 125\ngraphden_counters_registry_rebuild 59"
              (impl {:m (delay (array-map "heap_mb" 125
@@ -113,7 +96,7 @@
 ;; ============================================================================
 
 (deftest digest-hex-known-answers-test
-  (let [digest (impl-of :digest-hex)]
+  (let [digest (impls/impl-of :digest-hex)]
     (testing "NIST known-answer vectors per algorithm"
       (is (= "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
              (digest {:algorithm "SHA-256" :s "abc"} nil)))

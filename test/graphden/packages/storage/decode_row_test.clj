@@ -13,28 +13,13 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
-
-
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
+    [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.exec-harness :as eh :refer [*context* *storage*]]))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
-  (fn [t]
-    (exec/with-clean-registry
-      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-         (try
-           (binding [*context* (:ctx graph)
-                     *storage* (:storage graph)]
-             (t))
-           (finally (sp/close (:storage graph))))))))
-
-
-(defn- fn-id
-  [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (eh/exec-fixture (str (ns-name *ns*))))
 
 
 (deftest decode-row-decodes-service-entity-end-to-end
@@ -78,7 +63,7 @@
         :args {:row :_decode-test-first
                :entity-type {:value "service"}}}])
 
-    (let [via-graph (exec/execute *context* (fn-id "decode-test-via-graph") {})]
+    (let [via-graph (exec/execute *context* (eh/fn-id "decode-test-via-graph") {})]
       (testing "key shape is kebab-case kw (not raw snake_case)"
         (is (contains? via-graph :fn-id)
             ":fn-id (kebab) present, not :fn_id (snake)")

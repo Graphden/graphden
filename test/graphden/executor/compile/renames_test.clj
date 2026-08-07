@@ -6,23 +6,13 @@
    build a real graph and `l/build-lookups` over it."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
+    [graphden.executor.compile.test-support :as support]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
-
-
-(defn- lookups-for
-  [storage]
-  (l/build-lookups
-    {:fns        (sp/query-entities storage :fn {})
-     :slots      (sp/query-entities storage :slot {})
-     :fn-slots   (sp/query-entities storage :fn-slot {})
-     :bindings   (sp/query-entities storage :binding {})
-     :list-items (sp/query-entities storage :binding-list-item {})}))
 
 
 ;; ============================================================================
@@ -59,7 +49,7 @@
                                     :bindings {"a" {:value 10}}})]
           ;; a is value-bound, b is free → only b surfaces.
           (is (= [:b] (r/deep-free-ext-names (-> fn1 :fn :id)
-                                             (lookups-for storage)))))
+                                             (support/lookups-for storage)))))
         (finally (sp/close storage)))))
 
   (testing "deep-free walks across a non-HOF ref into the ref-target's free args"
@@ -81,7 +71,7 @@
                                        :bindings {"s" {:ref d}}})]
           ;; C's own slot s is ref-bound; D's `inner` bubbles up.
           (is (= [:inner] (r/deep-free-ext-names (-> c :fn :id)
-                                                 (lookups-for storage)))))
+                                                 (support/lookups-for storage)))))
         (finally (sp/close storage))))))
 
 
@@ -112,7 +102,7 @@
           ;; (`:filter :pred :some?` case).
           (is (= [:x] (r/alpha-equiv-lambda-params (-> r-fn :fn :id)
                                                    (-> f-fn :fn :id)
-                                                   (lookups-for storage)))))
+                                                   (support/lookups-for storage)))))
         (finally (sp/close storage)))))
 
   (testing "a name a caller-relative supplies is captured, not a lambda-param"
@@ -130,7 +120,7 @@
           ;; f binds x → x flows in from the closure → no lambda-params.
           (is (= [] (r/alpha-equiv-lambda-params (-> r-fn :fn :id)
                                                  (-> f-fn :fn :id)
-                                                 (lookups-for storage)))))
+                                                 (support/lookups-for storage)))))
         (finally (sp/close storage))))))
 
 
@@ -162,7 +152,7 @@
               f-fn    (setup/create-composed-fn! storage "bdy-f" (:id base-f))
               _       (setup/bind-ref! storage (:id f-fn) (:id s-callee) (:id t-fn))]
           (testing "T's free args do NOT bubble up through the HOF boundary"
-            (is (= [] (r/deep-free-ext-names (:id f-fn) (lookups-for storage)))
+            (is (= [] (r/deep-free-ext-names (:id f-fn) (support/lookups-for storage)))
                 "the :is-fn=true ref guard suppresses recursion into T"))
           (testing "find-slot-id-in-tree (via alpha-equiv resolver) honors the same guard"
             ;; alpha-equiv-lambda-params runs find-slot-id-in-tree
@@ -171,7 +161,7 @@
             ;; becomes a lambda-param of T when called from F.
             (is (= [:inner-free]
                    (r/alpha-equiv-lambda-params
-                     (:id t-fn) (:id f-fn) (lookups-for storage))))))
+                     (:id t-fn) (:id f-fn) (support/lookups-for storage))))))
         (finally (sp/close storage))))))
 
 
@@ -210,7 +200,7 @@
                             {:binding-id (:id list-bn) :position 2
                              :value {:as "skip-me"} :literal true})
           (is (= [:alpha :beta]
-                 (r/deep-free-ext-names (:id f-fn) (lookups-for storage)))
+                 (r/deep-free-ext-names (:id f-fn) (support/lookups-for storage)))
               "literal :as maps surface; :literal=true items are excluded"))
         (finally (sp/close storage))))))
 
@@ -254,7 +244,7 @@
             b-row  (setup/bind-ref! storage (:id f-fn) (:id s-cb) (-> r-fn :fn :id))]
         (is (= [] (r/hof-lambda-params (-> r-fn :fn :id)
                                        (:id s-cb) b-row (:id f-fn)
-                                       (lookups-for storage)))
+                                       (support/lookups-for storage)))
             "0-arg structural slot → empty lambda-params (variadic-ignore wrap)"))
       (finally (sp/close storage)))))
 
@@ -281,7 +271,7 @@
             b-row  (setup/bind-ref! storage (:id f-fn) (:id s-cb) (-> r-fn :fn :id))
             out    (r/hof-lambda-params (-> r-fn :fn :id)
                                         (:id s-cb) b-row (:id f-fn)
-                                        (lookups-for storage))]
+                                        (support/lookups-for storage))]
         (is (= #{:request :next-handler} (set out))
             ":request and :next-handler match the slot's structural args → lambda-params")
         (is (not (contains? (set out) :other))
@@ -312,7 +302,7 @@
             b-row  (setup/bind-ref! storage (:id f-fn) (:id s-cb) (-> r-fn :fn :id))
             ex     (try (r/hof-lambda-params (-> r-fn :fn :id)
                                              (:id s-cb) b-row (:id f-fn)
-                                             (lookups-for storage))
+                                             (support/lookups-for storage))
                         nil
                         (catch clojure.lang.ExceptionInfo e e))]
         (is (some? ex) "ambiguous multi-candidate must throw")
@@ -339,7 +329,7 @@
             base-f (setup/create-base-fn! storage "brr0-base-f")
             f-fn   (setup/create-composed-fn! storage "brr0-f" (:id base-f))]
         (is (= {} (r/build-ref-renames (-> r-fn :fn :id) (:id f-fn)
-                                       (lookups-for storage)))))
+                                       (support/lookups-for storage)))))
       (finally (sp/close storage)))))
 
 
@@ -369,7 +359,7 @@
                                            :source-slot-id (-> base-f :slots (get "inner") :id)})
             _ (setup/attach-slot! storage (:id f-fn) (:id rename-slot) 0)
             out (r/build-ref-renames (-> r-fn :fn :id) (:id f-fn)
-                                     (lookups-for storage))]
+                                     (support/lookups-for storage))]
         (is (= {:inner :outer} out)
             ":inner (R's free) maps to :outer (F's rename ext-name)"))
       (finally (sp/close storage)))))
@@ -404,7 +394,7 @@
                                            :source-slot-id (-> base-r :slots (get "inner") :id)})
             _ (setup/attach-slot! storage (:id f-fn) (:id rename-slot) 0)
             out (r/build-ref-renames (-> r-fn :fn :id) (:id f-fn)
-                                     (lookups-for storage))]
+                                     (support/lookups-for storage))]
         (is (= {:inner :outer} out)
             "cross-tree pass: F's `outer` slot with source-slot-id → R's `inner` produces {:inner :outer}"))
       (finally (sp/close storage)))))
@@ -508,7 +498,7 @@
     (try
       (let [base (setup/create-base-fn! storage "cra0-base")
             f-fn (setup/create-composed-fn! storage "cra0-f" (:id base))]
-        (is (= [] (r/compute-rename-aliases (:id f-fn) (lookups-for storage)))
+        (is (= [] (r/compute-rename-aliases (:id f-fn) (support/lookups-for storage)))
             "no own rename-slots → vec'd empty seq"))
       (finally (sp/close storage)))))
 
@@ -533,6 +523,6 @@
                                                            :type-fn-id)
                                            :source-slot-id root-slot-id})
             _ (setup/attach-slot! storage (:id f-fn) (:id rename-slot) 1)]
-        (is (= [] (r/compute-rename-aliases (:id f-fn) (lookups-for storage)))
+        (is (= [] (r/compute-rename-aliases (:id f-fn) (support/lookups-for storage)))
             "rename whose source is F's own root-slot — no chain alias"))
       (finally (sp/close storage)))))

@@ -9,23 +9,12 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile.bindings :as b]
-    [graphden.executor.compile.lookups :as l]
+    [graphden.executor.compile.test-support :as support]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
-
-
-(defn- lookups-for
-  "Snapshot the five graph tables and build the compiler's lookups."
-  [storage]
-  (l/build-lookups
-    {:fns        (sp/query-entities storage :fn {})
-     :slots      (sp/query-entities storage :slot {})
-     :fn-slots   (sp/query-entities storage :fn-slot {})
-     :bindings   (sp/query-entities storage :binding {})
-     :list-items (sp/query-entities storage :binding-list-item {})}))
 
 
 ;; ============================================================================
@@ -43,7 +32,7 @@
             cval (setup/create-composed-fn! storage "cb-val" (:id base))
             _    (setup/bind-value! storage (:id cval) (:id sa) 10)]
         (testing "a value-bound slot is :value; an unbound slot is :free, in position order"
-          (let [entries (b/collect-bindings (:id cval) (lookups-for storage))]
+          (let [entries (b/collect-bindings (:id cval) (support/lookups-for storage))]
             (is (= [:value :free] (mapv :kind entries)))
             (is (= 10 (:value (first entries))))
             (is (= :a (:base-name (first entries))))
@@ -63,7 +52,7 @@
             cref   (setup/create-composed-fn! storage "cbr-fn" (:id base))
             _      (setup/bind-ref! storage (:id cref) (:id slot) (:id target))]
         (testing "a ref-bound slot is :ref carrying the target fn-id"
-          (let [entry (first (b/collect-bindings (:id cref) (lookups-for storage)))]
+          (let [entry (first (b/collect-bindings (:id cref) (support/lookups-for storage)))]
             (is (= :ref (:kind entry)))
             (is (= (:id target) (:ref-id entry))))))
       (finally (sp/close storage)))))
@@ -88,7 +77,7 @@
             _     (sp/create-entity storage :binding-list-item
                                     {:binding-id (:id bind) :position 1 :value 2})]
         (testing "a :list-append binding classifies as :seq with its items"
-          (let [entry (first (b/collect-bindings (:id cseq) (lookups-for storage)))]
+          (let [entry (first (b/collect-bindings (:id cseq) (support/lookups-for storage)))]
             (is (= :seq (:kind entry)))
             (is (= 2 (count (:items entry)))))))
       (finally (sp/close storage)))))
@@ -109,12 +98,12 @@
             _      (setup/bind-ref! storage (:id cref) (:id slot) (:id target))
             cfree  (setup/create-composed-fn! storage "cbf-free" (:id base))]
         (testing "a ref into an :fn-typed slot is flagged :is-fn"
-          (let [entry (first (b/collect-bindings (:id cref) (lookups-for storage)))]
+          (let [entry (first (b/collect-bindings (:id cref) (support/lookups-for storage)))]
             (is (= :ref (:kind entry)))
             (is (true? (:is-fn entry)))))
 
         (testing "an unbound :fn-typed slot is :free and still :is-fn"
-          (let [entry (first (b/collect-bindings (:id cfree) (lookups-for storage)))]
+          (let [entry (first (b/collect-bindings (:id cfree) (support/lookups-for storage)))]
             (is (= :free (:kind entry)))
             (is (true? (:is-fn entry))))))
       (finally (sp/close storage)))))
@@ -145,7 +134,7 @@
             ;; value is nil — mirrors the EDN-parser shape for
             ;; `:default nil` literal bindings.
             _    (setup/bind-value! storage (:id cfn) (:id slot) nil)
-            entry (first (b/collect-bindings (:id cfn) (lookups-for storage)))]
+            entry (first (b/collect-bindings (:id cfn) (support/lookups-for storage)))]
         (testing "value-binding with literal nil is classified as :value, not :free"
           (is (= :value (:kind entry))
               (str "literal-nil binding fell through to :free — the "
@@ -171,7 +160,7 @@
             _    (setup/attach-slot! storage (:id base) (:id slot) 0)
             cfn  (setup/create-composed-fn! storage "cbo-fn" (:id base))]
         (testing "an unbound optional slot → :free with :required false"
-          (let [entry (first (b/collect-bindings (:id cfn) (lookups-for storage)))]
+          (let [entry (first (b/collect-bindings (:id cfn) (support/lookups-for storage)))]
             (is (= :free (:kind entry)))
             (is (false? (:required entry))))))
       (finally (sp/close storage)))))
@@ -190,14 +179,14 @@
             cfn  (setup/create-composed-fn! storage "ceb-fn" (:id base))]
         (testing "a fn binding only its own root slots has no env bindings"
           (setup/bind-value! storage (:id cfn) (:id sa) 1)
-          (is (empty? (b/collect-env-bindings (:id cfn) (lookups-for storage)))))
+          (is (empty? (b/collect-env-bindings (:id cfn) (support/lookups-for storage)))))
 
         (testing "a binding on a non-root slot surfaces as an env binding"
           (let [extra (setup/create-slot! storage "extra" :int)]
             (sp/create-entity storage :binding
                               {:fn-id (:id cfn) :slot-id (:id extra)
                                :value 99 :value-present true})
-            (let [env (b/collect-env-bindings (:id cfn) (lookups-for storage))]
+            (let [env (b/collect-env-bindings (:id cfn) (support/lookups-for storage))]
               (is (= 1 (count env)))
               (is (= :extra (:env-name (first env))))
               (is (= 99 (:value (first env))))))))

@@ -13,29 +13,14 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.exec-harness :as eh :refer [*context* *storage*]]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as res]))
 
 
-(def ^:dynamic *context* nil)
-(def ^:dynamic *storage* nil)
-
-
 (use-fixtures :once
   (setup/create-container-fixture)
-  (fn [t]
-    (exec/with-clean-registry
-      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
-         (try
-           (binding [*context* (:ctx graph)
-                     *storage* (:storage graph)]
-             (t))
-           (finally (sp/close (:storage graph))))))))
-
-
-(defn- fn-id
-  [nm]
-  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
+  (eh/exec-fixture (str (ns-name *ns*))))
 
 
 (defn- main-branch-id
@@ -60,17 +45,17 @@
 
       (testing "leaf → mid → root (3-deep)"
         (is (= [leaf mid root-id]
-               (exec/execute *context* (fn-id "branch-chain")
+               (exec/execute *context* (eh/fn-id "branch-chain")
                              {:branch-id leaf}))))
 
       (testing "mid → root (2-deep)"
         (is (= [mid root-id]
-               (exec/execute *context* (fn-id "branch-chain")
+               (exec/execute *context* (eh/fn-id "branch-chain")
                              {:branch-id mid}))))
 
       (testing "root alone (1-deep)"
         (is (= [root-id]
-               (exec/execute *context* (fn-id "branch-chain")
+               (exec/execute *context* (eh/fn-id "branch-chain")
                              {:branch-id root-id})))))))
 
 
@@ -81,7 +66,7 @@
                                           {:base-branch-id root-id}))
           leaf    (:id (vs/create-branch! *storage* "match-leaf"
                                           {:base-branch-id mid}))
-          via-graph   (exec/execute *context* (fn-id "branch-chain")
+          via-graph   (exec/execute *context* (eh/fn-id "branch-chain")
                                     {:branch-id leaf})
           via-clojure (#'res/collect-branch-chain-impl
                        (vs/unwrap *storage*) leaf)]

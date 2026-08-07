@@ -6,21 +6,12 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile.lookups :as l]
+    [graphden.executor.compile.test-support :as support]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
-
-
-(defn- lookups-for
-  [storage]
-  (l/build-lookups
-    {:fns        (sp/query-entities storage :fn {})
-     :slots      (sp/query-entities storage :slot {})
-     :fn-slots   (sp/query-entities storage :fn-slot {})
-     :bindings   (sp/query-entities storage :binding {})
-     :list-items (sp/query-entities storage :binding-list-item {})}))
 
 
 (deftest no-rename-falls-back-to-chain-leaf-test
@@ -33,7 +24,7 @@
               fn1  (setup/build-fn! storage
                                     {:name "lrs-fn1" :parent base})
               chain-leaf (-> base :slots (get "x") :id)
-              lookups (lookups-for storage)]
+              lookups (support/lookups-for storage)]
           (is (= chain-leaf
                  (l/effective-reader-slot-id (-> fn1 :fn :id)
                                              chain-leaf
@@ -69,7 +60,7 @@
                                                        :type-fn-id)
                                        :source-slot-id chain-leaf})
               _ (setup/attach-slot! storage (:id fn-b) (:id s-alt) 0)
-              lookups (lookups-for storage)]
+              lookups (support/lookups-for storage)]
           (is (= (:id s-src)
                  (l/effective-reader-slot-id (:id fn-a) chain-leaf lookups))
               "fn-a's reader uses its own :src rename slot id")
@@ -102,7 +93,7 @@
               fn-c (setup/create-composed-fn! storage "lrs3-c" (:id fn-a))]
           (is (= (:id s-src)
                  (l/effective-reader-slot-id
-                   (:id fn-c) chain-leaf (lookups-for storage)))
+                   (:id fn-c) chain-leaf (support/lookups-for storage)))
               "C inherits A's rename slot id — propagates through chain"))
         (finally (sp/close storage))))))
 
@@ -133,6 +124,6 @@
               _ (setup/attach-slot! storage (:id fn-b) (:id s-dbl) 0)]
           (is (= (:id s-dbl)
                  (l/effective-reader-slot-id
-                   (:id fn-b) chain-leaf (lookups-for storage)))
+                   (:id fn-b) chain-leaf (support/lookups-for storage)))
               "closest rename (B's :double-src) wins, transitive chain reaches :value"))
         (finally (sp/close storage))))))

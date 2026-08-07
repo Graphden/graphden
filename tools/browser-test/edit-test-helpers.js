@@ -34,8 +34,22 @@ async function waitForServerHealthy(deadlineMs = 60000) {
   const start = Date.now();
   while (Date.now() - start < deadlineMs) {
     try {
-      const r = await fetch(BASE + '/health', {signal: AbortSignal.timeout(2000)});
-      if (r.ok) return;
+      // Two probes, both required. /health rides a light path and stays
+      // 200 even while a request-path recompile has every worker parked —
+      // the exact window where the page's own API burst then gets
+      // connection-refused ("Failed to fetch" at file start; reproduced
+      // 1-in-8 SOLO against an idle isolated stack). The second probe is
+      // a REAL compiled-path read, so this gate only opens once the
+      // server is genuinely serving, and the per-assertion bounds after
+      // it measure UI work, not compile queues.
+      const h = await fetch(BASE + '/health', {signal: AbortSignal.timeout(2000)});
+      if (h.ok) {
+        const api = await fetch(BASE + '/api/graph/entities?scope=index', {
+          headers: {Authorization: 'Bearer ' + AUTH},
+          signal: AbortSignal.timeout(5000),
+        });
+        if (api.ok) return;
+      }
     } catch (_) { /* swallow + retry */ }
     await new Promise((res) => setTimeout(res, 500));
   }

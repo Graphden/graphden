@@ -113,8 +113,14 @@ async function openExecutePopover(page, fnName) {
                                null, {timeout: 20000, polling: 20});
     const reopened = await openExecutePopover(page, TARGET_FN);
     assert(reopened, '▶ popover re-opens during a graph refresh');
+    // 45s (was 20s): the form's arg build inside the held-open refresh
+    // window waits on the 3s-delayed subtree AND, when the preceding
+    // writes left the compiled registry invalidated, on a request-path
+    // recompile burst — the same class the comment above measured as a
+    // 45s page.fill stall. A "No free arguments" REGRESSION fails at any
+    // bound; the size only buys honest margin for the deliberate window.
     await page.waitForSelector('.execute-popover input[data-field-kind="number"]',
-                               {timeout: 20000});
+                               {timeout: 45000});
     console.log('  ✓ Run form still builds its args when opened during a refresh');
     await page.unroute('**/api/graph/entities?scope=subtree*');
 

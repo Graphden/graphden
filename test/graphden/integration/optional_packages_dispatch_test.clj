@@ -24,10 +24,11 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
-    [graphden.packages.sync :as pkg-sync]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.branch-router :as br]))
+    [graphden.system.branch-router :as br]
+    [graphden.test-infra.shared-bootstrap :as sb]))
 
 
 (def ^:dynamic *router* nil)
@@ -38,34 +39,41 @@
 
 (use-fixtures :once
   (setup/create-container-fixture)
+  exec/with-clean-registry
   exec/with-isolated-rich-types
   (fn [t]
-    (exec/with-clean-registry
-      #(let [storage (setup/create-versioned-test-storage)
-             ;; Full default set INCLUDING the optional `registry` + `mcp`
-             ;; packages — the same set the `registry-test` / `mcp-endpoint-test`
-             ;; golden uses, so this shares no new package-set surprise.
-             ;; Type-check ON: the `:router-result`-over-`:router-or-nil` shape
-             ;; of `:_registry-ring-response` / `:_mcp-ring-response` relies on
-             ;; the sweep's `:produces-callable?` detection to auto-invoke the
-             ;; produced Ring callable (without it, dispatch returns the router
-             ;; fn itself instead of a response).
-             _ (pkg-sync/bootstrap-from-packages!
-                 storage ["core" "web" "app-base" "app" "registry" "mcp"]
-                 {:skip-type-check? false})
-             ctx (exec/create-context
-                   {:storage storage
-                    :auth-provider (auth/single-token-provider test-auth-token)})
-             _ (cr/rebuild! ctx)
-             ;; The production wiring: the branch-router serves the optional
-             ;; packages' per-branch handlers alongside the main handler.
-             router (br/create-router
-                      ctx "_app-ring-response"
-                      {:optional-handler-fn-names ["_registry-ring-response"
-                                                   "_mcp-ring-response"]})]
-         (try
-           (binding [*router* router *ctx* ctx] (t))
-           (finally (sp/close storage)))))))
+    ;; Golden-clone of the CANONICAL optional-packages set — the same
+    ;; `[core web app registry mcp]` golden `registry-test` /
+    ;; `mcp-endpoint-test` clone (`app-base` arrives transitively via
+    ;; `app`'s package.edn deps; naming it explicitly would key a
+    ;; separate golden for an identical bundle). Swept rich-types come
+    ;; from the per-JVM cache: the `:router-result`-over-`:router-or-nil`
+    ;; shape of `:_registry-ring-response` / `:_mcp-ring-response`
+    ;; relies on the sweep's `:produces-callable?` detection to
+    ;; auto-invoke the produced Ring callable (without it, dispatch
+    ;; returns the router fn itself instead of a response).
+    (let [pkgs ["core" "web" "app" "registry" "mcp"]
+          _ (reset! registry-core/*rich-types-override*
+                    (sb/ensure-swept-rich-types! pkgs))
+          ;; Sweep BEFORE bootstrap — its rebuild then compiles under
+          ;; the same swept types as every sibling NS and shares one
+          ;; compile-all cache entry (see golden-app/fixture).
+          {:keys [storage]} (setup/bootstrap-crud-graph-from-golden!*
+                              "graphden.integration.optional-packages-dispatch-test"
+                              pkgs)
+          ctx (exec/create-context
+                {:storage storage
+                 :auth-provider (auth/single-token-provider test-auth-token)})
+          _ (cr/rebuild! ctx)
+          ;; The production wiring: the branch-router serves the optional
+          ;; packages' per-branch handlers alongside the main handler.
+          router (br/create-router
+                   ctx "_app-ring-response"
+                   {:optional-handler-fn-names ["_registry-ring-response"
+                                                "_mcp-ring-response"]})]
+      (try
+        (binding [*router* router *ctx* ctx] (t))
+        (finally (sp/close storage))))))
 
 
 (deftest mcp-route-threads-the-request-through-the-per-branch-handler

@@ -60,7 +60,22 @@
   (atom {}))
 
 
-(def ^:private lock (Object.))
+(def ^:private locks
+  "Per-package-set lock objects. One global lock would serialize the
+   warm-up CHAINS of unrelated package sets (golden bootstrap → sweep →
+   first compile is minutes per set); per-key striping lets e.g. the
+   `[core web app]` and `[core web app registry mcp]` chains warm in
+   parallel while still making each set's bootstrap once-only. The
+   nesting `ensure-swept-rich-types! → ensure-golden!` locks
+   sweep-key → golden-key — distinct maps' objects, one direction, no
+   deadlock."
+  (java.util.concurrent.ConcurrentHashMap.))
+
+
+(defn- lock-for
+  [kind k]
+  (java.util.concurrent.ConcurrentHashMap/.computeIfAbsent
+    locks [kind k] (fn [_] (Object.))))
 
 
 (defn- full-schema
@@ -142,9 +157,14 @@
    First caller per JVM × package-set pays the ~14 s bootstrap;
    subsequent callers return the cached entry."
   [packages]
-  (let [k (vec packages)]
+  (let [k (vec packages)
+        ;; Linters can't see that `lock-for` interns: the CHM guarantees
+        ;; one stable Object per key, so this IS a shared monitor, not a
+        ;; fresh local.
+        set-lock (lock-for :golden k)]
     (or (get @golden-state k)
-        (locking lock
+        #_{:clj-kondo/ignore [:locking-suspicious-lock]}
+        (locking set-lock
           (or (get @golden-state k)
               (let [db-name (str "test_golden_" (Math/abs (hash k)))]
                 (exec-on-cluster! (str "CREATE DATABASE \"" db-name "\"")
@@ -194,9 +214,12 @@
    Sweeping in a bound `*rich-types-override*` keeps the capture off
    the process-global registry, so it can't leak into a sibling NS."
   [packages]
-  (let [k (vec packages)]
+  (let [k (vec packages)
+        ;; Interned monitor — see the note in `ensure-golden!`.
+        set-lock (lock-for :sweep k)]
     (or (get @swept-state k)
-        (locking lock
+        #_{:clj-kondo/ignore [:locking-suspicious-lock]}
+        (locking set-lock
           (or (get @swept-state k)
               (let [{:keys [db-config]} (ensure-ns-database-from-golden!
                                           "swept-rich-types-capture" packages)

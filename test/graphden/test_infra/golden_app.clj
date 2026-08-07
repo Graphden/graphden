@@ -40,9 +40,16 @@
       exec/with-clean-registry
       exec/with-isolated-rich-types
       (fn [f]
+        ;; Overlay the cached sweep BEFORE the golden bootstrap: the
+        ;; bootstrap's own `cr/rebuild!` compiles under the ambient
+        ;; rich-types, and the compile-all cache keys on them — swept
+        ;; first, every NS on this package set shares ONE compile;
+        ;; swept after (the old order), each NS's bootstrap rebuild
+        ;; compiled under UNSWEPT types nobody else uses and paid a
+        ;; full-bundle eager compile (~2-3 min) per namespace.
+        (reset! registry-core/*rich-types-override*
+                (sb/ensure-swept-rich-types! package-names))
         (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!* ns-ident package-names)]
-          (reset! registry-core/*rich-types-override*
-                  (sb/ensure-swept-rich-types! package-names))
           (f)))])))
 
 

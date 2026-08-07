@@ -23,6 +23,7 @@
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
@@ -40,34 +41,40 @@
 
 (use-fixtures :once
   (setup/create-container-fixture)
+  exec/with-clean-registry
   exec/with-isolated-rich-types
   (fn [t]
-    (exec/with-clean-registry
-      #(let [storage (setup/create-versioned-test-storage)
-             ;; Full bootstrap WITH type-check sweep enabled
-             ;; (`:skip-type-check? false`). The sweep populates
-             ;; `:return-type` rich-types for composed fn-defs.
-             ;; Without it, `ref-produces-callable?` returns nil
-             ;; for `:_router` and `:router-result`'s HOF wrap
-             ;; captures the router-builder closure instead of the
-             ;; built router callable — `:assoc-empty` /
-             ;; `:update-in` then classcast on the wrapped
-             ;; callable. Production never skips the sweep, so
-             ;; this test mirrors production.
-             _ (sb/bootstrap-with-cached-sweep! storage ["core" "web" "app"])
-             ;; Auth seam (§3.0): inject a single-token provider with the
-             ;; test token. Auth now reads `(:auth-provider ctx)` (captured
-             ;; at construction), so the old `:env`-override trick is gone.
-             ctx (exec/create-context
-                   {:storage storage
-                    :auth-provider (auth/single-token-provider test-auth-token)})
-             _ (cr/rebuild! ctx)
-             router (br/create-router ctx "_app-ring-response")]
-         (try
-           (binding [*router* router
-                     *storage* storage]
-             (t))
-           (finally (sp/close storage)))))))
+    ;; Golden-clone (~100 ms) + the CACHED type-check sweep overlaid —
+    ;; the swept rich-types matter here: without `:return-type` entries
+    ;; for composed fn-defs, `ref-produces-callable?` returns nil for
+    ;; `:_router` and `:router-result`'s HOF wrap captures the
+    ;; router-builder closure instead of the built router callable.
+    ;; Production never skips the sweep, so this test mirrors
+    ;; production — it just reads the sweep from the per-JVM cache
+    ;; instead of paying a full per-NS `bootstrap-from-packages!`
+    ;; (same fixture shape as `test-infra.golden-app/fixture`; kept
+    ;; inline because the ctx needs the auth-provider seam wired).
+    (let [_ (reset! registry-core/*rich-types-override*
+                    (sb/ensure-swept-rich-types! ["core" "web" "app"]))
+          ;; Sweep BEFORE bootstrap — its rebuild then compiles under
+          ;; the same swept types as every sibling NS and shares one
+          ;; compile-all cache entry (see golden-app/fixture).
+          {:keys [storage]} (setup/bootstrap-crud-graph-from-golden!*
+                              "graphden.integration.execute-http-test"
+                              ["core" "web" "app"])
+          ;; Auth seam (§3.0): inject a single-token provider with the
+          ;; test token. Auth reads `(:auth-provider ctx)` (captured at
+          ;; construction), so the old `:env`-override trick is gone.
+          ctx (exec/create-context
+                {:storage storage
+                 :auth-provider (auth/single-token-provider test-auth-token)})
+          _ (cr/rebuild! ctx)
+          router (br/create-router ctx "_app-ring-response")]
+      (try
+        (binding [*router* router
+                  *storage* storage]
+          (t))
+        (finally (sp/close storage))))))
 
 
 (defn- json-post

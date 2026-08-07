@@ -25,6 +25,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.sse :as sse]
+    [graphden.test-infra.wait :as wait]
     [graphden.versioning.storage.core :as vs]
     [org.httpkit.client :as http]
     [org.httpkit.server :as hk]))
@@ -58,13 +59,6 @@
     {:port 0}))
 
 
-(defn- wait-for
-  [ms pred]
-  (let [deadline (+ (System/currentTimeMillis) ms)]
-    (loop [] (or (pred) (when (< (System/currentTimeMillis) deadline)
-                          (Thread/sleep 25) (recur))))))
-
-
 (deftest start-byo-serves-the-handler-and-refreshes-over-sse
   (let [storage (hub-storage!)
         ;; A handler impl injected via :extra-base-fns; returns a Ring response
@@ -95,11 +89,11 @@
           ;; The handler's body is read from the atom at execute time, so a
           ;; refresh+recompile is what re-runs it. Change the atom, push an
           ;; invalidation, and the next request reflects it.
-          (is (wait-for 3000 #(seq @(:subscribers relay))) "BYO source connected")
+          (is (wait/wait-for 3000 #(seq @(:subscribers relay))) "BYO source connected")
           (reset! served-body "v2")
           (doseq [cb @(:callbacks relay-listener)]
             (cb {:kind :fn :op :invalidate :id (str (:id handler))}))
-          (is (wait-for 5000 #(= "v2" (:body (GET))))
+          (is (wait/wait-for 5000 #(= "v2" (:body (GET))))
               "after the SSE push + refresh, the handler serves the new value"))
         (finally
           (byo/stop-byo! handle)

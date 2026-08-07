@@ -18,9 +18,9 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.context :as ctx]
-    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.graph-harness :as gh :refer [*graph* form-req json-req uniq]]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -28,29 +28,9 @@
 ;; Bootstrap fixture — heavy, once per JVM
 ;; ============================================================================
 
-(def ^:dynamic *graph* nil)
-
-
-(defn- graph-fixture
-  "Wraps the heavy bootstrap in `with-clean-registry` so the ~190
-   base-fn impls registered here land in a thread-local override
-   atom (`*registry-override*`) instead of the process-global
-   registry. Sibling test ns'es running in parallel kaocha threads
-   keep their own override atoms — no global pollution, no cross-test
-   leak via the shared registry."
-  [t]
-  (exec/with-clean-registry
-    #(let [graph (setup/bootstrap-crud-graph-from-golden!)
-           storage (:storage graph)]
-       (try
-         (binding [*graph* graph]
-           (t))
-         (finally (sp/close storage))))))
-
-
 (use-fixtures :once
   (setup/create-container-fixture)
-  graph-fixture)
+  (gh/graph-fixture (str (ns-name *ns*))))
 
 
 (defn- entity-ctx
@@ -61,33 +41,6 @@
    the per-test storage tests use."
   []
   (ctx/create-context {:storage (:storage *graph*) :base-fns {}}))
-
-
-(defn- uniq
-  "Random-uuid-suffixed name. Storage is shared across deftests in this
-   ns; unique names prevent cross-test collisions on `UNIQUE(name)`."
-  [stem]
-  (str stem "-" (random-uuid)))
-
-
-(defn- form-req
-  "Ring-shaped request for a form-encoded POST/PUT body."
-  ([uri body] (form-req uri body :post))
-  ([uri body method]
-   {:uri uri
-    :request-method method
-    :body body
-    :headers {"content-type" "application/x-www-form-urlencoded"}}))
-
-
-(defn- json-req
-  "Ring-shaped request for a JSON body."
-  ([uri body] (json-req uri body :post))
-  ([uri body method]
-   {:uri uri
-    :request-method method
-    :body (cheshire/generate-string body)
-    :headers {"content-type" "application/json"}}))
 
 
 (defn- via-create

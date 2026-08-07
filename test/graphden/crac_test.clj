@@ -16,6 +16,7 @@
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.test-infra.wait :as wait]
     [next.jdbc :as jdbc])
   (:import
     (java.sql
@@ -23,16 +24,6 @@
 
 
 (use-fixtures :once (setup/create-container-fixture) exec/with-clean-registry)
-
-
-(defn- wait-for
-  [ms pred]
-  (let [deadline (+ (System/currentTimeMillis) ms)]
-    (loop []
-      (or (pred)
-          (when (< (System/currentTimeMillis) deadline)
-            (Thread/sleep 50)
-            (recur))))))
 
 
 (deftest quiesce-then-resume-cycles-db-connections
@@ -65,7 +56,7 @@
         (is (= 1 (query-one)) "pool serves queries after resume (suspend lifted)")
         (is (false? (Connection/.isClosed (pg-lock/holder-conn holder)))
             "advisory-lock reconnected by resume!")
-        (is (wait-for 6000 #(false? (Connection/.isClosed @(:conn-atom listener))))
+        (is (wait/wait-for 6000 #(false? (Connection/.isClosed @(:conn-atom listener))))
             "LISTEN loop self-reconnected after restore"))
 
       (finally

@@ -17,17 +17,10 @@
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.sync :as pkg-sync]
-    [graphden.schema.executions.schema :as es]
-    [graphden.schema.graph.schema :as gds]
-    [graphden.schema.malli.core :as mds]
-    [graphden.schema.packages.schema :as pkgs]
-    [graphden.schema.protocol.protocol :as ds]
-    [graphden.schema.services.schema :as svcs]
-    [graphden.schema.traits.schema :as vts]
-    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.test-infra.schemas :as schemas]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.test-infra.shared-container :as sc]
     [graphden.versioning.storage.core :as vs])
@@ -96,18 +89,12 @@
 
 (defn- full-schema
   "Schema covering the executor minimum (graph + traits) plus
-   versioned + executions + services. Same combination the production
-   storage init runs through; tests touching `:branch` / `:execution`
-   / `:service` rows need every layer."
+   versioned + executions + services + packages. Same combination the
+   production storage init runs through; tests touching `:branch` /
+   `:execution` / `:service` rows need every layer. Delegates to the
+   shared `test-infra.schemas` builder."
   []
-  (-> (mds/create-builder)
-      (gds/extend-builder)
-      (vts/extend-builder)
-      (vds/extend-builder)
-      (es/extend-builder)
-      (svcs/extend-builder)
-      (pkgs/extend-builder)
-      (ds/build)))
+  (schemas/full-schema {:packages? true}))
 
 
 (defn create-versioned-test-storage

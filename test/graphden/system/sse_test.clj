@@ -15,18 +15,8 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
     [graphden.storage.remote.sse :as remote-sse]
-    [graphden.system.sse :as sse]))
-
-
-(defn- wait-for
-  "Poll `pred` up to `ms`, 20ms steps. Returns truthy pred value or nil."
-  [ms pred]
-  (let [deadline (+ (System/currentTimeMillis) ms)]
-    (loop []
-      (or (pred)
-          (when (< (System/currentTimeMillis) deadline)
-            (Thread/sleep 20)
-            (recur))))))
+    [graphden.system.sse :as sse]
+    [graphden.test-infra.wait :as wait]))
 
 
 (defn- relay-port
@@ -63,14 +53,14 @@
                   :on-event (fn [event] (swap! received conj event))})]
     (try
       (testing "the source connects and registers as a subscriber"
-        (is (wait-for 3000 #(seq @(:subscribers relay)))
+        (is (wait/wait-for 3000 #(seq @(:subscribers relay)))
             "relay saw the SSE subscriber connect"))
 
       (testing "an event fired through the relay's callback reaches the source, parsed"
         (let [event {:kind :fn :op :invalidate :id "fn-123" :branch-id "br-9"}]
           ;; Fire the registered callback (what the NOTIFY listener would do).
           (doseq [cb @(:callbacks listener)] (cb event))
-          (is (wait-for 3000 #(seq @received)) "source received a frame")
+          (is (wait/wait-for 3000 #(seq @received)) "source received a frame")
           (is (= event (first @received))
               "round-tripped through format-payload → SSE → parse-payload intact")))
 
@@ -78,7 +68,7 @@
         (reset! received [])
         (let [event {:kind :fn :op :invalidate :id ""}]
           (doseq [cb @(:callbacks listener)] (cb event))
-          (is (wait-for 3000 #(seq @received)))
+          (is (wait/wait-for 3000 #(seq @received)))
           (is (= event (first @received)))))
       (finally
         (remote-sse/stop-source! source)
@@ -121,19 +111,19 @@
         acme-src (mk "acme" acme-got)
         beta-src (mk "beta" beta-got)]
     (try
-      (is (wait-for 3000 #(= 2 (count @(:subscribers relay)))) "both subscribers connected")
+      (is (wait/wait-for 3000 #(= 2 (count @(:subscribers relay)))) "both subscribers connected")
       (let [fire (fn [event] (doseq [cb @(:callbacks listener)] (cb event)))]
         (testing "an acme-tagged event reaches only acme"
           (fire {:kind :fn :op :invalidate :id "f1" :org-id "acme"})
-          (is (wait-for 2000 #(seq @acme-got)))
+          (is (wait/wait-for 2000 #(seq @acme-got)))
           (is (= "acme" (:org-id (first @acme-got))))
           (Thread/sleep 200)
           (is (empty? @beta-got) "beta did NOT get acme's event"))
         (testing "a nil-org (public) event reaches everyone"
           (reset! acme-got []) (reset! beta-got [])
           (fire {:kind :fn :op :invalidate :id "pub"})
-          (is (wait-for 2000 #(seq @acme-got)))
-          (is (wait-for 2000 #(seq @beta-got)))
+          (is (wait/wait-for 2000 #(seq @acme-got)))
+          (is (wait/wait-for 2000 #(seq @beta-got)))
           (is (= "pub" (:id (first @acme-got))))
           (is (= "pub" (:id (first @beta-got))))))
       (finally

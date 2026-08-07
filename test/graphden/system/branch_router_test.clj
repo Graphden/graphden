@@ -25,17 +25,11 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
-    [graphden.schema.executions.schema :as es]
-    [graphden.schema.graph.schema :as gds]
-    [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.protocol :as ds]
-    [graphden.schema.services.schema :as svcs]
-    [graphden.schema.traits.schema :as vts]
-    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
+    [graphden.test-infra.schemas :as schemas]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
@@ -404,17 +398,6 @@
 ;; `graphden.crud.fn-execution-test`.
 ;; =============================================================================
 
-(defn- full-schema
-  []
-  (-> (mds/create-builder)
-      (gds/extend-builder)
-      (vts/extend-builder)
-      (vds/extend-builder)
-      (es/extend-builder)
-      (svcs/extend-builder)
-      (ds/build)))
-
-
 (defn- create-versioned-storage!
   "Fresh PG storage wrapped in versioning, pointed at the 'main'
    branch. Mirrors what `:db/versioned` builds in prod."
@@ -422,7 +405,7 @@
   (pth/clean-database-fast! @(resolve 'graphden.executor.test-setup/*container*))
   (let [container @(resolve 'graphden.executor.test-setup/*container*)
         storage (pg/create-storage (pth/get-container-config container))]
-    (sp/initialize storage (full-schema))
+    (sp/initialize storage (schemas/full-schema))
     (sp/upsert-entities storage :fn
                         (mapv #(dissoc % :kind) (records/boot-primitive-records)))
     (vs/wrap-with-versioning storage "main")))

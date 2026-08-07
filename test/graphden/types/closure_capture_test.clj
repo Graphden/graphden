@@ -44,16 +44,10 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
-    [graphden.schema.executions.schema :as es]
-    [graphden.schema.graph.schema :as gds]
-    [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.protocol :as ds]
-    [graphden.schema.services.schema :as svcs]
-    [graphden.schema.traits.schema :as vts]
-    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.test-infra.schemas :as schemas]
     [graphden.types.check :as check]
     [graphden.versioning.storage.core :as vs]))
 
@@ -65,23 +59,12 @@
   exec/with-isolated-rich-types)
 
 
-(defn- full-schema
-  []
-  (-> (mds/create-builder)
-      (gds/extend-builder)
-      (vts/extend-builder)
-      (vds/extend-builder)
-      (es/extend-builder)
-      (svcs/extend-builder)
-      (ds/build)))
-
-
 (defn- create-full-storage
   []
   (pth/clean-database-fast! @(resolve 'graphden.executor.test-setup/*container*))
   (let [container @(resolve 'graphden.executor.test-setup/*container*)
         storage (pg/create-storage (pth/get-container-config container))]
-    (sp/initialize storage (full-schema))
+    (sp/initialize storage (schemas/full-schema))
     (sp/upsert-entities storage :fn
                         (mapv #(dissoc % :kind) (records/boot-primitive-records)))
     (let [branch (sp/create-entity storage :branch

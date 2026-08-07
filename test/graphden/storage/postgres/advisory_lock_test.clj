@@ -8,7 +8,8 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.postgres.advisory-lock :as pg-lock])
+    [graphden.storage.postgres.advisory-lock :as pg-lock]
+    [graphden.test-infra.wait :as wait])
   (:import
     (com.zaxxer.hikari
       HikariDataSource)
@@ -42,17 +43,6 @@
     (Properties/.setProperty props "user" username)
     (Properties/.setProperty props "password" password)
     (DriverManager/getConnection ^String jdbc-url props)))
-
-
-(defn- wait-for
-  "Poll `pred` until truthy or `ms` elapses; returns the truthy value or
-   nil on timeout. Used where the condition becomes true ASYNCHRONOUSLY
-   (Postgres reaping an orphaned backend) so the assert doesn't race the
-   server-side cleanup under host load."
-  [ms pred]
-  (let [deadline (+ (System/currentTimeMillis) ms)]
-    (loop [] (or (pred) (when (< (System/currentTimeMillis) deadline)
-                          (Thread/sleep 25) (recur))))))
 
 
 (deftest two-pods-only-one-wins-test
@@ -153,7 +143,7 @@
         ;; than racing the server-side cleanup (a fixed immediate assert
         ;; flakes under host load, when the reap lags behind it).
         (Connection/.close (pg-lock/holder-conn holder))
-        (is (true? (wait-for 10000 #(pg-lock/try-lock! sibling svc-id)))
+        (is (true? (wait/wait-for 10000 #(pg-lock/try-lock! sibling svc-id)))
             "with the pod disconnected, a sibling CAN take the lock once PG reaps the dead backend")
         ;; Sibling releases; pod reconnects and re-acquires successfully
         ;; (nobody holds it now).

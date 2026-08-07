@@ -11,6 +11,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.postgres.notify :as pg-notify]
+    [graphden.test-infra.wait :as wait]
     [next.jdbc :as jdbc])
   (:import
     (com.zaxxer.hikari
@@ -38,22 +39,6 @@
         pw (HikariDataSource/.getPassword pool)]
     (HikariDataSource/.close pool)
     {:jdbc-url u :username un :password pw}))
-
-
-(defn- await-until
-  "Poll `pred` every 20 ms until it returns truthy or `timeout-ms`
-   elapses. Returns the final `pred` result — truthy on success,
-   falsey on timeout. Deterministic replacement for the fixed
-   post-emit `Thread/sleep`: waits exactly as long as delivery takes
-   (typically one ~250 ms poll window) yet never flakes on a loaded
-   host, where a fixed sleep either wastes time or expires early."
-  [timeout-ms pred]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (or (pred)
-          (when (< (System/currentTimeMillis) deadline)
-            (Thread/sleep 20)
-            (recur))))))
 
 
 ;; ============================================================================
@@ -148,7 +133,7 @@
                              ["SELECT pg_notify('graphden_events', ?)"
                               "service:write:event-1"])
               (finally (Connection/.close writer-conn))))
-          (await-until 10000 #(seq @received))
+          (wait/wait-for 10000 #(seq @received))
           (is (= [{:kind :service :op :write :id "event-1"}] @received)))
 
         (finally
@@ -177,7 +162,7 @@
                            ["SELECT pg_notify('graphden_events', ?)"
                             "fn:invalidate:abc"])
             (finally (Connection/.close writer-conn))))
-        (await-until 10000 #(and (seq @seen-a) (seq @seen-b)))
+        (wait/wait-for 10000 #(and (seq @seen-a) (seq @seen-b)))
         (is (= [{:kind :fn :op :invalidate :id "abc"}] @seen-a))
         (is (= [{:kind :fn :op :invalidate :id "abc"}] @seen-b))
         (finally
@@ -264,7 +249,7 @@
                            ["SELECT pg_notify('graphden_events', ?)"
                             "service:write:sentinel"])
             (finally (Connection/.close writer-conn)))
-          (is (await-until 10000 #(seq @sentinel))
+          (is (wait/wait-for 10000 #(seq @sentinel))
               "sentinel callback observed the later event")
           (pg-notify/unregister! listener sentinel-cb))
         (is (= [] @received) "no fire because the callback was unregistered")

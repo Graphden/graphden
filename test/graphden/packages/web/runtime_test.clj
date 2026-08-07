@@ -4,30 +4,16 @@
    dispatcher routes via `data-action=\"…\"`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.interface :as exec]
-    [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]))
+    [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.test-infra.graph-harness :as gh]))
 
 
 (def ^:dynamic *container* nil)
-(def ^:dynamic *bootstrap* nil)
 
 
 (use-fixtures :once
   (pth/create-container-fixture #'*container*)
-  exec/with-clean-registry
-  (fn [f]
-    (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
-      (f))))
-
-
-(defn- exec-name
-  [nm args]
-  (let [{:keys [ctx storage all-name->id]} *bootstrap*
-        fn-id (get all-name->id nm)]
-    (when-not fn-id
-      (throw (ex-info (str "No fn-id for " nm) {:nm nm})))
-    (setup/exec-with-storage ctx storage fn-id args)))
+  (gh/graph-fixture (str (ns-name *ns*))))
 
 
 ;; =============================================================================
@@ -37,7 +23,7 @@
 (deftest dispatch-action-emits-data-action-attr-test
   (testing "free arg :action → `{:data-action <action>}` map"
     (is (= {:data-action "run-fn"}
-           (exec-name :dispatch-action {:action "run-fn"})))))
+           (gh/exec-name :dispatch-action {:action "run-fn"})))))
 
 
 (deftest dispatch-action-passes-blank-action-through-test
@@ -49,7 +35,7 @@
     ;; reader doesn't mistake the absence of a runtime guard for
     ;; a bug.
     (is (= {:data-action ""}
-           (exec-name :dispatch-action {:action ""})))))
+           (gh/exec-name :dispatch-action {:action ""})))))
 
 
 (deftest dispatch-action-composes-via-assoc-test
@@ -57,7 +43,7 @@
     ;; Mimics what a future `:button` component does to add the
     ;; per-action payload. We invoke `:assoc` directly with the
     ;; `:dispatch-action` result as the seed map.
-    (let [base (exec-name :dispatch-action {:action "namespace-move"})
+    (let [base (gh/exec-name :dispatch-action {:action "namespace-move"})
           extended (assoc base :data-fn-id "12345")]
       (is (= {:data-action "namespace-move" :data-fn-id "12345"}
              extended)))))
@@ -71,7 +57,7 @@
   (testing "free arg :body → `{:data-action \"custom\" :data-custom-handler <body>}`"
     (is (= {:data-action "custom"
             :data-custom-handler "btn.title = 'hi';"}
-           (exec-name :dispatch-custom {:body "btn.title = 'hi';"})))))
+           (gh/exec-name :dispatch-custom {:body "btn.title = 'hi';"})))))
 
 
 (deftest dispatch-custom-accepts-empty-body-test
@@ -80,4 +66,4 @@
     ;; empty `data-custom-handler`. Documenting here that the
     ;; server side doesn't pre-reject empty bodies.
     (is (= {:data-action "custom" :data-custom-handler ""}
-           (exec-name :dispatch-custom {:body ""})))))
+           (gh/exec-name :dispatch-custom {:body ""})))))

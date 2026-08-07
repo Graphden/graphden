@@ -20,28 +20,13 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
-
-
-(def ^:dynamic *graph* nil)
-
-
-(defn- graph-fixture
-  [t]
-  (exec/with-clean-registry
-    #(let [graph (setup/bootstrap-crud-graph-from-golden!)
-           storage (:storage graph)]
-       (try
-         (binding [*graph* graph]
-           (t))
-         (finally (sp/close storage))))))
+    [graphden.test-infra.graph-harness :as gh :refer [*graph*]]))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
-  graph-fixture)
+  (gh/graph-fixture (str (ns-name *ns*))))
 
 
 (defn- post-via

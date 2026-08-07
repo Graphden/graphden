@@ -4,13 +4,12 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]))
+    [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.test-infra.graph-harness :as gh]))
 
 
 (def ^:dynamic *container* nil)
-(def ^:dynamic *bootstrap* nil)
 
 
 (use-fixtures :once
@@ -21,19 +20,7 @@
   ;; preconditions.
   setup/ensure-build-hashes-fixture
   (pth/create-container-fixture #'*container*)
-  exec/with-clean-registry
-  (fn [f]
-    (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
-      (f))))
-
-
-(defn- exec-name
-  [nm args]
-  (let [{:keys [ctx storage all-name->id]} *bootstrap*
-        fn-id (get all-name->id nm)]
-    (when-not fn-id
-      (throw (ex-info (str "No fn-id for " nm) {:nm nm})))
-    (setup/exec-with-storage ctx storage fn-id args)))
+  (gh/graph-fixture (str (ns-name *ns*))))
 
 
 ;; =============================================================================
@@ -42,11 +29,11 @@
 
 (deftest html-page-rendered-returns-text-test
   (testing ":html-page-rendered returns an HTML text string with the page body inside <body>"
-    (let [html (exec-name :html-page-rendered
-                          {:title "Test"
-                           :body [:div "Hello"]
-                           :head []
-                           :scripts []})]
+    (let [html (gh/exec-name :html-page-rendered
+                             {:title "Test"
+                              :body [:div "Hello"]
+                              :head []
+                              :scripts []})]
       (is (string? html))
       (is (str/includes? html "<title>Test</title>"))
       (is (str/includes? html "<div>Hello</div>")))))
@@ -54,12 +41,12 @@
 
 (deftest html-page-handler-returns-ring-response-test
   (testing ":html-page-handler returns a Ring response — 200, text/html, body wraps the hiccup"
-    (let [handler-route (exec-name :html-page-route
-                                   {:path "/x"
-                                    :title "X"
-                                    :body [:p "ok"]
-                                    :head []
-                                    :scripts []})
+    (let [handler-route (gh/exec-name :html-page-route
+                                      {:path "/x"
+                                       :title "X"
+                                       :body [:p "ok"]
+                                       :head []
+                                       :scripts []})
           handler (get-in (second handler-route) ["get" "handler"])
           response (handler {:request-method :get :uri "/x" :headers {}})]
       (is (= 200 (:status response)))
@@ -71,12 +58,12 @@
 
 (deftest html-page-route-yields-reitit-entry-test
   (testing ":html-page-route returns the [<path> {<method> {<handler>}}] tuple reitit consumes"
-    (let [entry (exec-name :html-page-route
-                           {:path "/about"
-                            :title "About"
-                            :body [:div "about"]
-                            :head []
-                            :scripts []})
+    (let [entry (gh/exec-name :html-page-route
+                              {:path "/about"
+                               :title "About"
+                               :body [:div "about"]
+                               :head []
+                               :scripts []})
           [path methods] (vec entry)]
       (is (= "/about" path))
       (is (contains? methods "get"))
@@ -89,7 +76,7 @@
 
 (deftest graphden-runtime-scripts-bundles-two-tags-test
   (testing "runtime bundle src tag first (loads bindActionDispatch), bootstrap second (calls it); src is hash-busted via ?v="
-    (let [scripts (exec-name :graphden-runtime-scripts {})
+    (let [scripts (gh/exec-name :graphden-runtime-scripts {})
           first-tag (first scripts)]
       (is (= 2 (count scripts)))
       (is (= :script (first first-tag)) "src tag is :script")
@@ -101,12 +88,12 @@
 
 (deftest html-page-route-with-runtime-scripts-includes-both-script-tags-test
   (testing "binding :scripts :graphden-runtime-scripts lands both <script> tags in the rendered HTML"
-    (let [route (exec-name :html-page-route
-                           {:path "/x"
-                            :title "X"
-                            :body [:div "hi"]
-                            :head []
-                            :scripts (exec-name :graphden-runtime-scripts {})})
+    (let [route (gh/exec-name :html-page-route
+                              {:path "/x"
+                               :title "X"
+                               :body [:div "hi"]
+                               :head []
+                               :scripts (gh/exec-name :graphden-runtime-scripts {})})
           handler (get-in (second route) ["get" "handler"])
           html (:body (handler {:request-method :get :uri "/x" :headers {}}))]
       (is (re-find #"<script src=\"/assets/graphden-runtime\.js\?v=[0-9a-f]+\">" html)
@@ -121,7 +108,7 @@
 
 (deftest graphden-page-head-bundles-stylesheet-link-test
   (testing "the default :head bundle contains the components-css <link> tag (hash-busted)"
-    (let [head (exec-name :graphden-page-head {})]
+    (let [head (gh/exec-name :graphden-page-head {})]
       (is (= 1 (count head))
           "currently exactly one <link>")
       (let [[tag attrs] (vec (first head))]
@@ -134,12 +121,12 @@
 
 (deftest html-page-route-with-page-head-includes-stylesheet-link-test
   (testing "binding :head :graphden-page-head lands the <link rel=stylesheet> in <head>"
-    (let [route (exec-name :html-page-route
-                           {:path "/y"
-                            :title "Y"
-                            :body [:div "hi"]
-                            :head (exec-name :graphden-page-head {})
-                            :scripts []})
+    (let [route (gh/exec-name :html-page-route
+                              {:path "/y"
+                               :title "Y"
+                               :body [:div "hi"]
+                               :head (gh/exec-name :graphden-page-head {})
+                               :scripts []})
           handler (get-in (second route) ["get" "handler"])
           html (:body (handler {:request-method :get :uri "/y" :headers {}}))]
       (is (re-find #"<head>.*<link href=\"/assets/graphden-components\.css\?v=[0-9a-f]+\" rel=\"stylesheet\""

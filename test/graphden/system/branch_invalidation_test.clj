@@ -17,27 +17,15 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
-    [graphden.schema.executions.schema :as es]
-    [graphden.schema.graph.schema :as gds]
-    [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.protocol :as ds]
-    [graphden.schema.services.schema :as svcs]
-    [graphden.schema.traits.schema :as vts]
-    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
+    [graphden.test-infra.schemas :as schemas]
     [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once (setup/create-container-fixture) exec/with-clean-registry)
-
-
-(defn- full-schema
-  []
-  (-> (mds/create-builder) (gds/extend-builder) (vts/extend-builder)
-      (vds/extend-builder) (es/extend-builder) (svcs/extend-builder) (ds/build)))
 
 
 (defn- fixture!
@@ -47,7 +35,7 @@
   (pth/clean-database-fast! @(resolve 'graphden.executor.test-setup/*container*))
   (let [container @(resolve 'graphden.executor.test-setup/*container*)
         raw (pg/create-storage (pth/get-container-config container))]
-    (sp/initialize raw (full-schema))
+    (sp/initialize raw (schemas/full-schema))
     (sp/upsert-entities raw :fn (mapv #(dissoc % :kind) (records/boot-primitive-records)))
     (exec/register-base-fn! :echo-x (fn [args _ctx] (get args :x)))
     (let [storage (vs/wrap-with-versioning raw "main")

@@ -11,7 +11,7 @@
    went through the package decomposition.
 
    These tests bootstrap the full `[core web app]` package set once
-   per JVM (via `setup/bootstrap-crud-graph!`) against a fresh
+   per JVM (gh/via `setup/bootstrap-crud-graph!`) against a fresh
    VERSIONED storage and invoke each handler through `cr/execute`,
    the same code path the `:list-branches-handler` Ring handler
    reaches in production. Each deftest opens a fresh storage so
@@ -19,9 +19,9 @@
   (:require
     [cheshire.core :as cheshire]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.graph-harness :as gh :refer [*graph* json-req uniq]]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -40,44 +40,18 @@
 ;; =============================================================================
 
 (def ^:dynamic *storage* nil)
-(def ^:dynamic *graph* nil)
-
-
-(defn- bootstrap-once
-  [t]
-  (exec/with-clean-registry
-    #(let [graph (setup/bootstrap-crud-graph-from-golden!)
-           storage (:storage graph)]
-       (try
-         (binding [*storage* storage *graph* graph]
-           (t))
-         (finally (sp/close storage))))))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
-  bootstrap-once)
-
-
-(defn- uniq
-  "Random-uuid-suffixed name — used to keep branch / fn names from
-   colliding across siblings sharing the same *storage*."
-  [stem]
-  (str stem "-" (random-uuid)))
+  (gh/graph-fixture (str (ns-name *ns*)))
+  ;; Thin local alias: 11 assertions read `*storage*` directly.
+  (fn [t] (binding [*storage* (:storage *graph*)] (t))))
 
 
 ;; =============================================================================
 ;; Request helpers
 ;; =============================================================================
-
-(defn- json-req
-  ([uri body] (json-req uri body :post))
-  ([uri body method]
-   {:uri uri
-    :request-method method
-    :body (cheshire/generate-string body)
-    :headers {"content-type" "application/json"}}))
-
 
 (defn- split-uri
   "Split a `path?query` string into `[path query-string-or-nil]`.
@@ -105,11 +79,6 @@
       qs (assoc :query-string qs))))
 
 
-(defn- via
-  [fn-name request]
-  (setup/via-graph *graph* fn-name request))
-
-
 (defn- json-body
   "Parse the Ring response body. Handlers' JSON-encoder emits string
    keys; we keywordize for ergonomic assertion."
@@ -127,10 +96,10 @@
    on the shared *storage*."
   [branch-name & [base-ref]]
   (let [body (cheshire/parse-string
-               (:body (via :create-branch-handler
-                           (json-req "/api/branches"
-                                     (cond-> {:name branch-name}
-                                       base-ref (assoc :base-branch-id base-ref)))))
+               (:body (gh/via :create-branch-handler
+                              (json-req "/api/branches"
+                                        (cond-> {:name branch-name}
+                                          base-ref (assoc :base-branch-id base-ref)))))
                true)]
     (is (:ok body) (str "create-branch-handler failed for " branch-name
                         " — " (:error body)))
@@ -156,7 +125,7 @@
   ;; Shared *storage* may carry branches minted by sibling deftests,
   ;; so we assert :main is present + JSON shape — NOT
   ;; "main is the only branch".
-  (let [resp (via :list-branches-handler (get-req "/api/branches"))
+  (let [resp (gh/via :list-branches-handler (get-req "/api/branches"))
         body (json-body resp)]
     (is (= 200 (:status resp)))
     (is (:ok body))
@@ -178,7 +147,7 @@
         _ (Thread/sleep 5)
         b-name (uniq "feature-b")
         _ (mk-branch! b-name)
-        body (json-body (via :list-branches-handler (get-req "/api/branches")))
+        body (json-body (gh/via :list-branches-handler (get-req "/api/branches")))
         ours (filter #(#{a-name b-name} (:name %)) (:branches body))]
     (is (= 2 (count ours)))
     (is (= [a-name b-name] (mapv :name ours))
@@ -192,8 +161,8 @@
 (deftest get-branch-by-name
   (let [name (uniq "feat")
         b (mk-branch! name)
-        body (json-body (via :get-branch-handler
-                             (get-req (str "/api/branches/" name))))]
+        body (json-body (gh/via :get-branch-handler
+                                (get-req (str "/api/branches/" name))))]
     (is (:ok body))
     (is (= name (-> body :branch :name)))
     (is (= (:id b) (-> body :branch :id)))))
@@ -202,22 +171,22 @@
 (deftest get-branch-by-uuid
   (let [name (uniq "feat")
         b (mk-branch! name)
-        body (json-body (via :get-branch-handler
-                             (get-req (str "/api/branches/" (:id b)))))]
+        body (json-body (gh/via :get-branch-handler
+                                (get-req (str "/api/branches/" (:id b)))))]
     (is (:ok body))
     (is (= name (-> body :branch :name)))))
 
 
 (deftest get-branch-not-found
-  (let [body (json-body (via :get-branch-handler
-                             (get-req (str "/api/branches/no-such-"
-                                           (random-uuid)))))]
+  (let [body (json-body (gh/via :get-branch-handler
+                                (get-req (str "/api/branches/no-such-"
+                                              (random-uuid)))))]
     (is (not (:ok body)))
     (is (re-find #"not found" (:error body)))))
 
 
 (deftest get-branch-blank-returns-not-found
-  (let [body (json-body (via :get-branch-handler (get-req "/api/branches/  ")))]
+  (let [body (json-body (gh/via :get-branch-handler (get-req "/api/branches/  ")))]
     (is (not (:ok body))
         "blank ref → not-found (resolve-branch-ref guards str/blank?)")))
 
@@ -227,8 +196,8 @@
 ;; =============================================================================
 
 (deftest list-fn-versions-no-fn-id-returns-error
-  (let [body (json-body (via :list-fn-versions-handler
-                             (get-req "/api/fns/")))]
+  (let [body (json-body (gh/via :list-fn-versions-handler
+                                (get-req "/api/fns/")))]
     ;; URI carries no fn-id segment after `/api/fns/` — the handler
     ;; rejects via its parse stage.
     (is (some? body))
@@ -240,8 +209,8 @@
 (deftest list-fn-versions-single-version
   (let [name (uniq "my-fn")
         fn-id (mk-fn! name)
-        body (json-body (via :list-fn-versions-handler
-                             (get-req (str "/api/fns/" fn-id "/versions"))))]
+        body (json-body (gh/via :list-fn-versions-handler
+                                (get-req (str "/api/fns/" fn-id "/versions"))))]
     (is (:ok body))
     (is (= 1 (:count body)))
     (let [v (first (:versions body))]
@@ -264,8 +233,8 @@
     (Thread/sleep 5)
     (sp/update-entity on-feat :fn fn-id
                       {:name name :description "edited-on-feat"})
-    (let [body (json-body (via :list-fn-versions-handler
-                               (get-req (str "/api/fns/" fn-id "/versions"))))]
+    (let [body (json-body (gh/via :list-fn-versions-handler
+                                  (get-req (str "/api/fns/" fn-id "/versions"))))]
       (is (= 2 (:count body)))
       (is (= (:name feat) (-> body :versions first :branch-name))
           "latest version (feat) wins the first slot")
@@ -277,33 +246,33 @@
 ;; =============================================================================
 
 (deftest diff-branches-target-not-found
-  (let [body (json-body (via :diff-branches-handler
-                             (get-req (str "/api/branches/no-target-"
-                                           (random-uuid) "/diff?against=main"))))]
+  (let [body (json-body (gh/via :diff-branches-handler
+                                (get-req (str "/api/branches/no-target-"
+                                              (random-uuid) "/diff?against=main"))))]
     (is (not (:ok body)))
     (is (re-find #"Target branch not found" (:error body)))))
 
 
 (deftest diff-branches-source-not-found
-  (let [body (json-body (via :diff-branches-handler
-                             (get-req (str "/api/branches/main/diff?against=no-source-"
-                                           (random-uuid)))))]
+  (let [body (json-body (gh/via :diff-branches-handler
+                                (get-req (str "/api/branches/main/diff?against=no-source-"
+                                              (random-uuid)))))]
     (is (not (:ok body)))
     (is (re-find #"Source branch not found" (:error body)))))
 
 
 (deftest diff-branches-against-missing
-  (let [body (json-body (via :diff-branches-handler
-                             (get-req "/api/branches/main/diff")))]
+  (let [body (json-body (gh/via :diff-branches-handler
+                                (get-req "/api/branches/main/diff")))]
     (is (not (:ok body)))
     (is (re-find #"against" (:error body)))))
 
 
 (deftest diff-branches-identical-returns-empty
   (let [feat (mk-branch! (uniq "feat"))
-        body (json-body (via :diff-branches-handler
-                             (get-req (str "/api/branches/" (:name feat)
-                                           "/diff?against=main"))))]
+        body (json-body (gh/via :diff-branches-handler
+                                (get-req (str "/api/branches/" (:name feat)
+                                              "/diff?against=main"))))]
     (is (:ok body))
     (is (= (:name feat) (-> body :target :name)))
     (is (= "main" (-> body :source :name)))
@@ -318,9 +287,9 @@
         on-feat (vs/switch-branch *storage* (java.util.UUID/fromString (:id feat)))]
     (sp/update-entity on-feat :fn fn-id
                       {:name fn-name :description "modified"})
-    (let [body (json-body (via :diff-branches-handler
-                               (get-req (str "/api/branches/" (:name feat)
-                                             "/diff?against=main"))))]
+    (let [body (json-body (gh/via :diff-branches-handler
+                                  (get-req (str "/api/branches/" (:name feat)
+                                                "/diff?against=main"))))]
       (is (:ok body))
       (is (pos? (:count body)) "feat diverged from main by one fn description edit")
       (let [d (first (:diffs body))]
@@ -336,30 +305,30 @@
 ;; =============================================================================
 
 (deftest create-branch-missing-name
-  (let [body (json-body (via :create-branch-handler
-                             (json-req "/api/branches" {})))]
+  (let [body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches" {})))]
     (is (not (:ok body)))
     (is (re-find #":name|name" (:error body)))))
 
 
 (deftest create-branch-blank-name
-  (let [body (json-body (via :create-branch-handler
-                             (json-req "/api/branches" {:name "   "})))]
+  (let [body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches" {:name "   "})))]
     (is (not (:ok body)) "blank :name treated as missing")))
 
 
 (deftest create-branch-duplicate-rejected
   (let [name (uniq "feat")
         _ (mk-branch! name)
-        body (json-body (via :create-branch-handler
-                             (json-req "/api/branches" {:name name})))]
+        body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches" {:name name})))]
     (is (not (:ok body)))
     (is (re-find #"already exists" (:error body)))))
 
 
 (deftest create-branch-default-forks-main
-  (let [body (json-body (via :create-branch-handler
-                             (json-req "/api/branches" {:name (uniq "feat")})))]
+  (let [body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches" {:name (uniq "feat")})))]
     (is (:ok body))
     (is (string? (-> body :branch :base-branch-id))
         "default fork picks the wrapper's current branch (main)")))
@@ -367,19 +336,19 @@
 
 (deftest create-branch-explicit-base
   (let [feat (mk-branch! (uniq "feat"))
-        body (json-body (via :create-branch-handler
-                             (json-req "/api/branches"
-                                       {:name (uniq "feat-2")
-                                        :base-branch-id (:name feat)})))]
+        body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches"
+                                          {:name (uniq "feat-2")
+                                           :base-branch-id (:name feat)})))]
     (is (:ok body))
     (is (= (:id feat) (-> body :branch :base-branch-id)))))
 
 
 (deftest create-branch-unknown-base
-  (let [body (json-body (via :create-branch-handler
-                             (json-req "/api/branches"
-                                       {:name (uniq "feat")
-                                        :base-branch-id (str "no-such-" (random-uuid))})))]
+  (let [body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches"
+                                          {:name (uniq "feat")
+                                           :base-branch-id (str "no-such-" (random-uuid))})))]
     (is (not (:ok body)))
     (is (re-find #"Base branch not found" (:error body)))))
 
@@ -389,15 +358,15 @@
 ;; =============================================================================
 
 (deftest delete-branch-not-found
-  (let [body (json-body (via :delete-branch-handler
-                             (delete-req (str "/api/branches/no-such-" (random-uuid)))))]
+  (let [body (json-body (gh/via :delete-branch-handler
+                                (delete-req (str "/api/branches/no-such-" (random-uuid)))))]
     (is (not (:ok body)))
     (is (re-find #"not found" (:error body)))))
 
 
 (deftest delete-branch-rejects-main
-  (let [body (json-body (via :delete-branch-handler
-                             (delete-req "/api/branches/main")))]
+  (let [body (json-body (gh/via :delete-branch-handler
+                                (delete-req "/api/branches/main")))]
     (is (not (:ok body)))
     (is (#{"root-branch-undeletable" :root-branch-undeletable}
          (:reason body)))))
@@ -406,8 +375,8 @@
 (deftest delete-branch-rejects-with-children
   (let [parent (mk-branch! (uniq "parent"))
         _child (mk-branch! (uniq "child") (:name parent))
-        body (json-body (via :delete-branch-handler
-                             (delete-req (str "/api/branches/" (:name parent)))))]
+        body (json-body (gh/via :delete-branch-handler
+                                (delete-req (str "/api/branches/" (:name parent)))))]
     (is (not (:ok body)))
     (is (#{"branch-has-children" :branch-has-children} (:reason body)))
     (is (seq (:child-branch-ids body))
@@ -417,14 +386,14 @@
 (deftest delete-branch-happy
   (let [name (uniq "ephemeral")
         b (mk-branch! name)
-        body (json-body (via :delete-branch-handler
-                             (delete-req (str "/api/branches/" name))))]
+        body (json-body (gh/via :delete-branch-handler
+                                (delete-req (str "/api/branches/" name))))]
     (is (:ok body))
     (is (= (:id b) (:id body)))
     (is (= name (:name body)))
     (testing "branch is gone from list-branches-handler"
-      (let [list-body (json-body (via :list-branches-handler
-                                      (get-req "/api/branches")))]
+      (let [list-body (json-body (gh/via :list-branches-handler
+                                         (get-req "/api/branches")))]
         (is (not-any? #(= name (:name %)) (:branches list-body)))))))
 
 
@@ -433,34 +402,34 @@
 ;; =============================================================================
 
 (deftest preview-conflicts-target-missing
-  (let [body (json-body (via :preview-conflicts-handler
-                             (get-req (str "/api/branches/no-target-"
-                                           (random-uuid)
-                                           "/conflicts?source=main"))))]
+  (let [body (json-body (gh/via :preview-conflicts-handler
+                                (get-req (str "/api/branches/no-target-"
+                                              (random-uuid)
+                                              "/conflicts?source=main"))))]
     (is (not (:ok body)))
     (is (re-find #"Target branch not found" (:error body)))))
 
 
 (deftest preview-conflicts-source-ref-missing
-  (let [body (json-body (via :preview-conflicts-handler
-                             (get-req "/api/branches/main/conflicts")))]
+  (let [body (json-body (gh/via :preview-conflicts-handler
+                                (get-req "/api/branches/main/conflicts")))]
     (is (not (:ok body)))
     (is (re-find #"source" (:error body)))))
 
 
 (deftest preview-conflicts-source-not-found
-  (let [body (json-body (via :preview-conflicts-handler
-                             (get-req (str "/api/branches/main/conflicts?source=no-such-"
-                                           (random-uuid)))))]
+  (let [body (json-body (gh/via :preview-conflicts-handler
+                                (get-req (str "/api/branches/main/conflicts?source=no-such-"
+                                              (random-uuid)))))]
     (is (not (:ok body)))
     (is (re-find #"Source branch not found" (:error body)))))
 
 
 (deftest preview-conflicts-no-conflicts
   (let [feat (mk-branch! (uniq "feat"))
-        body (json-body (via :preview-conflicts-handler
-                             (get-req (str "/api/branches/main/conflicts?source="
-                                           (:name feat)))))]
+        body (json-body (gh/via :preview-conflicts-handler
+                                (get-req (str "/api/branches/main/conflicts?source="
+                                              (:name feat)))))]
     (is (:ok body))
     (is (zero? (:count body)))
     (is (= [] (:conflicts body)))
@@ -473,33 +442,33 @@
 ;; =============================================================================
 
 (deftest merge-branch-target-missing
-  (let [body (json-body (via :merge-branch-handler
-                             (json-req (str "/api/branches/no-target-"
-                                            (random-uuid) "/merge")
-                                       {:source "main"})))]
+  (let [body (json-body (gh/via :merge-branch-handler
+                                (json-req (str "/api/branches/no-target-"
+                                               (random-uuid) "/merge")
+                                          {:source "main"})))]
     (is (not (:ok body)))
     (is (re-find #"Target branch not found" (:error body)))))
 
 
 (deftest merge-branch-source-field-missing
-  (let [body (json-body (via :merge-branch-handler
-                             (json-req "/api/branches/main/merge" {})))]
+  (let [body (json-body (gh/via :merge-branch-handler
+                                (json-req "/api/branches/main/merge" {})))]
     (is (not (:ok body)))
     (is (re-find #":source|source" (:error body)))))
 
 
 (deftest merge-branch-source-not-found
-  (let [body (json-body (via :merge-branch-handler
-                             (json-req "/api/branches/main/merge"
-                                       {:source (str "no-such-" (random-uuid))})))]
+  (let [body (json-body (gh/via :merge-branch-handler
+                                (json-req "/api/branches/main/merge"
+                                          {:source (str "no-such-" (random-uuid))})))]
     (is (not (:ok body)))
     (is (re-find #"Source branch not found" (:error body)))))
 
 
 (deftest merge-branch-same-source-target-rejected
-  (let [body (json-body (via :merge-branch-handler
-                             (json-req "/api/branches/main/merge"
-                                       {:source "main"})))]
+  (let [body (json-body (gh/via :merge-branch-handler
+                                (json-req "/api/branches/main/merge"
+                                          {:source "main"})))]
     (is (not (:ok body)))
     (is (re-find #"must differ" (:error body)))))
 
@@ -515,10 +484,10 @@
         on-feat (vs/switch-branch *storage* (java.util.UUID/fromString (:id feat)))]
     (sp/update-entity on-feat :fn fn-id
                       {:name fn-name :description "new on feat"})
-    (let [body (json-body (via :merge-branch-handler
-                               (json-req (str "/api/branches/"
-                                              (:name target) "/merge")
-                                         {:source (:name feat)})))]
+    (let [body (json-body (gh/via :merge-branch-handler
+                                  (json-req (str "/api/branches/"
+                                                 (:name target) "/merge")
+                                            {:source (:name feat)})))]
       (is (:ok body))
       (is (string? (-> body :merge :id)))
       (is (= (:id feat) (-> body :merge :source-branch-id)))
@@ -538,14 +507,14 @@
     (sp/update-entity on-feat :fn fn-id
                       {:name fn-name :description "edited"})
     (let [body (json-body
-                 (via :merge-branch-handler
-                      (json-req (str "/api/branches/" (:name target) "/merge")
-                                {:source (:name feat)
-                                 :conflict-resolutions
-                                 [{:entity-name "fn"
-                                   :entity-id "not-a-uuid"
-                                   :choice "source"}
-                                  {:entity-name "fn"
-                                   :entity-id (str fn-id)
-                                   :choice "elsewhere"}]})))]
+                 (gh/via :merge-branch-handler
+                         (json-req (str "/api/branches/" (:name target) "/merge")
+                                   {:source (:name feat)
+                                    :conflict-resolutions
+                                    [{:entity-name "fn"
+                                      :entity-id "not-a-uuid"
+                                      :choice "source"}
+                                     {:entity-name "fn"
+                                      :entity-id (str fn-id)
+                                      :choice "elsewhere"}]})))]
       (is (:ok body) "bad resolutions don't break the merge"))))

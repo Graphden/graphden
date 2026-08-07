@@ -34,16 +34,9 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
-    [graphden.schema.executions.schema :as es]
-    [graphden.schema.graph.schema :as gds]
-    [graphden.schema.malli.core :as mds]
-    [graphden.schema.packages.schema :as pkgs]
-    [graphden.schema.protocol.protocol :as ds]
-    [graphden.schema.services.schema :as svcs]
-    [graphden.schema.traits.schema :as vts]
-    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.schemas :as schemas]
     [graphden.test-infra.shared-container :as sc]
     [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]
@@ -79,18 +72,12 @@
 
 
 (defn- full-schema
-  "Same schema combination `test_setup/full-schema` uses; duplicated
-   here to keep this ns free of the `executor.test-setup` import
-   cycle (`test_setup` consumes our public API)."
+  "Same schema combination `test_setup/full-schema` uses — both now
+   delegate to the shared leaf `test-infra.schemas` builder (this used
+   to be a hand-kept duplicate precisely because requiring test-setup
+   from here would cycle; the leaf ns removed that constraint)."
   []
-  (-> (mds/create-builder)
-      (gds/extend-builder)
-      (vts/extend-builder)
-      (vds/extend-builder)
-      (es/extend-builder)
-      (svcs/extend-builder)
-      (pkgs/extend-builder)
-      (ds/build)))
+  (schemas/full-schema {:packages? true}))
 
 
 (defn- exec-on-cluster!
@@ -163,7 +150,6 @@
         ;; fresh local.
         set-lock (lock-for :golden k)]
     (or (get @golden-state k)
-        #_{:clj-kondo/ignore [:locking-suspicious-lock]}
         (locking set-lock
           (or (get @golden-state k)
               (let [db-name (str "test_golden_" (Math/abs (hash k)))]
@@ -218,7 +204,6 @@
         ;; Interned monitor — see the note in `ensure-golden!`.
         set-lock (lock-for :sweep k)]
     (or (get @swept-state k)
-        #_{:clj-kondo/ignore [:locking-suspicious-lock]}
         (locking set-lock
           (or (get @swept-state k)
               (let [{:keys [db-config]} (ensure-ns-database-from-golden!

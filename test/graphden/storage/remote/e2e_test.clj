@@ -29,6 +29,7 @@
     [graphden.storage.remote.core :as remote]
     [graphden.storage.remote.sse :as remote-sse]
     [graphden.system.sse :as sse]
+    [graphden.test-infra.wait :as wait]
     [graphden.versioning.storage.core :as vs]
     [org.httpkit.server :as hk]))
 
@@ -65,13 +66,6 @@
     {:port 0}))
 
 
-(defn- wait-for
-  [ms pred]
-  (let [deadline (+ (System/currentTimeMillis) ms)]
-    (loop [] (or (pred) (when (< (System/currentTimeMillis) deadline)
-                          (Thread/sleep 25) (recur))))))
-
-
 (defn- flaky-sse-server
   "SSE stub exercising the reconnect loop: the FIRST client gets one frame and
    then the stream is dropped (send-with-close); the SECOND (reconnecting)
@@ -105,7 +99,7 @@
                  {:hub-url url :token token
                   :on-event (fn [e] (swap! events conj (:id e)))})]
     (try
-      (is (wait-for 8000 #(some #{"bbb"} @events))
+      (is (wait/wait-for 8000 #(some #{"bbb"} @events))
           "after the first stream dropped, the source reconnected and got the 2nd event")
       (is (>= @conns 2) "the source actually reopened the connection")
       (finally
@@ -150,14 +144,14 @@
         (testing "a change on the hub + an SSE invalidation live-refreshes the BYO executor"
           ;; The SSE source connects asynchronously — wait for the relay to see
           ;; it before firing, or the event has no subscriber to reach.
-          (is (wait-for 3000 #(seq @(:subscribers relay))) "BYO source connected to the relay")
+          (is (wait/wait-for 3000 #(seq @(:subscribers relay))) "BYO source connected to the relay")
           ;; Change the graph on the hub (rebind echo-n → 2).
           (let [binding-id (:id (first (sp/query-entities storage :binding {:fn-id fn-id})))]
             (sp/update-entity storage :binding binding-id {:value 2 :value-present true}))
           ;; Fire the invalidation the way notify-after-write! does.
           (doseq [cb @(:callbacks relay-listener)]
             (cb {:kind :fn :op :invalidate :id (str fn-id)}))
-          (is (wait-for 5000 #(pos? @refreshed)) "BYO executor received the SSE event + refreshed")
+          (is (wait/wait-for 5000 #(pos? @refreshed)) "BYO executor received the SSE event + refreshed")
           (is (= 2 (cr/execute byo-ctx fn-id {}))
               "and now executes the NEW value, pulled fresh over HTTP"))
         (finally

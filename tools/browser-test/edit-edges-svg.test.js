@@ -86,11 +86,33 @@ const PROBE_FN = 'web-server';
       () => document.querySelector('#edge-lines path').getBoundingClientRect().width);
     assert(pathWidth > 1, 'edge path spans real screen width: ' + Math.round(pathWidth));
 
-    const withEdges = await page.screenshot();
+    // Clip every shot to #graph-layer: the byte-equality asserts below
+    // compare screenshots taken at DIFFERENT moments, and any live pixel
+    // outside the canvas (the sidebar's stats/relative-time text ticking
+    // over) breaks equality without an edge being involved — this
+    // full-viewport version flaked exactly that way (3 gate runs). Edges
+    // only ever paint inside #graph-layer, so the crop loses nothing.
+    // #graph-surface is the scroll/viewport container with a real box
+    // (#graph-layer itself is a transform container whose own box is 0x0).
+    // Fall back to the viewport minus nothing if it ever goes missing —
+    // a null/zero clip must fail loudly here, not inside screenshot().
+    // Freeze every animation/transition for the byte-equality trio —
+    // the canvas has live pixels of its own (service-badge-pending
+    // pulses at 1.5s, the busy spinner at 0.8s), and two shots taken
+    // ~100ms apart catch different animation frames: bytes differ with
+    // no edge involved. Static edge painting is exactly what the
+    // asserts are about, so freezing loses nothing.
+    await page.addStyleTag({content:
+      '*,*::before,*::after{animation:none!important;'
+      + 'transition:none!important;caret-color:transparent!important}'});
+    const clip = await page.locator('#graph-surface').boundingBox();
+    assert(clip && clip.width > 0 && clip.height > 0,
+           'graph surface has a real box to clip to: ' + JSON.stringify(clip));
+    const withEdges = await page.screenshot({clip});
     await page.evaluate(() => {
       document.getElementById('edge-layer').style.visibility = 'hidden';
     });
-    const withoutEdges = await page.screenshot();
+    const withoutEdges = await page.screenshot({clip});
     await page.evaluate(() => {
       document.getElementById('edge-layer').style.visibility = '';
     });
@@ -106,7 +128,7 @@ const PROBE_FN = 'web-server';
       const d = document.querySelector('#edge-lines path').getBoundingClientRect();
       return {width: d.width};  // geometry survives; only painting stops
     });
-    const withZeroSize = await page.screenshot();
+    const withZeroSize = await page.screenshot({clip});
     await page.evaluate(() => {
       document.getElementById('edge-layer').style.height = '';
     });

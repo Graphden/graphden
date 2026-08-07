@@ -22,7 +22,6 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
@@ -131,10 +130,15 @@
                         {:name "dispatch-guard-pkg" :version "1.0.0"
                          :ns-root "x" :fns [] :dependencies []
                          :content-hash "guardhash"})
-      ;; Mirror the real publish path: a write invalidates the ctx graph cache
-      ;; so the next execution re-reads. The per-branch handler re-reads the
-      ;; registry each call, so it sees the fresh row.
-      (exec-ctx/invalidate-graph-cache! *ctx*)
+      ;; NO cache invalidation on purpose — that IS the production shape:
+      ;; `affected-fn-ids` answers #{} for :package-version (a pin row
+      ;; cannot move a compiled closure), so the real publish path leaves
+      ;; the compiled registry alone, and freshness comes from the
+      ;; per-branch handler re-reading the registry each call. (This test
+      ;; used to full-clear here "to mirror the publish path" — the
+      ;; opposite of what production does — and the post-clear dispatch
+      ;; recompiled the whole 5-package bundle: ~130 s idle, ~770 s in a
+      ;; contended gate, for an assertion that is STRONGER without it.)
       (let [after (json/parse-string
                     (:body (br/dispatch *router* {:request-method :get
                                                   :uri "/api/packages"

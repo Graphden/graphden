@@ -5,40 +5,38 @@
    `build-graph-elements`' deep mutually-recursive branches (HOF
    migration, substitution-context binding migration, deep ref
    trees, MI convergence) are designed around the production graph's
-   topology; synthetic mini-graphs don't reach them. This fixture
-   boots the full package sync (`:dev` config, init only up to
-   `:exec/fn-entities` — no http server / compiled registry) so
-   `compute-layout` runs over `web-server`, `router`,
-   `text-error-router` and friends."
+   topology; synthetic mini-graphs don't reach them. The fixture used
+   to `ig/init` a `:dev` system up to `:exec/fn-entities` — a full
+   per-NS package sync (~50 s) producing rows the golden template
+   already holds (the golden IS `bootstrap-from-packages!` over the
+   same bundle, and every laid-out fn — `web-server`, `router`,
+   `text-error-router`, the `_app-cached` chain — lives in
+   core/web/app). Now a ~100 ms golden clone."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.test-setup :as setup]
     [graphden.layout.core :as lc]
     [graphden.layout.graph :as lg]
-    [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.system.interface :as sys]
-    [integrant.core :as ig]))
+    [graphden.storage.protocol.core :as sp]))
 
 
-(def ^:dynamic *container* nil)
 (def ^:dynamic *storage* nil)
 
 
 (use-fixtures :once
-  (pth/create-container-fixture #'*container*)
+  (setup/create-container-fixture)
   (fn [f]
-    (pth/clean-database-fast! *container*)
-    (let [cfg    (pth/get-container-config *container*)
-          config (-> (sys/read-config :dev)
-                     (assoc-in [:db/postgres :jdbc-url] (:jdbc-url cfg))
-                     (assoc-in [:db/postgres :username] (:username cfg))
-                     (assoc-in [:db/postgres :password] (:password cfg)))
-          ;; init only up to fn-entities — the full package sync,
-          ;; without the compiled registry or the http server.
-          system (ig/init config [:exec/fn-entities])]
-      (binding [*storage* (:db/versioned system)]
-        (try (f) (finally (ig/halt! system)))))))
+    ;; `examples` is in the set because `layout-migrate-on-fn-ref-test`
+    ;; lays out the `ex-*` pedagogical fns (the :dev system this fixture
+    ;; replaced loaded them implicitly). Without them the test's
+    ;; `when-let` guards skip every assertion — kaocha's
+    ;; zero-assertion failure is what catches that silent decay.
+    (let [{:keys [storage]} (setup/bootstrap-crud-graph-from-golden!*
+                              "graphden.layout.graph-real-test"
+                              ["core" "web" "app" "examples"])]
+      (binding [*storage* storage]
+        (try (f) (finally (sp/close storage)))))))
 
 
 (defn- fn-id

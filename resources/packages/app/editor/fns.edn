@@ -105,6 +105,9 @@
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
                   "packages/app/editor/editor-render.js"
+                  ;; Redesign shell — left-rail surface switching. Loads before
+                  ;; main so window.gdShellSurface exists for the rail onclicks.
+                  "packages/app/editor/editor-shell.js"
                   "packages/app/editor/editor-main.js"]}}
 
   ;; Raw concatenation of every editor module — still contains the
@@ -140,7 +143,59 @@
           ;; <main> for the graph canvas. axe-core's `region` rule
           ;; requires every page element be inside a landmark; without
           ;; this, screen-readers see flat content with no structure.
-          [:div {:id "app"}
+          [:div {:id "app" :class "gd-redesign"}
+           ;; LEFT RAIL — primary surface navigation (redesign 2026-08).
+           ;; Icon buttons switch the primary surface; editor-shell.js drives
+           ;; the active state + placeholder panes for not-yet-built surfaces.
+           ;; Build is the live surface today.
+           [:nav {:id "gd-rail" :aria-label "Surfaces"}
+            [:span {:class "gd-rail-btn gd-brand" :title "Graphden" :aria-hidden "true"}
+             [:svg {:viewBox "0 0 32 32" :fill "none" :width "20" :height "20"}
+              [:g {:stroke "currentColor" :stroke-width "3" :stroke-linecap "round"}
+               [:line {:x1 "9" :y1 "6" :x2 "25" :y2 "26"}]
+               [:line {:x1 "17" :y1 "16" :x2 "8" :y2 "26"}]]
+              [:g {:fill "currentColor"}
+               [:circle {:cx "9" :cy "6" :r "3"}]
+               [:circle {:cx "25" :cy "26" :r "3"}]
+               [:circle {:cx "8" :cy "26" :r "3"}]]]]
+            [:button {:type "button" :class "gd-rail-btn" :data-surface "build"
+                      :aria-pressed "true" :onclick "gdShellSurface('build', this)"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
+              [:circle {:cx "6" :cy "6" :r "2.4"}] [:circle {:cx "18" :cy "6" :r "2.4"}]
+              [:circle {:cx "12" :cy "18" :r "2.4"}] [:path {:d "M8 7l3 9M16 7l-3 9"}]]
+             [:span {:class "gd-rail-cap"} "Build"]]
+            [:button {:type "button" :class "gd-rail-btn" :data-surface "run"
+                      :aria-pressed "false" :onclick "gdShellSurface('run', this)"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
+              [:path {:d "M7 5l11 7-11 7z"}]]
+             [:span {:class "gd-rail-cap"} "Run"]]
+            [:button {:type "button" :class "gd-rail-btn" :data-surface "review"
+                      :aria-pressed "false" :onclick "gdShellSurface('review', this)"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
+              [:circle {:cx "6" :cy "6" :r "2.4"}] [:circle {:cx "6" :cy "18" :r "2.4"}]
+              [:circle {:cx "18" :cy "9" :r "2.4"}] [:path {:d "M6 8.4v7M8.4 6H14a3 3 0 013 3"}]]
+             [:span {:class "gd-rail-cap"} "Review"]]
+            [:button {:type "button" :class "gd-rail-btn" :data-surface "operate"
+                      :aria-pressed "false" :onclick "gdShellSurface('operate', this)"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.7" :aria-hidden "true"}
+              [:path {:d "M4 7h16M4 12h16M4 17h16"}]
+              [:circle {:cx "9" :cy "7" :r "1.6" :fill "currentColor" :stroke "none"}]
+              [:circle {:cx "15" :cy "12" :r "1.6" :fill "currentColor" :stroke "none"}]
+              [:circle {:cx "7" :cy "17" :r "1.6" :fill "currentColor" :stroke "none"}]]
+             [:span {:class "gd-rail-cap"} "Operate"]]
+            [:span {:class "gd-rail-spacer"}]
+            [:button {:type "button" :class "gd-rail-btn" :data-surface "workspaces"
+                      :aria-pressed "false" :onclick "gdShellSurface('workspaces', this)"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
+              [:rect {:x "3.5" :y "4.5" :width "17" :height "15" :rx "2"}]
+              [:path {:d "M3.5 9h17M8 4.5v4.5"}]]
+             [:span {:class "gd-rail-cap"} "Workspaces"]]
+            [:button {:type "button" :class "gd-rail-btn" :data-surface "settings"
+                      :aria-pressed "false" :onclick "gdShellSurface('settings', this)"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
+              [:circle {:cx "12" :cy "12" :r "3"}]
+              [:path {:d "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"}]]
+             [:span {:class "gd-rail-cap"} "Settings"]]]
            [:div {:id "main-container"}
             ;; Side menu \u2014 semantic <aside> + ARIA label since the
             ;; visible <h2>"Graphden" doubles as the app title rather
@@ -260,7 +315,23 @@
                [:button {:class "nav-btn" :onclick "navResetPositions()"
                          :aria-label "Reset node positions" :title "Reset all node positions"} "\u27F2"]
                [:button {:class "nav-btn" :onclick "navResetZoom()"
-                         :aria-label "Reset zoom" :title "Reset zoom"} "\u2299"]]]]]]}}
+                         :aria-label "Reset zoom" :title "Reset zoom"} "\u2299"]]]]
+            ;; RIGHT INSPECTOR \u2014 one home for everything about the selected fn
+            ;; (redesign 2026-08): bindings, types, effects, provenance, this
+            ;; function's OWN stats/errors, versions, run. Empty until a node
+            ;; is selected; editor-shell.js fills it. Replaces the popover-hell.
+            [:aside {:id "gd-inspector" :aria-label "Inspector"}
+             [:div {:class "gd-insp-empty"}
+              "Select a node to inspect its bindings, types, effects, and this function\u2019s own run history."]]
+            ;; Placeholder overlay for surfaces not yet rebuilt (Run / Review /
+            ;; Operate / Workspaces / Settings). Hidden on the Build surface.
+            [:div {:id "gd-surface-overlay" :hidden "hidden"}
+             [:div {:class "gd-surface-card"}
+              [:div {:class "gd-surface-title"} "Coming"]
+              [:div {:class "gd-surface-sub"} ""]
+              [:button {:type "button" :class "gd-surface-back"
+                        :onclick "gdShellSurface('build', document.querySelector('#gd-rail .gd-rail-btn[data-surface=build]'))"}
+               "Back to Build"]]]]]}}
 
   ;; =============================================================================
   ;; HASH-BUSTED ASSET URLs + LINK/SCRIPT-SRC ELEMENTS

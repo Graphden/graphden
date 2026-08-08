@@ -105,6 +105,58 @@
   --effect-chip-random: #f0abfc;
   --effect-chip-process: #94a3b8;
   --effect-chip-raw-sql: #f87171;
+
+  /* ========================================================================
+   * REDESIGN 2026-08 — the "drafting board / graph paper" design system.
+   * A parallel `--gd-*` token set introduced alongside the legacy tokens so
+   * the shell can be rebuilt surface-by-surface without breaking the running
+   * editor at any commit. Migrated components read `--gd-*`; un-migrated ones
+   * keep the legacy tokens above until they're replaced. Light values here;
+   * every colour is mirrored under `body.theme-dark`. See memory
+   * project_editor_ui_redesign_2026_08_08.
+   * ===================================================================== */
+  /* type roles */
+  --gd-ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --gd-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  /* grounds — cool porcelain, deliberately not cream */
+  --gd-paper: #eff1f0;
+  --gd-paper-2: #f6f7f6;
+  --gd-panel: #fbfcfb;
+  /* ink ramp */
+  --gd-ink: #181b1c;
+  --gd-ink-2: #4a5254;
+  --gd-ink-3: #7c8688;
+  --gd-ink-4: #a6afb0;
+  /* structural lines + the dot-grid substrate (the signature) */
+  --gd-line: #dce0df;
+  --gd-line-2: #cad0cf;
+  --gd-grid: #d6dbda;
+  /* the one accent — "flow" (edges, active, primary) */
+  --gd-flow: #137c74;
+  --gd-flow-ink: #0c5b55;
+  --gd-flow-wash: #ddecea;
+  --gd-flow-2: #1fa093;
+  /* the 3-way binding chip language: literal / reference / free */
+  --gd-lit: #525b5e;
+  --gd-lit-wash: #e6e9e8;
+  --gd-ref: #137c74;
+  --gd-ref-wash: #ddecea;
+  --gd-free: #b0791e;
+  --gd-free-wash: #f2e9d6;
+  /* semantic (separate from the accent hue) */
+  --gd-ok: #2e7d57;
+  --gd-warn: #b0791e;
+  --gd-crit: #c0453c;
+  --gd-crit-wash: #f4e0de;
+  /* shell geometry (theme-independent) */
+  --gd-rail-w: 58px;
+  --gd-ctxbar-h: 52px;
+  --gd-explorer-w: 260px;
+  --gd-inspector-w: 344px;
+  --gd-r: 9px;
+  --gd-r-sm: 6px;
+  --gd-shadow: 0 1px 2px rgba(20, 30, 28, 0.06), 0 6px 18px rgba(20, 30, 28, 0.06);
+  --gd-shadow-pop: 0 8px 30px rgba(20, 30, 28, 0.16);
 }
 body.theme-dark {
   /* Ink #0D1117 is the brand's dark ground. */
@@ -158,6 +210,34 @@ body.theme-dark {
   /* Effect-chip palette stays identical in dark theme — colour encodes
      category, not surface. Chip fg flips to white since dark-theme chips
      could otherwise look washed out against page bg in screenshots. */
+
+  /* REDESIGN 2026-08 — dark mirror of the `--gd-*` system (deep slate). */
+  --gd-paper: #0f1315;
+  --gd-paper-2: #141a1c;
+  --gd-panel: #171e20;
+  --gd-ink: #e8edec;
+  --gd-ink-2: #aeb9b8;
+  --gd-ink-3: #7b8786;
+  --gd-ink-4: #586261;
+  --gd-line: #252e30;
+  --gd-line-2: #313b3d;
+  --gd-grid: #1c2426;
+  --gd-flow: #37c9bb;
+  --gd-flow-ink: #7fe3d9;
+  --gd-flow-wash: #123230;
+  --gd-flow-2: #4fe0d2;
+  --gd-lit: #9aa4a5;
+  --gd-lit-wash: #20282a;
+  --gd-ref: #37c9bb;
+  --gd-ref-wash: #123230;
+  --gd-free: #d9a84e;
+  --gd-free-wash: #2a2417;
+  --gd-ok: #4fb983;
+  --gd-warn: #d9a84e;
+  --gd-crit: #e8756b;
+  --gd-crit-wash: #2e1a18;
+  --gd-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.35);
+  --gd-shadow-pop: 0 10px 34px rgba(0, 0, 0, 0.55);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
@@ -4541,3 +4621,202 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    Hidden unless the tenancy addon is active (gd-tenancy set once a capability
    header arrives), so single-tenant editors never show it. */
 body:not(.gd-tenancy) .action-deploy { display: none; }
+
+/* ============================================================================
+ * REDESIGN 2026-08 — SHELL LAYOUT (rail + explorer | canvas | inspector).
+ * Appended after the legacy rules so equal-specificity selectors win. Reads
+ * the `--gd-*` design system. The proportional UI font is applied ONLY to new
+ * chrome — the canvas cards + tree stay monospace (they are code, and the
+ * layout engine measures their text width). See memory
+ * project_editor_ui_redesign_2026_08_08.
+ * ========================================================================= */
+
+/* App shell — two tracks: the rail, then everything else. The `.gd-redesign`
+   marker on #app keeps these overriding selectors distinct from the legacy
+   rules above (no-duplicate-selectors) while winning on specificity. */
+#app.gd-redesign {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: var(--gd-rail-w) 1fr;
+  /* A FIXED-height row track (not `1fr`) so the tall explorer content can't
+     blow the track out past the viewport — `minmax(0,1fr)` still resolved to
+     the content's max-content here. Descendants then scroll within it. */
+  grid-template-rows: 100vh;
+}
+
+/* ---- LEFT RAIL ---- */
+#gd-rail {
+  grid-column: 1;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0;
+  font-family: var(--gd-ui-font);
+  background: var(--gd-panel);
+  border-right: 1px solid var(--gd-line);
+}
+.gd-rail-btn {
+  position: relative;
+  width: 44px; height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--gd-ink-3);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.gd-rail-btn svg { width: 21px; height: 21px; }
+.gd-rail-btn:hover { background: var(--gd-paper-2); color: var(--gd-ink); }
+.gd-rail-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+.gd-rail-btn[aria-pressed="true"] { background: var(--gd-flow-wash); color: var(--gd-flow); }
+.gd-brand { color: var(--gd-flow); cursor: default; margin-bottom: 6px; }
+.gd-brand svg { width: 20px; height: 20px; }
+.gd-rail-spacer { flex: 1 1 auto; }
+/* rail label — reveals on hover/focus as a small flag beside the icon */
+.gd-rail-cap {
+  position: absolute;
+  left: 50px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--gd-panel);
+  background: var(--gd-ink);
+  box-shadow: var(--gd-shadow-pop);
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+  transition: opacity 0.12s, transform 0.12s;
+  z-index: 320;
+}
+.gd-rail-btn:hover .gd-rail-cap,
+.gd-rail-btn:focus-visible .gd-rail-cap { opacity: 1; transform: none; }
+
+/* ---- MAIN: explorer | canvas | inspector ---- */
+#app.gd-redesign #main-container {
+  grid-column: 2;
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--gd-inspector-w);
+  grid-template-rows: 100%;
+}
+body.sidebar-collapsed #app.gd-redesign #main-container {
+  grid-template-columns: 0 minmax(0, 1fr) var(--gd-inspector-w);
+}
+
+/* Explorer — the former absolute-overlay sidebar, now a real grid column. */
+#app.gd-redesign #side-menu {
+  position: relative;
+  top: auto; left: auto;
+  width: auto; height: 100%;
+  min-height: 0;
+  transform: none;
+  transition: none;
+  overflow: hidden auto;
+  z-index: auto;
+  background: var(--gd-panel);
+  border-right: 1px solid var(--gd-line);
+}
+body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
+/* Blend the legacy header band into the new panel. */
+#app.gd-redesign .menu-header {
+  font-family: var(--gd-ui-font);
+  background: var(--gd-panel);
+  border-bottom: 1px solid var(--gd-line);
+}
+
+/* Canvas — the dot-grid drafting substrate (the signature). */
+#app.gd-redesign #graph-container {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--gd-paper);
+  background-image: radial-gradient(var(--gd-grid) 1.1px, transparent 1.1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+
+/* ---- RIGHT INSPECTOR ---- */
+#gd-inspector {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  font-family: var(--gd-ui-font);
+  background: var(--gd-panel);
+  border-left: 1px solid var(--gd-line);
+}
+.gd-insp-empty {
+  margin: auto;
+  max-width: 280px;
+  padding: 0 28px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--gd-ink-2); /* ink-3 fails AA (3.63) on the panel; ink-2 clears it */
+}
+
+/* ---- Placeholder overlay for not-yet-rebuilt surfaces ---- */
+#gd-surface-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 250;
+  display: grid;
+  place-items: center;
+  font-family: var(--gd-ui-font);
+  background: var(--gd-paper);
+}
+#gd-surface-overlay[hidden] { display: none; }
+.gd-surface-card {
+  max-width: 380px;
+  padding: 26px 30px;
+  text-align: center;
+  border-radius: 14px;
+  background: var(--gd-panel);
+  border: 1px solid var(--gd-line);
+  box-shadow: var(--gd-shadow);
+}
+.gd-surface-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--gd-ink);
+}
+.gd-surface-sub {
+  margin: 8px 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--gd-ink-2);
+}
+.gd-surface-back {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--gd-flow);
+  background: var(--gd-flow);
+  color: var(--on-accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.gd-surface-back:hover { background: var(--gd-flow-2); }
+.gd-surface-back:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+
+/* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet, the
+ *      rail stays (it's already thin). Below the sidebar breakpoint the
+ *      explorer auto-collapses (handled by editor-prefs.js). ---- */
+@media (max-width: 1100px) {
+  /* Drop the inspector column to two columns (explorer | canvas). Once the
+     inspector is interactive it returns here as a bottom sheet on selection. */
+  #app.gd-redesign #main-container { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
+  body.sidebar-collapsed #app.gd-redesign #main-container { grid-template-columns: 0 minmax(0, 1fr); }
+  #gd-inspector { display: none; }
+}

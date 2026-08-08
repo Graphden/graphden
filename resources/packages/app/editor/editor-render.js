@@ -27,7 +27,11 @@ function fitInVisibleArea(padding) {
   const surfaceH = surface.clientHeight;
   const sidebar = document.getElementById('side-menu');
   const collapsed = document.body.classList.contains('sidebar-collapsed');
-  const sidebarW = (sidebar && !collapsed) ? sidebar.getBoundingClientRect().width : 0;
+  // Redesign 2026-08: the sidebar is its own grid column, not an overlay over
+  // the canvas, so `surface` already excludes it — don't compensate again or
+  // the graph pans off-centre to the right.
+  const redesign = document.getElementById('app')?.classList.contains('gd-redesign');
+  const sidebarW = (!redesign && sidebar && !collapsed) ? sidebar.getBoundingClientRect().width : 0;
   const visibleW = Math.max(surfaceW - sidebarW, 100);
 
   const z = clampZoom(Math.min(

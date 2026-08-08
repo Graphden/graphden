@@ -4919,6 +4919,8 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   font-weight: 600;
 }
 .gd-chip-ref { background: var(--gd-ref-wash); color: var(--gd-flow-ink); }
+.gd-chip-type { background: var(--gd-lit-wash); color: var(--gd-ink-2); }
+.gd-insp-pure { font-size: 12px; font-style: italic; color: var(--gd-ink-3); }
 
 /* ---- Placeholder overlay for not-yet-rebuilt surfaces ---- */
 #gd-surface-overlay {

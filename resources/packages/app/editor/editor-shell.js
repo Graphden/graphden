@@ -115,8 +115,35 @@
       html += '<div class="gd-insp-row"><span class="gd-insp-k">Parent</span>'
         + '<span class="gd-insp-v">' + parentChips + '</span></div>';
     }
-    html += '<p class="gd-insp-soon">Bindings, resolved types, effects and this '
-      + 'function’s own stats are coming here — rendered from the graph.</p>'
+
+    // Returns + Effects reuse the SAME server-computed `richTypes` the card
+    // strips read (keyed by fn name) — not a client re-derivation.
+    const rt = (typeof richTypes === 'object' && richTypes && fn.name)
+      ? richTypes[fn.name] : null;
+    let returnStr = (rt && typeof formatTypeHint === 'function')
+      ? formatTypeHint(rt.return) : null;
+    if (!returnStr && fn['return-type']) returnStr = fn['return-type'];
+    if (returnStr) {
+      html += '<div class="gd-insp-row"><span class="gd-insp-k">Returns</span>'
+        + '<span class="gd-insp-v"><span class="gd-chip gd-chip-type">'
+        + esc(returnStr) + '</span></span></div>';
+    }
+    const effects = (rt && Array.isArray(rt.effects)) ? rt.effects : [];
+    if (effects.length) {
+      const effChips = effects.map((e) => {
+        const nm = String(e).replace(/^:/, '');
+        return '<span class="effects-chip effects-chip-' + esc(nm) + '">'
+          + esc(nm) + '</span>';
+      }).join(' ');
+      html += '<div class="gd-insp-row"><span class="gd-insp-k">Effects</span>'
+        + '<span class="gd-insp-v gd-insp-effects">' + effChips + '</span></div>';
+    } else if (rt) {
+      html += '<div class="gd-insp-row"><span class="gd-insp-k">Effects</span>'
+        + '<span class="gd-insp-v gd-insp-pure">pure</span></div>';
+    }
+
+    html += '<p class="gd-insp-soon">Bindings, provenance and this function’s '
+      + 'own stats are coming here — rendered from the graph.</p>'
       + '</div>';
     el.innerHTML = html;
   }

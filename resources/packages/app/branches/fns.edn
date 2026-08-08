@@ -2013,10 +2013,45 @@
           :coll {:as :branches}
           :current-name {:as :current-name}}}
 
-  {:name :_bp-rows-hiccup
+  ;; --- Shared / Mine split -------------------------------------------
+  ;; A branch is "personal" (Mine) iff its name starts with the `~`
+  ;; convention prefix. No `owner` column exists on `:branch` (branches
+  ;; are unversioned identity rows), so the prefix IS the durable marker
+  ;; — also visible on the context-bar branch chip, so you always know
+  ;; when you're standing on a personal branch. The split is a pure-graph
+  ;; filter over the already main/current/alpha-sorted rows.
+  {:name :_bp-is-personal?-cb
+   :description "Filter callback — true iff `{:as :item}`'s branch name starts with `~`."
+   :parent :str-starts-with?
+   :args {:string {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+          :prefix {:value "~"}}}
+
+  {:name :_bp-is-shared?-cb
+   :description "Filter callback — complement of `:_bp-is-personal?-cb`. `{:as :item}` propagates into the wrapped starts-with test (deep free-arg walk through the non-HOF `:not`/`:str-starts-with?`/`:get` refs)."
+   :parent :not
+   :args {:value {:parent :str-starts-with?
+                  :args {:string {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+                         :prefix {:value "~"}}}}}
+
+  {:name :_bp-rows-mine
+   :parent :filter
+   :args {:pred :_bp-is-personal?-cb :coll :_bp-rows-sorted}}
+
+  {:name :_bp-rows-shared
+   :parent :filter
+   :args {:pred :_bp-is-shared?-cb :coll :_bp-rows-sorted}}
+
+  {:name :_bp-rows-mine-hiccup
    :parent :map
    :args {:func :_bp-row
-          :coll :_bp-rows-sorted
+          :coll :_bp-rows-mine
+          :current-name {:as :current-name}
+          :branches {:as :branches}}}
+
+  {:name :_bp-rows-shared-hiccup
+   :parent :map
+   :args {:func :_bp-row
+          :coll :_bp-rows-shared
           :current-name {:as :current-name}
           :branches {:as :branches}}}
 
@@ -2026,13 +2061,86 @@
   ;; branch). Both flow in from the partial handler.
   ;; ---------------------------------------------------------------------
 
+  ;; --- Mine section: header (+ "New personal branch" CTA) + rows ------
+  {:name :_bp-mine-add-btn
+   :description "Primary CTA — sets the create form to personal mode + focuses the input. Wired in editor-branches.js via `data-create-personal`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:class "branch-section-add"
+                          :type "button"
+                          :data-create-personal "1"
+                          :title "Create a branch only you work on (name gets a ~ prefix)"}}
+          :children [{:value "+ New personal branch"}]}}
+
+  {:name :_bp-mine-header
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-section-header"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "branch-section-title"}}
+                             :children [{:value "Mine"}]}}
+                     :_bp-mine-add-btn]}}
+
+  {:name :_bp-mine-empty?
+   :parent :empty?
+   :args {:coll :_bp-rows-mine}}
+
+  {:name :_bp-mine-hint
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-section-empty"}}
+          :children [{:value "No personal branches yet — create one to experiment privately, then drop it when done."}]}}
+
+  {:name :_bp-mine-listbox
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-section-rows"
+                          :role "listbox"
+                          :aria-label "Personal branches"}}
+          :children :_bp-rows-mine-hiccup}}
+
+  {:name :_bp-mine-content
+   :parent :if
+   :args {:test :_bp-mine-empty?
+          :then :_bp-mine-hint
+          :else :_bp-mine-listbox}}
+
+  {:name :_bp-mine-section
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-section"}}
+          :children [:_bp-mine-header :_bp-mine-content]}}
+
+  ;; --- Shared section: header + rows (always non-empty — main lives here)
+  {:name :_bp-shared-header
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-section-header"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "branch-section-title"}}
+                             :children [{:value "Shared"}]}}]}}
+
+  {:name :_bp-shared-listbox
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-section-rows"
+                          :role "listbox"
+                          :aria-label "Shared branches"}}
+          :children :_bp-rows-shared-hiccup}}
+
+  {:name :_bp-shared-section
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-section"}}
+          :children [:_bp-shared-header :_bp-shared-listbox]}}
+
   {:name :_bp-list-div
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "branch-popover-list"
-                          :role "listbox"
-                          :aria-label "Branches"}}
-          :children :_bp-rows-hiccup}}
+          :attrs {:value {:class "branch-popover-list"}}
+          :children [:_bp-mine-section :_bp-shared-section]}}
 
   {:name :_bp-create-placeholder
    :parent :str
@@ -2058,11 +2166,45 @@
                           :class "branch-popover-btn"}}
           :children [{:value "Create"}]}}
 
+  ;; Create-mode toggle: Shared (team-wide) vs Mine (personal, `~`
+  ;; prefix). editor-branches.js reads `data-create-mode`, toggles
+  ;; `.active`, swaps the input placeholder, and prepends `~` on submit
+  ;; when personal. Shared is the default active mode.
+  {:name :_bp-create-mode-shared-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:class "branch-create-mode-btn active"
+                          :type "button"
+                          :data-create-mode "shared"}}
+          :children [{:value "Shared"}]}}
+
+  {:name :_bp-create-mode-personal-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:class "branch-create-mode-btn"
+                          :type "button"
+                          :data-create-mode "personal"}}
+          :children [{:value "Mine"}]}}
+
+  {:name :_bp-create-mode-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-create-mode"
+                          :role "group"
+                          :aria-label "New branch visibility"}}
+          :children [:_bp-create-mode-shared-btn :_bp-create-mode-personal-btn]}}
+
+  {:name :_bp-create-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-popover-create-row"}}
+          :children [:_bp-create-input :_bp-create-btn]}}
+
   {:name :_bp-create-div
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "branch-popover-create"}}
-          :children [:_bp-create-input :_bp-create-btn]}}
+          :children [:_bp-create-mode-div :_bp-create-row]}}
 
   {:name :_bp-error-div
    :parent :hiccup

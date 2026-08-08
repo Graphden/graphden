@@ -37,10 +37,8 @@
       label: 'Workspaces',
       sub: 'Scope a project to a set of namespaces, and give each person a private branch overlay to tinker without touching the team. Being rebuilt next.',
     },
-    settings: {
-      label: 'Settings',
-      sub: 'Account, API tokens, and the org access model — who may touch what. Being rebuilt next.',
-    },
+    // Settings is a REAL surface (#gd-settings) — handled in gdShellSurface,
+    // not via this placeholder map.
   };
 
   function gdShellSurface(name, btn) {
@@ -58,23 +56,36 @@
 
     const overlay = document.getElementById('gd-surface-overlay');
     const operate = document.getElementById('gd-operate');
+    const settings = document.getElementById('gd-settings');
 
     // Build = the graph editor (explorer | canvas | inspector), no cover.
     if (name === 'build') {
       if (overlay) overlay.hidden = true;
       if (operate) operate.hidden = true;
+      if (settings) settings.hidden = true;
       return;
     }
 
     // Operate has a real surface (the relocated ops/admin panels).
     if (name === 'operate') {
       if (overlay) overlay.hidden = true;
+      if (settings) settings.hidden = true;
       if (operate) operate.hidden = false;
+      return;
+    }
+
+    // Settings has a real surface too (personal editor settings).
+    if (name === 'settings') {
+      if (overlay) overlay.hidden = true;
+      if (operate) operate.hidden = true;
+      if (settings) settings.hidden = false;
+      gdRenderSettings();
       return;
     }
 
     // The rest still show a placeholder until they're rebuilt.
     if (operate) operate.hidden = true;
+    if (settings) settings.hidden = true;
     if (!overlay) return;
     const surface = SURFACES[name] || { label: name, sub: '' };
     const title = overlay.querySelector('.gd-surface-title');
@@ -101,7 +112,9 @@
     // On main (or diff unavailable): show the placeholder with a review hint.
     const overlay = document.getElementById('gd-surface-overlay');
     const operate = document.getElementById('gd-operate');
+    const settings = document.getElementById('gd-settings');
     if (operate) operate.hidden = true;
+    if (settings) settings.hidden = true;
     const rail = document.getElementById('gd-rail');
     if (rail) {
       rail.querySelectorAll('.gd-rail-btn[data-surface]').forEach((b) => {
@@ -132,6 +145,96 @@
     if (typeof renderGraph === 'function') renderGraph(true);
   }
   window.gdToggleCardDetails = gdToggleCardDetails;
+
+  // ---- Settings surface -----------------------------------------------------
+  // Personal editor settings. Delegates to the ctxbar controls that already
+  // own their state (theme toggle, hard-reload) so there's a single source of
+  // truth; reads sign-in via window.isAuthenticated and capabilities off the
+  // body classes the fetch layer stamps (gd-tenancy / gd-no-write / gd-no-execute).
+  function gdRenderSettings() {
+    const dark = document.body.classList.contains('theme-dark');
+    const themeBtn = document.getElementById('gd-set-theme');
+    if (themeBtn) {
+      themeBtn.textContent = dark ? 'Dark' : 'Light';
+      themeBtn.onclick = () => {
+        const t = document.getElementById('theme-toggle-btn');
+        if (t) t.click();
+        gdRenderSettings();
+      };
+    }
+    const compact = document.body.classList.contains('gd-cards-compact');
+    const compactBtn = document.getElementById('gd-set-compact');
+    if (compactBtn) {
+      compactBtn.textContent = compact ? 'Compact' : 'Detailed';
+      compactBtn.onclick = () => { gdToggleCardDetails(null); gdRenderSettings(); };
+    }
+
+    const acct = document.getElementById('gd-set-account');
+    if (acct) {
+      const authed = (typeof window.isAuthenticated === 'function') && window.isAuthenticated();
+      if (authed) {
+        acct.innerHTML = '<div class="gd-set-row"><div class="gd-set-copy">'
+          + '<div class="gd-set-label">Signed in</div>'
+          + '<div class="gd-set-hint">Editing affordances are unlocked.</div></div>'
+          + '<button id="gd-set-signout" type="button" class="gd-set-btn">Sign out</button></div>';
+        const so = document.getElementById('gd-set-signout');
+        if (so) {
+          so.onclick = () => {
+            try { localStorage.removeItem('graphden.auth.password'); } catch (_) {}
+            window.location.reload();
+          };
+        }
+      } else {
+        acct.innerHTML = '<div class="gd-set-row"><div class="gd-set-copy">'
+          + '<div class="gd-set-label">Open — not signed in</div>'
+          + '<div class="gd-set-hint">Read-only. Sign in with the admin password to edit.</div></div>'
+          + '<button id="gd-set-signin" type="button" class="gd-set-btn">Sign in</button></div>';
+        const si = document.getElementById('gd-set-signin');
+        if (si) {
+          si.onclick = () => { const l = document.getElementById('auth-lock-btn'); if (l) l.click(); };
+        }
+      }
+    }
+
+    const hashEl = document.getElementById('gd-set-hash');
+    if (hashEl) {
+      hashEl.textContent = (typeof window.BUILD_HASH === 'string') ? window.BUILD_HASH : '—';
+    }
+    const reloadBtn = document.getElementById('gd-set-reload');
+    if (reloadBtn) {
+      reloadBtn.onclick = () => {
+        const r = document.getElementById('hard-reload-btn');
+        if (r) r.click(); else window.location.reload();
+      };
+    }
+    const verEl = document.getElementById('gd-set-version');
+    if (verEl && !verEl.dataset.loaded) {
+      verEl.dataset.loaded = '1';
+      fetch('/version')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((v) => {
+          if (!v) return;
+          verEl.innerHTML = ['backend', 'packages'].map((k) =>
+            '<div class="gd-set-ver"><span>' + k + '</span><code>'
+            + esc(String(v[k] || '—').slice(0, 12)) + '</code></div>').join('');
+        })
+        .catch(() => {});
+    }
+
+    const caps = document.getElementById('gd-set-caps');
+    if (caps) {
+      if (document.body.classList.contains('gd-tenancy')) {
+        const canWrite = !document.body.classList.contains('gd-no-write');
+        const canExec = !document.body.classList.contains('gd-no-execute');
+        const chip = (label, on) => '<span class="gd-cap ' + (on ? 'gd-cap-on' : 'gd-cap-off')
+          + '">' + (on ? '✓ ' : '✕ ') + label + '</span>';
+        caps.innerHTML = chip('write', canWrite) + chip('execute', canExec);
+      } else {
+        caps.innerHTML = '<div class="gd-set-hint">Single-tenant — every action is available.</div>';
+      }
+    }
+  }
+  window.gdRenderSettings = gdRenderSettings;
 
   // ---- Right inspector ------------------------------------------------------
   // First slice: identity Overview off DIRECT fn fields the client already has

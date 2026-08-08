@@ -349,7 +349,45 @@
              [:div {:class "gd-operate-head"}
               [:h1 "Operate"]
               [:p "Services, monitoring, packages and apps — the operator console for what keeps graphs running."]]
-             [:div {:id "gd-operate-panels"}]]]]}}
+             [:div {:id "gd-operate-panels"}]]
+            ;; SETTINGS surface — personal editor settings: appearance,
+            ;; account, and what this build is. Team access (grants / users
+            ;; / roles) is operational and lives in Operate, not here. The
+            ;; dynamic bits (theme/compact state, sign-in state, build
+            ;; hashes, capabilities) are populated by gdRenderSettings.
+            [:section {:id "gd-settings" :hidden "hidden" :aria-label "Settings"}
+             [:div {:class "gd-operate-head"}
+              [:h1 "Settings"]
+              [:p "Your editor — appearance, account, and what this build is. Team access (grants, users, roles) lives in Operate."]]
+             [:div {:class "gd-settings-grid"}
+              [:div {:class "gd-set-card"}
+               [:h2 "Appearance"]
+               [:div {:class "gd-set-row"}
+                [:div {:class "gd-set-copy"}
+                 [:div {:class "gd-set-label"} "Theme"]
+                 [:div {:class "gd-set-hint"} "Light or dark drafting board."]]
+                [:button {:id "gd-set-theme" :type "button" :class "gd-set-btn"} "—"]]
+               [:div {:class "gd-set-row"}
+                [:div {:class "gd-set-copy"}
+                 [:div {:class "gd-set-label"} "Graph cards"]
+                 [:div {:class "gd-set-hint"} "Compact hides the type / effect strips until you reveal them."]]
+                [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]]
+              [:div {:class "gd-set-card"}
+               [:h2 "Account"]
+               [:div {:id "gd-set-account"}]]
+              [:div {:class "gd-set-card"}
+               [:h2 "About this build"]
+               [:div {:class "gd-set-row"}
+                [:div {:class "gd-set-copy"}
+                 [:div {:class "gd-set-label"} "Frontend"]
+                 [:div {:class "gd-set-hint"} "The bundle hash your browser is running."]]
+                [:code {:id "gd-set-hash" :class "gd-set-code"} "—"]]
+               [:div {:id "gd-set-version" :class "gd-set-versions"}]
+               [:button {:id "gd-set-reload" :type "button" :class "gd-set-btn"} "Reload editor"]]
+              [:div {:class "gd-set-card"}
+               [:h2 "Access"]
+               [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Operate surface."]
+               [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]]]}}
 
   ;; =============================================================================
   ;; HASH-BUSTED ASSET URLs + LINK/SCRIPT-SRC ELEMENTS

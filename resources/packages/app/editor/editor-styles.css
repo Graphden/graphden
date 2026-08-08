@@ -5170,6 +5170,68 @@ body.gd-cards-compact .effects-strip { display: none; }
 }
 #gd-operate-panels > * { min-width: 0; }
 
+/* ---- Settings surface (personal editor settings) ---- */
+#gd-settings {
+  position: absolute;
+  inset: 0;
+  z-index: 250;
+  overflow: auto;
+  padding: 26px 30px 60px;
+  font-family: var(--gd-ui-font);
+  background: var(--gd-paper);
+}
+#gd-settings[hidden] { display: none; }
+.gd-settings-grid {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.gd-set-card {
+  min-width: 0;
+  background: var(--gd-panel);
+  border: 1px solid var(--gd-line);
+  border-radius: var(--gd-r);
+  padding: 16px 18px;
+}
+.gd-set-card h2 {
+  margin: 0 0 10px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gd-ink-3);
+}
+.gd-set-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 0;
+}
+.gd-set-row + .gd-set-row { border-top: 1px solid var(--gd-line); }
+.gd-set-copy { min-width: 0; }
+.gd-set-label { font-size: 13px; color: var(--gd-ink); }
+.gd-set-hint { margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--gd-ink-3); }
+.gd-set-btn {
+  flex: none;
+  font-size: 12px; padding: 5px 12px; cursor: pointer;
+  background: var(--gd-panel); color: var(--gd-ink);
+  border: 1px solid var(--gd-line-2); border-radius: var(--gd-r-sm);
+}
+.gd-set-btn:hover { border-color: var(--gd-flow); color: var(--gd-flow); }
+.gd-set-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+.gd-set-code {
+  font-family: var(--gd-mono); font-size: 12px; color: var(--gd-ink-2);
+  background: var(--gd-paper-2); padding: 2px 6px; border-radius: 4px;
+}
+.gd-set-versions { margin: 8px 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.gd-set-ver { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--gd-ink-3); }
+.gd-set-ver code { font-family: var(--gd-mono); color: var(--gd-ink-2); }
+.gd-set-caps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.gd-cap {
+  font-family: var(--gd-mono); font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 6px;
+}
+.gd-cap-on { background: var(--gd-flow-wash); color: var(--gd-flow-ink); }
+.gd-cap-off { background: var(--gd-crit-wash); color: var(--gd-crit); }
+
 /* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet, the
  *      rail stays (it's already thin). Below the sidebar breakpoint the
  *      explorer auto-collapses (handled by editor-prefs.js). ---- */

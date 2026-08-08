@@ -154,10 +154,42 @@
         + '<span class="gd-insp-v gd-insp-pure">pure</span></div>';
     }
 
-    html += '<p class="gd-insp-soon">Bindings, provenance and this function’s '
-      + 'own stats are coming here — rendered from the graph.</p>'
+    html += '<div class="gd-insp-runs-head">Runs &amp; stats</div>'
+      + '<div id="gd-insp-runs" class="gd-insp-runs">'
+      + '<div class="gd-insp-runs-loading">Loading runs…</div></div>'
+      + '<p class="gd-insp-soon">Bindings and provenance are coming here next — '
+      + 'rendered from the graph.</p>'
       + '</div>';
     el.innerHTML = html;
+    gdLoadInspectorRuns(fnId);
+  }
+
+  // Per-fn runs + 7-day stats: reuse the existing server partial
+  // `GET /partials/execute-history?fn-id=` (which already renders the
+  // "N runs · N failed · avg N ms" strip + this fn's run rows). fetch() is
+  // branch/auth-wrapped (editor-branches.js). A token guards against a stale
+  // response landing after the user has already selected another fn.
+  let inspRunsToken = null;
+  function gdLoadInspectorRuns(fnId) {
+    inspRunsToken = fnId;
+    const url = '/partials/execute-history?fn-id=' + encodeURIComponent(fnId);
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+      .then((txt) => {
+        if (inspRunsToken !== fnId) return; // selection moved on
+        const host = document.getElementById('gd-insp-runs');
+        if (!host) return;
+        host.innerHTML = txt;
+        if (typeof htmx !== 'undefined' && htmx.process) htmx.process(host);
+      })
+      .catch(() => {
+        if (inspRunsToken !== fnId) return;
+        const host = document.getElementById('gd-insp-runs');
+        if (host) {
+          host.innerHTML = '<div class="gd-insp-runs-loading">'
+            + 'Sign in to see this function’s runs.</div>';
+        }
+      });
   }
 
   window.gdInspectorRender = gdInspectorRender;

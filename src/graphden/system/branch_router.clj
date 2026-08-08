@@ -981,11 +981,42 @@
                           id')))))))))))
 
 
+;; Static liveness path — the ONE endpoint that must answer WITHOUT the
+;; compiled registry. Every other route (including `/health`) is an
+;; `app.routes` graph fn reached through `ring-callable-for-ctx` →
+;; `cr/registry` below, so while a pod runs a full recompile (~50 s, holding
+;; the ctx invalidation lock) they all block. A k8s livenessProbe / Docker
+;; HEALTHCHECK pointed at such a path would kill a busy-but-alive pod, discard
+;; its in-flight compile, and force a cold boot (~115 s) — a slower outage than
+;; the rebuild it interrupted. `/livez` proves only "this process's HTTP worker
+;; can answer" (liveness); readiness — can it actually serve? — stays `/health`
+;; (registry-warm). Matched here, before any registry-touching seam, so it is
+;; immune to the rebuild. Path-only (any method); probes GET it.
+(def ^:private liveness-path "/livez")
+
+
+(def ^:private liveness-response
+  {:status 200
+   :headers {"Content-Type" "application/json"}
+   :body "{\"status\":\"alive\"}"})
+
+
+(declare dispatch*)
+
+
 (defn dispatch
   "Top-level Ring middleware. Reads `extract-branch-ref` off the
    request, resolves the branch, and delegates to the per-branch
    handler. Unknown branch refs surface a 400 rather than silently
-   misrouting."
+   misrouting. `/livez` short-circuits FIRST as a registry-independent
+   liveness probe (see `liveness-path`)."
+  [router request]
+  (if (= liveness-path (:uri request))
+    liveness-response
+    (dispatch* router request)))
+
+
+(defn- dispatch*
   [router request]
   (let [base-ctx (:base-ctx router)
         ;; Realize a streaming body up front, ONCE for every consumer below —

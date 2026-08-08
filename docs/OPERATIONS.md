@@ -86,9 +86,19 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
 
 ## Health & readiness
 
-- `GET /health` — liveness/readiness signal. A pod mid-cold-boot (compiling the
-  registry) is not yet ready; give the readiness probe a start-period generous
-  enough for the boot compile (see the Dockerfile healthcheck `start-period`).
+- `GET /health` — **readiness** signal (and startup). It is a graph fn behind
+  the compiled registry, so it stays 200 only while the registry is warm: a pod
+  mid-cold-boot, or mid *runtime* full-recompile (~50 s), reads not-ready and is
+  correctly de-rotated. Give the startup probe a start-period generous enough
+  for the boot compile (see the Dockerfile healthcheck `start-period`).
+- `GET /livez` — **liveness** signal. A static, registry-independent 200 (it
+  short-circuits in `branch-router/dispatch` before any registry access). Point
+  the k8s livenessProbe / any restart-on-unhealthy check HERE, never at
+  `/health`: a liveness probe on `/health` kills a busy-but-alive pod during a
+  runtime recompile → discards the in-flight compile → cold boot (~115 s)
+  cascade. `/livez` keeps the pod alive; `/health` (readiness) de-rotates it
+  until the compile lands. (Helm chart: `startup + readiness → /health`,
+  `liveness → /livez`.)
 - `GET /version` — the three build-section hashes (`bb verify` consumes these).
 - `GET /metrics` — a JVM + structural-counter snapshot (JSON). For a Prometheus
   scrape target, see the observability notes in [SCALING.md](SCALING.md).

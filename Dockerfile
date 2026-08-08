@@ -47,6 +47,17 @@ EXPOSE 8080
 # sweep + compile-eager); the prior 30s let healthchecks fire before
 # /health was bound, killing the container after 3 retries (~120s
 # into life) — visible as a docker restart loop under any test load.
+#
+# Deliberately /health (READINESS): plain `docker compose` never
+# restarts on `unhealthy`, so this is only a status/`depends_on` signal,
+# and "healthy" here should mean "warm and serving". If you ever add a
+# restart-on-unhealthy sidecar (autoheal) OR run under an orchestrator
+# that restarts on this check, point THAT restart at `/livez` instead —
+# a static registry-independent liveness path — or a runtime full
+# recompile (~50s, during which /health reads not-ready) will trigger a
+# restart that discards the compile and forces a slower cold boot. See
+# the k8s probe split in deploy/helm/.../statefulset.yaml and
+# docs/OPERATIONS.md § Health & readiness.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1
 

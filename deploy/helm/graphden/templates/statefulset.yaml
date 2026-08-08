@@ -93,6 +93,20 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          # Canonical k8s probe split (see branch_router/dispatch `liveness-path`):
+          #  - startup  → /health: "have I finished warming?" A pod that can't
+          #    compile the graph within the generous startupFailureThreshold is
+          #    genuinely stuck and SHOULD be restarted (boot self-heal). /health
+          #    is a graph fn behind the compiled registry, so it only passes once
+          #    the registry is warm — exactly the "started" signal we want.
+          #  - liveness → /livez: "am I alive (not deadlocked)?" MUST NOT depend
+          #    on the compiled registry. A runtime full recompile (~50s) blocks
+          #    /health; pointing liveness there killed a busy-but-alive pod
+          #    mid-compile → cold boot (~115s) cascade. /livez is a static
+          #    registry-independent 200, so a compiling pod stays alive (and is
+          #    correctly de-rotated by readiness below).
+          #  - readiness → /health: "can I serve right now?" — de-rotates a pod
+          #    while it recompiles, then re-adds it. Traffic gating, not restart.
           startupProbe:
             httpGet:
               path: /health
@@ -101,7 +115,7 @@ spec:
             failureThreshold: {{ .Values.probes.startupFailureThreshold }}
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: http
             periodSeconds: {{ .Values.probes.livenessPeriodSeconds }}
           readinessProbe:

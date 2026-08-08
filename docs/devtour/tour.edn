@@ -353,11 +353,14 @@
            compiled-registry and graph-cache atoms. This is how a branch gets
            its own executor without re-sharding the graph."
      :see [[:executor "create-context"]]}
-    {:ns graphden.system.branch-router :defn dispatch
-     :say "The top-level Ring middleware: extract the branch ref (header or
+    {:ns graphden.system.branch-router :defn dispatch*
+     :say "The top-level Ring dispatch: extract the branch ref (header or
            query), resolve it to a branch-id, and route the request to that
            branch's lazily-built handler (400 on an unknown branch). Where a
-           live request finally lands in the correct per-branch context."}]}
+           live request finally lands in the correct per-branch context. Its
+           public wrapper `dispatch` first short-circuits `/livez` — the one
+           registry-independent liveness path — so a pod busy on a full
+           recompile still answers its probe."}]}
 
   {:id :types
    :title "Type system"
@@ -682,8 +685,8 @@
      :say "The branch-routing wrap: delegate the Ring request to the correct
            per-branch handler resolved from the router above. This is how ONE
            server multiplexes requests across branch-scoped graphs — the package
-           side of the versioning block's `dispatch`."
-     :see [[:versioning "dispatch"]]}
+           side of the versioning block's `dispatch*`."
+     :see [[:versioning "dispatch*"]]}
     {:file "resources/packages/web/ring-adapter/impls.clj" :defn authenticate-request
      :say "The auth gate applied to a request inside the handler chain before a
            page or action runs. Sits between routing/dispatch and the handler

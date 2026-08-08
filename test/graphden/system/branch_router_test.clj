@@ -125,6 +125,33 @@
         (is (= 1 (count @calls)))))))
 
 
+(deftest dispatch-livez-is-a-registry-independent-liveness-probe
+  (testing "/livez short-circuits to a static 200 BEFORE any handler / registry
+            access — a pod mid-full-recompile (which stalls /health) still
+            answers liveness, so the probe can't kill a busy-but-alive pod"
+    (let [handler-fired (atom false)
+          ;; Every branch handler THROWS: if dispatch reached the
+          ;; branch-resolution / registry chain, this test would blow up.
+          router (fake-router {default-id
+                               {:handler (fn [_]
+                                           (reset! handler-fired true)
+                                           (throw (ex-info "registry gate reached" {})))}})
+          resp (br/dispatch router {:uri "/livez" :headers {} :query-string nil})]
+      (is (= 200 (:status resp)))
+      (is (= "application/json" (get-in resp [:headers "Content-Type"])))
+      (is (re-find #"\"status\":\"alive\"" (:body resp)))
+      (is (false? @handler-fired)
+          "/livez must not reach the branch handler / compiled registry"))
+    (testing "a non-/livez path still runs the normal dispatch chain"
+      (binding [br/*resolve-branch-id-override* (stub-resolutions {})]
+        (let [router (fake-router {default-id
+                                   {:handler (fn [_] {:status 200 :body "served"})}})
+              resp (br/dispatch router {:uri "/api/graph/entities"
+                                        :headers {} :query-string nil})]
+          (is (= "served" (:body resp))
+              "ordinary routes go through branch resolution as before"))))))
+
+
 (deftest dispatch-routes-by-header
   (testing "X-Graphden-Branch hits the corresponding per-branch handler"
     (binding [br/*resolve-branch-id-override*

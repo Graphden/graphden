@@ -309,7 +309,12 @@ curl http://localhost:9002/health
 
 The Docker health check probes `http://localhost:8080/health` (inside
 the container) every 30s, with a 90s start-period covering the full
-cold boot.
+cold boot. `/health` is the **readiness** signal (a graph fn behind the
+compiled registry — 200 only while warm). For **liveness** — a restart
+decision — use `GET /livez`, a static registry-independent 200: pointing
+a restart-on-unhealthy check at `/health` would kill a pod busy on a
+runtime recompile and force a slower cold boot. See docs/OPERATIONS.md
+§ Health & readiness.
 
 ## JVM Configuration
 

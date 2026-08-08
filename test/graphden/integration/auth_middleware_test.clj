@@ -86,6 +86,17 @@
      :body nil}))
 
 
+(deftest livez-served-unauthenticated-through-the-real-router-test
+  (testing "GET /livez with NO token → 200 alive, through the real branch
+            router — proves the liveness probe reaches its static bypass
+            before per-route auth AND without the compiled registry (a
+            recompiling pod still answers liveness)"
+    (let [resp (get-with-headers "/livez" {})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"\"status\":\"alive\"" (str (:body resp))))
+      (is (= "application/json" (get-in resp [:headers "Content-Type"]))))))
+
+
 (deftest auth-bearer-token-accepted-test
   (testing "GET /partials/branch-popover with valid Bearer token → 200"
     (let [resp (get-with-headers

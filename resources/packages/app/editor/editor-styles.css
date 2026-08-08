@@ -125,7 +125,7 @@
   /* ink ramp */
   --gd-ink: #181b1c;
   --gd-ink-2: #4a5254;
-  --gd-ink-3: #7c8688;
+  --gd-ink-3: #667072; /* darkened from #7c8688 to clear WCAG AA (4.5:1) as muted text on the panels */
   --gd-ink-4: #a6afb0;
   /* structural lines + the dot-grid substrate (the signature) */
   --gd-line: #dce0df;
@@ -4638,15 +4638,17 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
   height: 100vh;
   display: grid;
   grid-template-columns: var(--gd-rail-w) 1fr;
-  /* A FIXED-height row track (not `1fr`) so the tall explorer content can't
-     blow the track out past the viewport — `minmax(0,1fr)` still resolved to
-     the content's max-content here. Descendants then scroll within it. */
-  grid-template-rows: 100vh;
+  /* FIXED-height row tracks (not `1fr`) so the tall explorer content can't
+     blow a track out past the viewport — `minmax(0,1fr)` resolved to the
+     content's max-content here. The rail spans both rows; the context bar
+     tops the main column. Descendants scroll within the main track. */
+  grid-template-rows: var(--gd-ctxbar-h) calc(100vh - var(--gd-ctxbar-h));
+  grid-template-areas: "rail bar" "rail main";
 }
 
 /* ---- LEFT RAIL ---- */
 #gd-rail {
-  grid-column: 1;
+  grid-area: rail;
   z-index: 300;
   display: flex;
   flex-direction: column;
@@ -4696,9 +4698,95 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
 .gd-rail-btn:hover .gd-rail-cap,
 .gd-rail-btn:focus-visible .gd-rail-cap { opacity: 1; transform: none; }
 
+/* ---- CONTEXT BAR ---- */
+#gd-ctxbar {
+  grid-area: bar;
+  z-index: 280;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  font-family: var(--gd-ui-font);
+  background: var(--gd-panel);
+  border-bottom: 1px solid var(--gd-line);
+}
+.gd-ctx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--gd-line-2);
+  border-radius: 8px;
+  background: var(--gd-paper-2);
+  color: var(--gd-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+.gd-ctx-chip:hover { border-color: var(--gd-ink-4); }
+.gd-ctx-chip:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+.gd-ctx-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gd-flow); }
+.gd-ctx-k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gd-ink-3);
+}
+#gd-search {
+  flex: 1 1 auto;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--gd-line-2);
+  border-radius: 8px;
+  background: var(--gd-paper-2);
+  color: var(--gd-ink-3);
+  font-size: 12.5px;
+  cursor: text;
+}
+#gd-search svg { width: 15px; height: 15px; flex: none; }
+.gd-kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--gd-line-2);
+  border-radius: 4px;
+  font-family: var(--gd-mono);
+  font-size: 10.5px;
+  color: var(--gd-ink-3);
+}
+.gd-bar-spacer { flex: 1 1 auto; }
+/* The relocated theme/collapse/branch/org/auth mounts flow inline here. */
+#gd-ctxbar #prefs-mount,
+#gd-ctxbar #branch-mount,
+#gd-ctxbar #org-mount,
+#gd-ctxbar #auth-mount { display: flex; align-items: center; gap: 6px; }
+
+/* ---- Explorer slim head (brand + mounts moved to the rail / context bar) ---- */
+.gd-exp-head {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 14px;
+  font-family: var(--gd-ui-font);
+  border-bottom: 1px solid var(--gd-line);
+}
+.gd-exp-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gd-ink-3);
+}
+
 /* ---- MAIN: explorer | canvas | inspector ---- */
 #app.gd-redesign #main-container {
-  grid-column: 2;
+  grid-area: main;
   position: relative;
   height: 100%;
   min-height: 0;

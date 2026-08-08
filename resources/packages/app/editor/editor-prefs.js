@@ -164,11 +164,9 @@ function toggleCollapsed(targetCollapsed) {
 
 function buildPrefsButtons() {
   const mount = document.getElementById('prefs-mount');
-  const actions = document.querySelector('.menu-header-actions');
-  if (!mount || !actions) return;
-  // Theme + hard-reload sit in #prefs-mount (leftmost). The collapse
-  // button is appended to the actions row directly, AFTER #auth-mount,
-  // so the visual order is: theme | reload | lock | collapse.
+  if (!mount) return;
+  // Redesign 2026-08: theme, hard-reload and collapse all sit together in
+  // #prefs-mount (now in the context bar). Order: theme | reload | collapse.
   mount.innerHTML =
     '<button id="theme-toggle-btn" class="prefs-btn" title="Toggle theme"></button>'
     + '<button id="hard-reload-btn"  class="prefs-btn" title="Reload (drop cache)">' + RELOAD_SVG + '</button>';
@@ -176,7 +174,7 @@ function buildPrefsButtons() {
   collapseBtn.id = 'sidebar-collapse-btn';
   collapseBtn.className = 'prefs-btn';
   collapseBtn.title = 'Collapse sidebar';
-  actions.appendChild(collapseBtn);
+  mount.appendChild(collapseBtn);
   document.getElementById('theme-toggle-btn').addEventListener('click', () => {
     const dark = !document.body.classList.contains('theme-dark');
     applyTheme(dark);

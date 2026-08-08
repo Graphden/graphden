@@ -196,38 +196,38 @@
               [:circle {:cx "12" :cy "12" :r "3"}]
               [:path {:d "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"}]]
              [:span {:class "gd-rail-cap"} "Settings"]]]
+           ;; CONTEXT BAR — persistent across surfaces (redesign 2026-08).
+           ;; Hosts the workspace scope, the branch chip, org switcher, a
+           ;; global search, and (right) the theme/collapse + auth mounts that
+           ;; used to crowd the explorer header.
+           [:header {:id "gd-ctxbar"}
+            [:button {:type "button" :id "gd-ws-chip" :class "gd-ctx-chip"
+                      :title "Switch workspace (coming soon)"}
+             [:span {:class "gd-ctx-dot"}]
+             [:span {:class "gd-ctx-k"} "workspace"]
+             [:b "All functions"]]
+            [:div {:id "branch-mount"}]
+            [:div {:id "org-mount"}]
+            [:div {:id "gd-search" :role "search"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor"
+                    :stroke-width "1.8" :aria-hidden "true"}
+              [:circle {:cx "11" :cy "11" :r "7"}]
+              [:path {:d "M20 20l-3.5-3.5"}]]
+             [:span "Search functions, types, secrets…"]
+             [:span {:class "gd-kbd"} "⌘K"]]
+            [:span {:class "gd-bar-spacer"}]
+            [:div {:id "prefs-mount"}]
+            [:div {:id "auth-mount"}]]
            [:div {:id "main-container"}
             ;; Side menu \u2014 semantic <aside> + ARIA label since the
             ;; visible <h2>"Graphden" doubles as the app title rather
             ;; than the sidebar's heading.
             [:aside {:id "side-menu" :aria-label "Function browser"}
-             [:div {:class "menu-header"}
-              ;; Brand row — the λ mark (three nodes + two edges, docs/brand)
-              ;; over `currentColor` so `.menu-logo`'s `color: var(--accent)`
-              ;; themes it (Graphden Blue light / #4D94FF dark) — beside the
-              ;; wordmark.
-              [:div {:class "menu-brand"}
-               [:svg.menu-logo {:viewBox "0 0 32 32" :fill "none"
-                                :width "22" :height "22" :aria-hidden "true"}
-                [:g {:stroke "currentColor" :stroke-width "3" :stroke-linecap "round"}
-                 [:line {:x1 "9" :y1 "6" :x2 "25" :y2 "26"}]
-                 [:line {:x1 "17" :y1 "16" :x2 "8" :y2 "26"}]]
-                [:g {:fill "currentColor"}
-                 [:circle {:cx "9" :cy "6" :r "3"}]
-                 [:circle {:cx "25" :cy "26" :r "3"}]
-                 [:circle {:cx "8" :cy "26" :r "3"}]]]
-               [:h2 "Graphden"]]
-              ;; Toolbar row — its OWN row so a wide branch chip or the
-              ;; staggered JS mounts can't push the title around. `editor-
-              ;; prefs.js` mounts theme + collapse here on DOMContentLoaded;
-              ;; `editor-branches.js` the branch chip; `editor-auth.js` the
-              ;; lock. The "+ New namespace" affordance lives at the bottom
-              ;; of `#entity-list`.
-              [:div {:class "menu-header-actions"}
-               [:div {:id "prefs-mount"}]
-               [:div {:id "org-mount"}]
-               [:div {:id "branch-mount"}]
-               [:div {:id "auth-mount"}]]]
+             ;; Redesign 2026-08: the brand moved to the rail and the
+             ;; branch/org/auth/theme mounts moved to the context bar
+             ;; (#gd-ctxbar). The explorer keeps just a slim title.
+             [:div {:class "gd-exp-head"}
+              [:span {:class "gd-exp-title"} "Explorer"]]
              [:div {:id "search-bar" :role "search"}
               [:label {:for "search-input" :class "visually-hidden"} "Filter functions"]
               [:input {:id "search-input" :type "text" :placeholder "Filter..."

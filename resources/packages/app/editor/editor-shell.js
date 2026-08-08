@@ -40,13 +40,25 @@
     }
 
     const overlay = document.getElementById('gd-surface-overlay');
-    if (!overlay) return;
+    const operate = document.getElementById('gd-operate');
 
+    // Build = the graph editor (explorer | canvas | inspector), no cover.
     if (name === 'build') {
-      overlay.hidden = true;
+      if (overlay) overlay.hidden = true;
+      if (operate) operate.hidden = true;
       return;
     }
 
+    // Operate has a real surface (the relocated ops/admin panels).
+    if (name === 'operate') {
+      if (overlay) overlay.hidden = true;
+      if (operate) operate.hidden = false;
+      return;
+    }
+
+    // The rest still show a placeholder until they're rebuilt.
+    if (operate) operate.hidden = true;
+    if (!overlay) return;
     const surface = SURFACES[name] || { label: name, sub: '' };
     const title = overlay.querySelector('.gd-surface-title');
     const sub = overlay.querySelector('.gd-surface-sub');

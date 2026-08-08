@@ -620,34 +620,39 @@ function updateEntityList(data) {
     ? buildNsTree({ namespaces: data.namespaces, fns: _searchResults || [] })
     : buildNsTree(data);
 
-  // Admin sections (Grants / Users / Packages) — hidden while searching.
-  // Each returns null unless applicable.
+  // Admin / ops sections (Grants / Users / Packages / Stats / Errors / …) —
+  // hidden while searching, each returns null unless applicable. Redesign
+  // 2026-08: these mount into the OPERATE surface (#gd-operate-panels), not the
+  // explorer, so the sidebar stays a clean namespace browser. Falls back to the
+  // explorer list if the operate pane isn't present.
+  const opsHost = document.getElementById('gd-operate-panels') || list;
+  if (!searchMode && opsHost !== list) opsHost.innerHTML = '';
   if (!searchMode && typeof buildGrantsAdminSection === 'function') {
-    mountAdminSection(list, 'grants', buildGrantsAdminSection);
+    mountAdminSection(opsHost, 'grants', buildGrantsAdminSection);
   }
   if (!searchMode && typeof buildUsersAdminSection === 'function') {
-    mountAdminSection(list, 'users', buildUsersAdminSection);
+    mountAdminSection(opsHost, 'users', buildUsersAdminSection);
   }
   if (!searchMode && typeof buildRolesAdminSection === 'function') {
-    mountAdminSection(list, 'roles', buildRolesAdminSection);
+    mountAdminSection(opsHost, 'roles', buildRolesAdminSection);
   }
   if (!searchMode && typeof buildOrgsAdminSection === 'function') {
-    mountAdminSection(list, 'orgs', buildOrgsAdminSection);
+    mountAdminSection(opsHost, 'orgs', buildOrgsAdminSection);
   }
   if (!searchMode && typeof buildPackagesSection === 'function') {
-    mountAdminSection(list, 'packages', buildPackagesSection);
+    mountAdminSection(opsHost, 'packages', buildPackagesSection);
   }
   if (!searchMode && typeof buildStatsSection === 'function') {
-    mountAdminSection(list, 'stats', buildStatsSection);
+    mountAdminSection(opsHost, 'stats', buildStatsSection);
   }
   if (!searchMode && typeof buildAppsSection === 'function') {
-    mountAdminSection(list, 'apps', buildAppsSection);
+    mountAdminSection(opsHost, 'apps', buildAppsSection);
   }
   if (!searchMode && typeof buildErrorsSection === 'function') {
-    mountAdminSection(list, 'errors', buildErrorsSection);
+    mountAdminSection(opsHost, 'errors', buildErrorsSection);
   }
   if (!searchMode && typeof buildTypeErrorsSection === 'function') {
-    mountAdminSection(list, 'type-errors', buildTypeErrorsSection);
+    mountAdminSection(opsHost, 'type-errors', buildTypeErrorsSection);
   }
 
   // Top-level namespaces (sorted) — skip any with nothing visible under

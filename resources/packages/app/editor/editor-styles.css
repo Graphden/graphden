@@ -4970,6 +4970,41 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 .gd-surface-back:hover { background: var(--gd-flow-2); }
 .gd-surface-back:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 
+/* ---- OPERATE surface — relocated ops/admin panels ---- */
+#gd-operate {
+  position: absolute;
+  inset: 0;
+  z-index: 250;
+  overflow: auto;
+  padding: 26px 30px 60px;
+  font-family: var(--gd-ui-font);
+  background: var(--gd-paper);
+}
+#gd-operate[hidden] { display: none; }
+.gd-operate-head { max-width: 1100px; margin: 0 auto 18px; }
+.gd-operate-head h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--gd-ink);
+}
+.gd-operate-head p {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--gd-ink-2);
+}
+#gd-operate-panels {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+#gd-operate-panels > * { min-width: 0; }
+
 /* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet, the
  *      rail stays (it's already thin). Below the sidebar breakpoint the
  *      explorer auto-collapses (handled by editor-prefs.js). ---- */

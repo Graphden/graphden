@@ -331,7 +331,16 @@
               [:div {:class "gd-surface-sub"} ""]
               [:button {:type "button" :class "gd-surface-back"
                         :onclick "gdShellSurface('build', document.querySelector('#gd-rail .gd-rail-btn[data-surface=build]'))"}
-               "Back to Build"]]]]]}}
+               "Back to Build"]]]
+            ;; OPERATE surface — the ops/admin panels (packages, monitoring,
+            ;; errors, type-errors, grants, users, apps) mount here instead of
+            ;; crowding the explorer. Shown when the Operate rail button is
+            ;; active; editor-sidebar.js renders panels into #gd-operate-panels.
+            [:section {:id "gd-operate" :hidden "hidden" :aria-label "Operate"}
+             [:div {:class "gd-operate-head"}
+              [:h1 "Operate"]
+              [:p "Services, monitoring, packages and apps — the operator console for what keeps graphs running."]]
+             [:div {:id "gd-operate-panels"}]]]]}}
 
   ;; =============================================================================
   ;; HASH-BUSTED ASSET URLs + LINK/SCRIPT-SRC ELEMENTS

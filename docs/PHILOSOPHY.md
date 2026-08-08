@@ -132,10 +132,14 @@ made internally and can be re-evaluated at any time, because no
 external party is locked into the previous choice.
 
 This is both a reason to build the tool from scratch (existing tools
-bake in someone else's trade-offs) and a guard rail for accepting
-external pressure: a contribution or feature request that would put
-someone else in vendor-position for the author is rejected by
-default.
+bake in someone else's trade-offs) and a guard rail for weighing
+external pressure: the contributions that land easiest are the ones
+that add capability without putting anyone else in vendor-position for
+the author — a new base-fn, a package, a bug fix, a doc, a feature the
+author would also reach for. A request that would lock the author into
+supporting a use case they don't share isn't a bad idea; it's just one
+the author can't take stewardship of, and it fits better as a
+downstream package or fork than in the core.
 
 Practical consequences:
 
@@ -147,9 +151,13 @@ Practical consequences:
   original constraint, not its current popularity. A pattern adopted
   because of a constraint that no longer applies is a candidate for
   removal, not preservation.
-- Contributors are welcomed but **cannot create vendor obligations**:
-  a feature accepted into open core must not lock the author into
-  supporting a use case the author does not also have.
+- Contributions are genuinely welcome — the surest path in is one that
+  **adds capability without adding an obligation**: something that
+  extends what the graph can express (a base-fn, a package, a fix, a
+  doc) rather than one that commits the author to maintaining a use case
+  they don't share. When a contribution needs that kind of ongoing
+  stewardship, the open architecture — packages and forks — is the place
+  for it, and the copy-on-write fork door stays open by design.
 
 This is the load-bearing reason for "tool for myself first, product
 second" — only the author-as-sole-source-of-trade-offs framing

@@ -44,6 +44,10 @@
   };
 
   function gdShellSurface(name, btn) {
+    // Review is an ACTION — it opens the branch-diff modal over the current
+    // surface (this branch vs main), not a persistent surface. Handle it before
+    // touching rail/surface state so Build stays underneath the modal.
+    if (name === 'review') { gdOpenReview(); return; }
     const rail = document.getElementById('gd-rail');
     if (rail) {
       const buttons = rail.querySelectorAll('.gd-rail-btn[data-surface]');
@@ -81,6 +85,40 @@
   }
 
   window.gdShellSurface = gdShellSurface;
+
+  // Review surface = the branch-diff (this branch vs main). Reuses the existing
+  // showBranchDiff modal (editor-branch-diff.js). On main there's nothing to
+  // review, so guide the user to switch branches via the placeholder pane.
+  function gdOpenReview() {
+    const current = (typeof getCurrentBranchName === 'function')
+      ? getCurrentBranchName() : 'main';
+    const onMain = (typeof isOnDefaultBranch === 'function')
+      ? isOnDefaultBranch() : (current === 'main');
+    if (!onMain && typeof window.showBranchDiff === 'function') {
+      window.showBranchDiff('main', current);
+      return;
+    }
+    // On main (or diff unavailable): show the placeholder with a review hint.
+    const overlay = document.getElementById('gd-surface-overlay');
+    const operate = document.getElementById('gd-operate');
+    if (operate) operate.hidden = true;
+    const rail = document.getElementById('gd-rail');
+    if (rail) {
+      rail.querySelectorAll('.gd-rail-btn[data-surface]').forEach((b) => {
+        b.setAttribute('aria-pressed', b.getAttribute('data-surface') === 'review' ? 'true' : 'false');
+      });
+    }
+    if (overlay) {
+      const t = overlay.querySelector('.gd-surface-title');
+      const s = overlay.querySelector('.gd-surface-sub');
+      if (t) t.textContent = 'Review';
+      if (s) {
+        s.textContent = 'You’re on main. Switch to a branch in the top bar to '
+          + 'review its changes against main as a graph diff.';
+      }
+      overlay.hidden = false;
+    }
+  }
 
   // Toggle the compact-cards mode, then re-lay-out so the graph reflows to the
   // new card heights (renderGraph re-measures the overlays).

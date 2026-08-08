@@ -39,6 +39,31 @@ async function setTheme(page, theme) {
   await page.evaluate(() => new Promise(requestAnimationFrame));
 }
 
+// Redesign 2026-08: cards start COMPACT — the return-type / effects strips
+// (and the ↳ type-rule badge that rides the return-type strip) are hidden
+// until "Details" is toggled. Reveal them for the tests that click those.
+async function revealCardDetails(page) {
+  await page.evaluate(() => {
+    if (document.body.classList.contains('gd-cards-compact')
+        && typeof window.gdToggleCardDetails === 'function') {
+      window.gdToggleCardDetails();
+    }
+  });
+  await page.waitForSelector('.return-type-strip', { state: 'visible', timeout: 5000 })
+    .catch(() => {});
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+}
+
+// Open a click-driven affordance by dispatching the click straight to the
+// element, bypassing Playwright's hit-testing. At narrow viewports the
+// redesign's floating overlays (the #nav-controls graph toolbar, the left
+// rail over the legacy #sidebar-expand-floating) sit above card badges and
+// intercept pointer events. A visual test only needs the RESULTING state on
+// screen — the affordance's own reachability is covered by the e2e suite.
+async function domClick(locator) {
+  await locator.evaluate((el) => el.click());
+}
+
 test.describe('Editor — visual baselines', () => {
   test('web-server loaded, light theme', async ({ page }) => {
     await page.goto('/#web-server');
@@ -77,7 +102,7 @@ test.describe('Editor — visual baselines', () => {
     await expect(badge).toHaveAttribute(
       'title', /Narrowed at :assoc-fn .* click for full chain/);
 
-    await badge.click();
+    await domClick(badge);
     const popover = page.locator('.provenance-popover.visible');
     await expect(popover).toBeVisible();
     await expect(popover.locator('.provenance-popover-title'))
@@ -92,8 +117,8 @@ test.describe('Editor — visual baselines', () => {
 
     // Source-fn names render as clickable links — click `:assoc` and
     // verify the editor navigates to it and the popover dismisses.
-    await popover.locator('.type-inline-resolution-link', { hasText: 'assoc' })
-                 .last().click();
+    await domClick(popover.locator('.type-inline-resolution-link', { hasText: 'assoc' })
+                 .last());
     await expect(page).toHaveURL(/#core\.collections\.assoc$/);
     await expect(page.locator('.provenance-popover.visible')).toHaveCount(0);
   });
@@ -104,13 +129,14 @@ test.describe('Editor — visual baselines', () => {
     // ↳ trigger pointing at `:assoc`.
     await page.goto('/#app.common.health-status');
     await waitForGraphRendered(page);
+    await revealCardDetails(page);
 
     const trigger = page.locator('.return-type-strip-provenance').first();
     await expect(trigger).toBeVisible();
     await expect(trigger).toHaveAttribute(
       'title', /Computed by :assoc's :return-type-rule/);
 
-    await trigger.click();
+    await domClick(trigger);
     const popover = page.locator('.provenance-popover.visible');
     await expect(popover).toBeVisible();
     await expect(popover.locator('.provenance-popover-title'))
@@ -229,7 +255,10 @@ test.describe('Editor — visual baselines', () => {
     const isCollapsed = await page.evaluate(() =>
       document.body.classList.contains('sidebar-collapsed'));
     if (isCollapsed) {
-      await page.locator('#sidebar-expand-floating').click();
+      // Redesign: the left rail sits above the legacy floating expand
+      // button, so a hit-tested click is intercepted — invoke its handler
+      // directly to open the sidebar for the snapshot.
+      await domClick(page.locator('#sidebar-expand-floating'));
       await page.waitForTimeout(250);  // slide-in animation
     }
     // The URL-hash selection (#web-server) auto-expands the tree down

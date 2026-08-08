@@ -103,6 +103,41 @@ function graphdenInWorkspace(nsPath) {
   }
   return false;
 }
+// Redesign 2026-08 — WORKSPACE FOCUS (user-chosen scope). Distinct from the
+// server highlight above: focus HIDES out-of-scope namespaces in the explorer.
+// A workspace is just a set of namespace roots (reuses the same root+descendant
+// test), persisted locally — no new entity. null = no focus (show everything).
+let graphdenFocusRoots = null;
+try {
+  const raw = JSON.parse(localStorage.getItem('graphden.workspace.roots') || 'null');
+  if (Array.isArray(raw) && raw.length) graphdenFocusRoots = raw.slice();
+} catch (_) { /* ignore malformed pref */ }
+function graphdenInFocus(nsPath) {
+  if (!graphdenFocusRoots || !nsPath) return false;
+  for (const w of graphdenFocusRoots) {
+    if (nsPath === w || nsPath.startsWith(w + '.')) return true;
+  }
+  return false;
+}
+function graphdenWorkspaceFocused() { return !!graphdenFocusRoots; }
+function graphdenWorkspaceLabel() {
+  if (!graphdenFocusRoots) return 'All functions';
+  return graphdenFocusRoots.length === 1
+    ? graphdenFocusRoots[0]
+    : graphdenFocusRoots.length + ' namespaces';
+}
+// Set (array of ns roots) or clear (null/empty) the workspace focus + persist.
+function setGraphdenWorkspace(roots) {
+  graphdenFocusRoots = (Array.isArray(roots) && roots.length) ? roots.slice() : null;
+  try {
+    localStorage.setItem('graphden.workspace.roots', JSON.stringify(graphdenFocusRoots || []));
+  } catch (_) { /* ignore */ }
+}
+window.graphdenInFocus = graphdenInFocus;
+window.graphdenWorkspaceFocused = graphdenWorkspaceFocused;
+window.graphdenWorkspaceLabel = graphdenWorkspaceLabel;
+window.setGraphdenWorkspace = setGraphdenWorkspace;
+window.graphdenWorkspaceRoots = () => (graphdenFocusRoots ? graphdenFocusRoots.slice() : []);
 // The tenancy addon is active iff we've seen a capability header (absent in
 // single-tenant). Used to gate addon-only UI like the Grants admin section.
 function graphdenTenancyActive() { return graphdenCapabilities !== null; }

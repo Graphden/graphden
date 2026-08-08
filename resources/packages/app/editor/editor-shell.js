@@ -212,4 +212,71 @@
   }
 
   window.gdInspectorRender = gdInspectorRender;
+
+  // ---- Workspace switcher --------------------------------------------------
+  // The context-bar chip scopes the explorer to a namespace root (a "workspace"
+  // is just a set of namespace roots — see editor-branches.js). "All functions"
+  // clears the focus. Reuses the existing lazy tree; no new entity, no backend.
+  function gdWsChipLabel() {
+    const b = document.querySelector('#gd-ws-chip b');
+    if (b && typeof graphdenWorkspaceLabel === 'function') b.textContent = graphdenWorkspaceLabel();
+  }
+  function gdCloseWsPop() {
+    const p = document.getElementById('gd-ws-pop');
+    if (p) p.remove();
+    const s = document.getElementById('gd-ws-scrim');
+    if (s) s.remove();
+  }
+  function gdOpenWsPop() {
+    gdCloseWsPop();
+    const chip = document.getElementById('gd-ws-chip');
+    if (!chip) return;
+    const scrim = document.createElement('div');
+    scrim.id = 'gd-ws-scrim';
+    scrim.className = 'gd-pop-scrim';
+    scrim.addEventListener('click', gdCloseWsPop);
+    document.body.appendChild(scrim);
+
+    const roots = [];
+    try {
+      const nss = (typeof graphData !== 'undefined' && graphData) ? (graphData.namespaces || []) : [];
+      nss.forEach((n) => { if (!n['parent-id'] && n.name) roots.push(n.name); });
+    } catch (_) { /* ignore */ }
+    roots.sort((a, b) => a.localeCompare(b));
+    const current = (typeof graphdenWorkspaceRoots === 'function') ? graphdenWorkspaceRoots() : [];
+    const focused = current.length > 0;
+
+    let html = '<h5>Workspace — scope the explorer</h5>'
+      + '<button type="button" class="gd-pop-item' + (focused ? '' : ' sel') + '" data-ws="">'
+      + '<span class="gd-pi">◍</span>All functions</button><div class="gd-pop-div"></div>';
+    roots.forEach((nm) => {
+      const sel = current.indexOf(nm) >= 0 ? ' sel' : '';
+      html += '<button type="button" class="gd-pop-item' + sel + '" data-ws="' + esc(nm) + '">'
+        + '<span class="gd-pi">&#955;</span>' + esc(nm) + '</button>';
+    });
+
+    const pop = document.createElement('div');
+    pop.id = 'gd-ws-pop';
+    pop.className = 'gd-pop';
+    pop.innerHTML = html;
+    const r = chip.getBoundingClientRect();
+    pop.style.left = r.left + 'px';
+    pop.style.top = (r.bottom + 6) + 'px';
+    pop.querySelectorAll('.gd-pop-item').forEach((it) => {
+      it.addEventListener('click', () => {
+        const ws = it.getAttribute('data-ws');
+        if (typeof setGraphdenWorkspace === 'function') setGraphdenWorkspace(ws ? [ws] : null);
+        gdWsChipLabel();
+        if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') {
+          updateEntityList(graphData);
+        }
+        gdCloseWsPop();
+      });
+    });
+    document.body.appendChild(pop);
+  }
+
+  const wsChip = document.getElementById('gd-ws-chip');
+  if (wsChip) wsChip.addEventListener('click', gdOpenWsPop);
+  gdWsChipLabel();
 })();

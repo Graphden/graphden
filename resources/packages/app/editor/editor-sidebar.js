@@ -658,8 +658,14 @@ function updateEntityList(data) {
   // Top-level namespaces (sorted) — skip any with nothing visible under
   // the current toggles (unless an inline-create is rooted inside).
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const wsFocused = !searchMode && typeof window.graphdenWorkspaceFocused === 'function'
+    && window.graphdenWorkspaceFocused();
   for (const [name, node] of sortedNs) {
     if (!nodeShouldShow(node, searchMode)) continue;
+    // Workspace focus (redesign 2026-08): hide top-level namespaces outside the
+    // scope. Search always spans everything (searchMode short-circuits above).
+    if (wsFocused && typeof window.graphdenInFocus === 'function'
+        && !window.graphdenInFocus(name)) continue;
     renderNsNode(list, name, node, '', searchMode);
   }
 

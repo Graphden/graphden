@@ -4771,6 +4771,50 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
 #gd-ctxbar #org-mount,
 #gd-ctxbar #auth-mount { display: flex; align-items: center; gap: 6px; }
 
+/* ---- Context-bar popover (workspace switcher) ---- */
+.gd-pop-scrim { position: fixed; inset: 0; z-index: 340; }
+.gd-pop {
+  position: fixed;
+  z-index: 350;
+  min-width: 234px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--gd-line-2);
+  border-radius: 11px;
+  background: var(--gd-panel);
+  box-shadow: var(--gd-shadow-pop);
+  font-family: var(--gd-ui-font);
+}
+.gd-pop h5 {
+  margin: 2px 6px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gd-ink-3);
+}
+.gd-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gd-ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.gd-pop-item:hover { background: var(--gd-paper-2); }
+.gd-pop-item.sel { background: var(--gd-flow-wash); color: var(--gd-flow-ink); font-weight: 600; }
+.gd-pop-item .gd-pi { width: 18px; text-align: center; color: var(--gd-ink-3); font-family: var(--gd-mono); }
+.gd-pop-item.sel .gd-pi { color: var(--gd-flow); }
+.gd-pop-div { height: 1px; margin: 6px 4px; background: var(--gd-line); }
+
 /* ---- Explorer slim head (brand + mounts moved to the rail / context bar) ---- */
 .gd-exp-head {
   display: flex;

@@ -691,8 +691,26 @@
         (when-let [entry (rich-type-of (keyword row-name))]
           (when-not (contains? @stale-id-rescue-warned fn-id)
             (swap! stale-id-rescue-warned conj fn-id)
-            (log/warn "rich-type resolved by NAME for a stale identity row — repoint or tombstone the legacy fn row"
-                      {:fn-id fn-id :name row-name}))
+            ;; Warn-once per id, and NOT an unconditional "you have a bug".
+            ;; Two shapes reach here and only ONE is actionable:
+            ;;   - a genuine intra-namespace GHOST (a historical rename left an
+            ;;     abandoned id in the SAME ns) → repoint/tombstone the row;
+            ;;   - a LEGAL cross-namespace / `@version` bare-name twin — a
+            ;;     version-materialized install puts `_x` in BOTH `pkg` and
+            ;;     `pkg@1-0-0`. Expected (ADR-identity-model stage-5 per-ns
+            ;;     names), not a bug; its sibling detector
+            ;;     `dev.integrity/cross-ns-duplicates` already treats the same
+            ;;     shape as INFO-only "no auto-repair".
+            ;; The rescue resolved correctly either way (same authored
+            ;; contract) — this is a heads-up, not a prescription. The
+            ;; canonical namespace is logged so an operator can tell them
+            ;; apart: a `@version` / different-ns canonical is the benign twin.
+            ;; (Narrowing the fire condition to same-ns would need the stale
+            ;; row's ns threaded through 3 hot-path call sites AND a path↔ns-id
+            ;; reconciliation — not worth the compile-path risk for a non-bug.)
+            (log/warn "rich-type resolved by NAME for a stale identity row — actionable only if the canonical is in the SAME namespace (else a legal cross-ns/@version twin)"
+                      {:fn-id fn-id :name row-name
+                       :canonical-namespace (:namespace entry)}))
           entry))))
 
 

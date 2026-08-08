@@ -246,6 +246,10 @@ test.describe('Editor — visual baselines', () => {
     await page.goto('/#web-server');
     await waitForGraphRendered(page);
     await setTheme(page, 'light');
+    // Selecting #web-server opens the inspector; on narrow viewports (≤1100)
+    // it's a bottom sheet that would cover the sidebar we're snapshotting.
+    // This test is about the sidebar, so dismiss the sheet (no-op on desktop).
+    await page.evaluate(() => document.body.classList.remove('gd-insp-open'));
     // On narrow viewports the sidebar auto-collapses on first
     // visit. For the snapshot we always want it OPEN — that's the
     // surface we're testing. The floating expand button has

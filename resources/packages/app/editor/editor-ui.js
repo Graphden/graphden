@@ -46,6 +46,9 @@ function selectFn(fnId, updateHistory = true) {
 
   updateEntityList(graphData);
 
+  // Redesign 2026-08: reflect the selection in the right inspector.
+  if (typeof gdInspectorRender === 'function') gdInspectorRender(fnId);
+
   // Scroll selected item into view
   const item = document.querySelector('[data-fn-id="' + fnId + '"]');
   if (item) item.scrollIntoView({ block: 'nearest' });

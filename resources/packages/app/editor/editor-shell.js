@@ -56,4 +56,70 @@
   }
 
   window.gdShellSurface = gdShellSurface;
+
+  // ---- Right inspector ------------------------------------------------------
+  // First slice: identity Overview off DIRECT fn fields the client already has
+  // (name, namespace, description, parents) — no re-derivation of server-known
+  // state. The rich panels (bindings, resolved types, effects, provenance, and
+  // this function's OWN stats/errors) arrive next as `GET /partials/inspector`.
+  // graph-first-exception (temporary, tracked): richer content migrates to a
+  // server-rendered partial; this keeps the selection→inspector loop legible.
+  const INSP_EMPTY =
+    '<div class="gd-insp-empty">Select a node to inspect its bindings, types, '
+    + 'effects, and this function’s own run history.</div>';
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function fnLabel(fn) {
+    return fn?.name ? fn.name : '(anonymous)';
+  }
+
+  function gdInspectorRender(fnId) {
+    const el = document.getElementById('gd-inspector');
+    if (!el) return;
+
+    // `lookups` is a bundle-level `let` (not a window property), so read the
+    // lexical global directly rather than `window.lookups` (which is undefined).
+    const lk = (typeof lookups !== 'undefined') ? lookups : null;
+    const fn = (fnId && lk?.fnMap) ? lk.fnMap.get(fnId) : null;
+    if (!fn) { el.innerHTML = INSP_EMPTY; return; }
+
+    // Namespace = the qualified name minus the fn's own last segment.
+    let ns = '';
+    if (typeof getQualifiedFnName === 'function') {
+      const parts = getQualifiedFnName(fn).split('.');
+      parts.pop();
+      ns = parts.join('.');
+    }
+
+    const parentIds = Array.isArray(fn['parent-ids']) ? fn['parent-ids'] : [];
+    const kind = parentIds.length ? 'fn-def'
+      : (fn['return-type-fn-id'] ? 'base-fn' : 'type');
+
+    const parentChips = parentIds.map((pid) => {
+      const p = lk.fnMap.get(pid);
+      return '<span class="gd-chip gd-chip-ref">→ ' + esc(fnLabel(p)) + '</span>';
+    }).join(' ');
+
+    let html = '<div class="gd-insp-head">'
+      + '<div class="gd-insp-title"><span class="gd-insp-name">' + esc(fnLabel(fn))
+      + '</span><span class="gd-insp-kind">' + esc(kind) + '</span></div>';
+    if (ns) html += '<div class="gd-insp-ns">' + esc(ns) + '</div>';
+    if (fn.description) html += '<p class="gd-insp-desc">' + esc(fn.description) + '</p>';
+    html += '</div><div class="gd-insp-scroll">';
+    if (parentChips) {
+      html += '<div class="gd-insp-row"><span class="gd-insp-k">Parent</span>'
+        + '<span class="gd-insp-v">' + parentChips + '</span></div>';
+    }
+    html += '<p class="gd-insp-soon">Bindings, resolved types, effects and this '
+      + 'function’s own stats are coming here — rendered from the graph.</p>'
+      + '</div>';
+    el.innerHTML = html;
+  }
+
+  window.gdInspectorRender = gdInspectorRender;
 })();

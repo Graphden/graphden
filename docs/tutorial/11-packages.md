@@ -49,7 +49,7 @@ Two levels of grouping:
   dependency.
 - **Module** (`auth/`, `billing/`) — fns and their impls
   co-located; the unit of grouping by topic. Maps to a graphden
-  NAMESPACE the editor's sidebar shows.
+  NAMESPACE the editor's explorer shows.
 
 ## `package.edn`
 
@@ -162,7 +162,7 @@ Which packages load is the `:package-names` list in
 listing `"app"` also loads `core`/`web`/`storage`/`app-base`).
 Because `registry` and `mcp` are OPTIONAL, dropping either from
 `:package-names` omits it — the app still boots, the editor hides
-its Packages panel, and `/mcp` 404s. (Full distribution flow —
+its **Packages** section on the **Operate** surface, and `/mcp` 404s. (Full distribution flow —
 publish / install / update / fork — is [Lesson 14](14-distributing-packages.md).)
 
 ## Try it
@@ -191,7 +191,7 @@ publish / install / update / fork — is [Lesson 14](14-distributing-packages.md
 
 3. Add `"mycorp"` to `:package-names` in
    `resources/system-dev.edn`, then run `bb rebuild`. After the
-   JVM restarts, the editor's sidebar shows `mycorp.hello.greet`.
+   JVM restarts, the editor's explorer shows `mycorp.hello.greet`.
    Open `⋯` → `▶ Run`, supply `:name = "world"`, get
    `"Hello, world!"`.
 

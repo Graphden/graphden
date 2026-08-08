@@ -22,17 +22,18 @@ mounts.
 The client finds out the addon is live from a response header:
 the first `/api/*` response that carries
 `X-Graphden-Capabilities` flips the editor into tenancy mode.
-Only then — and only when you're signed in — does the sidebar
-grow the admin pseudo-namespaces, in this order: **Grants**,
-**Users**, **Packages**.
+Only then — and only when you're signed in — does the **Operate**
+surface (open it from the left rail) grow the admin sections,
+among them **Grants**, **Users** and **Packages**.
 
-So if you don't see a **Users** section: either you're not
-signed in, or this instance runs without the tenancy addon.
-(The sections also hide while the sidebar filter is active.)
+So if you don't see a **Users** section on the Operate surface:
+either you're not signed in, or this instance runs without the
+tenancy addon.
 
 ## The table
 
-Expand **Users**. The body is a server-rendered partial
+On the **Operate** surface, expand **Users**. The body is a
+server-rendered partial
 (`GET /partials/users-admin`) — a table of every user:
 
 ```

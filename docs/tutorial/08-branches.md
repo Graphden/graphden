@@ -160,7 +160,7 @@ curl -X POST "$BASE/api/branches" \
 ```
 
 While either the SOURCE or the TARGET branch carries recorded
-type diagnostics (the "Type errors" panel's content — Lesson 03),
+type diagnostics (the content of the "Type errors" section on the **Operate** surface — Lesson 03),
 merging INTO such a branch is refused with a 409
 (`:merge-protection-violation`) whose message names the broken
 fns: "Merge blocked: target branch forbids invalid fns —

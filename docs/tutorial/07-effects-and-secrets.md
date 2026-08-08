@@ -241,10 +241,10 @@ just typed.
 
 ## The admin secrets UX
 
-The Secrets sidebar panel in the editor is the canonical
-admin flow:
+The **Secrets** rows in the explorer (toggle the **secrets**
+filter) are the canonical admin flow:
 
-1. Admin clicks `+` on the panel.
+1. Admin clicks `+` on the secrets section.
 2. Form asks for name, vault path, value, description.
 3. Submit writes:
    - The secret VALUE to OpenBao at the given path.

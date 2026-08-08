@@ -120,7 +120,7 @@ The type-checker enforces the `[:fn {} :any]` slot shape on
   a callable; you can't invoke `"tick"` as a thunk. In the
   editor the SAVE still lands (type errors record a diagnostic
   instead of blocking — Lesson 03): the fn gets the ⚠ badge,
-  the "Type errors" panel lists it with the hint ("bind a
+  the "Type errors" section (on the **Operate** surface) lists it with the hint ("bind a
   fn-ref or an inline `{:parent …}`"), and executing it is
   refused until fixed. In a package's `fns.edn` the same
   mistake still hard-fails the sync. Either way the fix is the

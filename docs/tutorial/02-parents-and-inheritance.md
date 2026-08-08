@@ -125,7 +125,8 @@ Two failure modes guard an MI parent set:
   TYPE error: at package sync it fails the load; in the editor
   the fn still SAVES, and the conflict surfaces as a recorded
   diagnostic — ⚠ badge on the card, an entry in the "Type
-  errors" panel (Lesson 03) — with execution refused until one
+  errors" section on the **Operate** surface (Lesson 03) — with
+  execution refused until one
   side backs off.
 
 ## The fn-card as a chain visualizer

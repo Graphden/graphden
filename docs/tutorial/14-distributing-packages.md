@@ -3,12 +3,14 @@
 **Goal**: by the end of this lesson you can publish a namespace
 as an immutable package version, then browse the registry and
 install / update / roll back / uninstall / fork packages from the
-editor's **Packages** panel — all without leaving the graph.
+**Packages** section on the editor's **Operate** surface — all
+without leaving the graph.
 
 **Concepts introduced**: `registry`, `:package-version`,
 `publish`, `pin` (`:package-install`), `reference-install` vs
 `fork` (copy-on-write), `version constraint` / `latest` /
-`rollback`, the **Packages panel**, and — beyond the registry —
+`rollback`, the **Packages** section (on the **Operate** surface),
+and — beyond the registry —
 an **external package pulled by git coord** (`executor-packages.edn`).
 
 ## Authoring vs distributing
@@ -47,7 +49,8 @@ how the registry indexes it. Bump a fn in `mycorp.hello`,
 `bb rebuild`, and publish again as `1.1.0` — now the registry
 holds **both** versions. `GET /api/packages` lists the index.
 
-You can also publish **from the editor**: the Packages panel has a
+You can also publish **from the editor**: the **Packages** section
+on the **Operate** surface has a
 "Publish a namespace" form (name / version / ns-root) — the same
 export-and-freeze step, no `curl` needed. The `curl` above is the
 programmatic equivalent for scripts / CI. Either way, publishing is
@@ -56,8 +59,9 @@ happens in the panel.
 
 ## The Packages panel
 
-Open the editor, sign in (the panel is auth-gated), and expand
-the sidebar. Below **Secrets** there's a **Packages** section:
+Open the editor, sign in (the section is auth-gated), and open the
+**Operate** surface from the left rail. It has a **Packages**
+section:
 
 ```
 Packages
@@ -115,7 +119,7 @@ instead. Fork **copies** the version's fns into the graph at
 their **original** namespace (`mycorp.hello`, not the versioned
 one), so they become ordinary editable fn-defs — and writes **no
 pin** (it's a copy, not a reference). A short notice confirms it;
-reload to see the copied fns in the sidebar tree.
+reload to see the copied fns in the explorer tree.
 
 | | Install | Fork |
 |---|---|---|

@@ -13,7 +13,7 @@
 
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, synthArgs, nodeApi,
-       deleteFnByName, waitFor} = require('./edit-test-helpers');
+       deleteFnByName, waitFor, openOperate} = require('./edit-test-helpers');
 
 const TEST_NAME = 'test-type-errors-panel';
 
@@ -75,6 +75,8 @@ async function typeErrorsPartial() {
       15000);
     assert(badgeSeen, 'type-error badge visible on the fn card root row');
 
+    // The Type-errors panel moved to the Operate surface (redesign 2026-08).
+    await openOperate(page);
     // Sidebar section mounts the server partial with the fn's row.
     const panelRow = await waitFor(
       () => page.evaluate((name) => {

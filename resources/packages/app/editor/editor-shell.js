@@ -10,7 +10,13 @@
   // in the inspector for the selected fn). The nav-controls "Details" toggle
   // reveals them across the canvas. Set before first render so the layout
   // engine measures the compact card heights.
-  try { document.body.classList.add('gd-cards-compact'); } catch (_) {}
+  try {
+    // Default compact; the choice persists (a user who reveals details keeps
+    // them). '0' = user opted into full cards.
+    if (localStorage.getItem('graphden.cards.compact') !== '0') {
+      document.body.classList.add('gd-cards-compact');
+    }
+  } catch (_) { document.body.classList.add('gd-cards-compact'); }
 
   // Copy is written from the user's side of the screen — each line says what
   // the surface will DO, not how it's wired.
@@ -80,6 +86,7 @@
   // new card heights (renderGraph re-measures the overlays).
   function gdToggleCardDetails(btn) {
     const compact = document.body.classList.toggle('gd-cards-compact');
+    try { localStorage.setItem('graphden.cards.compact', compact ? '1' : '0'); } catch (_) {}
     if (btn) {
       btn.setAttribute('aria-pressed', String(!compact));
       btn.title = compact ? 'Show card details' : 'Hide card details';

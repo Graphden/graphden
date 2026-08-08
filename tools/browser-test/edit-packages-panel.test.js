@@ -29,7 +29,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, nodeApi, nodeApiJson} = require('./edit-test-helpers');
+const {assert, newContext, nodeApi, nodeApiJson, openOperate} = require('./edit-test-helpers');
 
 
 // Per-run unique package name so reruns against a shared stack stay
@@ -146,6 +146,7 @@ async function panelState(page) {
     // Un-collapse the sidebar in case a stale pref persisted (a fresh
     // e2e context won't have it, but keep the dev-demo run robust).
     await page.evaluate(() => document.body.classList.remove('sidebar-collapsed'));
+    await openOperate(page); // panels live on the Operate surface (redesign 2026-08)
     await page.waitForSelector('.sidebar-packages', {timeout: 15000});
 
     // ===================================================================

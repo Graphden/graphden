@@ -100,6 +100,9 @@ async function newContext(chromium) {
     // navigation to localhost runs the init script again on a real
     // origin, so just swallow the failure here.
     try { localStorage.setItem('graphden.auth.password', auth); } catch (_) {}
+    // Redesign 2026-08: cards default to compact (metadata strips hidden).
+    // Tests assert on / interact with those strips, so opt into full cards.
+    try { localStorage.setItem('graphden.cards.compact', '0'); } catch (_) {}
   }, AUTH);
   const page = await ctx.newPage();
   // Generous default timeouts so a transient GC pause under the
@@ -642,7 +645,19 @@ async function deleteOrThrow(path, name) {
 }
 
 
+// Redesign 2026-08: the ops/admin panels (packages, stats, errors, type-
+// errors, apps, grants, users) moved OUT of the explorer onto the Operate
+// surface (#gd-operate), hidden until the Operate rail button is active. Tests
+// that interact with those panels call this after navigating.
+async function openOperate(page) {
+  const btn = await page.$('#gd-rail .gd-rail-btn[data-surface="operate"]');
+  if (btn) {
+    await btn.click();
+    await page.waitForSelector('#gd-operate:not([hidden])', { timeout: 5000 }).catch(() => {});
+  }
+}
+
 module.exports = { assert, deepEqual, newContext, api, getEntities,
-                   nodeApi, nodeApiJson, openBranchPopover,
+                   nodeApi, nodeApiJson, openBranchPopover, openOperate,
                    synthArgs, waitFor, waitForServerHealthy,
                    deleteFnByName, AUTH, BASE };

@@ -16,7 +16,7 @@
 // that argument).
 
 const {chromium} = require('playwright');
-const {assert, newContext, nodeApi, nodeApiJson, waitForServerHealthy} =
+const {assert, newContext, nodeApi, nodeApiJson, waitForServerHealthy, openOperate} =
   require('./edit-test-helpers');
 
 
@@ -39,6 +39,7 @@ const BH = {'X-Graphden-Branch': BRANCH};
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/?branch=' + encodeURIComponent(BRANCH));
     await page.evaluate(() => document.body.classList.remove('sidebar-collapsed'));
+    await openOperate(page); // panels live on the Operate surface (redesign 2026-08)
     await page.waitForSelector('.sidebar-packages', {timeout: 15000});
     await page.waitForFunction(() => {
       const sec = document.querySelector('.sidebar-packages');

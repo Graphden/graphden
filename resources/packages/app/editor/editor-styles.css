@@ -4814,6 +4814,29 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
 .gd-pop-item .gd-pi { width: 18px; text-align: center; color: var(--gd-ink-3); font-family: var(--gd-mono); }
 .gd-pop-item.sel .gd-pi { color: var(--gd-flow); }
 .gd-pop-div { height: 1px; margin: 6px 4px; background: var(--gd-line); }
+.gd-pop-row { display: flex; align-items: center; gap: 2px; }
+.gd-pop-row .gd-pop-item { flex: 1 1 auto; }
+.gd-pop-pin {
+  flex: none;
+  width: 30px; height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gd-ink-4);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.gd-pop-pin:hover { background: var(--gd-paper-2); opacity: 1; }
+.gd-pop-pin.pinned { color: var(--gd-flow); opacity: 1; background: var(--gd-flow-wash); }
+.gd-pop-pin:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
+.gd-pop-hint {
+  margin: 8px 6px 2px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--gd-ink-3);
+}
 
 /* ---- Explorer slim head (brand + mounts moved to the rail / context bar) ---- */
 .gd-exp-head {

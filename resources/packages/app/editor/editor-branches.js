@@ -138,6 +138,32 @@ window.graphdenWorkspaceFocused = graphdenWorkspaceFocused;
 window.graphdenWorkspaceLabel = graphdenWorkspaceLabel;
 window.setGraphdenWorkspace = setGraphdenWorkspace;
 window.graphdenWorkspaceRoots = () => (graphdenFocusRoots ? graphdenFocusRoots.slice() : []);
+// Pinned namespaces stay visible in the explorer even when a workspace focus
+// would otherwise hide them — the "shared library" convention (core/web/… you
+// always want in view). Persisted locally; same root+descendant test.
+let graphdenPinnedRoots = [];
+try {
+  const p = JSON.parse(localStorage.getItem('graphden.workspace.pins') || 'null');
+  if (Array.isArray(p)) graphdenPinnedRoots = p.slice();
+} catch (_) { /* ignore malformed pref */ }
+function graphdenIsPinned(nsPath) {
+  if (!nsPath) return false;
+  for (const w of graphdenPinnedRoots) {
+    if (nsPath === w || nsPath.startsWith(w + '.')) return true;
+  }
+  return false;
+}
+function graphdenTogglePin(root) {
+  const i = graphdenPinnedRoots.indexOf(root);
+  if (i >= 0) graphdenPinnedRoots.splice(i, 1);
+  else graphdenPinnedRoots.push(root);
+  try {
+    localStorage.setItem('graphden.workspace.pins', JSON.stringify(graphdenPinnedRoots));
+  } catch (_) { /* ignore */ }
+}
+window.graphdenIsPinned = graphdenIsPinned;
+window.graphdenTogglePin = graphdenTogglePin;
+window.graphdenPins = () => graphdenPinnedRoots.slice();
 // The tenancy addon is active iff we've seen a capability header (absent in
 // single-tenant). Used to gate addon-only UI like the Grants admin section.
 function graphdenTenancyActive() { return graphdenCapabilities !== null; }

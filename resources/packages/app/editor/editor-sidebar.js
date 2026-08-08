@@ -663,9 +663,13 @@ function updateEntityList(data) {
   for (const [name, node] of sortedNs) {
     if (!nodeShouldShow(node, searchMode)) continue;
     // Workspace focus (redesign 2026-08): hide top-level namespaces outside the
-    // scope. Search always spans everything (searchMode short-circuits above).
+    // scope — unless PINNED (shared libraries stay in view). Search always spans
+    // everything (searchMode short-circuits above).
     if (wsFocused && typeof window.graphdenInFocus === 'function'
-        && !window.graphdenInFocus(name)) continue;
+        && !window.graphdenInFocus(name)
+        && !(typeof window.graphdenIsPinned === 'function' && window.graphdenIsPinned(name))) {
+      continue;
+    }
     renderNsNode(list, name, node, '', searchMode);
   }
 

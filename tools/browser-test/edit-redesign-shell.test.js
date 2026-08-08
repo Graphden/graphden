@@ -79,6 +79,18 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
     }, picked);
     assert(scoped.chip === picked, 'chip shows the scoped workspace (' + scoped.chip + ')');
     assert(scoped.appGone, 'scoping hid the out-of-workspace "app" namespace');
+
+    // Pinning a shared library keeps it visible even under a scope.
+    const appBack = await page.evaluate(() => {
+      window.graphdenTogglePin('app');            // pin app (a "shared library")
+      updateEntityList(graphData);
+      const top = [...document.querySelectorAll('#entity-list [data-ns-path]')]
+        .map((h) => h.getAttribute('data-ns-path'))
+        .filter((p) => p && p.indexOf('.') === -1);
+      window.graphdenTogglePin('app');            // unpin (leave clean state)
+      return top.includes('app');
+    });
+    assert(appBack, 'pinning "app" keeps it visible under the workspace scope');
     // Reset scope so the tail of the test runs against the full tree.
     await page.evaluate(() => { if (window.setGraphdenWorkspace) window.setGraphdenWorkspace(null); });
 

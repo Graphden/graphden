@@ -291,14 +291,22 @@
     const current = (typeof graphdenWorkspaceRoots === 'function') ? graphdenWorkspaceRoots() : [];
     const focused = current.length > 0;
 
+    const pins = (typeof graphdenPins === 'function') ? graphdenPins() : [];
     let html = '<h5>Workspace — scope the explorer</h5>'
       + '<button type="button" class="gd-pop-item' + (focused ? '' : ' sel') + '" data-ws="">'
       + '<span class="gd-pi">◍</span>All functions</button><div class="gd-pop-div"></div>';
     roots.forEach((nm) => {
       const sel = current.indexOf(nm) >= 0 ? ' sel' : '';
-      html += '<button type="button" class="gd-pop-item' + sel + '" data-ws="' + esc(nm) + '">'
-        + '<span class="gd-pi">&#955;</span>' + esc(nm) + '</button>';
+      const pinned = pins.indexOf(nm) >= 0;
+      html += '<div class="gd-pop-row">'
+        + '<button type="button" class="gd-pop-item' + sel + '" data-ws="' + esc(nm) + '">'
+        +   '<span class="gd-pi">&#955;</span>' + esc(nm) + '</button>'
+        + '<button type="button" class="gd-pop-pin' + (pinned ? ' pinned' : '') + '"'
+        +   ' data-pin="' + esc(nm) + '" aria-pressed="' + (pinned ? 'true' : 'false') + '"'
+        +   ' title="' + (pinned ? 'Unpin' : 'Pin — keep visible even when scoped') + '">&#128204;</button>'
+        + '</div>';
     });
+    html += '<div class="gd-pop-hint">Pin shared libraries (&#128204;) to keep them in view under any workspace.</div>';
 
     const pop = document.createElement('div');
     pop.id = 'gd-ws-pop';
@@ -316,6 +324,20 @@
           updateEntityList(graphData);
         }
         gdCloseWsPop();
+      });
+    });
+    pop.querySelectorAll('.gd-pop-pin').forEach((pb) => {
+      pb.addEventListener('click', (e) => {
+        e.stopPropagation(); // pin, don't scope
+        const root = pb.getAttribute('data-pin');
+        if (typeof graphdenTogglePin === 'function') graphdenTogglePin(root);
+        const nowPinned = (typeof graphdenIsPinned === 'function') && graphdenIsPinned(root);
+        pb.classList.toggle('pinned', nowPinned);
+        pb.setAttribute('aria-pressed', nowPinned ? 'true' : 'false');
+        pb.title = nowPinned ? 'Unpin' : 'Pin — keep visible even when scoped';
+        if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') {
+          updateEntityList(graphData);
+        }
       });
     });
     document.body.appendChild(pop);

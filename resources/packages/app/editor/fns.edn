@@ -315,7 +315,16 @@
                [:button {:class "nav-btn" :onclick "navResetPositions()"
                          :aria-label "Reset node positions" :title "Reset all node positions"} "\u27F2"]
                [:button {:class "nav-btn" :onclick "navResetZoom()"
-                         :aria-label "Reset zoom" :title "Reset zoom"} "\u2299"]]]]
+                         :aria-label "Reset zoom" :title "Reset zoom"} "\u2299"]
+               ;; Progressive disclosure \u2014 toggle the dense card metadata strips
+               ;; (return-type + effects) on/off across the canvas. Cards start
+               ;; compact (editor-shell.js sets body.gd-cards-compact).
+               [:button {:class "nav-btn" :onclick "gdToggleCardDetails(this)"
+                         :aria-pressed "false"
+                         :aria-label "Show card details" :title "Show card details"}
+                [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor"
+                       :stroke-width "1.8" :aria-hidden "true"}
+                 [:path {:d "M4 6h16M4 12h16M4 18h10"}]]]]]]
             ;; RIGHT INSPECTOR \u2014 one home for everything about the selected fn
             ;; (redesign 2026-08): bindings, types, effects, provenance, this
             ;; function's OWN stats/errors, versions, run. Empty until a node

@@ -5,6 +5,13 @@
 // they are rebuilt, one at a time. The rail's inline onclick calls the single
 // exported entry point `window.gdShellSurface(name, btn)`.
 (function () {
+  // Progressive disclosure (redesign 2026-08): cards start COMPACT — the dense
+  // return-type + effects metadata strips are hidden by default (that data is
+  // in the inspector for the selected fn). The nav-controls "Details" toggle
+  // reveals them across the canvas. Set before first render so the layout
+  // engine measures the compact card heights.
+  try { document.body.classList.add('gd-cards-compact'); } catch (_) {}
+
   // Copy is written from the user's side of the screen — each line says what
   // the surface will DO, not how it's wired.
   const SURFACES = {
@@ -68,6 +75,18 @@
   }
 
   window.gdShellSurface = gdShellSurface;
+
+  // Toggle the compact-cards mode, then re-lay-out so the graph reflows to the
+  // new card heights (renderGraph re-measures the overlays).
+  function gdToggleCardDetails(btn) {
+    const compact = document.body.classList.toggle('gd-cards-compact');
+    if (btn) {
+      btn.setAttribute('aria-pressed', String(!compact));
+      btn.title = compact ? 'Show card details' : 'Hide card details';
+    }
+    if (typeof renderGraph === 'function') renderGraph(true);
+  }
+  window.gdToggleCardDetails = gdToggleCardDetails;
 
   // ---- Right inspector ------------------------------------------------------
   // First slice: identity Overview off DIRECT fn fields the client already has

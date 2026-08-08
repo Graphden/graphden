@@ -122,23 +122,28 @@ function metadataStripsHeight(nodeData) {
     ? lookups.fnMap.get(fnId) : null;
   if (!fn) return 0;
   let total = 0;
+  // Redesign 2026-08 progressive disclosure: in compact mode the return-type
+  // and effects strips are CSS-hidden (body.gd-cards-compact), so they reserve
+  // no height. renderGraph re-runs this when the "Details" toggle flips.
+  const compact = typeof document !== 'undefined'
+    && document.body.classList.contains('gd-cards-compact');
   // The return-type strip renders when EITHER the row is editable
   // (always shown to expose an "add return-type" affordance), OR when
   // there's an explicit `:return-type` on the entity, OR when
   // `richTypes` carries a computed entry for this name.
   const hasRtEntry = !!fn.name
-    && typeof richTypes === 'object' 
+    && typeof richTypes === 'object'
     && richTypes?.[fn.name] && richTypes[fn.name].return != null;
   const isNavRoot = !nodeData.isPlaceholder && nodeData.isRoot;
   const rtEditable = isNavRoot
     && (typeof isFnEditable === 'function' && isFnEditable(fnId))
     && (typeof isAuthenticated === 'function' && isAuthenticated());
-  if (fn['return-type'] || rtEditable || hasRtEntry) {
+  if (!compact && (fn['return-type'] || rtEditable || hasRtEntry)) {
     total += METADATA_STRIP_HEIGHT;
   }
   // Effects strip — present iff the rich-type registry knows of either
   // computed or declared effects for this fn.
-  if (fn.name && typeof richTypes === 'object' && richTypes) {
+  if (!compact && fn.name && typeof richTypes === 'object' && richTypes) {
     const re = richTypes[fn.name];
     const eff = (re && Array.isArray(re.effects)) ? re.effects : [];
     const decl = (re && Array.isArray(re['expects-effects'])) ? re['expects-effects'] : [];

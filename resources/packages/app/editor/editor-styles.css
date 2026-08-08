@@ -4936,6 +4936,13 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 .gd-insp-runs { font-size: 12px; }
 .gd-insp-runs-loading { padding: 8px 0; font-size: 12px; color: var(--gd-ink-3); }
 
+/* ---- Progressive disclosure: compact cards hide the dense metadata strips
+ *      (return-type + effects) until the nav-controls "Details" toggle. ---- */
+body.gd-cards-compact .return-type-strip,
+body.gd-cards-compact .effects-strip { display: none; }
+.nav-btn[aria-pressed="true"] { color: var(--gd-flow); }
+.nav-btn svg { width: 15px; height: 15px; }
+
 /* ---- Placeholder overlay for not-yet-rebuilt surfaces ---- */
 #gd-surface-overlay {
   position: absolute;

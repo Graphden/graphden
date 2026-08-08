@@ -5011,15 +5011,6 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   color: var(--gd-ink-3);
 }
 .gd-insp-v { display: flex; flex-wrap: wrap; gap: 5px; }
-.gd-insp-soon {
-  margin-top: 14px;
-  padding: 10px 12px;
-  border: 1px dashed var(--gd-line-2);
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--gd-ink-3);
-}
 .gd-chip {
   display: inline-flex;
   align-items: center;
@@ -5043,6 +5034,51 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 }
 .gd-insp-runs { font-size: 12px; }
 .gd-insp-runs-loading { padding: 8px 0; font-size: 12px; color: var(--gd-ink-3); }
+
+/* ---- Inspector detail (server partial /partials/inspector-detail):
+ *      bindings (the 3-way literal/ref/free language) + provenance. ---- */
+.gd-insp-detail-host { margin-top: 4px; }
+.gd-insp-sec { margin-top: 18px; }
+.gd-insp-sec-head {
+  margin-bottom: 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gd-ink-3);
+}
+.gd-insp-sec-empty { font-size: 12px; font-style: italic; color: var(--gd-ink-3); }
+.gd-bind-list { display: flex; flex-direction: column; }
+.gd-bind-row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  padding: 6px 0; border-bottom: 1px solid var(--gd-line);
+}
+.gd-bind-name {
+  font-family: var(--gd-mono); font-size: 12px; font-weight: 600;
+  color: var(--gd-ink);
+}
+/* The 3-way chip is encoded by SHAPE (free = dashed outline) as well as
+   hue, so the newcomer trap reads even without colour. */
+.gd-bind {
+  margin-left: auto; max-width: 210px;
+  display: inline-flex; align-items: center;
+  padding: 1px 8px; border: 1px solid transparent; border-radius: 6px;
+  font-family: var(--gd-mono); font-size: 11px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gd-bind-lit { background: var(--gd-lit-wash); color: var(--gd-lit); }
+.gd-bind-ref { background: var(--gd-ref-wash); color: var(--gd-flow-ink); }
+.gd-bind-free { background: transparent; color: var(--gd-free); border: 1px dashed var(--gd-free); }
+.gd-bind-type {
+  flex-basis: 100%;
+  font-family: var(--gd-mono); font-size: 10px; color: var(--gd-ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gd-prov-row { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; }
+.gd-prov-k {
+  flex: none; min-width: 96px;
+  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--gd-ink-3);
+}
+.gd-prov-v { font-size: 12px; color: var(--gd-ink-2); min-width: 0; overflow-wrap: anywhere; }
+.gd-prov-mono { font-family: var(--gd-mono); }
 
 /* ---- Progressive disclosure: compact cards hide the dense metadata strips
  *      (return-type + effects) until the nav-controls "Details" toggle. ---- */

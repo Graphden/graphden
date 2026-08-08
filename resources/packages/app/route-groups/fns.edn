@@ -39,6 +39,7 @@
                   :partial-mismatch-explainer
                   :partial-provenance
                   :partial-return-type-rule
+                  :partial-inspector-detail
                   :partial-fn-picker-incompat
                   :partial-execute-popover
                   :partial-type-name-datalist

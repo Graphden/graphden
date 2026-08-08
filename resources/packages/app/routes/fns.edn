@@ -181,6 +181,11 @@
    :parent :get-route
    :args {:path "/partials/return-type-rule" :handler :_partial-rtr-handler}}
 
+  {:name :partial-inspector-detail
+   :description "GET /partials/inspector-detail?fn-id={uuid} — the redesign inspector's Bindings (3-way literal/ref/free) + Provenance sections, computed server-side off the fn row + rich-types registry. PUBLIC (`:get-route`) for the same reason as `/partials/provenance`: it only projects binding/type structure already readable via the public `/api/graph/entities`. editor-shell.js swaps it into #gd-insp-detail on node select."
+   :parent :get-route
+   :args {:path "/partials/inspector-detail" :handler :_partial-inspector-detail-handler}}
+
   {:name :partial-fn-picker-incompat
    :description "GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid} — server-rendered incompat-explainer popover fragment for the fn-picker's `explainAndOfferAnyway` flow."
    :parent :get-auth-required

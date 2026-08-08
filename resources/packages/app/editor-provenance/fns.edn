@@ -1079,4 +1079,328 @@
    :lambda-params [:request]
    :description "Ring handler for `GET /partials/return-type-rule?fn=<name>` — returns the return-type-rule popover hiccup as `text/html`. Replaces the JS-built popover + `ruleNarrators` prose mirror; JS mounts + anchors only."
    :parent :html-ok-response
-   :args {:body :_rtr-html}}]}
+   :args {:body :_rtr-html}}
+
+  ;; =====================================================================
+  ;; INSPECTOR DETAIL — GET /partials/inspector-detail?fn-id=
+  ;; ---------------------------------------------------------------------
+  ;; Server-rendered Bindings + Provenance for the selected fn, fetched
+  ;; by editor-shell.js into #gd-insp-detail (the same fetch-into-a-div
+  ;; pattern the Runs&stats section uses). Graph-first: no client
+  ;; re-derivation of the binding state.
+  ;;
+  ;; The fn's full argument surface = union of the rich-types entry's
+  ;; `:args` (FREE args, name→type) and `:resolved-bindings` (BOUND args,
+  ;; name→{:type :value :ref :value-present}). Per arg, the 3-way state:
+  ;;   :ref present            → reference  (→ :target)
+  ;;   :value-present true     → literal    (= value)  [even literal-nil]
+  ;;   otherwise              → free       (dashed amber)
+  ;; `:value-present` (not `some? :value`) is the correct literal test —
+  ;; a PB'-style `{:type T :value nil}` slot decl is NOT a literal.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_insp-fn-id
+   :description "Selected fn id from `?fn-id=`; nil when absent/malformed."
+   :parent :fn-id-param
+   :args {:request {:as :request}}}
+
+  {:name :_insp-fn-id-nil?
+   :parent :nil?
+   :args {:value :_insp-fn-id}}
+
+  {:name :_insp-row
+   :description "The selected fn's row — resolved only in the non-nil branch (`:if` short-circuits, so `:assert-some` never runs on a nil id)."
+   :parent :get-entity
+   :args {:entity-type {:value "fn"}
+          :id {:parent :assert-some :args {:value {:ref :_insp-fn-id :type :nullable-uuid}}}}}
+
+  {:name :_insp-name
+   :parent :get
+   :args {:coll :_insp-row :key {:value :name} :default nil}}
+
+  {:name :_insp-entry
+   :description "RAW rich-types registry entry (via id→name→registry); nil for anonymous / unregistered fns — the sections then collapse to their empty states."
+   :parent :rich-type-of-name
+   :args {:fn-name {:ref :_insp-name :type :nullable-text}}}
+
+  ;; --- Arguments (the 3-way binding view) ------------------------------
+  {:name :_insp-free-args
+   :parent :get
+   :args {:coll :_insp-entry :key {:value :args} :default {:value {}}}}
+
+  {:name :_insp-bound
+   :parent :get
+   :args {:coll :_insp-entry :key {:value :resolved-bindings} :default {:value {}}}}
+
+  {:name :_insp-arg-names
+   :description "Sorted union of free + bound arg names — `(sort (keys (merge free bound)))`."
+   :parent :sort
+   :args {:coll {:parent :keys
+                 :args {:map {:parent :merge :args {:maps [:_insp-free-args :_insp-bound]}}}}}}
+
+  {:name :_insp-has-args?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_insp-arg-names}}}}
+
+  ;; Per-arg row. HOF over `:_insp-arg-names`; `{:as :item}` = arg name,
+  ;; `{:as :bound}` / `{:as :free}` = the two maps (closure-captured).
+  {:name :_insp-r-rb
+   :parent :get
+   :args {:coll {:as :bound} :key {:as :item} :default nil}}
+
+  {:name :_insp-r-ref
+   :parent :get
+   :args {:coll :_insp-r-rb :key {:value :ref} :default nil}}
+
+  {:name :_insp-r-vp
+   :parent :get
+   :args {:coll :_insp-r-rb :key {:value :value-present} :default nil}}
+
+  {:name :_insp-r-val
+   :parent :get
+   :args {:coll :_insp-r-rb :key {:value :value} :default nil}}
+
+  {:name :_insp-r-rb-type
+   :parent :get
+   :args {:coll :_insp-r-rb :key {:value :type} :default nil}}
+
+  {:name :_insp-r-free-type
+   :parent :get
+   :args {:coll {:as :free} :key {:as :item} :default nil}}
+
+  {:name :_insp-r-type
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_insp-r-rb-type}}
+          :then :_insp-r-rb-type
+          :else :_insp-r-free-type}}
+
+  {:name :_insp-r-type-text
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_insp-r-type}}
+          :then {:parent :to-str :args {:value :_insp-r-type}}
+          :else {:value "any"}}}
+
+  {:name :_insp-r-is-ref?
+   :parent :some?
+   :args {:value :_insp-r-ref}}
+
+  {:name :_insp-r-is-lit?
+   :parent :equal?
+   :args {:a :_insp-r-vp :b {:value true}}}
+
+  {:name :_insp-r-ref-text
+   :parent :str-join
+   :args {:coll [{:value "→ :"}
+                 {:parent :keyword-to-str :args {:keyword {:ref :_insp-r-ref :type :keyword}}}]
+          :separator {:value ""}}}
+
+  {:name :_insp-r-val-text
+   :parent :str-join
+   :args {:coll [{:value "= "} {:parent :pr-str :args {:value :_insp-r-val}}]
+          :separator {:value ""}}}
+
+  {:name :_insp-r-ref-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-bind gd-bind-ref"}}
+          :children [:_insp-r-ref-text]}}
+
+  {:name :_insp-r-lit-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-bind gd-bind-lit"}}
+          :children [:_insp-r-val-text]}}
+
+  {:name :_insp-r-free-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-bind gd-bind-free"}}
+          :children [{:value "free"}]}}
+
+  {:name :_insp-r-lit-or-free
+   :parent :if
+   :args {:test :_insp-r-is-lit?
+          :then :_insp-r-lit-chip
+          :else :_insp-r-free-chip}}
+
+  {:name :_insp-r-chip
+   :parent :if
+   :args {:test :_insp-r-is-ref?
+          :then :_insp-r-ref-chip
+          :else :_insp-r-lit-or-free}}
+
+  {:name :_insp-r-name-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-bind-name"}}
+          :children [{:parent :keyword-to-str :args {:keyword {:as :item}}}]}}
+
+  {:name :_insp-r-type-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-bind-type"}}
+          :children [:_insp-r-type-text]}}
+
+  {:name :_insp-arg-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-bind-row"}}
+          :children [:_insp-r-name-span :_insp-r-chip :_insp-r-type-span]}}
+
+  {:name :_insp-arg-rows
+   :parent :map
+   :args {:func :_insp-arg-row
+          :coll :_insp-arg-names
+          :bound :_insp-bound
+          :free :_insp-free-args}}
+
+  {:name :_insp-args-rows-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-bind-list"}}
+          :children :_insp-arg-rows}}
+
+  {:name :_insp-args-empty
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-sec-empty"}}
+          :children [{:value "No arguments."}]}}
+
+  {:name :_insp-args-content
+   :parent :if
+   :args {:test :_insp-has-args?
+          :then :_insp-args-rows-div
+          :else :_insp-args-empty}}
+
+  {:name :_insp-args-section
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-sec"}}
+          :children [{:value [:div {:class "gd-insp-sec-head"} "Arguments"]}
+                     :_insp-args-content]}}
+
+  ;; --- Provenance ------------------------------------------------------
+  {:name :_insp-parent-ids
+   :parent :get
+   :args {:coll :_insp-row :key {:value :parent-ids} :default {:value []}}}
+
+  {:name :_insp-has-parents?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_insp-parent-ids}}}}
+
+  {:name :_insp-rtfid
+   :parent :get
+   :args {:coll :_insp-row :key {:value :return-type-fn-id} :default nil}}
+
+  {:name :_insp-kind-text
+   :description "base-fn = empty parent-ids + return-type-fn-id; fn-def = non-empty parent-ids; type-row = neither."
+   :parent :cond
+   :args {:clauses [:_insp-has-parents? {:value "Composed function (fn-def)"}
+                    {:parent :some? :args {:value :_insp-rtfid}} {:value "Base function — Clojure implementation"}
+                    {:value true} {:value "Type row"}]}}
+
+  {:name :_insp-primary
+   :parent :get
+   :args {:coll :_insp-entry :key {:value :primary-parent} :default nil}}
+
+  {:name :_insp-primary-some?
+   :parent :some?
+   :args {:value :_insp-primary}}
+
+  {:name :_insp-rule-owner
+   :parent :rule-owner-of-name
+   :args {:fn-name {:ref :_insp-name :type :nullable-text}}}
+
+  {:name :_insp-rule-owner-name
+   :parent :get
+   :args {:coll :_insp-rule-owner :key {:value :name} :default nil}}
+
+  {:name :_insp-return
+   :parent :get
+   :args {:coll :_insp-entry :key {:value :return} :default nil}}
+
+  {:name :_insp-return-text
+   :description "Return-type provenance: attribute to the rule-owning base-fn when one computes it, else show the declared/computed return type."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_insp-rule-owner-name}}
+          :then {:parent :str-join
+                 :args {:coll [{:value "computed by "}
+                               {:parent :to-str :args {:value :_insp-rule-owner-name}}
+                               {:value "'s rule"}]
+                        :separator {:value ""}}}
+          :else {:parent :if
+                 :args {:test {:parent :some? :args {:value :_insp-return}}
+                        :then {:parent :to-str :args {:value :_insp-return}}
+                        :else {:value "—"}}}}}
+
+  ;; A prov row = [k v]. The primary-parent row is conditional (hidden
+  ;; placeholder keeps the children vector shape uniform, same idiom as
+  ;; the branch-popover row placeholders).
+  {:name :_insp-prov-kind-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-prov-row"}}
+          :children [{:value [:span {:class "gd-prov-k"} "Kind"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-prov-v"}}
+                             :children [:_insp-kind-text]}}]}}
+
+  {:name :_insp-prov-primary-row-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-prov-row"}}
+          :children [{:value [:span {:class "gd-prov-k"} "Primary parent"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-prov-v gd-prov-mono"}}
+                             :children [{:parent :to-str :args {:value :_insp-primary}}]}}]}}
+
+  {:name :_insp-prov-primary-row
+   :parent :if
+   :args {:test :_insp-primary-some?
+          :then :_insp-prov-primary-row-shown
+          :else {:value [:span {:hidden "1"}]}}}
+
+  {:name :_insp-prov-return-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-prov-row"}}
+          :children [{:value [:span {:class "gd-prov-k"} "Return type"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-prov-v gd-prov-mono"}}
+                             :children [:_insp-return-text]}}]}}
+
+  {:name :_insp-prov-section
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-sec"}}
+          :children [{:value [:div {:class "gd-insp-sec-head"} "Provenance"]}
+                     :_insp-prov-kind-row
+                     :_insp-prov-primary-row
+                     :_insp-prov-return-row]}}
+
+  ;; --- Assembly + handler ---------------------------------------------
+  {:name :_insp-detail-full
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-detail"}}
+          :children [:_insp-args-section :_insp-prov-section]}}
+
+  {:name :_insp-detail-body
+   :description "Empty span for a nil id (keeps `:get-entity`/`:assert-some` off the nil path); the full detail otherwise."
+   :parent :if
+   :args {:test :_insp-fn-id-nil?
+          :then {:value [:span {:hidden "1"}]}
+          :else :_insp-detail-full}}
+
+  {:name :_insp-html
+   :parent :render-hiccup
+   :args {:hiccup :_insp-detail-body}}
+
+  {:name :_partial-inspector-detail-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/inspector-detail?fn-id=` — bindings (3-way literal/ref/free) + provenance for the selected fn, as `text/html`. editor-shell.js swaps the response into #gd-insp-detail."
+   :parent :html-ok-response
+   :args {:body :_insp-html}}]}

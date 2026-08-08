@@ -218,14 +218,42 @@
         + '<span class="gd-insp-v gd-insp-pure">pure</span></div>';
     }
 
+    // Bindings + provenance: server-rendered from the graph, fetched into
+    // this host (like Runs&stats below). Placed above runs — the argument
+    // surface is the first thing to read about a selected fn.
+    html += '<div id="gd-insp-detail" class="gd-insp-detail-host">'
+      + '<div class="gd-insp-runs-loading">Loading bindings…</div></div>';
     html += '<div class="gd-insp-runs-head">Runs &amp; stats</div>'
       + '<div id="gd-insp-runs" class="gd-insp-runs">'
       + '<div class="gd-insp-runs-loading">Loading runs…</div></div>'
-      + '<p class="gd-insp-soon">Bindings and provenance are coming here next — '
-      + 'rendered from the graph.</p>'
       + '</div>';
     el.innerHTML = html;
+    gdLoadInspectorDetail(fnId);
     gdLoadInspectorRuns(fnId);
+  }
+
+  // Per-fn bindings + provenance: server partial GET /partials/inspector-detail.
+  // PUBLIC route (projects graph structure already public via /api/graph/entities),
+  // so it renders signed-out too. Token-guarded against a stale response landing
+  // after the selection moved on.
+  let inspDetailToken = null;
+  function gdLoadInspectorDetail(fnId) {
+    inspDetailToken = fnId;
+    const url = '/partials/inspector-detail?fn-id=' + encodeURIComponent(fnId);
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+      .then((txt) => {
+        if (inspDetailToken !== fnId) return; // selection moved on
+        const host = document.getElementById('gd-insp-detail');
+        if (host) host.innerHTML = txt;
+      })
+      .catch(() => {
+        if (inspDetailToken !== fnId) return;
+        const host = document.getElementById('gd-insp-detail');
+        if (host) {
+          host.innerHTML = '<div class="gd-insp-sec-empty">Bindings unavailable.</div>';
+        }
+      });
   }
 
   // Per-fn runs + 7-day stats: reuse the existing server partial

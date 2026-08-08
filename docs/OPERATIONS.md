@@ -88,9 +88,16 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
 
 - `GET /health` — **readiness** signal (and startup). It is a graph fn behind
   the compiled registry, so it stays 200 only while the registry is warm: a pod
-  mid-cold-boot, or mid *runtime* full-recompile (~50 s), reads not-ready and is
-  correctly de-rotated. Give the startup probe a start-period generous enough
-  for the boot compile (see the Dockerfile healthcheck `start-period`).
+  mid-cold-boot reads not-ready and is correctly de-rotated. Give the startup
+  probe a start-period generous enough for the boot compile (see the Dockerfile
+  healthcheck `start-period`). A *runtime* full clear (a nil-seed write, a
+  migration) no longer de-rotates the pod: it is **stale-while-revalidate** —
+  the ctx keeps serving its existing (stale) registry while a background
+  `rebuild-optimistic!` refreshes it, so `/health` stays 200 and no request
+  blocks behind the ~50 s recompile. Staleness is bounded by one rebuild; the
+  window is served, never hung. (Only a genuinely cold holder — boot, or a
+  divergent cold branch's first access — still compiles on the request path,
+  and that is per-ctx, so it never hangs the whole pod.)
 - `GET /livez` — **liveness** signal. A static, registry-independent 200 (it
   short-circuits in `branch-router/dispatch` before any registry access). Point
   the k8s livenessProbe / any restart-on-unhealthy check HERE, never at

@@ -178,6 +178,12 @@
    ;; without the lock falls through with no synchronization (no
    ;; concurrency to worry about anyway).
    (let [body (fn []
+                ;; Monotonic token for stale-while-revalidate: every real
+                ;; invalidation (delta or full) bumps it, so a background full
+                ;; rebuild can tell whether a newer write landed mid-compile and
+                ;; skip its swap rather than clobber a delta patch. (The `#{}`
+                ;; no-op skip below never runs `body`, so it doesn't bump.)
+                (when-let [ic (:invalidation-count ctx)] (swap! ic inc))
                 ;; Splice when we know what changed; drop wholesale only when we
                 ;; don't. The full drop is what made every write cost the next
                 ;; reader a complete graph reload from Postgres.
@@ -208,13 +214,26 @@
                   :else
                   (do
                     ;; The write said nothing about what it changed, so the whole
-                    ;; registry goes. The rebuild is NOT counted here — it lands
-                    ;; later, lazily, on whichever request reads next
-                    ;; (`compile-runtime/registry`). Two full-clears before one
-                    ;; read cost one rebuild, so these two counters answer
+                    ;; registry is now stale. The rebuild is NOT counted here — it
+                    ;; lands later, in the background, driven by the next request
+                    ;; through `compile-runtime/registry`. Two full-clears before
+                    ;; one read cost one rebuild, so these two counters answer
                     ;; different questions and must not be compared to each other.
                     (counters/count! :registry/invalidate-full)
-                    (reset! (:compiled-registry ctx) nil)
+                    (when-let [fc (:full-clear-count ctx)] (swap! fc inc))
+                    (let [holder (:compiled-registry ctx)
+                          stale? (:registry-stale? ctx)]
+                      (if (and holder stale? (some? @holder))
+                        ;; WARM: keep serving the stale registry, flag it for
+                        ;; revalidation. The gate rebuilds it in the background
+                        ;; (`rebuild-optimistic!`) — no request ever blocks behind
+                        ;; a ~50s cold compile on this ctx. See the ctx-atom
+                        ;; comment in `make-execution-context`.
+                        (reset! stale? true)
+                        ;; COLD (never compiled, e.g. boot / cold branch) or a
+                        ;; stripped test ctx without the machinery — nothing to
+                        ;; serve stale, so clear and let the gate compile once.
+                        (when holder (reset! holder nil))))
                     (cr/refresh-type-registries-from-storage! ctx))))]
      ;; An EMPTY (but non-nil) seed set is an ANSWER, not a shrug: the caller
      ;; knows this write cannot have changed any compiled closure — a `:slot`
@@ -362,6 +381,23 @@
       ;; `evict-cell!` reference-count shared fns. Empty + unused on a
       ;; non-fleet ctx (which loads its whole shard via `rebuild!`).
       (assoc :loaded-roots (atom #{}))
+      ;; Availability: stale-while-revalidate for the request-path full clear.
+      ;; A full clear (nil-seed write, migration) used to nil `:compiled-registry`,
+      ;; so the next request ran the ~50s cold `rebuild!` UNDER the invalidation
+      ;; lock and every concurrent request on this ctx blocked behind it (the
+      ;; pod-wide hang). Instead we KEEP the (now stale) registry, flip
+      ;; `:registry-stale?`, and let the gate serve stale while a background
+      ;; `rebuild-optimistic!` revalidates — the same pattern the epoch heal uses.
+      ;;   `:invalidation-count` — monotonic, bumped on EVERY invalidation
+      ;;     (delta + full). It is the `unchanged?` token: a background full
+      ;;     rebuild swaps only if no newer invalidation landed mid-compile, so
+      ;;     it can't clobber a delta that patched the live registry meanwhile.
+      ;;   `:registry-rebuild-inflight` — CAS guard so one background revalidate
+      ;;     runs per ctx, however many requests observe the stale flag.
+      (assoc :invalidation-count (atom 0)
+             :full-clear-count (atom 0)
+             :registry-stale? (atom false)
+             :registry-rebuild-inflight (atom false))
       ;; Effect sandbox — nil = unrestricted. Read on the hot path by
       ;; `compile-runtime/execute`, which binds `*allowed-effects*` for
       ;; the execution so `record-effect!` can gate.

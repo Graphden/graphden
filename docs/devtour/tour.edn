@@ -62,11 +62,14 @@
            code — this is where that happens."}
 
     {:ns graphden.executor.compile-runtime :defn registry
-     :say "Returns the `{fn-id -> closure}` map from the context holder. On a
-           cold holder it rebuilds on demand under an invalidation lock, with a
-           double-checked read so concurrent callers coalesce onto one rebuild
-           instead of stampeding. This is the lazy **compile-once, reuse-forever**
-           registry the executor actually runs against."
+     :say "Returns the `{fn-id -> closure}` map from the context holder. A warm
+           holder is served straight back; if a full clear flagged it stale it
+           is still served immediately while a background `rebuild-optimistic!`
+           refreshes it (stale-while-revalidate — no reader ever blocks behind a
+           ~50s cold compile). Only a genuinely COLD holder (boot, a divergent
+           cold branch) compiles on demand under the invalidation lock, double-
+           checked so concurrent callers coalesce onto one rebuild. This is the
+           lazy **compile-once, reuse-forever** registry the executor runs against."
      :see [[:executor "rebuild!"]]}
 
     {:ns graphden.executor.compile-runtime :defn rebuild!

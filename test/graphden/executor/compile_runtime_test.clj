@@ -121,6 +121,66 @@
 
 
 ;; ============================================================================
+;; Availability: request-path full clear is stale-while-revalidate, not a
+;; nil-then-block-behind-the-cold-compile (the pod-wide-hang fix).
+;; ============================================================================
+
+(deftest full-clear-keeps-serving-stale-and-flags-revalidate
+  (testing "a full clear (nil seeds) on a WARM ctx keeps the registry and flags it"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
+        (setup/setup-add-function! storage)
+        (let [ctx (exec/create-context {:storage storage})
+              warm (cr/registry ctx)]
+          (is (some? warm) "registry is warm before the clear")
+          (is (false? @(:registry-stale? ctx)) "not stale yet")
+          ;; nil changed-fn-ids ⇒ full clear.
+          (ectx/invalidate-graph-cache! ctx nil)
+          (is (some? @(:compiled-registry ctx))
+              "holder is NOT nil'd — the stale registry is still served")
+          (is (true? @(:registry-stale? ctx)) "flagged for revalidation"))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest gate-serves-stale-then-revalidates-in-background
+  (testing "the gate returns the stale registry immediately and refreshes it"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
+        (setup/setup-add-function! storage)
+        (let [ctx (exec/create-context {:storage storage})]
+          (cr/registry ctx)                       ; warm
+          (ectx/invalidate-graph-cache! ctx nil)  ; full clear
+          (is (true? @(:registry-stale? ctx)))
+          ;; Run the background revalidate INLINE so the test is deterministic.
+          (binding [cr/*stale-revalidate-sync?* true]
+            (let [served (cr/registry ctx)]
+              (is (some? served) "gate returned a registry WITHOUT blocking on nil")
+              (is (map? served))))
+          (is (false? @(:registry-stale? ctx))
+              "revalidate cleared the stale flag")
+          (is (some? @(:compiled-registry ctx)) "registry is warm again"))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest cold-ctx-still-compiles-on-first-access
+  (testing "a never-compiled ctx (nothing to serve stale) still builds on demand"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
+        (setup/setup-add-function! storage)
+        (let [ctx (exec/create-context {:storage storage})]
+          (is (nil? @(:compiled-registry ctx)) "cold")
+          (is (map? (cr/registry ctx)) "cold gate compiles once")
+          (is (some? @(:compiled-registry ctx)) "now warm"))
+        (finally
+          (sp/close storage))))))
+
+
+;; ============================================================================
 ;; `execute` — fn? branch (callable fn-id)
 ;; ============================================================================
 

@@ -216,7 +216,7 @@
 
 
 (deftest invalidate-full-clear-on-empty-fn-ids
-  (testing "invalidate-graph-cache! with no fn-ids (legacy 1-arity OR explicit nil) drops the whole compiled registry — the registry function rebuilds it from scratch on the next read."
+  (testing "invalidate-graph-cache! with no fn-ids (legacy 1-arity OR explicit nil) is stale-while-revalidate on a WARM ctx: it KEEPS serving the (now stale) registry and flags it, rather than nil-ing the holder and blocking the next reader behind a ~50s cold compile."
     (let [storage (setup/create-test-storage)]
       (try
         (let [c (exec/create-context {:storage storage})
@@ -224,7 +224,9 @@
                    'graphden.executor.compile-runtime/registry) c)]
           (is (some? @(:compiled-registry c)) "registry populated by initial build")
           (ctx/invalidate-graph-cache! c)
-          (is (nil? @(:compiled-registry c))
-              "1-arity full-clear empties the registry"))
+          (is (some? @(:compiled-registry c))
+              "1-arity full-clear KEEPS the stale registry (no pod-wide hang)")
+          (is (true? @(:registry-stale? c))
+              "…and flags it for background revalidation"))
         (finally
           (sp/close storage))))))

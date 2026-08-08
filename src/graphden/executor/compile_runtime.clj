@@ -546,6 +546,61 @@
             compiled))))))
 
 
+(def ^:dynamic *stale-revalidate-sync?*
+  "Test seam. When true, `maybe-schedule-revalidate!` runs the background
+   rebuild INLINE (deterministic) instead of on a daemon thread — mirrors
+   `branch-router/*epoch-heal-sync?*`."
+  false)
+
+
+(defn maybe-schedule-revalidate!
+  "Kick a single background stale-while-revalidate for `ctx` when its
+   `:registry-stale?` flag is set and none is already running. This is the
+   availability contract for the request-path full clear: the gate keeps
+   returning the STALE registry (never blocks behind a ~50s cold compile),
+   and this refreshes it off-thread. Coalesced via the ctx's
+   `:registry-rebuild-inflight` CAS guard, so N concurrent requests that
+   observe the flag still spawn only one rebuild.
+
+   Shape mirrors the epoch heal (`branch-router/heal-stale-ctxs!`): two
+   optimistic attempts (compile outside the invalidation lock, swap only if
+   `:invalidation-count` didn't move mid-compile — a moved count means a
+   newer write already patched the live registry and our snapshot would
+   regress read-your-writes), then a blocking `rebuild!` correctness
+   fallback. The stale flag is cleared only if no NEW full clear landed
+   while we ran (`:full-clear-count` unmoved) — a delta bumps
+   `:invalidation-count` but not `:full-clear-count`, so ordinary edits
+   don't wastefully keep re-triggering; a genuine full clear during our
+   compile leaves the flag set for the next request to re-kick."
+  [ctx]
+  (let [inflight (:registry-rebuild-inflight ctx)
+        stale? (:registry-stale? ctx)
+        ic (:invalidation-count ctx)
+        fc (:full-clear-count ctx)]
+    (when (and inflight stale? ic fc @stale?
+               (compare-and-set! inflight false true))
+      (let [run (fn []
+                  (try
+                    (let [fc0 @fc
+                          c0 @ic]
+                      (loop [attempt 1]
+                        (when-not (rebuild-optimistic! ctx (fn [] (= c0 @ic)))
+                          (if (< attempt 2)
+                            (recur (inc attempt))
+                            (rebuild! ctx))))
+                      ;; Cleared only if no full clear re-flagged us mid-run;
+                      ;; otherwise the next request re-kicks with a fresh token.
+                      (when (= fc0 @fc) (reset! stale? false)))
+                    (catch Exception e
+                      (log/warn e "registry stale-revalidate failed"))
+                    (finally (reset! inflight false))))]
+        (if *stale-revalidate-sync?*
+          (run)
+          (let [t (Thread. ^Runnable run "registry-stale-revalidate")]
+            (Thread/.setDaemon t true)
+            (Thread/.start t)))))))
+
+
 (defn instantiate-from-templates!
   "Hydrate `dst-ctx`'s `:compiled-registry` from `src-ctx`'s. Used by
    the branch-router's lazy-compile fast path: when a non-default
@@ -780,8 +835,24 @@
    cheaply."
   [ctx]
   (when-let [holder (:compiled-registry ctx)]
-    (or @holder
-        (call-with-invalidation-lock ctx (fn [] (or @holder (rebuild! ctx)))))))
+    (let [cur @holder]
+      (if (some? cur)
+        (do
+          ;; Serve the current registry immediately. If a full clear flagged
+          ;; it stale, revalidate in the BACKGROUND — a reader never blocks
+          ;; behind the ~50s cold compile. Coalesced (a no-op once one is in
+          ;; flight), so this is cheap on the hot path.
+          (when (some-> (:registry-stale? ctx) deref)
+            (maybe-schedule-revalidate! ctx))
+          cur)
+        ;; Cold: never compiled (boot, or a divergent cold branch's first
+        ;; access) — nothing to serve stale, so compile once under the lock,
+        ;; double-checked so concurrent readers coalesce onto the first
+        ;; arrival's result. This blocks only THIS ctx's readers until its
+        ;; first compile; the pod-wide hang came from full-clearing a WARM
+        ;; ctx to nil, which no longer happens (see `context/invalidate-graph-
+        ;; cache!` stale-while-revalidate).
+        (call-with-invalidation-lock ctx (fn [] (or @holder (rebuild! ctx))))))))
 
 
 ;; =============================================================================

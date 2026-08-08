@@ -28,12 +28,15 @@
      themes (slightly-raised body + distinct header band + visible outline)
      instead of inverting to bright gray. The focused/root card wears a
      Graphden-Blue title band so the active node reads in brand colour. */
-  --card-bg: #fff;
-  --card-fg: #0d1117;
-  --card-border: #0d1117;
-  --card-header-bg: #0066cc;
+  /* Redesign 2026-08: node cards read from the --gd-* palette so the canvas
+     matches the shell. The focused/root title band is a fixed deep teal
+     (#106b63) — white text clears AA on it in both themes. */
+  --card-bg: var(--gd-panel);
+  --card-fg: var(--gd-ink);
+  --card-border: var(--gd-line-2);
+  --card-header-bg: #106b63;
   --card-header-fg: #fff;
-  --card-row-highlight: #eef4ff;
+  --card-row-highlight: var(--gd-flow-wash);
   /* HOF-captured arg strip — subtle blue tint that survives both themes. */
   --hof-fg: #557;
   --hof-bg: #f4f6fc;
@@ -178,12 +181,13 @@ body.theme-dark {
   /* Card body slightly raised vs Ink body; the focused/root card keeps the
      Graphden-Blue title band (brand colour reads on dark too); outline
      subtle so the node frame isn't a glaring box. */
-  --card-bg: #161b22;
-  --card-fg: #e6edf3;
-  --card-border: #30363d;
-  --card-header-bg: #0066cc;
+  /* Redesign 2026-08: dark cards read from the --gd-* dark palette. */
+  --card-bg: var(--gd-panel);
+  --card-fg: var(--gd-ink);
+  --card-border: var(--gd-line-2);
+  --card-header-bg: #106b63;
   --card-header-fg: #fff;
-  --card-row-highlight: #182130;
+  --card-row-highlight: var(--gd-flow-wash);
   --hof-fg: #aab8e8;
   --hof-bg: #1e2030;
   --hof-border: #3a4070;

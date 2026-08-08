@@ -680,8 +680,9 @@
    resolved refs to it survive un-tombstoned). Such an id has NO
    registry entry — but its NAME, when unambiguous, identifies the
    CURRENT fn carrying the same authored contract. Falls back to the
-   name view (nil for per-ns-ambiguous bares), warn-once per id with
-   the repoint-or-tombstone prescription. Same rescue the
+   name view (nil for per-ns-ambiguous bares), info-once per id (the
+   resolution succeeds; actionable ghost-hunting lives in the dedicated
+   `dev.integrity/stale-identities` tool). Same rescue the
    lambda-params reader uses; shared here so every silent consumer
    (produces-callable? / lazy-seq-args / compile-time-value?) degrades
    LOUDLY-and-correctly instead of silently-and-wrongly."
@@ -708,7 +709,16 @@
             ;; (Narrowing the fire condition to same-ns would need the stale
             ;; row's ns threaded through 3 hot-path call sites AND a path↔ns-id
             ;; reconciliation — not worth the compile-path risk for a non-bug.)
-            (log/warn "rich-type resolved by NAME for a stale identity row — actionable only if the canonical is in the SAME namespace (else a legal cross-ns/@version twin)"
+            ;; INFO, not WARN: the rescue ALWAYS resolves to the correct
+            ;; same-contract fn (verified non-bug), so this is a heads-up, not
+            ;; an error. The one actionable shape — a genuine intra-namespace
+            ;; ghost from a historical rename — is surfaced (and repaired) by
+            ;; the dedicated `dev.integrity/stale-identities` /
+            ;; `repair-stale-identities!` operator tool, which is where ghost
+            ;; hunting belongs; a differing `:canonical-namespace` here is the
+            ;; benign cross-ns / `@version` twin. Emitting WARN on the hot path
+            ;; for an always-correct resolution just cried wolf.
+            (log/info "rich-type resolved by NAME for a stale identity row (resolution OK) — run dev.integrity/stale-identities if the canonical is in the SAME namespace; a differing namespace is a benign cross-ns/@version twin"
                       {:fn-id fn-id :name row-name
                        :canonical-namespace (:namespace entry)}))
           entry))))

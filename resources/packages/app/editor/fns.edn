@@ -387,7 +387,21 @@
               [:div {:class "gd-set-card"}
                [:h2 "Access"]
                [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Operate surface."]
-               [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]]]}}
+               [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]
+            ;; RUN surface — execute the SELECTED fn (launches the proven
+            ;; execute popover) + its recent runs. Populated by gdRenderRun.
+            [:section {:id "gd-run" :hidden "hidden" :aria-label "Run"}
+             [:div {:class "gd-operate-head"}
+              [:h1 "Run"]
+              [:p "Execute the selected function — fill its free arguments, acknowledge side effects, and see its recent runs."]]
+             [:div {:id "gd-run-body" :class "gd-run-body"}]]
+            ;; WORKSPACES surface — spatial focus (namespace roots + pinned
+            ;; libraries) and the personal-branch overlay. gdRenderWorkspaces.
+            [:section {:id "gd-workspaces" :hidden "hidden" :aria-label "Workspaces"}
+             [:div {:class "gd-operate-head"}
+              [:h1 "Workspaces"]
+              [:p "Scope the editor to the namespaces you work in, pin shared libraries, and keep a private branch overlay to tinker without touching the team."]]
+             [:div {:id "gd-workspaces-body" :class "gd-workspaces-body"}]]]]}}
 
   ;; =============================================================================
   ;; HASH-BUSTED ASSET URLs + LINK/SCRIPT-SRC ELEMENTS

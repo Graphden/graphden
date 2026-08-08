@@ -4963,9 +4963,30 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 }
 /* Inspector content — identity Overview (first slice; rich panels via partial). */
 .gd-insp-head {
+  position: relative;
   padding: 14px 16px 12px;
   border-bottom: 1px solid var(--gd-line);
 }
+/* Close ✕ — only shown when the inspector is a bottom sheet (≤1100). */
+.gd-insp-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--gd-r-sm);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--gd-ink-3);
+  cursor: pointer;
+}
+.gd-insp-close:hover { background: var(--gd-line); color: var(--gd-ink); }
 .gd-insp-title { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .gd-insp-name {
   font-family: var(--gd-mono);
@@ -4995,6 +5016,28 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   line-height: 1.5;
   color: var(--gd-ink-2);
 }
+.gd-insp-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--gd-line);
+}
+.gd-insp-tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--gd-ink-3);
+  cursor: pointer;
+}
+.gd-insp-tab:hover { color: var(--gd-ink); }
+.gd-insp-tab.active { color: var(--gd-flow); border-bottom-color: var(--gd-flow); font-weight: 600; }
+.gd-insp-tab:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: -2px; }
 .gd-insp-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -5171,7 +5214,7 @@ body.gd-cards-compact .effects-strip { display: none; }
 #gd-operate-panels > * { min-width: 0; }
 
 /* ---- Settings surface (personal editor settings) ---- */
-#gd-settings {
+#gd-settings, #gd-run, #gd-workspaces {
   position: absolute;
   inset: 0;
   z-index: 250;
@@ -5180,7 +5223,7 @@ body.gd-cards-compact .effects-strip { display: none; }
   font-family: var(--gd-ui-font);
   background: var(--gd-paper);
 }
-#gd-settings[hidden] { display: none; }
+#gd-settings[hidden], #gd-run[hidden], #gd-workspaces[hidden] { display: none; }
 .gd-settings-grid {
   max-width: 1100px;
   margin: 0 auto;
@@ -5232,13 +5275,87 @@ body.gd-cards-compact .effects-strip { display: none; }
 .gd-cap-on { background: var(--gd-flow-wash); color: var(--gd-flow-ink); }
 .gd-cap-off { background: var(--gd-crit-wash); color: var(--gd-crit); }
 
+/* ---- Run surface ---- */
+.gd-run-body { max-width: 720px; margin: 0 auto; }
+.gd-run-empty {
+  max-width: 62ch; font-size: 13.5px; line-height: 1.6; color: var(--gd-ink-2);
+}
+.gd-run-card {
+  background: var(--gd-panel);
+  border: 1px solid var(--gd-line);
+  border-radius: var(--gd-r);
+  padding: 18px 20px;
+}
+.gd-run-fn { display: flex; align-items: baseline; gap: 10px; }
+.gd-run-fnname { font-family: var(--gd-mono); font-size: 18px; font-weight: 600; color: var(--gd-ink); }
+.gd-run-effects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 14px 0; }
+.gd-run-effects-label {
+  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--gd-ink-3); margin-right: 4px;
+}
+.gd-run-launch {
+  font-size: 14px; font-weight: 600; padding: 8px 18px; cursor: pointer;
+  background: var(--gd-flow); color: var(--on-accent);
+  border: 1px solid var(--gd-flow); border-radius: var(--gd-r-sm);
+}
+.gd-run-launch:hover { background: var(--gd-flow-2); border-color: var(--gd-flow-2); }
+.gd-run-launch:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+.gd-run-hist-head {
+  margin: 22px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gd-ink-3);
+}
+
+/* ---- Workspaces surface ---- */
+.gd-ws-grid {
+  max-width: 1100px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px; align-items: start;
+}
+.gd-ws-summary { font-size: 12.5px; color: var(--gd-ink-2); margin: 4px 0 12px; }
+.gd-ws-summary b { color: var(--gd-ink); }
+.gd-ws-nslist { display: flex; flex-direction: column; gap: 4px; }
+.gd-ws-nsrow { display: flex; align-items: center; gap: 6px; }
+.gd-ws-nsbtn {
+  flex: 1 1 auto; min-width: 0; text-align: left;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--gd-mono); font-size: 12px;
+  padding: 6px 10px; cursor: pointer;
+  background: var(--gd-panel); color: var(--gd-ink);
+  border: 1px solid var(--gd-line-2); border-radius: var(--gd-r-sm);
+}
+.gd-ws-nsbtn .gd-pi { color: var(--gd-ink-3); }
+.gd-ws-nsbtn:hover { border-color: var(--gd-flow); }
+.gd-ws-nsbtn.active { background: var(--gd-flow-wash); color: var(--gd-flow-ink); border-color: var(--gd-flow); font-weight: 600; }
+.gd-ws-nsbtn.active .gd-pi { color: var(--gd-flow); }
+.gd-ws-pin {
+  flex: none; width: 30px; height: 30px; cursor: pointer;
+  background: none; border: 1px solid transparent; border-radius: var(--gd-r-sm);
+  opacity: 0.4; font-size: 13px;
+}
+.gd-ws-pin:hover { opacity: 0.8; }
+.gd-ws-pin.pinned { opacity: 1; background: var(--gd-flow-wash); border-color: var(--gd-flow); }
+
 /* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet, the
  *      rail stays (it's already thin). Below the sidebar breakpoint the
  *      explorer auto-collapses (handled by editor-prefs.js). ---- */
 @media (max-width: 1100px) {
-  /* Drop the inspector column to two columns (explorer | canvas). Once the
-     inspector is interactive it returns here as a bottom sheet on selection. */
+  /* Two columns (explorer | canvas); the inspector leaves the grid and
+     returns as a bottom sheet, revealed on selection (body.gd-insp-open). */
   #app.gd-redesign #main-container { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
   body.sidebar-collapsed #app.gd-redesign #main-container { grid-template-columns: 0 minmax(0, 1fr); }
-  #gd-inspector { display: none; }
+  #gd-inspector {
+    position: fixed;
+    left: var(--gd-rail-w);
+    right: 0;
+    bottom: 0;
+    z-index: 260;
+    max-height: 60vh;
+    border-left: none;
+    border-top: 1px solid var(--gd-line);
+    box-shadow: var(--shadow-lg);
+    transform: translateY(100%);
+    transition: transform 0.18s ease;
+  }
+  body.gd-insp-open #gd-inspector { transform: translateY(0); }
+  .gd-insp-close { display: inline-flex; }
 }

@@ -18,81 +18,64 @@
     }
   } catch (_) { document.body.classList.add('gd-cards-compact'); }
 
-  // Copy is written from the user's side of the screen — each line says what
-  // the surface will DO, not how it's wired.
-  const SURFACES = {
-    run: {
-      label: 'Run',
-      sub: 'Execute a function, fill its free arguments, acknowledge side effects, and trace the path. This surface is being rebuilt next.',
-    },
-    review: {
-      label: 'Review',
-      sub: 'Diff a branch and merge it — where a teammate, or an AI on its own branch, proposes changes as a graph diff. Being rebuilt next.',
-    },
-    operate: {
-      label: 'Operate',
-      sub: 'Services, monitoring, packages and apps — grouped by job instead of stacked as sidebar panels. Being rebuilt next.',
-    },
-    workspaces: {
-      label: 'Workspaces',
-      sub: 'Scope a project to a set of namespaces, and give each person a private branch overlay to tinker without touching the team. Being rebuilt next.',
-    },
-    // Settings is a REAL surface (#gd-settings) — handled in gdShellSurface,
-    // not via this placeholder map.
-  };
-
+  // Build / Run / Review / Operate / Workspaces / Settings are all live now —
+  // Build is the graph editor, Review opens the branch-diff modal, and the
+  // rest are real <section>s (see REAL_SURFACES). The placeholder overlay is
+  // only a defensive fallback for an unknown surface name.
   function gdShellSurface(name, btn) {
     // Review is an ACTION — it opens the branch-diff modal over the current
     // surface (this branch vs main), not a persistent surface. Handle it before
     // touching rail/surface state so Build stays underneath the modal.
     if (name === 'review') { gdOpenReview(); return; }
-    const rail = document.getElementById('gd-rail');
-    if (rail) {
-      const buttons = rail.querySelectorAll('.gd-rail-btn[data-surface]');
-      buttons.forEach((b) => {
-        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
-      });
+    gdSetRailPressed(btn ? btn.getAttribute('data-surface') : name);
+    gdHideAllSurfaces();
+
+    // Build = the graph editor (explorer | canvas | inspector), no cover.
+    if (name === 'build') return;
+
+    // Real surfaces reveal their own section (+ populate dynamic content);
+    // anything else falls back to the "being rebuilt" placeholder overlay.
+    const realId = REAL_SURFACES[name];
+    if (realId) {
+      const el = document.getElementById(realId);
+      if (el) el.hidden = false;
+      const render = { settings: gdRenderSettings, run: gdRenderRun, workspaces: gdRenderWorkspaces }[name];
+      if (typeof render === 'function') render();
+      return;
     }
 
     const overlay = document.getElementById('gd-surface-overlay');
-    const operate = document.getElementById('gd-operate');
-    const settings = document.getElementById('gd-settings');
-
-    // Build = the graph editor (explorer | canvas | inspector), no cover.
-    if (name === 'build') {
-      if (overlay) overlay.hidden = true;
-      if (operate) operate.hidden = true;
-      if (settings) settings.hidden = true;
-      return;
-    }
-
-    // Operate has a real surface (the relocated ops/admin panels).
-    if (name === 'operate') {
-      if (overlay) overlay.hidden = true;
-      if (settings) settings.hidden = true;
-      if (operate) operate.hidden = false;
-      return;
-    }
-
-    // Settings has a real surface too (personal editor settings).
-    if (name === 'settings') {
-      if (overlay) overlay.hidden = true;
-      if (operate) operate.hidden = true;
-      if (settings) settings.hidden = false;
-      gdRenderSettings();
-      return;
-    }
-
-    // The rest still show a placeholder until they're rebuilt.
-    if (operate) operate.hidden = true;
-    if (settings) settings.hidden = true;
     if (!overlay) return;
-    const surface = SURFACES[name] || { label: name, sub: '' };
     const title = overlay.querySelector('.gd-surface-title');
     const sub = overlay.querySelector('.gd-surface-sub');
-    if (title) title.textContent = surface.label;
-    if (sub) sub.textContent = surface.sub;
+    if (title) title.textContent = name;
+    if (sub) sub.textContent = 'This surface is being rebuilt.';
     overlay.hidden = false;
+  }
+
+  // The rail surfaces that own a real <section> (vs the placeholder overlay).
+  const REAL_SURFACES = {
+    operate: 'gd-operate',
+    settings: 'gd-settings',
+    run: 'gd-run',
+    workspaces: 'gd-workspaces',
+  };
+
+  function gdSetRailPressed(activeSurface) {
+    const rail = document.getElementById('gd-rail');
+    if (!rail) return;
+    rail.querySelectorAll('.gd-rail-btn[data-surface]').forEach((b) => {
+      b.setAttribute('aria-pressed', b.getAttribute('data-surface') === activeSurface ? 'true' : 'false');
+    });
+  }
+
+  function gdHideAllSurfaces() {
+    const overlay = document.getElementById('gd-surface-overlay');
+    if (overlay) overlay.hidden = true;
+    Object.values(REAL_SURFACES).forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.hidden = true;
+    });
   }
 
   window.gdShellSurface = gdShellSurface;
@@ -110,17 +93,9 @@
       return;
     }
     // On main (or diff unavailable): show the placeholder with a review hint.
+    gdHideAllSurfaces();
+    gdSetRailPressed('review');
     const overlay = document.getElementById('gd-surface-overlay');
-    const operate = document.getElementById('gd-operate');
-    const settings = document.getElementById('gd-settings');
-    if (operate) operate.hidden = true;
-    if (settings) settings.hidden = true;
-    const rail = document.getElementById('gd-rail');
-    if (rail) {
-      rail.querySelectorAll('.gd-rail-btn[data-surface]').forEach((b) => {
-        b.setAttribute('aria-pressed', b.getAttribute('data-surface') === 'review' ? 'true' : 'false');
-      });
-    }
     if (overlay) {
       const t = overlay.querySelector('.gd-surface-title');
       const s = overlay.querySelector('.gd-surface-sub');
@@ -236,6 +211,191 @@
   }
   window.gdRenderSettings = gdRenderSettings;
 
+  // ---- Shared helpers -------------------------------------------------------
+  function gdFnKind(fn) {
+    const parentIds = Array.isArray(fn['parent-ids']) ? fn['parent-ids'] : [];
+    return parentIds.length ? 'fn-def' : (fn['return-type-fn-id'] ? 'base-fn' : 'type');
+  }
+
+  // Fetch a server partial into a host by id. No token guard — callers
+  // re-render the whole host, so a late response just lands in a host that's
+  // already been replaced (harmless). htmx.process for fragments with hx-*.
+  function gdFetchPartial(url, hostId, htmxProcess, failHtml) {
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+      .then((txt) => {
+        const host = document.getElementById(hostId);
+        if (!host) return;
+        host.innerHTML = txt;
+        if (htmxProcess && typeof htmx !== 'undefined' && htmx.process) htmx.process(host);
+      })
+      .catch(() => {
+        const host = document.getElementById(hostId);
+        if (host) host.innerHTML = failHtml;
+      });
+  }
+
+  // The selected fn (bundle-lexical, like `lookups`) resolved to its entity.
+  function gdSelectedFn() {
+    const fnId = (typeof selectedFnId !== 'undefined') ? selectedFnId : null;
+    const lk = (typeof lookups !== 'undefined') ? lookups : null;
+    const fn = (fnId && lk?.fnMap) ? lk.fnMap.get(fnId) : null;
+    return fn ? { fnId, fn } : null;
+  }
+
+  // ---- Run surface ----------------------------------------------------------
+  // A focused home for executing the SELECTED fn: its identity + effects, a
+  // launch button into the proven execute popover (free-arg forms / effect
+  // ack / run / cancel / result — all owned by editor-execute.js), and this
+  // fn's recent runs. Reuses showExecutePopover + /partials/execute-history;
+  // no new execution code.
+  function gdRenderRun() {
+    const host = document.getElementById('gd-run-body');
+    if (!host) return;
+    const sel = gdSelectedFn();
+    if (!sel) {
+      host.innerHTML = '<div class="gd-run-empty">Select a function in '
+        + '<b>Build</b> to run it — then return here to execute it and see '
+        + 'its recent runs.</div>';
+      return;
+    }
+    const { fnId, fn } = sel;
+    const rt = (typeof richTypes === 'object' && richTypes && fn.name) ? richTypes[fn.name] : null;
+    const effects = (rt && Array.isArray(rt.effects)) ? rt.effects : [];
+    const effHtml = effects.length
+      ? effects.map((e) => {
+          const nm = String(e).replace(/^:/, '');
+          return '<span class="effects-chip effects-chip-' + esc(nm) + '">' + esc(nm) + '</span>';
+        }).join(' ')
+      : '<span class="gd-insp-pure">pure</span>';
+    host.innerHTML =
+      '<div class="gd-run-card">'
+      + '<div class="gd-run-fn"><span class="gd-run-fnname">' + esc(fnLabel(fn)) + '</span>'
+      + '<span class="gd-insp-kind">' + esc(gdFnKind(fn)) + '</span></div>'
+      + (fn.description ? '<p class="gd-insp-desc">' + esc(fn.description) + '</p>' : '')
+      + '<div class="gd-run-effects"><span class="gd-run-effects-label">Effects</span>'
+      + effHtml + '</div>'
+      + '<button type="button" id="gd-run-launch" class="gd-run-launch">Run ▶</button>'
+      + '</div>'
+      + '<div class="gd-run-hist-head">Recent runs</div>'
+      + '<div id="gd-run-history" class="gd-insp-runs">'
+      + '<div class="gd-insp-runs-loading">Loading runs…</div></div>';
+    const btn = document.getElementById('gd-run-launch');
+    if (btn) {
+      btn.onclick = () => {
+        if (typeof window.showExecutePopover === 'function') window.showExecutePopover(fn, btn);
+      };
+    }
+    gdFetchPartial('/partials/execute-history?fn-id=' + encodeURIComponent(fnId),
+      'gd-run-history', true,
+      '<div class="gd-insp-runs-loading">Sign in to see this function’s runs.</div>');
+  }
+  window.gdRenderRun = gdRenderRun;
+
+  // ---- Workspaces surface ---------------------------------------------------
+  // A full-page home for the two orthogonal scoping axes:
+  //   • SPATIAL — focus a set of namespace roots (the explorer hides the rest)
+  //     + pin shared libraries so they stay visible under any focus;
+  //   • PERSONAL — a ~-prefixed branch is your private overlay.
+  // Reuses the same bundle-lexical workspace API the ctxbar chip popover uses
+  // (setGraphdenWorkspace / graphdenWorkspaceRoots / graphdenPins /
+  // graphdenTogglePin / updateEntityList) — no new state, no backend.
+  function gdWsTopLevelRoots() {
+    const roots = [];
+    try {
+      const nss = (typeof graphData !== 'undefined' && graphData) ? (graphData.namespaces || []) : [];
+      nss.forEach((n) => { if (!n['parent-id'] && n.name) roots.push(n.name); });
+    } catch (_) { /* ignore */ }
+    return roots.sort((a, b) => a.localeCompare(b));
+  }
+
+  function gdWsApplyFocus(roots) {
+    if (typeof setGraphdenWorkspace === 'function') setGraphdenWorkspace(roots);
+    gdWsChipLabel();
+    if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') {
+      updateEntityList(graphData);
+    }
+  }
+
+  function gdRenderWorkspaces() {
+    const host = document.getElementById('gd-workspaces-body');
+    if (!host) return;
+    const roots = gdWsTopLevelRoots();
+    const current = (typeof graphdenWorkspaceRoots === 'function') ? graphdenWorkspaceRoots() : [];
+    const pins = (typeof graphdenPins === 'function') ? graphdenPins() : [];
+    const focused = current.length > 0;
+    const branch = (typeof getCurrentBranchName === 'function') ? getCurrentBranchName() : 'main';
+    const isPersonal = branch.charAt(0) === '~';
+
+    let ns = '<div class="gd-ws-nslist">';
+    if (!roots.length) {
+      ns += '<div class="gd-set-hint">No namespaces yet.</div>';
+    }
+    roots.forEach((nm) => {
+      const inFocus = current.indexOf(nm) >= 0;
+      const pinned = pins.indexOf(nm) >= 0;
+      ns += '<div class="gd-ws-nsrow">'
+        + '<button type="button" class="gd-ws-nsbtn' + (inFocus ? ' active' : '')
+        +   '" data-ws-toggle="' + esc(nm) + '" aria-pressed="' + inFocus + '">'
+        +   '<span class="gd-pi">&#955;</span>' + esc(nm) + '</button>'
+        + '<button type="button" class="gd-ws-pin' + (pinned ? ' pinned' : '')
+        +   '" data-ws-pin="' + esc(nm) + '" aria-pressed="' + pinned + '" title="'
+        +   (pinned ? 'Unpin' : 'Pin — keep visible under any focus') + '">&#128204;</button>'
+        + '</div>';
+    });
+    ns += '</div>';
+
+    host.innerHTML =
+      '<div class="gd-ws-grid">'
+      + '<div class="gd-set-card"><h2>Scope</h2>'
+      +   '<p class="gd-set-hint">Focus the namespaces you work in — the explorer '
+      +   'hides everything else. Pin shared libraries (&#128204;) to keep them '
+      +   'in view under any focus.</p>'
+      +   '<div class="gd-ws-summary">Focus: <b>' + esc(focused ? current.join(', ') : 'All functions') + '</b>'
+      +     (focused ? ' <button type="button" class="gd-set-btn" id="gd-ws-clear">Show all</button>' : '')
+      +   '</div>'
+      +   ns
+      + '</div>'
+      + '<div class="gd-set-card"><h2>Personal overlay</h2>'
+      +   '<p class="gd-set-hint">Scope is spatial; a personal <b>branch</b> is your '
+      +   'private overlay — install a package or add scratch fns only you see, then '
+      +   'drop it. Personal branches carry a <code>~</code> prefix.</p>'
+      +   '<div class="gd-set-row"><div class="gd-set-copy">'
+      +     '<div class="gd-set-label">Current branch</div>'
+      +     '<div class="gd-set-hint">' + (isPersonal ? 'Personal — private to you.' : 'Shared with the team.') + '</div></div>'
+      +     '<span class="gd-chip ' + (isPersonal ? 'gd-bind gd-bind-free' : 'gd-chip-ref') + '">' + esc(branch) + '</span></div>'
+      +   '<button type="button" class="gd-set-btn" id="gd-ws-branches">Manage branches…</button>'
+      + '</div>'
+      + '</div>';
+
+    const clear = document.getElementById('gd-ws-clear');
+    if (clear) clear.onclick = () => { gdWsApplyFocus(null); gdRenderWorkspaces(); };
+    host.querySelectorAll('[data-ws-toggle]').forEach((b) => {
+      b.onclick = () => {
+        const nm = b.getAttribute('data-ws-toggle');
+        const cur = (typeof graphdenWorkspaceRoots === 'function') ? graphdenWorkspaceRoots() : [];
+        const i = cur.indexOf(nm);
+        if (i >= 0) cur.splice(i, 1); else cur.push(nm);
+        gdWsApplyFocus(cur.length ? cur : null);
+        gdRenderWorkspaces();
+      };
+    });
+    host.querySelectorAll('[data-ws-pin]').forEach((b) => {
+      b.onclick = () => {
+        if (typeof graphdenTogglePin === 'function') graphdenTogglePin(b.getAttribute('data-ws-pin'));
+        if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') {
+          updateEntityList(graphData);
+        }
+        gdRenderWorkspaces();
+      };
+    });
+    const br = document.getElementById('gd-ws-branches');
+    if (br) {
+      br.onclick = () => { const c = document.getElementById('branch-chip-btn'); if (c) c.click(); };
+    }
+  }
+  window.gdRenderWorkspaces = gdRenderWorkspaces;
+
   // ---- Right inspector ------------------------------------------------------
   // First slice: identity Overview off DIRECT fn fields the client already has
   // (name, namespace, description, parents) — no re-derivation of server-known
@@ -257,6 +417,19 @@
     return fn?.name ? fn.name : '(anonymous)';
   }
 
+  // The inspector is TABBED: a persistent head (identity) + a tab bar whose
+  // body swaps between Overview / Bindings / Stats / History. `inspTab`
+  // persists across selections so clicking a second node keeps you on the
+  // same lens. Bindings/Stats/History are lazy server partials, fetched into
+  // #gd-insp-tabbody only when their tab is shown.
+  const INSP_TABS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'bindings', label: 'Bindings' },
+    { id: 'stats', label: 'Stats' },
+    { id: 'history', label: 'History' },
+  ];
+  let inspTab = 'overview';
+
   function gdInspectorRender(fnId) {
     const el = document.getElementById('gd-inspector');
     if (!el) return;
@@ -265,7 +438,7 @@
     // lexical global directly rather than `window.lookups` (which is undefined).
     const lk = (typeof lookups !== 'undefined') ? lookups : null;
     const fn = (fnId && lk?.fnMap) ? lk.fnMap.get(fnId) : null;
-    if (!fn) { el.innerHTML = INSP_EMPTY; return; }
+    if (!fn) { el.innerHTML = INSP_EMPTY; document.body.classList.remove('gd-insp-open'); return; }
 
     // Namespace = the qualified name minus the fn's own last segment.
     let ns = '';
@@ -276,63 +449,104 @@
     }
 
     const parentIds = Array.isArray(fn['parent-ids']) ? fn['parent-ids'] : [];
-    const kind = parentIds.length ? 'fn-def'
-      : (fn['return-type-fn-id'] ? 'base-fn' : 'type');
+    const kind = gdFnKind(fn);
 
-    const parentChips = parentIds.map((pid) => {
-      const p = lk.fnMap.get(pid);
-      return '<span class="gd-chip gd-chip-ref">→ ' + esc(fnLabel(p)) + '</span>';
-    }).join(' ');
-
-    let html = '<div class="gd-insp-head">'
+    let head = '<div class="gd-insp-head">'
+      + '<button type="button" class="gd-insp-close" aria-label="Close inspector">&times;</button>'
       + '<div class="gd-insp-title"><span class="gd-insp-name">' + esc(fnLabel(fn))
       + '</span><span class="gd-insp-kind">' + esc(kind) + '</span></div>';
-    if (ns) html += '<div class="gd-insp-ns">' + esc(ns) + '</div>';
-    if (fn.description) html += '<p class="gd-insp-desc">' + esc(fn.description) + '</p>';
-    html += '</div><div class="gd-insp-scroll">';
-    if (parentChips) {
-      html += '<div class="gd-insp-row"><span class="gd-insp-k">Parent</span>'
-        + '<span class="gd-insp-v">' + parentChips + '</span></div>';
-    }
+    if (ns) head += '<div class="gd-insp-ns">' + esc(ns) + '</div>';
+    if (fn.description) head += '<p class="gd-insp-desc">' + esc(fn.description) + '</p>';
+    head += '</div>';
 
-    // Returns + Effects reuse the SAME server-computed `richTypes` the card
-    // strips read (keyed by fn name) — not a client re-derivation.
-    const rt = (typeof richTypes === 'object' && richTypes && fn.name)
-      ? richTypes[fn.name] : null;
-    let returnStr = (rt && typeof formatTypeHint === 'function')
-      ? formatTypeHint(rt.return) : null;
+    const tabbar = '<div class="gd-insp-tabs" role="tablist">'
+      + INSP_TABS.map((t) => '<button type="button" class="gd-insp-tab'
+          + (t.id === inspTab ? ' active' : '') + '" role="tab" aria-selected="'
+          + (t.id === inspTab) + '" data-insp-tab="' + t.id + '">'
+          + t.label + '</button>').join('')
+      + '</div>';
+
+    el.innerHTML = head + tabbar + '<div id="gd-insp-tabbody" class="gd-insp-scroll"></div>';
+    el.querySelectorAll('.gd-insp-tab').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (inspTab === b.dataset.inspTab) return;
+        inspTab = b.dataset.inspTab;
+        el.querySelectorAll('.gd-insp-tab').forEach((x) => {
+          const on = x.dataset.inspTab === inspTab;
+          x.classList.toggle('active', on);
+          x.setAttribute('aria-selected', String(on));
+        });
+        renderInspTab(fnId, fn, kind, parentIds, lk);
+      });
+    });
+    renderInspTab(fnId, fn, kind, parentIds, lk);
+
+    // On narrow viewports the inspector is a bottom sheet — reveal it on
+    // selection; the × (shown only ≤1100 via CSS) dismisses it. On wide
+    // viewports the class is inert (the inspector is a static column).
+    document.body.classList.add('gd-insp-open');
+    const closeBtn = el.querySelector('.gd-insp-close');
+    if (closeBtn) closeBtn.onclick = () => document.body.classList.remove('gd-insp-open');
+  }
+
+  function inspRow(k, v) {
+    return '<div class="gd-insp-row"><span class="gd-insp-k">' + k + '</span>' + v + '</div>';
+  }
+
+  // Overview = identity extras (parents / returns / effects) off DIRECT fn
+  // fields + the SAME server-computed richTypes the card strips read.
+  function gdInspOverviewHtml(fn, parentIds, lk) {
+    let html = '';
+    const parentChips = parentIds.map((pid) => {
+      const p = lk?.fnMap?.get(pid) ?? null;
+      return '<span class="gd-chip gd-chip-ref">→ ' + esc(fnLabel(p)) + '</span>';
+    }).join(' ');
+    if (parentChips) html += inspRow('Parent', '<span class="gd-insp-v">' + parentChips + '</span>');
+
+    const rt = (typeof richTypes === 'object' && richTypes && fn.name) ? richTypes[fn.name] : null;
+    let returnStr = (rt && typeof formatTypeHint === 'function') ? formatTypeHint(rt.return) : null;
     if (!returnStr && fn['return-type']) returnStr = fn['return-type'];
     if (returnStr) {
-      html += '<div class="gd-insp-row"><span class="gd-insp-k">Returns</span>'
-        + '<span class="gd-insp-v"><span class="gd-chip gd-chip-type">'
-        + esc(returnStr) + '</span></span></div>';
+      html += inspRow('Returns', '<span class="gd-insp-v"><span class="gd-chip gd-chip-type">'
+        + esc(returnStr) + '</span></span>');
     }
     const effects = (rt && Array.isArray(rt.effects)) ? rt.effects : [];
     if (effects.length) {
       const effChips = effects.map((e) => {
         const nm = String(e).replace(/^:/, '');
-        return '<span class="effects-chip effects-chip-' + esc(nm) + '">'
-          + esc(nm) + '</span>';
+        return '<span class="effects-chip effects-chip-' + esc(nm) + '">' + esc(nm) + '</span>';
       }).join(' ');
-      html += '<div class="gd-insp-row"><span class="gd-insp-k">Effects</span>'
-        + '<span class="gd-insp-v gd-insp-effects">' + effChips + '</span></div>';
+      html += inspRow('Effects', '<span class="gd-insp-v gd-insp-effects">' + effChips + '</span>');
     } else if (rt) {
-      html += '<div class="gd-insp-row"><span class="gd-insp-k">Effects</span>'
-        + '<span class="gd-insp-v gd-insp-pure">pure</span></div>';
+      html += inspRow('Effects', '<span class="gd-insp-v gd-insp-pure">pure</span>');
     }
+    return html || '<div class="gd-insp-sec-empty">No further type info.</div>';
+  }
 
-    // Bindings + provenance: server-rendered from the graph, fetched into
-    // this host (like Runs&stats below). Placed above runs — the argument
-    // surface is the first thing to read about a selected fn.
-    html += '<div id="gd-insp-detail" class="gd-insp-detail-host">'
-      + '<div class="gd-insp-runs-loading">Loading bindings…</div></div>';
-    html += '<div class="gd-insp-runs-head">Runs &amp; stats</div>'
-      + '<div id="gd-insp-runs" class="gd-insp-runs">'
-      + '<div class="gd-insp-runs-loading">Loading runs…</div></div>'
-      + '</div>';
-    el.innerHTML = html;
-    gdLoadInspectorDetail(fnId);
-    gdLoadInspectorRuns(fnId);
+  function renderInspTab(fnId, fn, kind, parentIds, lk) {
+    const body = document.getElementById('gd-insp-tabbody');
+    if (!body) return;
+    if (inspTab === 'overview') {
+      body.innerHTML = gdInspOverviewHtml(fn, parentIds, lk);
+      return;
+    }
+    if (inspTab === 'bindings') {
+      body.innerHTML = '<div id="gd-insp-detail" class="gd-insp-detail-host">'
+        + '<div class="gd-insp-runs-loading">Loading bindings…</div></div>';
+      gdLoadInspectorDetail(fnId);
+      return;
+    }
+    if (inspTab === 'stats') {
+      body.innerHTML = '<div id="gd-insp-runs" class="gd-insp-runs">'
+        + '<div class="gd-insp-runs-loading">Loading runs…</div></div>';
+      gdLoadInspectorRuns(fnId);
+      return;
+    }
+    if (inspTab === 'history') {
+      body.innerHTML = '<div id="gd-insp-history" class="gd-insp-history">'
+        + '<div class="gd-insp-runs-loading">Loading versions…</div></div>';
+      gdLoadInspectorHistory(fnId, fn);
+    }
   }
 
   // Per-fn bindings + provenance: server partial GET /partials/inspector-detail.
@@ -383,6 +597,36 @@
         if (host) {
           host.innerHTML = '<div class="gd-insp-runs-loading">'
             + 'Sign in to see this function’s runs.</div>';
+        }
+      });
+  }
+
+  // History tab: this fn's version timeline via the existing
+  // `GET /partials/fn-versions?fn-id=&current-branch=&title=` partial (the
+  // same data as the ⌛ popover). Rows use HTMX to lazy-load per-version
+  // executions, so htmx.process the swapped-in fragment.
+  let inspHistoryToken = null;
+  function gdLoadInspectorHistory(fnId, fn) {
+    inspHistoryToken = fnId;
+    const branch = (typeof getCurrentBranchName === 'function') ? getCurrentBranchName() : 'main';
+    const url = '/partials/fn-versions?fn-id=' + encodeURIComponent(fnId)
+      + '&current-branch=' + encodeURIComponent(branch)
+      + '&title=' + encodeURIComponent(fnLabel(fn));
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+      .then((txt) => {
+        if (inspHistoryToken !== fnId) return;
+        const host = document.getElementById('gd-insp-history');
+        if (!host) return;
+        host.innerHTML = txt;
+        if (typeof htmx !== 'undefined' && htmx.process) htmx.process(host);
+      })
+      .catch(() => {
+        if (inspHistoryToken !== fnId) return;
+        const host = document.getElementById('gd-insp-history');
+        if (host) {
+          host.innerHTML = '<div class="gd-insp-runs-loading">'
+            + 'Sign in to see version history.</div>';
         }
       });
   }

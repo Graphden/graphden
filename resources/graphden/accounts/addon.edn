@@ -43,7 +43,10 @@
                                                        :client-secret #env GITHUB_CLIENT_SECRET}
                                              "google" {:client-id #env GOOGLE_CLIENT_ID
                                                        :client-secret #env GOOGLE_CLIENT_SECRET}}
-                           :telegram {:bot-token #env TELEGRAM_BOT_TOKEN}}
+                           ;; bot-username renders the login widget; bot-token
+                           ;; verifies its HMAC server-side. Both or no widget.
+                           :telegram {:bot-token #env TELEGRAM_BOT_TOKEN
+                                      :bot-username #env TELEGRAM_BOT_USERNAME}}
 
  :db/schema {:extensions [#ig/ref :accounts/schema-extension]}
 

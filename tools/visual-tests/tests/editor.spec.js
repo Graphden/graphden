@@ -290,26 +290,10 @@ test.describe('Editor — visual baselines', () => {
   });
 
   // -- Redesign 2026-08 rail surfaces -------------------------------------
-  // Run + Workspaces became real surfaces; cover them so a re-skin can't
-  // silently regress. Crop to the inner container (the surface is
-  // position:absolute inset:0 with lots of empty ground otherwise).
-
-  test('run surface — selected fn, effects, launch + recent runs', async ({ page }) => {
-    await page.goto('/#web-server');
-    await waitForGraphRendered(page);
-    await setTheme(page, 'light');
-    await page.locator('#gd-rail .gd-rail-btn[data-surface="run"]').click();
-    // The fn card + launch button render client-side from the selection.
-    await page.waitForSelector('#gd-run-launch', { state: 'visible', timeout: 10000 });
-    // Let the recent-runs strip replace its "Loading…" placeholder so the
-    // snapshot is stable (a fresh stack shows "7d: 0 runs").
-    await page.waitForFunction(() => {
-      const h = document.getElementById('gd-run-history');
-      return h && !/Loading/.test(h.textContent);
-    }, { timeout: 10000 }).catch(() => {});
-    await page.evaluate(() => new Promise(requestAnimationFrame));
-    await expect(page.locator('#gd-run-body')).toHaveScreenshot('04-run-surface.png');
-  });
+  // Workspaces is a real surface; cover it so a re-skin can't silently
+  // regress. Crop to the inner container (the surface is position:absolute
+  // inset:0 with lots of empty ground otherwise). (The Run surface was
+  // removed — running is the ▶ node action + the inspector Runs tab.)
 
   test('workspaces surface — scope focus, pins, personal overlay', async ({ page }) => {
     await page.goto('/#web-server');

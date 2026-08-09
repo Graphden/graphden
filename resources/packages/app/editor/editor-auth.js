@@ -335,13 +335,87 @@ function togglePasswordVisibility() {
 function renderAuthLock() {
   const btn = document.getElementById('auth-lock-btn');
   if (!btn) return;
-  const authed = isAuthenticated() || accountsAuthed;
+  const allBtn = document.getElementById('auth-logout-all-btn');
+  // Accounts mode: the affordance is an identity CHIP (avatar initial), not a
+  // lock — the lock metaphor belongs to single-token / admin-password
+  // deployments only. Sign-out + sign-out-everywhere live in the chip's menu,
+  // so the separate top-bar logout-all button is retired here.
+  if (accountsMode) {
+    if (allBtn) allBtn.classList.add('hidden');
+    btn.classList.add('auth-chip');
+    btn.classList.toggle('auth-lock-open', accountsAuthed);
+    if (accountsAuthed && window.gdAccount) {
+      const label = window.gdAccount.email || window.gdAccount['display-name'] || '?';
+      const isOp = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
+      const av = document.createElement('span');
+      av.className = 'auth-avatar' + (isOp ? ' auth-avatar-op' : '');
+      av.textContent = (String(label).trim().charAt(0) || '?').toUpperCase();
+      btn.replaceChildren(av);
+      btn.title = label + (isOp ? ' — operator' : '');
+    } else {
+      const pill = document.createElement('span');
+      pill.className = 'auth-signin';
+      pill.textContent = 'Sign in';
+      btn.replaceChildren(pill);
+      btn.title = 'Sign in';
+    }
+    return;
+  }
+  // Single-token / tenancy bearer session: the classic lock.
+  btn.classList.remove('auth-chip');
+  const authed = isAuthenticated();
   btn.innerHTML = authed ? LOCK_OPEN_SVG : LOCK_CLOSED_SVG;
   btn.classList.toggle('auth-lock-open', authed);
-  btn.title = authed ? 'Sign out' : (accountsMode || loginIsTenant() ? 'Sign in' : 'Admin login');
+  btn.title = authed ? 'Sign out' : (loginIsTenant() ? 'Sign in' : 'Admin login');
   // "Sign out everywhere" only makes sense for a real server-side session.
-  const allBtn = document.getElementById('auth-logout-all-btn');
-  if (allBtn) allBtn.classList.toggle('hidden', !(authed && (accountsMode || loginIsTenant())));
+  if (allBtn) allBtn.classList.toggle('hidden', !(authed && loginIsTenant()));
+}
+
+
+// The account chip's menu (accounts mode, signed in): who you are + operator
+// badge, and the self-service actions. Rendered into the shared #auth-popover.
+function openAccountMenu() {
+  const pop = document.getElementById('auth-popover');
+  if (!pop) return;
+  const a = window.gdAccount || {};
+  const who = a.email || a['display-name'] || a.id || 'signed in';
+  const isOp = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
+  const menu = document.createElement('div');
+  menu.className = 'auth-menu';
+  const head = document.createElement('div');
+  head.className = 'auth-menu-head';
+  const whoEl = document.createElement('div');
+  whoEl.className = 'auth-menu-who';
+  whoEl.textContent = who;
+  head.appendChild(whoEl);
+  if (isOp) {
+    const badge = document.createElement('span');
+    badge.className = 'auth-menu-badge';
+    badge.textContent = 'operator';
+    head.appendChild(badge);
+  }
+  menu.appendChild(head);
+  const item = (label, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'auth-menu-item';
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    menu.appendChild(b);
+  };
+  item('Account', () => { window.location.href = '/account'; });
+  item('Sign out', async () => {
+    try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+    window.location.reload();
+  });
+  item('Sign out everywhere', async () => {
+    try { await fetch('/auth/logout-all', { method: 'POST' }); } catch (_) {}
+    window.location.reload();
+  });
+  pop.replaceChildren(menu);
+  _authFieldsMounted = true; // it's the menu now, not the login form — don't refetch
+  pop.classList.remove('hidden');
+  positionAuthPopover();
 }
 
 // Sign out of ALL sessions (server-side: POST /api/logout-all deletes every
@@ -369,12 +443,12 @@ async function logoutEverywhere() {
 // in-progress edit session.
 async function toggleAuthAction() {
   if (accountsMode) {
-    // Accounts addon: the session is an HttpOnly cookie; sign-in lives on the
-    // module's own /login page — no popover.
+    // Accounts addon: signed in → the account menu (identity + Account /
+    // Sign out / Sign out everywhere); signed out → the /login page.
     if (accountsAuthed) {
-      if (!confirm('Sign out?')) return;
-      try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
-      window.location.reload();
+      const pop = document.getElementById('auth-popover');
+      if (pop && !pop.classList.contains('hidden')) { closeAuthPopover(); return; }
+      openAccountMenu();
     } else {
       window.location.href = '/login';
     }

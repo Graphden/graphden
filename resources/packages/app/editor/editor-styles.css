@@ -542,6 +542,48 @@ body.sidebar-collapsed .sidebar-expand-floating {
 }
 .auth-lock-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 .auth-lock-btn.auth-lock-open { background: var(--header-fg); color: var(--header-bg); }
+
+/* Account chip (accounts mode) — the lock's chrome relaxes into an identity
+   affordance: an avatar disc when signed in, a "Sign in" pill otherwise. */
+.auth-lock-btn.auth-chip {
+  width: auto; min-width: 26px; border-color: transparent; padding: 2px;
+}
+.auth-lock-btn.auth-chip:hover { background: transparent; }
+.auth-lock-btn.auth-chip.auth-lock-open:hover .auth-avatar { filter: brightness(1.1); }
+.auth-avatar {
+  width: 22px; height: 22px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  background: var(--header-fg); color: var(--header-bg);
+}
+.auth-avatar.auth-avatar-op {
+  background: var(--gd-flow, #0066cc); color: var(--gd-on-accent, #fff);
+  box-shadow: 0 0 0 1px var(--header-fg);
+}
+.auth-signin {
+  font-size: 12px; padding: 3px 10px; border-radius: 3px;
+  border: 1px solid var(--header-fg); color: var(--header-fg);
+}
+.auth-lock-btn.auth-chip:hover .auth-signin { background: var(--header-fg); color: var(--header-bg); }
+
+/* Account menu (the chip's popover) */
+.auth-menu { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }
+.auth-menu-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 4px 8px 8px; border-bottom: 1px solid var(--line, #2a3038); margin-bottom: 4px;
+}
+.auth-menu-who { font-size: 13px; font-weight: 600; word-break: break-all; }
+.auth-menu-badge {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: 3px;
+  background: var(--gd-flow, #0066cc); color: var(--gd-on-accent, #fff);
+}
+.auth-menu-item {
+  text-align: left; background: transparent; border: none; cursor: pointer;
+  font-size: 13px; padding: 7px 8px; border-radius: 4px; color: var(--fg);
+}
+.auth-menu-item:hover { background: var(--bg); }
+
 /* "Sign out everywhere" — same chrome as the lock, sits beside it. */
 .auth-logout-all-btn {
   background: transparent; color: var(--header-fg); border: 1px solid var(--header-fg); border-radius: 3px;
@@ -1515,19 +1557,9 @@ body.gd-no-write .type-inline-promote-btn,
 body.gd-no-write .type-explainer-btn {
   display: none !important;
 }
-body.gd-no-execute .gd-run-launch,
 body.gd-no-execute .execute-run-btn,
 body.gd-no-execute .execute-cancel-btn {
   display: none !important;
-}
-/* When execute is denied the Run surface's launch button is hidden — say why
-   instead of leaving a dead card. */
-.gd-run-noexec { display: none; }
-body.gd-no-execute .gd-run-noexec {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--gd-ink-3);
 }
 
 /* Row-actions popover — floats outside the card to the right (or
@@ -5258,7 +5290,7 @@ body.gd-cards-compact .effects-strip { display: none; }
 #gd-operate-panels > * { min-width: 0; }
 
 /* ---- Settings surface (personal editor settings) ---- */
-#gd-settings, #gd-run, #gd-workspaces {
+#gd-settings, #gd-workspaces {
   position: absolute;
   inset: 0;
   z-index: 250;
@@ -5267,7 +5299,7 @@ body.gd-cards-compact .effects-strip { display: none; }
   font-family: var(--gd-ui-font);
   background: var(--gd-paper);
 }
-#gd-settings[hidden], #gd-run[hidden], #gd-workspaces[hidden] { display: none; }
+#gd-settings[hidden], #gd-workspaces[hidden] { display: none; }
 .gd-settings-grid {
   max-width: 1100px;
   margin: 0 auto;
@@ -5325,36 +5357,6 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 }
 .gd-cap-on { background: var(--gd-flow-wash); color: var(--gd-flow-ink); }
 .gd-cap-off { background: var(--gd-crit-wash); color: var(--gd-crit); }
-
-/* ---- Run surface ---- */
-.gd-run-body { max-width: 720px; margin: 0 auto; }
-.gd-run-empty {
-  max-width: 62ch; font-size: 13.5px; line-height: 1.6; color: var(--gd-ink-2);
-}
-.gd-run-card {
-  background: var(--gd-panel);
-  border: 1px solid var(--gd-line);
-  border-radius: var(--gd-r);
-  padding: 18px 20px;
-}
-.gd-run-fn { display: flex; align-items: baseline; gap: 10px; }
-.gd-run-fnname { font-family: var(--gd-mono); font-size: 18px; font-weight: 600; color: var(--gd-ink); }
-.gd-run-effects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 14px 0; }
-.gd-run-effects-label {
-  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--gd-ink-3); margin-right: 4px;
-}
-.gd-run-launch {
-  font-size: 14px; font-weight: 600; padding: 8px 18px; cursor: pointer;
-  background: var(--gd-flow); color: var(--on-accent);
-  border: 1px solid var(--gd-flow); border-radius: var(--gd-r-sm);
-}
-.gd-run-launch:hover { background: var(--gd-flow-2); border-color: var(--gd-flow-2); }
-.gd-run-launch:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
-.gd-run-hist-head {
-  margin: 22px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--gd-ink-3);
-}
 
 /* ---- Workspaces surface ---- */
 .gd-ws-grid {

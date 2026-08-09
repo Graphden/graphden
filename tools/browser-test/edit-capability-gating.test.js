@@ -47,12 +47,19 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
     assert(await hidden('#create-root-ns-btn'),
            'create-root-ns hidden under gd-no-write');
 
-    // Run surface: the launch button is an EXECUTE path separate from the
-    // row-actions run-fn trigger; it must hide, and say why.
-    await page.click('#gd-rail .gd-rail-btn[data-surface="run"]');
-    await page.waitForSelector('#gd-run-body', {timeout: 10000});
-    assert(await hidden('#gd-run-launch'), 'Run-surface launch hidden under gd-no-execute');
-    assert(await visible('.gd-run-noexec'), 'Run surface shows the no-execute hint');
+    // Execute gating: running a fn is the ▶ node/card action (the Run rail
+    // surface was removed as a duplicate). Verify the CSS execute-gate hides
+    // that affordance under gd-no-execute — on a synthetic node so the test
+    // doesn't depend on a particular fn's row-actions popover being open.
+    const runActionHidden = await page.evaluate(() => {
+      const el = document.createElement('button');
+      el.setAttribute('data-action', 'run-fn');
+      document.body.appendChild(el);
+      const h = getComputedStyle(el).display === 'none';
+      el.remove();
+      return h;
+    });
+    assert(runActionHidden, 'run-fn node action hidden under gd-no-execute');
 
     // Branch popover: create/merge/delete (writes) hidden; the list +
     // switch/diff (reads) stay usable.

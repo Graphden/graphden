@@ -39,7 +39,7 @@
     if (realId) {
       const el = document.getElementById(realId);
       if (el) el.hidden = false;
-      const render = { settings: gdRenderSettings, run: gdRenderRun, workspaces: gdRenderWorkspaces }[name];
+      const render = { settings: gdRenderSettings, workspaces: gdRenderWorkspaces }[name];
       if (typeof render === 'function') render();
       return;
     }
@@ -57,7 +57,6 @@
   const REAL_SURFACES = {
     operate: 'gd-operate',
     settings: 'gd-settings',
-    run: 'gd-run',
     workspaces: 'gd-workspaces',
   };
 
@@ -245,82 +244,6 @@
     const parentIds = Array.isArray(fn['parent-ids']) ? fn['parent-ids'] : [];
     return parentIds.length ? 'fn-def' : (fn['return-type-fn-id'] ? 'base-fn' : 'type');
   }
-
-  // Fetch a server partial into a host by id. No token guard — callers
-  // re-render the whole host, so a late response just lands in a host that's
-  // already been replaced (harmless). htmx.process for fragments with hx-*.
-  function gdFetchPartial(url, hostId, htmxProcess, failHtml) {
-    fetch(url)
-      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
-      .then((txt) => {
-        const host = document.getElementById(hostId);
-        if (!host) return;
-        host.innerHTML = txt;
-        if (htmxProcess && typeof htmx !== 'undefined' && htmx.process) htmx.process(host);
-      })
-      .catch(() => {
-        const host = document.getElementById(hostId);
-        if (host) host.innerHTML = failHtml;
-      });
-  }
-
-  // The selected fn (bundle-lexical, like `lookups`) resolved to its entity.
-  function gdSelectedFn() {
-    const fnId = (typeof selectedFnId !== 'undefined') ? selectedFnId : null;
-    const lk = (typeof lookups !== 'undefined') ? lookups : null;
-    const fn = (fnId && lk?.fnMap) ? lk.fnMap.get(fnId) : null;
-    return fn ? { fnId, fn } : null;
-  }
-
-  // ---- Run surface ----------------------------------------------------------
-  // A focused home for executing the SELECTED fn: its identity + effects, a
-  // launch button into the proven execute popover (free-arg forms / effect
-  // ack / run / cancel / result — all owned by editor-execute.js), and this
-  // fn's recent runs. Reuses showExecutePopover + /partials/execute-history;
-  // no new execution code.
-  function gdRenderRun() {
-    const host = document.getElementById('gd-run-body');
-    if (!host) return;
-    const sel = gdSelectedFn();
-    if (!sel) {
-      host.innerHTML = '<div class="gd-run-empty">Select a function in '
-        + '<b>Build</b> to run it — then return here to execute it and see '
-        + 'its recent runs.</div>';
-      return;
-    }
-    const { fnId, fn } = sel;
-    const rt = (typeof richTypes === 'object' && richTypes && fn.name) ? richTypes[fn.name] : null;
-    const effects = (rt && Array.isArray(rt.effects)) ? rt.effects : [];
-    const effHtml = effects.length
-      ? effects.map((e) => {
-          const nm = String(e).replace(/^:/, '');
-          return '<span class="effects-chip effects-chip-' + esc(nm) + '">' + esc(nm) + '</span>';
-        }).join(' ')
-      : '<span class="gd-insp-pure">pure</span>';
-    host.innerHTML =
-      '<div class="gd-run-card">'
-      + '<div class="gd-run-fn"><span class="gd-run-fnname">' + esc(fnLabel(fn)) + '</span>'
-      + '<span class="gd-insp-kind">' + esc(gdFnKind(fn)) + '</span></div>'
-      + (fn.description ? '<p class="gd-insp-desc">' + esc(fn.description) + '</p>' : '')
-      + '<div class="gd-run-effects"><span class="gd-run-effects-label">Effects</span>'
-      + effHtml + '</div>'
-      + '<button type="button" id="gd-run-launch" class="gd-run-launch">Run ▶</button>'
-      + '<div class="gd-run-noexec">Running isn’t permitted for your role.</div>'
-      + '</div>'
-      + '<div class="gd-run-hist-head">Recent runs</div>'
-      + '<div id="gd-run-history" class="gd-insp-runs">'
-      + '<div class="gd-insp-runs-loading">Loading runs…</div></div>';
-    const btn = document.getElementById('gd-run-launch');
-    if (btn) {
-      btn.onclick = () => {
-        if (typeof window.showExecutePopover === 'function') window.showExecutePopover(fn, btn);
-      };
-    }
-    gdFetchPartial('/partials/execute-history?fn-id=' + encodeURIComponent(fnId),
-      'gd-run-history', true,
-      '<div class="gd-insp-runs-loading">Sign in to see this function’s runs.</div>');
-  }
-  window.gdRenderRun = gdRenderRun;
 
   // ---- Workspaces surface ---------------------------------------------------
   // A full-page home for the two orthogonal scoping axes:

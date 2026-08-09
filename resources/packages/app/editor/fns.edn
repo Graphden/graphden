@@ -164,11 +164,6 @@
               [:circle {:cx "6" :cy "6" :r "2.4"}] [:circle {:cx "18" :cy "6" :r "2.4"}]
               [:circle {:cx "12" :cy "18" :r "2.4"}] [:path {:d "M8 7l3 9M16 7l-3 9"}]]
              [:span {:class "gd-rail-cap"} "Build"]]
-            [:button {:type "button" :class "gd-rail-btn" :data-surface "run"
-                      :aria-pressed "false" :onclick "gdShellSurface('run', this)"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
-              [:path {:d "M7 5l11 7-11 7z"}]]
-             [:span {:class "gd-rail-cap"} "Run"]]
             [:button {:type "button" :class "gd-rail-btn" :data-surface "review"
                       :aria-pressed "false" :onclick "gdShellSurface('review', this)"}
              [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
@@ -388,13 +383,9 @@
                [:h2 "Access"]
                [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Operate surface."]
                [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]
-            ;; RUN surface — execute the SELECTED fn (launches the proven
-            ;; execute popover) + its recent runs. Populated by gdRenderRun.
-            [:section {:id "gd-run" :hidden "hidden" :aria-label "Run"}
-             [:div {:class "gd-operate-head"}
-              [:h1 "Run"]
-              [:p "Execute the selected function — fill its free arguments, acknowledge side effects, and see its recent runs."]]
-             [:div {:id "gd-run-body" :class "gd-run-body"}]]
+            ;; (No Run surface: running a fn is the ▶ action on its node/card
+            ;; → the execute popover; a fn's history is the inspector Runs tab.
+            ;; A dedicated surface only duplicated both.)
             ;; WORKSPACES surface — spatial focus (namespace roots + pinned
             ;; libraries) and the personal-branch overlay. gdRenderWorkspaces.
             [:section {:id "gd-workspaces" :hidden "hidden" :aria-label "Workspaces"}

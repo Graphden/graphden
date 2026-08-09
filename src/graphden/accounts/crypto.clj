@@ -62,3 +62,34 @@
   (boolean
     (when (and a b)
       (MessageDigest/isEqual (String/.getBytes a "UTF-8") (String/.getBytes b "UTF-8")))))
+
+
+(defn fixed-window-limiter
+  "A per-key fixed-window rate limiter: `(fn [key] → allowed?)`, at most
+   `max-attempts` per `window-ms`. In-memory (per process); denied attempts
+   don't grow the window, and fully-idle keys are swept at most once per
+   window so the map stays bounded by ACTIVE keys. Atomic test-and-record —
+   a separate read-then-swap would let two concurrent attempts both pass
+   under the cap."
+  [max-attempts window-ms]
+  (let [state (atom {})
+        last-prune (atom 0)]
+    (fn [key]
+      (let [now (System/currentTimeMillis)
+            cutoff (- now window-ms)
+            prune (fn [ts] (filterv #(> % cutoff) ts))]
+        (when (> now (+ @last-prune window-ms))
+          (reset! last-prune now)
+          (swap! state (fn [m]
+                         (persistent!
+                           (reduce-kv (fn [acc k ts]
+                                        (let [r (prune ts)]
+                                          (if (seq r) (assoc! acc k r) acc)))
+                                      (transient {}) m)))))
+        (let [[old new] (swap-vals! state
+                                    (fn [m]
+                                      (let [recent (prune (get m key []))]
+                                        (assoc m key (if (< (count recent) max-attempts)
+                                                       (conj recent now)
+                                                       recent)))))]
+          (> (count (get new key)) (count (prune (get old key)))))))))

@@ -99,6 +99,21 @@
                 "<p>The link expires in 24 hours. If you didn't create a Graphden account, ignore this email.</p>")}))
 
 
+(defn reset-email-body
+  "Subject + html + text for a password-reset message. The link opens
+   `<app-base-url>/reset?token=<token>`."
+  [app-base-url token]
+  (let [link (str app-base-url "/reset?token=" token)]
+    {:subject "Reset your Graphden password"
+     :text (str "Someone (hopefully you) asked to reset the Graphden password for this address.\n\n"
+                "Set a new password here:\n\n" link
+                "\n\nThe link expires in 1 hour. If you didn't ask, ignore this email — nothing changes.")
+     :html (str "<p>Someone (hopefully you) asked to reset the Graphden password for this address.</p>"
+                "<p><a href=\"" link "\">Set a new password</a></p>"
+                "<p>Or paste this link into your browser:<br>" link "</p>"
+                "<p>The link expires in 1 hour. If you didn't ask, ignore this email — nothing changes.</p>")}))
+
+
 (defn make-mailer
   "Pick a `Mailer` from config: a non-blank `api-key` → `ResendMailer`, else the
    `LogMailer` fallback (self-hosted without email still works)."

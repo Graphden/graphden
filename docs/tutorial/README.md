@@ -37,10 +37,10 @@
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written |
-| 16 | [Users — the operator's account panel](16-users-admin.md) | ✅ written |
+| 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written |
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written |
 | 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
-| 19 | [Signing up & signing in — your cloud account](19-signing-up-and-in.md) | ✅ written |
+| 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written |
 | 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written |
 | 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written |
 

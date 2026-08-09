@@ -8,6 +8,8 @@
      POST /auth/signup             {email,password} → set gd_session, send verify
      POST /auth/login              {email,password} → set gd_session
      POST /auth/logout             revoke session + clear cookie
+     POST /auth/forgot             {email} → email a reset link (never enumerates)
+     POST /auth/reset              {token,password} → set new pw, sign out everywhere
      GET  /auth/verify?token=      consume email-verification link → redirect
      GET  /auth/:provider/start    (github|google) 302 to the provider + state cookie
      GET  /auth/:provider/callback (github|google) exchange → session → redirect
@@ -231,6 +233,35 @@
     (json-resp 401 {:ok false :error "unauthenticated"})))
 
 
+(defn- client-ip
+  "Best-effort client IP for rate-limiting — the first X-Forwarded-For hop
+   (trusts a front proxy) or the socket remote-addr."
+  [request]
+  (or (some-> (get-in request [:headers "x-forwarded-for"])
+              (str/split #",") first str/trim not-empty)
+      (:remote-addr request)
+      "unknown"))
+
+
+(defn- handle-forgot
+  "POST /auth/forgot {email} — always 200 with the same body whether or not
+   the email exists (no account enumeration); the reset link goes by email."
+  [storage mailer origin request]
+  (let [{:keys [email]} (req/read-json-body request)]
+    (flows/request-password-reset! storage mailer origin email)
+    (json-resp 200 {:ok true :reset-sent true})))
+
+
+(defn- handle-reset
+  "POST /auth/reset {token password} — consume the emailed token, set the new
+   password, sign the account out everywhere."
+  [storage request]
+  (let [{:keys [token password]} (req/read-json-body request)]
+    (if (core/reset-password! storage token password)
+      (json-resp 200 {:ok true})
+      (json-resp 400 {:ok false :error "invalid_or_expired"}))))
+
+
 (defn- handle-verify
   [storage origin request]
   (let [token (get (req/parse-query-string (:query-string request)) "token")]
@@ -284,11 +315,19 @@
    `:oauth-providers` `{\"github\" {:client-id :client-secret} …}` (enabled only),
    `:telegram` `{:bot-token …}` or nil."
   [{:keys [storage mailer app-origin oauth-providers telegram]}]
-  (let [provider-keys (set (keys oauth-providers))]
+  (let [provider-keys (set (keys oauth-providers))
+        ;; Per-IP fixed-window limiters: login blunts password brute-force
+        ;; (bcrypt slows but doesn't bound attempts), signup blunts
+        ;; mass-account abuse, forgot blunts reset-mail spam. Over-quota →
+        ;; the same shape as failure (401/generic 200) so the limiter's
+        ;; existence isn't probeable.
+        login-limit (crypto/fixed-window-limiter 10 60000)
+        signup-limit (crypto/fixed-window-limiter 20 60000)
+        forgot-limit (crypto/fixed-window-limiter 5 60000)]
     (fn [request]
       (let [uri (str (:uri request))
             method (:request-method request)]
-        (when (or (str/starts-with? uri "/auth/") (= uri "/login") (= uri "/account"))
+        (when (or (str/starts-with? uri "/auth/") (= uri "/login") (= uri "/account") (= uri "/reset"))
           (let [origin (resolve-origin app-origin request)]
             (cond
               (and (= method :get) (= uri "/login"))
@@ -296,6 +335,9 @@
 
               (and (= method :get) (= uri "/account"))
               (html-resp (pages/account-page provider-keys))
+
+              (and (= method :get) (= uri "/reset"))
+              (html-resp (pages/reset-page))
 
               (and (= method :get) (= uri "/auth/me"))
               (handle-me storage request)
@@ -307,10 +349,23 @@
               (handle-verify storage origin request)
 
               (and (= method :post) (= uri "/auth/signup"))
-              (handle-signup storage mailer origin request)
+              (if (signup-limit (client-ip request))
+                (handle-signup storage mailer origin request)
+                (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/login"))
-              (handle-login storage origin request)
+              (if (login-limit (client-ip request))
+                (handle-login storage origin request)
+                ;; same shape as bad credentials — not probeable
+                (json-resp 401 {:ok false :error "invalid_credentials"}))
+
+              (and (= method :post) (= uri "/auth/forgot"))
+              (if (forgot-limit (client-ip request))
+                (handle-forgot storage mailer origin request)
+                (json-resp 200 {:ok true :reset-sent true}))
+
+              (and (= method :post) (= uri "/auth/reset"))
+              (handle-reset storage request)
 
               (and (= method :post) (= uri "/auth/logout"))
               (handle-logout storage origin request)

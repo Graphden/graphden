@@ -1,125 +1,108 @@
-# Lesson 16 — Users: the operator's account panel
+# Lesson 16 — Members: managing who is in your org
 
-**Goal**: by the end of this lesson you can list, create,
-reset-password and delete platform users from the editor's
-**Users** panel, and you'll know exactly *who* is allowed to do
-that (spoiler: the platform operator, not tenants) and why the
-panel sometimes simply isn't there.
+**Goal**: by the end of this lesson you can list your org's
+members, add one by email, remove one, and transfer ownership —
+from the editor's **Members** panel — and you'll know exactly
+*who* is allowed to do each of those and why the panel sometimes
+simply isn't there.
 
 **Concepts introduced**: the tenancy addon's capability header,
-pseudo-namespace admin sections, the `:user` entity,
-tenant-forbidden entities, cascade delete, session invalidation
-on password reset.
+grant-derived membership, the `:account` entity, tenant-forbidden
+entities, the owner's special position, ownership transfer.
+
+## Membership is grants
+
+Under the accounts model ([Lesson 19](19-signing-up-and-in.md)),
+people *sign themselves up* — there is no admin-creates-user flow
+and no per-org password store. What an org controls is
+**membership**, and membership is simply *grants*: an account is
+a member of your org iff it holds a `:grant` row there (or owns
+the org outright). "Add a member" = write them a grant; "remove a
+member" = delete their grants in your org. The person's account —
+their email, password, 2FA — stays theirs, untouched.
 
 ## When the panel exists at all
 
-The Users panel is part of the **tenancy addon** (the
-multi-tenant platform layer — see
-[docs/SECURITY_MODEL.md](../SECURITY_MODEL.md)). A single-tenant
-graphden has no `:user` rows to manage, so the section never
-mounts.
+The Members panel is part of the **tenancy addon** (the
+multi-tenant platform layer). A single-tenant graphden has no
+orgs to manage, so the section never mounts.
 
 The client finds out the addon is live from a response header:
 the first `/api/*` response that carries
 `X-Graphden-Capabilities` flips the editor into tenancy mode.
 Only then — and only when you're signed in — does the **Operate**
 surface (open it from the left rail) grow the admin sections,
-among them **Grants**, **Users** and **Packages**.
-
-So if you don't see a **Users** section on the Operate surface:
-either you're not signed in, or this instance runs without the
-tenancy addon.
+among them **Grants**, **Members** and **Packages**.
 
 ## The table
 
-On the **Operate** surface, expand **Users**. The body is a
-server-rendered partial
-(`GET /partials/users-admin`) — a table of every user:
+On the **Operate** surface, expand **Members**. The body is a
+server-rendered partial (`GET /partials/users-admin` — the path
+is historical) — a table of your org's members:
 
 ```
-Username | Org        |
-alice    | acme       |  [new password] [Reset pw]  ×
-bob      | public     |  [new password] [Reset pw]  ×
+Member               |       |
+owner@acme.com       | owner |
+dev@acme.com         |       |  ×
 ```
 
-Password hashes never reach the browser — the listing strips
-them server-side and ships only `username`, `org` and the row
-id.
+Each row is an account, shown by its **verified email**; the
+owner is badged and carries no remove button (transfer ownership
+first). Nothing secret is in the panel — password hashes and
+session tokens live in the accounts tables, which never reach
+the browser.
 
-If the addon isn't actually active on the backend, the panel
-degrades to a notice: *"Tenancy addon not active — no users to
-manage."*
+## Add a member — by email
 
-## Create a user
+Under the table: one email field and **+ Add member**. The person
+must already have an account with that *verified* email (they
+sign up themselves at `/login` — [Lesson 19](19-signing-up-and-in.md));
+submitting grants them `write` in your org. Refine what they may
+actually do in the **Grants** panel (next lesson) — membership
+gets them in the door, grants decide the rooms.
 
-Under the table there's a three-field form — `username`,
-`password`, `org` — and a **+ Add user** button. Submit posts
-to `POST /api/users`; the password is bcrypt-hashed by the
-addon's user-ops seam before it touches storage, and the panel
-re-renders with the new row.
+## Remove a member
 
-The `org` field is the tenant this account belongs to. `public`
-is the platform org — accounts there are operator accounts.
+The row's `×` (confirm) deletes every grant that account holds in
+*your org only* — their account and their other orgs' memberships
+are untouched. The owner is refused.
 
-## Reset a password
+## Transfer ownership
 
-Each row carries its own tiny form: type a new password, click
-**Reset pw** (`POST /api/users/:id/password`). Two things
-happen: the hash is replaced, and every session token the user
-held is invalidated — they're signed out everywhere.
-
-## Delete a user
-
-The row's `×` (confirm: *"Delete this user?"*) calls a
-dedicated cascade route — `DELETE /api/users/:id` — which
-removes the user AND their `:token` and `:grant` rows in one
-operation. It's deliberately not the generic
-`/api/entities/user/:id` endpoint: a bare entity delete would
-leave orphaned tokens and grants behind.
+The owner (only) sees a **Transfer ownership** form: enter the
+new owner's email (they must already be a member), confirm. There
+is no revoke — ownership only moves.
 
 ## Who may actually use this
 
-Here's the part the panel itself won't tell you. The routes are
-merely *auth-required* — any signed-in user gets past the 401.
-But `:user` (like `:token`, `:grant`, `:org`) is a
-**tenant-forbidden entity**: the org-scoped storage layer denies
-reads and writes for every org except the platform (`public`)
-org.
-
-Practical upshot: a tenant user may see the section mount
-(their responses carry the capability header too), but every
-listing and mutation comes back denied. User management is an
-**operator** activity. Provisioning whole orgs, tokens and
-custom domains is likewise operator-only, via the registration
-API (`POST /api/orgs`, `/api/tokens`, `/api/domains`) — that
-API has no editor UI at all.
+Adding and removing members requires the `manage-users`
+org-management capability — held implicitly by the **owner**, or
+delegated via a role ([Lesson 17](17-grants.md)). Everyone else
+sees the panel read-only at best: the underlying entities
+(`:account`, `:grant`, `:org`) are guarded server-side, so the
+affordances are just UX — the enforcement is in storage.
 
 ## Try it
 
-(Requires an instance with the tenancy addon; on a plain dev
-stack the panel degrades to the not-active notice — that
-degradation itself is worth seeing.)
+(Requires an instance with the tenancy addon.)
 
-1. Sign in as an operator (public-org account). Expand
-   **Users**.
-2. Add `test-user` / a password / org `public`. The row
-   appears.
-3. Reset their password from the row form — note the button
-   relabels nothing; the sessions just die server-side.
-4. Delete the row (`×`, confirm). Their tokens and grants go
-   with it — check Grants (next lesson) if you'd granted them
-   anything.
+1. Sign in as an org owner. Expand **Members** — you're there,
+   badged `owner`.
+2. Have a second account sign up at `/login` (and verify its
+   email).
+3. Add it by email — the row appears. Check **Grants**: a `write`
+   grant materialized.
+4. Remove it (`×`, confirm) — the row and its grants go; the
+   person's account is unaffected.
 
 ## What we glossed over
 
-- **Where accounts come from besides this panel** — the
-  registration flow and org provisioning (lesson
-  [19 — Signing up & in](19-signing-up-and-in.md)).
-- **Session/token mechanics** — how bearer tokens are hashed at
-  rest and matched per-request.
-- **Personal namespaces** — every user implicitly owns
-  `<prefix>.<username>`; that interacts with grants (next
-  lesson).
+- **Where accounts come from** — self-serve signup, social
+  sign-in, verification ([Lesson 19](19-signing-up-and-in.md)).
+- **Delegating member management** — a role carrying
+  `manage-users` (next lesson).
+- **Personal namespaces** — every member implicitly owns
+  `<prefix>.<name>`; that interacts with grants (next lesson).
 
 ## Next
 

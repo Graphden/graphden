@@ -315,6 +315,46 @@
         (catch Exception _ nil)))))
 
 
+(def ^:const reset-ttl-ms
+  "1h — how long a password-reset link is valid."
+  (* 60 60 1000))
+
+
+(defn mint-password-reset!
+  "Create a reset token for the account owning a `password` identity under
+   `email`, returning `{:token :account-id}` — or nil when no such identity
+   (callers MUST NOT reveal which; answer identically either way). The email
+   rides on the token's `:label`. Reuses the `:session` shape (kind
+   \"pw-reset\" — never authenticates)."
+  [storage email]
+  (let [email (normalize-email email)]
+    (when-let [ident (and email (find-identity storage "password" email))]
+      {:token (mint-session! storage (:account-id ident)
+                             {:kind "pw-reset" :label email :ttl-ms reset-ttl-ms})
+       :account-id (:account-id ident)})))
+
+
+(defn reset-password!
+  "Consume a reset token: set the new bcrypt hash on the account's `password`
+   identity, revoke EVERY session of the account (the resetter proves email
+   control; anyone else holding a session is signed out), and delete the token
+   (single-use). Returns the account or nil (unknown/expired/wrong-kind token,
+   or a password below 8 chars)."
+  [storage token new-password]
+  (when (and (not (str/blank? token)) (>= (count (str new-password)) 8))
+    (when-let [s (first (sp/query-entities storage :session
+                                           {:token-hash (crypto/sha256-hex token)}))]
+      (when (and (= "pw-reset" (:kind s)) (session-live? s))
+        (let [account-id (:account-id s)
+              ident (find-identity storage "password" (:label s))]
+          (when (and ident (= account-id (:account-id ident)))
+            (sp/update-entity storage :identity (:id ident)
+                              (assoc ident :secret-data (hash-password new-password)))
+            (sp/delete-entities storage :session [(:id s)])
+            (revoke-all-for-account! storage account-id)
+            (account-of storage account-id)))))))
+
+
 (defn verify-email!
   "Consume a verify token: mark every identity on the account carrying that
    email as verified, promote the email to `:account.primary-email` if free, and

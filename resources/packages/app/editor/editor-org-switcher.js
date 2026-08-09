@@ -1,37 +1,38 @@
 // Editor Org-switcher — top-bar chip for Slack-style multi-org (Track B/C).
 //
-// Fetches GET /api/memberships ({current, orgs}). When the user belongs to
-// MORE THAN ONE org, mounts a chip in #org-mount showing the current org and
-// a dropdown of the others.
+// Fetches GET /api/memberships ({ok, memberships, active} — served by the
+// tenancy auth-routes Ring router; the session cookie authenticates it, so
+// no window.API key is involved). When the account belongs to MORE THAN ONE
+// org, mounts a chip in #org-mount showing the active org and a dropdown of
+// the others.
 //
 // Track C model A: each org's editor is its own subdomain ORIGIN
-// (<org>.graphden.dev) with its own session (per-origin localStorage). So
-// picking another org NAVIGATES to that org's subdomain — you sign in there;
-// a token minted here would be rejected on that origin's cross-org host guard.
-// On a single-host dev instance (localhost / no derivable base domain) there
-// are no per-org origins, so we fall back to the in-place re-mint via
-// POST /api/switch-org.
+// (<org>.graphden.dev), and the request-scope resolves the org from the Host
+// when you're a member — so picking another org NAVIGATES to that org's
+// subdomain (the accounts session cookie is origin-scoped like any cookie).
+// On a single-host dev instance (localhost / no derivable base domain) the
+// fallback is POST /api/switch-org, which sets the gd_org selector cookie
+// and reloads — sessions are org-agnostic, no re-mint involved.
 //
-// Globals consumed: window.API (route URLs), authFetch, setAuthPassword.
+// Globals consumed: authFetch (bearer/cookie-transparent fetch).
 
 async function initOrgSwitcher() {
   const mount = document.getElementById('org-mount');
   if (!mount || typeof authFetch !== 'function') return;
-  // No memberships route (single-tenant / no tenancy addon) → nothing to
-  // switch; skip the fetch so we don't hit /undefined.
-  if (!window.API?.api_memberships) return;
   let data;
   try {
-    const resp = await authFetch(window.API.api_memberships);
+    const resp = await authFetch('/api/memberships');
     if (!resp.ok) return; // unauthenticated / no addon → no chip
+    const ct = resp.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return; // graph fall-through page
     data = await resp.json();
   } catch (_) {
     return;
   }
-  const orgs = (data && Array.isArray(data.orgs)) ? data.orgs : [];
+  const orgs = (data && Array.isArray(data.memberships)) ? data.memberships : [];
   if (orgs.length < 2) return; // nothing to switch between
 
-  const current = data.current;
+  const current = data.active;
   mount.innerHTML = ''
     + '<button id="org-chip-btn" class="org-chip-btn" title="Switch organization">'
     +   '<span id="org-chip-name"></span>'
@@ -86,19 +87,19 @@ async function switchToOrg(org) {
       window.location.protocol + '//' + org + '.' + base + port + '/';
     return;
   }
-  // Single-host dev fallback: re-mint the session in place.
+  // Single-host dev fallback: set the gd_org selector cookie server-side
+  // (validated against memberships), then reload — the session itself is
+  // org-agnostic, so there is nothing to re-mint.
   try {
-    const resp = await authFetch(window.API.api_switch_org + '?org=' + encodeURIComponent(org), {
+    const resp = await authFetch('/api/switch-org', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ org }),
     });
     if (!resp.ok) return;
-    const token = (await resp.text()).trim();
-    if (token && typeof setAuthPassword === 'function') {
-      setAuthPassword(token);
-      // Reload so the whole editor re-fetches under the new org's session.
-      window.location.reload();
-    }
+    // Reload so the whole editor re-fetches under the newly selected org.
+    window.location.reload();
   } catch (_) {
-    // Network / auth error — leave the current session untouched.
+    // Network / auth error — leave the current selection untouched.
   }
 }

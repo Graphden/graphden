@@ -15,3 +15,14 @@
   (let [token (core/mint-verification! storage account-id addr)
         body (email/verification-email-body app-base-url token)]
     (email/send-mail! mailer (assoc body :to addr))))
+
+
+(defn request-password-reset!
+  "Mint a reset token for `addr` (when a password identity exists) and email
+   the link. Returns `{:ok? …}` from the mailer, or `{:ok? true :no-op true}`
+   when no such identity — indistinguishable to the HTTP caller (no account
+   enumeration)."
+  [storage mailer app-base-url addr]
+  (if-let [{:keys [token]} (core/mint-password-reset! storage addr)]
+    (email/send-mail! mailer (assoc (email/reset-email-body app-base-url token) :to addr))
+    {:ok? true :no-op true}))

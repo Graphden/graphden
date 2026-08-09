@@ -111,7 +111,9 @@
       "<div id='totp-wrap' style='display:none'><label>Authentication code</label>"
       "<input type='text' id='code' inputmode='numeric' autocomplete='one-time-code' placeholder='123456'></div>"
       "<button class='btn-primary' id='go' type='submit'>Sign in</button>"
-      "<div class='msg' id='msg'></div></form>"
+      "<div class='msg' id='msg'></div>"
+      "<p style='margin:10px 0 0;font-size:13px;text-align:center'>"
+      "<a href='#' id='forgot' onclick='return forgot()'>Forgot password?</a></p></form>"
       (social-buttons enabled-providers telegram)
       "</div>"
       "<script>"
@@ -136,6 +138,9 @@
       "if(s===200){if(signup&&j.verification_sent){say('Account created — check your email to verify. Redirecting…',true);}"
       "setTimeout(()=>location.href='/',700);return false;}"
       "say(j.error==='email-taken'?'That email is already registered.':(signup?'Could not create account.':'Invalid email or password.'));return false;}"
+      "async function forgot(){let email=document.getElementById('email').value;"
+      "if(!email){say('Enter your email above first.');return false;}"
+      "await post('/auth/forgot',{email});say('If that address has an account, a reset link is on its way.',true);return false;}"
       "</script>")))
 
 
@@ -184,4 +189,31 @@
       "if(j.account.email&&!j.account['email-verified?']){}}}"
       "async function logout(){await post('/auth/logout');location.href='/login';}"
       "whoami();loadIdents();loadTfaState();"
+      "</script>")))
+
+
+(defn reset-page
+  "The /reset?token=… page the emailed link opens: one new-password field,
+   POSTs /auth/reset with the token from the query string."
+  []
+  (page
+    "Reset password"
+    (str
+      "<div class='card'>"
+      "<h1>Choose a new password</h1>"
+      "<p class='sub'>After resetting you'll be signed out everywhere.</p>"
+      "<form onsubmit='return doReset(event)'>"
+      "<label>New password</label>"
+      "<input type='password' id='password' required minlength='8' autocomplete='new-password'>"
+      "<button class='btn-primary' type='submit'>Set password</button>"
+      "<div class='msg' id='msg'></div></form></div>"
+      "<script>"
+      "function say(t,ok){let m=document.getElementById('msg');m.textContent=t;m.className='msg '+(ok?'ok':'err');}"
+      "async function doReset(e){e.preventDefault();"
+      "let token=new URLSearchParams(location.search).get('token');"
+      "let r=await fetch('/auth/reset',{method:'POST',headers:{'Content-Type':'application/json'},"
+      "body:JSON.stringify({token,password:document.getElementById('password').value})});"
+      "if(r.status===200){say('Password set — sign in with it now.',true);setTimeout(()=>location.href='/login',900);}"
+      "else{say('That link is invalid or expired — request a new one from the sign-in page.');}"
+      "return false;}"
       "</script>")))

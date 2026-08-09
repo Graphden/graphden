@@ -251,3 +251,41 @@
                                     :app-origin origin})]
     (is (nil? (router {:request-method :get :uri "/editor"}))
         "a non-/auth path returns nil so the seam falls through")))
+
+
+(deftest ^:integration password-reset-flow-through-http
+  (let [sink (atom [])
+        router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer sink)
+                                    :app-origin origin})]
+    (router {:request-method :post :uri "/auth/signup"
+             :body (json/generate-string {:email "reset-me@example.com" :password "old-pw-123"})})
+    (reset! sink [])
+    (testing "forgot answers identically for known and unknown emails (no enumeration)"
+      (let [known (router {:request-method :post :uri "/auth/forgot"
+                           :body (json/generate-string {:email "reset-me@example.com"})})
+            unknown (router {:request-method :post :uri "/auth/forgot"
+                             :body (json/generate-string {:email "nobody@example.com"})})]
+        (is (= (:status known) (:status unknown) 200))
+        (is (= (json/parse-string (:body known)) (json/parse-string (:body unknown))))
+        (is (= 1 (count @sink)) "only the real account got mail")))
+    (let [live-session (set-cookie-token (router {:request-method :post :uri "/auth/login"
+                                                  :body (json/generate-string {:email "reset-me@example.com" :password "old-pw-123"})}))
+          link-token (-> (re-find #"/reset\?token=([^\s\"]+)" (:text (first @sink))) second)]
+      (testing "the reset page serves"
+        (is (= 200 (:status (router {:request-method :get :uri "/reset" :query-string (str "token=" link-token)})))))
+      (testing "a short password is refused; the token survives"
+        (is (= 400 (:status (router {:request-method :post :uri "/auth/reset"
+                                     :body (json/generate-string {:token link-token :password "short"})})))))
+      (testing "reset sets the new password, kills every session, single-use token"
+        (is (= 200 (:status (router {:request-method :post :uri "/auth/reset"
+                                     :body (json/generate-string {:token link-token :password "new-pw-456"})}))))
+        (is (nil? (core/authenticate-token (storage) live-session)) "old session dead")
+        (is (= 400 (:status (router {:request-method :post :uri "/auth/reset"
+                                     :body (json/generate-string {:token link-token :password "again-789"})})))
+            "token is single-use")
+        (is (= 401 (:status (router {:request-method :post :uri "/auth/login"
+                                     :body (json/generate-string {:email "reset-me@example.com" :password "old-pw-123"})})))
+            "old password no longer works")
+        (is (= 200 (:status (router {:request-method :post :uri "/auth/login"
+                                     :body (json/generate-string {:email "reset-me@example.com" :password "new-pw-456"})})))
+            "new password signs in")))))

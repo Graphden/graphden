@@ -12,7 +12,7 @@ authorization, default-deny, personal namespaces.
 
 ## The model in one paragraph
 
-A grant is a row: **subject** (a username) + **capability** +
+A grant is a row: **subject** (a member's email, stored as their stable account id) + **capability** +
 **namespace**. Authorization is default-deny: an operation is
 allowed iff some grant covers it. "Covers" is generous in two
 directions — a grant on a parent namespace covers all its
@@ -48,7 +48,7 @@ graph-read filter rather than picked by hand — but the
 
 One freebie needs no grant row at all: every user implicitly
 holds `admin` over their **personal namespace**
-(`<prefix>.<username>`).
+(`<prefix>.<account-id>` — built from the stable id, so it survives an email change).
 
 ## Where the checks fire
 
@@ -79,17 +79,24 @@ alice   | write      | acme.billing  |  ×
 bob     | execute    | acme          |  ×
 ```
 
-Below it, the add form: a `subject` text input, a capability
+Below it, the add form: a `subject` email input (with type-ahead
+over the org's members), a capability
 `<select>` (the six pickable values — every capability except
 `view-impl`), a `namespace` input, and **+ Add grant**
 (`POST /api/grants`).
 
-One subtlety worth knowing: the form takes a *username*, but
-enforcement keys on the user's stable id — the create handler
-resolves the name to that id at write time and stores only the
-id (the username is re-joined from the user row for display).
-Typo the username and you get a "dead" grant that matches no one
-— its subject cell renders blank — but it doesn't throw.
+One subtlety worth knowing: the form takes an *email*, but
+enforcement keys on the account's stable id — the create handler
+resolves the email to that id at write time and stores only the
+id (the email is re-joined from the account row for display).
+Typo the email and you get a "dead" grant that matches no one —
+its subject cell renders the raw id — but it doesn't throw.
+
+One special capability rides the same rows: `require-2fa`.
+Granted to a user (or, with subject-kind `org`, to a whole org)
+it doesn't *allow* anything — it *requires* the subject to enroll
+two-factor authentication before any other request passes
+([Lesson 19](19-signing-up-and-in.md) shows enrollment).
 
 Revoke is the row's `×` (confirm: *"Delete this grant?"*) —
 this one goes through the generic entity endpoint

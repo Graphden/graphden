@@ -1,76 +1,107 @@
-# Lesson 19 — Signing up & signing in: your cloud account
+# Lesson 19 — Signing up & signing in: your account
 
-**Goal**: by the end of this lesson you can create your own
-organization on a graphden cloud, sign back into it, and you'll
-understand how the same login surface behaves on a self-hosted
-instance. This is the on-ramp to the operator lessons that
-follow ([16 Users](16-users-admin.md), [17 Grants](17-grants.md),
-[18 Plans](18-plans-and-tiers.md)).
+**Goal**: by the end of this lesson you can create an account on a
+graphden cloud, sign back into it (by password or a social
+provider), verify your email, protect the account with two-factor
+authentication — and you'll understand how the same login surface
+behaves on a self-hosted instance. This is the on-ramp to the
+operator lessons that follow ([16 Members](16-users-admin.md),
+[17 Grants](17-grants.md), [18 Plans](18-plans-and-tiers.md)).
 
-**Concepts introduced**: the `/login` page, self-serve org
-creation (`signup`), the org-creator admin grant, the single
-sign-in surface across deployment shapes, and where the login
-*form* comes from (it's a graph partial, like everything else).
+**Concepts introduced**: the `/login` page, accounts and sign-in
+*identities* (one account, many ways in), email verification,
+account linking, personal orgs, the `/account` page, TOTP 2FA.
+
+## Accounts and identities
+
+Graphden's identity model (the open `accounts` module —
+[docs/ACCOUNTS.md](../ACCOUNTS.md)) separates **who you are** from
+**how you sign in**:
+
+- an **account** is you — one stable identity everything else
+  (grants, orgs, ownership) keys on;
+- an **identity** is one way of signing in: an email + password,
+  a Google account, a GitHub account, a Telegram account.
+
+One account can hold several identities. Sign up with a password
+today, link Google tomorrow — both land in the same account. If a
+social provider vouches for the same **verified email** your
+account already owns, the link even happens automatically.
 
 ## The `/login` page (cloud)
 
-On a cloud deployment (the tenancy addon is active), open
-`/login`. It's one card with two tabs:
+Open `/login`. One card, two tabs:
 
-- **Sign in** — username + password for an existing account.
-- **Create account** — username + password + **organization
-  name**. Submitting it:
-  1. creates a brand-new org (the name is also its identity —
-     it can't be one that already exists, and reserved platform
-     labels like `app` / `www` / `api` are refused);
-  2. creates you as its first user (password stored only as a
-     bcrypt hash; an 8-character minimum, checked on the server —
-     the strength meter next to the field is just a hint);
-  3. **grants you `:admin` over your whole org** (root
-     namespace), so you can edit immediately — you are the owner
-     of the org you just made;
-  4. logs you in and drops you into the editor.
+- **Sign in** — email + password, or one of the provider buttons
+  (Continue with GitHub / Google, or the Telegram widget).
+- **Create account** — email + password. Submitting it:
+  1. creates your account and emails you a **verification link**
+     (from `noreply@graphden.dev`; the link is valid for 24 h);
+  2. signs you in right away — but your email counts as *verified*
+     only after you click the link, and some things (like being
+     found by email for org invites) wait for that;
+  3. on your first request the platform provisions a **personal
+     org** derived from your email — you own it and hold `:admin`
+     over it, so you can start building immediately.
 
-Signup can *only ever create a new org* — it never joins an
-existing one. To add teammates to your org you invite them
-([Lesson 17 covers grants](17-grants.md)); a fresh signup with an
-existing org name is refused, not merged.
+Signing up through a social button skips the password entirely:
+the provider proves who you are, and a provider-verified email is
+trusted as verified from the start. (Telegram has no email, so a
+Telegram-created account starts email-less — you can add one
+later from `/account`.)
 
-Once signed in, the bearer token lives in your browser and rides
-every request. There is **no anonymous view of the graph** on a
-cloud instance: unauthenticated, `/` bounces you to `/login`.
+Sessions ride an HttpOnly cookie — sign in once and the editor,
+the API and every page share it. Signed out, `/` bounces you to
+`/login`.
+
+## The `/account` page
+
+Once signed in, `/account` is your self-service surface:
+
+- **Sign-in methods** — the identities linked to your account.
+  Link GitHub/Google from here; unlink any of them (the last
+  remaining method is refused — you'd lock yourself out).
+- **Two-factor authentication** — enable TOTP: add the secret to
+  any authenticator app, confirm with a 6-digit code, and from
+  then on password sign-ins ask for the code. (An org can also
+  *require* 2FA — [Lesson 17](17-grants.md) shows the
+  `require-2fa` capability.)
+- **Sign out** — this device, or everywhere at once.
 
 ## The same surface, self-hosted
 
-Run graphden yourself and the *same* lock affordance appears, but
-the form is different — because the login form is a graph partial
-(`GET /partials/auth-form`) and each deployment serves its own:
+Run graphden yourself and the sign-in surface depends on what you
+enable:
 
-- **`AUTH_TOKEN` set** → a single **Admin password** field. Paste
-  the token value; there are no usernames or orgs to manage.
-- **`AUTH_TOKEN` unset** → auth is *off* entirely: the instance is
-  open, no login at all (the convenient local-dev mode).
+- **accounts addon enabled** (`GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn`)
+  → the same `/login` + `/account` pages as the cloud. Each social
+  provider turns on only when you configure its credentials; with
+  no email provider configured, verification links are printed to
+  the server log instead of emailed — everything still works.
+- **`AUTH_TOKEN` set** (no accounts addon) → a single **Admin
+  password** popover in the editor. No accounts, no orgs.
+- **neither** → auth is *off* entirely: the instance is open, no
+  login at all (the convenient local-dev mode).
 
-So the tenant username/org fields you see on the cloud simply do
-not exist in a self-hosted build — the tenancy package that
-carries them isn't loaded. Nothing is hidden; each deployment
-ships exactly the form it needs. (The mechanics live in
-[docs/TENANCY_SEAM.md § Auth seam](../TENANCY_SEAM.md#auth-seam) and
-[docs/DEPLOYMENT.md § Authentication](../DEPLOYMENT.md).)
+Nothing is hidden; each deployment ships exactly the surface it
+needs. (Mechanics: [docs/ACCOUNTS.md](../ACCOUNTS.md) and
+[docs/TENANCY_SEAM.md § Auth seam](../TENANCY_SEAM.md#auth-seam).)
 
 ## Try it
 
 On a cloud instance:
 
-1. Open `/login`, click **Create account**.
-2. Pick a username, a password (8+ chars), and an org name that's
-   yours — e.g. `acme-<yourname>`.
-3. Submit → you land in the editor, already able to create
-   namespaces and fns (you're your org's admin).
-4. Sign out (the lock icon → confirm), then **Sign in** with the
-   same username/password to confirm the round-trip.
+1. Open `/login`, click **Create account**. Use a real email and
+   a password (8+ chars).
+2. Submit → you land in the editor with your personal org already
+   provisioned; check your inbox and click the verification link.
+3. Open `/account` → link a social provider (e.g. GitHub), then
+   sign out and sign back in with that provider instead of the
+   password — same account, same org.
+4. Still in `/account`, enable 2FA: scan/enter the secret in an
+   authenticator app, confirm the code, sign out, sign in with
+   the password — the code is now required.
 
 That's the whole account lifecycle. Managing *other* people in
-your org — adding users, granting them narrower capabilities,
-seeing your plan's limits — is [Lesson 16](16-users-admin.md)
-onward.
+your org — adding members by email, granting them narrower
+capabilities — is [Lesson 16](16-users-admin.md) onward.

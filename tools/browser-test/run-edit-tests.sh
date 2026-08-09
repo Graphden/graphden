@@ -196,10 +196,15 @@ FAILED_NAMES=""
 STRICT_FLAKES=""    # flaked-passed-on-retry files; strict-escalated only if NOT degraded
 STRICT_LEAKS=""     # leak-in-passing-test files (name(count)); same
 DEGRADED_FILES=0    # count of files that ran slower than THRASH_FILE_SECS
-HEAP_HWM_MIB=0      # executor heap high-water across the run, in MiB
+HEAP_HWM_MIB=0      # executor heap high-water (docker stats), MiB — INFO ONLY in the banner,
+                    # NOT a degraded trigger: a JVM at MaxRAMPercentage commits heap toward
+                    # the cap regardless of pressure (the "executor memory" note at the end
+                    # of this file measured a FLAT after-GC live-set), so ~1.7GiB is normal.
 THRASH_FILE_SECS=${THRASH_FILE_SECS:-150}   # norm ~10-40s; >150s = starved (hard cap is 300s)
 THRASH_MIN_FILES=${THRASH_MIN_FILES:-3}     # this many slow files => degraded run
-THRASH_HEAP_MIB=${THRASH_HEAP_MIB:-1500}    # OR heap high-water at/above this MiB
+THRASH_MIN_FLAKED=${THRASH_MIN_FLAKED:-2}   # OR this many DIFFERENT files needing a retry: a
+                                            # real race is localized to one file, so several
+                                            # innocent files flaking in one run = host jitter
 # Consecutive server-down counter. Demo (:9002) has docker restart-
 # policy so a single bounce recovers; an isolated testcontainer
 # stack does NOT auto-restart, so a single crash cascades through
@@ -332,7 +337,8 @@ for f in $FILES; do
   fi
   FILE_SECS=$((SECONDS - FILE_START))
   FILE_MEM="$(executor_mem)"
-  # Thrash signals: a file far past the norm, and the executor heap high-water.
+  # Thrash signal: a file far past the norm. (Heap high-water is tracked too but
+  # only for the banner — see the HEAP_HWM_MIB note above for why it is not a trigger.)
   # executor_mem is like "1.701GiB" / "812.3MiB" / "?" — normalise to MiB.
   if [ "$FILE_SECS" -gt "$THRASH_FILE_SECS" ]; then DEGRADED_FILES=$((DEGRADED_FILES+1)); fi
   file_mib="$(printf '%s' "$FILE_MEM" | awk '{v=$0; g=(v ~ /GiB/); sub(/[A-Za-z].*/,"",v); if (v+0>0) printf "%d", (g? v*1024 : v+0); else print 0}')"
@@ -395,7 +401,9 @@ fi
 # past the norm, or the executor heap sat at its high-water. Under those
 # conditions a strict flake/leak is the environment, not the branch.
 DEGRADED=0
-if [ "$DEGRADED_FILES" -ge "$THRASH_MIN_FILES" ] || [ "$HEAP_HWM_MIB" -ge "$THRASH_HEAP_MIB" ]; then
+FLAKED_COUNT=0
+for _x in $FLAKED; do FLAKED_COUNT=$((FLAKED_COUNT+1)); done
+if [ "$DEGRADED_FILES" -ge "$THRASH_MIN_FILES" ] || [ "$FLAKED_COUNT" -ge "$THRASH_MIN_FLAKED" ]; then
   DEGRADED=1
 fi
 if [ -n "$STRICT_FLAKES$STRICT_LEAKS" ]; then
@@ -424,7 +432,7 @@ if [ "$FAIL" != "0" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi
 if [ "$DEGRADED" = 1 ]; then
-  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran >${THRASH_FILE_SECS}s (norm ~10-40s), executor heap high-water ${HEAP_HWM_MIB}MiB." >&2
+  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran >${THRASH_FILE_SECS}s (norm ~10-40s), ${FLAKED_COUNT} file(s) needed a retry; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
   echo "    Strict flake/leak verdicts were downgraded to report-only — a retry-pass under thrash is a pass, not a race." >&2
   if [ "$FAIL" != "0" ]; then
     echo "    A file HARD-failed above: the host is too starved to judge it. Free RAM (e.g. 'docker stop graphden-executor' to drop the demo stack) and re-run on a quiet host — do NOT read this as a branch regression." >&2

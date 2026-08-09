@@ -907,4 +907,40 @@
            http-server — the same core, assembled for someone else's hardware.
            Closes the platform block: the seams above are exactly what make this
            assembly possible."}]}
+
+  {:id :accounts
+   :title "Accounts — the open identity module"
+   :status :toured
+   :summary "The opt-in identity layer (docs/ACCOUNTS.md): one account, many
+             sign-in identities (password / Google / GitHub / Telegram),
+             hashed sessions, email verification, TOTP 2FA, and the /auth/*
+             + /login surface — all OFF unless the addon fragment is enabled."
+   :paths ["src/graphden/accounts/"]
+   :steps
+   [{:ns graphden.accounts.core :defn resolve-social-identity!
+     :say "The heart of account-LINKING: a social sign-in resolves to an
+           existing identity, auto-links onto an account that owns the same
+           VERIFIED email, or creates a fresh account — in that order. One
+           person, many sign-in methods, one stable account-id for authz."}
+    {:ns graphden.accounts.core :defn mint-session!
+     :say "Sessions are rows, not JWTs: the raw token exists exactly once (the
+           return value); storage keeps only its SHA-256. `kind` overloads the
+           same row for verify links and pending-2FA steps — kinds outside
+           nil/\"api\" never authenticate, so a verify link can't become a
+           bearer."}
+    {:ns graphden.accounts.provider :defn accounts-provider
+     :say "The module's AuthProvider: bearer OR the HttpOnly gd_session cookie
+           (an OAuth redirect can't carry a bearer) → an org-AGNOSTIC principal.
+           Org is deliberately absent — the tenancy layer resolves it from
+           membership, which is what keeps this module open-core."}
+    {:ns graphden.accounts.routes :defn make-router
+     :say "The whole HTTP surface as one route-collection Ring router:
+           password + social + telegram callbacks, verify links, identities
+           list/unlink, TOTP enroll/confirm/login-step, and the self-contained
+           /login + /account pages. Installed before the graph router; returns
+           nil to fall through, so an instance without the addon never sees it."}
+    {:ns graphden.accounts.totp :defn valid?
+     :say "RFC 6238 in ~100 lines: base32, HOTP, a ±1-step skew window and a
+           constant-time compare, verified against the RFC's reference vectors.
+           The enrollment/confirm flow that uses it lives in accounts.core."}]}
 ]}

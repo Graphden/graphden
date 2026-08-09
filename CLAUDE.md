@@ -179,6 +179,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/SECRETS.md](docs/SECRETS.md) | `:secret` taint marker — asymmetric subtyping, propagation rules, hide-at-sink, Secrets-panel UX | When touching secret-type code or adding a base-fn that handles user data |
 | [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Module kinds (fns-only / impl+fns / core-swap), registry lifecycle, export, § 15.1 as-built repo map | When touching `registry` / `packages/{loader,export}` / `executor-packages.edn`, or deciding what belongs in its own repo |
 | [docs/TENANCY_SEAM.md](docs/TENANCY_SEAM.md) | The core seams the tenancy addon plugs into — context, auth, addon manifest, storage/schema, route collection, effect gate, execute guard | When touching `tenancy/context.clj`, the effect gate, an admission/quota seam, or any `:tenancy/*` init-key |
+| [docs/ACCOUNTS.md](docs/ACCOUNTS.md) | The open opt-in identity module — account/identity/session model, social providers, email verification, TOTP, the `/auth/*` + `/login` surface | When touching `src/graphden/accounts/` or wiring auth for a deployment |
 | [docs/devtour/README.md](docs/devtour/README.md) | The developer code-tour — symbol-anchored read of the codebase; `bb devtour` bake + `bb devtour-check` drift guard | When onboarding, or when a toured top-level form is renamed/moved/deleted (CI goes red) |
 
 ## Common Commands

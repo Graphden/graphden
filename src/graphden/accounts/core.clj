@@ -12,14 +12,9 @@
    as the return value the caller hands to the client."
   (:require
     [clojure.string :as str]
+    [graphden.accounts.crypto :as crypto]
     [graphden.storage.protocol.core :as sp])
   (:import
-    (java.security
-      MessageDigest
-      SecureRandom)
-    (java.util
-      Base64
-      Base64$Encoder)
     (org.mindrot.jbcrypt
       BCrypt)))
 
@@ -36,27 +31,6 @@
 (defn- now
   ^long []
   (System/currentTimeMillis))
-
-
-(defn- sha256-hex
-  [^String s]
-  (let [digest (MessageDigest/getInstance "SHA-256")
-        bytes (MessageDigest/.digest digest (String/.getBytes s "UTF-8"))]
-    (str/join (map #(format "%02x" (bit-and % 0xff)) bytes))))
-
-
-(defn- random-bytes
-  ^bytes [n]
-  (let [b (byte-array n)]
-    (SecureRandom/.nextBytes (SecureRandom.) b)
-    b))
-
-
-(defn- random-token
-  "A high-entropy URL-safe token; only its SHA-256 hash is ever stored."
-  []
-  (Base64$Encoder/.encodeToString (Base64$Encoder/.withoutPadding (Base64/getUrlEncoder))
-                                  (random-bytes 32)))
 
 
 (defn hash-password
@@ -150,6 +124,40 @@
                              :provider provider})))))
 
 
+(defn resolve-social-identity!
+  "Resolve a social sign-in to an account, creating or auto-linking as needed.
+   `info` = `{:provider :subject :email :email-verified? :display-name}`:
+
+   1. an existing `(provider, subject)` identity → its account (returning user);
+   2. else a VERIFIED email that an existing account owns as its primary-email →
+      attach the new identity to THAT account (auto-link across providers);
+   3. else a brand-new account (primary-email set only when the email is
+      verified) plus the identity.
+
+   Returns `{:account :account-id :created? :linked?}`. The caller mints the
+   session — this is storage-only."
+  [storage {:keys [provider subject email email-verified? display-name]}]
+  (let [email (normalize-email email)]
+    (if-let [ident (find-identity storage provider subject)]
+      (let [account-id (:account-id ident)]
+        {:account (account-of storage account-id) :account-id account-id
+         :created? false :linked? false})
+      (if-let [acct (and email email-verified? (account-by-email storage email))]
+        (let [account-id (str (:id acct))]
+          (create-identity! storage account-id
+                            {:provider provider :subject subject
+                             :email email :email-verified? true})
+          {:account acct :account-id account-id :created? false :linked? true})
+        (let [acct (create-account! storage {:display-name (or display-name email)
+                                             :primary-email (when email-verified? email)
+                                             :status "active"})
+              account-id (str (:id acct))]
+          (create-identity! storage account-id
+                            {:provider provider :subject subject
+                             :email email :email-verified? (boolean email-verified?)})
+          {:account acct :account-id account-id :created? true :linked? false})))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; sessions
 
@@ -166,9 +174,9 @@
   ([storage account-id] (mint-session! storage account-id nil))
   ([storage account-id opts]
    (let [ttl-ms (get opts :ttl-ms default-session-ttl-ms)
-         token (random-token)]
+         token (crypto/random-token)]
      (sp/create-entity storage :session
-                       {:token-hash (sha256-hex token)
+                       {:token-hash (crypto/sha256-hex token)
                         :account-id account-id
                         :expires-at (when ttl-ms (+ (now) ttl-ms))
                         :kind (:kind opts)
@@ -184,7 +192,7 @@
   [storage token]
   (when-not (str/blank? token)
     (when-let [s (first (sp/query-entities storage :session
-                                           {:token-hash (sha256-hex token)}))]
+                                           {:token-hash (crypto/sha256-hex token)}))]
       (when (and (contains? #{nil "api"} (:kind s)) (session-live? s))
         (when-let [acct (account-of storage (:account-id s))]
           (when (= "active" (:status acct))
@@ -196,7 +204,7 @@
   [storage token]
   (when-let [s (and token
                     (first (sp/query-entities storage :session
-                                              {:token-hash (sha256-hex token)})))]
+                                              {:token-hash (crypto/sha256-hex token)})))]
     (sp/delete-entities storage :session [(:id s)])))
 
 
@@ -292,7 +300,7 @@
   [storage token]
   (when-not (str/blank? token)
     (when-let [s (first (sp/query-entities storage :session
-                                           {:token-hash (sha256-hex token)}))]
+                                           {:token-hash (crypto/sha256-hex token)}))]
       (when (and (= "verify" (:kind s)) (session-live? s))
         (let [account-id (:account-id s)
               email (:label s)]

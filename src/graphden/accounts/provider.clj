@@ -19,22 +19,22 @@
 (def ^:const session-cookie "gd_session")
 
 
-(defn- cookie-token
-  "The `gd_session` value from the raw Cookie header, or nil. Parsed here (not
-   via ring cookie middleware) because auth runs at the base storage layer,
+(defn cookie-value
+  "The value of cookie `name` from the raw Cookie header, or nil. Parsed here
+   (not via ring cookie middleware) because auth runs at the base storage layer,
    before per-request middleware."
-  [request]
+  [request name]
   (when-let [header (get-in request [:headers "cookie"])]
     (some (fn [pair]
             (let [[k v] (str/split pair #"=" 2)]
-              (when (= (str/trim (str k)) session-cookie) v)))
+              (when (= (str/trim (str k)) name) v)))
           (str/split header #";\s*"))))
 
 
 (defn request-token
   "The session token from a request: bearer first, then the session cookie."
   [request]
-  (or (auth/extract-bearer request) (cookie-token request)))
+  (or (auth/extract-bearer request) (cookie-value request session-cookie)))
 
 
 (defrecord AccountsAuthProvider

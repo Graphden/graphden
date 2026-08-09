@@ -12,12 +12,15 @@
    - `:accounts/provider` → the `AccountsAuthProvider`, dropped into
      `:exec/context {:auth-provider ...}` (the same swap-point tenancy uses)."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.accounts.account-schema :as account-schema]
     [graphden.accounts.email :as email]
     [graphden.accounts.identity-schema :as identity-schema]
     [graphden.accounts.provider :as provider]
+    [graphden.accounts.routes :as routes]
     [graphden.accounts.session-schema :as session-schema]
+    [graphden.system.route-collection :as rc]
     [integrant.core :as ig]))
 
 
@@ -47,3 +50,32 @@
   [_ config]
   ;; api-key blank (unset RESEND_API_KEY collapses to "") → LogMailer.
   (email/make-mailer config))
+
+
+(defn- enabled-oauth
+  "Keep only providers whose client-id AND secret are set — an unset #env
+   collapses to \"\", so a provider without credentials is simply OFF."
+  [oauth-providers]
+  (into {} (for [[k {:keys [client-id client-secret] :as cfg}] oauth-providers
+                 :when (and (not (str/blank? client-id))
+                            (not (str/blank? client-secret)))]
+             [k cfg])))
+
+
+(defmethod ig/init-key :accounts/routes-install
+  [_ {:keys [storage mailer app-origin oauth-providers telegram]}]
+  (let [oauth (enabled-oauth oauth-providers)
+        tg (when-not (str/blank? (:bot-token telegram)) telegram)]
+    (log/info "Accounts: installing /auth/* routes"
+              {:oauth (keys oauth) :telegram (some? tg)
+               :app-origin (if (str/blank? (str app-origin)) :from-host app-origin)})
+    (rc/install-router! :accounts
+                        (routes/make-router {:storage storage :mailer mailer
+                                             :app-origin app-origin
+                                             :oauth-providers oauth :telegram tg}))
+    :installed))
+
+
+(defmethod ig/halt-key! :accounts/routes-install
+  [_ _]
+  (rc/remove-router! :accounts))

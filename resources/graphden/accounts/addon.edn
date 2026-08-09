@@ -31,6 +31,20 @@
  :accounts/mailer {:api-key #env RESEND_API_KEY
                    :from #env GRAPHDEN_MAIL_FROM}
 
+ ;; The /auth/* HTTP surface (password + social + verify). Each social provider
+ ;; is enabled only when BOTH its client-id and secret are set (unset #env →
+ ;; "" → OFF), so social login is per-provider opt-in. GRAPHDEN_APP_ORIGIN is
+ ;; the public origin used for redirect URIs + verification links; unset → the
+ ;; request Host is used.
+ :accounts/routes-install {:storage #ig/ref :db/postgres
+                           :mailer #ig/ref :accounts/mailer
+                           :app-origin #env GRAPHDEN_APP_ORIGIN
+                           :oauth-providers {"github" {:client-id #env GITHUB_CLIENT_ID
+                                                       :client-secret #env GITHUB_CLIENT_SECRET}
+                                             "google" {:client-id #env GOOGLE_CLIENT_ID
+                                                       :client-secret #env GOOGLE_CLIENT_SECRET}}
+                           :telegram {:bot-token #env TELEGRAM_BOT_TOKEN}}
+
  :db/schema {:extensions [#ig/ref :accounts/schema-extension]}
 
  :exec/context {:auth-provider #ig/ref :accounts/provider}}

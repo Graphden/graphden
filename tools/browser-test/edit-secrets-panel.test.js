@@ -142,17 +142,18 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     });
     // Wait until either the popover dismisses (success) OR a visible
     // popover-error appears (vault-not-configured). Both are valid
-    // first-submit outcomes for this test. 30s, not 5s: the submit does a
-    // vault write + fn-def create + recompile, which on a long-lived stack
-    // (big accumulated graph) regularly exceeds 5s while the popover sits
-    // open with no error yet.
+    // first-submit outcomes for this test. Sized to the honest worst case,
+    // not the median: the submit does a vault write + fn-def create +
+    // recompile, and under the gate's GC-pressured e2e stack that regularly
+    // ran past 30s (a fail-then-pass strict flake). It's a poll, so the
+    // happy path still returns in well under a second.
     await page.waitForFunction(() => {
       const pop = document.querySelector('.secrets-popover');
       if (!pop) return true;
       const err = pop.querySelector('.popover-error');
       return err && !err.hasAttribute('hidden')
              && (err.textContent || '').trim().length > 0;
-    },null,  {timeout: 30000, polling: 100});
+    },null,  {timeout: 60000, polling: 100});
     // Reopen if closed (success path), else carry on (error path).
     const popoverClosed = await page.evaluate(
       () => !document.querySelector('.secrets-popover'));

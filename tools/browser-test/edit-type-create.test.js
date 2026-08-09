@@ -200,14 +200,23 @@ async function openTypeCreate(page, nsName) {
     // Submit.
     await page.click('.type-create-submit');
     // The submit handler awaits POST, then initGraph(), then selectFnByName.
-    // Wait for the new type to land in graphData / sidebar.
+    // Wait for the new type to land in BOTH the sidebar AND the richTypes
+    // registry. These refresh from separate fetches, so polling only the
+    // sidebar and then reading richTypes once is a race: under load the
+    // sidebar item can appear a beat before richTypes refetches, and the
+    // single read below then reads stale-empty (the "rich-types registry
+    // carries the new type" flake). Poll for both — the happy path still
+    // returns immediately.
     await page.waitForFunction(
       (name) => {
-        return Array.from(document.querySelectorAll('.entity-item'))
+        const inSidebar = Array.from(document.querySelectorAll('.entity-item'))
           .some((el) => el.textContent.includes(name));
+        const inRich = typeof richTypes === 'object' && richTypes
+                       && Object.prototype.hasOwnProperty.call(richTypes, name);
+        return inSidebar && inRich;
       },
       TYPE_NAME,
-      {timeout: 15000});
+      {timeout: 20000, polling: 100});
 
     const createdState = await page.evaluate((name) => {
       const item = Array.from(document.querySelectorAll('.entity-item'))

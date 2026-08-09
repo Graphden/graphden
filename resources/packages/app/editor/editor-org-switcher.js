@@ -21,8 +21,8 @@ async function initOrgSwitcher() {
   if (!mount || typeof authFetch !== 'function') return;
   let data;
   try {
-    // api-url-drift-allow: fixed route-collection endpoint (tenancy auth-routes), not a graph route
-    const resp = await authFetch('/api/memberships');
+    // Fixed route-collection endpoint (tenancy auth-routes), not a graph route.
+    const resp = await authFetch('/api/memberships'); // api-url-drift-allow: route-collection
     if (!resp.ok) return; // unauthenticated / no addon → no chip
     const ct = resp.headers.get('content-type') || '';
     if (!ct.includes('application/json')) return; // graph fall-through page
@@ -92,8 +92,8 @@ async function switchToOrg(org) {
   // (validated against memberships), then reload — the session itself is
   // org-agnostic, so there is nothing to re-mint.
   try {
-    // api-url-drift-allow: fixed route-collection endpoint (tenancy auth-routes), not a graph route
-    const resp = await authFetch('/api/switch-org', {
+    // Fixed route-collection endpoint (tenancy auth-routes), not a graph route.
+    const resp = await authFetch('/api/switch-org', { // api-url-drift-allow: route-collection
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ org }),

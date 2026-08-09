@@ -24,6 +24,13 @@
  ;; before any request scope binds.
  :accounts/provider {:storage #ig/ref :db/postgres}
 
+ ;; Transactional email. RESEND_API_KEY unset (→ "") selects the LogMailer,
+ ;; so a self-hosted instance without an email provider still completes
+ ;; verification (the link goes to the log). GRAPHDEN_MAIL_FROM overrides the
+ ;; default sender.
+ :accounts/mailer {:api-key #env RESEND_API_KEY
+                   :from #env GRAPHDEN_MAIL_FROM}
+
  :db/schema {:extensions [#ig/ref :accounts/schema-extension]}
 
  :exec/context {:auth-provider #ig/ref :accounts/provider}}

@@ -247,3 +247,59 @@
             (when (= "active" (:status acct))
               {:account acct :account-id account-id
                :token (mint-session! storage account-id)})))))))
+
+
+;; ---------------------------------------------------------------------------
+;; email verification
+;;
+;; A verification token reuses the `:session` shape (kind "verify") rather than
+;; adding an entity (design principle #2): it is the same hashed, expiring,
+;; account-scoped token, and kind "verify" is NOT in the authenticating set, so
+;; it can never double as a login bearer — exactly how the tenancy `:token`
+;; overloads kind "invite".
+
+(def ^:const verification-ttl-ms
+  "24h — how long an email-verification link is valid."
+  (* 24 60 60 1000))
+
+
+(defn mint-verification!
+  "Create a verification token for `email` on `account-id`, returning the RAW
+   token (embed it in the link). The email rides on the token's `:label`."
+  [storage account-id email]
+  (mint-session! storage account-id
+                 {:kind "verify" :label (normalize-email email)
+                  :ttl-ms verification-ttl-ms}))
+
+
+(defn- promote-primary-email!
+  "Set `:account.primary-email` to `email` when the account has none and no
+   other account already claims it. A UNIQUE-constraint race is swallowed (the
+   email stays verified on the identity; linking can merge accounts later)."
+  [storage account-id email]
+  (let [acct (account-of storage account-id)]
+    (when (and acct (nil? (:primary-email acct)) (nil? (account-by-email storage email)))
+      (try
+        (sp/update-entity storage :account (:id acct) (assoc acct :primary-email email))
+        (catch Exception _ nil)))))
+
+
+(defn verify-email!
+  "Consume a verify token: mark every identity on the account carrying that
+   email as verified, promote the email to `:account.primary-email` if free, and
+   delete the token (single-use). Returns the account, or nil for an
+   unknown / expired / non-verify token."
+  [storage token]
+  (when-not (str/blank? token)
+    (when-let [s (first (sp/query-entities storage :session
+                                           {:token-hash (sha256-hex token)}))]
+      (when (and (= "verify" (:kind s)) (session-live? s))
+        (let [account-id (:account-id s)
+              email (:label s)]
+          (doseq [ident (sp/query-entities storage :identity
+                                           {:account-id account-id :email email})]
+            (sp/update-entity storage :identity (:id ident)
+                              (assoc ident :email-verified? true)))
+          (promote-primary-email! storage account-id email)
+          (sp/delete-entities storage :session [(:id s)])
+          (account-of storage account-id))))))

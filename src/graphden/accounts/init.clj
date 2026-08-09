@@ -14,6 +14,7 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.accounts.account-schema :as account-schema]
+    [graphden.accounts.email :as email]
     [graphden.accounts.identity-schema :as identity-schema]
     [graphden.accounts.provider :as provider]
     [graphden.accounts.session-schema :as session-schema]
@@ -40,3 +41,9 @@
   [_ {:keys [storage]}]
   (log/info "Accounts: wiring AccountsAuthProvider")
   (provider/accounts-provider storage))
+
+
+(defmethod ig/init-key :accounts/mailer
+  [_ config]
+  ;; api-key blank (unset RESEND_API_KEY collapses to "") → LogMailer.
+  (email/make-mailer config))

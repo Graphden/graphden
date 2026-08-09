@@ -30,6 +30,7 @@
 
 (def ^:private session-max-age-secs (* 24 60 60))
 (def ^:private oauth-state-max-age-secs 600)
+(def ^:private pending-2fa-max-age-secs 300)
 
 
 (defn- https-origin?
@@ -138,12 +139,56 @@
         (json-resp 409 {:ok false :error (name (or (:type (ex-data e)) :error))})))))
 
 
+(defn- pending-2fa-cookie
+  [token origin]
+  (cookie-str "gd_2fa" token {:max-age pending-2fa-max-age-secs :secure? (https-origin? origin)}))
+
+
 (defn- handle-login
   [storage origin request]
-  (let [{:keys [email password]} (req/read-json-body request)]
-    (if-let [{:keys [token]} (core/password-login! storage {:email email :password password})]
+  (let [{:keys [email password]} (req/read-json-body request)
+        result (core/password-login! storage {:email email :password password})]
+    (cond
+      (nil? result) (json-resp 401 {:ok false :error "invalid_credentials"})
+      (:totp-required? result)
+      (json-resp 200 {:ok true :totp-required true}
+                 (pending-2fa-cookie (core/mint-pending-2fa! storage (:account-id result)) origin))
+      :else (json-resp 200 {:ok true} (session-cookie (:token result) origin)))))
+
+
+(defn- handle-totp
+  "Second login step: a pending-2fa cookie + a TOTP code → a full session."
+  [storage origin request]
+  (let [{:keys [code]} (req/read-json-body request)
+        pending (provider/cookie-value request "gd_2fa")]
+    (if-let [{:keys [token]} (core/complete-2fa! storage pending code)]
       (json-resp 200 {:ok true} (session-cookie token origin))
-      (json-resp 401 {:ok false :error "invalid_credentials"}))))
+      (json-resp 401 {:ok false :error "invalid_code"}))))
+
+
+(defn- handle-totp-enroll
+  [storage request]
+  (if-let [acct (current-account storage request)]
+    (json-resp 200 (assoc (core/begin-totp-enrollment! storage (str (:id acct))) :ok true))
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
+(defn- handle-totp-confirm
+  [storage request]
+  (if-let [acct (current-account storage request)]
+    (if (core/confirm-totp! storage (str (:id acct)) (:code (req/read-json-body request)))
+      (json-resp 200 {:ok true})
+      (json-resp 400 {:ok false :error "invalid_code"}))
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
+(defn- handle-totp-disable
+  [storage request]
+  (if-let [acct (current-account storage request)]
+    (if (core/disable-totp! storage (str (:id acct)) (:code (req/read-json-body request)))
+      (json-resp 200 {:ok true})
+      (json-resp 400 {:ok false :error "invalid_code"}))
+    (json-resp 401 {:ok false :error "unauthenticated"})))
 
 
 (defn- handle-logout
@@ -229,6 +274,18 @@
 
             (and (= method :post) (= uri "/auth/unlink"))
             (handle-unlink storage request)
+
+            (and (= method :post) (= uri "/auth/totp"))
+            (handle-totp storage origin request)
+
+            (and (= method :post) (= uri "/auth/totp/enroll"))
+            (handle-totp-enroll storage request)
+
+            (and (= method :post) (= uri "/auth/totp/confirm"))
+            (handle-totp-confirm storage request)
+
+            (and (= method :post) (= uri "/auth/totp/disable"))
+            (handle-totp-disable storage request)
 
             (and (= method :get) (= uri "/auth/telegram/callback"))
             (handle-telegram storage telegram origin request)

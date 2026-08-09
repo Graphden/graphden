@@ -13,6 +13,7 @@
   (:require
     [clojure.string :as str]
     [graphden.accounts.crypto :as crypto]
+    [graphden.accounts.totp :as totp]
     [graphden.storage.protocol.core :as sp])
   (:import
     (org.mindrot.jbcrypt
@@ -256,9 +257,16 @@
       {:account acct :account-id account-id :token (mint-session! storage account-id)})))
 
 
+(defn totp-enabled?
+  [account]
+  (boolean (:totp-enabled? account)))
+
+
 (defn password-login!
-  "Verify `email`+`password` and mint a session. Returns `{:account :account-id
-   :token}` or nil (unknown email / bad password / suspended account)."
+  "Verify `email`+`password`. Returns nil (unknown email / bad password /
+   suspended). On success, when the account has 2FA enabled returns
+   `{:account :account-id :totp-required? true}` (NO token — the caller runs the
+   TOTP step); otherwise `{:account :account-id :token}` with a live session."
   [storage {:keys [email password]}]
   (let [email (normalize-email email)]
     (when-let [ident (and email (find-identity storage "password" email))]
@@ -266,8 +274,10 @@
         (let [account-id (:account-id ident)]
           (when-let [acct (account-of storage account-id)]
             (when (= "active" (:status acct))
-              {:account acct :account-id account-id
-               :token (mint-session! storage account-id)})))))))
+              (if (totp-enabled? acct)
+                {:account acct :account-id account-id :totp-required? true}
+                {:account acct :account-id account-id
+                 :token (mint-session! storage account-id)}))))))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -324,3 +334,89 @@
           (promote-primary-email! storage account-id email)
           (sp/delete-entities storage :session [(:id s)])
           (account-of storage account-id))))))
+
+
+;; ---------------------------------------------------------------------------
+;; two-factor (TOTP)
+;;
+;; The account's `:totp-secret` is set at enrollment (enabled false) and only
+;; flips `:totp-enabled?` true once a code confirms the authenticator is in
+;; sync. The password-login 2FA step uses a short-lived "pending-2fa" session
+;; (a `:session` kind that does not authenticate) so the password check and the
+;; code check are two requests without ever exposing a full session in between.
+
+(def ^:const pending-2fa-ttl-ms
+  "5 min to enter the TOTP code after the password step."
+  (* 5 60 1000))
+
+
+(defn- now-secs
+  ^long []
+  (quot (now) 1000))
+
+
+(defn begin-totp-enrollment!
+  "Generate + store a fresh TOTP secret on `account-id` (enabled stays false
+   until confirmed). Returns `{:secret :otpauth-uri}` to show as a QR."
+  [storage account-id]
+  (let [acct (account-of storage account-id)
+        secret (totp/generate-secret)]
+    (sp/update-entity storage :account (:id acct)
+                      (assoc acct :totp-secret secret :totp-enabled? false))
+    {:secret secret
+     :otpauth-uri (totp/otpauth-uri "Graphden"
+                                    (or (:primary-email acct) (str account-id))
+                                    secret)}))
+
+
+(defn confirm-totp!
+  "Activate 2FA: verify `code` against the enrolled secret and, on success, set
+   `:totp-enabled? true`. Returns true/false."
+  [storage account-id code]
+  (let [acct (account-of storage account-id)]
+    (boolean
+      (when (and (:totp-secret acct) (totp/valid? (:totp-secret acct) code (now-secs)))
+        (sp/update-entity storage :account (:id acct) (assoc acct :totp-enabled? true))
+        true))))
+
+
+(defn verify-totp
+  "True iff `code` is valid for the account's current secret."
+  [storage account-id code]
+  (let [acct (account-of storage account-id)]
+    (boolean (and (totp-enabled? acct)
+                  (totp/valid? (:totp-secret acct) code (now-secs))))))
+
+
+(defn disable-totp!
+  "Turn 2FA off — requires a valid current `code`. Clears the secret + flag.
+   Returns true/false."
+  [storage account-id code]
+  (let [acct (account-of storage account-id)]
+    (boolean
+      (when (and (totp-enabled? acct) (totp/valid? (:totp-secret acct) code (now-secs)))
+        (sp/update-entity storage :account (:id acct)
+                          (assoc acct :totp-secret nil :totp-enabled? false))
+        true))))
+
+
+(defn mint-pending-2fa!
+  "A short-lived non-authenticating token binding the passed-password step to
+   the upcoming TOTP step."
+  [storage account-id]
+  (mint-session! storage account-id {:kind "pending-2fa" :ttl-ms pending-2fa-ttl-ms}))
+
+
+(defn complete-2fa!
+  "Given a pending-2fa token + a TOTP `code`, verify the code, consume the
+   pending token, and mint a full session. Returns `{:account-id :token}` or
+   nil (bad/expired pending token or wrong code)."
+  [storage pending-token code]
+  (when-not (str/blank? pending-token)
+    (when-let [s (first (sp/query-entities storage :session
+                                           {:token-hash (crypto/sha256-hex pending-token)}))]
+      (when (and (= "pending-2fa" (:kind s)) (session-live? s)
+                 (verify-totp storage (:account-id s) code))
+        (sp/delete-entities storage :session [(:id s)])
+        {:account-id (:account-id s)
+         :token (mint-session! storage (:account-id s))}))))

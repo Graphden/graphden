@@ -17,6 +17,12 @@
                        enforced in `accounts.core`, not by this constraint.
    - `status`        — \"active\" | \"suspended\". A suspended account's sessions
                        stop authenticating (checked in the provider).
+   - `totp-secret`   — base32 TOTP secret once 2FA is enrolled (nullable —
+                       nil = never enrolled). Set at enrollment, cleared on
+                       disable.
+   - `totp-enabled?` — 2FA confirmed + active (nullable bool; nil/false = off).
+                       Enrollment sets the secret but leaves this false until a
+                       code confirms it.
    - `created-at`    — epoch millis.
 
    Platform-managed, non-versioned (like the tenancy identity entities): no
@@ -46,6 +52,14 @@
   #uuid "619c1b95-f50d-4bb2-8c2c-d27e0865dda7")
 
 
+(def ^:private account-totp-secret-field-uuid
+  #uuid "627710cb-6a04-4e5c-8158-65d53b9cb6f8")
+
+
+(def ^:private account-totp-enabled-field-uuid
+  #uuid "4e9a1488-fcf2-4038-b76e-46bdf580136e")
+
+
 (defn extend-builder
   "Add the `:account` entity with a UNIQUE-when-present `primary-email`."
   [builder]
@@ -59,5 +73,11 @@
                                       :nullable? true
                                       :indexed? true}
                       :status {:uuid account-status-field-uuid :type :text}
+                      :totp-secret {:uuid account-totp-secret-field-uuid
+                                    :type :text
+                                    :nullable? true}
+                      :totp-enabled? {:uuid account-totp-enabled-field-uuid
+                                      :type :bool
+                                      :nullable? true}
                       :created-at {:uuid account-created-at-field-uuid :type :int}})
       (ds/add-constraint :account {:type :unique :fields [:primary-email]})))

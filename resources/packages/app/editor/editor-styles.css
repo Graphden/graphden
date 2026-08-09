@@ -1486,6 +1486,50 @@ body.gd-no-execute [data-action="run-fn"] {
   display: none !important;
 }
 
+/* --- Capability gating, full coverage (2026-08). The [data-action] rules
+   above cover the fn-card row-actions popover; these extend the SAME
+   gd-no-write / gd-no-execute contract to every OTHER write/execute affordance
+   the editor exposes (create menu + sidebar-tree ns edits — a parallel path
+   the row-actions gate missed — branch create/merge/delete, secrets, services,
+   type promote/tighten, version restore, deploy, and all three execute
+   buttons). No-op for self-hosted (these body classes are only set when the
+   tenancy addon reports capabilities); server-side enforcement is the real
+   gate — this is the matching UX so a tenant never sees a control it can't use. */
+body.gd-no-write .create-menu-item,
+body.gd-no-write #create-root-ns-btn,
+body.gd-no-write .ns-edit-btn,
+body.gd-no-write .ns-plus-btn,
+body.gd-no-write .ns-delete-btn,
+body.gd-no-write .action-deploy,
+body.gd-no-write .fn-versions-restore,
+body.gd-no-write .branch-popover-create,
+body.gd-no-write .branch-section-add,
+body.gd-no-write .branch-row-merge,
+body.gd-no-write .branch-row-delete,
+body.gd-no-write #secret-add-btn,
+body.gd-no-write .sidebar-action-delete,
+body.gd-no-write .sidebar-action[title="Rotate value"],
+body.gd-no-write .service-popover-save-btn,
+body.gd-no-write .service-popover-delete-btn,
+body.gd-no-write .type-inline-promote-btn,
+body.gd-no-write .type-explainer-btn {
+  display: none !important;
+}
+body.gd-no-execute .gd-run-launch,
+body.gd-no-execute .execute-run-btn,
+body.gd-no-execute .execute-cancel-btn {
+  display: none !important;
+}
+/* When execute is denied the Run surface's launch button is hidden — say why
+   instead of leaving a dead card. */
+.gd-run-noexec { display: none; }
+body.gd-no-execute .gd-run-noexec {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--gd-ink-3);
+}
+
 /* Row-actions popover — floats outside the card to the right (or
    left if there's no room). Brief fade-in masks the position-shift
    when zoom changes apply scale/transform mid-frame. */

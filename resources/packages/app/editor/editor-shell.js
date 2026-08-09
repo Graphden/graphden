@@ -276,6 +276,7 @@
       + '<div class="gd-run-effects"><span class="gd-run-effects-label">Effects</span>'
       + effHtml + '</div>'
       + '<button type="button" id="gd-run-launch" class="gd-run-launch">Run ▶</button>'
+      + '<div class="gd-run-noexec">Running isn’t permitted for your role.</div>'
       + '</div>'
       + '<div class="gd-run-hist-head">Recent runs</div>'
       + '<div id="gd-run-history" class="gd-insp-runs">'

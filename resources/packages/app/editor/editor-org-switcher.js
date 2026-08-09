@@ -21,6 +21,7 @@ async function initOrgSwitcher() {
   if (!mount || typeof authFetch !== 'function') return;
   let data;
   try {
+    // api-url-drift-allow: fixed route-collection endpoint (tenancy auth-routes), not a graph route
     const resp = await authFetch('/api/memberships');
     if (!resp.ok) return; // unauthenticated / no addon → no chip
     const ct = resp.headers.get('content-type') || '';
@@ -91,6 +92,7 @@ async function switchToOrg(org) {
   // (validated against memberships), then reload — the session itself is
   // org-agnostic, so there is nothing to re-mint.
   try {
+    // api-url-drift-allow: fixed route-collection endpoint (tenancy auth-routes), not a graph route
     const resp = await authFetch('/api/switch-org', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

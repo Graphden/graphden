@@ -607,22 +607,18 @@ async function maybeStartLandingDemo() {
     const qs = params.toString();
     window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
   };
-  // Route key exists only when the deployment enables the demo endpoint
-  // (the tenancy addon merges its routes into window.API). No literal
-  // fallback — the api-url drift guard scans /api/* string literals against
-  // the LIVE router, and a core-only boot doesn't serve this route.
-  const url = window.API && API.api_demo_start;
-  if (!url) { cleanUrl(); return false; }
+  // /api/demo/start is a FIXED route-collection endpoint (the tenancy
+  // auth-routes Ring router), NOT a graph route — so it is NOT in window.API.
+  // Two response shapes: the accounts addon sets an HttpOnly gd_session cookie
+  // and returns {ok, org} (no token — just reload, the cookie authenticates);
+  // the legacy tenancy path returned {token} (stored as a bearer). 404 /
+  // network error (self-hosted / demo off) → strip the param, boot signed-out.
   try {
-    const response = await fetch(url, { method: 'POST' });
+    const response = await fetch('/api/demo/start', { method: 'POST' }); // api-url-drift-allow: route-collection
     if (response.ok) {
-      const data = await response.json();
-      if (data?.token) {
-        setAuthPassword(data.token);
-        cleanUrl();
-        window.location.reload();
-        return true;
-      }
+      const data = await response.json().catch(() => ({}));
+      if (data?.token) { setAuthPassword(data.token); cleanUrl(); window.location.reload(); return true; }
+      if (data?.ok) { cleanUrl(); window.location.reload(); return true; }
     }
   } catch (_) { /* fall through to signed-out boot */ }
   cleanUrl();

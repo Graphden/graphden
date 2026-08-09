@@ -87,9 +87,12 @@
              "<a class='btn-social' href='/auth/google/start'>Continue with Google</a>")
            "</div>"))
     (when-let [bot (:bot-username telegram)]
-      (str "<div class='social' style='margin-top:10px'>"
+      ;; Center the Telegram-injected iframe (a flex column left-aligns an
+      ;; intrinsic-width iframe → the button "slid off") and pin `data-lang=en`
+      ;; so the label matches the rest of the page instead of the viewer locale.
+      (str "<div class='social' style='margin-top:10px;align-items:center'>"
            "<script async src='https://telegram.org/js/telegram-widget.js?22'"
-           " data-telegram-login='" bot "' data-size='large'"
+           " data-telegram-login='" bot "' data-size='large' data-lang='en'"
            " data-auth-url='/auth/telegram/callback' data-request-access='write'></script>"
            "</div>"))))
 

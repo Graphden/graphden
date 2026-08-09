@@ -75,12 +75,26 @@ async function probeAccountsAuth() {
     if (r.ok && j?.account) {
       accountsMode = true;
       accountsAuthed = true;
+      window.gdAccount = j.account; // {id, email, display-name} — Settings + lock read this
     } else if (r.status === 401 && j?.error === 'unauthenticated') {
       accountsMode = true;
       accountsAuthed = false;
+      window.gdAccount = null;
     }
   } catch (_) { /* network/parse failure → treat as no accounts */ }
-  if (accountsMode) renderAuthLock();
+  if (accountsMode) {
+    renderAuthLock();
+    // The sidebar (edit affordances + admin panels) is painted at boot, BEFORE
+    // this async probe resolves — with isAuthenticated() still false for a
+    // cookie session. Re-render it now that the cookie session is known, so an
+    // accounts operator actually sees the create/edit controls + Operate panels
+    // instead of a read-only view. Idempotent; skipped until graphData loads
+    // (initGraph's own render then paints with the correct auth state).
+    if (accountsAuthed && typeof updateEntityList === 'function'
+        && typeof graphData !== 'undefined' && graphData) {
+      try { updateEntityList(graphData); } catch (_) {}
+    }
+  }
 }
 
 // Multi-tenant popover mode: false = log in (username + password), true = sign
@@ -108,8 +122,13 @@ function applyAuthMode() {
   if (saveBtn) saveBtn.textContent = tenant ? (authSignupMode ? 'Sign up' : 'Sign in') : 'Save';
 }
 
+// Authenticated iff EITHER a stored bearer (single-token / tenancy) OR a live
+// accounts cookie session (`gd_session`, from the boot probe). Every editing
+// affordance + admin panel gates on this, so an accounts-cookie operator MUST
+// count as signed-in — otherwise the editor renders read-only with no admin
+// sections (the "am I the operator?" confusion this fixes).
 function isAuthenticated() {
-  return !!getAuthPassword();
+  return !!getAuthPassword() || accountsAuthed;
 }
 
 // Wraps fetch() — adds Authorization header from storage when present;
@@ -626,3 +645,7 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
 });
 window.authMutate = authMutate;
 window.isAuthenticated = isAuthenticated;
+// True on a deployment running the open accounts addon (the /auth/* surface
+// answered the boot probe), regardless of whether THIS visitor is signed in —
+// so the "not signed in" UI can point at /login rather than the admin popover.
+window.graphdenAccountsMode = () => accountsMode;

@@ -289,3 +289,27 @@
         (is (= 200 (:status (router {:request-method :post :uri "/auth/login"
                                      :body (json/generate-string {:email "reset-me@example.com" :password "new-pw-456"})})))
             "new password signs in")))))
+
+
+(deftest ^:integration resend-verification-through-http
+  (let [sink (atom [])
+        router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer sink)
+                                    :app-origin origin})
+        session (set-cookie-token (router {:request-method :post :uri "/auth/signup"
+                                           :body (json/generate-string {:email "resend-me@example.com" :password "pw-resend-1"})}))]
+    (reset! sink [])
+    (testing "a signed-in account with an unverified email gets a fresh link"
+      (let [resp (router {:request-method :post :uri "/auth/resend-verification"
+                          :headers {"cookie" (str "gd_session=" session)}})]
+        (is (= 200 (:status resp)))
+        (is (= 1 (count @sink)))
+        (let [token (-> (re-find #"/auth/verify\?token=([^\s\"]+)" (:text (first @sink))) second)]
+          (is (= "resend-me@example.com" (:primary-email (core/verify-email! (storage) token)))
+              "the resent link verifies"))))
+    (testing "unauthenticated resend is refused"
+      (is (= 401 (:status (router {:request-method :post :uri "/auth/resend-verification"})))))
+    (testing "once verified, resend sends nothing (no unverified identity) but still 200s"
+      (reset! sink [])
+      (is (= 200 (:status (router {:request-method :post :uri "/auth/resend-verification"
+                                   :headers {"cookie" (str "gd_session=" session)}}))))
+      (is (zero? (count @sink))))))

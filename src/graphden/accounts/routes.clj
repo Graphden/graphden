@@ -164,6 +164,23 @@
         (json-resp 409 {:ok false :error (name (or (:type (ex-data e)) :error))})))))
 
 
+(defn- handle-resend-verification
+  "Re-send the verification email for the signed-in account's still-unverified
+   password identity. Idempotent-ish (mints a fresh token each call); answers
+   200 whether or not there was anything to send (no state leak)."
+  [storage mailer origin request]
+  (if-let [acct (current-account storage request)]
+    (do
+      (when-let [ident (->> (core/identities-for-account storage (str (:id acct)))
+                            (filter #(and (= "password" (:provider %))
+                                          (not (:email-verified? %))
+                                          (:email %)))
+                            first)]
+        (flows/request-verification! storage mailer origin (str (:id acct)) (:email ident)))
+      (json-resp 200 {:ok true}))
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
 (defn- pending-2fa-cookie
   [token origin]
   (cookie-str "gd_2fa" token {:max-age pending-2fa-max-age-secs :secure? (https-origin? origin)}))
@@ -366,6 +383,11 @@
 
               (and (= method :post) (= uri "/auth/reset"))
               (handle-reset storage request)
+
+              (and (= method :post) (= uri "/auth/resend-verification"))
+              (if (forgot-limit (client-ip request))
+                (handle-resend-verification storage mailer origin request)
+                (json-resp 200 {:ok true}))
 
               (and (= method :post) (= uri "/auth/logout"))
               (handle-logout storage origin request)

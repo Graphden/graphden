@@ -42,9 +42,12 @@
 (defn router-paths
   "All path patterns the compiled router serves, in route-table
    order. Accepts either a bare `reitit.core/Router` or a
-   `reitit.ring` handler."
+   `reitit.ring` handler. A plain-fn route-collection router (e.g. the
+   accounts `/auth/*` router) has no reitit route table → `[]`."
   [router]
-  (mapv first (r/routes (or (ring/get-router router) router))))
+  (if-let [rr (or (ring/get-router router) (when (satisfies? r/Router router) router))]
+    (mapv first (r/routes rr))
+    []))
 
 
 (defn- literal-prefix

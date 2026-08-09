@@ -126,11 +126,17 @@
 (defn router-paths
   "All path patterns the compiled router serves, in route-table
    order. Accepts either a bare `reitit.core/Router` or a
-   `reitit.ring` handler. Mirrors [[graphden.system.api-url-drift/
-   router-paths]] — kept as a separate fn so `bb test` doesn't
-   force a require-cycle."
+   `reitit.ring` handler. A route-collection router that is a PLAIN
+   Clojure fn (the accounts `/auth/*` router — the seam explicitly
+   allows any `(fn [req] resp-or-nil)`) has no reitit route table, so
+   it contributes no window.API entries: return `[]` rather than throw
+   on the `reitit.core/routes` protocol. Mirrors
+   [[graphden.system.api-url-drift/router-paths]] — kept as a separate
+   fn so `bb test` doesn't force a require-cycle."
   [router]
-  (mapv first (r/routes (or (ring/get-router router) router))))
+  (if-let [rr (or (ring/get-router router) (when (satisfies? r/Router router) router))]
+    (mapv first (r/routes rr))
+    []))
 
 
 ;; =============================================================================

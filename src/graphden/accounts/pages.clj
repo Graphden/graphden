@@ -153,6 +153,7 @@
     (str
       "<div class='card'>"
       "<h1>Your account</h1><p class='sub' id='who'>&nbsp;</p>"
+      "<div id='verify-banner'></div>"
       "<div class='sec'><h2>Sign-in methods</h2><div id='idents'>Loading…</div>"
       "<div class='social' style='margin-top:12px'>"
       (when (contains? enabled-providers "github") "<a class='btn-social' href='/auth/github/start'>Link GitHub</a>")
@@ -185,8 +186,14 @@
       "document.getElementById('tfa').innerHTML=(j&&j.enabled)?"
       "`<p class='sub'>Two-factor is <b>on</b>.</p><button class='btn-ghost' onclick='disableTotp()'>Disable 2FA</button>`:"
       "`<p class='sub'>Add a second factor with an authenticator app.</p><button class='btn-primary' onclick='enroll()'>Enable 2FA</button>`;}"
-      "async function whoami(){let[s,j]=await get('/auth/me');if(s===200&&j.account){document.getElementById('who').textContent=j.account.email||j.account.id;"
-      "if(j.account.email&&!j.account['email-verified?']){}}}"
+      "async function whoami(){let[s,j]=await get('/auth/me');if(s!==200||!j.account){location.href='/login';return;}"
+      "document.getElementById('who').textContent=j.account.email||'(email not verified yet)';"
+      ;; primary-email is null until a verification link is clicked — offer a resend.
+      "if(!j.account.email){document.getElementById('verify-banner').innerHTML="
+      "`<div class='sec' style='border-color:var(--blue-hi)'><h2>Verify your email</h2>`+"
+      "`<p class='sub'>Check your inbox for the link. Didn't get it?</p>`+"
+      "`<button class='btn-primary' onclick='resendVerify()'>Resend verification email</button></div>`;}}"
+      "async function resendVerify(){await post('/auth/resend-verification');say('If your email is unverified, a new link is on its way.',true);}"
       "async function logout(){await post('/auth/logout');location.href='/login';}"
       "whoami();loadIdents();loadTfaState();"
       "</script>")))

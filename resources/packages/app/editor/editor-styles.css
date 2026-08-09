@@ -5304,6 +5304,13 @@ body.gd-cards-compact .effects-strip { display: none; }
 }
 .gd-set-btn:hover { border-color: var(--gd-flow); color: var(--gd-flow); }
 .gd-set-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center; }
+.gd-set-acct-btns { display: flex; gap: 8px; flex: none; }
+.gd-set-badge {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 1px 6px; margin-left: 6px; border-radius: var(--gd-r-sm);
+  background: var(--gd-flow); color: var(--gd-on-accent);
+}
 .gd-set-code {
   font-family: var(--gd-mono); font-size: 12px; color: var(--gd-ink-2);
   background: var(--gd-paper-2); padding: 2px 6px; border-radius: 4px;

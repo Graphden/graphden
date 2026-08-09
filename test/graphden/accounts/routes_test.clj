@@ -211,6 +211,30 @@
       (is (= 401 (:status (router {:request-method :get :uri "/auth/identities"})))))))
 
 
+(deftest ^:integration serves-login-and-account-pages
+  (let [router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
+                                    :app-origin origin
+                                    :oauth-providers {"github" {:client-id "c" :client-secret "s"}}})]
+    (testing "GET /login renders HTML with the password form + enabled social button"
+      (let [resp (router {:request-method :get :uri "/login"})]
+        (is (= 200 (:status resp)))
+        (is (str/includes? (get-in resp [:headers "Content-Type"]) "text/html"))
+        (is (str/includes? (:body resp) "Sign in"))
+        (is (str/includes? (:body resp) "/auth/github/start"))))
+    (testing "GET /account renders HTML"
+      (is (= 200 (:status (router {:request-method :get :uri "/account"})))))
+    (testing "GET /auth/me needs auth and returns the account when signed in"
+      (is (= 401 (:status (router {:request-method :get :uri "/auth/me"}))))
+      (let [session (set-cookie-token (router {:request-method :post :uri "/auth/signup"
+                                               :body (json/generate-string {:email "me@example.com" :password "pw-me-123"})}))
+            body (json/parse-string (:body (router {:request-method :get :uri "/auth/me"
+                                                    :headers {"cookie" (str "gd_session=" session)}}))
+                                    true)]
+        (is (:ok body))
+        (is (some? (get-in body [:account :id])))
+        (is (nil? (get-in body [:account :email])) "unverified email is not yet primary")))))
+
+
 (deftest ^:integration non-auth-path-falls-through
   (let [router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
                                     :app-origin origin})]

@@ -23,6 +23,7 @@
     [graphden.accounts.crypto :as crypto]
     [graphden.accounts.flows :as flows]
     [graphden.accounts.oauth :as oauth]
+    [graphden.accounts.pages :as pages]
     [graphden.accounts.provider :as provider]
     [graphden.accounts.telegram :as telegram]
     [graphden.crud.request :as req]))
@@ -81,6 +82,11 @@
     :body (json/generate-string body)}))
 
 
+(defn- html-resp
+  [html]
+  {:status 200 :headers {"Content-Type" "text/html; charset=utf-8"} :body html})
+
+
 ;; --- handlers ---
 
 (defn- current-account
@@ -111,6 +117,23 @@
     (json-resp 200 {:ok true
                     :identities (mapv #(select-keys % [:provider :email :email-verified? :created-at])
                                       (core/identities-for-account storage (str (:id acct))))})
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
+(defn- handle-me
+  [storage request]
+  (if-let [acct (current-account storage request)]
+    (json-resp 200 {:ok true
+                    :account {:id (str (:id acct))
+                              :email (:primary-email acct)
+                              :display-name (:display-name acct)}})
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
+(defn- handle-tfa-state
+  [storage request]
+  (if-let [acct (current-account storage request)]
+    (json-resp 200 {:ok true :enabled (core/totp-enabled? acct)})
     (json-resp 401 {:ok false :error "unauthenticated"})))
 
 
@@ -251,48 +274,61 @@
    `:oauth-providers` `{\"github\" {:client-id :client-secret} …}` (enabled only),
    `:telegram` `{:bot-token …}` or nil."
   [{:keys [storage mailer app-origin oauth-providers telegram]}]
-  (fn [request]
-    (let [uri (str (:uri request))
-          method (:request-method request)]
-      (when (str/starts-with? uri "/auth/")
-        (let [origin (resolve-origin app-origin request)]
-          (cond
-            (and (= method :get) (= uri "/auth/verify"))
-            (handle-verify storage origin request)
+  (let [provider-keys (set (keys oauth-providers))]
+    (fn [request]
+      (let [uri (str (:uri request))
+            method (:request-method request)]
+        (when (or (str/starts-with? uri "/auth/") (= uri "/login") (= uri "/account"))
+          (let [origin (resolve-origin app-origin request)]
+            (cond
+              (and (= method :get) (= uri "/login"))
+              (html-resp (pages/login-page provider-keys telegram))
 
-            (and (= method :post) (= uri "/auth/signup"))
-            (handle-signup storage mailer origin request)
+              (and (= method :get) (= uri "/account"))
+              (html-resp (pages/account-page provider-keys))
 
-            (and (= method :post) (= uri "/auth/login"))
-            (handle-login storage origin request)
+              (and (= method :get) (= uri "/auth/me"))
+              (handle-me storage request)
 
-            (and (= method :post) (= uri "/auth/logout"))
-            (handle-logout storage origin request)
+              (and (= method :get) (= uri "/auth/tfa-state"))
+              (handle-tfa-state storage request)
 
-            (and (= method :get) (= uri "/auth/identities"))
-            (handle-identities storage request)
+              (and (= method :get) (= uri "/auth/verify"))
+              (handle-verify storage origin request)
 
-            (and (= method :post) (= uri "/auth/unlink"))
-            (handle-unlink storage request)
+              (and (= method :post) (= uri "/auth/signup"))
+              (handle-signup storage mailer origin request)
 
-            (and (= method :post) (= uri "/auth/totp"))
-            (handle-totp storage origin request)
+              (and (= method :post) (= uri "/auth/login"))
+              (handle-login storage origin request)
 
-            (and (= method :post) (= uri "/auth/totp/enroll"))
-            (handle-totp-enroll storage request)
+              (and (= method :post) (= uri "/auth/logout"))
+              (handle-logout storage origin request)
 
-            (and (= method :post) (= uri "/auth/totp/confirm"))
-            (handle-totp-confirm storage request)
+              (and (= method :get) (= uri "/auth/identities"))
+              (handle-identities storage request)
 
-            (and (= method :post) (= uri "/auth/totp/disable"))
-            (handle-totp-disable storage request)
+              (and (= method :post) (= uri "/auth/unlink"))
+              (handle-unlink storage request)
 
-            (and (= method :get) (= uri "/auth/telegram/callback"))
-            (handle-telegram storage telegram origin request)
+              (and (= method :post) (= uri "/auth/totp"))
+              (handle-totp storage origin request)
 
-            :else
-            (when-let [[_ pk action] (re-matches #"/auth/(github|google)/(start|callback)" uri)]
-              (when (= method :get)
-                (case action
-                  "start" (handle-oauth-start oauth-providers origin pk)
-                  "callback" (handle-oauth-callback storage oauth-providers origin pk request))))))))))
+              (and (= method :post) (= uri "/auth/totp/enroll"))
+              (handle-totp-enroll storage request)
+
+              (and (= method :post) (= uri "/auth/totp/confirm"))
+              (handle-totp-confirm storage request)
+
+              (and (= method :post) (= uri "/auth/totp/disable"))
+              (handle-totp-disable storage request)
+
+              (and (= method :get) (= uri "/auth/telegram/callback"))
+              (handle-telegram storage telegram origin request)
+
+              :else
+              (when-let [[_ pk action] (re-matches #"/auth/(github|google)/(start|callback)" uri)]
+                (when (= method :get)
+                  (case action
+                    "start" (handle-oauth-start oauth-providers origin pk)
+                    "callback" (handle-oauth-callback storage oauth-providers origin pk request)))))))))))

@@ -10,6 +10,8 @@
     [clojure.string :as str]
     [graphden.accounts.crypto :as crypto])
   (:import
+    (java.io
+      ByteArrayOutputStream)
     (javax.crypto
       Mac)
     (javax.crypto.spec
@@ -18,6 +20,7 @@
 
 (def ^:private ^:const step-secs 30)
 (def ^:private ^:const digits 6)
+(def ^:private divisor (reduce * 1 (repeat digits 10)))
 (def ^:private b32-alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
 
 
@@ -35,30 +38,30 @@
   [^bytes bs]
   (let [total-bits (* (alength bs) 8)
         nchars (quot (+ total-bits 4) 5)]
-    (apply str
-           (for [j (range nchars)]
-             (let [start (* j 5)
-                   v (reduce (fn [acc k]
-                               (bit-or (bit-shift-left acc 1)
-                                       (bit-at bs total-bits (+ start k))))
-                             0 (range 5))]
-               (.charAt b32-alphabet v))))))
+    (str/join
+      (for [j (range nchars)]
+        (let [start (* j 5)
+              v (reduce (fn [acc k]
+                          (bit-or (bit-shift-left acc 1)
+                                  (bit-at bs total-bits (+ start k))))
+                        0 (range 5))]
+          (String/.charAt b32-alphabet v))))))
 
 
 (defn base32-decode
   ^bytes [^String s]
   (let [s (str/replace (str/upper-case s) #"[^A-Z2-7]" "")
-        out (java.io.ByteArrayOutputStream.)]
+        out (ByteArrayOutputStream.)]
     (loop [buf 0 bits 0 i 0]
       (if (< i (count s))
-        (let [idx (.indexOf b32-alphabet (int (.charAt s i)))
+        (let [idx (String/.indexOf b32-alphabet (int (String/.charAt s i)))
               buf (bit-or (bit-shift-left buf 5) idx)
               bits (+ bits 5)]
           (if (>= bits 8)
-            (do (.write out (bit-and (bit-shift-right buf (- bits 8)) 0xff))
+            (do (ByteArrayOutputStream/.write out (bit-and (bit-shift-right buf (- bits 8)) 0xff))
                 (recur buf (- bits 8) (inc i)))
             (recur buf bits (inc i))))
-        (.toByteArray out)))))
+        (ByteArrayOutputStream/.toByteArray out)))))
 
 
 (defn generate-secret
@@ -84,10 +87,10 @@
         h (Mac/.doFinal mac (counter-bytes counter))
         offset (bit-and (aget h 19) 0xf)
         bin (bit-or (bit-shift-left (bit-and (aget h offset) 0x7f) 24)
-                    (bit-shift-left (bit-and (aget h (+ offset 1)) 0xff) 16)
+                    (bit-shift-left (bit-and (aget h (inc offset)) 0xff) 16)
                     (bit-shift-left (bit-and (aget h (+ offset 2)) 0xff) 8)
                     (bit-and (aget h (+ offset 3)) 0xff))]
-    (mod bin (long (Math/pow 10 digits)))))
+    (mod bin divisor)))
 
 
 (defn code-at

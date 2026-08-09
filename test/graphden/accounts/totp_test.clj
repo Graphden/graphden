@@ -13,7 +13,7 @@
 
 (deftest base32-roundtrips
   (is (= "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
-         (totp/base32-encode (.getBytes "12345678901234567890" "UTF-8"))))
+         (totp/base32-encode (String/.getBytes "12345678901234567890" "UTF-8"))))
   (is (= "12345678901234567890"
          (String. (totp/base32-decode rfc-secret) "UTF-8"))))
 

@@ -164,6 +164,53 @@
         (is (str/includes? (get-in resp [:headers "Location"]) "error=telegram"))))))
 
 
+(deftest ^:integration linking-identities-through-http
+  (let [router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
+                                    :app-origin origin
+                                    :oauth-providers {"github" {:client-id "c" :client-secret "s"}}})
+        session (set-cookie-token (router {:request-method :post :uri "/auth/signup"
+                                           :body (json/generate-string {:email "linkb@example.com" :password "pw-linkb-123"})}))]
+    (testing "a signed-in user's OAuth callback LINKS the identity (no new account)"
+      (with-redefs [oauth/exchange-code! (fn [_ _ _ _]
+                                           {:provider "github" :subject "gh-link-1"
+                                            :email "linkb@example.com" :email-verified? true :display-name "LB"})]
+        (let [resp (router {:request-method :get :uri "/auth/github/callback"
+                            :query-string "code=c&state=S"
+                            :headers {"cookie" (str "gd_session=" session "; gd_oauth=S")}})]
+          (is (str/includes? (get-in resp [:headers "Location"]) "/settings?linked=github"))
+          (is (= (str (:id (core/authenticate-token (storage) session)))
+                 (:account-id (core/find-identity (storage) "github" "gh-link-1")))
+              "github attached to the signed-in account"))))
+    (testing "GET /auth/identities lists the linked providers (no secrets)"
+      (let [body (json/parse-string (:body (router {:request-method :get :uri "/auth/identities"
+                                                    :headers {"cookie" (str "gd_session=" session)}}))
+                                    true)]
+        (is (= #{"password" "github"} (set (map :provider (:identities body)))))
+        (is (not-any? :secret-data (:identities body)))))
+    (testing "unlink github; unlinking the LAST identity is refused"
+      (is (= 200 (:status (router {:request-method :post :uri "/auth/unlink"
+                                   :headers {"cookie" (str "gd_session=" session)}
+                                   :body (json/generate-string {:provider "github"})}))))
+      (is (= 409 (:status (router {:request-method :post :uri "/auth/unlink"
+                                   :headers {"cookie" (str "gd_session=" session)}
+                                   :body (json/generate-string {:provider "password"})})))
+          "can't remove the only remaining sign-in method"))
+    (testing "linking an identity owned by ANOTHER account is a conflict"
+      (let [mk (fn []
+                 {:provider "github" :subject "gh-other" :email "othera@example.com"
+                  :email-verified? true :display-name "A"})]
+        (with-redefs [oauth/exchange-code! (fn [_ _ _ _] (mk))]
+          (router {:request-method :get :uri "/auth/github/callback"
+                   :query-string "code=c&state=S" :headers {"cookie" "gd_oauth=S"}}))
+        (with-redefs [oauth/exchange-code! (fn [_ _ _ _] (mk))]
+          (let [resp (router {:request-method :get :uri "/auth/github/callback"
+                              :query-string "code=c&state=S"
+                              :headers {"cookie" (str "gd_session=" session "; gd_oauth=S")}})]
+            (is (str/includes? (get-in resp [:headers "Location"]) "error=identity_conflict"))))))
+    (testing "the identities API requires auth"
+      (is (= 401 (:status (router {:request-method :get :uri "/auth/identities"})))))))
+
+
 (deftest ^:integration non-auth-path-falls-through
   (let [router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
                                     :app-origin origin})]

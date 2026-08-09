@@ -82,6 +82,51 @@
 
 ;; --- handlers ---
 
+(defn- current-account
+  "The signed-in account for this request (bearer or gd_session), or nil."
+  [storage request]
+  (core/authenticate-token storage (provider/request-token request)))
+
+
+(defn- finish-social
+  "Common tail for an OAuth/Telegram callback that produced a normalized
+   identity `info`: if the request already carries a session, LINK the identity
+   to that account (or report a conflict) and stay signed in; otherwise log in /
+   create and set a fresh session."
+  [storage origin request info provider-key]
+  (if-let [acct (current-account storage request)]
+    (try
+      (core/link-identity! storage (str (:id acct)) info)
+      (redirect (str origin "/settings?linked=" provider-key))
+      (catch clojure.lang.ExceptionInfo _
+        (redirect (str origin "/settings?error=identity_conflict"))))
+    (let [{:keys [account-id]} (core/resolve-social-identity! storage info)]
+      (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin)))))
+
+
+(defn- handle-identities
+  [storage request]
+  (if-let [acct (current-account storage request)]
+    (json-resp 200 {:ok true
+                    :identities (mapv #(select-keys % [:provider :email :email-verified? :created-at])
+                                      (core/identities-for-account storage (str (:id acct))))})
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
+(defn- handle-unlink
+  [storage request]
+  (if-let [acct (current-account storage request)]
+    (let [provider (:provider (req/read-json-body request))
+          account-id (str (:id acct))
+          idents (core/identities-for-account storage account-id)
+          remaining (remove #(= provider (:provider %)) idents)]
+      (if (empty? remaining)
+        (json-resp 409 {:ok false :error "last_identity"})
+        (do (core/unlink-identity! storage account-id provider)
+            (json-resp 200 {:ok true}))))
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
 (defn- handle-signup
   [storage mailer origin request]
   (let [{:keys [email password]} (req/read-json-body request)]
@@ -140,8 +185,7 @@
       (redirect (str origin "/login?error=oauth_state"))
       :else
       (if-let [info (oauth/exchange-code! provider-key cfg code (str origin "/auth/" provider-key "/callback"))]
-        (let [{:keys [account-id]} (core/resolve-social-identity! storage info)]
-          (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin)))
+        (finish-social storage origin request info provider-key)
         (redirect (str origin "/login?error=oauth_failed"))))))
 
 
@@ -152,8 +196,7 @@
                (telegram/verify-login (:bot-token telegram-cfg) q
                                       (quot (System/currentTimeMillis) 1000)))]
     (if info
-      (let [{:keys [account-id]} (core/resolve-social-identity! storage info)]
-        (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin)))
+      (finish-social storage origin request info "telegram")
       (redirect (str origin "/login?error=telegram")))))
 
 
@@ -180,6 +223,12 @@
 
             (and (= method :post) (= uri "/auth/logout"))
             (handle-logout storage origin request)
+
+            (and (= method :get) (= uri "/auth/identities"))
+            (handle-identities storage request)
+
+            (and (= method :post) (= uri "/auth/unlink"))
+            (handle-unlink storage request)
 
             (and (= method :get) (= uri "/auth/telegram/callback"))
             (handle-telegram storage telegram origin request)

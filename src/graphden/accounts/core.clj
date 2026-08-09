@@ -124,6 +124,19 @@
                              :provider provider})))))
 
 
+(defn unlink-identity!
+  "Remove every identity of `provider` from `account-id`. Returns the number
+   removed. Callers MUST keep at least one identity on the account (don't lock
+   the person out) — that guard lives at the API layer where the full identity
+   set is known."
+  [storage account-id provider]
+  (let [ids (mapv :id (filter #(= provider (:provider %))
+                              (identities-for-account storage account-id)))]
+    (when (seq ids)
+      (sp/delete-entities storage :identity ids))
+    (count ids)))
+
+
 (defn resolve-social-identity!
   "Resolve a social sign-in to an account, creating or auto-linking as needed.
    `info` = `{:provider :subject :email :email-verified? :display-name}`:

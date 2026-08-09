@@ -1,0 +1,29 @@
+;; Open `accounts` module — opt-in identity layer (docs/ACCOUNTS.md).
+;;
+;; Enable it by naming this fragment in GRAPHDEN_ADDON_CONFIGS:
+;;   GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn
+;; Omit it and core runs exactly as before (single-token or open) — this
+;; fragment is the whole opt-in switch, no core-config edit needed.
+;;
+;; It deep-merges over system-<profile>.edn:
+;;   - loads graphden.accounts.init (registers the init-key defmethods),
+;;   - adds :account / :identity / :session to the schema via the
+;;     :db/schema :extensions seam,
+;;   - swaps :exec/context's :auth-provider to the accounts provider
+;;     (bearer OR gd_session cookie → account principal).
+;;
+;; NOTE (prod/tenancy coexistence, Phase 4): :db/schema :extensions is a
+;; VECTOR — deep-merge REPLACES vectors, it does not concat. When accounts
+;; and tenancy both run, the prod fragment that wins must list BOTH
+;; extension refs; that unification lands with the tenancy cutover.
+{:graphden/require [graphden.accounts.init]
+
+ :accounts/schema-extension {}
+
+ ;; The provider reads the BASE storage — auth runs in the platform context,
+ ;; before any request scope binds.
+ :accounts/provider {:storage #ig/ref :db/postgres}
+
+ :db/schema {:extensions [#ig/ref :accounts/schema-extension]}
+
+ :exec/context {:auth-provider #ig/ref :accounts/provider}}

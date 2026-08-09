@@ -223,7 +223,10 @@ function initAuthLock() {
 
   renderAuthLock();
   // Async accounts-addon detection — re-renders the lock when it lands.
-  probeAccountsAuth();
+  // Published as a promise (resolves to accountsMode) so dependents that
+  // only make sense under the accounts addon (the org-switcher) can wait
+  // instead of firing doomed requests on every non-accounts boot.
+  window.gdAccountsReady = probeAccountsAuth().then(() => accountsMode);
 }
 
 // Lazily fetch the popover FIELDS (graph partial, GET /partials/auth-form) into

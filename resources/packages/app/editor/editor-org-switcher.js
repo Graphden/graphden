@@ -19,6 +19,9 @@
 async function initOrgSwitcher() {
   const mount = document.getElementById('org-mount');
   if (!mount || typeof authFetch !== 'function') return;
+  // Orgs exist only under the accounts addon — wait for its boot probe and
+  // skip entirely when it's absent (no wasted fetch on single-tenant boots).
+  if (!(await window.gdAccountsReady)) return;
   let data;
   try {
     // Fixed route-collection endpoint (tenancy auth-routes), not a graph route.

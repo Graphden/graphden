@@ -51,10 +51,36 @@ function clearAuthPassword() {
 // username/org variant) stamps `data-auth-mode` on its error div, captured at
 // mount. Before the fields have mounted (the lock tooltip renders at boot)
 // fall back to the `gd-tenancy` capability class.
-let authServedMode = null; // 'admin' | 'tenant' — read off the mounted partial
+let authServedMode = null; // 'admin' | 'tenant' | 'accounts' — read off the mounted partial
 function loginIsTenant() {
   if (authServedMode) return authServedMode === 'tenant';
   return document.body.classList.contains('gd-tenancy');
+}
+
+// The open `accounts` addon replaces the popover flow entirely: sessions ride
+// an HttpOnly gd_session cookie and sign-in lives on its own /login page. The
+// editor detects it with one boot probe of GET /auth/me — when the addon is
+// absent the path falls through to the graph router (404/HTML), which the
+// strict JSON check below treats as "no accounts". State:
+//   accountsMode   — the /auth/* surface exists (route answered with JSON)
+//   accountsAuthed — the cookie session currently authenticates
+let accountsMode = false;
+let accountsAuthed = false;
+async function probeAccountsAuth() {
+  try {
+    const r = await fetch('/auth/me', { headers: { Accept: 'application/json' } });
+    const ct = (r.headers.get('content-type') || '');
+    if (!ct.includes('application/json')) return;
+    const j = await r.json();
+    if (r.ok && j?.account) {
+      accountsMode = true;
+      accountsAuthed = true;
+    } else if (r.status === 401 && j?.error === 'unauthenticated') {
+      accountsMode = true;
+      accountsAuthed = false;
+    }
+  } catch (_) { /* network/parse failure → treat as no accounts */ }
+  if (accountsMode) renderAuthLock();
 }
 
 // Multi-tenant popover mode: false = log in (username + password), true = sign
@@ -196,6 +222,8 @@ function initAuthLock() {
   });
 
   renderAuthLock();
+  // Async accounts-addon detection — re-renders the lock when it lands.
+  probeAccountsAuth();
 }
 
 // Lazily fetch the popover FIELDS (graph partial, GET /partials/auth-form) into
@@ -285,19 +313,25 @@ function togglePasswordVisibility() {
 function renderAuthLock() {
   const btn = document.getElementById('auth-lock-btn');
   if (!btn) return;
-  const authed = isAuthenticated();
+  const authed = isAuthenticated() || accountsAuthed;
   btn.innerHTML = authed ? LOCK_OPEN_SVG : LOCK_CLOSED_SVG;
   btn.classList.toggle('auth-lock-open', authed);
-  btn.title = authed ? 'Sign out' : (loginIsTenant() ? 'Sign in' : 'Admin login');
-  // "Sign out everywhere" only makes sense for a real (multi-tenant) session.
+  btn.title = authed ? 'Sign out' : (accountsMode || loginIsTenant() ? 'Sign in' : 'Admin login');
+  // "Sign out everywhere" only makes sense for a real server-side session.
   const allBtn = document.getElementById('auth-logout-all-btn');
-  if (allBtn) allBtn.classList.toggle('hidden', !(authed && loginIsTenant()));
+  if (allBtn) allBtn.classList.toggle('hidden', !(authed && (accountsMode || loginIsTenant())));
 }
 
 // Sign out of ALL sessions (server-side: POST /api/logout-all deletes every
 // :token for this user), then clear local + reload.
 async function logoutEverywhere() {
   if (!confirm('Sign out of all your sessions, on every device?')) return;
+  if (accountsMode) {
+    // Accounts addon: revoke every session for this account server-side.
+    try { await fetch('/auth/logout-all', { method: 'POST' }); } catch (_) {}
+    window.location.reload();
+    return;
+  }
   // Tenancy auth routes — only reached in multi-tenant mode (loginIsTenant).
   // The tenancy-admin addon registers its routes in window.API at boot (same
   // routing-graph codegen as core routes), so we address them by key — no
@@ -312,6 +346,18 @@ async function logoutEverywhere() {
 // (when open). Logout asks for confirmation since it loses the
 // in-progress edit session.
 async function toggleAuthAction() {
+  if (accountsMode) {
+    // Accounts addon: the session is an HttpOnly cookie; sign-in lives on the
+    // module's own /login page — no popover.
+    if (accountsAuthed) {
+      if (!confirm('Sign out?')) return;
+      try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+      window.location.reload();
+    } else {
+      window.location.href = '/login';
+    }
+    return;
+  }
   if (isAuthenticated()) {
     if (!confirm('Sign out?')) return;
     // Multi-tenant: invalidate the session token server-side (POST /api/logout
@@ -331,6 +377,12 @@ async function toggleAuthAction() {
 }
 
 async function openAuthPopover(errorMsg) {
+  // Accounts addon: no popover — the /login page is the sign-in surface.
+  // Guards every 401-triggered open (authExpired paths), not just the lock.
+  if (accountsMode) {
+    window.location.href = '/login';
+    return;
+  }
   const popover = document.getElementById('auth-popover');
   if (!popover) return;
   // Fields are a graph partial mounted on first open; if the fetch fails, show

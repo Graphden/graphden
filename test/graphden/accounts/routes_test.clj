@@ -91,7 +91,18 @@
                           :headers {"cookie" (str "gd_session=" token)}})]
         (is (= 200 (:status resp)))
         (is (str/includes? (get-in resp [:headers "Set-Cookie"]) "Max-Age=0"))
-        (is (nil? (core/authenticate-token (storage) token)) "session revoked server-side")))))
+        (is (nil? (core/authenticate-token (storage) token)) "session revoked server-side")))
+    (testing "logout-all kills every session of the account"
+      (let [login #(set-cookie-token (router {:request-method :post :uri "/auth/login"
+                                              :body (json/generate-string {:email "rt-a@example.com" :password "pw-rt-a-123"})}))
+            t1 (login)
+            t2 (login)]
+        (is (= 200 (:status (router {:request-method :post :uri "/auth/logout-all"
+                                     :headers {"cookie" (str "gd_session=" t1)}}))))
+        (is (nil? (core/authenticate-token (storage) t1)))
+        (is (nil? (core/authenticate-token (storage) t2)) "the OTHER session died too")
+        (is (= 401 (:status (router {:request-method :post :uri "/auth/logout-all"})))
+            "logout-all requires auth")))))
 
 
 (deftest ^:integration verify-link-through-http

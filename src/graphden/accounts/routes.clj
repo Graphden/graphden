@@ -221,6 +221,16 @@
              (cookie-str provider/session-cookie "" {:max-age 0 :secure? (https-origin? origin)})))
 
 
+(defn- handle-logout-all
+  "Revoke EVERY session of the signed-in account (sign out everywhere)."
+  [storage origin request]
+  (if-let [acct (current-account storage request)]
+    (do (core/revoke-all-for-account! storage (str (:id acct)))
+        (json-resp 200 {:ok true}
+                   (cookie-str provider/session-cookie "" {:max-age 0 :secure? (https-origin? origin)})))
+    (json-resp 401 {:ok false :error "unauthenticated"})))
+
+
 (defn- handle-verify
   [storage origin request]
   (let [token (get (req/parse-query-string (:query-string request)) "token")]
@@ -304,6 +314,9 @@
 
               (and (= method :post) (= uri "/auth/logout"))
               (handle-logout storage origin request)
+
+              (and (= method :post) (= uri "/auth/logout-all"))
+              (handle-logout-all storage origin request)
 
               (and (= method :get) (= uri "/auth/identities"))
               (handle-identities storage request)

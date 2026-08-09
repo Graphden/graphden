@@ -45,9 +45,14 @@
   (authenticate
     [_ request]
     (if-let [acct (accounts/authenticate-token storage (request-token request))]
+      ;; :email / :totp-enabled? ride along so a policy layer (tenancy's
+      ;; operator-by-email, enforced 2FA) can act without re-reading the
+      ;; account. NO :org — org is the policy layer's job (membership).
       {:authenticated? true
        :user-id (str (:id acct))
-       :user (or (:primary-email acct) (:display-name acct) (str (:id acct)))}
+       :user (or (:primary-email acct) (:display-name acct) (str (:id acct)))
+       :email (:primary-email acct)
+       :totp-enabled? (boolean (:totp-enabled? acct))}
       {:authenticated? false})))
 
 

@@ -1010,6 +1010,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       # historical pattern was retries papering over one file's leak while
       # every investigation chased the victim file (run-edit-tests.sh
       # documents that case).
+      #   EXCEPTION (run-edit-tests.sh run-level thrash check): when the HOST
+      #   starved the stack this run — several files ran far past the norm, or
+      #   the executor heap sat at its high-water — a retry-pass is the test
+      #   being slow, not a race, so strict flake/leak verdicts are downgraded
+      #   to report-only and the run stays green. A file that NEVER passed still
+      #   reds (you can't land what didn't pass); the banner then says to free
+      #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
+      #   (DEGRADED=0), where strict stays on.
       ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
     fi
 

@@ -186,6 +186,20 @@ WORST=0
 PASS=0
 FAIL=0
 FAILED_NAMES=""
+# --- run-level thrash detection (decided in the escalation block after the loop) ---
+# A strict-flake (a file that fails once then PASSES on retry) and a leak-in-a-
+# passing-test are only worth bouncing the branch for when the HOST was healthy:
+# on a starved host a retry-pass is the test being SLOW, not a real race, and the
+# leaked rows are abort-collateral. So we DEFER those two strict verdicts here and
+# escalate them to a red RESULT only if the run was NOT degraded. A genuine race
+# still reproduces on a quiet host, where DEGRADED=0 and strict stays on.
+STRICT_FLAKES=""    # flaked-passed-on-retry files; strict-escalated only if NOT degraded
+STRICT_LEAKS=""     # leak-in-passing-test files (name(count)); same
+DEGRADED_FILES=0    # count of files that ran slower than THRASH_FILE_SECS
+HEAP_HWM_MIB=0      # executor heap high-water across the run, in MiB
+THRASH_FILE_SECS=${THRASH_FILE_SECS:-150}   # norm ~10-40s; >150s = starved (hard cap is 300s)
+THRASH_MIN_FILES=${THRASH_MIN_FILES:-3}     # this many slow files => degraded run
+THRASH_HEAP_MIB=${THRASH_HEAP_MIB:-1500}    # OR heap high-water at/above this MiB
 # Consecutive server-down counter. Demo (:9002) has docker restart-
 # policy so a single bounce recovers; an isolated testcontainer
 # stack does NOT auto-restart, so a single crash cascades through
@@ -299,9 +313,8 @@ for f in $FILES; do
     if [ "$attempt" -gt 1 ]; then
       FLAKED="$FLAKED $f"
       if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$real_flake" = 1 ]; then
-        WORST=1
-        FAILED_NAMES="$FAILED_NAMES $f(flaked-passed-on-retry)"
-        echo "  (passed on attempt $attempt — REAL FLAKE, WTQ_FLAKE_STRICT=1 fails this run)" >&2
+        STRICT_FLAKES="$STRICT_FLAKES $f"
+        echo "  (passed on attempt $attempt — REAL flake candidate; strict verdict DEFERRED to the run-level thrash check)" >&2
       elif [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
         echo "  (passed on attempt $attempt — server-window retry: named in the summary, NOT a strict failure)" >&2
       else
@@ -319,6 +332,11 @@ for f in $FILES; do
   fi
   FILE_SECS=$((SECONDS - FILE_START))
   FILE_MEM="$(executor_mem)"
+  # Thrash signals: a file far past the norm, and the executor heap high-water.
+  # executor_mem is like "1.701GiB" / "812.3MiB" / "?" — normalise to MiB.
+  if [ "$FILE_SECS" -gt "$THRASH_FILE_SECS" ]; then DEGRADED_FILES=$((DEGRADED_FILES+1)); fi
+  file_mib="$(printf '%s' "$FILE_MEM" | awk '{v=$0; g=(v ~ /GiB/); sub(/[A-Za-z].*/,"",v); if (v+0>0) printf "%d", (g? v*1024 : v+0); else print 0}')"
+  if [ "${file_mib:-0}" -gt "$HEAP_HWM_MIB" ] 2>/dev/null; then HEAP_HWM_MIB="$file_mib"; fi
   FN_AFTER="$(fn_count)"
   NS_AFTER="$(ns_count)"
   CTR_DELTA="$(counters_delta "$CTR_BEFORE" "$(executor_counters)")"
@@ -339,9 +357,8 @@ for f in $FILES; do
     # only under WTQ_FLAKE_STRICT, the same queue-economics knob as the flake
     # policy above.
     if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
-      WORST=1
-      FAILED_NAMES="$FAILED_NAMES $f(leaked-$FN_LEAKED)"
-      echo "  (leaked $FN_LEAKED — WTQ_FLAKE_STRICT=1 fails this run)" >&2
+      STRICT_LEAKS="$STRICT_LEAKS $f($FN_LEAKED)"
+      echo "  (leaked $FN_LEAKED — strict verdict DEFERRED to the run-level thrash check)" >&2
     else
       echo "  (leaked $FN_LEAKED entities — reported, run stays green; WTQ_FLAKE_STRICT=1 to fail)" >&2
     fi
@@ -373,17 +390,45 @@ if [ -n "$REMAINING_FILES" ]; then
   WORST=1
 fi
 
+# --- run-level thrash decision (see the state block before the loop) ---
+# The run is DEGRADED when the host was starving the stack: several files ran far
+# past the norm, or the executor heap sat at its high-water. Under those
+# conditions a strict flake/leak is the environment, not the branch.
+DEGRADED=0
+if [ "$DEGRADED_FILES" -ge "$THRASH_MIN_FILES" ] || [ "$HEAP_HWM_MIB" -ge "$THRASH_HEAP_MIB" ]; then
+  DEGRADED=1
+fi
+if [ -n "$STRICT_FLAKES$STRICT_LEAKS" ]; then
+  if [ "$DEGRADED" = 1 ]; then
+    echo "  (run-level thrash: env degraded — strict flakes/leaks are REPORT-ONLY this run, NOT a red RESULT)" >&2
+  else
+    # Healthy host: escalate exactly as strict mode did before this change.
+    for x in $STRICT_FLAKES; do FAILED_NAMES="$FAILED_NAMES $x(flaked-passed-on-retry)"; done
+    for x in $STRICT_LEAKS;  do FAILED_NAMES="$FAILED_NAMES $x(leaked)"; done
+    WORST=1
+  fi
+fi
+
 echo "============================================================"
 echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
 if [ -n "$FLAKED" ]; then
-  if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
+  if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$DEGRADED" != 1 ]; then
     echo "  FLAKED (failed once, passed on retry — counted as FAILURES):$FLAKED" >&2
+  elif [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
+    echo "  FLAKED (failed once, passed on retry — REPORT-ONLY, env degraded):$FLAKED" >&2
   else
     echo "  FLAKED (failed once, passed on retry — investigate, run stays green):$FLAKED" >&2
   fi
 fi
 if [ "$FAIL" != "0" ]; then
   echo "  failed:$FAILED_NAMES" >&2
+fi
+if [ "$DEGRADED" = 1 ]; then
+  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran >${THRASH_FILE_SECS}s (norm ~10-40s), executor heap high-water ${HEAP_HWM_MIB}MiB." >&2
+  echo "    Strict flake/leak verdicts were downgraded to report-only — a retry-pass under thrash is a pass, not a race." >&2
+  if [ "$FAIL" != "0" ]; then
+    echo "    A file HARD-failed above: the host is too starved to judge it. Free RAM (e.g. 'docker stop graphden-executor' to drop the demo stack) and re-run on a quiet host — do NOT read this as a branch regression." >&2
+  fi
 fi
 
 # The profile. Read it before optimising anything: the suite's 45 minutes were

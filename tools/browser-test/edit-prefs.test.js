@@ -24,21 +24,30 @@ const {assert, newContext} = require('./edit-test-helpers');
   console.log('edit-prefs — theme toggle + sidebar collapse / expand');
 
   try {
-    // newContext lands on `/` (no fn-selected). Wait for the prefs
-    // buttons to be wired (`buildPrefsButtons` mounts them on load).
+    // newContext lands on `/` (no fn-selected). Wait for the shell + the
+    // Explorer's collapse chevron to be present.
     await page.waitForFunction(
-      () => !!document.getElementById('theme-toggle-btn')
-            && !!document.getElementById('sidebar-collapse-btn'),
+      () => !!document.getElementById('sidebar-collapse-btn'),
       null,
       {timeout: 10000, polling: 100});
 
     // ===================================================================
-    // Phase A: theme toggle round-trip.
+    // Phase A: theme toggle round-trip — the theme control now lives in
+    // Settings → Appearance (#gd-set-theme); the old top-bar quick toggle
+    // was removed as a duplicate.
     // ===================================================================
     const initialTheme = await page.evaluate(() =>
       document.body.classList.contains('theme-dark'));
 
-    await page.click('#theme-toggle-btn');
+    // Open Settings so gdRenderSettings wires #gd-set-theme.
+    await page.evaluate(() =>
+      gdShellSurface('settings', document.querySelector('[data-surface=settings]')));
+    await page.waitForFunction(
+      () => { const b = document.getElementById('gd-set-theme');
+              return b && b.offsetParent !== null; },
+      null, {timeout: 5000, polling: 50});
+
+    await page.click('#gd-set-theme');
     await page.waitForFunction(
       (was) => document.body.classList.contains('theme-dark') !== was,
       initialTheme,
@@ -53,7 +62,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     assert(afterFirst.stored === (afterFirst.dark ? 'dark' : 'light'),
            'localStorage carries the new theme: ' + afterFirst.stored);
 
-    await page.click('#theme-toggle-btn');
+    await page.click('#gd-set-theme');
     await page.waitForFunction(
       (was) => document.body.classList.contains('theme-dark') === was,
       initialTheme,
@@ -66,6 +75,11 @@ const {assert, newContext} = require('./edit-test-helpers');
            'second click returns to initial theme: ' + afterSecond.dark);
     assert(afterSecond.stored === (afterSecond.dark ? 'dark' : 'light'),
            'localStorage round-trips back: ' + afterSecond.stored);
+
+    // Back to Build so the Explorer (and its collapse chevron) are on top
+    // for Phase B.
+    await page.evaluate(() =>
+      gdShellSurface('build', document.querySelector('[data-surface=build]')));
 
     // ===================================================================
     // Phase B: sidebar collapse + expand round-trip.

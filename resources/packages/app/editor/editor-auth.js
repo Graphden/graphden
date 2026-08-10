@@ -403,7 +403,7 @@ function openAccountMenu() {
     b.addEventListener('click', onClick);
     menu.appendChild(b);
   };
-  item('Account', () => { window.location.href = '/account'; });
+  item('Account & security', () => { window.location.href = '/account'; });
   item('Sign out', async () => {
     try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
     window.location.reload();

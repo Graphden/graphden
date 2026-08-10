@@ -150,9 +150,12 @@
     const themeBtn = document.getElementById('gd-set-theme');
     if (themeBtn) {
       themeBtn.textContent = dark ? 'Dark' : 'Light';
+      // Theme lives HERE now (the top-bar quick toggle was removed as a
+      // duplicate). Toggle directly — applyTheme/setDarkStored are the prefs
+      // module's own state owners.
       themeBtn.onclick = () => {
-        const t = document.getElementById('theme-toggle-btn');
-        if (t) t.click();
+        const d = !document.body.classList.contains('theme-dark');
+        applyTheme(d); setDarkStored(d);
         gdRenderSettings();
       };
     }
@@ -163,61 +166,10 @@
       compactBtn.onclick = () => { gdToggleCardDetails(null); gdRenderSettings(); };
     }
 
-    const acct = document.getElementById('gd-set-account');
-    if (acct) {
-      const accountsMode = (typeof window.graphdenAccountsMode === 'function') && window.graphdenAccountsMode();
-      const isOperator = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
-      const authed = (typeof window.isAuthenticated === 'function') && window.isAuthenticated();
-      if (window.gdAccount) {
-        // Accounts mode: show WHO you are + the operator badge, link to the
-        // self-service /account page, and a real server-side sign-out.
-        const a = window.gdAccount;
-        const who = esc(a.email || a['display-name'] || a.id || 'signed in');
-        acct.innerHTML = '<div class="gd-set-row"><div class="gd-set-copy">'
-          + '<div class="gd-set-label">' + who
-          + (isOperator ? ' <span class="gd-set-badge">operator</span>' : '') + '</div>'
-          + '<div class="gd-set-hint">Manage sign-in methods, 2FA and linked accounts on your account page.</div></div>'
-          + '<div class="gd-set-acct-btns">'
-          + '<a class="gd-set-btn" href="/account">Account</a>'
-          + '<button id="gd-set-signout" type="button" class="gd-set-btn">Sign out</button></div></div>';
-        const so = document.getElementById('gd-set-signout');
-        if (so) {
-          so.onclick = async () => {
-            try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
-            window.location.reload();
-          };
-        }
-      } else if (authed) {
-        // Single-token / tenancy bearer session.
-        acct.innerHTML = '<div class="gd-set-row"><div class="gd-set-copy">'
-          + '<div class="gd-set-label">Signed in</div>'
-          + '<div class="gd-set-hint">Editing affordances are unlocked.</div></div>'
-          + '<button id="gd-set-signout" type="button" class="gd-set-btn">Sign out</button></div>';
-        const so = document.getElementById('gd-set-signout');
-        if (so) {
-          so.onclick = () => {
-            try { localStorage.removeItem('graphden.auth.password'); } catch (_) {}
-            window.location.reload();
-          };
-        }
-      } else {
-        // Not signed in. Accounts mode → the /login page; else the admin popover.
-        const hint = accountsMode
-          ? 'Read-only. Sign in to edit.'
-          : 'Read-only. Sign in with the admin password to edit.';
-        acct.innerHTML = '<div class="gd-set-row"><div class="gd-set-copy">'
-          + '<div class="gd-set-label">Open — not signed in</div>'
-          + '<div class="gd-set-hint">' + hint + '</div></div>'
-          + '<button id="gd-set-signin" type="button" class="gd-set-btn">Sign in</button></div>';
-        const si = document.getElementById('gd-set-signin');
-        if (si) {
-          si.onclick = () => {
-            if (accountsMode) { window.location.href = '/login'; return; }
-            const l = document.getElementById('auth-lock-btn'); if (l) l.click();
-          };
-        }
-      }
-    }
+    // (No Account card here — your account is the single hub behind the avatar
+    // chip in the top bar: who you are, Account & security → /account, Sign
+    // out / Sign out everywhere. Duplicating it in Settings only split the
+    // identity actions across two places.)
 
     const hashEl = document.getElementById('gd-set-hash');
     if (hashEl) {
@@ -225,10 +177,9 @@
     }
     const reloadBtn = document.getElementById('gd-set-reload');
     if (reloadBtn) {
-      reloadBtn.onclick = () => {
-        const r = document.getElementById('hard-reload-btn');
-        if (r) r.click(); else window.location.reload();
-      };
+      // Reload (drop cache) lives HERE now — the top-bar quick-action was a
+      // duplicate. hardReload is the prefs module's own implementation.
+      reloadBtn.onclick = () => { hardReload(); };
     }
     const verEl = document.getElementById('gd-set-version');
     if (verEl && !verEl.dataset.loaded) {

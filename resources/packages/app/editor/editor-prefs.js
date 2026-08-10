@@ -20,7 +20,6 @@ const SUN_SVG  = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" st
 const MOON_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 const COLLAPSE_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
 const EXPAND_SVG   = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
-const RELOAD_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
 
 // =============================================================================
 // PERSISTENCE HELPERS
@@ -162,25 +161,13 @@ function toggleCollapsed(targetCollapsed) {
   setCollapsedStored(targetCollapsed);
 }
 
-function buildPrefsButtons() {
-  const mount = document.getElementById('prefs-mount');
-  if (!mount) return;
-  // Theme + hard-reload only. The sidebar toggle used to live here too — but
-  // this cluster is in the persistent context bar (present on every surface),
-  // so a collapse button on the far RIGHT controlled the far-LEFT Explorer and
-  // showed even on Operate/Settings where the Explorer isn't visible. The
-  // Explorer toggle now lives WITH the Explorer (header chevron + a Build-only
-  // left-edge expand tab); see gdToggleSidebar / the Explorer header.
-  mount.innerHTML =
-    '<button id="theme-toggle-btn" class="prefs-btn" title="Toggle theme"></button>'
-    + '<button id="hard-reload-btn"  class="prefs-btn" title="Reload (drop cache)">' + RELOAD_SVG + '</button>';
-  document.getElementById('theme-toggle-btn').addEventListener('click', () => {
-    const dark = !document.body.classList.contains('theme-dark');
-    applyTheme(dark);
-    setDarkStored(dark);
-  });
-  document.getElementById('hard-reload-btn').addEventListener('click', hardReload);
-}
+// The top-bar quick-actions cluster (theme + reload) was REMOVED: both were
+// duplicates of Settings controls — theme is Settings → Appearance, "Reload
+// (drop cache)" is Settings → About → "Reload editor" (both now call
+// applyTheme/setDarkStored/hardReload directly). Dropping the cluster declutters
+// the context bar (which had already lost the sidebar toggle). Kept as a no-op
+// so the boot call site stays stable; the #prefs-mount div is gone from fns.edn.
+function buildPrefsButtons() { /* intentionally empty — see comment above */ }
 
 // One toggle for the Explorer, wired to BOTH affordances: the chevron in the
 // Explorer header (visible while open) and the left-edge tab (visible while

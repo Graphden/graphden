@@ -211,7 +211,9 @@
              [:span "Search functions, types, secrets…"]
              [:span {:class "gd-kbd"} "⌘K"]]
             [:span {:class "gd-bar-spacer"}]
-            [:div {:id "prefs-mount"}]
+            ;; (No #prefs-mount quick-actions cluster: theme + reload were
+            ;; duplicates of Settings controls. The context bar's right side is
+            ;; just the account chip now.)
             [:div {:id "auth-mount"}]]
            [:div {:id "main-container"}
             ;; Side menu \u2014 semantic <aside> + ARIA label since the
@@ -379,9 +381,8 @@
                  [:div {:class "gd-set-label"} "Graph cards"]
                  [:div {:class "gd-set-hint"} "Compact hides the type / effect strips until you reveal them."]]
                 [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]]
-              [:div {:class "gd-set-card"}
-               [:h2 "Account"]
-               [:div {:id "gd-set-account"}]]
+              ;; (No Account card — your account lives behind the avatar chip in
+              ;; the top bar: identity, Account & security → /account, Sign out.)
               [:div {:class "gd-set-card"}
                [:h2 "About this build"]
                [:div {:class "gd-set-row"}

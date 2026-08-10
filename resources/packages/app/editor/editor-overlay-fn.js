@@ -255,6 +255,21 @@ function createFnOverlay(node, container) {
   overlay.dataset.nodeId = nodeId;
   overlay.style.cursor = 'default';
 
+  // Click the card BODY (not a button / inline editor) to inspect THIS node's
+  // fn in the right panel — the standard "select a node → see its details"
+  // loop, so you can read any node you see on the graph, not just the one you
+  // opened. Buttons, links and inline editors inside the card own their clicks.
+  overlay.addEventListener('click', (e) => {
+    if (e.target.closest(
+      'button, a, input, select, textarea, label, [contenteditable="true"], .placeholder-binder',
+    )) return;
+    if (typeof window.gdInspectorRender !== 'function') return;
+    document.querySelectorAll('.node-overlay.gd-node-active')
+      .forEach((n) => n.classList.remove('gd-node-active'));
+    overlay.classList.add('gd-node-active');
+    window.gdInspectorRender(originalFnId);
+  });
+
   // Paint state lives in buildFnPaintState() above; helpers receive it
   // via rowCtx. The body of this function only ever needs `restoreStyles`
   // for the final paint after the dispatch loop.

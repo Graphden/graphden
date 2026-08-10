@@ -1268,6 +1268,11 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 
 /* Node overlay for interactive ancestor list */
 .node-overlay { pointer-events: auto; z-index: 10; }
+/* The node whose fn is showing in the inspector — a calm ring, no layout shift. */
+.node-overlay.gd-node-active {
+  outline: 2px solid var(--gd-flow);
+  outline-offset: 2px;
+}
 .node-overlay .ancestor-line {
   /* Each row must occupy one full text-line slot even when the content is
      empty — e.g. the top row of an anonymous fn keeps its black "no own name"

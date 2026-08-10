@@ -361,26 +361,33 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
    space for it so the icon doesn't appear over a still-shrinking
    sidebar. */
 .sidebar-expand-floating {
-  /* Sits at the top-left of the CANVAS (just past the rail, below the context
-     bar) where the function browser reappears — NOT over the rail/brand, which
-     used to obscure it and swallow its clicks (rail is z-index 300). */
+  /* The Explorer's EXPAND affordance while collapsed: a slim tab flush against
+     the rail's right edge (= the left edge of the canvas, where the Explorer
+     reappears), pointing right (›). Shown ONLY on Build + collapsed (rule
+     below) — the Explorer doesn't exist on the overlay surfaces, so neither
+     does its toggle. Not over the rail/brand, which used to swallow its clicks. */
   position: fixed;
-  top: calc(var(--gd-ctxbar-h, 48px) + 8px);
-  left: calc(var(--gd-rail-w, 58px) + 8px);
+  top: calc(var(--gd-ctxbar-h, 48px) + 10px);
+  left: var(--gd-rail-w, 58px);
   z-index: 320;
-  width: 26px; height: 26px; padding: 3px;
-  background: var(--bg); color: var(--fg);
-  border: 1px solid var(--fg); border-radius: 3px;
+  width: 18px; height: 46px; padding: 0;
+  background: var(--gd-panel); color: var(--gd-ink-2);
+  border: 1px solid var(--gd-line); border-left: none;
+  border-radius: 0 7px 7px 0;
   cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0; pointer-events: none;
   transition: opacity 0.18s ease;
 }
-body.sidebar-collapsed .sidebar-expand-floating {
+/* Build-only: gated on the active surface so it never floats over Operate /
+   Settings / Workspaces (which have no Explorer). */
+body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   opacity: 1; pointer-events: auto;
   transition: opacity 0.18s ease 0.2s; /* wait for the shrink to clear */
 }
-.sidebar-expand-floating:hover { background: var(--fg); color: var(--bg); }
+.sidebar-expand-floating:hover {
+  background: var(--gd-flow-wash); color: var(--gd-flow); border-color: var(--gd-flow);
+}
 
 /* Right-edge resize handle. 4 px wide, centred on the sidebar's
    trailing border so the cursor lands on it before the user has to
@@ -4980,6 +4987,18 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
   text-transform: uppercase;
   color: var(--gd-ink-3);
 }
+/* Collapse chevron — pushed to the right end of the Explorer header, subtle
+   until hovered. The toggle sits WITH the panel it controls. */
+.gd-exp-collapse {
+  margin-left: auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0;
+  background: none; border: none; border-radius: 5px;
+  color: var(--gd-ink-3); cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.gd-exp-collapse:hover { background: var(--gd-paper-2); color: var(--gd-ink); }
+.gd-exp-collapse:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
 /* ---- MAIN: explorer | canvas | inspector ---- */
 #app.gd-redesign #main-container {

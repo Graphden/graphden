@@ -19,6 +19,10 @@
     }
   } catch (_) { document.body.classList.add('gd-cards-compact'); }
 
+  // The editor opens on Build; record it so surface-scoped chrome (the
+  // Explorer expand tab) gates correctly before the first rail click.
+  document.body.setAttribute('data-surface', 'build');
+
   // Build / Review / Operate / Workspaces / Settings are all live —
   // Build is the graph editor, Review opens the branch-diff modal, and the
   // rest are real <section>s (see REAL_SURFACES). The placeholder overlay is
@@ -30,6 +34,10 @@
     if (name === 'review') { gdOpenReview(); return; }
     gdSetRailPressed(btn ? btn.getAttribute('data-surface') : name);
     gdHideAllSurfaces();
+    // Record the active surface so surface-scoped chrome can gate on it — the
+    // Explorer's left-edge expand tab only makes sense on Build (the other
+    // surfaces are full overlays with no Explorer).
+    document.body.setAttribute('data-surface', name);
 
     // Build = the graph editor (explorer | canvas | inspector), no cover.
     if (name === 'build') return;

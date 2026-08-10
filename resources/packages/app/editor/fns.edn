@@ -222,7 +222,19 @@
              ;; branch/org/auth/theme mounts moved to the context bar
              ;; (#gd-ctxbar). The explorer keeps just a slim title.
              [:div {:class "gd-exp-head"}
-              [:span {:class "gd-exp-title"} "Explorer"]]
+              [:span {:class "gd-exp-title"} "Explorer"]
+              ;; Collapse the Explorer — the toggle lives WITH the panel it
+              ;; controls. editor-prefs.js/applyCollapsed keeps the chevron (‹)
+              ;; + title in sync; the collapsed-state EXPAND affordance is the
+              ;; left-edge tab (.sidebar-expand-floating), Build-only.
+              [:button {:id "sidebar-collapse-btn" :class "gd-exp-collapse"
+                        :type "button" :title "Collapse sidebar"
+                        :aria-label "Collapse sidebar"
+                        :onclick "gdToggleSidebar()"}
+               [:svg {:viewBox "0 0 24 24" :width "14" :height "14" :fill "none"
+                      :stroke "currentColor" :stroke-width "2.4"
+                      :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden "true"}
+                [:polyline {:points "15 18 9 12 15 6"}]]]]
              [:div {:id "search-bar" :role "search"}
               [:label {:for "search-input" :class "visually-hidden"} "Filter functions"]
               [:input {:id "search-input" :type "text" :placeholder "Filter..."

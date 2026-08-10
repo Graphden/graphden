@@ -165,28 +165,31 @@ function toggleCollapsed(targetCollapsed) {
 function buildPrefsButtons() {
   const mount = document.getElementById('prefs-mount');
   if (!mount) return;
-  // Redesign 2026-08: theme, hard-reload and collapse all sit together in
-  // #prefs-mount (now in the context bar). Order: theme | reload | collapse.
+  // Theme + hard-reload only. The sidebar toggle used to live here too — but
+  // this cluster is in the persistent context bar (present on every surface),
+  // so a collapse button on the far RIGHT controlled the far-LEFT Explorer and
+  // showed even on Operate/Settings where the Explorer isn't visible. The
+  // Explorer toggle now lives WITH the Explorer (header chevron + a Build-only
+  // left-edge expand tab); see gdToggleSidebar / the Explorer header.
   mount.innerHTML =
     '<button id="theme-toggle-btn" class="prefs-btn" title="Toggle theme"></button>'
     + '<button id="hard-reload-btn"  class="prefs-btn" title="Reload (drop cache)">' + RELOAD_SVG + '</button>';
-  const collapseBtn = document.createElement('button');
-  collapseBtn.id = 'sidebar-collapse-btn';
-  collapseBtn.className = 'prefs-btn';
-  collapseBtn.title = 'Collapse sidebar';
-  mount.appendChild(collapseBtn);
   document.getElementById('theme-toggle-btn').addEventListener('click', () => {
     const dark = !document.body.classList.contains('theme-dark');
     applyTheme(dark);
     setDarkStored(dark);
   });
   document.getElementById('hard-reload-btn').addEventListener('click', hardReload);
-  // Two-way toggle: collapse when open, expand when collapsed. (It used to
-  // only ever collapse, so once collapsed the button showed an "expand" icon
-  // that did nothing — the floating arrow was the only way back.)
-  collapseBtn.addEventListener('click', () =>
-    toggleCollapsed(!document.body.classList.contains('sidebar-collapsed')));
 }
+
+// One toggle for the Explorer, wired to BOTH affordances: the chevron in the
+// Explorer header (visible while open) and the left-edge tab (visible while
+// collapsed). Exposed globally so the server-rendered header chevron
+// (fns.edn) can call it inline.
+function gdToggleSidebar() {
+  toggleCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+}
+window.gdToggleSidebar = gdToggleSidebar;
 
 // Drop in-page caches (Cache API entries from any service worker) and
 // reload with a cache-busting query param so the browser can't serve a
@@ -203,14 +206,18 @@ async function hardReload() {
   window.location.replace(url.toString());
 }
 
-// Floating expand button shown only when the sidebar is collapsed. Lives
-// outside #side-menu so it isn't clipped when the sidebar shrinks to 0.
+// The Explorer's EXPAND affordance for the collapsed state: a slim tab at the
+// left edge of the canvas. Lives outside #side-menu so it isn't clipped when
+// the sidebar shrinks to 0. CSS shows it ONLY on the Build surface while
+// collapsed (`body[data-surface="build"].sidebar-collapsed`) — the Explorer
+// doesn't exist on Operate/Settings/Workspaces, so neither does its toggle.
 function installFloatingExpandBtn() {
   if (document.getElementById('sidebar-expand-floating')) return;
   const btn = document.createElement('button');
   btn.id = 'sidebar-expand-floating';
   btn.className = 'sidebar-expand-floating';
-  btn.title = 'Expand sidebar';
+  btn.title = 'Show the function browser';
+  btn.setAttribute('aria-label', 'Show the function browser');
   btn.innerHTML = EXPAND_SVG;
   btn.addEventListener('click', () => toggleCollapsed(false));
   document.body.appendChild(btn);

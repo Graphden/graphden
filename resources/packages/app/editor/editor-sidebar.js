@@ -648,7 +648,11 @@ function updateEntityList(data) {
   // explorer, so the sidebar stays a clean namespace browser. Falls back to the
   // explorer list if the operate pane isn't present.
   const opsHost = document.getElementById('gd-operate-panels') || list;
+  // Cross-org / platform panels mount into the separate PLATFORM surface;
+  // everything else (org RBAC + the org's operational panels) into Organization.
+  const platHost = document.getElementById('gd-platform-panels') || opsHost;
   if (!searchMode && opsHost !== list) opsHost.innerHTML = '';
+  if (!searchMode && platHost !== opsHost && platHost !== list) platHost.innerHTML = '';
   if (!searchMode && typeof buildGrantsAdminSection === 'function') {
     mountAdminSection(opsHost, 'grants', buildGrantsAdminSection);
   }
@@ -659,7 +663,8 @@ function updateEntityList(data) {
     mountAdminSection(opsHost, 'roles', buildRolesAdminSection);
   }
   if (!searchMode && typeof buildOrgsAdminSection === 'function') {
-    mountAdminSection(opsHost, 'orgs', buildOrgsAdminSection);
+    // Cross-org registry → Platform surface.
+    mountAdminSection(platHost, 'orgs', buildOrgsAdminSection);
   }
   if (!searchMode && typeof buildPackagesSection === 'function') {
     mountAdminSection(opsHost, 'packages', buildPackagesSection);

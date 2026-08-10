@@ -86,6 +86,9 @@ function captureCapabilities(resp) {
       graphdenCapabilities = new Set(cap.split(',').map((s) => s.trim()).filter(Boolean));
       document.body.classList.toggle('gd-no-write', !graphdenCapabilities.has('write'));
       document.body.classList.toggle('gd-no-execute', !graphdenCapabilities.has('execute'));
+      // Platform surface is for platform-right holders only — reveal its rail
+      // button (hidden by default) when the principal carries a platform cap.
+      document.body.classList.toggle('gd-platform', graphdenCapabilities.has('platform-admin'));
       // Tenancy addon is active once a capability header arrives — gates
       // addon-only affordances like the ⌂ set-as-app-handler button (§3.4 4b).
       document.body.classList.add('gd-tenancy');

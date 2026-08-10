@@ -48,7 +48,7 @@
     if (realId) {
       const el = document.getElementById(realId);
       if (el) el.hidden = false;
-      const render = { operate: gdRenderOperate, settings: gdRenderSettings, workspaces: gdRenderWorkspaces }[name];
+      const render = { operate: gdRenderOperate, platform: gdRenderPlatform, settings: gdRenderSettings, workspaces: gdRenderWorkspaces }[name];
       if (typeof render === 'function') render();
       return;
     }
@@ -73,9 +73,20 @@
     }
   }
 
+  // Platform panels mount the same way (sidebar render → #gd-platform-panels);
+  // repopulate if the surface opens empty. Same guard as Operate.
+  function gdRenderPlatform() {
+    const host = document.getElementById('gd-platform-panels');
+    if (host && host.children.length === 0
+        && typeof updateEntityList === 'function' && typeof graphData !== 'undefined' && graphData) {
+      updateEntityList(graphData);
+    }
+  }
+
   // The rail surfaces that own a real <section> (vs the placeholder overlay).
   const REAL_SURFACES = {
     operate: 'gd-operate',
+    platform: 'gd-platform',
     settings: 'gd-settings',
     workspaces: 'gd-workspaces',
   };

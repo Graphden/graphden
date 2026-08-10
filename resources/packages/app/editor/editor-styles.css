@@ -5283,7 +5283,8 @@ body.gd-cards-compact .effects-strip { display: none; }
 .gd-surface-back:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 
 /* ---- OPERATE surface — relocated ops/admin panels ---- */
-#gd-operate {
+#gd-operate,
+#gd-platform {
   position: absolute;
   inset: 0;
   z-index: 250;
@@ -5292,7 +5293,11 @@ body.gd-cards-compact .effects-strip { display: none; }
   font-family: var(--gd-ui-font);
   background: var(--gd-paper);
 }
-#gd-operate[hidden] { display: none; }
+#gd-operate[hidden], #gd-platform[hidden] { display: none; }
+/* The Platform rail button is hidden until a platform right arrives
+   (body.gd-platform, set from X-Graphden-Capabilities). */
+.gd-rail-btn.gd-platform-only { display: none; }
+body.gd-platform .gd-rail-btn.gd-platform-only { display: flex; }
 .gd-operate-head { max-width: 1100px; margin: 0 auto 18px; }
 .gd-operate-head h1 {
   margin: 0 0 4px;
@@ -5307,7 +5312,8 @@ body.gd-cards-compact .effects-strip { display: none; }
   line-height: 1.5;
   color: var(--gd-ink-2);
 }
-#gd-operate-panels {
+#gd-operate-panels,
+#gd-platform-panels {
   max-width: 1100px;
   margin: 0 auto;
   display: grid;
@@ -5315,7 +5321,7 @@ body.gd-cards-compact .effects-strip { display: none; }
   gap: 16px;
   align-items: start;
 }
-#gd-operate-panels > * { min-width: 0; }
+#gd-operate-panels > *, #gd-platform-panels > * { min-width: 0; }
 /* Each ops section is wrapped by mountAdminSection in a titled card, mirroring
    the Settings surface so Operate reads as distinct panels, not a dumped stack. */
 .gd-op-card {
@@ -5332,14 +5338,16 @@ body.gd-cards-compact .effects-strip { display: none; }
 }
 /* Consistent tokened selects across the Operate panels (tenancy Users/Orgs
    plan+role pickers, branch scopers, …) — they were raw browser controls. */
-#gd-operate-panels select {
+#gd-operate-panels select,
+#gd-platform-panels select {
   font: inherit; font-size: 13px;
   color: var(--gd-ink); background: var(--gd-paper);
   border: 1px solid var(--gd-line); border-radius: 6px;
   padding: 5px 8px; cursor: pointer;
 }
-#gd-operate-panels select:hover { border-color: var(--gd-flow); }
-#gd-operate-panels select:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
+#gd-operate-panels select:hover, #gd-platform-panels select:hover { border-color: var(--gd-flow); }
+#gd-operate-panels select:focus-visible,
+#gd-platform-panels select:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
 /* ---- Settings surface (personal editor settings) ---- */
 #gd-settings, #gd-workspaces {

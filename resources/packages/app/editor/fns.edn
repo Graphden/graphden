@@ -170,6 +170,10 @@
               [:circle {:cx "6" :cy "6" :r "2.4"}] [:circle {:cx "6" :cy "18" :r "2.4"}]
               [:circle {:cx "18" :cy "9" :r "2.4"}] [:path {:d "M6 8.4v7M8.4 6H14a3 3 0 013 3"}]]
              [:span {:class "gd-rail-cap"} "Review"]]
+            ;; "Organization" — your org: members / roles / grants (RBAC) +
+            ;; its operational panels (packages / stats / errors / apps). The
+            ;; internal surface id stays "operate" (mechanics + e2e unchanged);
+            ;; only the user-facing label is the org-management name.
             [:button {:type "button" :class "gd-rail-btn" :data-surface "operate"
                       :aria-pressed "false" :onclick "gdShellSurface('operate', this)"}
              [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.7" :aria-hidden "true"}
@@ -177,7 +181,16 @@
               [:circle {:cx "9" :cy "7" :r "1.6" :fill "currentColor" :stroke "none"}]
               [:circle {:cx "15" :cy "12" :r "1.6" :fill "currentColor" :stroke "none"}]
               [:circle {:cx "7" :cy "17" :r "1.6" :fill "currentColor" :stroke "none"}]]
-             [:span {:class "gd-rail-cap"} "Operate"]]
+             [:span {:class "gd-rail-cap"} "Organization"]]
+            ;; "Platform" — cross-org / platform-wide (org registry today; the
+            ;; landing + cross-org stats + platform-rights land here next).
+            ;; Hidden unless the principal holds a platform right (body.gd-platform).
+            [:button {:type "button" :class "gd-rail-btn gd-platform-only" :data-surface "platform"
+                      :aria-pressed "false" :onclick "gdShellSurface('platform', this)"}
+             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
+              [:circle {:cx "12" :cy "12" :r "8"}]
+              [:path {:d "M3 12h18M12 4c2.5 2.3 2.5 13.7 0 16M12 4c-2.5 2.3-2.5 13.7 0 16"}]]
+             [:span {:class "gd-rail-cap"} "Platform"]]
             [:span {:class "gd-rail-spacer"}]
             [:button {:type "button" :class "gd-rail-btn" :data-surface "workspaces"
                       :aria-pressed "false" :onclick "gdShellSurface('workspaces', this)"}
@@ -354,11 +367,21 @@
             ;; errors, type-errors, grants, users, apps) mount here instead of
             ;; crowding the explorer. Shown when the Operate rail button is
             ;; active; editor-sidebar.js renders panels into #gd-operate-panels.
-            [:section {:id "gd-operate" :hidden "hidden" :aria-label "Operate"}
+            [:section {:id "gd-operate" :hidden "hidden" :aria-label "Organization"}
              [:div {:class "gd-operate-head"}
-              [:h1 "Operate"]
-              [:p "Services, monitoring, packages and apps — the operator console for what keeps graphs running."]]
+              [:h1 "Organization"]
+              [:p "Your organization — members, roles and permissions, plus its packages, monitoring, apps and errors."]]
              [:div {:id "gd-operate-panels"}]]
+            ;; PLATFORM surface — cross-org / platform-wide administration (the
+            ;; org registry today; landing + cross-org stats + platform-rights
+            ;; grant next). editor-sidebar.js renders the platform sections into
+            ;; #gd-platform-panels; the rail button is hidden without a platform
+            ;; right (body.gd-platform).
+            [:section {:id "gd-platform" :hidden "hidden" :aria-label "Platform"}
+             [:div {:class "gd-operate-head"}
+              [:h1 "Platform"]
+              [:p "Platform-wide administration across every organization."]]
+             [:div {:id "gd-platform-panels"}]]
             ;; SETTINGS surface — personal editor settings: appearance,
             ;; account, and what this build is. Team access (grants / users
             ;; / roles) is operational and lives in Operate, not here. The

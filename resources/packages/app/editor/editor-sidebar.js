@@ -666,6 +666,10 @@ function updateEntityList(data) {
     // Cross-org registry → Platform surface.
     mountAdminSection(platHost, 'orgs', buildOrgsAdminSection);
   }
+  if (!searchMode && typeof buildPlatformAccessSection === 'function') {
+    // Platform-access delegation → Platform surface (manage-platform-access).
+    mountAdminSection(platHost, 'platform-access', buildPlatformAccessSection);
+  }
   if (!searchMode && typeof buildPackagesSection === 'function') {
     mountAdminSection(opsHost, 'packages', buildPackagesSection);
   }

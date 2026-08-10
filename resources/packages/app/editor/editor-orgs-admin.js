@@ -16,7 +16,9 @@ function buildOrgsAdminSection() {
   if (typeof window.graphdenTenancyActive === 'function' && !window.graphdenTenancyActive()) {
     return null;
   }
-  if (typeof window.graphdenHasCap === 'function' && !window.graphdenHasCap('platform-admin')) {
+  // Gated on the fine-grained `manage-orgs` platform right (platform-admin
+  // implies it — the operator still sees it; a manage-orgs delegate does too).
+  if (typeof window.graphdenHasCap === 'function' && !window.graphdenHasCap('manage-orgs')) {
     return null;
   }
   const wrap = document.createElement('div');

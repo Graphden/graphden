@@ -95,6 +95,7 @@
                   "packages/app/editor/editor-users-admin.js"
                   "packages/app/editor/editor-roles-admin.js"
                   "packages/app/editor/editor-orgs-admin.js"
+                  "packages/app/editor/editor-platform-access.js"
                   "packages/app/editor/editor-packages.js"
                   "packages/app/editor/editor-quota.js"
                   "packages/app/editor/editor-stats.js"

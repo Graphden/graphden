@@ -5297,7 +5297,10 @@ body.gd-cards-compact .effects-strip { display: none; }
 /* The Platform rail button is hidden until a platform right arrives
    (body.gd-platform, set from X-Graphden-Capabilities). */
 .gd-rail-btn.gd-platform-only { display: none; }
-body.gd-platform .gd-rail-btn.gd-platform-only { display: flex; }
+/* Match the sibling rail buttons' `display: grid; place-items: center`
+   (NOT flex) — flex left-aligns the icon/cap so the button reads as
+   shifted left of the rail column. */
+body.gd-platform .gd-rail-btn.gd-platform-only { display: grid; }
 .gd-operate-head { max-width: 1100px; margin: 0 auto 18px; }
 .gd-operate-head h1 {
   margin: 0 0 4px;

@@ -361,7 +361,13 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
    space for it so the icon doesn't appear over a still-shrinking
    sidebar. */
 .sidebar-expand-floating {
-  position: fixed; top: 8px; left: 8px; z-index: 250;
+  /* Sits at the top-left of the CANVAS (just past the rail, below the context
+     bar) where the function browser reappears — NOT over the rail/brand, which
+     used to obscure it and swallow its clicks (rail is z-index 300). */
+  position: fixed;
+  top: calc(var(--gd-ctxbar-h, 48px) + 8px);
+  left: calc(var(--gd-rail-w, 58px) + 8px);
+  z-index: 320;
   width: 26px; height: 26px; padding: 3px;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--fg); border-radius: 3px;
@@ -4796,7 +4802,10 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
 .gd-rail-btn:hover { background: var(--gd-paper-2); color: var(--gd-ink); }
 .gd-rail-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 .gd-rail-btn[aria-pressed="true"] { background: var(--gd-flow-wash); color: var(--gd-flow); }
-.gd-brand { color: var(--gd-flow); cursor: default; margin-bottom: 6px; }
+/* Brand mark, NOT a control: it carries `.gd-rail-btn` only for rail layout
+   (size/centering). `pointer-events: none` stops it faking a hover/click and
+   stops it swallowing clicks meant for anything beneath it in the corner. */
+.gd-brand { color: var(--gd-flow); cursor: default; margin-bottom: 6px; pointer-events: none; }
 .gd-brand svg { width: 20px; height: 20px; }
 .gd-rail-spacer { flex: 1 1 auto; }
 /* rail label — reveals on hover/focus as a small flag beside the icon */
@@ -5288,6 +5297,30 @@ body.gd-cards-compact .effects-strip { display: none; }
   align-items: start;
 }
 #gd-operate-panels > * { min-width: 0; }
+/* Each ops section is wrapped by mountAdminSection in a titled card, mirroring
+   the Settings surface so Operate reads as distinct panels, not a dumped stack. */
+.gd-op-card {
+  min-width: 0;
+  background: var(--gd-panel);
+  border: 1px solid var(--gd-line);
+  border-radius: var(--gd-r);
+  padding: 16px 18px;
+}
+.gd-op-card-title {
+  margin: 0 0 12px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--gd-ink-3);
+}
+/* Consistent tokened selects across the Operate panels (tenancy Users/Orgs
+   plan+role pickers, branch scopers, …) — they were raw browser controls. */
+#gd-operate-panels select {
+  font: inherit; font-size: 13px;
+  color: var(--gd-ink); background: var(--gd-paper);
+  border: 1px solid var(--gd-line); border-radius: 6px;
+  padding: 5px 8px; cursor: pointer;
+}
+#gd-operate-panels select:hover { border-color: var(--gd-flow); }
+#gd-operate-panels select:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 1px; }
 
 /* ---- Settings surface (personal editor settings) ---- */
 #gd-settings, #gd-workspaces {

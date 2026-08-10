@@ -55,14 +55,36 @@ let _searchDebounce = null;
 // switches all reload (editor-auth / switchToBranch), which is what clears it.
 const _adminSections = new Map();
 
+// Human labels for the ops sections, so each mounts as a titled card on the
+// Operate surface instead of a heading-less dumped panel.
+const OP_SECTION_LABELS = {
+  grants: 'Grants', users: 'Users', roles: 'Roles', orgs: 'Organizations',
+  packages: 'Packages', stats: 'Statistics', apps: 'Apps',
+  errors: 'Errors', 'type-errors': 'Type errors',
+};
+
 function mountAdminSection(list, key, build) {
   let section = _adminSections.get(key);
   if (section) {
     list.appendChild(section);   // already loaded — no rebuild, no refetch
     return;
   }
-  section = build();
-  if (!section) return;          // not applicable (not an admin, etc.)
+  const built = build();
+  if (!built) return;            // not applicable (not an admin, etc.)
+  // Wrap in a consistent titled card so the Operate surface reads as distinct
+  // panels, not one dumped stack. Skip our title if the section already leads
+  // with its own heading (don't double up).
+  section = document.createElement('section');
+  section.className = 'gd-op-card';
+  const first = built.firstElementChild;
+  const hasOwnHeading = first && /^H[1-3]$/.test(first.tagName);
+  if (!hasOwnHeading && OP_SECTION_LABELS[key]) {
+    const h = document.createElement('h2');
+    h.className = 'gd-op-card-title';
+    h.textContent = OP_SECTION_LABELS[key];
+    section.appendChild(h);
+  }
+  section.appendChild(built);
   _adminSections.set(key, section);
   list.appendChild(section);
   // Only now — process() is what fires hx-trigger="load", and it must fire on a

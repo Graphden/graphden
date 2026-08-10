@@ -158,7 +158,7 @@ function authFetchErrorMessage(response, opts) {
   const o = opts || {};
   if (response && response.status === 401) {
     return o.authExpired
-      || 'Sign-in expired. Click the lock icon in the toolbar to re-authenticate.';
+      || 'Sign-in expired. Re-authenticate from the top bar.';
   }
   if (typeof o.fallback === 'function') return o.fallback(response);
   if (o.fallback) return o.fallback;
@@ -179,7 +179,7 @@ async function extractResponseError(response, opts) {
     return o.authExpired;
   }
   if (response && response.status === 401) {
-    return 'Sign-in expired. Click the lock icon in the toolbar to re-authenticate.';
+    return 'Sign-in expired. Re-authenticate from the top bar.';
   }
   let raw = '';
   try { raw = await response.text(); } catch (_) {}

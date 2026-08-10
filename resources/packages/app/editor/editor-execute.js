@@ -155,7 +155,7 @@ async function pollOnce(execId, resultHostEl) {
     if (!r.ok) {
       resultHostEl.textContent = '';
       const msg = authFetchErrorMessage(r, {
-        authExpired: 'Sign-in expired during polling. Re-authenticate via the toolbar lock icon; the run continues in the background and can be reopened from History.',
+        authExpired: 'Sign-in expired during polling. Re-authenticate from the top bar; the run continues in the background and can be reopened from the Runs tab.',
         fallback: (resp) => 'Polling failed: HTTP ' + resp.status,
       });
       resultHostEl.appendChild(renderErrorPane(msg));
@@ -278,7 +278,7 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
     resultHostEl.textContent = '';
     if (!r.ok) {
       const msg = authFetchErrorMessage(r, {
-        authExpired: 'Sign-in expired. Click the lock icon in the toolbar to re-authenticate, then try Run again.',
+        authExpired: 'Sign-in expired. Re-authenticate from the top bar, then try Run again.',
         fallback: body?.error,
       });
       resultHostEl.appendChild(renderErrorPane(msg, body?.['error-data']));

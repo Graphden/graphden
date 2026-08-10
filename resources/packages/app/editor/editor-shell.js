@@ -1,9 +1,10 @@
 // Editor Shell — redesign 2026-08. Owns the left-rail surface switching.
 //
-// Build is the live surface (the graph editor). The other surfaces (Run /
-// Review / Operate / Workspaces / Settings) show a placeholder overlay until
-// they are rebuilt, one at a time. The rail's inline onclick calls the single
-// exported entry point `window.gdShellSurface(name, btn)`.
+// Build is the graph editor. Review opens the branch-diff modal; Operate /
+// Workspaces / Settings are real <section>s (see REAL_SURFACES). The rail's
+// inline onclick calls the single exported entry point
+// `window.gdShellSurface(name, btn)`. (There is no Run surface — running a fn
+// is the ▶ action on its node/card; its history is the inspector Runs tab.)
 (function () {
   // Progressive disclosure (redesign 2026-08): cards start COMPACT — the dense
   // return-type + effects metadata strips are hidden by default (that data is
@@ -18,7 +19,7 @@
     }
   } catch (_) { document.body.classList.add('gd-cards-compact'); }
 
-  // Build / Run / Review / Operate / Workspaces / Settings are all live now —
+  // Build / Review / Operate / Workspaces / Settings are all live —
   // Build is the graph editor, Review opens the branch-diff modal, and the
   // rest are real <section>s (see REAL_SURFACES). The placeholder overlay is
   // only a defensive fallback for an unknown surface name.
@@ -39,7 +40,7 @@
     if (realId) {
       const el = document.getElementById(realId);
       if (el) el.hidden = false;
-      const render = { settings: gdRenderSettings, workspaces: gdRenderWorkspaces }[name];
+      const render = { operate: gdRenderOperate, settings: gdRenderSettings, workspaces: gdRenderWorkspaces }[name];
       if (typeof render === 'function') render();
       return;
     }
@@ -51,6 +52,17 @@
     if (title) title.textContent = name;
     if (sub) sub.textContent = 'This surface is being rebuilt.';
     overlay.hidden = false;
+  }
+
+  // Operate panels are normally mounted as a side effect of the sidebar render
+  // at boot. If they're missing — e.g. the sidebar last rendered in search mode,
+  // which skips the ops sections — repopulate so Operate never opens empty.
+  function gdRenderOperate() {
+    const host = document.getElementById('gd-operate-panels');
+    if (host && host.children.length === 0
+        && typeof updateEntityList === 'function' && typeof graphData !== 'undefined' && graphData) {
+      updateEntityList(graphData);
+    }
   }
 
   // The rail surfaces that own a real <section> (vs the placeholder overlay).
@@ -378,8 +390,8 @@
   const INSP_TABS = [
     { id: 'overview', label: 'Overview' },
     { id: 'bindings', label: 'Bindings' },
-    { id: 'stats', label: 'Stats' },
-    { id: 'history', label: 'History' },
+    { id: 'stats', label: 'Runs' },
+    { id: 'history', label: 'Versions' },
   ];
   let inspTab = 'overview';
 

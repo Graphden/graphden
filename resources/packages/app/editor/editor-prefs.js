@@ -181,7 +181,11 @@ function buildPrefsButtons() {
     setDarkStored(dark);
   });
   document.getElementById('hard-reload-btn').addEventListener('click', hardReload);
-  collapseBtn.addEventListener('click', () => toggleCollapsed(true));
+  // Two-way toggle: collapse when open, expand when collapsed. (It used to
+  // only ever collapse, so once collapsed the button showed an "expand" icon
+  // that did nothing — the floating arrow was the only way back.)
+  collapseBtn.addEventListener('click', () =>
+    toggleCollapsed(!document.body.classList.contains('sidebar-collapsed')));
 }
 
 // Drop in-page caches (Cache API entries from any service worker) and

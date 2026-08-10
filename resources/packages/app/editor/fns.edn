@@ -384,8 +384,9 @@
                [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Operate surface."]
                [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]
             ;; (No Run surface: running a fn is the ▶ action on its node/card
-            ;; → the execute popover; a fn's history is the inspector Runs tab.
-            ;; A dedicated surface only duplicated both.)
+            ;; → the execute popover; its run history is the inspector "Runs"
+            ;; tab and its version timeline the "Versions" tab. A dedicated
+            ;; surface only duplicated both.)
             ;; WORKSPACES surface — spatial focus (namespace roots + pinned
             ;; libraries) and the personal-branch overlay. gdRenderWorkspaces.
             [:section {:id "gd-workspaces" :hidden "hidden" :aria-label "Workspaces"}

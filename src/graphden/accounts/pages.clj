@@ -34,9 +34,11 @@
   .btn-primary{width:100%;margin-top:20px;padding:11px;background:var(--blue);color:#fff;font-weight:600}
   .btn-primary:hover{background:#0a74e0}
   .social{display:flex;flex-direction:column;gap:10px;margin-top:16px}
-  .btn-social{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;
-    background:var(--ink);border:1px solid var(--line);color:var(--text);text-decoration:none}
+  .btn-social{display:flex;align-items:center;justify-content:center;gap:10px;padding:11px;
+    background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);
+    text-decoration:none;font-weight:500;font-size:15px}
   .btn-social:hover{border-color:var(--blue-hi)}
+  .btn-social svg{width:18px;height:18px;flex:none}
   .divider{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;margin:20px 0}
   .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line)}
   .tabs{display:flex;gap:4px;margin-bottom:18px;background:var(--ink);padding:4px;border-radius:8px}
@@ -76,15 +78,35 @@
        "</div></body></html>"))
 
 
+;; Provider marks so GitHub/Google read as branded buttons alongside the
+;; Telegram login widget (an official iframe we can't restyle) — otherwise the
+;; row was two plain text buttons next to one branded blue one.
+(def ^:private github-mark
+  (str "<svg viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'><path d='M12 .5C5.7.5.5"
+       " 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7"
+       " 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8"
+       " 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.6 1.6.2"
+       " 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8"
+       " 7.9-10.9C23.5 5.7 18.3.5 12 .5z'/></svg>"))
+
+
+(def ^:private google-mark
+  (str "<svg viewBox='0 0 48 48' aria-hidden='true'>"
+       "<path fill='#4285F4' d='M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z'/>"
+       "<path fill='#34A853' d='M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9h-7.3v5.7C6.1 41.1 14.4 46 24 46z'/>"
+       "<path fill='#FBBC05' d='M11.8 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 17.1 2 20.4 2 24s1 6.9 2.5 9.9l7.3-5.7z'/>"
+       "<path fill='#EA4335' d='M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 4.1 29.9 2 24 2 14.4 2 6.1 6.9 4.5 14.1l7.3 5.7c1.7-5.2 6.5-9.1 12.2-9.1z'/></svg>"))
+
+
 (defn- social-buttons
   [providers telegram]
   (str
     (when (seq providers)
       (str "<div class='divider'>or</div><div class='social'>"
            (when (contains? providers "github")
-             "<a class='btn-social' href='/auth/github/start'>Continue with GitHub</a>")
+             (str "<a class='btn-social' href='/auth/github/start'>" github-mark "Continue with GitHub</a>"))
            (when (contains? providers "google")
-             "<a class='btn-social' href='/auth/google/start'>Continue with Google</a>")
+             (str "<a class='btn-social' href='/auth/google/start'>" google-mark "Continue with Google</a>"))
            "</div>"))
     (when-let [bot (:bot-username telegram)]
       ;; Center the Telegram-injected iframe (a flex column left-aligns an
@@ -159,8 +181,8 @@
       "<div id='verify-banner'></div>"
       "<div class='sec'><h2>Sign-in methods</h2><div id='idents'>Loading…</div>"
       "<div class='social' style='margin-top:12px'>"
-      (when (contains? enabled-providers "github") "<a class='btn-social' href='/auth/github/start'>Link GitHub</a>")
-      (when (contains? enabled-providers "google") "<a class='btn-social' href='/auth/google/start'>Link Google</a>")
+      (when (contains? enabled-providers "github") (str "<a class='btn-social' href='/auth/github/start'>" github-mark "Link GitHub</a>"))
+      (when (contains? enabled-providers "google") (str "<a class='btn-social' href='/auth/google/start'>" google-mark "Link Google</a>"))
       "</div></div>"
       "<div class='sec'><h2>Two-factor authentication</h2><div id='tfa'>Loading…</div></div>"
       "<button class='btn-primary' style='background:transparent;border:1px solid var(--line);color:var(--muted)' onclick='logout()'>Sign out</button>"

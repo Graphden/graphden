@@ -5315,30 +5315,87 @@ body.gd-platform .gd-rail-btn.gd-platform-only { display: grid; }
   line-height: 1.5;
   color: var(--gd-ink-2);
 }
-#gd-operate-panels,
-#gd-platform-panels {
+/* Section-list layout: a vertical list of sections on the left, ONE full-width
+   pane on the right — a settings-style screen, not a grid of look-alike tiles.
+   Scales to long member/grant tables and reads calm, not like a cockpit. */
+.gd-op-body {
   max-width: 1100px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 28px;
   align-items: start;
 }
-#gd-operate-panels > *, #gd-platform-panels > * { min-width: 0; }
-/* Each ops section is wrapped by mountAdminSection in a titled card, mirroring
-   the Settings surface so Operate reads as distinct panels, not a dumped stack. */
-.gd-op-card {
-  min-width: 0;
-  background: var(--gd-panel);
-  border: 1px solid var(--gd-line);
-  border-radius: var(--gd-r);
-  padding: 16px 18px;
+.gd-op-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
 }
+.gd-op-nav-btn {
+  appearance: none;
+  text-align: left;
+  font: inherit; font-size: 13.5px;
+  color: var(--gd-ink-2);
+  background: transparent;
+  border: 0; border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.gd-op-nav-btn:hover { background: var(--gd-paper-2); color: var(--gd-ink); }
+.gd-op-nav-btn[aria-current="page"] {
+  background: var(--gd-flow-wash);
+  color: var(--gd-flow);
+  font-weight: 600;
+}
+/* The pane holds exactly one section at a time; the rest are [hidden]. */
+#gd-operate-panels, #gd-platform-panels { display: block; min-width: 0; }
+.gd-op-card { min-width: 0; width: 100%; }
+.gd-op-card[hidden] { display: none; }
 .gd-op-card-title {
-  margin: 0 0 12px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--gd-ink-3);
+  margin: 0 0 18px;
+  font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--gd-ink);
 }
+/* ONE heading per pane — the card title above. Drop the redundant headings the
+   build wrapper / server partials still carry (the section list already names
+   the pane). */
+.gd-op-card .ns-header { display: none; }
+.gd-op-card .ns-children > h3:first-child,
+.gd-op-card .ns-children > * > h3:first-child { display: none; }
+
+/* Forms across ops panels — inline field+button ROWS with tokened controls,
+   not bare stacked inputs with a button dangling underneath. The panels'
+   original `.sidebar-*-admin .*-form { flex-direction: column }` styling was
+   for the NARROW rail; in the wide pane, override to a row. The id scope
+   (1,0,1) beats those two-class column rules (0,2,0). */
+#gd-operate-panels form, #gd-platform-panels form {
+  display: flex; flex-direction: row; flex-wrap: wrap;
+  gap: 8px; align-items: center; margin-top: 14px;
+}
+#gd-operate-panels form input, #gd-operate-panels form select,
+#gd-platform-panels form input, #gd-platform-panels form select {
+  flex: 1 1 150px; min-width: 120px; width: auto;
+}
+#gd-operate-panels form button, #gd-platform-panels form button { flex: 0 0 auto; }
+.gd-op-card input[type="text"], .gd-op-card input[type="email"],
+.gd-op-card input[type="search"], .gd-op-card input:not([type]) {
+  font: inherit; font-size: 13px;
+  color: var(--gd-ink); background: var(--gd-paper);
+  border: 1px solid var(--gd-line); border-radius: 7px;
+  padding: 7px 10px;
+}
+.gd-op-card input:focus-visible {
+  outline: 2px solid var(--gd-flow); outline-offset: 1px; border-color: var(--gd-flow);
+}
+.gd-op-card form button, .gd-op-card .grant-create-btn, .gd-op-card .invite-btn {
+  font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--on-accent); background: var(--gd-flow);
+  border: 0; border-radius: 7px; padding: 8px 14px; cursor: pointer;
+}
+.gd-op-card form button:hover, .gd-op-card .grant-create-btn:hover { filter: brightness(1.06); }
 /* Consistent tokened selects across the Operate panels (tenancy Users/Orgs
    plan+role pickers, branch scopers, …) — they were raw browser controls. */
 #gd-operate-panels select,

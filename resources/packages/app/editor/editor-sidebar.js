@@ -54,41 +54,58 @@ let _searchDebounce = null;
 // request. The cache lives as long as the page: login, logout and branch
 // switches all reload (editor-auth / switchToBranch), which is what clears it.
 const _adminSections = new Map();
+const _adminNavBtns = new Map();
 
-// Human labels for the ops sections, so each mounts as a titled card on the
-// Operate surface instead of a heading-less dumped panel.
+// Human labels for the ops sections. Each mounts as ONE titled pane selected
+// from a section list on the left — a clean settings layout, not a grid of
+// look-alike tiles.
 const OP_SECTION_LABELS = {
-  grants: 'Grants', users: 'Users', roles: 'Roles', orgs: 'Organizations',
-  packages: 'Packages', stats: 'Statistics', apps: 'Apps',
-  errors: 'Errors', 'type-errors': 'Type errors',
+  grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
+  packages: 'Packages', stats: 'Monitoring', apps: 'Apps',
+  errors: 'Errors', 'type-errors': 'Type errors', 'platform-access': 'Platform access',
 };
 
-function mountAdminSection(list, key, build) {
+// Show one section's pane on a surface and mark its nav item; hide the rest.
+function activateOpSection(nav, pane, key) {
+  [...pane.children].forEach((s) => { s.hidden = s.dataset.section !== key; });
+  [...nav.children].forEach((b) => {
+    b.setAttribute('aria-current', b.dataset.section === key ? 'page' : 'false');
+  });
+}
+
+// Mount an ops/admin section as a selectable pane. `nav` is the section-list
+// container (null → legacy fallback: append the card inline, always visible).
+// The pane carries exactly ONE heading (the card title); the build's own
+// header label is dropped since the nav already names the section.
+function mountAdminSection(pane, nav, key, build) {
   let section = _adminSections.get(key);
-  if (section) {
-    list.appendChild(section);   // already loaded — no rebuild, no refetch
-    return;
-  }
-  const built = build();
-  if (!built) return;            // not applicable (not an admin, etc.)
-  // Wrap in a consistent titled card so the Operate surface reads as distinct
-  // panels, not one dumped stack. Skip our title if the section already leads
-  // with its own heading (don't double up).
-  section = document.createElement('section');
-  section.className = 'gd-op-card';
-  const first = built.firstElementChild;
-  const hasOwnHeading = first && /^H[1-3]$/.test(first.tagName);
-  if (!hasOwnHeading && OP_SECTION_LABELS[key]) {
+  let navBtn = _adminNavBtns.get(key);
+  if (!section) {
+    const built = build();
+    if (!built) return;            // not applicable (not an admin, etc.)
+    const ownHdr = built.querySelector(':scope > .ns-header');
+    if (ownHdr) ownHdr.remove();
+    section = document.createElement('section');
+    section.className = 'gd-op-card';
+    section.dataset.section = key;
     const h = document.createElement('h2');
     h.className = 'gd-op-card-title';
-    h.textContent = OP_SECTION_LABELS[key];
+    h.textContent = OP_SECTION_LABELS[key] || key;
     section.appendChild(h);
+    section.appendChild(built);
+    _adminSections.set(key, section);
+    navBtn = document.createElement('button');
+    navBtn.type = 'button';
+    navBtn.className = 'gd-op-nav-btn';
+    navBtn.dataset.section = key;
+    navBtn.textContent = OP_SECTION_LABELS[key] || key;
+    navBtn.addEventListener('click', () => activateOpSection(nav, pane, key));
+    _adminNavBtns.set(key, navBtn);
   }
-  section.appendChild(built);
-  _adminSections.set(key, section);
-  list.appendChild(section);
-  // Only now — process() is what fires hx-trigger="load", and it must fire on a
-  // CONNECTED node, so this has to come after appendChild.
+  if (nav) nav.appendChild(navBtn);
+  else section.hidden = false;     // legacy fallback — no section list, show all
+  pane.appendChild(section);
+  // process() fires hx-trigger="load" and must run on a CONNECTED node.
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
 }
 
@@ -647,43 +664,64 @@ function updateEntityList(data) {
   // 2026-08: these mount into the OPERATE surface (#gd-operate-panels), not the
   // explorer, so the sidebar stays a clean namespace browser. Falls back to the
   // explorer list if the operate pane isn't present.
-  const opsHost = document.getElementById('gd-operate-panels') || list;
+  const opsPane = document.getElementById('gd-operate-panels');
+  const opsNav = document.getElementById('gd-operate-nav');
+  const platPane = document.getElementById('gd-platform-panels');
+  const platNav = document.getElementById('gd-platform-nav');
+  const opsHost = opsPane || list;
+  const opsNavHost = opsPane ? opsNav : null;
   // Cross-org / platform panels mount into the separate PLATFORM surface;
   // everything else (org RBAC + the org's operational panels) into Organization.
-  const platHost = document.getElementById('gd-platform-panels') || opsHost;
-  if (!searchMode && opsHost !== list) opsHost.innerHTML = '';
-  if (!searchMode && platHost !== opsHost && platHost !== list) platHost.innerHTML = '';
+  const platHost = platPane || opsHost;
+  const platNavHost = platPane ? platNav : opsNavHost;
+  if (!searchMode && opsHost !== list) {
+    opsPane.innerHTML = '';
+    if (opsNavHost) opsNavHost.innerHTML = '';
+  }
+  if (!searchMode && platHost !== opsHost && platHost !== list) {
+    platPane.innerHTML = '';
+    if (platNavHost && platNavHost !== opsNavHost) platNavHost.innerHTML = '';
+  }
   if (!searchMode && typeof buildGrantsAdminSection === 'function') {
-    mountAdminSection(opsHost, 'grants', buildGrantsAdminSection);
+    mountAdminSection(opsHost, opsNavHost, 'grants', buildGrantsAdminSection);
   }
   if (!searchMode && typeof buildUsersAdminSection === 'function') {
-    mountAdminSection(opsHost, 'users', buildUsersAdminSection);
+    mountAdminSection(opsHost, opsNavHost, 'users', buildUsersAdminSection);
   }
   if (!searchMode && typeof buildRolesAdminSection === 'function') {
-    mountAdminSection(opsHost, 'roles', buildRolesAdminSection);
+    mountAdminSection(opsHost, opsNavHost, 'roles', buildRolesAdminSection);
   }
   if (!searchMode && typeof buildOrgsAdminSection === 'function') {
     // Cross-org registry → Platform surface.
-    mountAdminSection(platHost, 'orgs', buildOrgsAdminSection);
+    mountAdminSection(platHost, platNavHost, 'orgs', buildOrgsAdminSection);
   }
   if (!searchMode && typeof buildPlatformAccessSection === 'function') {
     // Platform-access delegation → Platform surface (manage-platform-access).
-    mountAdminSection(platHost, 'platform-access', buildPlatformAccessSection);
+    mountAdminSection(platHost, platNavHost, 'platform-access', buildPlatformAccessSection);
   }
   if (!searchMode && typeof buildPackagesSection === 'function') {
-    mountAdminSection(opsHost, 'packages', buildPackagesSection);
+    mountAdminSection(opsHost, opsNavHost, 'packages', buildPackagesSection);
   }
   if (!searchMode && typeof buildStatsSection === 'function') {
-    mountAdminSection(opsHost, 'stats', buildStatsSection);
+    mountAdminSection(opsHost, opsNavHost, 'stats', buildStatsSection);
   }
   if (!searchMode && typeof buildAppsSection === 'function') {
-    mountAdminSection(opsHost, 'apps', buildAppsSection);
+    mountAdminSection(opsHost, opsNavHost, 'apps', buildAppsSection);
   }
   if (!searchMode && typeof buildErrorsSection === 'function') {
-    mountAdminSection(opsHost, 'errors', buildErrorsSection);
+    mountAdminSection(opsHost, opsNavHost, 'errors', buildErrorsSection);
   }
   if (!searchMode && typeof buildTypeErrorsSection === 'function') {
-    mountAdminSection(opsHost, 'type-errors', buildTypeErrorsSection);
+    mountAdminSection(opsHost, opsNavHost, 'type-errors', buildTypeErrorsSection);
+  }
+  // Select the first section on each surface so a pane is always showing.
+  if (!searchMode) {
+    if (opsNavHost?.firstElementChild) {
+      activateOpSection(opsNavHost, opsHost, opsNavHost.firstElementChild.dataset.section);
+    }
+    if (platNavHost && platNavHost !== opsNavHost && platNavHost.firstElementChild) {
+      activateOpSection(platNavHost, platHost, platNavHost.firstElementChild.dataset.section);
+    }
   }
 
   // Top-level namespaces (sorted) — skip any with nothing visible under

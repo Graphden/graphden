@@ -372,7 +372,9 @@
              [:div {:class "gd-operate-head"}
               [:h1 "Organization"]
               [:p "Your organization — members, roles and permissions, plus its packages, monitoring, apps and errors."]]
-             [:div {:id "gd-operate-panels"}]]
+             [:div {:class "gd-op-body"}
+              [:nav {:id "gd-operate-nav" :class "gd-op-nav" :aria-label "Organization sections"}]
+              [:div {:id "gd-operate-panels" :class "gd-op-pane"}]]]
             ;; PLATFORM surface — cross-org / platform-wide administration (the
             ;; org registry today; landing + cross-org stats + platform-rights
             ;; grant next). editor-sidebar.js renders the platform sections into
@@ -382,7 +384,9 @@
              [:div {:class "gd-operate-head"}
               [:h1 "Platform"]
               [:p "Platform-wide administration across every organization."]]
-             [:div {:id "gd-platform-panels"}]]
+             [:div {:class "gd-op-body"}
+              [:nav {:id "gd-platform-nav" :class "gd-op-nav" :aria-label "Platform sections"}]
+              [:div {:id "gd-platform-panels" :class "gd-op-pane"}]]]
             ;; SETTINGS surface — personal editor settings: appearance,
             ;; account, and what this build is. Team access (grants / users
             ;; / roles) is operational and lives in Operate, not here. The

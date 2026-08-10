@@ -199,6 +199,44 @@
       (select-keys fa ref-frees))))
 
 
+(def skip-cache-priming-key
+  "Ctx flag consumed by `run`. Set it on the ctx of an execute whose
+   PURPOSE is to build long-lived Ring handler callables that will each
+   serve independent later requests — a route-collection router-install
+   (`:tenancy/router-install`, accounts `/auth/*`). See `run`'s cache
+   logic + `defer-handler-call-cache` for why."
+  ::skip-cache-priming)
+
+
+(defn defer-handler-call-cache
+  "Mark `ctx` so an execute that BUILDS route handlers doesn't leave a
+   shared `::call-cache` for those handlers to capture.
+
+   A route-collection router is built once (at boot) by executing its
+   router fn-def; the `:fn`-typed route handlers are `hof-wrap`ped
+   during that execute and CAPTURE its ctx. Normally `run` primes a
+   `::call-cache` HashMap into the ctx — so every later request through
+   such a handler reuses that ONE build-time cache. A no-free-arg
+   subtree then has a constant cache key `[fn-id {}]`, is memoised on
+   the first request, and its frozen result is served to every caller
+   forever (e.g. `/api/my-tokens/list` leaking one account's tokens to
+   all — a cross-principal data leak). The main app router escapes this
+   because branch-router re-dispatches each request through `execute`
+   with a fresh, cache-less branch ctx.
+
+   With this flag, `run` primes no shared cache and PROPAGATES the flag
+   through every nested run down to where the `:fn` route handlers are
+   `hof-wrap`ped — so those handlers capture a cache-less, flag-carrying
+   ctx. Each later request through such a handler then runs cache-less
+   too (every `:ref` a fresh call): correct + per-principal, trading the
+   within-request memo away for these low-traffic admin routes. HOF
+   callbacks elsewhere are unaffected — they capture the enclosing
+   REQUEST execute's ctx (no flag), so within-execute memoisation and
+   shared per-execute `:atom`/state still work."
+  [ctx]
+  (assoc ctx skip-cache-priming-key true))
+
+
 (def ^:private call-cache-max-size
   "Cap on the per-execute call-cache. Average entry size observed
    ~180 KB (large maps, JSON strings, etc.) on /api/graph/entities-
@@ -962,7 +1000,21 @@
          ;; top-level closure.
          run
          (fn [fa ctx]
-           (let [ctx (if (::call-cache ctx)
+           (let [;; Prime a fresh per-call cache for sibling `:ref`
+                 ;; memoisation, UNLESS:
+                 ;;  - one is already in scope (inherited from an enclosing
+                 ;;    execute) — reuse it; or
+                 ;;  - this is a router-BUILD execute flagged by
+                 ;;    `defer-handler-call-cache` — prime NO shared cache and
+                 ;;    KEEP the flag, so every nested run down to where the
+                 ;;    `:fn` route handlers are `hof-wrap`ped stays cache-less
+                 ;;    too (consuming the flag here would let those nested runs
+                 ;;    re-prime a cache the handlers then capture). The flag
+                 ;;    rides along on the captured ctx, so each later REQUEST
+                 ;;    through such a handler also runs cache-less (every `:ref`
+                 ;;    a fresh call) — correct + per-principal, trading away
+                 ;;    within-request memo for these low-traffic admin routes.
+                 ctx (if (or (::call-cache ctx) (skip-cache-priming-key ctx))
                        ctx
                        (assoc ctx ::call-cache (java.util.HashMap.)))
                  fa (r/apply-rename-aliases fa rename-aliases)

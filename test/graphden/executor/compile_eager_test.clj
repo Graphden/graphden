@@ -133,6 +133,58 @@
         (finally (sp/close storage))))))
 
 
+(deftest defer-handler-call-cache-disables-the-shared-memo-test
+  ;; Route-collection routers (the tenancy control plane, incl.
+  ;; `/api/my-tokens/list`) are built ONCE at boot via `execute-by-name`;
+  ;; their graph-executed `:fn` handlers CAPTURE that build execute's ctx.
+  ;; If the ctx carried a shared `::call-cache`, every later request through
+  ;; such a handler would reuse it — freezing any no-free-arg child ref to
+  ;; its first result and serving that to every principal (a cross-principal
+  ;; data leak: one account's token list shown to all). `defer-handler-call-
+  ;; cache` marks the build ctx so `run` primes NO shared cache and
+  ;; PROPAGATES the flag to the captured handler ctx, so each later request
+  ;; re-evaluates. Pinned here by the per-execute memo being OFF under the
+  ;; flag: a child ref'd in two sibling slots fires TWICE, not once (the
+  ;; control assertion is the normal-execute memo firing once — same setup
+  ;; as `dry-memo-shares-result-across-sibling-refs-test`).
+  (testing "under defer-handler-call-cache the shared per-execute memo is off"
+    (let [storage (setup/create-test-storage)
+          call-count (atom 0)]
+      (try
+        (registry/initialize-all! storage
+                                  [{:defer-counter {:args {:x :any}
+                                                    :return-type :any
+                                                    :impl (setup/fn-impl
+                                                            [x]
+                                                            (swap! call-count inc)
+                                                            x)}}
+                                   {:defer-add {:args {:a :int :b :int}
+                                                :return-type :int
+                                                :impl (setup/fn-impl [a b] (+ a b))}}])
+        (fn-composition/sync-fns-to-storage!
+          storage
+          [{:name :defer-value :parent :defer-counter :args {:x 7}}
+           {:name :defer-doubler :parent :defer-add
+            :args {:a :defer-value :b :defer-value}}])
+        (let [doubler (first (sp/query-entities storage :fn
+                                                {:name "defer-doubler"}))
+              ctx (exec/create-context {:storage storage})
+              ;; control: a normal execute shares the child across siblings
+              _ (reset! call-count 0)
+              normal (exec/execute ctx (:id doubler) nil)
+              normal-count @call-count
+              ;; under the flag: no shared cache is primed → each ref fires
+              _ (reset! call-count 0)
+              deferred (exec/execute (cr/defer-handler-call-cache ctx)
+                                     (:id doubler) nil)]
+          (is (= 14 normal deferred) "same result with or without the flag")
+          (is (= 1 normal-count)
+              "control: normal execute memoises the shared child (fires once)")
+          (is (= 2 @call-count)
+              "defer-handler-call-cache disables the shared memo — each ref re-evaluates"))
+        (finally (sp/close storage))))))
+
+
 (deftest always-fresh-bypasses-the-dry-memo-test
   ;; `:time` and `:random` impls must fire fresh on every read — two
   ;; clock reads in one request must produce different timestamps.

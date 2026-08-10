@@ -1361,6 +1361,15 @@
     (execute ctx (:id match) named-args)))
 
 
+(def defer-handler-call-cache
+  "Re-export of `compile-eager/defer-handler-call-cache`. Wrap the ctx of
+   a router-BUILD execute (`execute-by-name` producing a route-collection
+   Ring router) so the graph-executed handlers it builds don't capture a
+   shared build-time call-cache — each later request primes its own. See
+   the target's docstring for the cross-principal-leak it prevents."
+  ce/defer-handler-call-cache)
+
+
 ;; =============================================================================
 ;; HOF callable helpers
 ;; =============================================================================

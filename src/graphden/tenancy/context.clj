@@ -83,6 +83,31 @@
   (boolean (@platform-admin-fn)))
 
 
+;; Fine-grained platform-capability SEAM. Same policy-lives-in-the-addon shape
+;; as `platform-admin-fn`, but the predicate takes a capability keyword — so a
+;; gate can admit a DELEGATE holding just that one platform right (e.g.
+;; `:view-all-stats`, `:manage-orgs`) rather than the whole `:platform-admin`
+;; umbrella. The addon installs `grant/current-has-platform-capability?`, which
+;; returns true for the umbrella too, so an operator keeps passing every gate.
+(defonce ^:private platform-cap-fn (atom (constantly false)))
+
+
+(defn install-platform-cap-fn!
+  "Install the addon's 1-arg platform-capability predicate `(fn [cap] bool)`.
+   `nil` restores the no-op default (no platform capabilities)."
+  [f]
+  (reset! platform-cap-fn (or f (constantly false))))
+
+
+(defn current-has-platform-cap?
+  "True when the current principal effectively holds platform capability `cap`
+   — a direct grant OR the `:platform-admin` umbrella — via the installed seam.
+   Default-deny with no tenancy addon. The seam gates read so they don't thread
+   a grant store + principal through their signatures."
+  [cap]
+  (boolean (@platform-cap-fn cap)))
+
+
 (def ^:dynamic *current-principal*
   "The authenticated principal (`AuthProvider` result) for the current
    request, bound by the addon's request-scope. Read by per-namespace grant

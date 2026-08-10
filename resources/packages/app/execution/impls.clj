@@ -199,12 +199,13 @@
 
 (defbase usage-all-org-stats
   [days limit]
-  ;; OPERATOR-only cross-org rollup — the platform context (no tenant org
-  ;; bound, or the platform org itself) sees every org's counts; ANY tenant
-  ;; context gets [] so the Stats panel's by-org section simply never renders
-  ;; for them. The guard lives HERE, impl-side, so no graph composition can
-  ;; reach cross-org data from a tenant ctx.
-  (if (or (tc/current-platform-tier?) (tc/current-platform-admin?))
+  ;; Cross-org rollup — the platform context (no tenant org bound, or the
+  ;; platform org itself) OR a holder of the `:view-all-stats` platform right
+  ;; (a delegate; platform-admin implies it via the umbrella) sees every org's
+  ;; counts; ANY other tenant context gets [] so the Stats panel's by-org
+  ;; section simply never renders for them. The guard lives HERE, impl-side, so
+  ;; no graph composition can reach cross-org data from a tenant ctx.
+  (if (or (tc/current-platform-tier?) (tc/current-has-platform-cap? :view-all-stats))
     (exec-stats/org-all-stats (:pool (:pg-storage ctx)) days limit)
     []))
 

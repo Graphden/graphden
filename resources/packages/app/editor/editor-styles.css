@@ -4900,37 +4900,19 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
   text-transform: uppercase;
   color: var(--gd-ink-3);
 }
-#gd-search {
-  flex: 1 1 auto;
-  max-width: 420px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 11px;
-  border: 1px solid var(--gd-line-2);
-  border-radius: 8px;
-  background: var(--gd-paper-2);
-  color: var(--gd-ink-3);
-  font-size: 12.5px;
-  cursor: text;
-}
-#gd-search svg { width: 15px; height: 15px; flex: none; }
-.gd-kbd {
-  margin-left: auto;
-  padding: 1px 5px;
-  border: 1px solid var(--gd-line-2);
-  border-radius: 4px;
-  font-family: var(--gd-mono);
-  font-size: 10.5px;
-  color: var(--gd-ink-3);
-}
 .gd-bar-spacer { flex: 1 1 auto; }
 /* The relocated theme/collapse/branch/org/auth mounts flow inline here. */
 #gd-ctxbar #prefs-mount,
 #gd-ctxbar #branch-mount,
 #gd-ctxbar #org-mount,
 #gd-ctxbar #auth-mount { display: flex; align-items: center; gap: 6px; }
+/* Contextual chrome is a function of the SURFACE, not the shell: the workspace
+   scope + branch chip belong to Build (you author graph IN a branch/scope). On
+   Organization / Platform / Settings they're meaningless — a branch has no
+   bearing on managing an org — so hide them there. The org switcher + account
+   chip stay global (you may need to re-scope or sign out from any surface). */
+body:not([data-surface="build"]) #gd-ws-chip,
+body:not([data-surface="build"]) #gd-ctxbar #branch-mount { display: none; }
 
 /* ---- Context-bar popover (workspace switcher) ---- */
 .gd-pop-scrim { position: fixed; inset: 0; z-index: 340; }

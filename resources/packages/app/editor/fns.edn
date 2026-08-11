@@ -205,25 +205,22 @@
               [:circle {:cx "12" :cy "12" :r "3"}]
               [:path {:d "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"}]]
              [:span {:class "gd-rail-cap"} "Settings"]]]
-           ;; CONTEXT BAR — persistent across surfaces (redesign 2026-08).
-           ;; Hosts the workspace scope, the branch chip, org switcher, a
-           ;; global search, and (right) the theme/collapse + auth mounts that
-           ;; used to crowd the explorer header.
+           ;; CONTEXT BAR (redesign 2026-08). Hosts the CONTEXTUAL controls —
+           ;; the workspace scope + branch chip (shown only on the Build
+           ;; surface; they're meaningless while managing an org / the platform)
+           ;; — plus the always-global org switcher + account chip. See
+           ;; editor-styles.css `body:not([data-surface="build"])`.
            [:header {:id "gd-ctxbar"}
             [:button {:type "button" :id "gd-ws-chip" :class "gd-ctx-chip"
-                      :title "Switch workspace (coming soon)"}
+                      :title "Switch workspace scope"}
              [:span {:class "gd-ctx-dot"}]
              [:span {:class "gd-ctx-k"} "workspace"]
              [:b "All functions"]]
             [:div {:id "branch-mount"}]
             [:div {:id "org-mount"}]
-            [:div {:id "gd-search" :role "search"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor"
-                    :stroke-width "1.8" :aria-hidden "true"}
-              [:circle {:cx "11" :cy "11" :r "7"}]
-              [:path {:d "M20 20l-3.5-3.5"}]]
-             [:span "Search functions, types, secrets…"]
-             [:span {:class "gd-kbd"} "⌘K"]]
+            ;; (No global search chip: it was a dead affordance — never wired to
+            ;; anything. The live function search is the Explorer filter, which
+            ;; hits ?scope=search. One search, where the functions are.)
             [:span {:class "gd-bar-spacer"}]
             ;; (No #prefs-mount quick-actions cluster: theme + reload were
             ;; duplicates of Settings controls. The context bar's right side is

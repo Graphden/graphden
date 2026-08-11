@@ -384,8 +384,11 @@ function ensureIconReasonPopover() {
   return el;
 }
 
-function showIconReasonPopover(anchorEl, text) {
-  if (!anchorEl || !text) return;
+// `content` is either a plain string (a one-line reason, the original use) or a
+// DOM Node (a small interactive menu — e.g. the ns popover's namespace + Reveal
+// / Move actions). A Node gets the `-menu` modifier for button-friendly padding.
+function showIconReasonPopover(anchorEl, content) {
+  if (!anchorEl || !content) return;
   // Toggle off if we're re-clicking the same anchor.
   if (iconReasonAnchor === anchorEl
       && iconReasonPopoverEl
@@ -394,7 +397,13 @@ function showIconReasonPopover(anchorEl, text) {
     return;
   }
   const el = ensureIconReasonPopover();
-  el.textContent = text;
+  if (content instanceof Node) {
+    el.replaceChildren(content);
+    el.classList.add('icon-reason-popover-menu');
+  } else {
+    el.textContent = content;
+    el.classList.remove('icon-reason-popover-menu');
+  }
   el.style.display = 'block';
   el.style.opacity = '0';
   el.style.transform = 'translateY(4px)';

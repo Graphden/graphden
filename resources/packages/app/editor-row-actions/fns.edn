@@ -165,12 +165,12 @@
           :children [{:value "i"}]}}
 
   {:name :_partial-row-actions-open-href
-   :description "Tab URL for the ↗ button — `?fn=<name>` (the editor's `selectFn` reads `?fn=` to navigate). Falls back to `?fn=` for anonymous fns; the JS dispatcher gates the button visibility on `:_partial-row-actions-show-open?` so an anonymous fn-id never gets rendered here in practice."
+   :description "Fallback tab URL for the ↗ button — `#<name>` (the editor navigates by the URL HASH; a `?fn=` query is read by nothing). The `open` action handler overrides this on click with the client's QUALIFIED name (robust against duplicate bare names); this bare-name hash is only the no-JS fallback. Anonymous fns never render ↗ (`:_partial-row-actions-show-open?` gate)."
    :parent :str
-   :args {:parts [{:value "?fn="} :_partial-row-actions-fn-name]}}
+   :args {:parts [{:value "#"} :_partial-row-actions-fn-name]}}
 
   {:name :_partial-row-actions-open-button
-   :description "`<a class=\"open-in-new-tab\" data-action=\"open\" target=\"_blank\" href=\"?fn=<name>\">↗</a>`. Rendered only when `show-open=true`; otherwise the `:if` short-circuits to an empty `:list` slot."
+   :description "`<a class=\"open-in-new-tab\" data-action=\"open\" target=\"_blank\" href=\"#<name>\">↗</a>`. Rendered only when `show-open=true`; otherwise the `:if` short-circuits to an empty `:list` slot."
    :parent :hiccup
    :args {:tag {:value "a"}
           :attrs {:parent :assoc

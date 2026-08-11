@@ -398,17 +398,55 @@ async function loadRowActionsContent(host, fnId, context, opts) {
 // preventDefault / stopPropagation) and the third `host` arg
 // (for fall-through to `host.dataset.*`).
 
+// The `ns` badge is primarily "WHERE does this fn live" — it opens a small
+// popover showing the fn's namespace path + a "Reveal in Explorer" action to
+// find it in the tree, and (only when the fn is editable) a "Move to another
+// namespace…" action. So it's useful on ANY node — including a read-only /
+// stdlib fn you just want to locate — instead of silently doing nothing.
 registerActionHandler('namespace-move', (btn, e) => {
   e.preventDefault();
   e.stopPropagation();
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  const fn = lookups?.fnMap?.get(fnId);
   const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
   const editable = typeof isFnEditable === 'function' && isFnEditable(fnId);
-  const fnEntity = lookups?.fnMap?.get(fnId);
-  if (signedIn && editable && fnEntity
-      && typeof enterNamespaceMoveEditMode === 'function') {
-    enterNamespaceMoveEditMode(fnEntity, btn);
+  const nsPath = (fn && lookups?.nsPathMap && fn['namespace-id'])
+    ? (lookups.nsPathMap.get(fn['namespace-id']) || '(root)')
+    : '(root)';
+
+  const menu = document.createElement('div');
+  menu.className = 'ns-menu';
+  const label = document.createElement('div');
+  label.className = 'ns-menu-label';
+  label.textContent = 'Namespace';
+  const path = document.createElement('div');
+  path.className = 'ns-menu-path';
+  path.textContent = nsPath;
+  menu.append(label, path);
+
+  const reveal = document.createElement('button');
+  reveal.type = 'button';
+  reveal.className = 'ns-menu-btn';
+  reveal.textContent = 'Reveal in Explorer';
+  reveal.addEventListener('click', () => {
+    if (typeof hideIconReasonPopover === 'function') hideIconReasonPopover();
+    if (typeof revealFnInTree === 'function') revealFnInTree(fnId);
+  });
+  menu.appendChild(reveal);
+
+  if (signedIn && editable && fn && typeof enterNamespaceMoveEditMode === 'function') {
+    const move = document.createElement('button');
+    move.type = 'button';
+    move.className = 'ns-menu-btn';
+    move.textContent = 'Move to another namespace…';
+    move.addEventListener('click', () => {
+      if (typeof hideIconReasonPopover === 'function') hideIconReasonPopover();
+      enterNamespaceMoveEditMode(fn, btn);
+    });
+    menu.appendChild(move);
   }
+
+  if (typeof showIconReasonPopover === 'function') showIconReasonPopover(btn, menu);
 });
 
 
@@ -433,8 +471,20 @@ registerActionHandler('description', (btn, e, host) => {
 });
 
 
-registerActionHandler('open', () => {
-  // <a target="_blank"> default behaviour — no JS needed.
+registerActionHandler('open', (btn, e) => {
+  // Open THIS node's fn in a new tab. The server-rendered href is a fallback;
+  // the editor navigates by the URL HASH (`#<qualified-name>`), not a `?fn=`
+  // query (nothing reads that), so build the same hash the tree's ↗ uses from
+  // the client's qualified name — robust against duplicate bare names.
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  const fn = (fnId && lookups?.fnMap) ? lookups.fnMap.get(fnId) : null;
+  const name = (fn && typeof getQualifiedFnName === 'function') ? getQualifiedFnName(fn) : null;
+  if (name && name !== '(anonymous)') {
+    e.preventDefault();
+    window.open('#' + encodeURIComponent(name), '_blank', 'noopener');
+  }
+  // else: fall through to the <a href> default (best-effort for an
+  // unresolved / anonymous fn — the dispatcher never renders ↗ for those).
 });
 
 

@@ -2975,6 +2975,29 @@ textarea.arg-value-edit-input {
   transition: opacity 110ms ease-out, transform 110ms ease-out;
   display: none;
 }
+/* Menu variant (the ns badge popover): namespace path + Reveal / Move actions. */
+.icon-reason-popover.icon-reason-popover-menu { padding: 8px; max-width: 280px; }
+.ns-menu { display: flex; flex-direction: column; gap: 3px; min-width: 190px; }
+.ns-menu-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--gd-ink-3);
+}
+.ns-menu-path {
+  font-family: var(--mono); font-size: 12px; color: var(--fg);
+  margin-bottom: 6px; word-break: break-all;
+}
+.ns-menu-btn {
+  appearance: none; text-align: left; font: inherit; font-size: 12px;
+  color: var(--gd-flow); background: transparent; border: 0; border-radius: 6px;
+  padding: 6px 8px; cursor: pointer;
+}
+.ns-menu-btn:hover { background: var(--gd-flow-wash); }
+/* Flash the tree row that a "Reveal in Explorer" landed on. */
+.entity-item.gd-tree-flash { animation: gd-tree-flash 1.3s ease; }
+@keyframes gd-tree-flash {
+  0%, 100% { background-color: transparent; }
+  20% { background-color: var(--gd-flow-wash); }
+}
 
 /* Right-edge action icons — `i` (description) and `↗` (open in new tab).
    Highlight on hover so the click-target is obvious; the tint uses

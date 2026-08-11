@@ -634,6 +634,37 @@ function renderRootNode(list, rootFns, searchMode) {
 /**
  * Update the entity list in sidebar as a namespace tree
  */
+// Scroll the Explorer tree to a fn's row (if present) and flash it, so
+// "Reveal in Explorer" lands the eye on the right entry.
+function scrollTreeToFn(fnId) {
+  requestAnimationFrame(() => {
+    const row = document.querySelector('#entity-list .entity-item[data-fn-id="' + fnId + '"]');
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.add('gd-tree-flash');
+    setTimeout(() => row.classList.remove('gd-tree-flash'), 1300);
+  });
+}
+
+// Reveal a fn in the Explorer tree: expand its namespace (and every ancestor
+// segment), load that namespace's leaves, re-render, then scroll to + flash the
+// row. Lets the ns popover answer "where does this live / find it in the editor".
+function revealFnInTree(fnId) {
+  const fn = lookups?.fnMap?.get(fnId);
+  const nsId = fn?.['namespace-id'];
+  const nsPath = (nsId && lookups?.nsPathMap) ? lookups.nsPathMap.get(nsId) : null;
+  if (nsPath) {
+    const segs = nsPath.split('.');
+    for (let i = 1; i <= segs.length; i++) expandedNamespaces.add(segs.slice(0, i).join('.'));
+  }
+  const finish = () => { updateEntityList(graphData); scrollTreeToFn(fnId); };
+  if (nsId && typeof loadNamespaceFns === 'function') {
+    loadNamespaceFns(nsId).then(finish).catch(finish);
+  } else {
+    finish();
+  }
+}
+
 function updateEntityList(data) {
   const list = document.getElementById('entity-list');
   list.innerHTML = '';

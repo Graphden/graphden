@@ -179,26 +179,34 @@ function showRowActionsPopover(anchorEl, build) {
     rowActionsPopoverAnchor.setAttribute('aria-expanded', 'false');
   }
   el.textContent = '';
-  build(el);
+  el.style.opacity = '0';
   rowActionsPopoverAnchor = anchorEl;
   anchorEl.setAttribute('aria-expanded', 'true');
-  // Fade-in: hide opacity through the position-measurement step
-  // (which flips display to inline-block to read offsetWidth) and
-  // then unfade in the next frame so the transition catches.
-  el.style.opacity = '0';
-  positionRowActionsPopover(el, anchorEl);
-  requestAnimationFrame(() => { el.style.opacity = '1'; });
   ensureRowActionsCyHandlers();
-  // Move focus into the popover when it opens via keyboard activation
-  // (Enter/Space on the trigger leaves focus on the trigger itself).
-  // Only auto-focus on sticky open — hover-show shouldn't grab focus
-  // from whatever the user was looking at.
-  if (rowActionsPopoverSticky) {
-    const first = el.querySelector('button, a[href], [tabindex]:not([tabindex="-1"])');
-    if (first) {
-      try { first.focus({ preventScroll: true }); } catch (_) { first.focus(); }
+  // The popover body is built ASYNCHRONOUSLY (a server partial on first open,
+  // then instant from cache). Keep the popover HIDDEN until it's populated,
+  // then position + fade in — otherwise the user sees the loadPartial "…"
+  // placeholder / an empty box flash before the menu ("intermediate dots").
+  // `build` returns the load promise; a cache hit resolves on the next
+  // microtask, so a warm popover still feels instant.
+  const reveal = () => {
+    if (rowActionsPopoverAnchor !== anchorEl) return; // hover moved on mid-load
+    // Position (flips display to inline-block to read offsetWidth) then unfade
+    // next frame so the transition catches.
+    positionRowActionsPopover(el, anchorEl);
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+    // Move focus into the popover on keyboard/sticky open (hover-show must not
+    // grab focus from whatever the user was looking at).
+    if (rowActionsPopoverSticky) {
+      const first = el.querySelector('button, a[href], [tabindex]:not([tabindex="-1"])');
+      if (first) {
+        try { first.focus({ preventScroll: true }); } catch (_) { first.focus(); }
+      }
     }
-  }
+  };
+  const built = build(el);
+  if (built && typeof built.then === 'function') built.then(reveal, reveal);
+  else reveal();
 }
 
 // Public — schedule a hide (debounced so the cursor can cross the
@@ -295,6 +303,17 @@ ensureRowActionsDismissHandler();
 // which both need the arg's `:type` / `:item-id` / etc. fields.
 const _rowActionsUseSiteArgs = new Map();
 
+// Cache of rendered row-actions partial HTML, keyed by the full partial URL
+// (which encodes fn-id + context + editable / owned / show-open). The popover
+// is a FIXED set of actions for a given fn+context, so re-fetching it on every
+// hover was pure waste — and it flashed loadPartial's "…" placeholder each
+// time. First hover fetches; every hover after is instant from here. The URL
+// key captures the auth-derived params (editable / owned), so a sign-in/out —
+// which re-renders the graph with new params — naturally keys to fresh entries.
+// Bounded FIFO so a long session can't grow it without bound.
+const _rowActionsHtmlCache = new Map();
+const _ROW_ACTIONS_CACHE_MAX = 300;
+
 
 function _bindDescriptionBadgeHover(host) {
   host.addEventListener('mouseenter', (e) => {
@@ -379,10 +398,27 @@ async function loadRowActionsContent(host, fnId, context, opts) {
                 ? '&edit-block-reason='
                   + encodeURIComponent(opts.editBlockReason)
                 : '');
+  // Cache hit → render synchronously, no fetch, no "…" flash. The add-MI
+  // disabled-state is recomputed against the CURRENT lookups (not cached), so a
+  // stale-graph case can't wrongly enable it.
+  const cached = _rowActionsHtmlCache.get(url);
+  if (cached != null) {
+    host.innerHTML = cached;
+    _applyAddMICompatibilityState(host);
+    if (typeof bindActionDispatch === 'function') bindActionDispatch(host);
+    return Promise.resolve();
+  }
   return loadPartial(host, url, {
     loadingClass: 'row-actions-loading',
+    // No visible loading text — the popover stays hidden until this resolves
+    // (see showRowActionsPopover), so an intermediate "…" would only ever flash.
+    loadingText: '',
     errorClass: 'row-actions-error',
     onSwap: (h) => {
+      _rowActionsHtmlCache.set(url, h.innerHTML);
+      if (_rowActionsHtmlCache.size > _ROW_ACTIONS_CACHE_MAX) {
+        _rowActionsHtmlCache.delete(_rowActionsHtmlCache.keys().next().value);
+      }
       _applyAddMICompatibilityState(h);
     }
   });

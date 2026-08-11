@@ -125,7 +125,7 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // in `:partial-row-actions :_partial-row-actions-col-header`.
   const buildColPopoverContent = (host) => {
     if (typeof loadRowActionsContent !== 'function') return;
-    loadRowActionsContent(host, colFn.fnId, 'col-header', {
+    return loadRowActionsContent(host, colFn.fnId, 'col-header', {
       showOpen: colShowOpen
     });
   };
@@ -235,7 +235,7 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     // reason check using `compatibleMIParentInfo` (client-cached).
     const buildCellPopoverContent = (host) => {
       if (typeof loadRowActionsContent !== 'function') return;
-      loadRowActionsContent(host, f.fnId, 'cell', {
+      return loadRowActionsContent(host, f.fnId, 'cell', {
         showOpen: !!miShowOpen,
         editable: !!miEditable && !!cardFnEntity,
         cardFnId: cardFnEntity ? cardFnEntity.id : null
@@ -399,14 +399,12 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     // safe — the dispatcher does a second `isAuthenticated()`
     // check inside `deleteUseSiteBinding` as a defence in depth.
     if (useSiteArg) {
-      if (typeof loadRowActionsContent === 'function') {
-        loadRowActionsContent(host, lineFn.fnId, 'use-site-arg', {
-          showOpen: !!lineShowOpen,
-          editable: true,
-          useSiteArg: useSiteArg
-        });
-      }
-      return;
+      if (typeof loadRowActionsContent !== 'function') return;
+      return loadRowActionsContent(host, lineFn.fnId, 'use-site-arg', {
+        showOpen: !!lineShowOpen,
+        editable: true,
+        useSiteArg: useSiteArg
+      });
     }
     // HTMX migration Phase A4: root-row context (▶⌛⚙✎+✕ plus the
     // shared ns/i/↗ head). Client computes the edit-gating strings
@@ -417,7 +415,7 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     // create-service guard uses.
     if (rootAffordancesVisible && lineFnEntity) {
       if (typeof loadRowActionsContent !== 'function') return;
-      loadRowActionsContent(host, lineFn.fnId, 'root-row', {
+      return loadRowActionsContent(host, lineFn.fnId, 'root-row', {
         showOpen: !!lineShowOpen,
         editable: !!lineEditable,
         editBlockReason: lineEditBlockReason,
@@ -427,7 +425,6 @@ function renderSingleFnRow(line, levelInfo, ctx) {
         owned: (typeof graphdenIsFnOwned === 'function')
           ? graphdenIsFnOwned(lineFnEntity) : true
       });
-      return;
     }
     // Parent-edit row (depth-1 of an editable card) — same toolbar
     // shape as the MI cell context (ns/i/↗ + × Remove-parent + +
@@ -438,19 +435,18 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     // (cardFnEntity, lineFn.fnId)` 1:1.
     if (parentEditAllowed && cardFnEntity) {
       if (typeof loadRowActionsContent !== 'function') return;
-      loadRowActionsContent(host, lineFn.fnId, 'cell', {
+      return loadRowActionsContent(host, lineFn.fnId, 'cell', {
         showOpen: !!lineShowOpen,
         editable: true,
         cardFnId: cardFnEntity.id
       });
-      return;
     }
     // Fall-through: read-only viewers + non-root, non-parent-edit
     // lines. ns/i/↗ shared head only — reuses the `col-header`
     // partial (functionally identical 3-button shape; the
     // `data-context` value is debug-only).
     if (typeof loadRowActionsContent === 'function') {
-      loadRowActionsContent(host, lineFn.fnId, 'col-header', {
+      return loadRowActionsContent(host, lineFn.fnId, 'col-header', {
         showOpen: !!lineShowOpen
       });
     }

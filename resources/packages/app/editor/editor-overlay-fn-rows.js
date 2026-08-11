@@ -420,7 +420,12 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       loadRowActionsContent(host, lineFn.fnId, 'root-row', {
         showOpen: !!lineShowOpen,
         editable: !!lineEditable,
-        editBlockReason: lineEditBlockReason
+        editBlockReason: lineEditBlockReason,
+        // Ownership (tenancy): Rename / Delete render only on a fn the principal
+        // OWNS. A public / other-org fn stays read-only (Run / Extend / view
+        // remain). Single-tenant + platform-tier → always owned (unchanged).
+        owned: (typeof graphdenIsFnOwned === 'function')
+          ? graphdenIsFnOwned(lineFnEntity) : true
       });
       return;
     }

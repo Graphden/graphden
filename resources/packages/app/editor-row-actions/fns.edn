@@ -57,6 +57,19 @@
    :parent :equal?
    :args {:a :_partial-row-actions-editable-str :b {:value "true"}}}
 
+  {:name :_partial-row-actions-owned-str
+   :description "Optional `owned` flag. Client passes `\"false\"` when the fn is NOT owned by the principal's data-scope org (a public / other-tier fn the principal may only read). Absent → owned (single-tenant, or a platform-tier principal). Gates the destructive Rename / Delete buttons — a read-only fn keeps Run / Extend / view."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "owned"}}}
+
+  {:name :_partial-row-actions-owned?
+   :description "True iff `owned` is absent OR not literally `\"false\"`. Default-on so single-tenant callers don't pass the flag."
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a :_partial-row-actions-owned-str
+                         :b {:value "false"}}}}}
+
   ;; --- Phase A3 query param ---
 
   {:name :_partial-row-actions-binding-id-str
@@ -524,6 +537,24 @@
           :then :_partial-row-actions-delete-button-disabled
           :else :_partial-row-actions-delete-button-enabled}}
 
+  ;; Ownership gate (tenancy): Rename ✎ and Delete ✕ are OWNERSHIP actions —
+  ;; they only make sense on a fn the principal owns. On a public / other-org
+  ;; fn (`owned=false`) they're omitted entirely (nil → stripped by the
+  ;; root-row `:filter :some?`), so the fn reads as read-only while Run ▶ /
+  ;; Extend ＋ / view remain. Extend is NOT gated here — extending a public fn
+  ;; creates a child in the caller's OWN org, which is always allowed.
+  {:name :_partial-row-actions-rename-button-or-owned-nil
+   :parent :if
+   :args {:test :_partial-row-actions-owned?
+          :then :_partial-row-actions-rename-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-delete-button-or-owned-nil
+   :parent :if
+   :args {:test :_partial-row-actions-owned?
+          :then :_partial-row-actions-delete-button
+          :else {:value nil}}}
+
   ;; ⌂ Set-as-app-handler (§3.4 4b self-serve deploy) — points the current
   ;; org at this fn. Always emitted; editor-row-actions.js hides it unless the
   ;; tenancy addon is active (body.gd-tenancy) and re-checks before POSTing.
@@ -548,9 +579,9 @@
                   :_partial-row-actions-run-button
                   :_partial-row-actions-history-button
                   :_partial-row-actions-service-button
-                  :_partial-row-actions-rename-button
+                  :_partial-row-actions-rename-button-or-owned-nil
                   :_partial-row-actions-extend-button
-                  :_partial-row-actions-delete-button
+                  :_partial-row-actions-delete-button-or-owned-nil
                   :_partial-row-actions-deploy-button]}}
 
   {:name :_partial-row-actions-root-row-children

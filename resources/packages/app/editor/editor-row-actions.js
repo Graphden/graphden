@@ -368,6 +368,7 @@ async function loadRowActionsContent(host, fnId, context, opts) {
             + '&context=' + encodeURIComponent(context)
             + (opts.showOpen === false ? '&show-open=false' : '')
             + (opts.editable ? '&editable=true' : '')
+            + (opts.owned === false ? '&owned=false' : '')
             + (opts.cardFnId
                 ? '&card-fn-id=' + encodeURIComponent(opts.cardFnId)
                 : '')
@@ -409,7 +410,11 @@ registerActionHandler('namespace-move', (btn, e) => {
   const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fn = lookups?.fnMap?.get(fnId);
   const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
-  const editable = typeof isFnEditable === 'function' && isFnEditable(fnId);
+  // Moving a fn to another namespace is an ownership edit — offer it only on a
+  // fn the principal both structurally can edit AND owns (tenancy). Reveal +
+  // the namespace path stay available on ANY fn (read-only locate).
+  const owned = (typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn);
+  const editable = (typeof isFnEditable === 'function' && isFnEditable(fnId)) && owned;
   const nsPath = (fn && lookups?.nsPathMap && fn['namespace-id'])
     ? (lookups.nsPathMap.get(fn['namespace-id']) || '(root)')
     : '(root)';

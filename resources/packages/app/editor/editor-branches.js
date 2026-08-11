@@ -77,8 +77,14 @@ function switchToBranch(name) {
 // and everything is allowed, so the editor is unchanged.
 const CAP_HEADER = 'X-Graphden-Capabilities';
 const WORKSPACE_HEADER = 'X-Graphden-Workspace';
+const ORG_HEADER = 'X-Graphden-Org';
 let graphdenCapabilities = null; // null = unknown → allow all
 let graphdenWorkspace = null;    // null = unknown / no workspace hint
+// The current principal's DATA-scope org id (from X-Graphden-Org). Used to tell
+// a fn the principal OWNS (its `:org-id` matches) from a public / other-tier fn
+// they may only read. null = single-tenant / unknown → ownership check is a
+// no-op (everything editable, as before).
+let graphdenCurrentOrg = null;
 function captureCapabilities(resp) {
   try {
     const cap = resp?.headers?.get(CAP_HEADER);
@@ -99,7 +105,29 @@ function captureCapabilities(resp) {
     if (ws !== null && ws !== undefined) {
       graphdenWorkspace = new Set(ws.split(',').map((s) => s.trim()).filter(Boolean));
     }
+    const org = resp?.headers?.get(ORG_HEADER);
+    if (org !== null && org !== undefined) {
+      graphdenCurrentOrg = org.trim() || null;
+    }
   } catch (_) { /* never break a fetch over a header read */ }
+}
+// Platform tier = the operator (platform-admin) or a platform-access delegate.
+// They edit the shared / public tier, so the per-fn ownership gate below is a
+// no-op for them (unchanged, unrestricted behaviour).
+function graphdenIsPlatformTier() {
+  return !!graphdenCapabilities
+    && (graphdenCapabilities.has('platform-admin') || graphdenCapabilities.has('platform-access'));
+}
+// Does the current principal OWN `fn` (may rename / delete it)? True in
+// single-tenant (no capability header seen), for platform-tier principals, or
+// when the fn's `:org-id` matches the principal's data-scope org. A public /
+// base fn (null / 'public' org) or another tier's fn → NOT owned → the editor
+// hides its destructive actions and shows it read-only.
+function graphdenIsFnOwned(fn) {
+  if (!graphdenCapabilities) return true;          // single-tenant → all mine
+  if (graphdenIsPlatformTier()) return true;       // operator / delegate
+  if (!graphdenCurrentOrg) return true;            // org unknown → fail-open (server still enforces)
+  return !!fn && fn['org-id'] === graphdenCurrentOrg;
 }
 function graphdenCanWrite() { return !graphdenCapabilities || graphdenCapabilities.has('write'); }
 function graphdenCanExecute() { return !graphdenCapabilities || graphdenCapabilities.has('execute'); }
@@ -192,6 +220,8 @@ window.graphdenInWorkspace = graphdenInWorkspace;
 window.graphdenTenancyActive = graphdenTenancyActive;
 window.graphdenHasCap = graphdenHasCap;
 window.graphdenIsOrgOwner = graphdenIsOrgOwner;
+window.graphdenIsFnOwned = graphdenIsFnOwned;
+window.graphdenIsPlatformTier = graphdenIsPlatformTier;
 
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);

@@ -23,15 +23,11 @@
   // Explorer expand tab) gates correctly before the first rail click.
   document.body.setAttribute('data-surface', 'build');
 
-  // Build / Review / Operate / Workspaces / Settings are all live —
-  // Build is the graph editor, Review opens the branch-diff modal, and the
-  // rest are real <section>s (see REAL_SURFACES). The placeholder overlay is
-  // only a defensive fallback for an unknown surface name.
+  // Build / Operate / Platform / Settings are the live surfaces (Review +
+  // Workspaces were retired — see the rail comments in fns.edn). Build is the
+  // graph editor; the rest are real <section>s (see REAL_SURFACES). The
+  // placeholder overlay is only a defensive fallback for an unknown name.
   function gdShellSurface(name, btn) {
-    // Review is an ACTION — it opens the branch-diff modal over the current
-    // surface (this branch vs main), not a persistent surface. Handle it before
-    // touching rail/surface state so Build stays underneath the modal.
-    if (name === 'review') { gdOpenReview(); return; }
     gdSetRailPressed(btn ? btn.getAttribute('data-surface') : name);
     gdHideAllSurfaces();
     // Record the active surface so surface-scoped chrome can gate on it — the
@@ -48,7 +44,7 @@
     if (realId) {
       const el = document.getElementById(realId);
       if (el) el.hidden = false;
-      const render = { operate: gdRenderOperate, platform: gdRenderPlatform, settings: gdRenderSettings, workspaces: gdRenderWorkspaces }[name];
+      const render = { operate: gdRenderOperate, platform: gdRenderPlatform, settings: gdRenderSettings }[name];
       if (typeof render === 'function') render();
       return;
     }
@@ -88,7 +84,6 @@
     operate: 'gd-operate',
     platform: 'gd-platform',
     settings: 'gd-settings',
-    workspaces: 'gd-workspaces',
   };
 
   function gdSetRailPressed(activeSurface) {
@@ -110,33 +105,9 @@
 
   window.gdShellSurface = gdShellSurface;
 
-  // Review surface = the branch-diff (this branch vs main). Reuses the existing
-  // showBranchDiff modal (editor-branch-diff.js). On main there's nothing to
-  // review, so guide the user to switch branches via the placeholder pane.
-  function gdOpenReview() {
-    const current = (typeof getCurrentBranchName === 'function')
-      ? getCurrentBranchName() : 'main';
-    const onMain = (typeof isOnDefaultBranch === 'function')
-      ? isOnDefaultBranch() : (current === 'main');
-    if (!onMain && typeof window.showBranchDiff === 'function') {
-      window.showBranchDiff('main', current);
-      return;
-    }
-    // On main (or diff unavailable): show the placeholder with a review hint.
-    gdHideAllSurfaces();
-    gdSetRailPressed('review');
-    const overlay = document.getElementById('gd-surface-overlay');
-    if (overlay) {
-      const t = overlay.querySelector('.gd-surface-title');
-      const s = overlay.querySelector('.gd-surface-sub');
-      if (t) t.textContent = 'Review';
-      if (s) {
-        s.textContent = 'You’re on main. Switch to a branch in the top bar to '
-          + 'review its changes against main as a graph diff.';
-      }
-      overlay.hidden = false;
-    }
-  }
+  // (Review surface retired: comparing a branch against main is the per-branch
+  // diff button in the branch switcher — `.branch-row-diff` → showBranchDiff in
+  // editor-branches.js — not a separate rail surface.)
 
   // Toggle the compact-cards mode, then re-lay-out so the graph reflows to the
   // new card heights (renderGraph re-measures the overlays).

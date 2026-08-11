@@ -5466,6 +5466,30 @@ body.gd-platform .gd-rail-btn.gd-platform-only { display: grid; }
   border: 0; border-radius: 7px; padding: 8px 14px; cursor: pointer;
 }
 .gd-op-card form button:hover, .gd-op-card .grant-create-btn:hover { filter: brightness(1.06); }
+/* Full-surface admin TABLES + per-row edit forms. The panels reuse the
+   `.grants-admin-table` class whose `width:100%` is scoped to the retired
+   `.sidebar-*` mounts, so on the wide surface the table shrank to content.
+   And a per-row edit form (a plan `select` + Apply in one cell) inherited the
+   wrapping `.gd-op-card form` layout and dropped Apply BELOW the select. Fix
+   both on the surface: full-width tables, and per-row cell forms stay on one
+   line (select then Apply, side by side). */
+#gd-operate-panels table,
+#gd-platform-panels table { width: 100%; }
+#gd-operate-panels table form,
+#gd-platform-panels table form {
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-top: 0;
+  align-items: center;
+}
+#gd-operate-panels table form select,
+#gd-operate-panels table form input,
+#gd-platform-panels table form select,
+#gd-platform-panels table form input {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: auto;
+}
 /* Consistent tokened selects across the Operate panels (tenancy Users/Orgs
    plan+role pickers, branch scopers, …) — they were raw browser controls. */
 #gd-operate-panels select,

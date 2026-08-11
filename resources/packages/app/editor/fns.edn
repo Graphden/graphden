@@ -165,12 +165,10 @@
               [:circle {:cx "6" :cy "6" :r "2.4"}] [:circle {:cx "18" :cy "6" :r "2.4"}]
               [:circle {:cx "12" :cy "18" :r "2.4"}] [:path {:d "M8 7l3 9M16 7l-3 9"}]]
              [:span {:class "gd-rail-cap"} "Build"]]
-            [:button {:type "button" :class "gd-rail-btn" :data-surface "review"
-                      :aria-pressed "false" :onclick "gdShellSurface('review', this)"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
-              [:circle {:cx "6" :cy "6" :r "2.4"}] [:circle {:cx "6" :cy "18" :r "2.4"}]
-              [:circle {:cx "18" :cy "9" :r "2.4"}] [:path {:d "M6 8.4v7M8.4 6H14a3 3 0 013 3"}]]
-             [:span {:class "gd-rail-cap"} "Review"]]
+            ;; (No Review surface: comparing branches is a MODE of the editor,
+            ;; not a separate screen. The per-branch diff already lives in the
+            ;; branch switcher — `.branch-row-diff` → showBranchDiff — which is
+            ;; where merge/compare belongs.)
             ;; "Organization" — your org: members / roles / grants (RBAC) +
             ;; its operational panels (packages / stats / errors / apps). The
             ;; internal surface id stays "operate" (mechanics + e2e unchanged);
@@ -193,12 +191,9 @@
               [:path {:d "M3 12h18M12 4c2.5 2.3 2.5 13.7 0 16M12 4c-2.5 2.3-2.5 13.7 0 16"}]]
              [:span {:class "gd-rail-cap"} "Platform"]]
             [:span {:class "gd-rail-spacer"}]
-            [:button {:type "button" :class "gd-rail-btn" :data-surface "workspaces"
-                      :aria-pressed "false" :onclick "gdShellSurface('workspaces', this)"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
-              [:rect {:x "3.5" :y "4.5" :width "17" :height "15" :rx "2"}]
-              [:path {:d "M3.5 9h17M8 4.5v4.5"}]]
-             [:span {:class "gd-rail-cap"} "Workspaces"]]
+            ;; (No Workspaces surface: a workspace is a scope switch, not a place
+            ;; you navigate to — the switcher is the ctxbar chip's popover
+            ;; (#gd-ws-chip → gdOpenWsPop). A full-page surface duplicated it.)
             [:button {:type "button" :class "gd-rail-btn" :data-surface "settings"
                       :aria-pressed "false" :onclick "gdShellSurface('settings', this)"}
              [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
@@ -425,13 +420,9 @@
             ;; → the execute popover; its run history is the inspector "Runs"
             ;; tab and its version timeline the "Versions" tab. A dedicated
             ;; surface only duplicated both.)
-            ;; WORKSPACES surface — spatial focus (namespace roots + pinned
-            ;; libraries) and the personal-branch overlay. gdRenderWorkspaces.
-            [:section {:id "gd-workspaces" :hidden "hidden" :aria-label "Workspaces"}
-             [:div {:class "gd-operate-head"}
-              [:h1 "Workspaces"]
-              [:p "Scope the editor to the namespaces you work in, pin shared libraries, and keep a private branch overlay to tinker without touching the team."]]
-             [:div {:id "gd-workspaces-body" :class "gd-workspaces-body"}]]]]}}
+            ;; (No Workspaces surface — the scope switcher is the ctxbar chip
+            ;; (#gd-ws-chip → gdOpenWsPop); a full-page surface duplicated it.)
+            ]]}}
 
   ;; =============================================================================
   ;; HASH-BUSTED ASSET URLs + LINK/SCRIPT-SRC ELEMENTS

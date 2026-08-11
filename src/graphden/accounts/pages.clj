@@ -90,6 +90,13 @@
        " 7.9-10.9C23.5 5.7 18.3.5 12 .5z'/></svg>"))
 
 
+(def ^:private telegram-mark
+  (str "<svg viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'><path d='M23.1 3.8"
+       " 19.6 20c-.26 1.16-.95 1.44-1.92.9l-5.32-3.92-2.57 2.47c-.28.28-.52.52-1.07.52l.38-5.42"
+       " 9.85-8.9c.43-.38-.09-.6-.67-.22L6.03 13.1 1.4 11.65c-1.15-.36-1.17-1.15.24-1.7L21.6"
+       " 2.2c.95-.35 1.79.22 1.5 1.6z'/></svg>"))
+
+
 (def ^:private google-mark
   (str "<svg viewBox='0 0 48 48' aria-hidden='true'>"
        "<path fill='#4285F4' d='M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z'/>"
@@ -108,15 +115,26 @@
            (when (contains? providers "google")
              (str "<a class='btn-social' href='/auth/google/start'>" google-mark "Continue with Google</a>"))
            "</div>"))
-    (when-let [bot (:bot-username telegram)]
-      ;; Center the Telegram-injected iframe (a flex column left-aligns an
-      ;; intrinsic-width iframe → the button "slid off") and pin `data-lang=en`
-      ;; so the label matches the rest of the page instead of the viewer locale.
-      (str "<div class='social' style='margin-top:10px;align-items:center'>"
-           "<script async src='https://telegram.org/js/telegram-widget.js?22'"
-           " data-telegram-login='" bot "' data-size='large' data-lang='en'"
-           " data-auth-url='/auth/telegram/callback' data-request-access='write'></script>"
-           "</div>"))))
+    ;; Telegram: instead of the official widget (an iframe with its own fixed
+    ;; blue button we can't restyle), load telegram-widget.js only for its
+    ;; `Telegram.Login.auth` fn and render OUR OWN `.btn-social` button so all
+    ;; three providers share one design. The auth callback returns the SAME
+    ;; signed fields the widget's redirect would, so we just forward them to the
+    ;; unchanged `/auth/telegram/callback` (server-side HMAC verify is identical).
+    ;; `Telegram.Login.auth` needs the NUMERIC bot id — the token's prefix.
+    (when-let [token (:bot-token telegram)]
+      (let [ci (String/.indexOf token ":")
+            bot-id (if (pos? ci) (subs token 0 ci) token)]
+        (str "<script async src='https://telegram.org/js/telegram-widget.js?22'></script>"
+             "<div class='social' style='margin-top:10px'>"
+             "<button type='button' class='btn-social' id='tg-login'>" telegram-mark
+             "Continue with Telegram</button></div>"
+             "<script>document.getElementById('tg-login').addEventListener('click',function(){"
+             "if(!window.Telegram||!window.Telegram.Login){return;}"
+             "window.Telegram.Login.auth({bot_id:'" bot-id "',request_access:'write'},function(u){"
+             "if(!u){return;}var q=Object.keys(u).map(function(k){"
+             "return encodeURIComponent(k)+'='+encodeURIComponent(u[k]);}).join('&');"
+             "window.location='/auth/telegram/callback?'+q;});});</script>")))))
 
 
 (defn login-page

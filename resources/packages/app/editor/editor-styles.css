@@ -4655,15 +4655,75 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    The wrapping `.row-actions-popover` (built JS-side) handles
    background / border / shadow; this rule covers only the inner
    layout + the loading / error placeholders during the swap-in. */
+/* Redesign 2026-08 (landing 2): the row-actions popover is a LABELED
+   vertical MENU, not a strip of cryptic glyphs. Each action keeps its glyph
+   but now shows its aria-label as a visible label — so "what does this do" is
+   answered at a glance instead of by hovering each icon in turn. All rules are
+   scoped INSIDE `.row-actions-content` (which exists only in the popover), so
+   the same `.action-icon` factory still renders as a compact square when it's
+   used inline on a card row. */
 .row-actions-content {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  min-width: 186px;
 }
+/* Each button/link becomes a full-width menu row: a fixed glyph lane, then the
+   label. Grid puts the element's own glyph text-node in column 1 and the
+   ::after label in column 2, so labels align regardless of glyph width. */
+.row-actions-content .action-icon,
+.row-actions-content .namespace-badge,
+.row-actions-content .description-badge,
+.row-actions-content .open-in-new-tab {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 9px;
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: left;
+  text-decoration: none;
+  color: var(--card-fg, currentColor);
+  cursor: pointer;
+}
+/* The visible label, from the aria-label already present on every button/link.
+   Only buttons/links get one — never the toolbar container (also aria-labelled). */
+.row-actions-content button[aria-label]::after,
+.row-actions-content a[aria-label]::after {
+  content: attr(aria-label);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-actions-content .action-icon:hover,
+.row-actions-content .namespace-badge:hover,
+.row-actions-content .description-badge:hover,
+.row-actions-content .open-in-new-tab:hover {
+  background: var(--hover-bg);
+  opacity: 1;
+}
+/* Destructive (Delete) reads as danger — red label carries the signal; the
+   hover bg stays the shared menu-hover so we don't invent a one-off colour. */
+.row-actions-content .action-icon-danger,
+.row-actions-content .action-icon-danger::after { color: var(--error-fg); }
+/* Disabled stays muted (the reason is in its title on hover). */
+.row-actions-content .action-icon-disabled { opacity: 0.5; cursor: help; }
+.row-actions-content .action-icon-disabled:hover { background: transparent; }
 .row-actions-loading,
 .row-actions-error {
-  font-size: 11px;
-  padding: 0 4px;
+  font-size: 12px;
+  padding: 6px 10px;
 }
 .action-icon {
   display: inline-flex;

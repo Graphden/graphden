@@ -145,8 +145,8 @@
           :attrs {:value {:type "button"
                           :class "namespace-badge action-icon"
                           :data-action "namespace-move"
-                          :title "Move to a different namespace"
-                          :aria-label "Move to a different namespace"}}
+                          :title "Namespace — reveal in Explorer / move"
+                          :aria-label "Namespace"}}
           :children [{:value "ns"}]}}
 
   {:name :_partial-row-actions-i-button
@@ -177,6 +177,7 @@
                   :args {:map {:value {:class "open-in-new-tab action-icon"
                                        :data-action "open"
                                        :target "_blank"
+                                       :aria-label "Open in new tab"
                                        :title "Open in new tab"}}
                          :key {:value :href}
                          :value :_partial-row-actions-open-href}}

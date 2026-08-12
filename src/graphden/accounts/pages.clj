@@ -14,7 +14,7 @@
 (def ^:private brand-css
   "
   :root{--ink:#0D1117;--panel:#161B22;--line:#2A3038;--text:#E6EDF3;
-        --muted:#9AA7B4;--blue:#0066CC;--blue-hi:#4D94FF;--danger:#E5534B;--radius:10px}
+        --muted:#9AA7B4;--accent:#137C74;--accent-hi:#37C9BB;--danger:#E5534B;--radius:10px}
   *{box-sizing:border-box}
   body{margin:0;background:var(--ink);color:var(--text);
        font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
@@ -29,15 +29,16 @@
   label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
   input[type=email],input[type=password],input[type=text]{width:100%;padding:10px 12px;
     background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px}
-  input:focus{outline:none;border-color:var(--blue-hi)}
+  input:focus{outline:none;border-color:var(--accent-hi)}
   button{cursor:pointer;font-size:15px;border-radius:8px;border:1px solid transparent}
-  .btn-primary{width:100%;margin-top:20px;padding:11px;background:var(--blue);color:#fff;font-weight:600}
-  .btn-primary:hover{background:#0a74e0}
+  .btn-primary{width:100%;margin-top:20px;padding:11px;background:var(--accent);color:#fff;font-weight:600}
+  .btn-primary:hover{filter:brightness(1.1)}
+  .brand svg{color:var(--accent-hi)}
   .social{display:flex;flex-direction:column;gap:10px;margin-top:16px}
   .btn-social{display:flex;align-items:center;justify-content:center;gap:10px;padding:11px;
     background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);
     text-decoration:none;font-weight:500;font-size:15px}
-  .btn-social:hover{border-color:var(--blue-hi)}
+  .btn-social:hover{border-color:var(--accent-hi)}
   .btn-social svg{width:18px;height:18px;flex:none}
   .divider{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;margin:20px 0}
   .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line)}
@@ -45,7 +46,7 @@
   .tabs button{flex:1;padding:8px;background:transparent;color:var(--muted)}
   .tabs button.on{background:var(--panel);color:var(--text);border:1px solid var(--line)}
   .msg{margin-top:14px;font-size:13px;min-height:18px}
-  .msg.err{color:var(--danger)} .msg.ok{color:var(--blue-hi)}
+  .msg.err{color:var(--danger)} .msg.ok{color:var(--accent-hi)}
   .row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
   .row:last-child{border-bottom:none}
   .row .prov{font-weight:600;text-transform:capitalize}
@@ -55,16 +56,21 @@
   .sec{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
   .sec h2{font-size:14px;margin:0 0 10px}
   code.secret{display:block;background:var(--ink);border:1px solid var(--line);border-radius:8px;
-    padding:10px;margin:10px 0;word-break:break-all;font-size:13px;color:var(--blue-hi)}
-  a{color:var(--blue-hi)}")
+    padding:10px;margin:10px 0;word-break:break-all;font-size:13px;color:var(--accent-hi)}
+  a{color:var(--accent-hi)}")
 
 
 (def ^:private lambda-svg
-  "The Graphden λ mark on the brand-blue disc."
-  (str "<svg viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg'>"
-       "<circle cx='16' cy='16' r='16' fill='#0066CC'/>"
-       "<text x='16' y='22' font-size='18' text-anchor='middle' fill='#fff'"
-       " font-family='Georgia,serif'>&#955;</text></svg>"))
+  "The Graphden graph-λ mark — the SAME mark as the editor rail brand (two
+   strokes forming λ + three node discs), teal via `.brand svg{color}` +
+   currentColor. Replaces the old serif-λ-on-blue-disc so the auth surface
+   reads as the same product as the editor."
+  (str "<svg viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'>"
+       "<g stroke='currentColor' stroke-width='3' stroke-linecap='round'>"
+       "<line x1='9' y1='6' x2='25' y2='26'/><line x1='17' y1='16' x2='8' y2='26'/></g>"
+       "<g fill='currentColor'>"
+       "<circle cx='9' cy='6' r='3'/><circle cx='25' cy='26' r='3'/><circle cx='8' cy='26' r='3'/></g>"
+       "</svg>"))
 
 
 (defn- page
@@ -233,7 +239,7 @@
       "document.getElementById('who').textContent=j.account.email||'(email not verified yet)';"
       ;; primary-email is null until a verification link is clicked — offer a resend.
       "if(!j.account.email){document.getElementById('verify-banner').innerHTML="
-      "`<div class='sec' style='border-color:var(--blue-hi)'><h2>Verify your email</h2>`+"
+      "`<div class='sec' style='border-color:var(--accent-hi)'><h2>Verify your email</h2>`+"
       "`<p class='sub'>Check your inbox for the link. Didn't get it?</p>`+"
       "`<button class='btn-primary' onclick='resendVerify()'>Resend verification email</button></div>`;}}"
       "async function resendVerify(){await post('/auth/resend-verification');say('If your email is unverified, a new link is on its way.',true);}"

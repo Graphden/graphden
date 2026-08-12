@@ -387,7 +387,7 @@
             [:section {:id "gd-settings" :hidden "hidden" :aria-label "Settings"}
              [:div {:class "gd-operate-head"}
               [:h1 "Settings"]
-              [:p "Your editor — appearance, account, and what this build is. Team access (grants, users, roles) lives in Operate."]]
+              [:p "Your editor — appearance, account, and what this build is. Team access (grants, users, roles) lives in Organization."]]
              [:div {:class "gd-settings-grid"}
               [:div {:class "gd-set-card"}
                [:h2 "Appearance"]
@@ -414,7 +414,7 @@
                [:button {:id "gd-set-reload" :type "button" :class "gd-set-btn"} "Reload editor"]]
               [:div {:class "gd-set-card"}
                [:h2 "Access"]
-               [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Operate surface."]
+               [:p {:class "gd-set-hint"} "Who may touch what is enforced by the server. Under a tenancy addon your granted capabilities show below; the admin controls (grants, users, roles, orgs) live in the Organization surface."]
                [:div {:id "gd-set-caps" :class "gd-set-caps"}]]]]
             ;; (No Run surface: running a fn is the ▶ action on its node/card
             ;; → the execute popover; its run history is the inspector "Runs"

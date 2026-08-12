@@ -4966,6 +4966,25 @@ body:not(.gd-tenancy) .action-deploy { display: none; }
 #gd-ctxbar #branch-mount,
 #gd-ctxbar #org-mount,
 #gd-ctxbar #auth-mount { display: flex; align-items: center; gap: 6px; }
+/* Narrow / phone: the context bar's chips (workspace + branch + org) don't fit
+   a phone width and DISTENDED the whole page (horizontal scroll). Hide the
+   workspace-scope chip (a desktop power feature), drop the uppercase labels,
+   and let the branch/org mounts shrink + truncate — the bar, and the page,
+   never overflow. The account chip always stays reachable. */
+@media (max-width: 640px) {
+  #gd-ctxbar { gap: 6px; padding: 0 8px; min-width: 0; }
+  #gd-ctxbar #gd-ws-chip { display: none; }
+  #gd-ctxbar .gd-ctx-k { display: none; }
+  #gd-ctxbar #branch-mount,
+  #gd-ctxbar #org-mount { min-width: 0; }
+  #gd-ctxbar #branch-mount > *,
+  #gd-ctxbar #org-mount > * {
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 /* Contextual chrome is a function of the SURFACE, not the shell: the workspace
    scope + branch chip belong to Build (you author graph IN a branch/scope). On
    Organization / Platform / Settings they're meaningless — a branch has no

@@ -139,6 +139,22 @@ async function loadAllServiceFnIds() {
 }
 
 
+// fn-id → service row index, rebuilt only when `servicesCache` changes
+// (identity-keyed). getServiceForFnId is called ~3× per sidebar row on every
+// tree render, so a linear `.find` per call is O(rows × services) — at scale
+// (a cloud org with hundreds of services) that dominates. The Map makes each
+// lookup O(1). Built lazily so it costs nothing until the first classify.
+let _svcByFnId = null;
+let _svcMapSrc = null;
+function serviceIndex() {
+  if (_svcMapSrc !== servicesCache) {
+    _svcByFnId = new Map();
+    for (const s of (servicesCache?.services || [])) _svcByFnId.set(s['fn-id'], s);
+    _svcMapSrc = servicesCache;
+  }
+  return _svcByFnId;
+}
+
 // Synchronous read of the cached service for `fnId` — used by the
 // fn-card badge renderer. Returns the service row + running state,
 // or null when no entry exists. Does NOT trigger a fetch (badge
@@ -146,7 +162,7 @@ async function loadAllServiceFnIds() {
 // primed via loadServicesEager() at editor startup.
 function getServiceForFnId(fnId) {
   if (!servicesCache?.services) return null;
-  return servicesCache.services.find((s) => s['fn-id'] === fnId) || null;
+  return serviceIndex().get(fnId) || null;
 }
 
 
@@ -155,7 +171,7 @@ function getServiceForFnId(fnId) {
 // (the chip shows no number rather than a lying 0).
 function getAllServiceFnIdCount() {
   if (!servicesCache?.services) return null;
-  return new Set(servicesCache.services.map((s) => s['fn-id'])).size;
+  return serviceIndex().size;
 }
 
 

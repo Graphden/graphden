@@ -53,11 +53,31 @@ async function refreshAppRoutesCache() {
   return appRoutesCache;
 }
 
+// fn-id → app-route rows, rebuilt only when `appRoutesCache` changes
+// (identity-keyed). Like the service index, getAppRoutesForFnId runs ~3× per
+// sidebar row per render; a `.filter` per call (which also allocates) is
+// O(rows × app-routes). The Map makes it O(1). Built lazily.
+let _appRoutesByFnId = null;
+let _appRoutesMapSrc = null;
+function appRouteIndex() {
+  if (_appRoutesMapSrc !== appRoutesCache) {
+    _appRoutesByFnId = new Map();
+    for (const a of (Array.isArray(appRoutesCache) ? appRoutesCache : [])) {
+      const k = a['handler-fn-id'];
+      let arr = _appRoutesByFnId.get(k);
+      if (!arr) { arr = []; _appRoutesByFnId.set(k, arr); }
+      arr.push(a);
+    }
+    _appRoutesMapSrc = appRoutesCache;
+  }
+  return _appRoutesByFnId;
+}
+
 // Synchronous: every :app-route served by `fnId` (usually 0 or 1; a fn CAN
 // back several labels). [] while unprimed / not tenancy.
 function getAppRoutesForFnId(fnId) {
   if (!Array.isArray(appRoutesCache)) return [];
-  return appRoutesCache.filter((a) => a['handler-fn-id'] === fnId);
+  return appRouteIndex().get(fnId) || [];
 }
 
 // Synchronous count of app routes — the sidebar apps lens-chip count. null

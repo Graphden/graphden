@@ -420,21 +420,30 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   padding: 1px 6px; font: inherit; font-size: 11px;
   color: var(--muted-fg); cursor: pointer;
 }
-.kind-toggle:hover { background: var(--hover-bg); color: var(--fg); }
+/* Hover = a faint neutral wash, deliberately DIFFERENT from the active
+   accent below so a hovered inactive chip is never mistaken for the applied
+   lens. Inactive hovered chips only lift their text to full-strength. */
+.kind-toggle:hover:not([aria-pressed="true"]) {
+  background: var(--hover-bg); color: var(--fg); border-color: transparent;
+}
 .kind-toggle[hidden] { display: none; }
 .kind-glyph {
   display: inline-flex; font-size: 11px; line-height: 1;
   user-select: none;
 }
 .kind-label { user-select: none; }
-.kind-count { font-size: 10px; opacity: 0.75; user-select: none; }
+.kind-count { font-size: 10px; opacity: 0.85; user-select: none; }
 .kind-count:empty { display: none; }
-/* Active chip — this kind is in the lens (or "All" with an empty lens). */
+/* Active chip — this kind IS the applied lens (or "All" with an empty lens).
+   A distinct ACCENT treatment (accent text + border + tint + weight) so the
+   applied lens is unmistakable at a glance, and never collides with :hover. */
 .kind-toggle[aria-pressed="true"] {
-  color: var(--fg);
-  border-color: var(--input-border);
-  background: var(--hover-bg);
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--selected-bg);
+  font-weight: 600;
 }
+.kind-toggle[aria-pressed="true"]:hover { filter: brightness(0.98); }
 /* "+ New secret" — trailing button in the filter bar. Auth-gated: the
    `hidden` attr (set by syncKindFilterBar) must beat the flex display. */
 .kind-add {
@@ -5269,7 +5278,16 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
   font-weight: 600;
 }
 .gd-chip-ref { background: var(--gd-ref-wash); color: var(--gd-flow-ink); }
-.gd-chip-type { background: var(--gd-lit-wash); color: var(--gd-ink-2); }
+/* The Returns type chip holds a whole (possibly long, shaped) type signature —
+   every HTTP handler/router return type wraps to several lines. Let it grow in
+   normal flow instead of the base chip's fixed 20px height, so it never spills
+   onto the Effects row below. Returns-only (no other `.gd-chip-type` use). */
+.gd-chip-type {
+  background: var(--gd-lit-wash); color: var(--gd-ink-2);
+  height: auto; min-height: 20px; align-items: flex-start;
+  padding: 3px 8px; line-height: 1.5; max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere;
+}
 .gd-insp-pure { font-size: 12px; font-style: italic; color: var(--gd-ink-3); }
 .gd-insp-runs-head {
   margin: 16px 0 8px;

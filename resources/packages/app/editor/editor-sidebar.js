@@ -221,6 +221,13 @@ function nodeShouldShow(node, searchMode) {
     if (nodeShouldShow(child, searchMode)) return true;
   }
   if (nodeHasActiveCreate(node)) return true;
+  // Under an ACTIVE lens (focus on specific kinds), do NOT optimistically show
+  // an unloaded/empty namespace. That rule exists so a just-created / not-yet-
+  // fetched namespace stays visible in the normal (All) view — but under a
+  // "services"/"secrets" focus it floods the tree with namespaces that hold
+  // none of the focused kind, which then vanish the moment you expand them.
+  // Focus should read as a crisp match list; keep the fallback only for All.
+  if (lensKinds.size > 0) return false;
   // Genuinely empty (nothing loaded here) → keep visible: this covers both
   // a just-created empty namespace AND a collapsed namespace whose leaves
   // haven't been lazily fetched yet (they load on expand).
@@ -676,6 +683,10 @@ function renderRootNode(list, rootFns, searchMode) {
   // when it holds anything (loaded-visible, or count says so while unloaded).
   if (searchMode) { if (visible.length === 0) return; }
   else if (visible.length === 0 && !(rootCount > 0 && !loaded)) return;
+  // The primitives bucket is ALL type-rows — under an active lens that excludes
+  // `types` it holds no match, so hide it instead of an unopenable "(primitives)
+  // N" (mirrors the namespace focus-prune above). A `types`/All lens keeps it.
+  else if (visible.length === 0 && lensKinds.size > 0 && !lensKinds.has('types')) return;
 
   const groupPath = '__root__';
   const isOpen = searchMode || expandedNamespaces.has(groupPath);

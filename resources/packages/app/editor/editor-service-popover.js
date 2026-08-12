@@ -150,6 +150,15 @@ function getServiceForFnId(fnId) {
 }
 
 
+// Synchronous count of DISTINCT fns covered by a :service row — the
+// sidebar services lens-chip count. null while the cache is unprimed
+// (the chip shows no number rather than a lying 0).
+function getAllServiceFnIdCount() {
+  if (!servicesCache?.services) return null;
+  return new Set(servicesCache.services.map((s) => s['fn-id'])).size;
+}
+
+
 // Render-state classifier used by the badge. Returns one of:
 //   'running'  — stopper-set + no give-up
 //   'failed'   — start-failed-at recorded

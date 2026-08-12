@@ -404,34 +404,36 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 #search-bar { display: flex; padding: 6px 8px;
   border-bottom: 1px solid var(--light-border); gap: 4px;
   flex-wrap: wrap; }
-/* Entity-kind visibility toggles (fn / types / secrets / services) — each
-   an eye that dims + gets a slash when its kind is hidden. Button state is
-   synced from localStorage by syncKindFilterBar (aria-pressed). */
+/* The LENS — kind chips with focus semantics ("show only this kind").
+   aria-pressed=true = in the lens ("All" is pressed when the lens is
+   empty); synced from localStorage by syncKindFilterBar. The services /
+   apps chips carry a count; the apps chip is hidden (JS) when the
+   deployment has no app routing. */
 #kind-filters {
   flex: 1 1 100%;
   display: flex; flex-wrap: wrap; align-items: center;
-  gap: 2px 8px; padding: 2px 0;
+  gap: 2px 4px; padding: 2px 0;
 }
 .kind-toggle {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: transparent; border: 0; border-radius: 3px;
-  padding: 1px 3px; font: inherit; font-size: 11px;
-  color: var(--fg); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 3px;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  padding: 1px 6px; font: inherit; font-size: 11px;
+  color: var(--muted-fg); cursor: pointer;
 }
-.kind-toggle:hover { background: var(--hover-bg); }
-.kind-eye {
-  position: relative; display: inline-flex;
-  width: 14px; height: 14px; color: var(--fg);
+.kind-toggle:hover { background: var(--hover-bg); color: var(--fg); }
+.kind-toggle[hidden] { display: none; }
+.kind-glyph {
+  display: inline-flex; font-size: 11px; line-height: 1;
+  user-select: none;
 }
-.kind-eye svg { width: 14px; height: 14px; display: block; }
 .kind-label { user-select: none; }
-/* Hidden kind: dim the whole toggle + strike the eye with a slash. */
-.kind-toggle[aria-pressed="false"] { color: var(--muted-fg); }
-.kind-toggle[aria-pressed="false"] .kind-eye { color: var(--muted-fg); }
-.kind-toggle[aria-pressed="false"] .kind-eye::after {
-  content: ""; position: absolute; left: -1px; top: 6px;
-  width: 16px; height: 1.5px; background: currentColor;
-  transform: rotate(-45deg); transform-origin: center;
+.kind-count { font-size: 10px; opacity: 0.75; user-select: none; }
+.kind-count:empty { display: none; }
+/* Active chip — this kind is in the lens (or "All" with an empty lens). */
+.kind-toggle[aria-pressed="true"] {
+  color: var(--fg);
+  border-color: var(--input-border);
+  background: var(--hover-bg);
 }
 /* "+ New secret" — trailing button in the filter bar. Auth-gated: the
    `hidden` attr (set by syncKindFilterBar) must beat the flex display. */
@@ -1560,7 +1562,6 @@ body.gd-no-write #create-root-ns-btn,
 body.gd-no-write .ns-edit-btn,
 body.gd-no-write .ns-plus-btn,
 body.gd-no-write .ns-delete-btn,
-body.gd-no-write .action-deploy,
 body.gd-no-write .fn-versions-restore,
 body.gd-no-write .branch-popover-create,
 body.gd-no-write .branch-section-add,
@@ -4502,6 +4503,21 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-right: 2px;
   flex: 0 0 auto;
 }
+/* Tree-row kind markers — the same glyphs as the lens chips, so a mixed
+   (All-lens) tree reads at a glance. Service markers reuse the badge's
+   state palette (running/failed/disabled/pending). */
+.fn-kind-marker {
+  font-size: 10px;
+  margin-right: 2px;
+  flex: 0 0 auto;
+  color: var(--muted-fg);
+  user-select: none;
+}
+.kind-marker-service.svc-running  { color: var(--success-fg); }
+.kind-marker-service.svc-failed   { color: var(--error-fg); }
+.kind-marker-service.svc-disabled { color: var(--muted-fg); opacity: 0.65; }
+.kind-marker-app { color: var(--accent); }
+.kind-marker-type { font-size: 9px; opacity: 0.8; }
 
 .secrets-popover {
   position: absolute;
@@ -4838,11 +4854,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-grants-admin .grant-input,
 .sidebar-users-admin .grant-input { font-size: 11px; padding: 2px 4px; }
 .sidebar-grants-admin .grant-create-btn { font-size: 11px; padding: 2px 6px; cursor: pointer; align-self: flex-start; }
-
-/* Set-as-app-handler (⌂) row-action — FaaS self-serve deploy (§3.4 4b).
-   Hidden unless the tenancy addon is active (gd-tenancy set once a capability
-   header arrives), so single-tenant editors never show it. */
-body:not(.gd-tenancy) .action-deploy { display: none; }
 
 /* ============================================================================
  * REDESIGN 2026-08 — SHELL LAYOUT (rail + explorer | canvas | inspector).

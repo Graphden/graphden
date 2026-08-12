@@ -559,29 +559,6 @@ registerActionHandler('add-mi-parent', (btn, e, host) => {
 });
 
 
-registerActionHandler('set-app-handler', (btn, e, host) => {
-  // §3.4 4b self-serve deploy: point the current org at this fn as its app
-  // handler. Belt-and-suspenders gate (the button is also CSS-hidden unless
-  // body.gd-tenancy): only act when the tenancy addon is active + signed in.
-  if (e) { e.preventDefault(); e.stopPropagation(); }
-  if (!(typeof window.graphdenTenancyActive === 'function' && window.graphdenTenancyActive())) return;
-  if (typeof isAuthenticated === 'function' && !isAuthenticated()) return;
-  const fnId = btn.dataset.fnId
-              || btn.closest('[data-fn-id]')?.dataset.fnId
-              || host?.dataset.fnId;
-  if (!fnId) return;
-  if (!window.confirm("Set this function as your org's app handler?")) return;
-  const body = new URLSearchParams({ 'fn-id': fnId }).toString();
-  // Addon route — registered in window.API by the tenancy-admin addon at boot
-  // (this action is addon-gated above), so address by key, not a hardcoded path.
-  authFetch(API.api_my_app_handler, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-});
-
-
 registerActionHandler('remove-use-site-binding', (btn, e, host) => {
   // Look up the rich `useSiteArg` via the binding-id-keyed
   // registry the caller populated pre-fetch. The arg carries

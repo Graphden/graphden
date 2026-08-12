@@ -518,12 +518,30 @@
              (p/shell "npx" "commitlint" "--from" from "--to" to)))}
 
   visual
-  {:doc "Run Playwright visual-regression tests against running editor (default http://localhost:9002). Reads AUTH_TOKEN from env or .env. Use `bb visual-update` after intentional UI changes."
-   :task (p/shell {:dir "tools/visual-tests"} "npx" "playwright" "test")}
+  {:doc "Run Playwright visual-regression tests against running editor (default http://localhost:9002). Baselines are AUTHED (the editor is login-gated now — signed-out renders no graph at all), so the task sources AUTH_TOKEN from the env or .env and fails fast without one. Use `bb visual-update` after intentional UI changes."
+   :task (let [token (or (System/getenv "AUTH_TOKEN")
+                         (some->> (try (slurp ".env") (catch Exception _ nil))
+                                  clojure.string/split-lines
+                                  (some (fn [line]
+                                          (second (re-matches (re-pattern "AUTH_TOKEN=(.+)") line))))))]
+           (when-not token
+             (throw (ex-info "bb visual needs AUTH_TOKEN (env or .env) — the editor is login-gated and signed-out baselines render no graph" {})))
+           (p/shell {:dir "tools/visual-tests"
+                     :extra-env {"AUTH_TOKEN" token}}
+                    "npx" "playwright" "test"))}
 
   visual-update
-  {:doc "Refresh visual-regression baselines (commit the updated PNGs after intentional UI changes)"
-   :task (p/shell {:dir "tools/visual-tests"} "npx" "playwright" "test" "--update-snapshots")}
+  {:doc "Refresh visual-regression baselines (commit the updated PNGs after intentional UI changes). Same authed contract as `bb visual`."
+   :task (let [token (or (System/getenv "AUTH_TOKEN")
+                         (some->> (try (slurp ".env") (catch Exception _ nil))
+                                  clojure.string/split-lines
+                                  (some (fn [line]
+                                          (second (re-matches (re-pattern "AUTH_TOKEN=(.+)") line))))))]
+           (when-not token
+             (throw (ex-info "bb visual-update needs AUTH_TOKEN (env or .env) — the editor is login-gated and signed-out baselines render no graph" {})))
+           (p/shell {:dir "tools/visual-tests"
+                     :extra-env {"AUTH_TOKEN" token}}
+                    "npx" "playwright" "test" "--update-snapshots"))}
 
   ;; NOTE: Eastwood removed - incompatible with Clojure 1.12 qualified methods (Class/.method)
   ;; See: https://github.com/jonase/eastwood/issues/457

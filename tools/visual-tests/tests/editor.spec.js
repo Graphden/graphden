@@ -295,15 +295,17 @@ test.describe('Editor — visual baselines', () => {
   // inset:0 with lots of empty ground otherwise). (The Run surface was
   // removed — running is the ▶ node action + the inspector Runs tab.)
 
-  test('workspaces surface — scope focus, pins, personal overlay', async ({ page }) => {
+  // The workspaces SURFACE was folded into the context-bar chip during the
+  // redesign — the scope list (All functions + namespace roots + pins) lives
+  // in the #gd-ws-pop popover the chip opens.
+  test('workspaces popover — scope roots + pins', async ({ page }) => {
     await page.goto('/#web-server');
     await waitForGraphRendered(page);
     await setTheme(page, 'light');
-    await page.locator('#gd-rail .gd-rail-btn[data-surface="workspaces"]').click();
-    // Scope card lists the namespace roots; wait for them to render.
-    await page.waitForSelector('#gd-workspaces-body .gd-ws-nsbtn',
+    await domClick(page.locator('#gd-ws-chip'));
+    await page.waitForSelector('#gd-ws-pop .gd-pop-item',
                               { state: 'visible', timeout: 10000 });
     await page.evaluate(() => new Promise(requestAnimationFrame));
-    await expect(page.locator('.gd-ws-grid')).toHaveScreenshot('05-workspaces-surface.png');
+    await expect(page.locator('#gd-ws-pop')).toHaveScreenshot('05-workspaces-popover.png');
   });
 });

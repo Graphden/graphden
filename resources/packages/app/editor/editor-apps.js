@@ -17,7 +17,62 @@
 // (editor-sidebar.js mountAdminSection) runs htmx.process after appending, so
 // the hx-get on a CONNECTED node fires.
 //
-// Globals consumed: isAuthenticated, window.API, htmx.
+// Globals consumed: isAuthenticated, window.API, htmx, authFetch.
+
+// === App-routes cache =======================================================
+// The org's :app-route rows (GET /api/orgs/apps), cached for the SYNC reads
+// the sidebar tree makes hot: the ▣ kind-marker + host tooltip on a handler
+// fn's row, the apps lens filter, and the apps chip count. Mirrors
+// servicesCache (editor-service-popover.js) — primed once per graph load via
+// primeAppsCacheOnce (editor-sidebar.js), refreshed on demand.
+let appRoutesCache = null;
+
+async function refreshAppRoutesCache() {
+  // Address the route by its window.API key ONLY — the boot-time URL-drift
+  // guard scans editor JS for /api/* literals against the LIVE router, and
+  // this addon-only route doesn't exist on a single-tenant instance.
+  const listUrl = window.API?.api_orgs_apps;
+  if (!listUrl) { appRoutesCache = []; return appRoutesCache; }
+  try {
+    const r = await authFetch(listUrl, { method: 'GET' });
+    if (!r.ok) {
+      if (r.status !== 401) {
+        // eslint-disable-next-line no-console
+        console.error(listUrl + ' HTTP', r.status, r.statusText);
+      }
+      appRoutesCache = [];
+      return appRoutesCache;
+    }
+    const body = await r.json();
+    appRoutesCache = Array.isArray(body) ? body : [];
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(listUrl + ' fetch threw', err);
+    appRoutesCache = [];
+  }
+  return appRoutesCache;
+}
+
+// Synchronous: every :app-route served by `fnId` (usually 0 or 1; a fn CAN
+// back several labels). [] while unprimed / not tenancy.
+function getAppRoutesForFnId(fnId) {
+  if (!Array.isArray(appRoutesCache)) return [];
+  return appRoutesCache.filter((a) => a['handler-fn-id'] === fnId);
+}
+
+// Synchronous count of app routes — the sidebar apps lens-chip count. null
+// while unprimed (no number on the chip rather than a lying 0).
+function getAppRouteCount() {
+  return Array.isArray(appRoutesCache) ? appRoutesCache.length : null;
+}
+
+// The app label an :app-route serves under (the `<label>.<apps-domain>`
+// subdomain). The apps-domain isn't exposed client-side, so the marker
+// tooltip shows the bare label — unambiguous, and the Apps panel renders
+// the full public host.
+function appRouteHost(route) {
+  return route?.label || null;
+}
 
 function buildAppsSection() {
   if (!isAuthenticated()) return null;

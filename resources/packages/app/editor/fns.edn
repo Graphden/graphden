@@ -249,56 +249,51 @@
                        :aria-label "Filter functions"
                        :oninput "onSearchInput(this.value)"}]
               [:button {:id "search-clear" :onclick "clearSearch()" :aria-label "Clear filter"} "\u00D7"]
-              ;; Entity-kind visibility toggles. Each is an eye that dims +
-              ;; gets a slash when its kind is hidden; state persists in
-              ;; localStorage and is synced onto these buttons at load
-              ;; (syncKindFilterBar in editor-sidebar.js). The trailing
-              ;; `+` opens the New-secret form (shown only when authed).
-              ;; NOTE: this is EDN (literal hiccup), so no let/fn — the
-              ;; four eye buttons are spelled out; the SVG eye is shared
-              ;; by class .kind-eye (slashed via CSS on aria-pressed=false).
+              ;; The LENS — kind chips with FOCUS semantics ("show only this
+              ;; kind"), replacing the old hide-semantics eyes. "All" (empty
+              ;; lens) shows everything with per-row kind markers; clicking a
+              ;; kind chip focuses the tree on that kind (structure/expansion
+              ;; kept, client-side filter, no reload); a further chip adds to
+              ;; the selection; re-clicking (or "All") returns. State persists
+              ;; in localStorage; syncKindFilterBar (editor-sidebar.js) syncs
+              ;; aria-pressed, fills the services/apps counts and hides the
+              ;; apps chip when the deployment has no app routing. The
+              ;; trailing `+` opens the New-secret form (authed only).
               [:div {:id "kind-filters" :role "group"
-                     :aria-label "Show or hide entity kinds"}
+                     :aria-label "Focus the tree on an entity kind"}
+               [:button {:type "button" :class "kind-toggle kind-all" :data-kind "all"
+                         :aria-pressed "true" :onclick "toggleKind('all')"
+                         :title "Show everything"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "◍"]
+                [:span {:class "kind-label"} "all"]]
                [:button {:type "button" :class "kind-toggle" :data-kind "fn"
-                         :aria-pressed "true" :onclick "toggleKind('fn', this)"
-                         :title "Show / hide fn"}
-                [:span {:class "kind-eye" :aria-hidden "true"}
-                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
-                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
-                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
-                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
-                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                         :aria-pressed "false" :onclick "toggleKind('fn')"
+                         :title "Only functions"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "λ"]
                 [:span {:class "kind-label"} "fn"]]
                [:button {:type "button" :class "kind-toggle" :data-kind "types"
-                         :aria-pressed "true" :onclick "toggleKind('types', this)"
-                         :title "Show / hide types"}
-                [:span {:class "kind-eye" :aria-hidden "true"}
-                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
-                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
-                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
-                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
-                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                         :aria-pressed "false" :onclick "toggleKind('types')"
+                         :title "Only types"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "T"]
                 [:span {:class "kind-label"} "types"]]
                [:button {:type "button" :class "kind-toggle" :data-kind "secrets"
-                         :aria-pressed "true" :onclick "toggleKind('secrets', this)"
-                         :title "Show / hide secrets"}
-                [:span {:class "kind-eye" :aria-hidden "true"}
-                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
-                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
-                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
-                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
-                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                         :aria-pressed "false" :onclick "toggleKind('secrets')"
+                         :title "Only secrets"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "🔒"]
                 [:span {:class "kind-label"} "secrets"]]
                [:button {:type "button" :class "kind-toggle" :data-kind "services"
-                         :aria-pressed "true" :onclick "toggleKind('services', this)"
-                         :title "Show / hide services"}
-                [:span {:class "kind-eye" :aria-hidden "true"}
-                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
-                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
-                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
-                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
-                            :stroke "currentColor" :stroke-width "1.2"}]]]
-                [:span {:class "kind-label"} "services"]]
+                         :aria-pressed "false" :onclick "toggleKind('services')"
+                         :title "Only services (daemons kept running)"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "⚙"]
+                [:span {:class "kind-label"} "services"]
+                [:span {:class "kind-count" :aria-hidden "true"}]]
+               [:button {:type "button" :class "kind-toggle" :data-kind "apps"
+                         :aria-pressed "false" :onclick "toggleKind('apps')"
+                         :hidden "hidden"
+                         :title "Only apps (fns served at a public host)"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "▣"]
+                [:span {:class "kind-label"} "apps"]
+                [:span {:class "kind-count" :aria-hidden "true"}]]
                [:button {:id "secret-add-btn" :type "button" :class "kind-add"
                          :hidden "hidden" :title "New secret"
                          :aria-label "New secret"

@@ -119,32 +119,54 @@ function mountAdminSection(pane, nav, key, build) {
 // its namespace). State persists in localStorage.
 const TYPE_ROLES = new Set(['refinement', 'list', 'union', 'variant',
                             'record', 'fn-type', 'primitive']);
-const KIND_PREFS_STORAGE = 'graphden.sidebarKinds';
+// The LENS — focus-semantics kind filter (replaces the old hide-semantics
+// eyes). Empty set = "All" (everything shows, rows carry kind markers);
+// non-empty = show ONLY fns matching a selected kind. One click focuses a
+// kind, a second click on it (or on "All") returns to everything; clicking
+// further chips adds them to the selection (services+apps together, etc.).
+// Tree structure, expansion and scroll position are untouched — the lens is
+// the same client-side row filter the eyes used, with the semantics the
+// actual task ("show me all my services / apps, let me click through them")
+// needs.
+const LENS_STORAGE = 'graphden.sidebarLens';
 
-function loadKindPrefs() {
-  const def = { fn: true, types: true, secrets: true, services: true };
+function loadLens() {
   try {
-    const raw = localStorage.getItem(KIND_PREFS_STORAGE);
-    if (raw) return { ...def, ...JSON.parse(raw) };
-  } catch (_) { /* private-mode / corrupt → defaults */ }
-  return def;
+    const raw = localStorage.getItem(LENS_STORAGE);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch (_) { /* private-mode / corrupt → All */ }
+  return new Set();
 }
-const kindVisible = loadKindPrefs();
+const lensKinds = loadLens();
 
-function saveKindPrefs() {
-  try { localStorage.setItem(KIND_PREFS_STORAGE, JSON.stringify(kindVisible)); }
+function saveLens() {
+  try { localStorage.setItem(LENS_STORAGE, JSON.stringify([...lensKinds])); }
   catch (_) { /* best-effort */ }
 }
 
-// Classify a fn-row into one visibility bucket (priority order above).
-function classifyFnKind(fn) {
-  if (typeof isSecretFn === 'function' && isSecretFn(fn)) return 'secrets';
+// EVERY kind a fn-row belongs to. A fn can be several at once (an app's
+// handler may also be a service), so membership is a set — the lens matches
+// on ANY, and the row renders a marker per kind.
+function fnKindSet(fn) {
+  const kinds = new Set();
+  if (typeof isSecretFn === 'function' && isSecretFn(fn)) kinds.add('secrets');
   const role = (fn.role || '').replace(/^:/, '');
-  if (TYPE_ROLES.has(role)) return 'types';
-  if (typeof getServiceForFnId === 'function' && getServiceForFnId(fn.id)) return 'services';
+  if (TYPE_ROLES.has(role)) kinds.add('types');
+  if (typeof getServiceForFnId === 'function' && getServiceForFnId(fn.id)) kinds.add('services');
+  if (typeof getAppRoutesForFnId === 'function' && getAppRoutesForFnId(fn.id).length > 0) kinds.add('apps');
+  if (kinds.size === 0) kinds.add('fn');
+  return kinds;
+}
+
+// Primary bucket, kept for single-kind call sites (priority order above).
+function classifyFnKind(fn) {
+  const kinds = fnKindSet(fn);
+  for (const k of ['secrets', 'types', 'apps', 'services']) {
+    if (kinds.has(k)) return k;
+  }
   return 'fn';
 }
-// A kind eye hides a fn's ROW — but NEVER the fn the user is currently looking
+// The lens hides a fn's ROW — but NEVER the fn the user is currently looking
 // at. The selected fn always shows, so opening it by link can't leave its
 // namespace empty-and-collapsed (the "openable ⟺ in the menu" invariant).
 // Without this, deep-linking a service-fn — often the only leaf loaded in its
@@ -152,7 +174,12 @@ function classifyFnKind(fn) {
 // AND dropped the whole namespace via nodeShouldShow.
 function fnKindVisible(fn) {
   if (fn && typeof selectedFnId !== 'undefined' && fn.id === selectedFnId) return true;
-  return kindVisible[classifyFnKind(fn)] !== false;
+  if (lensKinds.size === 0) return true;
+  const kinds = fnKindSet(fn);
+  for (const k of lensKinds) {
+    if (kinds.has(k)) return true;
+  }
+  return false;
 }
 
 function nodeHasActiveCreate(node) {
@@ -232,6 +259,17 @@ function primeServiceCacheOnce() {
   if (typeof isAuthenticated === 'function' && !isAuthenticated()) return;
   _serviceCachePrimed = true;
   loadAllServiceFnIds().then(repaintAfterPrime);
+}
+let _appsCachePrimed = false;
+function primeAppsCacheOnce() {
+  // Same shape as the service prime: the apps classification (▣ markers,
+  // the apps lens, the chip count) reads the app-routes cache sync'ly.
+  // No tenancy API on this deployment → nothing to prime (the chip hides).
+  if (_appsCachePrimed || typeof refreshAppRoutesCache !== 'function') return;
+  if (!(window.API && API.api_orgs_apps)) return;
+  if (typeof isAuthenticated === 'function' && !isAuthenticated()) return;
+  _appsCachePrimed = true;
+  refreshAppRoutesCache().then(repaintAfterPrime);
 }
 let _secretsPrimedGraph = null;
 function primeSecretsOnce() {
@@ -323,6 +361,37 @@ function buildFnItem(fn) {
     lock.textContent = '🔒';
     lock.title = 'Secret — value lives in the vault, never in the graph DB';
     item.appendChild(lock);
+  }
+
+  // Kind markers — so the mixed (All-lens) tree stays legible: a row says
+  // WHAT it is at a glance (the lens chips use the same glyphs). Secrets
+  // keep their 🔒 above; plain fns carry no marker (they're the default).
+  const kinds = fnKindSet(fn);
+  if (kinds.has('services')) {
+    const svc = (typeof getServiceForFnId === 'function') ? getServiceForFnId(fn.id) : null;
+    const state = (typeof serviceBadgeState === 'function') ? serviceBadgeState(svc) : null;
+    const m = document.createElement('span');
+    m.className = 'fn-kind-marker kind-marker-service' + (state ? ' svc-' + state : '');
+    m.textContent = '⚙';
+    m.title = 'Service' + (state ? ' — ' + state : '');
+    item.appendChild(m);
+  }
+  if (kinds.has('apps')) {
+    const routes = (typeof getAppRoutesForFnId === 'function') ? getAppRoutesForFnId(fn.id) : [];
+    const hosts = routes.map((r) => (typeof appRouteHost === 'function') ? appRouteHost(r) : r.label)
+      .filter(Boolean).join(', ');
+    const m = document.createElement('span');
+    m.className = 'fn-kind-marker kind-marker-app';
+    m.textContent = '▣';
+    m.title = hosts ? 'App — served at ' + hosts : 'App handler';
+    item.appendChild(m);
+  }
+  if (kinds.has('types')) {
+    const m = document.createElement('span');
+    m.className = 'fn-kind-marker kind-marker-type';
+    m.textContent = 'T';
+    m.title = 'Type';
+    item.appendChild(m);
   }
 
   const nameSpan = document.createElement('span');
@@ -542,34 +611,57 @@ function clearSearch() {
 }
 
 
-// Eye-toggle click (from the #kind-filters buttons). Flips the kind's
-// visibility, persists it, re-renders.
-function toggleKind(kind, btn) {
-  const next = btn?.getAttribute('aria-pressed') !== 'true';
-  if (btn) btn.setAttribute('aria-pressed', String(next));
-  setKindVisible(kind, next);
-}
-function setKindVisible(kind, visible) {
-  kindVisible[kind] = !!visible;
-  saveKindPrefs();
+// Lens-chip click (from the #kind-filters buttons). "all" clears the lens;
+// a kind chip toggles its membership; focusing down to the last selected
+// kind and clicking it again also returns to All. Persists + re-renders.
+function toggleKind(kind) {
+  if (kind === 'all') lensKinds.clear();
+  else if (lensKinds.has(kind)) lensKinds.delete(kind);
+  else lensKinds.add(kind);
+  saveLens();
+  syncKindFilterBar();
   updateEntityList(graphData);
 }
 
-// Sync the static eye buttons to the persisted state + gate the "+ New
-// secret" button on auth. Cheap (≤5 nodes); runs on every render.
+// Sync the lens chips to the persisted state (active = in the lens; "All"
+// active when the lens is empty), fill the services/apps counts from their
+// primed caches, hide the apps chip when the deployment has no app routing
+// (no tenancy API), + gate the "+ New secret" button on auth. Cheap
+// (≤7 nodes); runs on every render.
 function syncKindFilterBar() {
   document.querySelectorAll('#kind-filters .kind-toggle').forEach((btn) => {
-    btn.setAttribute('aria-pressed', String(kindVisible[btn.dataset.kind] !== false));
+    const kind = btn.dataset.kind;
+    const active = kind === 'all' ? lensKinds.size === 0 : lensKinds.has(kind);
+    btn.setAttribute('aria-pressed', String(active));
+    if (kind === 'apps') {
+      btn.hidden = !(window.API && API.api_orgs_apps);
+    }
+    // Deployed-thing counts — the two "how many do I have running" kinds
+    // whose caches hold the GLOBAL truth (services/app-routes lists). The
+    // structural kinds (fn/types/secrets) load lazily, so a client count
+    // would lie; they get no number.
+    const countEl = btn.querySelector('.kind-count');
+    if (countEl) {
+      let n = null;
+      if (kind === 'services' && typeof getAllServiceFnIdCount === 'function') {
+        n = getAllServiceFnIdCount();
+      } else if (kind === 'apps' && typeof getAppRouteCount === 'function') {
+        n = getAppRouteCount();
+      }
+      countEl.textContent = (n === null || n === undefined) ? '' : String(n);
+    }
   });
   const addBtn = document.getElementById('secret-add-btn');
   if (addBtn) addBtn.hidden = !(typeof isAuthenticated === 'function' && isAuthenticated());
 }
 
-// Collapsible "(root)" node for namespace-less entities — the primitive
-// type-rows seeded at boot (any, bool, int, …) plus the occasional
-// top-level user fn. Filtered by the kind toggles; hidden entirely when
-// nothing inside is visible. Reuses the expandedNamespaces machinery via
-// a synthesised path key.
+// Collapsible "(primitives)" node for namespace-less entities — the
+// primitive type-rows seeded at boot (any, bool, int, …) plus the
+// occasional top-level user fn. (The old "(root)" label was a
+// developer-ism — users read "primitives", which is what ~all of its
+// content is.) Filtered by the lens; hidden entirely when nothing inside
+// is visible. Reuses the expandedNamespaces machinery via a synthesised
+// path key.
 function renderRootNode(list, rootFns, searchMode) {
   const visible = [...rootFns].filter(fnKindVisible)
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -595,7 +687,8 @@ function renderRootNode(list, rootFns, searchMode) {
   header.appendChild(arrow);
   const label = document.createElement('span');
   label.className = 'ns-label';
-  label.textContent = '(root)';
+  label.textContent = '(primitives)';
+  label.title = 'Namespace-less entities — the boot-seeded primitive types, plus any top-level fn';
   header.appendChild(label);
   const count = document.createElement('span');
   count.className = 'ns-count';
@@ -679,10 +772,12 @@ function updateEntityList(data) {
   const list = document.getElementById('entity-list');
   list.innerHTML = '';
 
-  // Keep the eye buttons + secret-add in sync with persisted state, and
-  // prime the caches classification depends on (service cache + secrets).
+  // Keep the lens chips + secret-add in sync with persisted state, and
+  // prime the caches classification depends on (services, app routes,
+  // secrets).
   syncKindFilterBar();
   primeServiceCacheOnce();
+  primeAppsCacheOnce();
   primeSecretsOnce();
 
   const searchMode = !!searchFilter;

@@ -113,8 +113,17 @@
    recordable-but-undeclarable again (`:state` was exactly that:
    `:swap`/`:reset` recorded it, the checker rejected declaring it,
    and every composition over them wore a permanent un-fixable
-   drift chip)."
-  #{:db :env :io :network :process :state :time :random :raw-sql})
+   drift chip).
+
+   `:cross-org` is a PLATFORM-ONLY category (the cloud domain-router's
+   `:execute-in-org` primitive records it): it is in `known-effect-
+   categories` so the checker admits its declaration and propagates it,
+   and in `cloud-forbidden-effects` so NO tenant `:allowed-effects` set
+   ever contains it — a tenant graph that references `:execute-in-org`
+   gets `:execution/forbidden-effect`, while the platform router runs
+   unrestricted (nil `*allowed-effects*`). Structurally identical to the
+   `:raw-sql`/`:pg-query` gate. Declarable-but-inert for tenants."
+  #{:db :env :io :network :process :state :time :random :raw-sql :cross-org})
 
 
 (def taint-with-secret-if-tainted  shapes/taint-with-secret-if-tainted)

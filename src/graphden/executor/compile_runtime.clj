@@ -1096,12 +1096,21 @@
                   record `:raw-sql` so a cloud/tenant graph can't read
                   or mutate the platform DB (incl. RLS-less token /
                   user / grant tables) or an out-of-band datasource.
+   - `:cross-org` — running a fn under ANOTHER org's `*current-org*`
+                  scope (the cloud domain-router's `:execute-in-org`
+                  primitive). The trusted platform router runs
+                  unrestricted (nil `*allowed-effects*`) so it passes;
+                  forbidding it here keeps it out of every tenant set,
+                  so a tenant graph referencing `:execute-in-org` is
+                  403'd before it can cross into a foreign org. Exactly
+                  the `:raw-sql`/`:pg-query` gate, one level up (org
+                  boundary instead of storage boundary).
 
    The safe remainder — `:db`, `:time`, `:state`, `:random` — stays
    allowed (internal infrastructure depends on it). New base-fns must
    keep this contract: any security-sensitive primitive MUST
    `record-effect!`, or it becomes a sandbox hole."
-  #{:env :io :network :process :raw-sql})
+  #{:env :io :network :process :raw-sql :cross-org})
 
 
 (def known-effects

@@ -773,7 +773,8 @@
                   "time"    "Uses wall-clock time — call returns a different value over time."
                   "random"  "Generates random or otherwise non-deterministic values."
                   "process" "Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service."
-                  "raw-sql" "Runs arbitrary SQL against the PLATFORM database, bypassing the org-scoped, access-checked storage layer (raw `:pg-query` / `:pg-execute` / `:pg-tx`). Always blocked for cloud / tenant graphs — it would cross tenants; use the org-scoped `:query-entities` family instead. (Connecting to your OWN external database via `:sql-query` / `:sql-exec` is the `network` effect, not this.)"}}}
+                  "raw-sql" "Runs arbitrary SQL against the PLATFORM database, bypassing the org-scoped, access-checked storage layer (raw `:pg-query` / `:pg-execute` / `:pg-tx`). Always blocked for cloud / tenant graphs — it would cross tenants; use the org-scoped `:query-entities` family instead. (Connecting to your OWN external database via `:sql-query` / `:sql-exec` is the `network` effect, not this.)"
+                  "cross-org" "Runs a function under ANOTHER organization's data scope — the cloud domain-router's primitive for serving each app request as its owning org. Platform-only: always blocked for tenant graphs (it would cross tenants), and it cannot be granted on any plan. You never declare or use this; it exists so the trusted router can dispatch across orgs safely."}}}
 
   {:name :_partial-effect-name
    :description "Read the `effect` query-string parameter from the inbound request. Empty string when absent so downstream lookups fall to the default."

@@ -799,8 +799,15 @@ function syncKindFilterBar() {
       countEl.textContent = (n === null || n === undefined) ? '' : String(n);
     }
   });
+  // "+ New secret" — a create action, not a filter. Shown only when the user is
+  // authed AND focused on secrets (the `secrets` lens active), so it appears
+  // right where a user manages secrets instead of sitting ambiguously in the
+  // filter bar. "All"/other lenses hide it; the 🔒 chip is always there to get in.
   const addBtn = document.getElementById('secret-add-btn');
-  if (addBtn) addBtn.hidden = !(typeof isAuthenticated === 'function' && isAuthenticated());
+  if (addBtn) {
+    const authed = typeof isAuthenticated === 'function' && isAuthenticated();
+    addBtn.hidden = !(authed && lensKinds.has('secrets'));
+  }
 }
 
 // Collapsible "(primitives)" node for namespace-less entities — the

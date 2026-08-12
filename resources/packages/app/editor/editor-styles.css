@@ -444,18 +444,19 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   font-weight: 600;
 }
 .kind-toggle[aria-pressed="true"]:hover { filter: brightness(0.98); }
-/* "+ New secret" — trailing button in the filter bar. Auth-gated: the
-   `hidden` attr (set by syncKindFilterBar) must beat the flex display. */
-.kind-add {
-  margin-left: auto; flex-shrink: 0;
-  width: 20px; height: 18px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: transparent; color: var(--muted-fg);
-  border: 1px solid var(--input-border); border-radius: 3px;
-  font-size: 14px; line-height: 1; cursor: pointer;
+/* "+ New secret" — a CREATE action (not a filter), so it lives outside the
+   kind-filters role-group. Contextual: syncKindFilterBar reveals it only under
+   the `secrets` lens. `hidden` (attr) must beat the flex display. */
+.gd-secret-add {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin: 2px 0 4px; padding: 3px 8px;
+  background: transparent; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 8px;
+  font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
 }
-.kind-add:hover { background: var(--hover-bg); color: var(--fg); }
-.kind-add[hidden] { display: none; }
+.gd-secret-add::before { content: "+"; font-weight: 600; }
+.gd-secret-add:hover { background: var(--selected-bg); }
+.gd-secret-add[hidden] { display: none; }
 #search-input {
   flex: 1; min-width: 0; padding: 4px 8px;
   border: 1px solid var(--input-border); border-radius: 3px;
@@ -5423,6 +5424,12 @@ body.gd-cards-compact .effects-strip { display: none; }
    (NOT flex) — flex left-aligns the icon/cap so the button reads as
    shifted left of the rail column. */
 body.gd-platform .gd-rail-btn.gd-platform-only { display: grid; }
+/* Tenancy-adaptive copy: show the org/RBAC wording only when the tenancy addon
+   is active (body.gd-tenancy, set from X-Graphden-Capabilities); a single-tenant
+   instance sees the operational-only variant. */
+.gd-tenancy-only { display: none; }
+body.gd-tenancy .gd-tenancy-only { display: revert; }
+body.gd-tenancy .gd-solo-only { display: none; }
 .gd-operate-head { max-width: 1100px; margin: 0 auto 18px; }
 .gd-operate-head h1 {
   margin: 0 0 4px;

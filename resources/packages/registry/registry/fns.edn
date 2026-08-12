@@ -1227,7 +1227,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "packages-panel-empty"}}
-          :children [{:value "No packages installed on this branch."}]}}
+          :children [{:value "No add-on packages installed on this branch. The built-in packages are always available — browse the registry below to install more."}]}}
   {:name :_pkg-panel-is-empty
    :parent :empty? :args {:coll :list-installed-packages}}
   {:name :_pkg-panel-body

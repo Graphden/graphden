@@ -166,7 +166,7 @@
         (is (= 200 (:status resp)))
         (is (re-find #"data-packages-panel" (:body resp))
             "response is the panel root, ready for the HTMX outerHTML swap")
-        (is (re-find #"No packages installed" (:body resp))
+        (is (re-find #"No add-on packages installed" (:body resp))
             "the sole pin is gone → refreshed panel shows the empty-state")
         (is (not (re-find #"acme\.uninstall" (:body resp)))
             "the uninstalled package no longer appears in the table"))

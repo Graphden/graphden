@@ -293,11 +293,17 @@
                          :title "Only apps (fns served at a public host)"}
                 [:span {:class "kind-glyph" :aria-hidden "true"} "▣"]
                 [:span {:class "kind-label"} "apps"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]
-               [:button {:id "secret-add-btn" :type "button" :class "kind-add"
-                         :hidden "hidden" :title "New secret"
-                         :aria-label "New secret"
-                         :onclick "openCreateSecretForm(this)"} "+"]]]
+                [:span {:class "kind-count" :aria-hidden "true"}]]]]
+             ;; Create-a-secret action — NOT a filter, so it sits OUTSIDE the
+             ;; kind-filters role-group (and the search bar). Contextual:
+             ;; syncKindFilterBar reveals it only for an authed user with the
+             ;; `secrets` lens active — creating a secret belongs with viewing them.
+             [:button {:id "secret-add-btn" :type "button" :class "gd-secret-add"
+                       :hidden "hidden" :title "Create a new secret"
+                       :aria-label "New secret"
+                       :onclick "openCreateSecretForm(this)"}
+              [:span {:class "kind-glyph" :aria-hidden "true"} "🔒"]
+              [:span {:class "kind-label"} "New secret"]]
              [:nav {:id "entity-list" :aria-label "Namespace tree"}]]
             ;; Graph container \u2014 <main> landmark
             ;; `#graph-surface` is a `group`, not an `img`: it hosts the
@@ -358,7 +364,13 @@
             [:section {:id "gd-operate" :hidden "hidden" :aria-label "Organization"}
              [:div {:class "gd-operate-head"}
               [:h1 "Organization"]
-              [:p "Your organization — members, roles and permissions, plus its packages, monitoring, apps and errors."]]
+              ;; Two variants toggled by `body.gd-tenancy` (added once a
+              ;; capability header arrives): the RBAC promise (members / roles /
+              ;; permissions) only holds when the tenancy addon is active. A
+              ;; single-tenant self-hosted instance has no members/roles, so it
+              ;; gets the operational-only wording — no over-promise.
+              [:p {:class "gd-solo-only"} "This instance's operations — packages, monitoring, apps and errors."]
+              [:p {:class "gd-tenancy-only"} "Your organization — members, roles and permissions, plus its packages, monitoring, apps and errors."]]
              [:div {:class "gd-op-body"}
               [:nav {:id "gd-operate-nav" :class "gd-op-nav" :aria-label "Organization sections"}]
               [:div {:id "gd-operate-panels" :class "gd-op-pane"}]]]

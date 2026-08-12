@@ -476,6 +476,10 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 /* Namespace tree in sidebar */
 #entity-list { padding: 4px 0; margin: 0; }
 .ns-header { display: flex; align-items: center; padding: 3px 8px; cursor: pointer; user-select: none; }
+/* The lens is a `hidden` overlay (applyLensVisibility flips rows/namespaces in
+   place instead of rebuilding). `.ns-header`/`.entity-item` set an explicit
+   `display`, which would beat the UA `[hidden]{display:none}`, so force it. */
+#entity-list [hidden] { display: none !important; }
 .ns-header:hover { background: var(--hover-bg); }
 /* Workspace highlight: namespaces the user works in get
    a left accent. No-op without the addon — the class is only added when the

@@ -138,6 +138,9 @@ function loadLens() {
   return new Set();
 }
 const lensKinds = loadLens();
+// The last render's namespace-less (root/primitives) fn list — applyLensVisibility
+// re-renders that small bucket in place on a lens flip.
+let _lastRootFns = null;
 
 function saveLens() {
   try { localStorage.setItem(LENS_STORAGE, JSON.stringify([...lensKinds])); }
@@ -473,6 +476,17 @@ function renderNsNode(container, name, node, path, searchMode) {
   }
   header.dataset.nsPath = nsPath;
 
+  // Lens visibility is a HIDDEN overlay, not a structural filter: the tree is
+  // built lens-INDEPENDENTLY (every loaded node, regardless of the active
+  // lens), so a lens-chip toggle is a cheap in-place `hidden` flip
+  // (`applyLensVisibility`) instead of a full teardown+rebuild. Parity with a
+  // full render holds by construction \u2014 both decide visibility with the SAME
+  // `nodeShouldShow`; only the `hidden` bit differs. Store the node so the flip
+  // can re-run `nodeShouldShow` without re-deriving the tree.
+  const nodeVisible = nodeShouldShow(node, searchMode);
+  header._treeNode = node;
+  header.hidden = !nodeVisible;
+
   const arrow = document.createElement('span');
   arrow.className = 'ns-arrow' + (isCollapsed ? ' collapsed' : '');
   arrow.textContent = isCollapsed ? '\u25B6' : '\u25BC';
@@ -534,10 +548,15 @@ function renderNsNode(container, name, node, path, searchMode) {
   // own leaves — a child loads its own fns when IT expands.
   const childGroup = document.createElement('div');
   childGroup.className = 'ns-children';
+  childGroup.dataset.nsChildren = nsPath;   // paired with the header for the flip
+  childGroup.hidden = !nodeVisible;
 
   const sortedChildren = [...node.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [childName, childNode] of sortedChildren) {
-    if (!nodeShouldShow(childNode, searchMode)) continue;
+    // Non-search: build ALL children lens-independently — each sets its own
+    // `hidden` overlay, so a lens flip can reveal/hide any without a rebuild.
+    // Search: a matched-only structural tree (no lens flip), so keep the skip.
+    if (searchMode && !nodeShouldShow(childNode, searchMode)) continue;
     renderNsNode(childGroup, childName, childNode, nsPath, searchMode);
   }
 
@@ -562,9 +581,17 @@ function renderNsNode(container, name, node, path, searchMode) {
     // Fn items — filtered by the kind toggles, rendered flat. Kind is a
     // top-level filter (fn / types / secrets / services), not an
     // in-namespace Types/Functions grouping.
-    const visibleFns = [...node.fns].filter(fnKindVisible)
+    // Build ALL loaded fns; the lens is a per-row `hidden` overlay (not a
+    // filter that drops them from the DOM), so `applyLensVisibility` can flip
+    // them in place on a lens toggle. `fnKindVisible` still force-shows the
+    // selected fn.
+    const sortedFns = [...node.fns]
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
-    for (const fn of visibleFns) childGroup.appendChild(buildFnItem(fn));
+    for (const fn of sortedFns) {
+      const el = buildFnItem(fn);
+      el.hidden = !fnKindVisible(fn);
+      childGroup.appendChild(el);
+    }
   }
 
   // If the user has an active inline-create rooted at THIS namespace,
@@ -627,7 +654,50 @@ function toggleKind(kind) {
   else lensKinds.add(kind);
   saveLens();
   syncKindFilterBar();
-  updateEntityList(graphData);
+  // A lens change is a VISIBILITY change only (the loaded set is identical), so
+  // flip `hidden` over the existing DOM instead of tearing down + rebuilding the
+  // whole tree — the sidebar's top scale cost (~2.4ms/row rebuilt). Parity with
+  // a full rebuild is guaranteed: the tree is built lens-independently and both
+  // paths decide visibility with the same nodeShouldShow / fnKindVisible. A
+  // search box is active → fall back to a rebuild (the search tree is a
+  // different, server-fed structure, not a lens overlay).
+  if (searchFilter) updateEntityList(graphData);
+  else applyLensVisibility();
+}
+
+// In-place lens application: re-set the `hidden` overlay on the already-built
+// tree DOM (fn rows via fnKindVisible, namespace header+children via
+// nodeShouldShow over the node stored on the header), and re-render the small
+// primitives bucket in place (its custom visibility + lazy-load make an
+// overlay fiddly; re-running renderRootNode keeps it parity-correct). O(open
+// rows) `hidden` writes, no teardown/rebuild.
+function applyLensVisibility() {
+  const list = document.getElementById('entity-list');
+  if (!list) return;
+  for (const el of list.querySelectorAll('.entity-item[data-fn-id]')) {
+    const fn = lookups?.fnMap?.get(el.dataset.fnId);
+    if (fn) el.hidden = !fnKindVisible(fn);
+  }
+  const cgByPath = new Map();
+  for (const cg of list.querySelectorAll('.ns-children[data-ns-children]')) {
+    cgByPath.set(cg.dataset.nsChildren, cg);
+  }
+  for (const header of list.querySelectorAll('.ns-header[data-ns-path]')) {
+    const node = header._treeNode;
+    const vis = node ? nodeShouldShow(node, false) : true;
+    header.hidden = !vis;
+    const cg = cgByPath.get(header.dataset.nsPath);
+    if (cg) cg.hidden = !vis;
+  }
+  // Root/primitives bucket — re-render in place (small: ≤ the boot primitives).
+  const rootHeader = list.querySelector('.ns-header-pseudo');
+  if (rootHeader) {
+    const rootChildren = rootHeader.nextElementSibling?.classList.contains('ns-children')
+      ? rootHeader.nextElementSibling : null;
+    rootHeader.remove();
+    if (rootChildren) rootChildren.remove();
+  }
+  if (_lastRootFns) renderRootNode(list, _lastRootFns, false);
 }
 
 // Sync the lens chips to the persisted state (active = in the lens; "All"
@@ -871,13 +941,18 @@ function updateEntityList(data) {
     }
   }
 
-  // Top-level namespaces (sorted) — skip any with nothing visible under
-  // the current toggles (unless an inline-create is rooted inside).
+  // Top-level namespaces (sorted). Lens visibility is a `hidden` overlay set
+  // inside renderNsNode (not a structural skip here), so a lens toggle flips in
+  // place. Workspace-focus IS a structural skip — it's lens-independent (a lens
+  // toggle never changes workspace scope), so out-of-scope namespaces need not
+  // be in the DOM.
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   const wsFocused = !searchMode && typeof window.graphdenWorkspaceFocused === 'function'
     && window.graphdenWorkspaceFocused();
   for (const [name, node] of sortedNs) {
-    if (!nodeShouldShow(node, searchMode)) continue;
+    // Search: matched-only structural tree (no lens flip) → keep the skip.
+    // Non-search: build all, lens is a `hidden` overlay set in renderNsNode.
+    if (searchMode && !nodeShouldShow(node, searchMode)) continue;
     // Workspace focus (redesign 2026-08): hide top-level namespaces outside the
     // scope — unless PINNED (shared libraries stay in view). Search always spans
     // everything (searchMode short-circuits above).
@@ -891,6 +966,7 @@ function updateEntityList(data) {
 
   // Namespace-less entities (primitive type-rows any/int/bool + top-level
   // fns) in a single collapsible "(root)" node, subject to the toggles.
+  _lastRootFns = tree.fns;   // for applyLensVisibility's in-place root re-render
   renderRootNode(list, tree.fns, searchMode);
 
   // A truncated search result (server-side cap) — tell the user to refine

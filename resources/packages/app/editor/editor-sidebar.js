@@ -141,6 +141,25 @@ const lensKinds = loadLens();
 // The last render's namespace-less (root/primitives) fn list — applyLensVisibility
 // re-renders that small bucket in place on a lens flip.
 let _lastRootFns = null;
+// The last-built namespace tree root. Incremental expand/refresh must read the
+// CURRENT node (fresh `.fns`) from here, never a node captured at an earlier
+// render — a lazy load appends to `graphData.fns`, so a stale captured node's
+// `.fns` stays frozen-empty and its group would render blank. Rebuilt on every
+// updateEntityList AND after each lazy load lands (see loadNamespaceFns .then).
+let _lastTree = null;
+
+// Walk `_lastTree` to the node at `nsPath` ("a.b.c"), or null. Cheap
+// (path-depth Map lookups); the O(loaded-fns) tree build itself is done once
+// per render / per lazy load, not per walk.
+function treeNodeAt(nsPath) {
+  let node = _lastTree;
+  if (!node || !nsPath) return null;
+  for (const part of nsPath.split('.')) {
+    node = node.children?.get(part);
+    if (!node) return null;
+  }
+  return node;
+}
 
 function saveLens() {
   try { localStorage.setItem(LENS_STORAGE, JSON.stringify([...lensKinds])); }
@@ -532,61 +551,78 @@ function renderNsNode(container, name, node, path, searchMode) {
 
   header.onclick = (e) => {
     e.stopPropagation();
-    if (isCollapsed) {
-      expandedNamespaces.add(nsPath);
-    } else {
-      expandedNamespaces.delete(nsPath);
+    // Search mode is a server-fed, force-expanded tree — keep the full rebuild
+    // there. Non-search: toggle just THIS namespace's subtree in place (the
+    // sidebar's other big rebuild cost, ~800ms at scale) instead of tearing
+    // down + rebuilding the whole tree.
+    if (searchFilter) {
+      if (expandedNamespaces.has(nsPath)) expandedNamespaces.delete(nsPath);
+      else expandedNamespaces.add(nsPath);
+      updateEntityList(graphData);
+      return;
     }
-    updateEntityList(graphData);
+    if (expandedNamespaces.has(nsPath)) {
+      // Collapse: drop this namespace's children. Its own (and its ancestors')
+      // visibility is unchanged — the node's tree data is the same — so no
+      // resync is needed.
+      expandedNamespaces.delete(nsPath);
+      const cg = findNsChildGroup(nsPath);
+      if (cg) cg.remove();
+      arrow.classList.add('collapsed');
+      arrow.textContent = '▶';
+    } else {
+      // Expand: build ONLY this subtree + insert after the header. The built
+      // rows/namespaces set their own `hidden` overlay, so no global resync is
+      // needed here — a lazy load (buildNsChildGroup) does its own resync.
+      expandedNamespaces.add(nsPath);
+      arrow.classList.remove('collapsed');
+      arrow.textContent = '▼';
+      // Fresh node (current `.fns`), never the one captured when this header
+      // was built — see refreshLoadedNamespace / treeNodeAt.
+      header.after(buildNsChildGroup(treeNodeAt(nsPath) || node, nsPath, searchMode));
+    }
   };
 
   container.appendChild(header);
 
   if (isCollapsed) return;
 
-  // Child namespaces (sorted). These render independently of this node's
-  // own leaves — a child loads its own fns when IT expands.
+  container.appendChild(buildNsChildGroup(node, nsPath, searchMode));
+}
+
+// Build the `.ns-children` element for an expanded namespace (its child
+// namespaces + own fn leaves), lens-INDEPENDENTLY with per-node `hidden`
+// overlays. Shared by the initial render (renderNsNode) AND incremental expand
+// (header.onclick), so the two can't diverge.
+function buildNsChildGroup(node, nsPath, searchMode) {
   const childGroup = document.createElement('div');
   childGroup.className = 'ns-children';
-  childGroup.dataset.nsChildren = nsPath;   // paired with the header for the flip
-  childGroup.hidden = !nodeVisible;
+  childGroup.dataset.nsChildren = nsPath;   // paired with the header
+  childGroup.hidden = !nodeShouldShow(node, searchMode);
 
   const sortedChildren = [...node.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [childName, childNode] of sortedChildren) {
-    // Non-search: build ALL children lens-independently — each sets its own
-    // `hidden` overlay, so a lens flip can reveal/hide any without a rebuild.
-    // Search: a matched-only structural tree (no lens flip), so keep the skip.
+    // Non-search builds ALL children (lens is a `hidden` overlay); search keeps
+    // the matched-only structural skip.
     if (searchMode && !nodeShouldShow(childNode, searchMode)) continue;
     renderNsNode(childGroup, childName, childNode, nsPath, searchMode);
   }
 
-  // Own fn leaves. Outside search mode they load lazily the first time this
-  // namespace is expanded — show a placeholder, fetch, re-render. In search
-  // mode the leaves are the server's matches and are already in `node.fns`.
+  // Own fn leaves — load lazily the first time this namespace opens.
   if (!searchMode && node.nsId != null
       && typeof isNamespaceLoaded === 'function' && !isNamespaceLoaded(node.nsId)) {
     const loading = document.createElement('div');
     loading.className = 'loading';
     loading.textContent = 'Loading…';
     childGroup.appendChild(loading);
-    // Trigger the fetch (with its re-render) only if one isn't already in
-    // flight — re-rendering while it loads must not attach another `.then`.
     if (typeof loadNamespaceFns === 'function'
         && !(typeof isNamespaceLoading === 'function' && isNamespaceLoading(node.nsId))) {
       loadNamespaceFns(node.nsId)
-        .then(() => updateEntityList(graphData))
+        .then(() => refreshLoadedNamespace(nsPath, searchMode))
         .catch((err) => { console.error('loadNamespaceFns failed', err); });
     }
   } else {
-    // Fn items — filtered by the kind toggles, rendered flat. Kind is a
-    // top-level filter (fn / types / secrets / services), not an
-    // in-namespace Types/Functions grouping.
-    // Build ALL loaded fns; the lens is a per-row `hidden` overlay (not a
-    // filter that drops them from the DOM), so `applyLensVisibility` can flip
-    // them in place on a lens toggle. `fnKindVisible` still force-shows the
-    // selected fn.
-    const sortedFns = [...node.fns]
-      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    const sortedFns = [...node.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
     for (const fn of sortedFns) {
       const el = buildFnItem(fn);
       el.hidden = !fnKindVisible(fn);
@@ -594,15 +630,36 @@ function renderNsNode(container, name, node, path, searchMode) {
     }
   }
 
-  // If the user has an active inline-create rooted at THIS namespace,
-  // append the input row inside `childGroup` so it sits where the new
-  // entity will appear once submitted.
+  // Active inline-create row rooted at THIS namespace.
   if (node?.nsId && typeof buildActiveCreateRow === 'function') {
     const createRow = buildActiveCreateRow(node.nsId, 0);
     if (createRow) childGroup.appendChild(createRow);
   }
+  return childGroup;
+}
 
-  container.appendChild(childGroup);
+// The `.ns-children` element for `nsPath`, or null when it's collapsed.
+function findNsChildGroup(nsPath) {
+  for (const cg of document.querySelectorAll('#entity-list .ns-children[data-ns-children]')) {
+    if (cg.dataset.nsChildren === nsPath) return cg;
+  }
+  return null;
+}
+
+// After a namespace's fns lazy-load: rebuild JUST its child group in place
+// (now populated) + resync visibility. The load appended to `graphData.fns`, so
+// rebuild the tree first and re-derive the CURRENT node — a node captured at an
+// earlier render still has a frozen-empty `.fns` and would rebuild blank. The
+// fresh `.fns` also flips this namespace's / its ancestors' nodeShouldShow
+// under an active lens.
+function refreshLoadedNamespace(nsPath, searchMode) {
+  const old = findNsChildGroup(nsPath);
+  if (!old) return;   // collapsed again before the load landed
+  _lastTree = buildNsTree(graphData);
+  const node = treeNodeAt(nsPath);
+  if (!node) return;
+  old.replaceWith(buildNsChildGroup(node, nsPath, searchMode));
+  applyLensVisibility();
 }
 
 /**
@@ -690,6 +747,20 @@ function applyLensVisibility() {
     if (cg) cg.hidden = !vis;
   }
   // Root/primitives bucket — re-render in place (small: ≤ the boot primitives).
+  refreshRootNode();
+}
+
+// Remove + re-render the namespace-less (primitives) bucket in place. Its
+// custom visibility + lazy-load make a `hidden` overlay fiddly, so re-running
+// renderRootNode keeps it parity-correct — and it's tiny. Used by the lens
+// flip, its own expand/collapse toggle, AND the root lazy-load .then. Rebuild
+// the tree first so a lazy load that just appended root fns to `graphData.fns`
+// is reflected — `_lastRootFns` captured at an earlier render is frozen-empty.
+function refreshRootNode() {
+  const list = document.getElementById('entity-list');
+  if (!list) return;
+  _lastTree = buildNsTree(graphData);
+  _lastRootFns = _lastTree.fns;
   const rootHeader = list.querySelector('.ns-header-pseudo');
   if (rootHeader) {
     const rootChildren = rootHeader.nextElementSibling?.classList.contains('ns-children')
@@ -790,7 +861,9 @@ function renderRootNode(list, rootFns, searchMode) {
     e.stopPropagation();
     if (isOpen) expandedNamespaces.delete(groupPath);
     else expandedNamespaces.add(groupPath);
-    updateEntityList(graphData);
+    // Re-render just this small bucket in place (search stays a full rebuild).
+    if (searchFilter) updateEntityList(graphData);
+    else refreshRootNode();
   };
   list.appendChild(header);
 
@@ -805,7 +878,7 @@ function renderRootNode(list, rootFns, searchMode) {
       if (typeof loadNamespaceFns === 'function'
           && !(typeof isNamespaceLoading === 'function' && isNamespaceLoading(null))) {
         loadNamespaceFns(null)
-          .then(() => updateEntityList(graphData))
+          .then(() => refreshRootNode())
           .catch((err) => { console.error('loadNamespaceFns(root) failed', err); });
       }
     } else {
@@ -967,6 +1040,7 @@ function updateEntityList(data) {
   // Namespace-less entities (primitive type-rows any/int/bool + top-level
   // fns) in a single collapsible "(root)" node, subject to the toggles.
   _lastRootFns = tree.fns;   // for applyLensVisibility's in-place root re-render
+  _lastTree = tree;          // for incremental expand/refresh's fresh-node lookup
   renderRootNode(list, tree.fns, searchMode);
 
   // A truncated search result (server-side cap) — tell the user to refine

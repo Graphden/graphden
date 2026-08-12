@@ -110,7 +110,11 @@ function createArgOverlay(node, container) {
               : null;
   const inImpl = arg && implementationFnIds?.has(arg['fn-id']);
   const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
-  const editable = inImpl && signedIn;
+  // Ownership (tenancy): you can only edit a value on a fn your org OWNS.
+  // A public / other-org fn is read-only even when signed-in + reachable.
+  const argFn = arg ? lookups?.fnMap?.get(arg['fn-id']) : null;
+  const owned = (typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(argFn);
+  const editable = inImpl && signedIn && owned;
   if (editable) {
     content.style.cursor = 'pointer';
     content.title = isTruncated ? rawLabel : 'Click to edit value';
@@ -125,6 +129,26 @@ function createArgOverlay(node, container) {
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: true });
+        const badge = createProvenanceBadge(getTypeNarrowingInfo(arg), arg);
+        if (badge) row.appendChild(badge);
+      }
+    }
+  } else if (inImpl && signedIn && !owned) {
+    // Read-only because the fn belongs to another org / the platform (tenancy)
+    // — not a sign-in or navigation issue; you can't edit what you don't own.
+    // Click shows the value in the read-only viewer (like the structural case).
+    content.style.cursor = 'pointer';
+    content.title = isTruncated ? rawLabel
+                  : 'Read-only — this function belongs to another owner';
+    content.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (typeof openValueViewer === 'function') openValueViewer(arg, content);
+    });
+    if (arg.type) {
+      const chip = createTypeChip(arg, { readOnly: true });
+      if (chip) {
+        row.appendChild(chip);
+        attachArgChipExpand(chip, arg, node.id(), { editable: false });
         const badge = createProvenanceBadge(getTypeNarrowingInfo(arg), arg);
         if (badge) row.appendChild(badge);
       }

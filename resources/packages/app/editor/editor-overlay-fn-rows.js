@@ -237,7 +237,11 @@ function renderMiRow(line, levelInfo, idx, ctx) {
       if (typeof loadRowActionsContent !== 'function') return;
       return loadRowActionsContent(host, f.fnId, 'cell', {
         showOpen: !!miShowOpen,
-        editable: !!miEditable && !!cardFnEntity,
+        // Ownership (tenancy): the × Remove-MI / + Add-MI edits mutate the
+        // CARD's parent-set, so they're offered only on a card the principal
+        // OWNS. A public / other-org card is read-only.
+        editable: !!miEditable && !!cardFnEntity
+                  && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(cardFnEntity)),
         cardFnId: cardFnEntity ? cardFnEntity.id : null
       });
     };
@@ -402,7 +406,11 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       if (typeof loadRowActionsContent !== 'function') return;
       return loadRowActionsContent(host, lineFn.fnId, 'use-site-arg', {
         showOpen: !!lineShowOpen,
-        editable: true,
+        // Ownership (tenancy): × Remove-binding / ✎ Change-value mutate the
+        // card's fn, so gate on owning the card. Read-only on a public/other-org
+        // fn (server enforces too). Unknown card → fail-open.
+        editable: (typeof graphdenIsFnOwned !== 'function')
+                  || !cardFnEntity || graphdenIsFnOwned(cardFnEntity),
         useSiteArg: useSiteArg
       });
     }
@@ -437,7 +445,10 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       if (typeof loadRowActionsContent !== 'function') return;
       return loadRowActionsContent(host, lineFn.fnId, 'cell', {
         showOpen: !!lineShowOpen,
-        editable: true,
+        // Ownership (tenancy): reparent / MI edits mutate the card's parent-set
+        // → offered only on a card the principal owns. Read-only otherwise.
+        editable: (typeof graphdenIsFnOwned !== 'function')
+                  || !cardFnEntity || graphdenIsFnOwned(cardFnEntity),
         cardFnId: cardFnEntity.id
       });
     }

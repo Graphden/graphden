@@ -356,7 +356,7 @@
                 false) refuses any `:byo` org with a 421. See
                 `tenancy.context/byo-org?`."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
-           execute-guard app-router set-org-handler verify-domain user-ops
+           execute-guard app-router verify-domain user-ops
            my-tokens executor-orgs byo-executor? fleet-forward fleet-command]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
@@ -414,10 +414,6 @@
       ;; subdomain is served by that org's handler fn (org-scoped + effect-
       ;; gated), never the editor.
       (cond-> app-router (assoc :app-router app-router))
-      ;; Self-serve deploy seam (§3.4 4b) — `(fn [ctx fn-id] …)` the
-      ;; `:invoke-set-org-handler` base-fn calls so a tenant can point its
-      ;; own org at its own handler fn. Addon-only.
-      (cond-> set-org-handler (assoc :set-org-handler set-org-handler))
       ;; Self-serve DNS-verify seam (§3.4 #2) — `(fn [ctx hostname] …)` the
       ;; `:invoke-verify-domain` base-fn calls so a tenant can prove ownership
       ;; of its own custom domain (DNS-TXT) and flip it verified. Addon-only.

@@ -100,7 +100,7 @@
 
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
-             execute-guard app-router set-org-handler verify-domain user-ops
+             execute-guard app-router verify-domain user-ops
              my-tokens executor-orgs byo-executor? executor-id]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
@@ -153,8 +153,6 @@
                    ;; App-router seam (§3.4 FaaS) — serves a tenant's subdomain
                    ;; via that org's handler fn. Addon-only.
                    app-router (assoc :app-router app-router)
-                   ;; Self-serve deploy seam (§3.4 4b) — addon-only.
-                   set-org-handler (assoc :set-org-handler set-org-handler)
                    ;; Self-serve DNS-verify seam (§3.4 #2) — addon-only.
                    verify-domain (assoc :verify-domain verify-domain)
                    ;; User-model seam — create-user / login. Addon-only.

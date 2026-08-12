@@ -86,14 +86,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- fleet-storage
-  "Fake storage: `:org` rows (name→handler-fn-id), `:placement` rows, and a
+  "Fake storage: `:app-route` rows (org→handler-fn-id), `:placement` rows, and a
    pending-execution count per org (for cell-weight's load term)."
-  [{:keys [orgs placements pending]}]
+  [{:keys [app-routes placements pending]}]
   (reify sp/StorageCRUD
     (query-entities
       [_ en where]
       (case en
-        :org (mapv (fn [[nm h]] {:name nm :handler-fn-id h}) orgs)
+        :app-route (mapv (fn [[org h]] {:org org :handler-fn-id h}) app-routes)
         :placement placements
         :fn-execution (when (= :pending (:status where))
                         (vec (repeat (get pending (:org-id where) 0) {:status :pending})))
@@ -121,7 +121,7 @@
 
 
 (deftest discover-cells-unions-org-apps-and-placements
-  (let [storage (fleet-storage {:orgs {"acme" c1}
+  (let [storage (fleet-storage {:app-routes {"acme" c1}
                                 :placements [{:org "beta" :entry-fn-id c2 :executor-id "e1" :epoch 1}]
                                 :pending {"acme" 2}})
         ;; c1's cell = {c1}; weight = 1 fn + 2 pending = 3. c2's cell = {c2}=1, no load.
@@ -133,14 +133,14 @@
         "tenant app cell + already-placed cell, each weighted")))
 
 
-(deftest discover-cells-tolerates-a-missing-org-entity
-  ;; `safe-query` swallows the throw when the `:org` entity isn't defined (a
-  ;; non-tenancy deployment), so discovery still returns the placed cells.
+(deftest discover-cells-tolerates-a-missing-app-route-entity
+  ;; `safe-query` swallows the throw when the `:app-route` entity isn't defined
+  ;; (a non-tenancy deployment), so discovery still returns the placed cells.
   (let [storage (reify sp/StorageCRUD
                   (query-entities
                     [_ en where]
                     (case en
-                      :org (throw (ex-info "entity :org not defined" {}))
+                      :app-route (throw (ex-info "entity :app-route not defined" {}))
                       :placement [{:org "beta" :entry-fn-id c2 :executor-id "e1" :epoch 1}]
                       :fn-execution (when (= :pending (:status where)) [])
                       nil))
@@ -163,7 +163,7 @@
 
 (deftest run-tick-drives-plan-through-the-move-seam
   (let [;; two org apps, both unplaced → both get an initial placement this tick.
-        storage (fleet-storage {:orgs {"acme" c1 "beta" c2}})
+        storage (fleet-storage {:app-routes {"acme" c1 "beta" c2}})
         applied (atom [])
         env {:storage storage :forward-deps {}
              :executors ["e1" "e2"] :move-fn #(swap! applied conj %)}
@@ -182,7 +182,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest discover-cells-attaches-closure-when-requested
-  (let [storage (fleet-storage {:orgs {"acme" c1} :pending {}})]
+  (let [storage (fleet-storage {:app-routes {"acme" c1} :pending {}})]
     (testing "default omits :closure (cheap, no per-cell closure walk)"
       (is (nil? (:closure (first (loop/discover-cells storage {}))))))
     (testing "with-closure? attaches the cell's forward-closure fn-set"

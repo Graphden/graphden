@@ -101,11 +101,12 @@ A cell's closure never leaves `org ∪ public` — already guaranteed by
   zero-free-arg root the executor compiles independently *is* a cell. `:web-server`
   ships as the baseline service. **So every service row already names a cell root
   — these are the first placeable units, no new work.**
-- **An org's web app is ONE cell today.** `app_router` reads a single
-  `:org.handler-fn-id` and executes it with `{:request request}`. Routes exist as
-  *data* (each route is a fn-def parented from `:get-route`, gathered into one
+- **An org's app is ONE cell per `:app-route` today.** The fleet reads each
+  `:app-route` row's `handler-fn-id` (the graph `:domain-router` resolves
+  Host→route and executes it with `{:request request}`). Routes WITHIN a handler
+  exist as *data* (each is a fn-def parented from `:get-route`, gathered into one
   list fed to one compiled reitit router), but they are **not independently
-  addressable** — every request enters the one top handler.
+  addressable** — every request to that app enters the one top handler.
 - **Splitting an app into route-cells is pure fn-def rewiring** (no new base-fn):
   split the route list into N sub-lists, give each its own router-root fn-def
   (`:router-or-nil` already exists for fall-through composition), and point a

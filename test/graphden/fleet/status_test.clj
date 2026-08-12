@@ -14,14 +14,14 @@
 
 
 (defn- fleet-storage
-  "Fake storage: `:org` rows (name→handler-fn-id) + `:placement` rows + a
+  "Fake storage: `:app-route` rows (org→handler-fn-id) + `:placement` rows + a
    pending-execution count per org (for cell-weight's load term)."
-  [{:keys [orgs placements pending]}]
+  [{:keys [app-routes placements pending]}]
   (reify sp/StorageCRUD
     (query-entities
       [_ en where]
       (case en
-        :org (mapv (fn [[nm h]] {:name nm :handler-fn-id h}) orgs)
+        :app-route (mapv (fn [[org h]] {:org org :handler-fn-id h}) app-routes)
         :placement placements
         :fn-execution (when (= :pending (:status where))
                         (vec (repeat (get pending (:org-id where) 0) {:status :pending})))
@@ -47,7 +47,7 @@
 
 (deftest fleet-status-snapshot-test
   (let [storage (fleet-storage
-                  {:orgs {"acme" c1 "beta" c2}
+                  {:app-routes {"acme" c1 "beta" c2}
                    :placements [{:org "acme" :entry-fn-id c1 :executor-id "e1" :epoch 1}
                                 {:org "beta" :entry-fn-id c2 :executor-id "e2" :epoch 1}]
                    :pending {"acme" 2}})

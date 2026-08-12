@@ -122,8 +122,9 @@
 
 (defn discover-cells
   "The cells the fleet manages, each weighted by `metrics/cell-weight`
-   (fn-count + org load): every tenant app cell (an `:org` row's
-   `:handler-fn-id`) unioned with whatever is already placed. Platform
+   (fn-count + org load): every tenant app cell (an `:app-route` row's
+   `(org, handler-fn-id)`) unioned with whatever is already placed. An org can
+   run several named apps, so it contributes one cell per route. Platform
    `:service` cells are deliberately EXCLUDED — the reconciler owns their
    advisory-lock singleton placement, so the fleet controller must not also
    move them.
@@ -133,10 +134,10 @@
    only on demand since it walks every cell's closure each tick."
   ([storage forward-deps] (discover-cells storage forward-deps {}))
   ([storage forward-deps {:keys [with-closure?]}]
-   (let [org-roots (keep (fn [o]
-                           (when-let [h (:handler-fn-id o)]
-                             {:org (:name o) :entry-fn-id h}))
-                         (safe-query storage :org {}))
+   (let [app-roots (keep (fn [r]
+                           (when-let [h (:handler-fn-id r)]
+                             {:org (:org r) :entry-fn-id h}))
+                         (safe-query storage :app-route {}))
          placed-roots (map (fn [r] {:org (:org r) :entry-fn-id (:entry-fn-id r)})
                            (safe-query storage :placement {}))]
      (map (fn [{:keys [org entry-fn-id]}]
@@ -144,7 +145,7 @@
                      :entry-fn-id entry-fn-id
                      :weight (metrics/cell-weight forward-deps storage org entry-fn-id)}
               with-closure? (assoc :closure (metrics/cell-closure forward-deps entry-fn-id))))
-          (distinct (concat org-roots placed-roots))))))
+          (distinct (concat app-roots placed-roots))))))
 
 
 (defn run-tick!

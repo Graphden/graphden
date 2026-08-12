@@ -266,7 +266,7 @@ Debt clusters in authz, structural type constraints, slot-owner tie-break.
 
 services reconciler (all `service-id`/`fn-id`), service seeding
 (deterministic service-id, stores fn-id), branch router (`branch-id` +
-pre-resolved `handler-fn-id`), app router/deploy (`:org.handler-fn-id`),
+pre-resolved `handler-fn-id`), app router (`:app-route.handler-fn-id`),
 layout core (fn-id/slot-id/arg-id), export/parse round-trip, org identity
 (slug).
 

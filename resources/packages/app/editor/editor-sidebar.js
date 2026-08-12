@@ -110,20 +110,19 @@ function mountAdminSection(pane, nav, key, build) {
 }
 
 // ── Per-kind visibility ────────────────────────────────────────────────
-// Every entity is classified into EXACTLY ONE tree kind by priority
-// secrets > types > fn. A SERVICE is deliberately NOT a kind: it's a normal
-// fn-def with a service badge, so it always lists as `fn` — hiding services
-// from the tree made service-fns (e.g. web-server) unreachable by browsing
-// while still openable by link. The `fn` / `types` / `secrets` eyes in
-// #kind-filters hide their kind plus any namespace left with nothing visible.
-// State persists in localStorage. (`services` may linger as a stale pref key
-// from before this change — inert, since nothing classifies as it now.)
+// Every entity is classified into EXACTLY ONE kind by priority
+// secrets > types > services > fn (a service is structurally a normal fn and a
+// secret is a fn too, so the priority makes each show under a single toggle).
+// Each kind has an eye toggle in #kind-filters; hiding a kind drops those
+// entities plus any namespace left with nothing visible — EXCEPT the currently
+// selected fn, which fnKindVisible always keeps (so a deep-link can't collapse
+// its namespace). State persists in localStorage.
 const TYPE_ROLES = new Set(['refinement', 'list', 'union', 'variant',
                             'record', 'fn-type', 'primitive']);
 const KIND_PREFS_STORAGE = 'graphden.sidebarKinds';
 
 function loadKindPrefs() {
-  const def = { fn: true, types: true, secrets: true };
+  const def = { fn: true, types: true, secrets: true, services: true };
   try {
     const raw = localStorage.getItem(KIND_PREFS_STORAGE);
     if (raw) return { ...def, ...JSON.parse(raw) };
@@ -138,20 +137,23 @@ function saveKindPrefs() {
 }
 
 // Classify a fn-row into one visibility bucket (priority order above).
-//
-// A service is NOT its own bucket: a `:service` is just "keep THIS fn running",
-// so a service-fn is a normal fn-def that carries a service badge — hiding it
-// from the tree by a "services" eye made it UNREACHABLE by browsing while it
-// stayed openable by link (e.g. `web-server`), breaking the rule "in the menu
-// iff openable". Services live as a badge here + the Services panel; the tree
-// always lists them as fns.
 function classifyFnKind(fn) {
   if (typeof isSecretFn === 'function' && isSecretFn(fn)) return 'secrets';
   const role = (fn.role || '').replace(/^:/, '');
   if (TYPE_ROLES.has(role)) return 'types';
+  if (typeof getServiceForFnId === 'function' && getServiceForFnId(fn.id)) return 'services';
   return 'fn';
 }
-function fnKindVisible(fn) { return kindVisible[classifyFnKind(fn)] !== false; }
+// A kind eye hides a fn's ROW — but NEVER the fn the user is currently looking
+// at. The selected fn always shows, so opening it by link can't leave its
+// namespace empty-and-collapsed (the "openable ⟺ in the menu" invariant).
+// Without this, deep-linking a service-fn — often the only leaf loaded in its
+// namespace, since the sibling non-service fns load lazily on expand — hid it
+// AND dropped the whole namespace via nodeShouldShow.
+function fnKindVisible(fn) {
+  if (fn && typeof selectedFnId !== 'undefined' && fn.id === selectedFnId) return true;
+  return kindVisible[classifyFnKind(fn)] !== false;
+}
 
 function nodeHasActiveCreate(node) {
   if (node.nsId && typeof window.hasActiveCreateIn === 'function'

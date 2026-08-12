@@ -289,9 +289,16 @@
                   [:circle {:cx "8" :cy "8" :r "2" :fill "none"
                             :stroke "currentColor" :stroke-width "1.2"}]]]
                 [:span {:class "kind-label"} "secrets"]]
-               ;; (No "services" eye: a service is a normal fn-def with a badge,
-               ;; not a hideable tree kind — hiding it made service-fns like
-               ;; web-server unreachable by browsing. See classifyFnKind.)
+               [:button {:type "button" :class "kind-toggle" :data-kind "services"
+                         :aria-pressed "true" :onclick "toggleKind('services', this)"
+                         :title "Show / hide services"}
+                [:span {:class "kind-eye" :aria-hidden "true"}
+                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
+                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
+                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
+                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
+                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                [:span {:class "kind-label"} "services"]]
                [:button {:id "secret-add-btn" :type "button" :class "kind-add"
                          :hidden "hidden" :title "New secret"
                          :aria-label "New secret"

@@ -54,6 +54,20 @@ Sessions ride an HttpOnly cookie — sign in once and the editor,
 the API and every page share it. Signed out, `/` bounces you to
 `/login`.
 
+## Forgot your password?
+
+The **Forgot password?** link on the Sign-in tab asks for your
+email and always answers the same way — "if that address has an
+account, a reset link is on its way" — whether or not the account
+exists (so addresses can't be probed). The emailed link opens
+`/reset`, where you set a new password; doing so **signs you out
+everywhere**, on the assumption that a reset means the old
+password may be compromised. Then sign back in.
+
+(These endpoints are rate-limited per IP, like sign-in and
+sign-up — a burst of attempts quietly gets the same generic
+answer.)
+
 ## The `/account` page
 
 Once signed in, `/account` is your self-service surface:

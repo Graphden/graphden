@@ -106,5 +106,7 @@ browser's local storage. Consequences worth knowing:
 
 ## Next
 
-That's the current end of the tutorial — new lessons are added as
-features ship (see the [index](README.md)).
+Lesson 23 — [Finding your way: the lens and the
+Inspector](23-explorer-and-inspector.md): the other half of not
+drowning in a big graph — filter by *kind*, and read everything
+about a selected fn in one panel.

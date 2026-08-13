@@ -176,8 +176,9 @@ the textarea fills.
 
 Lesson 14 continues from packages (Lesson 11): once you've
 authored a namespace, it shows how to publish it as a versioned
-artifact and install / update / fork it across branches from the
-editor's **Packages** section on the **Operate** surface.
+artifact (the namespace's **⬆** action) and install / update /
+fork it across branches from the **packages** chip on the Build
+surface.
 
 Multi-tenancy (multiple users hosting their own sites on one
 graphden instance, each with their own deploys / secrets /

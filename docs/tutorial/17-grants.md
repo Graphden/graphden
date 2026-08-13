@@ -69,7 +69,7 @@ tenant-mode UI is computed from these same rows.
 
 ## The panel
 
-Expand **Grants** on the **Operate** surface (open it from the
+Expand **Grants** on the **Organization** surface (open it from the
 left rail; same gating as Users: signed in + tenancy addon). The partial (`GET /partials/grants-admin`)
 renders:
 

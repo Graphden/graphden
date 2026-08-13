@@ -231,5 +231,4 @@ in your base-fn impl and the dispatch picks the right behavior.
 
 ## Next
 
-Lesson 07 — Effects and the `:secret` type-marker (planned —
-see [tutorial/README.md](README.md))
+[Lesson 07 — Effects and the `:secret` type-marker](07-effects-and-secrets.md)

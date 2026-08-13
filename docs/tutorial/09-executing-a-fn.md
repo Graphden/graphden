@@ -19,7 +19,7 @@ Run paths:
 | Path | When to use |
 |---|---|
 | `▶ Run` in the row's `⋯` actions popover | Interactive — you click + view the result |
-| The **Run** surface (left rail) | The selected fn front and centre — its effects, a launch button (same popover), and its recent runs, all on one page |
+| The Inspector's **Runs** tab (right panel) | The selected fn's own run history, live — there's no separate Run page; running is always the ▶ action, history lives here |
 | `POST /api/execute` | Programmatic — scripts / curl / other services |
 | Internal calls (refs in fn-graph) | Happens automatically when one fn refs another at runtime |
 
@@ -92,7 +92,7 @@ arguments" note) with Run enabled.
 
 The effect gate's sibling: a fn whose current branch carries
 recorded TYPE diagnostics (the ⚠ badge / "Type errors" section on
-the **Operate** surface — Lesson 03) is refused at submit. The run comes back rejected
+the **Organization** surface — Lesson 03) is refused at submit. The run comes back rejected
 with a clear message — "Execution refused: fn '…' has unresolved
 type errors — …" — naming the fn and the first error. There's
 nothing to acknowledge away here: fix the fn or its bindings

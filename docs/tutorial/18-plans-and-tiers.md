@@ -75,6 +75,13 @@ create anything, effective on its next request. Restore by setting
 its real tier back. (Delete still works, so a frozen tenant can clean
 up its own data.)
 
+Operators also get a fourth rail surface, **Platform** (it appears
+only for platform-tier principals): the cross-org registry of
+organizations and the platform-access delegation panel — the
+UI counterpart to the operator routes above, and the place where
+platform capabilities (like `:view-all-stats`) are handed to
+delegates.
+
 ## Handing out a demo
 
 A landing page mints an anonymous org for a visitor through the

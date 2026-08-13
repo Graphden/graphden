@@ -35,7 +35,7 @@ picks a handler by path, exactly like the editor itself does.
 ## The Apps panel
 
 On a cloud deployment (the tenancy addon is active) the editor's
-**Operate** surface (open it from the left rail) has an **Apps**
+**Organization** surface (open it from the left rail) has an **Apps**
 section. It lists your org's apps and lets
 you add or remove them. Each row shows the app's live URL and a
 link to the fn it serves.
@@ -43,6 +43,12 @@ link to the fn it serves.
 > On a single-tenant self-hosted instance there is no Apps panel —
 > apps are a cloud concept, and a self-hoster simply points their
 > own reverse proxy at the fn they want to serve.
+
+Apps also show up in the Explorer itself: a fn that serves an app
+carries a **▣** marker on its tree row, and the **apps** lens chip
+under the sidebar search (Lesson 23) narrows the tree to just
+those fns — the chip shows a count and appears only when the
+deployment has app routing at all.
 
 ## Creating an app
 

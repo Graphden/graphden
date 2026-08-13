@@ -30,13 +30,13 @@ orgs to manage, so the section never mounts.
 The client finds out the addon is live from a response header:
 the first `/api/*` response that carries
 `X-Graphden-Capabilities` flips the editor into tenancy mode.
-Only then — and only when you're signed in — does the **Operate**
+Only then — and only when you're signed in — does the **Organization**
 surface (open it from the left rail) grow the admin sections,
 among them **Grants**, **Members** and **Packages**.
 
 ## The table
 
-On the **Operate** surface, expand **Members**. The body is a
+On the **Organization** surface, expand **Members**. The body is a
 server-rendered partial (`GET /partials/users-admin` — the path
 is historical) — a table of your org's members:
 

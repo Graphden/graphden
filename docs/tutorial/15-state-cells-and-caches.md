@@ -171,4 +171,4 @@ falls back to `:atom` behaviour — fresh each call.
 
 ## Next
 
-[Lesson 16 — Users: the operator's account panel](16-users-admin.md)
+[Lesson 16 — Members: managing who is in your org](16-users-admin.md)

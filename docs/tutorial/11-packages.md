@@ -162,7 +162,9 @@ Which packages load is the `:package-names` list in
 listing `"app"` also loads `core`/`web`/`storage`/`app-base`).
 Because `registry` and `mcp` are OPTIONAL, dropping either from
 `:package-names` omits it — the app still boots, the editor hides
-its **Packages** section on the **Operate** surface, and `/mcp` 404s. (Full distribution flow —
+its packages affordances (the **packages** chip on the Build
+surface, the per-namespace **⬆** publish action, and the
+governance section on **Organization**), and `/mcp` 404s. (Full distribution flow —
 publish / install / update / fork — is [Lesson 14](14-distributing-packages.md).)
 
 ## Try it

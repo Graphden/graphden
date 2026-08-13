@@ -68,8 +68,9 @@ There are two ways to make a secret available to a fn-graph; both
 result in a fn-def the rest of the tutorial can `:ref` to. Pick
 one — they're interchangeable for everything below.
 
-If you're signed in, the top-of-sidebar **Secrets** section is the
-admin entry. The `+` button asks for `{name, path, value}`, writes
+If you're signed in, focus the **secrets** lens chip under the
+sidebar search — the tree narrows to 🔒 rows and a **+ New
+secret** button appears. It asks for `{name, path, value}`, writes
 the value to OpenBao, and creates a fn-def in graphden whose
 `parent` is the `:secret-leaf` base-fn (a pure passthrough — the
 executor dereferences the vault path at arg-resolution time so the

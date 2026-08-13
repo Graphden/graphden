@@ -42,3 +42,11 @@ regexes = [
   # A graph entity id, not a credential.
   '''21164217-585a-4335-8ade-da58f255c6ce''',
 ]
+paths = [
+  # The developer's LOCAL stack env file: git-ignored (can never be
+  # committed), but the working-tree scan runs `--no-git` and therefore
+  # sees ignored files too. GitHub CI checkouts have no `.env`, so this
+  # only fires on a local full `bb ci`. Real secrets legitimately live
+  # here — that is the file's job; skipping it is not a coverage loss.
+  '''^\.env$''',
+]

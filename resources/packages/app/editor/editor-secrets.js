@@ -52,17 +52,12 @@ async function primeSecretLeafId() {
 window.primeSecretLeafId = primeSecretLeafId;
 
 function getSecretLeafFnId() {
-  if (_primedSecretLeafId) return _primedSecretLeafId;
-  // Fallback: scan whatever fns are currently loaded (covers the window
-  // where the root bucket was expanded before priming resolved).
-  if (!graphData?.fns) return null;
-  for (const fn of graphData.fns) {
-    if ((fn['parent-ids'] || []).length === 0 && fn.name === 'secret-leaf') {
-      _primedSecretLeafId = fn.id;
-      return _primedSecretLeafId;
-    }
-  }
-  return null;
+  // Purely id-based. The secret-leaf id is resolved ONCE at boot
+  // (primeSecretLeafId, by the seed's stable identity) and cached here; a fn is
+  // never classified as a secret by matching a literal name. Until the prime
+  // resolves, this is null and classification simply waits for the repaint the
+  // prime triggers — no name scan.
+  return _primedSecretLeafId;
 }
 
 // `fn` is a secret-shaped fn-def iff its parents are exactly

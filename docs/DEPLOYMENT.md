@@ -161,6 +161,27 @@ Auth is **provider-driven and optional**:
 > instance to an untrusted network without either `AUTH_TOKEN` or the tenancy
 > addon. Deploy checklists below assume a set token.
 
+### Accounts (opt-in identity module — see [ACCOUNTS.md](ACCOUNTS.md))
+
+The open `accounts` addon gives a self-hosted instance real users
+(passwords, social login, sessions, 2FA) instead of the single token.
+Enable it via:
+
+```
+GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn
+```
+
+Its addon fragment reads (all optional; features degrade gracefully):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RESEND_API_KEY` | *(empty ⇒ LogMailer)* | Resend key for verify/reset email; unset logs the links |
+| `GRAPHDEN_MAIL_FROM` | *(built-in sender)* | Override the From address |
+| `GRAPHDEN_APP_ORIGIN` | *(unset ⇒ request Host)* | Public origin for OAuth redirects + emailed links |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | *(empty ⇒ off)* | GitHub OAuth — both required to enable |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | *(empty ⇒ off)* | Google OIDC — both required to enable |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` | *(empty ⇒ off)* | Telegram login-widget bot — both required to enable |
+
 ### Fleet / sharding (hosted pods — see [SCALING.md](SCALING.md))
 
 | Variable | Default | Description |

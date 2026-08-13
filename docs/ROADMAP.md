@@ -19,7 +19,13 @@ seams in [TENANCY_SEAM.md](TENANCY_SEAM.md)), the package registry
 (the `registry` package), the storage-swap path (storage base-fns `:pg-query` /
 `:pg-execute` / `:pg-tx`; API routes are graph fn-defs; the storage protocol is
 injected at the web-server via a `:storage-query` free arg — former Block 1),
-and `:fix` recursion ([RECURSION.md](RECURSION.md)).
+`:fix` recursion ([RECURSION.md](RECURSION.md)), the accounts module
+(open opt-in identity — [ACCOUNTS.md](ACCOUNTS.md)), the 2026-08
+editor redesign (rail surfaces + right inspector + sidebar lens +
+workspaces), and the packages-registry redesign (⬆ publish on the
+namespace, Build-surface install chip, org-private registry +
+`publish-packages` capability, Organization governance view —
+[PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md)).
 
 Unbuilt primitives that never made it into a block below: a **file-I/O**
 base-fn set and **WebSocket** live-updates.
@@ -61,7 +67,11 @@ Launch-order refinements agreed 2026-07-20:
 
 1. **Tests via `tests/` namespace** convention + UI filter in the
    sidebar — ~3-4 days
-2. **Workspaces** (namespace M:N self-link + UI scoping) — ~1 week
+2. **Workspaces** (namespace M:N self-link + UI scoping) — SHIPPED
+   2026-08-13: delivered as the ctxbar workspace chip's project
+   checklist (scope the Explorer to picked root namespaces +
+   personal ⊘ hide, per-browser), not a separate rail surface —
+   the rail-surface variant was tried and retired in the redesign.
 3. **Error tolerance** (type mismatches as derived diagnostics, not
    silent swallow) — SHIPPED, all phases (structured diagnostics +
    per-branch store + non-blocking user CRUD writes with
@@ -109,7 +119,7 @@ Launch-order refinements agreed 2026-07-20:
 (The routes-API + static-lint-against-drift item shipped as `window.API` +
 a sync-time drift validator — done, see § Implemented.)
 
-Block total (remaining items 1–5): **~3-4 weeks**
+Block total (sole remaining item, #1 tests-namespace): **~3-4 days**
 
 ### Block 4 — Ecosystem (after Block 1)
 
@@ -301,6 +311,72 @@ than text-diffs.
 ---
 
 ## Future Work
+
+### Package Interface Declaration (packages-spec §6, reframed)
+
+> **Deferred by user decision 2026-08-13**; the packages epic shipped to
+> prod without it. **Reframed 2026-08-13 after design discussion**: the
+> feature is NOT "hide a package's internals" — it is "declare the
+> package's update contract". This entry supersedes the "visibility
+> marker / hide internals" wording in
+> `.cursor/rules/packages-and-dependencies.mdc` §6.
+
+**Goal**: a graph-native declaration of a package's public interface —
+the fns the author promises to keep across versions — shown first in
+the install browser, machine-readable by update tooling.
+
+**Why "hiding" is the wrong frame** (cross-language survey):
+
+- Python `__all__` / `_`-prefix, Clojure `defn-` / `impl.*`-namespace
+  layering — advisory contract signals, not concealment.
+- Rust `pub` / Elm `exposing` / npm `exports` enforce visibility only
+  to protect the author's right to refactor internals across semver
+  updates (Hyrum's law) — the consumer-side hazard is *update time*.
+- Go's capitalization rule is name-based — the class of rule P4 forbids.
+
+In Graphden, install materializes ALL of a bundle's fns into the user's
+graph, and the §7 customization flows (inherit-override, fork-to-fix)
+*require* reading internals. Real concealment is therefore impossible
+and undesirable: **enforced privacy is a permanent non-goal** (not
+"until enforcement exists"), and any implementation must stay
+visual-only (collapse, never a read barrier).
+
+**Real value, in priority order:**
+
+1. **Update contract.** Update = repoint pin + rewrite the project's
+   refs old→new; a ref into a non-exported fn can dangle when v2
+   renames/removes it. An exports list gives a machine-checkable
+   interface diff v1→v2 → update tooling can warn "you depend on
+   internals of P" instead of silently breaking.
+2. **Install-browser UX.** Show the public few; collapse the private
+   many (packages with 40 fns and a 3-fn interface).
+3. Retires the last cosmetic `_`-prefix use (`displayLabel`).
+
+**Form (design lean, recorded 21890fa2)**: an **exports construct** — a
+per-namespace fn-def `:parent :exports` whose binding-list-items
+reference the public fns. Ordinary versioned binding content:
+branch-scoped, mergeable, toggle = add/remove one list item; list order
+doubles as display order; classification is structural (rows whose
+parent is the `:exports` base-fn), never a name. Preferred over
+marker-inheritance because `parent-ids` is an unversioned identity
+junction (ADR-parent-set-identity) — visibility-as-a-parent-edge would
+make every public/private toggle a cross-branch identity edit.
+
+**Rejected simpler alternative — namespace layering** ("root ns =
+interface, sub-namespaces = internals"): P4-clean, zero new constructs,
+and adequate for most small packages — but it conflates organization
+with visibility (a large public API can't be organized into
+sub-namespaces; a private helper can't sit beside its one consumer) and
+turns a visibility toggle into a structural fn move instead of a list
+edit. Keep it in mind as the fallback if the exports construct ever
+feels too heavy in practice.
+
+**Implementation trigger** — not "the design is ready" but the first
+real pain: a user's package update breaks refs into internals, or the
+install browser is unusably noisy on a real package. Until real
+cross-org package traffic exists, this stays deferred.
+
+---
 
 ### Graph-level Recursion
 

@@ -417,8 +417,9 @@ same chain-leaf); the name fallback covers dynamic per-call writes
 that haven't reached the slot-id key space.
 
 See [`docs/RUNTIME_SLOT_ID_REFACTOR.md`](RUNTIME_SLOT_ID_REFACTOR.md)
-for the phase-by-phase landing history and the deferred Phase 5
-extension that would unify the two key spaces.
+for the phase-by-phase landing history; the further full-unification
+of the two key spaces (its § 7) was attempted twice and dropped —
+it is a closed alternative, not deferred work.
 
 ### Limit checking
 

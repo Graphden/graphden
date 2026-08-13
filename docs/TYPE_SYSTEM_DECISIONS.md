@@ -96,12 +96,13 @@ For Pass-2 propagation across the ref-graph it ISN'T fine —
 the AS-NAME's TYPE flows through distinct slot-ids that may
 need different types.
 
-**If revisiting**: thread slot-id through the parser's pre-pass
-output and the registry's `:args` map (currently `{name →
-type}` → would become `{name → {:type T :slot-id S}}`), then
-have the BFS walker match on slot-id, not name. Mid-week of
-work. The α' path was preferred because it delivers the same
-correctness with smaller surface change.
+**Revisited and REJECTED** (2026-07-11): the slot-id-keyed
+sketch (thread slot-id through the parser's pre-pass and the
+registry's `:args` map, match the BFS walker on slot-id) was
+evaluated in full and found infeasible-for-payoff — see
+[ADR-slot-id-keyed-type-checker](adr/ADR-slot-id-keyed-type-checker.md).
+Do not re-open it; the α' path delivers the same correctness
+with smaller surface change.
 
 ## Phase #170 v2 — REJECTED (composed-guard narrowing)
 

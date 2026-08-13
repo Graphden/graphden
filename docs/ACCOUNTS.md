@@ -1,5 +1,7 @@
 # Accounts — the open identity module
 
+Last verified against code: 2026-08-13.
+
 `accounts` is the **open-core**, **opt-in** identity layer: it gives a
 self-hosted Graphden real users, passwords, sessions and — the point of the
 whole design — **account linking** (one person, many sign-in methods). The
@@ -15,7 +17,10 @@ GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn
 ```
 
 Omit it and core runs exactly as before (single-token bearer, or fully open with
-no `AUTH_TOKEN`).
+no `AUTH_TOKEN`). Env vars the addon fragment reads (mailer, social-provider
+credentials, public origin) are listed in
+[CONFIGURATION.md](CONFIGURATION.md#environment-variables) and
+[DEPLOYMENT.md](DEPLOYMENT.md#environment-variables).
 
 ## Data model (three non-versioned entities)
 
@@ -41,30 +46,131 @@ entities) — no version mirror, the cheap schema path.
 `graphden.auth.provider/AuthProvider` seam. It reads the bearer **or** the
 `gd_session` cookie, resolves it through `accounts.core/authenticate-token` to an
 ACTIVE account, and returns an **org-agnostic** principal
-`{:authenticated? :user-id :user}`. Open core has no orgs; when the tenancy
-addon is present it resolves the org from the account's membership at
-request-scope time.
+`{:authenticated? :user-id :user :email :totp-enabled?}` — the last two ride
+along so a policy layer (tenancy's operator-by-email, enforced 2FA) can act
+without re-reading the account. Open core has no orgs; when the tenancy addon
+is present it resolves the org from the account's membership at request-scope
+time.
 
 Wired at `:accounts/provider` and swapped into `:exec/context`'s
 `:auth-provider` — the same swap-point the tenancy `storage-token-provider` uses.
 
+## The `/auth/*` HTTP surface
+
+Served by `accounts.routes/make-router`, a plain Ring router installed
+through the route-collection seam (runs before the graph app-router;
+answers on a match, falls through on nil). Sessions travel as the
+HttpOnly `gd_session` cookie (Max-Age 24 h); cookies are written as raw
+`Set-Cookie` headers — there is no ring cookie middleware in the chain.
+
+| Route | Behavior |
+|-------|----------|
+| `GET /login` | Self-contained sign-in page (email/password + enabled social buttons) |
+| `GET /account` | Self-contained account-management page (identities, 2FA, verify banner) |
+| `GET /reset` | Password-reset form (consumes the emailed token) |
+| `POST /auth/signup` | `{email,password}` → account + session cookie, sends verify mail |
+| `POST /auth/login` | `{email,password}` → session cookie, or `{totp-required}` + short-lived `gd_2fa` cookie |
+| `POST /auth/totp` | Second login step: pending-2FA cookie + `{code}` → full session |
+| `POST /auth/logout` | Revoke THIS session + clear the cookie |
+| `POST /auth/logout-all` | Revoke EVERY session of the signed-in account |
+| `POST /auth/forgot` | `{email}` → email a reset link; always the same 200 (never enumerates) |
+| `POST /auth/reset` | `{token,password}` → set new password, sign out everywhere |
+| `GET /auth/verify?token=` | Consume the email-verification link → redirect |
+| `POST /auth/resend-verification` | Re-send verify mail for the signed-in, still-unverified identity; always 200 |
+| `GET /auth/me` | The signed-in account `{id,email,display-name}`, or 401 |
+| `GET /auth/identities` | The signed-in account's linked identities |
+| `POST /auth/unlink` | `{provider}` → detach an identity; 409 `last_identity` guards lockout |
+| `GET /auth/tfa-state` | `{enabled}` — is TOTP on for the signed-in account |
+| `POST /auth/totp/enroll` | Begin TOTP enrollment (secret + otpauth URI) |
+| `POST /auth/totp/confirm` | `{code}` → activate TOTP |
+| `POST /auth/totp/disable` | `{code}` → turn TOTP off |
+| `GET /auth/{github,google}/start` | 302 to the provider + `gd_oauth` state cookie |
+| `GET /auth/{github,google}/callback` | State check + code exchange → session (or LINK when already signed in) |
+| `GET /auth/telegram/callback` | Verify the login-widget HMAC → session (or LINK) |
+
+A social callback on an **already signed-in** request LINKs the identity to
+the current account (identity conflicts redirect to
+`/settings?error=identity_conflict`) instead of switching accounts.
+
+## Password reset & rate limiting
+
+Reset is the standard token-by-email flow with two hard properties:
+`POST /auth/forgot` returns the identical 200 body whether or not the
+email exists (no account enumeration), and a successful
+`POST /auth/reset` **signs the account out everywhere** (every session
+revoked) so a stolen session doesn't survive a recovery.
+
+Three **per-IP fixed-window limiters** (`crypto/fixed-window-limiter`;
+client IP = first `X-Forwarded-For` hop, else socket addr) guard the
+abuse-prone endpoints:
+
+| Endpoint | Limit | Over-quota response |
+|----------|-------|---------------------|
+| `POST /auth/login` | 10/min | 401 `invalid_credentials` (same as a bad password) |
+| `POST /auth/signup` | 20/min | 429 `rate_limited` |
+| `POST /auth/forgot` + `/auth/resend-verification` | 5/min | the normal 200 body |
+
+Login/forgot over-quota answers mirror the ordinary failure/success shape
+on purpose — the limiter's existence isn't probeable.
+
+## Login & account pages
+
+`/login`, `/account` and `/reset` are self-contained HTML
+(`accounts.pages`) served straight from the accounts router — inline
+CSS/JS calling the JSON `/auth/*` endpoints, brand-matched, with no
+editor coupling: enable the addon and a self-hosted instance has a
+working auth surface. Social sign-in renders **one unified button style**
+for GitHub, Google and Telegram — for Telegram the official widget's
+un-restylable iframe button is skipped; its script is loaded only for
+`Telegram.Login.auth`, wired to an own-styled button, and the payload
+goes through the unchanged server-side HMAC verify at
+`/auth/telegram/callback`. Each social provider appears only when its
+credentials are configured.
+
+## Editor integration (accounts-mode + org-switcher)
+
+The editor detects the addon with one boot probe of `GET /auth/me`
+(`editor-auth.js`): a JSON answer ⇒ `accountsMode` — the token popover is
+replaced by the cookie session and the `/login` page, an account chip
+renders, and the sidebar re-paints once the cookie session resolves (it
+boots before the async probe). The probe result is published as the
+`window.gdAccountsReady` promise so accounts-only UI can wait on it.
+
+`editor-org-switcher.js` (multi-org, tenancy addon present): fetches
+`GET /api/memberships` (tenancy auth-routes; the session cookie
+authenticates) and, when the account belongs to **more than one** org,
+mounts a top-bar chip with a dropdown. Picking an org navigates to that
+org's subdomain origin; on a single-host dev instance it falls back to
+`POST /api/switch-org` (the `gd_org` selector cookie) — sessions are
+org-agnostic, no re-mint involved.
+
 ## Sequencing (this module vs tenancy)
 
-`accounts` is authoritative for identity/credentials/sessions. The existing
-tenancy `:user`/`:token` model is **subsumed** by `:account`/`:session` in the
-Phase-4 cutover (operator-by-email), where the tenancy layer starts resolving
-org from account membership instead of a denormalized `:token.org`. Until then,
-`accounts` stands alone for self-hosted; there is no permanent dual model.
+`accounts` is authoritative for identity/credentials/sessions. The
+Phase-4 cutover has landed: the private tenancy addon resolves the org
+from the account's membership at request-scope time (no denormalized
+`:token.org`), and operator is a capability looked up by the account's
+verified `primary-email`. There is no permanent dual model; `accounts`
+stands alone for self-hosted.
 
 ## Roadmap of the epic
 
-0. **Identity foundation** — this module (schema, password provider, sessions,
-   linking primitive, `AuthProvider`). ✅
-1. Email + verification (Resend) — promotes a verified email to
-   `:account.primary-email`.
-2. Social providers — Google (OIDC), GitHub (OAuth), Telegram (login widget);
-   each a config-gated module resolving to an `:identity` row, auto-linking by
-   **verified** email where the provider vouches one.
-3. Account-linking UI — attach/detach identities on a signed-in account.
-4. Operator-by-email + tenancy cutover onto `accounts`.
-5. 2FA (TOTP) — self-serve, plus tenancy-enforced for a user/role/group.
+All phases shipped:
+
+0. **Identity foundation** — schema, password provider, sessions, linking
+   primitive, `AuthProvider`. ✅
+1. **Email + verification** (Resend; LogMailer fallback when no API key) —
+   promotes a verified email to `:account.primary-email`. ✅
+2. **Social providers** — Google (OIDC), GitHub (OAuth), Telegram (login
+   widget); each config-gated, resolving to an `:identity` row,
+   auto-linking by **verified** email where the provider vouches one. ✅
+3. **Account-linking UI** — the `/login` + `/account` pages;
+   attach/detach identities on a signed-in account. ✅
+4. **Operator-by-email + tenancy cutover** onto `accounts` (policy side
+   lives in the private `graphden-tenancy` repo). ✅
+5. **2FA (TOTP)** — self-serve enroll/confirm/disable + the two-step
+   login; tenancy-side enforcement is the policy layer's job. ✅
+
+Later additions beyond the original roadmap: password reset, per-IP rate
+limits, `logout-all`, `resend-verification`, and the editor
+accounts-mode / org-switcher integration (all documented above).

@@ -417,6 +417,31 @@ The production config reads these via `#env`:
 covered in [DEPLOYMENT.md](DEPLOYMENT.md), [SCALING.md](SCALING.md), and
 [FLEET_DEPLOY.md](FLEET_DEPLOY.md).)
 
+### Accounts (opt-in identity module)
+
+Enabled by naming the addon fragment in `GRAPHDEN_ADDON_CONFIGS`
+(comma-separated list, read in `system/config.clj`; each fragment
+deep-merges over `system-<profile>.edn`):
+
+```
+GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn
+```
+
+The fragment (`resources/graphden/accounts/addon.edn`) reads via `#env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RESEND_API_KEY` | *(empty ⇒ LogMailer)* | Resend API key for transactional email; unset logs the links instead |
+| `GRAPHDEN_MAIL_FROM` | *(built-in sender)* | Override the From address |
+| `GRAPHDEN_APP_ORIGIN` | *(unset ⇒ request Host)* | Public origin for OAuth redirect URIs + emailed links |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | *(empty ⇒ GitHub login off)* | GitHub OAuth app — both required to enable |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | *(empty ⇒ Google login off)* | Google OIDC client — both required to enable |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_USERNAME` | *(empty ⇒ Telegram login off)* | Telegram login-widget bot — both required to enable |
+
+Each social provider is per-provider opt-in: it appears only when both of
+its credentials are set. See [ACCOUNTS.md](ACCOUNTS.md) for the module
+itself (data model, `/auth/*` surface, editor integration).
+
 There is no env-configurable execution max-depth, but the per-execution
 wall-clock deadline **is** tunable via `GRAPHDEN_MAX_EXECUTION_WALL_MS`
 (default `300000` = 5 min; read in `crud/fn_execution/persist.clj`). The dev

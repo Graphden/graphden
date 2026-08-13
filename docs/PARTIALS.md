@@ -408,7 +408,7 @@ The full registry lives in `resources/packages/app/routes/fns.edn`
 `app/editor/fns.edn` (`;; HTMX PARTIALS` and the sections after it),
 `app/execution/fns.edn` (execute-result / service-popover /
 execute-history) and `app/{branches,secrets,registry}` for their
-panels. 23 partials as of 2026-07-19, by consumer surface:
+panels. 27 partials as of 2026-08-13, by consumer surface:
 
 | Partial (route name)                | Path (+key params)                                        | JS consumer |
 |-------------------------------------|-----------------------------------------------------------|-------------|
@@ -416,7 +416,10 @@ panels. 23 partials as of 2026-07-19, by consumer surface:
 | `:partial-auth-form`                 | GET /partials/auth-form (public — IS the login form)      | editor-auth.js |
 | `:partial-fn-versions`               | GET /partials/fn-versions?fn-id= (auth)                   | editor-fn-versions.js |
 | `:partial-fn-version-executions`     | GET /partials/fn-version-executions?fn-version-id= (auth) | per-row htmx load |
-| `:partial-execute-history`           | GET /partials/execute-history?fn-id= (auth)               | editor-execute-history.js |
+| `:partial-execute-history`           | GET /partials/execute-history?fn-id= (auth)               | editor-execute-history.js + inspector Runs tab (editor-shell.js) |
+| `:partial-stats`                     | GET /partials/stats (auth)                                | editor-stats.js — the org's 7-day run rollups (headline totals, per-day trend, top-fns) |
+| `:partial-error-log`                 | GET /partials/error-log (auth)                            | editor-errors.js — the org's recent failed executions, scrubbed |
+| `:partial-type-errors`               | GET /partials/type-errors (auth)                          | editor-type-errors.js — the current branch's recorded type diagnostics |
 | `:partial-execute-result`            | GET /partials/execute-result?id= (auth)                   | execute orchestrator + history |
 | `:partial-execute-result-inline`     | POST /partials/execute-result-inline (auth)               | non-persisted inline Run |
 | `:partial-execute-result-effects`    | GET /partials/execute-result-effects?runtime=&declared=   | editor-execute.js |
@@ -427,6 +430,7 @@ panels. 23 partials as of 2026-07-19, by consumer surface:
 | `:partial-mismatch-explainer`        | GET /partials/mismatch-explainer?binding-id= + optional item-id   | editor-mismatch-explainer.js |
 | `:partial-provenance`                | GET /partials/provenance?binding-id= + optional item-id (public)  | editor-provenance-popover.js |
 | `:partial-return-type-rule`          | GET /partials/return-type-rule?fn= (public)               | editor-provenance-popover.js (Type-rule popover) |
+| `:partial-inspector-detail`          | GET /partials/inspector-detail?fn-id= (public — projects structure already readable via /api/graph/entities) | editor-shell.js (inspector Bindings tab) |
 | `:partial-fn-picker-incompat`        | GET /partials/fn-picker-incompat?expected=&candidate-fn-id= (auth) | editor-fn-picker.js |
 | `:partial-type-name-datalist`        | GET /partials/type-name-datalist (auth)                   | editor-create-type.js (name autocomplete) |
 | `:partial-compatible-type-options`   | GET /partials/compatible-type-options?expected= + optional current / primitives=true (auth) | editor-edit-modes-type.js + editor-overlay-type-expand.js |
@@ -436,9 +440,15 @@ panels. 23 partials as of 2026-07-19, by consumer surface:
 | `:partial-secret-rotate-form`        | GET /partials/secret-rotate-form?fn-id= (auth)            | editor-secrets.js |
 | `:partial-row-actions`               | GET /partials/row-actions?fn-id=&context= (public; edit affordances re-gated client-side) | editor-row-actions.js |
 
-Sidebar admin/packages panels (`/partials/grants-admin`,
-`/partials/users-admin`, `/partials/packages-panel`) are registered
-by their addon/route groups rather than `app.routes` — same pattern.
+Addon-registered partials follow the same pattern but live outside
+`app.routes`: the optional `registry` package registers
+`:partial-packages-panel` (`/partials/packages-panel`) and
+`:partial-packages-governance` (`/partials/packages-governance`) in
+`resources/packages/registry/registry/fns.edn` (served per-branch via
+its fall-through router); the tenancy addon (private repo) registers
+the admin panels — `/partials/grants-admin`, `/partials/users-admin`,
+`/partials/roles-admin`, `/partials/orgs-admin`,
+`/partials/platform-access`, `/partials/apps-panel`.
 
 ---
 

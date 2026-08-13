@@ -313,8 +313,8 @@ The only remaining concern is `:throw` — see Known limits.
 ## Sharing / export policy — "never silently"
 
 A secret's VALUE never enters graph storage, so no export can leak it.
-The vault PATH does live in the graph (`binding.value` under
-`:override-kind :secret-path`) and is org-topology information — so
+The vault PATH does live in the graph (`binding.value` on a
+`:vault-get`-resolver binding) and is org-topology information — so
 every share-shaped bundle treats it explicitly:
 
 - **`GET /api/export/graph`** and **`POST /api/packages/publish`**
@@ -328,10 +328,10 @@ every share-shaped bundle treats it explicitly:
   notice). `GET /api/export/graph?include-secret-paths=true` opts back
   in for org-internal migration (same vault on both ends).
 - **Round-trip form**: the exporter emits `{:secret-path "kv/path"}`
-  (never a `{:value …}` literal) and the parser restores
-  `:override-kind :secret-path` from it — so an included path
-  re-imports as a working secret binding, not as a literal string
-  holding the path.
+  (never a `{:value …}` literal — the wire keyword survives the enum
+  retirement) and the parser restores a `:vault-get`-resolver binding
+  from it — so an included path re-imports as a working secret
+  binding, not as a literal string holding the path.
 - **`GET /api/export/graph-rows`** (BYO-executor bootstrap) keeps
   `:secret-path` rows verbatim BY DESIGN: it is an org-scoped,
   auth-required operational channel and the remote executor needs the
@@ -419,29 +419,31 @@ Three pieces:
 - **Schema**: the binding's `:resolver-fn-id` FK pointing at
     `:vault-get` — the generic value-resolver mechanism
     (`schema/graph/schema.clj`). The old `:override-kind
-    :secret-path` enum marker is RETIRED (audit-2 stage 1,
-    2026-07-23): writers emit the resolver form only, a boot
-    migration (`system.core/migrate-secret-path-bindings!`)
-    rewrites legacy rows idempotently, and the executor keeps a
-    read-compat branch for not-yet-migrated rows until stage 2
-    drops the column (the enum's other values were dead: `:fixed`
-    superseded by `:terminal`, `:default` write-only).
+    :secret-path` enum marker is fully RETIRED: stage 1
+    (2026-07-23) switched writers to the resolver form with an
+    idempotent boot migration for legacy rows, and stage 2b has
+    since **dropped the column** (`ds/retire-field :binding
+    :override-kind` in `schema/graph/schema.clj`) — there is no
+    read-compat branch left (the enum's other values were dead:
+    `:fixed` superseded by `:terminal`, `:default` write-only).
 
-- **Executor**: `compile/bindings.clj/classify-slot` recognises
-    `:override-kind :secret-path` and emits a `:kind :secret-value`
-    shape. The eager arg-builder (`compile_eager.clj`, via the
-    `vault-get-secret` delay) handles `:secret-value` by calling
-    `clients.vault/get-secret` on `(:vault ctx)` with the binding's
-    `:value` field as the path. The dereferenced
-    secret flows into BOTH `:args` (what the impl receives) and
-    `:aug` (so inner ref-chains that reference the slot by ext-name
-    receive the same value).
+- **Executor**: `compile/bindings.clj/classify-slot` recognises a
+    value-binding carrying `:resolver-fn-id` and emits a
+    `:kind :resolved-value` shape (`:stored` = the binding's
+    `:value`, i.e. the vault path). At arg-resolution time the
+    resolver graph fn (`:vault-get`) is executed with the stored
+    value as input, calling `clients.vault/get-secret` on
+    `(:vault ctx)`. The dereferenced secret flows into BOTH
+    `:args` (what the impl receives) and `:aug` (so inner
+    ref-chains that reference the slot by ext-name receive the
+    same value).
 
-- **Validation gate**: `crud/validation.clj/secret-path-rej`
-    refuses `:override-kind :secret-path` on slots whose effective
-    rich-type doesn't carry the `:secret` marker. Without this
-    gate, a user could mark any plain `:text`-typed binding as
-    secret-path, the executor would dereference, and the secret
+- **Validation gate**: `crud/validation.clj/resolver-rej` — when a
+    binding's resolver fn's registered RETURN carries a
+    hide-result marker (`:vault-get` → `[:secret :text]`), the
+    target slot's rich type must carry a marker too. Without this
+    gate, a user could point any plain `:text`-typed binding at
+    `:vault-get`, the executor would dereference, and the secret
     value would silently flow into a non-secret slot — bypassing
     T1's structural enforcement at runtime.
 
@@ -449,11 +451,11 @@ The Secrets-panel admin flow writes new secrets with this shape:
 
 - `:secret-leaf` base-fn (in `web/vault/fns.edn`) — a pure
     passthrough whose `:in` slot is `[:secret :text]`. The impl
-    just returns its arg; the executor's `:secret-value` case
+    just returns its arg; the executor's `:resolved-value` case
     has already dereferenced via vault by the time the impl runs.
 - `crud/secrets/create-secret` writes
     `parent-ids=[<secret-leaf-id>]` + a binding with
-    `:override-kind :secret-path` + `:value=<path>`.
+    `:resolver-fn-id=<vault-get>` + `:value=<path>`.
 - `crud.secrets/find-usages`, `delete-secret`, `rotate-secret`
     accept only the secret-leaf shape — `shape/secret-fn?` takes
     the secret-leaf id and checks `[secret-leaf-id]` parent-ids.
@@ -506,8 +508,8 @@ On submit the form POSTs to `/api/secret-bindings` (sibling to
    exists on `(fn-id, slot-id)`.
 2. `vault/put-secret` at the supplied path.
 3. `crud-entities/create-entity :binding` with
-   `:override-kind :secret-path` and `:value <path>`. This runs the
-   normal `secret-path-rej` gate — the gate rejects when the slot's
+   `:resolver-fn-id <vault-get>` and `:value <path>`. This runs the
+   normal `resolver-rej` gate — the gate rejects when the slot's
    rich-type doesn't carry `:secret`, in which case we
    `vault/delete-secret` to keep the stores consistent.
 
@@ -521,7 +523,7 @@ shape only — inline rotation is followup work.
 Verified end-to-end in 2026-05-29 smoke:
 
 - Gate-reject: a legacy `:override-kind` write → `:constraint-violation/override-kind-retired`; a `:vault-get`-resolver write into a non-secret slot → `:capability/resolver-marker-laundering`, vault rolled back (subsequent read 404).
-- Positive bind on `:sql-exec/:password` of a freshly-created composed fn → `binding` row with `:override-kind :secret-path`, vault holds the value at the path.
+- Positive bind on `:sql-exec/:password` of a freshly-created composed fn → `binding` row with the `:vault-get` resolver + `:value` path, vault holds the value at the path.
 
 ## Tests
 

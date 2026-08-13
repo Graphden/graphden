@@ -37,6 +37,30 @@ addon; unbound = platform/single-tenant), `platform-tier?` /
 `platform-admin?` predicates, and the BYO execution-mode resolution
 (`GRAPHDEN_BYO_EXECUTOR` / `:org.execution-mode`).
 
+### Capability seams (fine-grained)
+
+Beyond the yes/no predicates above, `context.clj` carries two
+installable capability seams — policy lives in the addon, core keeps
+only the hook; both are **default-deny** without the addon:
+
+- **Platform axis** — `install-platform-cap-fn!` /
+  `current-has-platform-cap? cap`: admits a *delegate* holding one
+  platform right (`:view-all-stats`, `:manage-orgs`, …) without the
+  whole `:platform-admin` umbrella. The addon's predicate returns
+  true for the umbrella too, so an operator passes every gate.
+- **Org axis** — `install-org-cap-fn!` / `current-has-org-cap? cap`:
+  the same shape scoped to the current org (`:manage-users`,
+  `:publish-packages`, …); the addon implements grants + role
+  bundles + owner-implies-all.
+
+Because both default to deny, a gate in core/packages MUST pair the
+capability check with a `current-platform-tier?` short-circuit to
+stay open on single-tenant / operator installs — the shape
+`(or (current-platform-tier?) (current-has-org-cap? :publish-packages))`
+guarding `publish-package-apply` (`registry/impls.clj`) and the
+`:view-all-stats` gate in `app/execution/impls.clj` are the two
+precedents.
+
 ## Auth seam
 
 Auth is provider-driven, never hardcoded. Core defines
@@ -97,10 +121,14 @@ The runtime sandbox mechanism is entirely in core
 - Every security-sensitive base-fn calls `record-effect!`; with
   `*allowed-effects*` bound to a set, a category outside it throws
   `:execution/forbidden-effect`. `nil` = unrestricted = zero overhead.
-- `cloud-forbidden-effects` = `#{:env :io :network :process :raw-sql}`.
+- `cloud-forbidden-effects` = `#{:env :io :network :process :raw-sql :cross-org}`.
   `:raw-sql` exists because `:db` must stay allowed (tenants need org-scoped
   storage) while the raw HoneySQL escape hatches would ride on `:db` past
   org-scope and RLS — they record `:raw-sql` additionally.
+  `:cross-org` marks the platform-only dispatch primitives that run a fn
+  under ANOTHER org's `*current-org*` scope (the cloud domain-router's
+  `:execute-in-org`) — safe on the operator plan, forbidden on every
+  tenant plan.
 - **Two layers** (a single blanket binding around the handler breaks the
   platform, whose own handler reads storage via `:raw-sql`-recording
   primitives):

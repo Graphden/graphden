@@ -14,7 +14,10 @@ not traffic; 90-day retention. Surfaced three ways: the `7d: N runs
 · M failed · avg K ms` strip in the editor's execute-history panel
 (`:usage-fn-stats`); the editor's **Stats** sidebar section
 (`GET /partials/stats` — org-scoped headline totals, per-day trend
-table, top-fns table; each org sees only its own workspace); and
+table, top-fns table; each org sees only its own workspace, except
+that a platform-tier principal or a `:view-all-stats` capability
+delegate additionally gets the cross-org by-org rollup —
+`usage-all-org-stats` returns `[]` for everyone else); and
 `org-stats` / `org-totals` for tooling. See
 [EXECUTION.md § Usage rollups](EXECUTION.md).
 

@@ -190,7 +190,7 @@ core's `case` matcher.
 
 | Affordance | Where | What it does |
 |------------|-------|--------------|
-| Branch chip | menu-header (between prefs + auth) | Shows current branch. Inverted style when off main. |
+| Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
 | Branch popover | click chip | Branch list + inline create + Δ diff + ⇢ merge + × delete |
 | Diff modal | click Δ in row | Full-viewport list of differences (`:added-in-source` / `:added-in-target` / `:modified`); :fn rows are clickable → navigate |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |

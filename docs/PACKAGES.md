@@ -29,26 +29,19 @@ The packages system organizes base functions and fn-defs into modular, reusable 
 ```
 resources/packages/
 ├── core/                # Core primitives (no dependencies)
-│   ├── package.edn
-│   ├── arithmetic/
-│   ├── logic/
-│   ├── hof/
-│   ├── collections/
-│   ├── strings/
-│   └── system/
+├── storage/             # Storage primitives over graphden's own datasource
 ├── web/                 # Web primitives (depends on core)
-│   ├── package.edn
-│   ├── http/
-│   ├── reitit/
-│   ├── html/
-│   ├── crud/
-│   └── graph/
-└── app/                 # Application (depends on core, web)
-    ├── package.edn
-    ├── common/          # Shared building blocks
-    ├── editor/          # Editor UI
-    └── server/          # Server composition
+├── app-base/            # Route-building vocabulary shared by app + addons
+├── registry/            # OPTIONAL — in-graph publish/install/fork/export
+├── mcp/                 # OPTIONAL — the /mcp JSON-RPC AI endpoint
+└── app/                 # Application server (editor UI + routes + server)
 ```
+
+Each package directory holds its `package.edn` plus module
+subdirectories (`core/arithmetic/`, `web/http/`, `app/editor/`, …).
+The authoritative as-built map — including the external packages kept
+out of the prod tree (`mathx`, `examples`) — is
+[PACKAGE_DISTRIBUTION.md § 15.1](PACKAGE_DISTRIBUTION.md).
 
 ### Key Design Principles
 

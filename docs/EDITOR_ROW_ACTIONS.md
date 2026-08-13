@@ -34,34 +34,58 @@ Disabled-with-reason: `edit-block-reason` is a client-passed query param; the
 
 ## Server output shape (col-header example)
 
+As assembled by the `:_partial-row-actions-{ns,i,open}-button` +
+`:_partial-row-actions-col-header*` fn-defs in
+`resources/packages/app/editor-row-actions/fns.edn`:
+
 ```clojure
-[:div.row-actions-content
- {:role "toolbar"
-  :aria-label "Row actions"
-  :data-context "col-header"
-  :data-fn-id <fn-id>}
- [:button.namespace-badge
-  {:type "button"
-   :data-action "namespace-move"
-   :data-fn-id <fn-id>
-   :data-ns-path <ns-path>      ; for hover tooltip
-   :aria-label (str "Namespace: " ns-path
-                    (when editable? " — click to change"))}
+[:div {:class "row-actions-content"
+       :role "toolbar"
+       :aria-label "Row actions"
+       :data-context "col-header"
+       :data-fn-id <fn-id-str>}
+ [:button {:type "button"
+           :class "namespace-badge action-icon"
+           :data-action "namespace-move"
+           :title "Namespace — reveal in Explorer / move"
+           :aria-label "Namespace"}
   "ns"]
- [:button.description-badge
-  {:type "button"
-   :data-action "description"
-   :data-entity-type "fn"
-   :data-entity-id <fn-id>
-   :data-description (or description "")
-   :data-name <name>}
+ [:button {:type "button"
+           :class "description-badge action-icon"
+           :data-action "description"
+           :data-entity-type "fn"
+           :title "Description"
+           :aria-label "Description"
+           :data-description <description-or-"">}   ; assoc'd from the fn row
   "i"]
- (when show-open?
-   [:a {:href (str "?fn=" name)
-        :target "_blank"
-        :data-action "open"
-        :title "Open in new tab"} "↗"])]
+ ;; Only when show-open ≠ "false" (default-on; callers pass show-open=false,
+ ;; e.g. for anonymous fns). Otherwise the entry is nil and stripped by the
+ ;; :filter :some? step before hiccup.
+ [:a {:class "open-in-new-tab action-icon"
+      :data-action "open"
+      :target "_blank"
+      :aria-label "Open in new tab"
+      :title "Open in new tab"
+      :href "#<name>"}   ; bare-name HASH fallback — the JS `open` handler
+  "↗"]]                  ; overrides it with the qualified name on click
 ```
+
+## Labeled-menu rendering (redesign 2026-08, commit 463e216c)
+
+The popover renders as a vertical LABELED menu, not a strip of bare
+glyphs: every button keeps its glyph AND shows its action name. The
+labels come from the `aria-label` already on each button, surfaced via
+CSS `.row-actions-content button[aria-label]::after`; a CSS grid gives
+a fixed glyph lane so labels align. Consequences:
+
+- **New buttons MUST carry a human-readable `aria-label`** — it doubles
+  as the visible menu label, so a missing/cryptic one renders a
+  label-less (or nonsense) menu row, not just an a11y gap.
+- Delete is styled as the danger row (reads red); disabled items stay
+  muted with their reason in `title`.
+- All rules are scoped inside `.row-actions-content` (popover-only), so
+  the same `.action-icon` factory still renders as a compact square
+  when used inline on a card row.
 
 ## Client dispatch contract
 
@@ -87,8 +111,20 @@ Disabled-with-reason: `edit-block-reason` is a client-passed query param; the
   the render (not just route-level 401).
 - **Re-anchor**: the popover re-positions on zoom/pan; post-swap binding must
   not break that flow.
-- **Network failure**: each popover open is a fetch — keep the graceful
-  "Failed" placeholder path working.
+- **Fetch-per-open is gone — `_rowActionsHtmlCache`**: the first hover
+  for a given URL fetches the partial and caches the swapped HTML
+  (bounded FIFO, 300 entries); every later hover renders synchronously
+  from the cache with zero fetch. The popover is held invisible
+  (opacity 0) until content resolves, so neither a first fetch nor a
+  warm open flashes a loading placeholder. **The full request URL is
+  the cache key** — auth-derived params (`editable` / owned) are part
+  of it, so sign-in/out naturally keys fresh entries; but it also
+  means any NEW query param must be part of the URL at fetch time
+  (added in `loadRowActionsContent`) or a cached entry for the old URL
+  shape will serve stale HTML. The add-MI disabled state is recomputed
+  against CURRENT `lookups` on every open, cached or not. The graceful
+  error path (`row-actions-error`) still applies when a cache-miss
+  fetch fails — keep it working.
 
 ## Decision guard: what stays in JS (do not re-attempt migration)
 

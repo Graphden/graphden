@@ -180,6 +180,15 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Module kinds (fns-only / impl+fns / core-swap), registry lifecycle, export, § 15.1 as-built repo map | When touching `registry` / `packages/{loader,export}` / `executor-packages.edn`, or deciding what belongs in its own repo |
 | [docs/TENANCY_SEAM.md](docs/TENANCY_SEAM.md) | The core seams the tenancy addon plugs into — context, auth, addon manifest, storage/schema, route collection, effect gate, execute guard | When touching `tenancy/context.clj`, the effect gate, an admission/quota seam, or any `:tenancy/*` init-key |
 | [docs/ACCOUNTS.md](docs/ACCOUNTS.md) | The open opt-in identity module — account/identity/session model, social providers, email verification, TOTP, the `/auth/*` + `/login` surface | When touching `src/graphden/accounts/` or wiring auth for a deployment |
+| [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) | The trust model — what each principal may do and which layer enforces it | Before touching an authz gate, or when reasoning about a tenant-facing surface |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Day-2 ops runbook | When operating a deployment (incidents, upgrades, backups) |
+| [docs/PLANS.md](docs/PLANS.md) | Cloud tiers/quotas reference — what each plan grants | When touching tier ceilings, quota, or the demo flow |
+| [docs/FAQ.md](docs/FAQ.md) | Honest positioning Q&A about the project | When writing outward-facing copy about graphden |
+| [docs/README.md](docs/README.md) | The reader-facing doc index (composes with this map) | When adding/renaming a doc — keep both indexes current |
+| [docs/TUTORIAL_API_POLL.md](docs/TUTORIAL_API_POLL.md) | End-to-end worked example: scheduled API poller built from fn-defs | After tutorial lessons 01–10, or as a template for a real integration |
+| [docs/RUNTIME_SLOT_ID_REFACTOR.md](docs/RUNTIME_SLOT_ID_REFACTOR.md) | The name→slot-id key-space refactor ledger — which runtime spaces are id-keyed vs name-keyed and why the remainder stays hybrid | Before re-keying any runtime map keyed by arg NAME |
+| [docs/adr/ADR-free-arg-slot-map-perf.md](docs/adr/ADR-free-arg-slot-map-perf.md) | Why `free-arg-slot-map` is cached the way it is (VERIFIED) | Before touching free-arg caching |
+| [docs/adr/ADR-slot-id-keyed-type-checker.md](docs/adr/ADR-slot-id-keyed-type-checker.md) | Slot-id-keyed checker — EVALUATED + REJECTED; closes TYPE_SYSTEM_DECISIONS § β | Before proposing to re-key the type checker |
 | [docs/devtour/README.md](docs/devtour/README.md) | The developer code-tour — symbol-anchored read of the codebase; `bb devtour` bake + `bb devtour-check` drift guard | When onboarding, or when a toured top-level form is renamed/moved/deleted (CI goes red) |
 
 ## Common Commands
@@ -543,7 +552,11 @@ src/graphden/
 │                       #   the multi-tenant POLICY lives in the private graphden-tenancy
 │                       #   repo, pulled into graphden-cloud as a git-dep
 ├── auth/               # Pluggable auth-provider seam
+├── accounts/           # Open opt-in identity module — accounts/identities/sessions,
+│                       #   social providers, TOTP, /auth/* routes (docs/ACCOUNTS.md)
+├── monitoring/         # Built-in domain alerter (docs/MONITORING.md)
 ├── clients/            # Vault/OpenBao client + SSRF egress guard (egress.clj)
+├── web/                # Shared web helpers (errors.clj, route_shape.clj)
 ├── util/               # Small shared helpers
 ├── system/             # Integrant lifecycle — config, init/* (per-concern init-keys),
 │                       #   branch_router (per-branch ctx + dispatch; also serves the
@@ -655,7 +668,7 @@ feature is complete enough for the lesson to be verified end-to-end.
 The **developer code-tour** lives in [docs/devtour/](docs/devtour/README.md) —
 a navigable, symbol-anchored walkthrough of the *host codebase* for a new
 contributor, organised by block (executor, storage, versioning, types, crud,
-packages, web, services, tenancy). It is the developer-facing counterpart to
+packages, web, layout, services, platform, accounts). It is the developer-facing counterpart to
 the user tutorial above: `docs/tutorial/` teaches *using* the editor; the tour
 teaches *the code that runs it*.
 

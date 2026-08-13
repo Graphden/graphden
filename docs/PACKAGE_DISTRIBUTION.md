@@ -119,8 +119,8 @@ implementation tasks.
   **without copying**. This is the foundation of reference-install (§ 4.2).
 - **Effect-gate** — `record-effect!` throws when an effect is outside the
   request's `:allowed-effects`. Cloud-forbidden set:
-  `#{:env :io :network :process :raw-sql}`. This — not "no impl" — is the
-  real cloud security boundary
+  `#{:env :io :network :process :raw-sql :cross-org}`. This — not "no
+  impl" — is the real cloud security boundary
   ([TENANCY_SEAM.md § Effect gate](TENANCY_SEAM.md#effect-gate)).
 
 ### 2.4 Branch versioning — the staging + rollback engine

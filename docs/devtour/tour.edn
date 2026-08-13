@@ -17,8 +17,11 @@
   (left). Read them roughly top-to-bottom: each block's `after:` line names
   what it assumes you have already seen. Start with the **Executor** — it is
   the spine everything else hangs off — then follow the dependency order:
-  Storage, then Branches, Types, CRUD, Packages, Web, Layout,
-  Services. (The multi-tenant / cloud policy layer is in the private graphden-tenancy repo — the open-core split — plugging into the `graphden.tenancy.context` seam kept here.)
+  Storage, then Branches, Types, CRUD, Packages, Web, Layout, Services,
+  Platform seams, Accounts. (The Platform block tours the in-repo seams and
+  hardening; the multi-tenant / cloud POLICY layer itself is in the private
+  graphden-tenancy repo — the open-core split — plugging into the
+  `graphden.tenancy.context` seam kept here.)
 
   Every step shows you the **actual source** of one function, pulled straight
   from the file it lives in. When a step points you at code in another block,

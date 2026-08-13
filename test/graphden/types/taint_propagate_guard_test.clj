@@ -80,6 +80,7 @@
     :render-prometheus :repeat :reset :resolve-branch-ref :resolve-fn
     :resolve-fn-version-id :resolve-form :resolve-package-version
     :resolve-type-fn-id :response-immutable? :rest :reverse
+    :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
     :ring-route-paths :ring-router :routes->js-bundle
     :rule-owner-of-name :running-entry :secret-leaf :select-keys
@@ -95,7 +96,7 @@
     :try-apply-seq-append :try-apply-seq-update :try-apply-tighten
     :try-apply-update :type-check-binding-rej :type-diagnostics-list
     :type-name-kinds :update-entity :update-in :update-keys
-    :update-package-apply :update-vals :url-decode :usage-all-org-stats
+    :update-vals :url-decode :usage-all-org-stats
     :usage-fn-stats :usage-org-daily :usage-org-fn-stats
     :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
     :vault-get :vault-metadata-get :vault-metadata-put :vault-put :vec

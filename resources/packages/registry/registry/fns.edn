@@ -157,15 +157,14 @@
    :return-type :int
    :effects #{:db}}
 
-  {:name :update-package-apply
-   :description "Update/rollback apply-core: materialize the target (if needed) → rewrite the project's own refs old→new (shared-remap invariant) → repoint the pin → delta-invalidate — one coupled unit. Returns the rewritten-ref count."
-   :args {:pkg-name {:type :text :description "Package name."}
+  {:name :rewrite-refs-to-version
+   :description "Rewrite apply-core: repoint the project's OWN refs from the OLD to the NEW version of the package rooted at `:ns-root` (package-internal refs untouched; shared-remap invariant) + delta-invalidate the owner fns whose compiled form changed — a coupled write+invalidation pair, same class as fork / materialize. Returns the rewritten-ref count. The rest of update/rollback — materialize-if-needed, pin repoint — is graph composition (`:_upd-rewritten`)."
+   :args {:ns-root {:type :text :description "Package ns-root."}
           :old-version {:type :text :description "Currently pinned version."}
           :new-version {:type :text :description "Target version (already resolved)."}
-          :ns-root {:type :text :description "Package ns-root."}
           :fns {:type [:list :jsonb] :description "The TARGET version's fn-defs."}}
    :return-type :int
-   :effects #{:db :time}}
+   :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/packages/publish — graph-composed handler.
@@ -884,13 +883,47 @@
    :parent :equal?
    :args {:a :_pkgv-resolved :b {:ref :_upd-old :type :nullable-text}}}
 
-  {:name :_upd-rewritten
-   :parent :update-package-apply
-   :args {:pkg-name {:as :pkg-name}
+  ;; --- the update write sequence, graph-visible (formerly one opaque
+  ;;     Clojure apply-core): materialize-if-needed → rewrite → pin. ---
+
+  {:name :_upd-materialized?
+   :parent :package-version-materialized?
+   :args {:ns-root {:ref :_pkgv-ns-root :type :text}
+          :version {:ref :_pkgv-resolved :type :text}
+          :fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
+
+  {:name :_upd-mat-count
+   :parent :materialize-package-fns
+   :args {:ns-root {:ref :_pkgv-ns-root :type :text}
+          :version {:ref :_pkgv-resolved :type :text}
+          :fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
+
+  ;; idempotency: a target version already visible (incl. platform-
+  ;; materialized under an OrgScoped read) is NOT re-synced and nothing
+  ;; is invalidated — same skip reference-install performs.
+  {:name :_upd-mat-maybe
+   :parent :if
+   :args {:test :_upd-materialized?
+          :then {:value nil}
+          :else :_upd-mat-count}}
+
+  {:name :_upd-rewrite
+   :description "Repoint the project's own refs old→new — the coupled write+invalidate core of update/rollback."
+   :parent :rewrite-refs-to-version
+   :args {:ns-root {:ref :_pkgv-ns-root :type :text}
           :old-version {:ref :_upd-old :type :text}
           :new-version {:ref :_pkgv-resolved :type :text}
-          :ns-root {:ref :_pkgv-ns-root :type :text}
           :fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
+
+  {:name :_upd-pin
+   :parent :package-upsert-pin
+   :args {:pkg-name {:as :pkg-name}
+          :pkg-version {:ref :_pkgv-resolved :type :text}}}
+
+  {:name :_upd-rewritten
+   :description "Update/rollback write sequence: materialize the target if needed, rewrite the project's refs old→new, repoint the pin. Returns the rewritten-ref count (the trailing `:_upd-rewrite` ref is result-cached — it re-reads the count, it does not re-run the write)."
+   :parent :do
+   :args {:steps [:_upd-mat-maybe :_upd-rewrite :_upd-pin :_upd-rewrite]}}
 
   {:name :_upd-err-not-installed
    :parent :zipmap

@@ -349,28 +349,24 @@
 ;; composable.
 
 
-;; Update/rollback apply-core: materialize the target version (if
-;; needed), REWRITE the project's own refs old→new (variant B —
+;; Rewrite apply-core: repoint the project's OWN refs OLD→NEW (variant B —
 ;; package-internal refs untouched; `rewrite-refs-to-version!`'s shared
-;; remap is the §3.3 invariant), repoint the pin, delta-invalidate the
-;; materialized fns + rewritten owners — the four writes and their
-;; invalidation are one coupled unit. Pin lookup / resolve / guards /
-;; envelopes are graph composition in fns.edn (`:update-package-version`).
-(defbase update-package-apply
-  [pkg-name old-version new-version ns-root fns]
+;; remap/accumulator is the §3.3 invariant) + delta-invalidate the owner
+;; fns whose compiled form changed — a coupled write+invalidation pair,
+;; same class as fork / materialize. An empty owner set invalidates
+;; nothing (`#{}` = "the write reached no compiled closure"). The rest of
+;; the former update pipeline — materialize-if-needed, pin repoint — is
+;; GRAPH composition now (the `:_upd-rewritten` `:do` in fns.edn), so
+;; update/rollback reads as steps in the graph instead of one opaque core.
+(defbase rewrite-refs-to-version
+  [ns-root old-version new-version fns]
   (cr/record-effect! :db)
-  (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)
-        mat-ids (when-not (already-materialized? storage ns-root new-version fns)
-                  (materialize-fns! storage ns-root new-version fns))
         {rewritten :count :keys [owners]}
         (rewrite-refs-to-version! storage ns-root old-version new-version fns)]
-    (upsert-pin! storage pkg-name new-version)
-    ;; Delta-invalidate the newly materialized fns + the project fns
-    ;; whose refs were rewritten (owners) — not the whole registry.
-    ;; A full clear here recompiled ~3600 fns and froze the server.
-    (exec-ctx/invalidate-graph-cache! ctx (into (set mat-ids) owners))
-    (br/note-graph-epoch-validated! (request/require-storage ctx))
+    ;; Delta — a full clear here recompiled ~3600 fns and froze the server.
+    (exec-ctx/invalidate-graph-cache! ctx owners)
+    (br/note-graph-epoch-validated! storage)
     rewritten))
 
 
@@ -409,5 +405,5 @@
    :version-qualified-ns version-qualified-ns-fn
    :fork-package-fns fork-package-fns
    :materialize-package-fns materialize-package-fns
-   :update-package-apply update-package-apply
+   :rewrite-refs-to-version rewrite-refs-to-version
    :package-upsert-pin package-upsert-pin})

@@ -168,10 +168,21 @@ blocked). All focused suites + lint green; rebuild healthy; live smoke
 verified columns + normalisation + index JSON. Known limitation documented:
 package NAMES are not org-scoped ((name,version) can exist once per org).
 
-**Slice — Governance view (Organization surface).**
-A read-mostly Organization panel: the org's package catalog, who-may-publish
-(the capability holders), and an install audit (what is installed where). Not an
-install button.
+**Slice — Governance view (Organization surface). ✅ SHIPPED 2026-08-13.**
+Done: `GET /partials/packages-governance` (registry fns.edn — shallow
+query/reshape/hiccup chains only, A2-landmine-safe) renders the org's
+published catalog (rows where `:org-id` = the new pure `:current-org-id`
+base-fn — publish now stamps org-id identically with and without the addon,
+so the filter needs no org literal) + an install audit (pins × branch names
+via one branches query + zipmap). Mounted as the 'packages' section on the
+Organization surface (`buildPackagesGovernanceSection` in editor-sidebar.js;
+registry-absent probe via `window.API.api_packages_installed`); the
+who-may-publish note is a static capability explanation (tenancy-aware text —
+holders are managed in Roles/Grants, not duplicated here). Verified: rebuild
+healthy, partial renders both tables live (publish+install smoke), Playwright
+section-mount + populated tables, full `bb visual` 24/24 (the ipad-landscape
+sidebar baseline was refreshed — it was STALE from A2's ⬆ + Workspaces' ⊘
+ns-row buttons, which show persistently on tablet layouts only).
 
 ## Coherence guardrails (from the review — hold these)
 

@@ -26,6 +26,16 @@
   (export/export-namespace (request/require-storage ctx) root))
 
 
+(defbase current-org-id
+  "The org id in scope for this request (`tc/current-org`; the shared
+   public org when unbound — single-tenant). Single context read (§3.1).
+   Lets graph compositions (the governance catalog filter) compare rows
+   against the caller's org without an org literal. Pure: a thread-local
+   read, constant within one request execution."
+  []
+  (tc/current-org))
+
+
 (defbase export-graph
   [include-secret-paths]
   (cr/record-effect! :db)
@@ -86,6 +96,13 @@
                                    :package-dependencies (:package-dependencies bundle)
                                    :secrets (vec (:secrets bundle))
                                    :content-hash content-hash
+                                   ;; Same value the tenancy decorator stamps when
+                                   ;; scoped (it overwrites with `(tc/current-org)`
+                                   ;; too) — set here as well so SINGLE-TENANT rows
+                                   ;; carry the public org instead of NULL and the
+                                   ;; governance catalog's org-equality filter works
+                                   ;; identically with and without the addon.
+                                   :org-id (tc/current-org)
                                    :public? public?
                                    :published-at (java.time.Instant/now)})]
         {:ok true
@@ -382,6 +399,7 @@
 
 (def impls
   {:export-namespace export-namespace
+   :current-org-id current-org-id
    :export-graph export-graph
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply

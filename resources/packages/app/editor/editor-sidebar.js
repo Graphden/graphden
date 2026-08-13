@@ -109,6 +109,36 @@ function mountAdminSection(pane, nav, key, build) {
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
 }
 
+// Packages GOVERNANCE (packages spec §4) — the Organization surface's
+// read-mostly view: who may publish (a static capability note; the holders
+// are managed in Roles/Grants), the org's published catalog and an install
+// audit, both server-rendered by /partials/packages-governance. NOT an
+// install surface — install lives on the Build packages chip.
+function buildPackagesGovernanceSection() {
+  if (!isAuthenticated()) return null;
+  // Optional registry package absent → no /api/packages/* in window.API →
+  // no governance section (probe, never a name).
+  if (!window.API?.api_packages_installed) return null;
+  const tenancy = typeof window.graphdenTenancyActive === 'function'
+    && window.graphdenTenancyActive();
+  const wrap = document.createElement('div');
+  wrap.className = 'sidebar-packages-governance';
+  wrap.innerHTML = ''
+    + '<div class="packages-gov-who">'
+    + (tenancy
+      ? 'Publishing requires the <code>publish-packages</code> capability — the '
+        + 'org owner always holds it; grant it to members in Roles or Grants. '
+        + 'Published versions are private to this organization unless the '
+        + 'publish dialog’s “Public” opt-in is checked.'
+      : 'Publishing is open on this instance (no organization capability '
+        + 'system); published versions are visible to every user.')
+    + '</div>'
+    + '<div class="ns-children" hx-get="/partials/packages-governance" hx-trigger="load" hx-swap="innerHTML">'
+    +   '<div class="loading">Loading…</div>'
+    + '</div>';
+  return wrap;
+}
+
 // ── Per-kind visibility ────────────────────────────────────────────────
 // Every entity is classified into EXACTLY ONE kind by priority
 // secrets > types > services > fn (a service is structurally a normal fn and a
@@ -1011,8 +1041,12 @@ function updateEntityList(data) {
     mountAdminSection(platHost, platNavHost, 'platform-access', buildPlatformAccessSection);
   }
   // Packages (install/browse) live on the BUILD surface via the #gd-pkg-chip
-  // context-bar chip → popover (editor-shell.js), NOT the Organization admin
-  // pane — install is a build act. Nothing to mount into the sidebar here.
+  // context-bar chip → popover (editor-shell.js) — install is a build act.
+  // What DOES belong here is the read-mostly GOVERNANCE view (packages spec
+  // §4): catalog of what the org published, who may publish, install audit.
+  if (!searchMode) {
+    mountAdminSection(opsHost, opsNavHost, 'packages', buildPackagesGovernanceSection);
+  }
   if (!searchMode && typeof buildStatsSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'stats', buildStatsSection);
   }

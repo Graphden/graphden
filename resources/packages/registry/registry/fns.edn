@@ -71,6 +71,11 @@
    :return-type :graph-rows-shape
    :effects #{:db}}
 
+  {:name :current-org-id
+   :description "The org id in scope for this request (the shared public org when unbound — single-tenant). Lets graph compositions (the governance catalog filter) compare rows against the caller's org without an org literal. Pure: a thread-local read, constant within one request."
+   :args {}
+   :return-type :text}
+
   {:name :publish-package-apply
    :description "Atomic publish core — reject if `(:pkg-name, :pkg-version)` already exists (immutable registry), else hash + insert. The existence check stays adjacent to the insert to keep the race window minimal until the DB-level UNIQUE(name, version) hardening ships. Returns a tagged `{:ok …}` result."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
@@ -1380,6 +1385,171 @@
    :args {:path "/partials/packages-panel" :handler :_partial-packages-panel-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; GET /partials/packages-governance — the Organization surface's
+  ;; read-mostly governance view (packages spec §4): the catalog of
+  ;; versions THIS org published, and an install audit (which package is
+  ;; pinned at which version on which branch). No install button — install
+  ;; lives on the Build packages chip. Shallow chains only (query +
+  ;; reshape + hiccup); never re-ref the publish/secrets closure (the A2
+  ;; boot landmine).
+  ;; ---------------------------------------------------------------------
+
+  ;; -- catalog: :package-version rows this org published. The org
+  ;;    comparison is row `:org-id` vs `:current-org-id` — never an org
+  ;;    literal; publish stamps the same value with and without the
+  ;;    tenancy addon, so the filter works identically on both.
+  {:name :_gov-row-org
+   :parent :get :args {:coll {:as :item} :key {:value :org-id} :default nil}}
+  {:name :_gov-row-mine?
+   :parent :equal? :args {:a :_gov-row-org :b :current-org-id}}
+  {:name :_gov-catalog-rows
+   :description "The :package-version rows the caller's org published — the governance catalog."
+   :parent :filter :args {:pred :_gov-row-mine? :coll :_pkg-index-rows}}
+
+  {:name :_gov-cat-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+  {:name :_gov-cat-version
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_gov-cat-public
+   :parent :get :args {:coll {:as :item} :key {:value :public?} :default nil}}
+  {:name :_gov-cat-visibility
+   :description "\"public\" / \"private\" from the row's :public? — write-time-normalised, so the flag alone decides."
+   :parent :if
+   :args {:test :_gov-cat-public :then {:value "public"} :else {:value "private"}}}
+  {:name :_gov-cat-at
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :published-at} :default {:value ""}}}}}
+  {:name :_gov-cat-td-name
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-cat-name]}}
+  {:name :_gov-cat-td-version
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-cat-version]}}
+  {:name :_gov-cat-td-visibility
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-cat-visibility]}}
+  {:name :_gov-cat-td-at
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-cat-at]}}
+  {:name :_gov-cat-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children [:_gov-cat-td-name :_gov-cat-td-version :_gov-cat-td-visibility :_gov-cat-td-at]}}
+  {:name :_gov-cat-body-rows
+   :parent :map :args {:func :_gov-cat-row :coll :_gov-catalog-rows}}
+  {:name :_gov-cat-tbody
+   :parent :hiccup :args {:tag {:value "tbody"} :children :_gov-cat-body-rows}}
+  {:name :_gov-cat-thead
+   :parent :hiccup
+   :args {:tag {:value "thead"}
+          :children [{:value [:tr [:th "Package"] [:th "Version"] [:th "Visibility"] [:th "Published"]]}]}}
+  {:name :_gov-cat-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table"}}
+          :children [:_gov-cat-thead :_gov-cat-tbody]}}
+  {:name :_gov-cat-empty
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-panel-empty"}}
+          :children [{:value "Nothing published by this organization yet — publish a namespace with its ⬆ action."}]}}
+  {:name :_gov-cat-is-empty
+   :parent :empty? :args {:coll :_gov-catalog-rows}}
+  {:name :_gov-cat-block
+   :parent :if
+   :args {:test :_gov-cat-is-empty :then :_gov-cat-empty :else :_gov-cat-table}}
+
+  ;; -- install audit: every pin visible to this org (all branches), each
+  ;;    resolved to its branch name via ONE branches query + a zipmap
+  ;;    (no per-row read).
+  {:name :_gov-branch-rows
+   :parent :query-entities
+   :args {:entity-type {:value "branch"} :where {:value {}}}}
+  {:name :_gov-branch-row-id
+   :parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+  {:name :_gov-branch-row-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value "?"}}}
+  {:name :_gov-branch-ids
+   :parent :map :args {:func :_gov-branch-row-id :coll :_gov-branch-rows}}
+  {:name :_gov-branch-names
+   :parent :map :args {:func :_gov-branch-row-name :coll :_gov-branch-rows}}
+  {:name :_gov-branch-name-map
+   :description "branch-id → branch-name for the audit rows — one query + zipmap, no per-pin read."
+   :parent :zipmap :args {:keys :_gov-branch-ids :vals :_gov-branch-names}}
+
+  {:name :_gov-pins
+   :parent :query-entities
+   :args {:entity-type {:value "package-install"} :where {:value {}}}}
+  {:name :_gov-pin-name
+   :parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
+  {:name :_gov-pin-version
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_gov-pin-branch-id
+   :parent :get :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
+  {:name :_gov-pin-branch
+   :parent :get :args {:coll :_gov-branch-name-map :key :_gov-pin-branch-id :default {:value "?"}}}
+  {:name :_gov-pin-at
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :installed-at} :default {:value ""}}}}}
+  {:name :_gov-pin-td-name
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-pin-name]}}
+  {:name :_gov-pin-td-version
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-pin-version]}}
+  {:name :_gov-pin-td-branch
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-pin-branch]}}
+  {:name :_gov-pin-td-at
+   :parent :hiccup :args {:tag {:value "td"} :children [:_gov-pin-at]}}
+  {:name :_gov-pin-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children [:_gov-pin-td-name :_gov-pin-td-version :_gov-pin-td-branch :_gov-pin-td-at]}}
+  {:name :_gov-pin-rows
+   :parent :map :args {:func :_gov-pin-row :coll :_gov-pins}}
+  {:name :_gov-pin-tbody
+   :parent :hiccup :args {:tag {:value "tbody"} :children :_gov-pin-rows}}
+  {:name :_gov-pin-thead
+   :parent :hiccup
+   :args {:tag {:value "thead"}
+          :children [{:value [:tr [:th "Package"] [:th "Version"] [:th "Branch"] [:th "Installed"]]}]}}
+  {:name :_gov-pin-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table"}}
+          :children [:_gov-pin-thead :_gov-pin-tbody]}}
+  {:name :_gov-pin-empty
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-panel-empty"}}
+          :children [{:value "No packages installed on any branch."}]}}
+  {:name :_gov-pins-are-empty
+   :parent :empty? :args {:coll :_gov-pins}}
+  {:name :_gov-pin-block
+   :parent :if
+   :args {:test :_gov-pins-are-empty :then :_gov-pin-empty :else :_gov-pin-table}}
+
+  ;; -- section root: two titled read-only blocks.
+  {:name :_gov-cat-title
+   :parent :hiccup
+   :args {:tag {:value "h4"}
+          :attrs {:value {:class "packages-gov-title"}}
+          :children [{:value "Published by this organization"}]}}
+  {:name :_gov-pin-title
+   :parent :hiccup
+   :args {:tag {:value "h4"}
+          :attrs {:value {:class "packages-gov-title"}}
+          :children [{:value "Installed (all branches)"}]}}
+  {:name :_gov-root
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-governance"}}
+          :children [:_gov-cat-title :_gov-cat-block :_gov-pin-title :_gov-pin-block]}}
+  {:name :_gov-html
+   :parent :render-hiccup :args {:hiccup :_gov-root}}
+  {:name :_partial-packages-governance-handler
+   :description "Ring handler for GET /partials/packages-governance — the org's package catalog + install audit as text/html."
+   :parent :html-ok-response :args {:body :_gov-html}}
+  {:name :partial-packages-governance
+   :description "GET /partials/packages-governance — the Organization surface's read-mostly packages governance view (catalog + install audit). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/packages-governance" :handler :_partial-packages-governance-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; DELETE /api/packages/uninstall?name=<pkg> — drop the current branch's pin
   ;; for the named package, then return the REFRESHED panel HTML (HTMX swaps it
   ;; into [data-packages-panel]). `:do` forces remove-before-render so the
@@ -1747,9 +1917,9 @@
                   :api-export-graph-rows]}}
 
   {:name :_registry-routes
-   :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` leaf."
+   :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` + `/partials/packages-governance` leaves."
    :parent :list
-   :args {:items [:_registry-api-routes :partial-packages-panel]}}
+   :args {:items [:_registry-api-routes :partial-packages-panel :partial-packages-governance]}}
 
   {:name :registry-router
    :description "Fall-through reitit router over `:_registry-routes` — returns nil on no-match (`:router-or-nil`) so the branch-router falls through to the main app router for any non-registry path."

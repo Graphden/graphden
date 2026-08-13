@@ -4867,6 +4867,15 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .gd-pop .packages-fork-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); cursor: pointer; font-size: 10px; margin-left: 3px; padding: 1px 6px; }
 .gd-pop .packages-fork-btn:hover { background: var(--hover-bg); color: var(--fg); }
 .gd-pop .packages-private-badge { border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); font-size: 9px; margin-left: 5px; padding: 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Packages governance (Organization surface) — read-mostly catalog + audit. */
+.sidebar-packages-governance .packages-gov-who { color: var(--muted-fg); font-size: 12px; line-height: 1.5; margin-bottom: 10px; }
+.sidebar-packages-governance .packages-gov-who code { font-family: var(--gd-mono, monospace); font-size: 11px; }
+.sidebar-packages-governance .packages-gov-title { font-size: 12px; margin: 12px 0 6px; }
+.sidebar-packages-governance .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.sidebar-packages-governance .packages-panel-table th,
+.sidebar-packages-governance .packages-panel-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.sidebar-packages-governance .packages-panel-empty { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
 .gd-pop .packages-fork-note { font-size: 10px; padding: 3px 6px; margin-bottom: 4px; border-radius: 3px; }
 .gd-pop .packages-fork-ok { color: var(--success-fg); }
 .gd-pop .packages-fork-err { color: var(--error-fg); }

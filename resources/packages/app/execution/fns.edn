@@ -890,28 +890,10 @@
   ;; kebab-case + timestamp parsing. Limit clamp is a `:cond` graph
   ;; over a nil/non-number/lt-1/gt-max ladder.
   {:name :_list-exec-apply-by-version
-   :description "Return executions for the specific `:fn-version-id`."
+   :description "Return executions for the specific `:fn-version-id`. Already newest-first + capped by the SQL `ORDER BY started_at DESC LIMIT <clamped>` (see `:_list-exec-by-version-hsql`), so the decoded rows go straight out — no in-memory sort/slice."
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :executions}]
-          :vals [{:value true} :_list-exec-by-version-rows]}}
-
-  {:name :_list-exec-by-version-rows
-   :description "Latest-first slice of the executions for this version, capped at the clamped limit."
-   :parent :take
-   :args {:count {:ref :_list-exec-clamped-limit :type :non-negative-int}
-          :coll :_list-exec-by-version-rows-desc}}
-
-  {:name :_list-exec-by-version-rows-desc
-   :parent :reverse
-   :args {:coll :_list-exec-by-version-rows-asc}}
-
-  {:name :_list-exec-by-version-rows-asc
-   :parent :sort-by
-   :args {:key-fn :_list-exec-started-at-key
-          :coll :_list-exec-by-version-decoded}}
-
-  {:name :_list-exec-started-at-key
-   :parent :get :args {:coll {:as :item} :key {:value :started-at} :default nil}}
+          :vals [{:value true} :_list-exec-by-version-decoded]}}
 
   {:name :_list-exec-by-version-decoded
    :parent :map
@@ -926,9 +908,21 @@
    :parent :storage-query-call
    :args {:arg :_list-exec-by-version-hsql}}
 
+  ;; SQL does the ordering + capping: `ORDER BY started_at DESC LIMIT <clamped>`
+  ;; (honeysql converts the kebab `:started-at` → `started_at`, same as the
+  ;; working `:where [:= :fn-version-id …]`). Without this the query fetched
+  ;; EVERY row for the version and sorted/sliced in memory — unbounded on a
+  ;; hot version. `:order-by` is a static literal in the base map; `:where`
+  ;; and the computed `:limit` are assoc'd on.
   {:name :_list-exec-by-version-hsql
    :parent :assoc
-   :args {:map {:value {:select [:*] :from :fn-execution}}
+   :args {:map :_list-exec-by-version-hsql-where-added
+          :key {:value :limit}
+          :value {:ref :_list-exec-clamped-limit :type :non-negative-int}}}
+
+  {:name :_list-exec-by-version-hsql-where-added
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :fn-execution :order-by [[:started-at :desc]]}}
           :key {:value :where}
           :value :_list-exec-by-version-hsql-where}}
 

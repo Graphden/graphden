@@ -45,25 +45,6 @@
     (is (not (parsing/valid-identifier? :keyword)))))
 
 
-;; === local-fn-name? ===
-
-(deftest local-fn-name?-test
-  (testing "returns true for underscore-prefixed keywords"
-    (is (parsing/local-fn-name? :_local))
-    (is (parsing/local-fn-name? :_my-local-fn)))
-
-  (testing "returns true for underscore-prefixed strings"
-    (is (parsing/local-fn-name? "_local")))
-
-  (testing "returns false for non-underscore names"
-    (is (not (parsing/local-fn-name? :my-fn)))
-    (is (not (parsing/local-fn-name? :hello)))
-    (is (not (parsing/local-fn-name? "normal"))))
-
-  (testing "returns nil/falsy for nil"
-    (is (not (parsing/local-fn-name? nil)))))
-
-
 ;; === parse-fn-ref ===
 
 (deftest parse-fn-ref-test

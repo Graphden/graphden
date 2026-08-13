@@ -91,6 +91,22 @@ it retires the last cosmetic `_`-prefix use (`displayLabel`). Verify: a fn's
 visibility is read from the graph (id/structure), never a name; a Playwright
 check that the interface shows/hides by the graph marker.
 
+> **STATUS 2026-08-13: USER DEFERRED to a dedicated design session** (the
+> rest of the epic — C + governance — is released to prod without it; the
+> install browser shows a bundle's fns with no interface/internals split
+> until this lands). **Design lean captured for that session:** prefer an
+> **exports-CONSTRUCT** — a per-namespace fn-def with `:parent :exports`
+> whose binding-list-items REFERENCE the public fns — over
+> marker-INHERITANCE. Rationale: `parent-ids` is an UNVERSIONED identity
+> junction (ADR-parent-set-identity, guarded by
+> `reparent-cross-branch-rej`), so visibility-as-a-parent-edge would make
+> every public/private toggle a cross-branch identity edit; exports refs
+> are ordinary VERSIONED binding content — branch-scoped, mergeable,
+> toggled by adding/removing a list item. Classification stays structural
+> (rows whose parent is the `:exports` base-fn), never a name. The
+> interface-is-small property also fits: enumerate the public few, not
+> the private many.
+
 **Slice A1-finish — Build-surface browser (no schema).**
 Turn the relocated popover from "the old combined panel" into the spec's
 *install/browse* browser only: search box; per-package detail (versions list,

@@ -43,6 +43,7 @@
 | 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written |
 | 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written |
 | 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written |
+| 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written |
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

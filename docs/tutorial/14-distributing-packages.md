@@ -12,8 +12,11 @@ so it lives as a **⬆ action on the namespace** in the Explorer.
 `publish`, `pin` (`:package-install`), `reference-install` vs
 `fork` (copy-on-write), `version constraint` / `latest` /
 `rollback`, the **packages chip** (Build surface) and the
-per-namespace **⬆ publish** action, and — beyond the registry —
-an **external package pulled by git coord** (`executor-packages.edn`).
+per-namespace **⬆ publish** action, publish **visibility**
+(org-private vs public) and the `publish-packages` capability,
+the Organization surface's **governance view**, and — beyond the
+registry — an **external package pulled by git coord**
+(`executor-packages.edn`).
 
 ## Authoring vs distributing
 
@@ -64,7 +67,27 @@ a deliberate "author decides to release" action; installing happens
 on the packages chip below.
 
 (The **⬆** action shows only when the optional `registry` package
-is installed on the deployment, and only when you're signed in.)
+is installed on the deployment, only when you're signed in — and,
+on a multi-tenant cloud, only when you hold the
+**`publish-packages`** org capability. The org owner always holds
+it; grant it to other members from Roles or Grants on the
+Organization surface. On a self-hosted single-tenant install there
+is no capability system, so publishing is simply open.)
+
+## Who sees what you publish — visibility
+
+On a multi-tenant cloud, a published version is **private to your
+organization by default**: it lands in the registry stamped with
+your org, and only your org's members see it when browsing. The ⬆
+popover has a **"Public — visible outside your organization"**
+checkbox for the explicit opt-in — tick it and the version becomes
+visible platform-wide. In the packages chip's browse list, private
+versions carry a **`private`** badge. (The programmatic
+equivalent: `"public": true` in the publish JSON body.)
+
+On a single-tenant install there is no org boundary to be private
+within — the checkbox isn't shown, and every published version is
+visible to every user.
 
 ## The packages chip — browse & install
 
@@ -148,6 +171,23 @@ reference them) — uninstall only removes *this branch's* claim on
 the package. Remove the last pin and the table collapses to the
 empty-state notice.
 
+## Governance — the Organization surface's packages view
+
+Publish and install are everyday **Build**-surface acts; oversight
+lives on the **Organization** surface. Its **packages** section is
+a read-only governance view with three parts:
+
+- a **who-may-publish** note — states the `publish-packages`
+  capability rule and the default visibility on this deployment;
+- the **catalog** — every version *your org* published
+  (Package / Version / Visibility / Published);
+- the **install audit** — every pin: which package, at which
+  version, on which branch, installed when.
+
+It is deliberately *not* an install surface — there's no Install
+button here. Reviewing what your org ships and consumes happens
+on Organization; acting on it happens on the Build packages chip.
+
 ## Try it
 
 1. Hover the `mycorp.hello` namespace in the Explorer, click **⬆**,
@@ -162,6 +202,10 @@ empty-state notice.
 5. Click **Fork** on `hello 1.0.0`, reload — `mycorp.hello`'s fns
    are now editable copies.
 6. Click `×` — the pin's gone.
+7. Open the **Organization** surface's **packages** section — the
+   governance catalog lists both published `hello` versions with
+   their visibility; the install audit shows a row per pin
+   (re-install first if you removed the pin in step 6).
 
 ## Beyond the registry — an external package from its own git repo
 

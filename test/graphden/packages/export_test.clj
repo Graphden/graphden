@@ -13,6 +13,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.deps :as deps]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.export :as export]
@@ -31,7 +32,10 @@
 
 
 ;; A storage with core+web+app synced, cloned once from the golden DB.
+;; *ctx* drives the GRAPH bundle fn-defs (:export-namespace /
+;; :export-graph are compositions now, not Clojure fns).
 (def ^:dynamic *storage* nil)
+(def ^:dynamic *ctx* nil)
 
 
 (use-fixtures :once
@@ -39,17 +43,27 @@
     ;; registry is its own OPTIONAL package now — bootstrap the golden WITH
     ;; "registry" so `:export-graph` / `:export-namespace` + their handlers
     ;; (which this suite exports/publishes) are present.
-    (binding [*storage* (:storage (setup/bootstrap-crud-graph-from-golden!
-                                    "export-test" ["core" "web" "app" "registry" "mcp"]))]
-      ;; The secret-fixture's `ex/vault-get` must be REGISTERED as a
-      ;; hide-result resolver — the export's `hidden-resolver?` keys
-      ;; secret-path emission on the resolver's registered return
-      ;; marker (by ID), not on its name.
-      (registry/record-rich-types!
-        (records/fn-id "ex" :vault-get)
-        :vault-get
-        {:args {:in {:type :text}} :return-type [:secret :text]})
-      (t))))
+    (let [graph (setup/bootstrap-crud-graph-from-golden!
+                  "export-test" ["core" "web" "app" "registry" "mcp"])]
+      (binding [*storage* (:storage graph)
+                *ctx* (:ctx graph)]
+        ;; The secret-fixture's `ex/vault-get` must be REGISTERED as a
+        ;; hide-result resolver — the export's `hidden-resolver?` keys
+        ;; secret-path emission on the resolver's registered return
+        ;; marker (by ID), not on its name.
+        (registry/record-rich-types!
+          (records/fn-id "ex" :vault-get)
+          :vault-get
+          {:args {:in {:type :text}} :return-type [:secret :text]})
+        (t)))))
+
+
+(defn- export-namespace-bundle* [root]
+  (exec/execute-by-name *ctx* "export-namespace" {:root root}))
+
+
+(defn- export-graph-bundle* []
+  (exec/execute-by-name *ctx* "export-graph" {:include-secret-paths nil}))
 
 
 (defn- norm
@@ -302,7 +316,7 @@
 
 
 (deftest export-graph-bundle-shape
-  (let [bundle (export/export-graph-bundle *storage*)]
+  (let [bundle (export-graph-bundle*)]
     (testing "the migration bundle shape (incl. the always-present secret keys)"
       (is (= #{:fns :namespaces :secrets :secret-paths-included?}
              (set (keys bundle))))
@@ -328,7 +342,7 @@
 
 (deftest export-namespace-bundle
   (testing "a leaf namespace exports only its own fns + external deps"
-    (let [bundle (export/export-namespace *storage* "app.contact-demo")
+    (let [bundle (export-namespace-bundle* "app.contact-demo")
           own-names (set (map :name (:fns bundle)))]
       (is (seq (:fns bundle)))
       (is (every? #(= "app.contact-demo" (:namespace %)) (:fns bundle))
@@ -351,7 +365,7 @@
                               (some #(str/starts-with? ns %) tops)))
                           (:dependencies bundle)))]
       (doseq [[root tops] {"core" ["web" "app"] "storage" ["web" "app"] "web" ["app"]}]
-        (let [bundle (export/export-namespace *storage* root)]
+        (let [bundle (export-namespace-bundle* root)]
           (is (seq (:fns bundle)))
           (is (not (upward? bundle tops))
               (str root " must not depend upward on " (pr-str tops))))))))

@@ -55,12 +55,13 @@
     :describe-type-mismatch :detect-conflicts :diff-branches
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :effective-branch-local? :empty? :env :eq
-    :equal? :error-boundary-wrap :error-http-status :every? :ex-data
-    :ex-info :export-graph :export-namespace :extract-entity-params
+    :encode-unreadable-kws :equal? :error-boundary-wrap
+    :error-http-status :every? :ex-data
+    :ex-info :extract-entity-params
     :filter :filter-xf :find-first :first :fix :flatten
     :fn-names-with-tag :fn-type-bound-effects :fork-package-fns
     :free-arg-slot-map :free-memory :future :get :get-entity
-    :get-execution :get-in :graph-rows :group-by :gt :gte :gzip-bytes
+    :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
     :http-request :http-server :http-stop :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
@@ -68,7 +69,8 @@
     :keyword-to-str :list :list-all-graph-entities :log-warn
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :max-memory :merge :merge-branch!
-    :middleware :missing-package-dependencies :mod :mul :name :neg :neq
+    :middleware :missing-package-dependencies :mod :mul :name
+    :namespace-external-deps :neg :neq
     :nil? :non-blank? :not :notify-after-write :or :os-arch
     :os-load-average :os-name :os-processors :package-upsert-pin
     :package-version-materialized? :pairs->map :parse-constraint
@@ -83,13 +85,15 @@
     :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
     :ring-route-paths :ring-router :routes->js-bundle
-    :rule-owner-of-name :running-entry :secret-leaf :select-keys
+    :rule-owner-of-name :running-entry :secret-leaf :secret-path-args
+    :select-keys
     :service-blocking-free-args :sleep :sleep-until-ms
     :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
     :sql-query :storage-query-identities :str :str-contains? :str-join
     :str-len :str-lower :str-replace :str-split :str-starts-with?
     :str-to-keyword :str-to-uuid :str-trim :str-upper
-    :stringify-response-headers :strip-hidden-impl :sub :subs :subtype?
+    :stringify-response-headers :strip-hidden-impl :strip-secret-paths
+    :sub :subs :subtype?
     :swap :sync-fn-defs-branch! :system-property :take :thread-count
     :throw :throwable-class-name :throwable-message :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create

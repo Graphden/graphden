@@ -69,7 +69,6 @@
   (:require
     [clojure.string :as str]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs])
@@ -673,38 +672,11 @@
         fn-defs))
 
 
-(defn export-graph-bundle
-  "Export the ENTIRE stored graph as a migration bundle:
-
-     {:fns        [fn-def …]   ; every named fn-def in the graph
-      :namespaces [dotted …]}  ; every namespace those fns span
-
-   Unlike `export-namespace` there is no single root and no `:dependencies`
-   — nothing is external to the whole graph. Because fn-ids are deterministic
-   from (namespace, name), re-syncing this bundle onto a *booted* install is
-   idempotent on any fn-def already present (the platform packages) and purely
-   additive for the caller's own fns — so it is a faithful \"download my whole
-   project\" migration artifact. Powers GET /api/export/graph.
-
-   Vault paths are STRIPPED by default (see § Secret-path policy above);
-   `:secrets` lists what was affected and `:secret-paths-included?` states
-   which mode produced the bundle. Pass `{:include-secret-paths? true}`
-   for an org-internal migration that keeps the paths."
-  ([storage] (export-graph-bundle storage {}))
-  ([storage {:keys [include-secret-paths?]}]
-   (let [fns (export-graph storage)
-         secrets (secret-path-args fns)
-         fns (if include-secret-paths? fns (strip-secret-paths fns))]
-     ;; The bundle is an EDN-TEXT artifact (`pr-str`ed by the route) —
-     ;; refs whose qualification isn't spellable as a readable keyword
-     ;; (`@`-versioned ns, root ns) become `#graphden/ref` tagged
-     ;; literals here. The JSONB publish path (`export-namespace`)
-     ;; keeps raw keywords: its codec round-trips them.
-     (wire/encode-unreadable-kws
-       {:fns fns
-        :namespaces (vec (sort (distinct (keep :namespace fns))))
-        :secrets secrets
-        :secret-paths-included? (boolean include-secret-paths?)}))))
+;; The whole-graph migration BUNDLE (formerly `export-graph-bundle`) is
+;; GRAPH composition now — registry/registry/fns.edn `:export-graph`
+;; assembles `{:fns :namespaces :secrets :secret-paths-included?}` from
+;; the primitives here (`export-graph`, `secret-path-args`,
+;; `strip-secret-paths`, `records.wire/encode-unreadable-kws`).
 
 
 ;; =============================================================================
@@ -785,77 +757,69 @@
                    namespaces))))
 
 
-(defn export-namespace
-  "Serialise the namespace subtree rooted at `root` (a dotted path) into
-   a publishable bundle:
+;; The publishable BUNDLE for a subtree (formerly `export-namespace`)
+;; is GRAPH composition now — registry/registry/fns.edn
+;; `:export-namespace` filters the whole-graph export down to the root,
+;; strips secret paths, and assembles the 7-key bundle from the
+;; primitives here. What stays below is the one cohesive analysis pass
+;; the graph binds as a single primitive.
 
-     {:namespace    root
-      :namespaces   [every sub-namespace included]
-      :fns          [fn-def …]   ; the subtree's own fns
-      :dependencies [fn-name …]} ; external fns the subtree references
+(defn external-deps
+  "Dependency analysis for the namespace subtree rooted at `root`:
 
-   `:dependencies` is the set of fn NAMES referenced from inside the
-   subtree but DEFINED outside it (excluding primitives) — what an
-   installer must already have present. This is the core of
-   `POST /api/packages/publish` (cloud) and `extract` (self-hosted);
-   registry persistence + versioning wrap this.
+     {:dependencies         [fn-name-kw …]        ; sorted
+      :package-dependencies [{:name :version} …]} ; registry-resolved
 
-   Vault paths are STRIPPED by default (publishing is sharing — see
-   § Secret-path policy above); `:secrets` manifests what the installer
-   must define. Pass `{:include-secret-paths? true}` only for an
-   org-internal bundle."
-  ([storage root] (export-namespace storage root {}))
-  ([storage root {:keys [include-secret-paths?]}]
-   (let [records (graph->records storage)
-         ctx (index-records records)
-         all-defs (records->fn-defs records)
-         owned-defs (filterv #(under-ns? (:namespace %) root) all-defs)
-         secrets (secret-path-args owned-defs)
-         owned-defs (if include-secret-paths?
-                      owned-defs
-                      (strip-secret-paths owned-defs))
-         owned-fn-ids (into #{}
-                            (comp (filter #(under-ns? (:namespace-id %) root))
-                                  (map :id))
-                            (vals (:fns ctx)))
-         ;; name index for resolving constraint type-name keywords → ns.
-         name->ns (into {}
-                        (keep (fn [f]
-                                (when (:name f)
-                                  [(keyword (:name f)) (:namespace-id f)])))
-                        (vals (:fns ctx)))
-         ;; External structural fn-id refs reachable from every owned fn —
-         ;; named, defined OUTSIDE the subtree, not a primitive. Collected once
-         ;; so we can derive both the fn-NAME deps and the package deps.
-         external-ref-fn-ids (into #{}
-                                   (comp (mapcat #(fn-ref-fn-ids % ctx))
-                                         (filter (fn [id]
-                                                   (let [f (get-in ctx [:fns id])]
-                                                     (and (:name f)
-                                                          (not (under-ns? (:namespace-id f) root))
-                                                          (not (contains? prim-id->kw id)))))))
-                                   owned-fn-ids)
-         ref-deps (into #{}
-                        (map #(keyword (:name (get-in ctx [:fns %]))))
-                        external-ref-fn-ids)
-         ;; The namespaces those external fns live in — the versioned ones
-         ;; (`X@V`) reverse-map to the packages this bundle depends on.
-         dep-namespaces (into #{}
-                              (keep #(:namespace-id (get-in ctx [:fns %])))
-                              external-ref-fn-ids)
-         ;; constraint type-name keywords (union / variant / map / tuple /
-         ;; fn-type) on owned fn rows whose target is defined outside.
-         constraint-deps (into #{}
-                               (comp (map #(get-in ctx [:fns %]))
-                                     (mapcat #(constraint-type-names (:constraint %)))
-                                     (filter (fn [nm]
-                                               (when-let [ns (name->ns nm)]
-                                                 (not (under-ns? ns root))))))
-                               owned-fn-ids)]
-     {:namespace root
-      :namespaces (vec (sort (distinct (map :namespace owned-defs))))
-      :fns owned-defs
-      :dependencies (vec (sort (into ref-deps constraint-deps)))
-      :package-dependencies (package-deps-from-namespaces storage dep-namespaces)
-      :secrets secrets
-      :secret-paths-included? (boolean include-secret-paths?)})))
+   `:dependencies` — fn NAMES referenced from inside the subtree but
+   DEFINED outside it (excluding primitives): structural fn-id refs
+   (parents, slot types, bindings, list items) plus constraint
+   type-name keywords (union / variant / map / tuple / fn-type) that
+   resolve outside the root. `:package-dependencies` — the published
+   packages whose version-qualified namespaces (`X@V`) those external
+   fns live under (drives recursive install).
+
+   ONE records read + index shared by the ref closure and the
+   constraint scan — a cohesive single-pass analysis; the bundle
+   assembly around it is graph composition."
+  [storage root]
+  (let [ctx (index-records (graph->records storage))
+        owned-fn-ids (into #{}
+                           (comp (filter #(under-ns? (:namespace-id %) root))
+                                 (map :id))
+                           (vals (:fns ctx)))
+        ;; name index for resolving constraint type-name keywords → ns.
+        name->ns (into {}
+                       (keep (fn [f]
+                               (when (:name f)
+                                 [(keyword (:name f)) (:namespace-id f)])))
+                       (vals (:fns ctx)))
+        ;; External structural fn-id refs reachable from every owned fn —
+        ;; named, defined OUTSIDE the subtree, not a primitive. Collected once
+        ;; so we can derive both the fn-NAME deps and the package deps.
+        external-ref-fn-ids (into #{}
+                                  (comp (mapcat #(fn-ref-fn-ids % ctx))
+                                        (filter (fn [id]
+                                                  (let [f (get-in ctx [:fns id])]
+                                                    (and (:name f)
+                                                         (not (under-ns? (:namespace-id f) root))
+                                                         (not (contains? prim-id->kw id)))))))
+                                  owned-fn-ids)
+        ref-deps (into #{}
+                       (map #(keyword (:name (get-in ctx [:fns %]))))
+                       external-ref-fn-ids)
+        ;; The namespaces those external fns live in — the versioned ones
+        ;; (`X@V`) reverse-map to the packages this bundle depends on.
+        dep-namespaces (into #{}
+                             (keep #(:namespace-id (get-in ctx [:fns %])))
+                             external-ref-fn-ids)
+        ;; constraint type-name keywords (union / variant / map / tuple /
+        ;; fn-type) on owned fn rows whose target is defined outside.
+        constraint-deps (into #{}
+                              (comp (map #(get-in ctx [:fns %]))
+                                    (mapcat #(constraint-type-names (:constraint %)))
+                                    (filter (fn [nm]
+                                              (when-let [ns (name->ns nm)]
+                                                (not (under-ns? ns root))))))
+                              owned-fn-ids)]
+    {:dependencies (vec (sort (into ref-deps constraint-deps)))
+     :package-dependencies (package-deps-from-namespaces storage dep-namespaces)}))

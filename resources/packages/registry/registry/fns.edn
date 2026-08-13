@@ -32,11 +32,137 @@
           :secrets [:list :secret-arg-ref]
           :secret-paths-included? :bool}}
 
-  {:name :export-namespace
-   :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract."
-   :args {:root {:type :text :description "Dotted root namespace path, e.g. \"web.components\"."}}
-   :return-type :package-bundle-shape
+  ;; ---------------------------------------------------------------------
+  ;; Export primitives — the bundle ASSEMBLIES (`:export-namespace` /
+  ;; `:export-graph`) are graph compositions below; these base-fns are
+  ;; the codec / policy / analysis atoms they compose.
+  ;; ---------------------------------------------------------------------
+
+  {:name :graph-fn-defs
+   :description "The whole stored graph (current branch/scope) as fn-def maps — the records read + records→EDN codec (inverse-of-parser library boundary)."
+   :args {}
+   :return-type [:list :keyword-map]
    :effects #{:db}}
+
+  {:name :secret-path-args
+   :description "Manifest of vault-path bindings across `:fn-defs` — one `{:fn <name> :arg <arg>}` per `{:secret-path …}` arg-value. Pure scan; what an importer must re-define when the paths are stripped."
+   :args {:fn-defs {:type [:list :keyword-map] :description "fn-def maps to scan."}}
+   :return-type [:list :secret-arg-ref]}
+
+  {:name :strip-secret-paths
+   :description "`:fn-defs` with vault paths removed — a stripped arg reverts to a FREE secret-typed slot at the importer (never share a vault path silently). Pure pass."
+   :args {:fn-defs {:type [:list :keyword-map] :description "fn-def maps to strip."}}
+   :return-type [:list :keyword-map]}
+
+  {:name :encode-unreadable-kws
+   :description "EDN-wire boundary — refs whose qualification isn't spellable as a readable keyword (`@`-versioned ns, root ns) become `#graphden/ref` tagged literals. For EDN-TEXT artifacts (the whole-graph bundle, `pr-str`ed by its route); the JSONB publish path keeps raw keywords (its codec round-trips them)."
+   :args {:value {:type a :description "Bundle (or any EDN value) to encode for the text wire."}}
+   :return-type a}
+
+  {:name :external-deps-shape
+   :description "What a subtree depends on: the external fn NAMES it references and the published packages those fns come from."
+   :type {:dependencies [:list :keyword]
+          :package-dependencies [:list :package-dependency-shape]}}
+
+  {:name :namespace-external-deps
+   :description "Dependency analysis for the subtree rooted at `:root` — `{:dependencies [fn-name-kw …] :package-dependencies [{:name :version} …]}`. One records read shared by the structural ref closure and the constraint type-name scan; cohesive single-pass analysis, stays one primitive."
+   :args {:root {:type :text :description "Dotted root namespace path."}}
+   :return-type :external-deps-shape
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :export-namespace — the publishable bundle as GRAPH composition
+  ;; (formerly one Clojure pipeline in packages/export.clj): whole-graph
+  ;; export → root filter → secret strip → dependency analysis → bundle.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_xn-all-defs
+   :parent :graph-fn-defs}
+
+  {:name :_xn-root-dot
+   :description "`<root>.` — the child-namespace prefix."
+   :parent :str
+   :args {:parts [{:as :root} {:value "."}]}}
+
+  ;; filter callback: fn-def lives AT :root or UNDER it.
+  {:name :_xn-pred-ns
+   :parent :get
+   :args {:coll {:as :item} :key {:value :namespace} :default nil}}
+  {:name :_xn-pred-exact?
+   :parent :equal?
+   :args {:a :_xn-pred-ns :b {:as :root}}}
+  {:name :_xn-pred-under?
+   :parent :str-starts-with?
+   :args {:string {:ref :_xn-pred-ns :type :nullable-text}
+          :prefix :_xn-root-dot}}
+  {:name :_xn-owned-pred
+   :parent :or
+   :args {:values [:_xn-pred-exact? :_xn-pred-under?]}}
+
+  {:name :_xn-owned
+   :description "The subtree's own fn-defs."
+   :parent :filter
+   :args {:pred :_xn-owned-pred
+          :coll {:ref :_xn-all-defs :type [:list :keyword-map]}}}
+
+  {:name :_xn-secrets
+   :parent :secret-path-args
+   :args {:fn-defs {:ref :_xn-owned :type [:list :keyword-map]}}}
+
+  ;; Publishing is sharing — paths are ALWAYS stripped here; the
+  ;; org-internal keep-paths mode exists only on the whole-graph export.
+  {:name :_xn-stripped
+   :parent :strip-secret-paths
+   :args {:fn-defs {:ref :_xn-owned :type [:list :keyword-map]}}}
+
+  ;; map callback — a fn-def's :namespace.
+  {:name :_xn-def-ns
+   :parent :get
+   :args {:coll {:as :item} :key {:value :namespace} :default nil}}
+
+  {:name :_xn-ns-list
+   :parent :map
+   :args {:func :_xn-def-ns
+          :coll {:ref :_xn-stripped :type [:list :keyword-map]}}}
+  {:name :_xn-ns-distinct
+   :parent :distinct
+   :args {:coll {:ref :_xn-ns-list :type [:list :any]}}}
+  {:name :_xn-ns-sorted
+   :parent :sort
+   :args {:coll :_xn-ns-distinct}}
+  {:name :_xn-namespaces
+   :parent :vec
+   :args {:coll :_xn-ns-sorted}}
+
+  {:name :_xn-deps
+   :parent :namespace-external-deps
+   :args {:root {:as :root}}}
+  {:name :_xn-dep-names
+   :parent :get
+   :args {:coll :_xn-deps :key {:value :dependencies} :default {:value []}}}
+  {:name :_xn-dep-pkgs
+   :parent :get
+   :args {:coll :_xn-deps :key {:value :package-dependencies} :default {:value []}}}
+
+  ;; passthrough of the caller's :root — the bundle's :namespace field.
+  ;; Its OWN {:as :root} rename keeps :export-namespace's args free of a
+  ;; same-fn pin+rename pair (which would mint a second `root` slot);
+  ;; the value flows down by name-match — the :json-handler idiom.
+  {:name :_xn-root
+   :parent :const
+   :args {:value {:as :root}}}
+
+  {:name :export-namespace
+   :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract. Pure graph composition — root filter, secret-strip policy, dependency analysis and the bundle assembly are all graph-visible."
+   :parent :zipmap
+   :args {:keys [{:value :namespace} {:value :namespaces} {:value :fns}
+                 {:value :dependencies} {:value :package-dependencies}
+                 {:value :secrets} {:value :secret-paths-included?}]
+          :vals [:_xn-root {:ref :_xn-namespaces :type [:list :text]} :_xn-stripped
+                 :_xn-dep-names :_xn-dep-pkgs
+                 :_xn-secrets {:value false}]
+          :root {:type :text :description "Dotted root namespace path, e.g. \"web.components\"."}}
+   :return-type :package-bundle-shape}
 
   ;; The shape `:export-graph` returns — the whole-graph migration bundle.
   ;; Distinct from `:package-bundle-shape`: no single root, no `:dependencies`
@@ -48,11 +174,73 @@
           :secrets [:list :secret-arg-ref]
           :secret-paths-included? :bool}}
 
+  ;; ---------------------------------------------------------------------
+  ;; :export-graph — the whole-graph migration bundle as GRAPH
+  ;; composition: export → secret policy (:if on the opt-in) → bundle →
+  ;; EDN-wire encode.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_xg-fns
+   :parent :graph-fn-defs}
+
+  {:name :_xg-secrets
+   :parent :secret-path-args
+   :args {:fn-defs {:ref :_xg-fns :type [:list :keyword-map]}}}
+
+  {:name :_xg-include?
+   :description "The query-param opt-in — only the string \"true\" keeps vault paths."
+   :parent :equal?
+   :args {:a {:as :include-secret-paths :type :nullable-text} :b {:value "true"}}}
+
+  {:name :_xg-stripped
+   :parent :strip-secret-paths
+   :args {:fn-defs {:ref :_xg-fns :type [:list :keyword-map]}}}
+
+  {:name :_xg-fns-out
+   :parent :if
+   :args {:test :_xg-include?
+          :then {:ref :_xg-fns :type [:list :keyword-map]}
+          :else :_xg-stripped}}
+
+  ;; namespaces = sorted distinct non-nil :namespace of the exported fns
+  ;; (root fns carry a nil namespace — dropped, as `keep` did).
+  {:name :_xg-def-ns
+   :parent :get
+   :args {:coll {:as :item} :key {:value :namespace} :default nil}}
+  {:name :_xg-ns-some?
+   :parent :some?
+   :args {:value {:as :item}}}
+  {:name :_xg-ns-list
+   :parent :map
+   :args {:func :_xg-def-ns
+          :coll {:ref :_xg-fns-out :type [:list :keyword-map]}}}
+  {:name :_xg-ns-present
+   :parent :filter
+   :args {:pred :_xg-ns-some?
+          :coll {:ref :_xg-ns-list :type [:list :any]}}}
+  {:name :_xg-ns-distinct
+   :parent :distinct
+   :args {:coll {:ref :_xg-ns-present :type [:list :any]}}}
+  {:name :_xg-ns-sorted
+   :parent :sort
+   :args {:coll :_xg-ns-distinct}}
+  {:name :_xg-namespaces
+   :parent :vec
+   :args {:coll :_xg-ns-sorted}}
+
+  {:name :_xg-bundle
+   :parent :zipmap
+   :args {:keys [{:value :fns} {:value :namespaces} {:value :secrets}
+                 {:value :secret-paths-included?}]
+          :vals [:_xg-fns-out {:ref :_xg-namespaces :type [:list :text]}
+                 :_xg-secrets :_xg-include?]}}
+
   {:name :export-graph
-   :description "Serialise the ENTIRE stored graph (the current branch/scope) into a migration bundle by reading the live graph — every named fn-def plus the namespaces they span. Vault paths are STRIPPED unless :include-secret-paths is the string \"true\" (org-internal migration); the :secrets manifest always lists the affected args. The core of GET /api/export/graph (cloud→self-hosted \"download my whole project\")."
-   :args {:include-secret-paths {:type :nullable-text :description "Query-param opt-in: the string \"true\" keeps vault paths in the bundle. Anything else (incl. nil) strips them."}}
-   :return-type :full-graph-export-shape
-   :effects #{:db}}
+   :description "Serialise the ENTIRE stored graph (the current branch/scope) into a migration bundle — every named fn-def plus the namespaces they span. Vault paths are STRIPPED unless :include-secret-paths is the string \"true\" (org-internal migration); the :secrets manifest always lists the affected args. The core of GET /api/export/graph (cloud→self-hosted \"download my whole project\"). Pure graph composition ending at the EDN-wire encode boundary."
+   :parent :encode-unreadable-kws
+   :args {:value :_xg-bundle
+          :include-secret-paths {:type :nullable-text :description "Query-param opt-in: the string \"true\" keeps vault paths in the bundle. Anything else (incl. nil) strips them."}}
+   :return-type :full-graph-export-shape}
 
   ;; The RAW five-table shape a remote / BYO executor bootstraps its in-memory
   ;; storage from — the compiler reads exactly these rows. Distinct from

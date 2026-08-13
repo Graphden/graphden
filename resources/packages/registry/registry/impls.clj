@@ -13,6 +13,7 @@
     [graphden.packages.export :as export]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
@@ -20,10 +21,57 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-(defbase export-namespace
+;; The export BUNDLES (`:export-namespace` / `:export-graph`) are graph
+;; compositions in fns.edn — root-filter, secret-strip policy, and the
+;; bundle-map assembly are all graph-visible. The primitives below are
+;; what they compose: the records↔EDN codec read, the two pure
+;; secret-path passes, the EDN-wire encoder, and the one cohesive
+;; dependency-analysis pass.
+
+(defbase graph-fn-defs
+  "The whole stored graph as fn-def maps — `export/export-graph`, the
+   records read + records→EDN codec (inverse-of-parser library
+   boundary)."
+  []
+  (cr/record-effect! :db)
+  (export/export-graph (request/require-storage ctx)))
+
+
+(defbase secret-path-args-fn
+  "Manifest of vault-path bindings across fn-defs — one
+   `{:fn <name> :arg <arg>}` per `{:secret-path …}` arg-value. Pure
+   scan (`export/secret-path-args`)."
+  [fn-defs]
+  (export/secret-path-args fn-defs))
+
+
+(defbase strip-secret-paths-fn
+  "fn-defs with vault paths removed — a stripped arg reverts to a FREE
+   secret-typed slot at the importer. Pure pass
+   (`export/strip-secret-paths`)."
+  [fn-defs]
+  (export/strip-secret-paths fn-defs))
+
+
+(defbase encode-unreadable-kws-fn
+  "EDN-wire boundary — refs whose qualification isn't spellable as a
+   readable keyword (`@`-versioned ns, root ns) become `#graphden/ref`
+   tagged literals (`records.wire/encode-unreadable-kws`). For
+   EDN-TEXT artifacts (the whole-graph bundle); the JSONB publish path
+   keeps raw keywords."
+  [value]
+  (wire/encode-unreadable-kws value))
+
+
+(defbase namespace-external-deps
+  "Dependency analysis for the subtree rooted at `root` —
+   `{:dependencies [...] :package-dependencies [...]}` via
+   `export/external-deps`: one records read shared by the structural
+   ref closure and the constraint type-name scan (cohesive single-pass
+   analysis, stays one primitive)."
   [root]
   (cr/record-effect! :db)
-  (export/export-namespace (request/require-storage ctx) root))
+  (export/external-deps (request/require-storage ctx) root))
 
 
 (defbase current-org-id
@@ -34,14 +82,6 @@
    read, constant within one request execution."
   []
   (tc/current-org))
-
-
-(defbase export-graph
-  [include-secret-paths]
-  (cr/record-effect! :db)
-  (export/export-graph-bundle
-    (request/require-storage ctx)
-    {:include-secret-paths? (= "true" include-secret-paths)}))
 
 
 (defbase graph-rows
@@ -380,9 +420,12 @@
 
 
 (def impls
-  {:export-namespace export-namespace
+  {:graph-fn-defs graph-fn-defs
+   :secret-path-args secret-path-args-fn
+   :strip-secret-paths strip-secret-paths-fn
+   :encode-unreadable-kws encode-unreadable-kws-fn
+   :namespace-external-deps namespace-external-deps
    :current-org-id current-org-id
-   :export-graph export-graph
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply
    :resolve-package-version resolve-package-version

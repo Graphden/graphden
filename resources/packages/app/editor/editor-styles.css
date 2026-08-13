@@ -1206,6 +1206,9 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .ns-header:hover .ns-row-actions .create-btn-inline,
 .entity-item:hover .ns-row-actions .create-btn-inline { opacity: 1; }
 .create-btn-inline:hover { background: var(--fg); color: var(--bg); }
+/* The personal "hide from my view" (⊘) ns action — a text glyph, not an SVG,
+   so size it to sit in the same 15×15 frame as the ✎/+ icons. */
+.ns-hide-btn { font-size: 11px; line-height: 1; }
 
 /* Disabled (greyed-out) state for the delete button when the entity
    can't be removed safely. The button stays in the row layout so its
@@ -5084,6 +5087,31 @@ body:not([data-surface="build"]) #gd-ctxbar #branch-mount { display: none; }
   line-height: 1.4;
   color: var(--gd-ink-3);
 }
+/* Workspace popover — section caption + the project checklist rows. */
+.gd-pop-cap {
+  margin: 4px 6px 4px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--gd-ink-4);
+}
+/* Bound the workspace popover so long namespace descriptions ellipsize inside
+   it instead of stretching the whole panel wide. */
+#gd-ws-pop { max-width: 340px; }
+.gd-ws-opt { min-width: 0; }
+.gd-ws-opt .gd-ws-nm { flex: 0 0 auto; }
+.gd-ws-opt .gd-ws-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 10.5px;
+  color: var(--gd-ink-4);
+}
+.gd-ws-opt.sel .gd-ws-desc { color: var(--gd-flow-ink); }
+.gd-ws-hidden { flex: 1 1 auto; color: var(--gd-ink-3); cursor: default; }
+.gd-ws-hidden .gd-pi { color: var(--gd-ink-4); }
 
 /* ---- Explorer slim head (brand + mounts moved to the rail / context bar) ---- */
 .gd-exp-head {

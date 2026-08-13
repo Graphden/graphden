@@ -481,6 +481,13 @@ function buildFnItem(fn) {
 
 function renderNsNode(container, name, node, path, searchMode) {
   const nsPath = path ? path + '.' + name : name;
+  // Personal workspace hide (redesign 2026-08): a namespace the user removed
+  // from their view is structurally skipped at every depth (so hiding a
+  // sub-namespace inside an in-scope project works too). Search spans all.
+  if (!searchMode && typeof window.graphdenIsHidden === 'function'
+      && window.graphdenIsHidden(nsPath)) {
+    return;
+  }
   // Search mode force-expands every matched branch so results are visible
   // without the user drilling in.
   const isCollapsed = searchMode ? false : !expandedNamespaces.has(nsPath);
@@ -818,6 +825,13 @@ function syncKindFilterBar() {
 // is visible. Reuses the expandedNamespaces machinery via a synthesised
 // path key.
 function renderRootNode(list, rootFns, searchMode) {
+  // Under an active workspace the namespace-less "(primitives)" bucket is out of
+  // any project scope — skip it so a scoped explorer shows only the picked
+  // projects. Search always spans everything.
+  if (!searchMode && typeof window.graphdenWorkspaceActive === 'function'
+      && window.graphdenWorkspaceActive()) {
+    return;
+  }
   const visible = [...rootFns].filter(fnKindVisible)
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
   // The root bucket's leaves (primitive type-rows + top-level fns) load
@@ -1027,18 +1041,21 @@ function updateEntityList(data) {
   // toggle never changes workspace scope), so out-of-scope namespaces need not
   // be in the DOM.
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  const wsFocused = !searchMode && typeof window.graphdenWorkspaceFocused === 'function'
-    && window.graphdenWorkspaceFocused();
+  const wsActive = !searchMode && typeof window.graphdenWorkspaceActive === 'function'
+    && window.graphdenWorkspaceActive();
   for (const [name, node] of sortedNs) {
     // Search: matched-only structural tree (no lens flip) → keep the skip.
     // Non-search: build all, lens is a `hidden` overlay set in renderNsNode.
     if (searchMode && !nodeShouldShow(node, searchMode)) continue;
-    // Workspace focus (redesign 2026-08): hide top-level namespaces outside the
-    // scope — unless PINNED (shared libraries stay in view). Search always spans
-    // everything (searchMode short-circuits above).
-    if (wsFocused && typeof window.graphdenInFocus === 'function'
-        && !window.graphdenInFocus(name)
-        && !(typeof window.graphdenIsPinned === 'function' && window.graphdenIsPinned(name))) {
+    // Workspaces (redesign 2026-08): when a workspace is active, show only its
+    // included top-level roots; always drop personally-hidden namespaces. Both
+    // are structural skips (lens-independent). Search spans everything (above).
+    if (!searchMode && typeof window.graphdenIsHidden === 'function'
+        && window.graphdenIsHidden(name)) {
+      continue;
+    }
+    if (wsActive && typeof window.graphdenInWorkspaceScope === 'function'
+        && !window.graphdenInWorkspaceScope(name)) {
       continue;
     }
     renderNsNode(list, name, node, '', searchMode);

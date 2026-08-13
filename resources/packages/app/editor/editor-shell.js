@@ -453,6 +453,20 @@
     const s = document.getElementById('gd-ws-scrim');
     if (s) s.remove();
   }
+  // Root namespaces = the "ready-made projects" you pick from (name → description).
+  function gdWsRoots() {
+    const out = [];
+    try {
+      const nss = (typeof graphData !== 'undefined' && graphData) ? (graphData.namespaces || []) : [];
+      nss.forEach((n) => { if (!n['parent-id'] && n.name) out.push({ name: n.name, desc: n.description || '' }); });
+    } catch (_) { /* ignore */ }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }
+  function gdWsRepaint() {
+    gdWsChipLabel();
+    if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') updateEntityList(graphData);
+  }
   function gdOpenWsPop() {
     gdCloseWsPop();
     const chip = document.getElementById('gd-ws-chip');
@@ -463,64 +477,69 @@
     scrim.addEventListener('click', gdCloseWsPop);
     document.body.appendChild(scrim);
 
-    const roots = [];
-    try {
-      const nss = (typeof graphData !== 'undefined' && graphData) ? (graphData.namespaces || []) : [];
-      nss.forEach((n) => { if (!n['parent-id'] && n.name) roots.push(n.name); });
-    } catch (_) { /* ignore */ }
-    roots.sort((a, b) => a.localeCompare(b));
-    const current = (typeof graphdenWorkspaceRoots === 'function') ? graphdenWorkspaceRoots() : [];
-    const focused = current.length > 0;
-
-    const pins = (typeof graphdenPins === 'function') ? graphdenPins() : [];
-    let html = '<h5>Workspace — scope the explorer</h5>'
-      + '<button type="button" class="gd-pop-item' + (focused ? '' : ' sel') + '" data-ws="">'
-      + '<span class="gd-pi">◍</span>All functions</button><div class="gd-pop-div"></div>';
-    roots.forEach((nm) => {
-      const sel = current.indexOf(nm) >= 0 ? ' sel' : '';
-      const pinned = pins.indexOf(nm) >= 0;
-      html += '<div class="gd-pop-row">'
-        + '<button type="button" class="gd-pop-item' + sel + '" data-ws="' + esc(nm) + '">'
-        +   '<span class="gd-pi">&#955;</span>' + esc(nm) + '</button>'
-        + '<button type="button" class="gd-pop-pin' + (pinned ? ' pinned' : '') + '"'
-        +   ' data-pin="' + esc(nm) + '" aria-pressed="' + (pinned ? 'true' : 'false') + '"'
-        +   ' title="' + (pinned ? 'Unpin' : 'Pin — keep visible even when scoped') + '">&#128204;</button>'
-        + '</div>';
-    });
-    html += '<div class="gd-pop-hint">Pin shared libraries (&#128204;) to keep them in view under any workspace.</div>';
-
     const pop = document.createElement('div');
     pop.id = 'gd-ws-pop';
     pop.className = 'gd-pop';
-    pop.innerHTML = html;
     const r = chip.getBoundingClientRect();
     pop.style.left = r.left + 'px';
     pop.style.top = (r.bottom + 6) + 'px';
-    pop.querySelectorAll('.gd-pop-item').forEach((it) => {
-      it.addEventListener('click', () => {
-        const ws = it.getAttribute('data-ws');
-        if (typeof setGraphdenWorkspace === 'function') setGraphdenWorkspace(ws ? [ws] : null);
-        gdWsChipLabel();
-        if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') {
-          updateEntityList(graphData);
-        }
-        gdCloseWsPop();
+
+    // Re-rendered in place on every toggle so you can compose a workspace
+    // without the popover closing (multi-select checklist).
+    const render = () => {
+      const roots = gdWsRoots();
+      const current = (typeof graphdenWorkspaceRoots === 'function') ? graphdenWorkspaceRoots() : [];
+      const hidden = (typeof graphdenHiddenList === 'function') ? graphdenHiddenList() : [];
+      const active = current.length > 0;
+      let html = '<h5>Workspace — choose what you see</h5>'
+        + '<button type="button" class="gd-pop-item' + (active ? '' : ' sel') + '" data-ws-all="1">'
+        + '<span class="gd-pi">◍</span>All functions</button>'
+        + '<div class="gd-pop-div"></div>'
+        + '<div class="gd-pop-cap">Projects — tick the namespaces you work in</div>';
+      roots.forEach((n) => {
+        const on = current.indexOf(n.name) >= 0;
+        html += '<button type="button" class="gd-pop-item gd-ws-opt' + (on ? ' sel' : '') + '"'
+          + ' role="checkbox" aria-checked="' + (on ? 'true' : 'false') + '" data-ws="' + esc(n.name) + '"'
+          + (n.desc ? ' title="' + esc(n.desc) + '"' : '') + '>'
+          + '<span class="gd-pi">' + (on ? '☑' : '☐') + '</span>'
+          + '<span class="gd-ws-nm">' + esc(n.name) + '</span>'
+          + (n.desc ? '<span class="gd-ws-desc">' + esc(n.desc) + '</span>' : '')
+          + '</button>';
       });
-    });
-    pop.querySelectorAll('.gd-pop-pin').forEach((pb) => {
-      pb.addEventListener('click', (e) => {
-        e.stopPropagation(); // pin, don't scope
-        const root = pb.getAttribute('data-pin');
-        if (typeof graphdenTogglePin === 'function') graphdenTogglePin(root);
-        const nowPinned = (typeof graphdenIsPinned === 'function') && graphdenIsPinned(root);
-        pb.classList.toggle('pinned', nowPinned);
-        pb.setAttribute('aria-pressed', nowPinned ? 'true' : 'false');
-        pb.title = nowPinned ? 'Unpin' : 'Pin — keep visible even when scoped';
-        if (typeof updateEntityList === 'function' && typeof graphData !== 'undefined') {
-          updateEntityList(graphData);
-        }
+      if (hidden.length) {
+        html += '<div class="gd-pop-div"></div>'
+          + '<div class="gd-pop-cap">Hidden by you — restore to your view</div>';
+        hidden.slice().sort((a, b) => a.localeCompare(b)).forEach((h) => {
+          html += '<div class="gd-pop-row">'
+            + '<span class="gd-pop-item gd-ws-hidden" title="Hidden from your explorer">'
+            +   '<span class="gd-pi">⦸</span>' + esc(h) + '</span>'
+            + '<button type="button" class="gd-pop-pin" data-restore="' + esc(h) + '"'
+            +   ' title="Restore to view">↺</button></div>';
+        });
+      }
+      html += '<div class="gd-pop-hint">Personal + per-browser (like your branch choice). '
+        + 'Hide a namespace from its ⊘ in the tree. Nothing here changes the shared graph.</div>';
+      pop.innerHTML = html;
+
+      pop.querySelector('[data-ws-all]').addEventListener('click', () => {
+        if (typeof setGraphdenWorkspace === 'function') setGraphdenWorkspace(null);
+        gdWsRepaint(); gdCloseWsPop();
       });
-    });
+      pop.querySelectorAll('.gd-ws-opt').forEach((it) => {
+        it.addEventListener('click', () => {
+          if (typeof graphdenToggleWorkspaceRoot === 'function') graphdenToggleWorkspaceRoot(it.getAttribute('data-ws'));
+          gdWsRepaint(); render();   // keep open, reflect the tick
+        });
+      });
+      pop.querySelectorAll('[data-restore]').forEach((rb) => {
+        rb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof graphdenToggleHidden === 'function') graphdenToggleHidden(rb.getAttribute('data-restore'));
+          gdWsRepaint(); render();
+        });
+      });
+    };
+    render();
     document.body.appendChild(pop);
   }
 

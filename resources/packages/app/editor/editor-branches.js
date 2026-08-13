@@ -140,67 +140,99 @@ function graphdenInWorkspace(nsPath) {
   }
   return false;
 }
-// Redesign 2026-08 — WORKSPACE FOCUS (user-chosen scope). Distinct from the
-// server highlight above: focus HIDES out-of-scope namespaces in the explorer.
-// A workspace is just a set of namespace roots (reuses the same root+descendant
-// test), persisted locally — no new entity. null = no focus (show everything).
-let graphdenFocusRoots = null;
+// Redesign 2026-08 — WORKSPACES (user-chosen scope over the shared namespace
+// tree). A workspace is PERSONAL and per-browser (localStorage, like the branch
+// selection + lens), reusing the existing namespace hierarchy — NO new entity:
+//   • included roots (`graphden.workspace.roots`) — the namespaces you work in.
+//     Empty ⇒ "All functions" (show everything). Pick from the ready-made
+//     projects (the graph's root namespaces) instead of building from scratch.
+//   • hidden paths (`graphden.workspace.hidden`) — YOUR personal exclusions
+//     within the included scope (the ".gitignore" — remove a sub-namespace from
+//     your view without touching the shared graph or anyone else's view).
+// Both are a root+descendant match. The old separate "pins" set is folded in:
+// a pinned root was just another included root, so on load we migrate it here.
+let graphdenWorkspaceRoots = [];
 try {
   const raw = JSON.parse(localStorage.getItem('graphden.workspace.roots') || 'null');
-  if (Array.isArray(raw) && raw.length) graphdenFocusRoots = raw.slice();
+  if (Array.isArray(raw)) graphdenWorkspaceRoots = raw.slice();
+  // One-time migration: old pins become included roots (same "keep in view").
+  const oldPins = JSON.parse(localStorage.getItem('graphden.workspace.pins') || 'null');
+  if (Array.isArray(oldPins) && oldPins.length) {
+    for (const p of oldPins) if (!graphdenWorkspaceRoots.includes(p)) graphdenWorkspaceRoots.push(p);
+    localStorage.setItem('graphden.workspace.roots', JSON.stringify(graphdenWorkspaceRoots));
+    localStorage.removeItem('graphden.workspace.pins');
+  }
 } catch (_) { /* ignore malformed pref */ }
-function graphdenInFocus(nsPath) {
-  if (!graphdenFocusRoots || !nsPath) return false;
-  for (const w of graphdenFocusRoots) {
+
+let graphdenHiddenPaths = [];
+try {
+  const h = JSON.parse(localStorage.getItem('graphden.workspace.hidden') || 'null');
+  if (Array.isArray(h)) graphdenHiddenPaths = h.slice();
+} catch (_) { /* ignore malformed pref */ }
+
+function graphdenWorkspaceActive() { return graphdenWorkspaceRoots.length > 0; }
+// Is nsPath inside the workspace scope (a root or under one)?
+function graphdenInWorkspaceScope(nsPath) {
+  if (!nsPath) return false;
+  for (const w of graphdenWorkspaceRoots) {
     if (nsPath === w || nsPath.startsWith(w + '.')) return true;
   }
   return false;
 }
-function graphdenWorkspaceFocused() { return !!graphdenFocusRoots; }
-function graphdenWorkspaceLabel() {
-  if (!graphdenFocusRoots) return 'All functions';
-  return graphdenFocusRoots.length === 1
-    ? graphdenFocusRoots[0]
-    : graphdenFocusRoots.length + ' namespaces';
+// Personal hide: nsPath is hidden if it (or an ancestor) is in the hidden set.
+function graphdenIsHidden(nsPath) {
+  if (!nsPath) return false;
+  for (const h of graphdenHiddenPaths) {
+    if (nsPath === h || nsPath.startsWith(h + '.')) return true;
+  }
+  return false;
 }
-// Set (array of ns roots) or clear (null/empty) the workspace focus + persist.
+function graphdenWorkspaceLabel() {
+  if (!graphdenWorkspaceRoots.length) return 'All functions';
+  return graphdenWorkspaceRoots.length === 1
+    ? graphdenWorkspaceRoots[0]
+    : graphdenWorkspaceRoots.length + ' namespaces';
+}
+// Set (array of ns roots) or clear (null/empty) the whole workspace + persist.
 function setGraphdenWorkspace(roots) {
-  graphdenFocusRoots = (Array.isArray(roots) && roots.length) ? roots.slice() : null;
+  graphdenWorkspaceRoots = (Array.isArray(roots) && roots.length) ? roots.slice() : [];
   try {
-    localStorage.setItem('graphden.workspace.roots', JSON.stringify(graphdenFocusRoots || []));
+    localStorage.setItem('graphden.workspace.roots', JSON.stringify(graphdenWorkspaceRoots));
   } catch (_) { /* ignore */ }
 }
-window.graphdenInFocus = graphdenInFocus;
-window.graphdenWorkspaceFocused = graphdenWorkspaceFocused;
+// Add/remove one root from the workspace (the popover checklist).
+function graphdenToggleWorkspaceRoot(root) {
+  const i = graphdenWorkspaceRoots.indexOf(root);
+  if (i >= 0) graphdenWorkspaceRoots.splice(i, 1);
+  else graphdenWorkspaceRoots.push(root);
+  try {
+    localStorage.setItem('graphden.workspace.roots', JSON.stringify(graphdenWorkspaceRoots));
+  } catch (_) { /* ignore */ }
+}
+// Add/remove one namespace path from the personal hidden set.
+function graphdenToggleHidden(nsPath) {
+  const i = graphdenHiddenPaths.indexOf(nsPath);
+  if (i >= 0) graphdenHiddenPaths.splice(i, 1);
+  else graphdenHiddenPaths.push(nsPath);
+  try {
+    localStorage.setItem('graphden.workspace.hidden', JSON.stringify(graphdenHiddenPaths));
+  } catch (_) { /* ignore */ }
+}
+window.graphdenWorkspaceActive = graphdenWorkspaceActive;
+window.graphdenInWorkspaceScope = graphdenInWorkspaceScope;
+window.graphdenIsHidden = graphdenIsHidden;
 window.graphdenWorkspaceLabel = graphdenWorkspaceLabel;
 window.setGraphdenWorkspace = setGraphdenWorkspace;
-window.graphdenWorkspaceRoots = () => (graphdenFocusRoots ? graphdenFocusRoots.slice() : []);
-// Pinned namespaces stay visible in the explorer even when a workspace focus
-// would otherwise hide them — the "shared library" convention (core/web/… you
-// always want in view). Persisted locally; same root+descendant test.
-let graphdenPinnedRoots = [];
-try {
-  const p = JSON.parse(localStorage.getItem('graphden.workspace.pins') || 'null');
-  if (Array.isArray(p)) graphdenPinnedRoots = p.slice();
-} catch (_) { /* ignore malformed pref */ }
-function graphdenIsPinned(nsPath) {
-  if (!nsPath) return false;
-  for (const w of graphdenPinnedRoots) {
-    if (nsPath === w || nsPath.startsWith(w + '.')) return true;
-  }
-  return false;
-}
-function graphdenTogglePin(root) {
-  const i = graphdenPinnedRoots.indexOf(root);
-  if (i >= 0) graphdenPinnedRoots.splice(i, 1);
-  else graphdenPinnedRoots.push(root);
-  try {
-    localStorage.setItem('graphden.workspace.pins', JSON.stringify(graphdenPinnedRoots));
-  } catch (_) { /* ignore */ }
-}
-window.graphdenIsPinned = graphdenIsPinned;
-window.graphdenTogglePin = graphdenTogglePin;
-window.graphdenPins = () => graphdenPinnedRoots.slice();
+window.graphdenToggleWorkspaceRoot = graphdenToggleWorkspaceRoot;
+window.graphdenToggleHidden = graphdenToggleHidden;
+window.graphdenWorkspaceRoots = () => graphdenWorkspaceRoots.slice();
+window.graphdenHiddenList = () => graphdenHiddenPaths.slice();
+// Back-compat shims (older callers referenced the focus/pins split; the model
+// is now one included-roots set). graphdenInFocus ≡ in-scope; pins are gone.
+window.graphdenInFocus = graphdenInWorkspaceScope;
+window.graphdenWorkspaceFocused = graphdenWorkspaceActive;
+window.graphdenIsPinned = () => false;
+window.graphdenPins = () => [];
 // The tenancy addon is active iff we've seen a capability header (absent in
 // single-tenant). Used to gate addon-only UI like the Grants admin section.
 function graphdenTenancyActive() { return graphdenCapabilities !== null; }

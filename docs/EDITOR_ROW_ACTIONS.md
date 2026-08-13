@@ -81,8 +81,15 @@ a fixed glyph lane so labels align. Consequences:
 - **New buttons MUST carry a human-readable `aria-label`** — it doubles
   as the visible menu label, so a missing/cryptic one renders a
   label-less (or nonsense) menu row, not just an a11y gap.
-- Delete is styled as the danger row (reads red); disabled items stay
-  muted with their reason in `title`.
+- Delete is styled as the danger row (reads red); a disabled item's
+  `aria-label` carries a SHORT inline reason ("Rename — fn in use",
+  "Service settings — has free args") with the full sentence in
+  `title` and in the click-to-open reason popover. Extend is never
+  in-use-blocked — it creates a child, it doesn't modify this fn.
+- Choosing an action that opens standalone UI (Run, Version history,
+  Rename, …) auto-dismisses the menu; `ns` / `i` keep it open because
+  their mini-popovers anchor inside it. The menu's zoom-follow is
+  CLAMPED to ~1 (it's a text menu, read at UI scale).
 - All rules are scoped inside `.row-actions-content` (popover-only), so
   the same `.action-icon` factory still renders as a compact square
   when used inline on a card row.

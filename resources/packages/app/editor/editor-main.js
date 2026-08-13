@@ -235,14 +235,22 @@ async function initGraph() {
   _subtreeFetchPromise = null;
   _knownFns = new Map();
   _loadedNamespaceIds = new Set();
-  const [entResp, typeResp, vkResp] = await Promise.all([
-    fetch(API.api_graph_entities + '?scope=tree'),
-    fetch(API.api_types).catch(() => null),
-    fetch(API.api_value_kinds).catch(() => null),
-    (typeof loadServicesEager === 'function')
-      ? loadServicesEager().catch(() => null)
-      : null,
-  ]);
+  // Tree first, alone: on an auth-gated deployment an anonymous boot
+  // used to fire all four fetches and paint FOUR red 401s into the
+  // console before the sign-in prompt. The tree's status answers the
+  // auth question for everyone — only when it isn't 401 do the three
+  // secondary fetches go out (in parallel; they start on the tree's
+  // response headers, so the authed path pays ~one RTT).
+  const entResp = await fetch(API.api_graph_entities + '?scope=tree');
+  const [typeResp, vkResp] = (entResp.status === 401)
+    ? [null, null]
+    : await Promise.all([
+        fetch(API.api_types).catch(() => null),
+        fetch(API.api_value_kinds).catch(() => null),
+        (typeof loadServicesEager === 'function')
+          ? loadServicesEager().catch(() => null)
+          : null,
+      ]);
   // Auth wall (B3): the graph view is login-gated when auth is active, so an
   // unauthenticated (or stale-token) boot gets 401 here — send the user to
   // sign in instead of dying into the red fatal banner. Tenancy deployments

@@ -171,6 +171,9 @@ const lensKinds = loadLens();
 // The last render's namespace-less (root/primitives) fn list — applyLensVisibility
 // re-renders that small bucket in place on a lens flip.
 let _lastRootFns = null;
+// Namespaces whose "internal N" group the user opened this session —
+// survives tree rebuilds (which happen on every lens flip / lazy load).
+const _internalOpenNs = new Set();
 // The last-built namespace tree root. Incremental expand/refresh must read the
 // CURRENT node (fresh `.fns`) from here, never a node captured at an earlier
 // render — a lazy load appends to `graphData.fns`, so a stale captured node's
@@ -660,10 +663,49 @@ function buildNsChildGroup(node, nsPath, searchMode) {
     }
   } else {
     const sortedFns = [...node.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
-    for (const fn of sortedFns) {
+    // INTERNAL rows — `_`-private fns and anonymous composites
+    // (`anon-<hash>`) are implementation detail; listing them flat
+    // drowned real fns (web.reitit showed 8 anon rows first). They
+    // collapse under one "internal N" toggle per namespace. Search
+    // stays flat (finding one by name must keep working), and the
+    // group auto-opens when the SELECTED fn is inside it — the
+    // "openable ⟺ visible in the menu" invariant.
+    const isInternal = (fn) => (typeof fn.rawName === 'string' && fn.rawName.startsWith('_'))
+                            || /^anon-/.test(fn.displayName || '');
+    const publicFns = searchMode ? sortedFns : sortedFns.filter(f => !isInternal(f));
+    const internalFns = searchMode ? [] : sortedFns.filter(isInternal);
+    for (const fn of publicFns) {
       const el = buildFnItem(fn);
       el.hidden = !fnKindVisible(fn);
       childGroup.appendChild(el);
+    }
+    if (internalFns.length) {
+      const open = _internalOpenNs.has(nsPath)
+        || internalFns.some(f => typeof selectedFnId !== 'undefined' && f.id === selectedFnId);
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'ns-internal-toggle';
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = (open ? '▾ ' : '▸ ') + 'internal ' + internalFns.length;
+      toggle.title = 'Private (_-prefixed) and anonymous fns of this namespace';
+      const holder = document.createElement('div');
+      holder.className = 'ns-internal-group';
+      holder.hidden = !open;
+      for (const fn of internalFns) {
+        const el = buildFnItem(fn);
+        el.hidden = !fnKindVisible(fn);
+        holder.appendChild(el);
+      }
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const nowOpen = holder.hidden;
+        holder.hidden = !nowOpen;
+        toggle.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+        toggle.textContent = (nowOpen ? '▾ ' : '▸ ') + 'internal ' + internalFns.length;
+        if (nowOpen) _internalOpenNs.add(nsPath); else _internalOpenNs.delete(nsPath);
+      });
+      childGroup.appendChild(toggle);
+      childGroup.appendChild(holder);
     }
   }
 
@@ -785,6 +827,33 @@ function applyLensVisibility() {
   }
   // Root/primitives bucket — re-render in place (small: ≤ the boot primitives).
   refreshRootNode();
+  // Empty-lens hint. A lens with ZERO matching rows used to show either
+  // a blank tree or only the force-shown selected fn — which read as
+  // "this fn matches the lens" (a `router` row under the secrets lens
+  // looked like router IS a secret). Say what's going on instead.
+  let hint = list.querySelector('.lens-empty-hint');
+  const lensSet = (typeof lensKinds !== 'undefined') ? lensKinds : new Set();
+  let matches = 0;
+  if (lensSet.size > 0 && lookups?.fnMap) {
+    for (const fn of lookups.fnMap.values()) {
+      const kinds = fnKindSet(fn);
+      for (const k of lensSet) if (kinds.has(k)) { matches++; break; }
+      if (matches) break;
+    }
+  }
+  if (lensSet.size > 0 && matches === 0) {
+    if (!hint) {
+      hint = document.createElement('div');
+      hint.className = 'lens-empty-hint';
+      list.appendChild(hint);
+    }
+    hint.textContent = lensSet.has('secrets')
+      ? 'No secrets yet — create one with “+ New secret” above. (The selected fn stays visible regardless of the lens.)'
+      : 'Nothing matches this lens yet. (The selected fn stays visible regardless.)';
+    hint.hidden = false;
+  } else if (hint) {
+    hint.hidden = true;
+  }
 }
 
 // Remove + re-render the namespace-less (primitives) bucket in place. Its

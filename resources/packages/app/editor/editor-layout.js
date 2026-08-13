@@ -110,6 +110,9 @@ const OPTIONAL_STRIP_HEIGHT = 17;
 // fn-name row — it occupies no dedicated strip.
 const METADATA_STRIP_HEIGHT = 17;
 const USE_SITE_HEADER_HEIGHT = 21;
+// Collapsed marker stripe when the node has NO expansion of its own —
+// mirrors appendUseSiteHeader's slim branch (editor-overlay-fn-rows.js).
+const USE_SITE_HEADER_SLIM_HEIGHT = 6;
 
 // Mirror appendFnMetadataStrips' decisions for the height-only side:
 // return whether each strip will render. Conservative — when a check
@@ -135,7 +138,12 @@ function metadataStripsHeight(nodeData) {
     && typeof richTypes === 'object'
     && richTypes?.[fn.name] && richTypes[fn.name].return != null;
   const isNavRoot = !nodeData.isPlaceholder && nodeData.isRoot;
-  const rtEditable = isNavRoot
+  // Mirror of appendFnMetadataStrips' isTypeRow gate — type-rows render
+  // neither the return strip nor "set parent…".
+  const isTypeRow = !(Array.isArray(fn['parent-ids']) && fn['parent-ids'].length)
+                 && !fn['return-type-fn-id']
+                 && !fn['return-type'];
+  const rtEditable = isNavRoot && !isTypeRow
     && (typeof isFnEditable === 'function' && isFnEditable(fnId))
     && (typeof isAuthenticated === 'function' && isAuthenticated());
   if (!compact && (fn['return-type'] || rtEditable || hasRtEntry)) {
@@ -225,7 +233,11 @@ function calculateNodeSize(nodeData) {
                    && lookups.fnMap && nodeData.originalFnId)
                   ? lookups.fnMap.get(nodeData.originalFnId) : null;
     const isLocalFn = !(ownFn?.name);
-    const useSiteRow = (!nodeData.isRoot && !isLocalFn) ? USE_SITE_HEADER_HEIGHT : 0;
+    const useSiteRow = (!nodeData.isRoot && !isLocalFn)
+      ? (expansionState.has(nodeData.id)
+          ? USE_SITE_HEADER_HEIGHT
+          : USE_SITE_HEADER_SLIM_HEIGHT)
+      : 0;
     const optionalExtra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
     const stripsExtra = isPlaceholder ? 0 : metadataStripsHeight(nodeData);
     const height = Math.max(30 + DRAG_HANDLE_HEIGHT,

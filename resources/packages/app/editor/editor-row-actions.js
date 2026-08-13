@@ -79,6 +79,20 @@ function ensureRowActionsPopover() {
   // and is bound ONCE here — binding it per-swap would leak a fresh
   // listener pair onto this singleton element on every popover open.
   _bindDescriptionBadgeHover(el);
+  // An action that opens its OWN standalone UI (Run popover, version
+  // modal, rename form, …) dismisses this menu — otherwise the two
+  // popovers stack. Delegated so it survives content swaps. `ns` and
+  // `i` stay: their mini-popovers anchor to the button INSIDE this
+  // menu, so it must remain visible under them.
+  el.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn || btn.getAttribute('aria-disabled') === 'true') return;
+    const keepOpen = ['description', 'namespace-move', 'add-mi-parent'];
+    if (keepOpen.includes(btn.dataset.action)) return;
+    rowActionsPopoverSticky = false;
+    // Next tick — let the action's own handler read the anchor first.
+    setTimeout(() => hideRowActionsPopover(), 0);
+  });
   document.body.appendChild(el);
   rowActionsPopoverEl = el;
   return el;
@@ -93,12 +107,12 @@ function ensureRowActionsPopover() {
 //
 // If there's not enough room on the right, fall back to LEFT-of-card.
 //
-// The popover scales with the viewport zoom so it matches the
-// scaled-up card chrome — the in-card icons all live inside an
-// overlay that gets `transform: scale(zoom)` applied (see
-// editor-overlays.js positionOverlays). Without this match the
-// popover stays at base 15-px icons while the trigger doubles in
-// size at 200 % zoom, which reads as broken.
+// The popover follows the viewport zoom only LOOSELY (clamped): it
+// used to match the card chrome 1:1 back when it was an icon row,
+// but since the labeled-menu redesign it is a TEXT menu — text is
+// read at UI scale, and a 1:1 match made it fill half the canvas at
+// high zoom and become unreadable at low zoom. The residual clamp
+// keeps it from visually detaching from very small / large cards.
 function positionRowActionsPopover(el, anchor) {
   const ar = anchor.getBoundingClientRect();
   // Anchor X to the card's edge, not the trigger's — see comment above.
@@ -122,7 +136,8 @@ function positionRowActionsPopover(el, anchor) {
     fadeOutPopover();
     return;
   }
-  const zoom = (typeof gv !== 'undefined' && gv.ready()) ? gv.zoom() : 1;
+  const rawZoom = (typeof gv !== 'undefined' && gv.ready()) ? gv.zoom() : 1;
+  const zoom = Math.max(0.9, Math.min(1.1, rawZoom));
   // Reset transform so offsetWidth measures the un-scaled size.
   el.style.transform = '';
   el.style.transformOrigin = 'top left';

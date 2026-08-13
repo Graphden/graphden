@@ -59,8 +59,9 @@ Open the editor at <http://localhost:9002> and sign in.
 In the left sidebar's namespace tree, create a namespace
 `demo.api-poll`. Every fn-def below lives in that namespace.
 Private helpers (the ones starting with `_`) live in the same
-namespace; the leading `_` just hides them from the default sidebar
-listing.
+namespace; the tree shows them without the `_` prefix, folded under
+the namespace's collapsed "internal N" row (click it to reveal
+them).
 
 ## Step 2 — Credential lookups (5 fn-defs)
 

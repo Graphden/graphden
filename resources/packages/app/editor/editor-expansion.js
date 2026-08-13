@@ -147,7 +147,20 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
   // Commit clears saved user positions — nodes that disappeared in the
   // committed state lose their manual position.
   savedUserPositions.clear();
+  // Did this click GROW the expansion? Only then auto-fit — newly
+  // revealed nodes must not land off-screen; a collapse always fits
+  // within the previous view, and refitting there would yank the
+  // user's pan/zoom for nothing.
+  const grew = newSpec !== null
+    && (!currentSpec
+        || (newSpec.fullDepth || 0) > (currentSpec.fullDepth || 0)
+        || (newSpec.partialFns?.size || 0)
+           > (currentSpec.partialFns?.size || 0));
   renderGraph(false);
+  if (grew && typeof fitGraphIfOverflowing === 'function') {
+    // Double-rAF: the measured layout settles positions after render.
+    requestAnimationFrame(() => requestAnimationFrame(fitGraphIfOverflowing));
+  }
   anchorNodeId = null;
 }
 

@@ -85,6 +85,26 @@ async function selectFnByName(name, updateHistory = true) {
       console.error('selectFnByName resolution failed', err);
     }
   }
+  // Display-name fallback: the tree shows private names WITHOUT their
+  // `_` prefix (displayLabel), so a name a user copied from the UI may
+  // be the stripped form. Retry with `_` on the last segment before
+  // declaring not-found — the canonical name stays authoritative.
+  if (!fn && typeof name === 'string' && name
+      && !name.split(/[./]/).pop().startsWith('_')) {
+    const privatized = name.replace(/([^./]+)$/, '_$1');
+    fn = (graphData.fns || []).find(f => f.name === privatized)
+      || (lookups
+          ? (graphData.fns || []).find(f => getQualifiedFnName(f) === privatized)
+          : null);
+    if (!fn && typeof resolveFnByName === 'function') {
+      try { fn = await resolveFnByName(privatized); } catch (_) { /* below */ }
+    }
+  }
+  if (!fn && typeof gdToast === 'function') {
+    // Silent-failure was worse than any message: the URL updated but
+    // the canvas kept the previous fn, with no hint why.
+    gdToast('Function not found: ' + name);
+  }
   if (fn) {
     selectFn(fn.id, updateHistory);
     // selectFn kicks renderGraph → ensureSubtreeFor but doesn't await it.
@@ -102,6 +122,29 @@ async function selectFnByName(name, updateHistory = true) {
   }
 }
 
+
+// ============================================================================
+// TOAST — minimal transient notice (bottom-center, auto-fades).
+// ============================================================================
+
+let _gdToastEl = null;
+let _gdToastTimer = null;
+function gdToast(message) {
+  if (!_gdToastEl) {
+    _gdToastEl = document.createElement('div');
+    _gdToastEl.className = 'gd-toast';
+    _gdToastEl.setAttribute('role', 'status');
+    _gdToastEl.setAttribute('aria-live', 'polite');
+    document.body.appendChild(_gdToastEl);
+  }
+  _gdToastEl.textContent = message;
+  _gdToastEl.classList.add('gd-toast-visible');
+  if (_gdToastTimer) clearTimeout(_gdToastTimer);
+  _gdToastTimer = setTimeout(() => {
+    _gdToastEl.classList.remove('gd-toast-visible');
+  }, 3500);
+}
+window.gdToast = gdToast;
 
 // ============================================================================
 // NAVIGATION CONTROLS
@@ -139,12 +182,34 @@ function updateZoomSlider() {
   if (slider && gv.ready()) slider.value = Math.round(gv.zoom() * 100);
 }
 
-/** Reset zoom to fit all nodes in viewport. */
+/** Fit all nodes in the viewport (the ⊙ nav button). */
 function navResetZoom() {
   if (!gv.ready() || gv.nodes().length === 0) return;
   fitInVisibleArea(50);
   applyViewportTransform();
   updateZoomSlider();
+}
+
+/**
+ * Refit ONLY when part of the graph lies outside the visible viewport —
+ * called after an expansion reveals new nodes, so they never land
+ * off-screen, while a graph that already fits keeps the user's pan/zoom.
+ */
+function fitGraphIfOverflowing() {
+  if (typeof gv === 'undefined' || !gv.ready() || gv.nodes().length === 0) return;
+  const bb = (typeof graphBoundingBox === 'function') ? graphBoundingBox() : null;
+  const surface = (typeof viewportContainer === 'function') ? viewportContainer() : null;
+  if (!bb || !surface || bb.w <= 0) return;
+  const z = viewport.zoom;
+  const x1 = bb.x1 * z + viewport.pan.x;
+  const y1 = bb.y1 * z + viewport.pan.y;
+  const x2 = bb.x2 * z + viewport.pan.x;
+  const y2 = bb.y2 * z + viewport.pan.y;
+  const m = 8; // px tolerance — don't refit over a sliver
+  const fits = x1 >= -m && y1 >= -m
+            && x2 <= surface.clientWidth + m
+            && y2 <= surface.clientHeight + m;
+  if (!fits) navResetZoom();
 }
 
 /** Pan to center the root node in the viewport. */

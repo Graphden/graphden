@@ -66,7 +66,15 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   if (!cardFnEntity) return;
   stripFacts = stripFacts || {};
   const rt = cardFnEntity['return-type'];
-  const rtEditable = isNavRoot
+  // TYPE-ROW (no parents, no base-fn impl): "→ (none)" and
+  // "set parent…" are fn vocabulary — a type has no return and gets
+  // its hierarchy through the type-create flows, so both strips are
+  // noise on a type card (worst on stdlib primitives like `int`).
+  const isTypeRow = !(Array.isArray(cardFnEntity['parent-ids'])
+                      && cardFnEntity['parent-ids'].length)
+                 && !cardFnEntity['return-type-fn-id']
+                 && !rt;
+  const rtEditable = isNavRoot && !isTypeRow
                   && (typeof isFnEditable === 'function' && isFnEditable(originalFnId))
                   && (typeof isAuthenticated === 'function' && isAuthenticated());
 

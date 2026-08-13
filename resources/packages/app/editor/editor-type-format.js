@@ -77,6 +77,13 @@ function formatTypeHumanReadable(t) {
                            : '';
       return 'function: ' + argsPart + 'returns ' + ret + effSuffix + varianceHint;
     }
+    // Marker head — [:secret T] and any registered marker wraps an
+    // inner type (same structural rule as validateLiteralAgainstType).
+    // Without this branch a secret's type printed as raw JSON
+    // (`["secret","text"]`) on cards and in the inspector.
+    if (t.length === 2 && typeof head === 'string') {
+      return head + ' ' + formatTypeHumanReadable(t[1]);
+    }
     return JSON.stringify(t);
   }
   if (typeof t === 'object') {
@@ -197,6 +204,11 @@ function formatTypeHint(t) {
         }
       }
       return '(' + args + ') → ' + ret + effSuffix;
+    }
+    // Marker head ([:secret T], …) — wraps an inner type; render as
+    // `secret text` instead of falling through to raw JSON.
+    if (t.length === 2 && typeof head === 'string') {
+      return head + ' ' + formatTypeHint(t[1]);
     }
     return JSON.stringify(t);
   }
@@ -574,4 +586,107 @@ function appendResolutionSection(host, prov, opts) {
     section.appendChild(row);
   }
   host.appendChild(section);
+}
+
+
+// ============================================================================
+// EDN type-string → JS type shape — for SERVER partials that print
+// rich types as EDN text (inspector-detail's `.gd-bind-type` /
+// `.gd-prov-mono`). The client re-renders those through
+// `formatTypeHint` so every surface speaks ONE type notation; the raw
+// EDN stays in `title=`. Subset parser: vectors, maps, keywords,
+// numbers, strings, bare symbols — exactly what type printing emits.
+// ============================================================================
+
+function parseEdnTypeString(src) {
+  let i = 0;
+  const isWs = (c) => c === ' ' || c === ',' || c === '\n' || c === '\t';
+  const skipWs = () => { while (i < src.length && isWs(src[i])) i++; };
+  function readValue() {
+    skipWs();
+    const c = src[i];
+    if (c === undefined) throw new Error('eof');
+    if (c === '[') {
+      i++;
+      const out = [];
+      for (skipWs(); src[i] !== ']';) { out.push(readValue()); skipWs(); }
+      i++;
+      return out;
+    }
+    if (c === '{') {
+      i++;
+      const out = {};
+      for (skipWs(); src[i] !== '}';) {
+        const k = readValue();
+        const v = readValue();
+        out[String(k)] = v;
+        skipWs();
+      }
+      i++;
+      return out;
+    }
+    if (c === '"') {
+      i++;
+      let s = '';
+      while (i < src.length && src[i] !== '"') {
+        if (src[i] === '\\') i++;
+        s += src[i]; i++;
+      }
+      i++;
+      return s;
+    }
+    // atom: keyword / number / bare symbol
+    let a = '';
+    while (i < src.length && !isWs(src[i]) && !'[]{}'.includes(src[i])) { a += src[i]; i++; }
+    if (a.startsWith(':')) return a.slice(1);           // keyword → wire form
+    if (/^-?\d+(\.\d+)?$/.test(a)) return Number(a);
+    return a;                                            // bare symbol
+  }
+  const v = readValue();
+  skipWs();
+  if (i !== src.length) throw new Error('trailing');
+  return v;
+}
+
+// Deep-resolve GENERATED alias names (`a-1234`) — meaningless to a
+// reader — into their definitions; named aliases stay by name.
+function resolveGeneratedAliases(t, depth = 0) {
+  if (depth > 8) return t;
+  if (typeof t === 'string' && /^a-\d+$/.test(t)
+      && typeof dereferenceType === 'function') {
+    const d = dereferenceType(t);
+    if (d !== t && d != null) return resolveGeneratedAliases(d, depth + 1);
+    return t;
+  }
+  if (Array.isArray(t)) return t.map((x) => resolveGeneratedAliases(x, depth + 1));
+  if (t && typeof t === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(t)) out[k] = resolveGeneratedAliases(v, depth + 1);
+    return out;
+  }
+  return t;
+}
+
+// Re-render every EDN-printed type inside `root` through
+// formatTypeHint. Non-type text (parse failure) is left untouched.
+function formatServerTypeTexts(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('.gd-bind-type, .gd-prov-mono')) {
+    const raw = (el.textContent || '').trim();
+    // Obvious type shapes, plus BARE generated aliases (`a-3449`) —
+    // provenance also prints `:ring-handler` (a fn ref, keep) in the
+    // same mono class.
+    if (!raw || !(raw.startsWith('[') || raw.startsWith('{') || /^a-\d+$/.test(raw))) continue;
+    try {
+      const parsed = resolveGeneratedAliases(parseEdnTypeString(raw));
+      // A generated alias the CLIENT registry can't expand (they are
+      // server-internal names) still must not leak an internal id —
+      // an inline/unnamed type is exactly what it is.
+      const pretty = formatTypeHint(parsed).replace(/\ba-\d+\b/g, 'unnamed');
+      if (pretty && pretty !== raw) {
+        el.title = raw;
+        el.textContent = pretty;
+      }
+    } catch (_) { /* not a type literal — leave as printed */ }
+  }
 }

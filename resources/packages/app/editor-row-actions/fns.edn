@@ -434,7 +434,7 @@
                   :args {:map {:value {:type "button"
                                        :class "action-icon action-icon-disabled"
                                        :data-action "service-settings"
-                                       :aria-label "Service settings (unavailable)"
+                                       :aria-label "Service settings — has free args"
                                        :aria-disabled "true"}}
                          :key {:value :title}
                          :value :_partial-row-actions-service-blocked-reason-str}}
@@ -464,7 +464,7 @@
                   :args {:map {:value {:type "button"
                                        :class "action-icon action-icon-disabled"
                                        :data-action "rename-fn"
-                                       :aria-label "Rename (unavailable)"
+                                       :aria-label "Rename — fn in use"
                                        :aria-disabled "true"}}
                          :key {:value :title}
                          :value :_partial-row-actions-edit-block-reason-str}}
@@ -476,8 +476,12 @@
           :then :_partial-row-actions-rename-button-disabled
           :else :_partial-row-actions-rename-button-enabled}}
 
-  ;; + Extend — same enabled/disabled pattern.
-  {:name :_partial-row-actions-extend-button-enabled
+  ;; + Extend — never blocked by the in-use gate: extending doesn't
+  ;; modify this fn, it CREATES a child with it as :parent, so "used
+  ;; as parent / referenced" is irrelevant (same reasoning that keeps
+  ;; Extend ungated on ownership — a child of a public fn is yours).
+  ;; Org-readiness (gd-no-write) still hides it via CSS.
+  {:name :_partial-row-actions-extend-button
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs {:value {:type "button"
@@ -486,25 +490,6 @@
                           :title "Extend (create a child fn with this as :parent)"
                           :aria-label "Extend"}}
           :children [{:value "+"}]}}
-
-  {:name :_partial-row-actions-extend-button-disabled
-   :parent :hiccup
-   :args {:tag {:value "button"}
-          :attrs {:parent :assoc
-                  :args {:map {:value {:type "button"
-                                       :class "action-icon action-icon-disabled"
-                                       :data-action "extend-fn"
-                                       :aria-label "Extend (unavailable)"
-                                       :aria-disabled "true"}}
-                         :key {:value :title}
-                         :value :_partial-row-actions-edit-block-reason-str}}
-          :children [{:value "+"}]}}
-
-  {:name :_partial-row-actions-extend-button
-   :parent :if
-   :args {:test :_partial-row-actions-edit-blocked?
-          :then :_partial-row-actions-extend-button-disabled
-          :else :_partial-row-actions-extend-button-enabled}}
 
   ;; ✕ Delete — destructive, separate danger class. Same enabled
   ;; vs disabled split.
@@ -525,7 +510,7 @@
                   :args {:map {:value {:type "button"
                                        :class "action-icon action-icon-danger action-icon-disabled"
                                        :data-action "delete-fn"
-                                       :aria-label "Delete (unavailable)"
+                                       :aria-label "Delete — fn in use"
                                        :aria-disabled "true"}}
                          :key {:value :title}
                          :value :_partial-row-actions-edit-block-reason-str}}

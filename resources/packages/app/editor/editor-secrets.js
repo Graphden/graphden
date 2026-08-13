@@ -269,6 +269,7 @@ async function openCreateSecretForm(anchor) {
       errEl.hidden = false;
       return;
     }
+    let createdId = null;
     try {
       const r = await authFetch(API.api_secrets, {
         method: 'POST',
@@ -284,6 +285,7 @@ async function openCreateSecretForm(anchor) {
         errEl.hidden = false;
         return;
       }
+      createdId = data?.secret?.id || null;
     } catch (e) {
       errEl.textContent = String(e);
       errEl.hidden = false;
@@ -300,6 +302,13 @@ async function openCreateSecretForm(anchor) {
       await loadGraphData();
     } else {
       updateEntityList(graphData);
+    }
+    // Take the user TO what they just created — before this, the new
+    // secret landed silently in its namespace (root → the very bottom
+    // of the tree) and looked like nothing had happened.
+    if (createdId && typeof selectFn === 'function') {
+      selectFn(createdId, true);
+      if (typeof revealFnInTree === 'function') revealFnInTree(createdId);
     }
   };
 }

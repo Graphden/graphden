@@ -114,6 +114,16 @@ async function mountArgFormHost(fnEntity, host) {
     host.classList.add('execute-arg-form-error');
   } else {
     renderValueForm(host, payload, {});
+    // A widget with NO input at all (fn-typed slots and other
+    // non-enterable kinds) used to render as a silent empty bar —
+    // indistinguishable from "broken". Say what it is instead.
+    if (!host.querySelector('input, textarea, select, button')) {
+      const note = document.createElement('div');
+      note.className = 'execute-arg-form-note';
+      note.textContent = 'Not entered here — this argument is a function, '
+        + 'resolved from the graph at run time.';
+      host.appendChild(note);
+    }
   }
   return () => {
     const root = host.querySelector('[data-form-root]') || host;

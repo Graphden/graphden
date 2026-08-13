@@ -338,7 +338,7 @@
                [:button {:class "nav-btn" :onclick "navResetPositions()"
                          :aria-label "Reset node positions" :title "Reset all node positions"} "\u27F2"]
                [:button {:class "nav-btn" :onclick "navResetZoom()"
-                         :aria-label "Reset zoom" :title "Reset zoom"} "\u2299"]
+                         :aria-label "Fit graph in view" :title "Fit graph in view"} "\u2299"]
                ;; Progressive disclosure \u2014 toggle the dense card metadata strips
                ;; (return-type + effects) on/off across the canvas. Cards start
                ;; compact (editor-shell.js sets body.gd-cards-compact).

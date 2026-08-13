@@ -20,9 +20,11 @@
   --sidebar-bg: #f5f8ff;
   --header-bg: #eef4ff;
   --header-fg: #0d1117;
-  --accent: #0066cc;
-  /* Two brand values the old monochrome scheme lacked. */
-  --blue-deep: #0047a3;
+  /* Legacy accent token — retargeted to the redesign's one-accent
+     "flow" teal (was Graphden-Blue #0066cc) so pre-redesign surfaces
+     (execute popover, lens active chip, focus rings) stop reading as
+     a foreign blue island. Keep in sync with --gd-flow below. */
+  --accent: #137c74;
   --soft-tint: #eef4ff;
   /* Graph node ("card") palette — keeps the same visual hierarchy in both
      themes (slightly-raised body + distinct header band + visible outline)
@@ -175,8 +177,8 @@ body.theme-dark {
   --sidebar-bg: #10151c;
   --header-bg: #161b22;
   --header-fg: #e6edf3;
-  --accent: #4d94ff;
-  --blue-deep: #0047a3;
+  /* Legacy accent — dark-theme flow teal (see the light-theme note). */
+  --accent: #37c9bb;
   --soft-tint: #182130;
   /* Card body slightly raised vs Ink body; the focused/root card keeps the
      Graphden-Blue title band (brand colour reads on dark too); outline
@@ -411,13 +413,19 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    deployment has no app routing. */
 #kind-filters {
   flex: 1 1 100%;
-  display: flex; flex-wrap: wrap; align-items: center;
-  gap: 2px 4px; padding: 2px 0;
+  /* One line, always — the lens is the explorer's first control and a
+     wrapped second row read as a layout accident. Overflow (very
+     narrow panel + apps chip) degrades to hidden-scrollbar scroll. */
+  display: flex; flex-wrap: nowrap; align-items: center;
+  gap: 2px 3px; padding: 2px 0;
+  overflow-x: auto; scrollbar-width: none;
 }
+#kind-filters::-webkit-scrollbar { display: none; }
 .kind-toggle {
   display: inline-flex; align-items: center; gap: 3px;
   background: transparent; border: 1px solid transparent; border-radius: 8px;
-  padding: 1px 6px; font: inherit; font-size: 11px;
+  padding: 1px 5px; font: inherit; font-size: 11px;
+  white-space: nowrap; flex: 0 0 auto;
   color: var(--muted-fg); cursor: pointer;
 }
 /* Hover = a faint neutral wash, deliberately DIFFERENT from the active
@@ -1413,6 +1421,13 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .effects-chip:hover {
   filter: brightness(1.08);
 }
+/* On CANVAS cards the chips are ambient metadata, not the reading
+   target — most app-level fns carry the same 8-category union, so at
+   full saturation the strip dominates the card ("candy"). Dim them on
+   the card; hover restores the true category colour. The inspector /
+   panels keep full strength (there the chips ARE the content). */
+.effects-strip .effects-chip { filter: saturate(0.55) brightness(1.03); }
+.effects-strip .effects-chip:hover { filter: none; }
 .effects-chip-db      { background: var(--effect-chip-db); }       /* storage CRUD */
 .effects-chip-env     { background: var(--effect-chip-env); }      /* env-var read */
 .effects-chip-io      { background: var(--effect-chip-io); }       /* file/classpath */
@@ -2581,12 +2596,14 @@ textarea.arg-value-edit-input {
   width: 18px; height: 18px;
   font-family: inherit; font-size: 14px; line-height: 1;
   font-weight: 600;
-  border: 1px dashed var(--muted-fg);
+  /* Free-arg language: amber + dashed, same as the inspector `free`
+     chip and the card's ?-row — one signal across all three surfaces. */
+  border: 1px dashed var(--gd-free);
   border-radius: 50%;
-  background: var(--bg);
-  color: var(--muted-fg);
+  background: var(--gd-free-wash);
+  color: var(--gd-free);
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.85;
   transition: opacity 120ms, color 120ms, border-color 120ms,
               background-color 120ms;
 }
@@ -2861,10 +2878,12 @@ textarea.arg-value-edit-input {
    (defaults in effect). Rendered by appendOptionalArgsStrip. */
 .optional-args-strip {
   padding: 2px 8px;
-  color: var(--light-fg);
+  /* FREE args share one language everywhere: amber + dashed (the
+     inspector's `free` chip, the ＋ binder circle, and this ?-row). */
+  color: var(--gd-free);
   font-size: 10px;
   font-style: italic;
-  border-top: 1px dashed var(--input-border);
+  border-top: 1px dashed var(--gd-free);
   background: var(--sidebar-bg);
   white-space: nowrap;
   overflow: hidden;
@@ -3741,6 +3760,98 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   font-family: inherit; font-size: 12px; line-height: 1.4;
 }
 .execute-popover.visible { display: block; }
+
+/* Free-arg form widgets inside the Run popover: cap the auto-generated
+   textareas (record fields like :headers / :body arrived as huge empty
+   boxes that dwarfed the form) — still resizable when more room is
+   really needed. */
+.execute-popover .execute-arg-form textarea {
+  height: 56px;
+  min-height: 34px;
+  resize: vertical;
+}
+/* Non-enterable widget (fn-typed slot) — the explainer line injected
+   by mountArgFormHost instead of a silent empty bar. */
+.execute-arg-form-note {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted-fg);
+  padding: 3px 2px;
+}
+
+/* Transient toast (gdToast, editor-ui.js) — e.g. "Function not found"
+   on a hash navigation that resolves to nothing. */
+.gd-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 10010;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--gd-ink);
+  color: var(--gd-paper);
+  font-size: 12.5px;
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s, transform 0.18s;
+}
+.gd-toast-visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* "internal N" — the per-namespace collapse for `_`-private and
+   anonymous fns in the explorer tree (editor-sidebar.js). Styled as a
+   quiet meta-row, not a fn row. */
+.ns-internal-toggle {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 2px 8px 2px 18px;
+  font: inherit;
+  font-size: 10.5px;
+  font-style: italic;
+  color: var(--muted-fg);
+  cursor: pointer;
+}
+.ns-internal-toggle:hover { color: var(--fg); }
+.ns-internal-group .entity-item { opacity: 0.85; }
+
+/* Value-node type chip: the SAME chip already sits on the arg's edge
+   label 60px to the left — showing it twice per binding doubled the
+   noise on every literal. Keep it as a hover / expanded affordance
+   (it's still the inline type-expand anchor). */
+.arg-overlay-row .arg-type-chip {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.arg-overlay-row:hover .arg-type-chip,
+.arg-overlay-row .arg-type-chip:focus-visible,
+.arg-overlay-row .arg-type-chip[aria-expanded="true"] {
+  opacity: 1;
+}
+
+/* Editable literal — reveal a ✎ on row hover so click-to-edit is
+   discoverable, not a cursor-only secret. */
+.arg-value-editable::after {
+  content: " ✎";
+  opacity: 0;
+  font-size: 10px;
+  transition: opacity 0.12s;
+}
+.arg-overlay-row:hover .arg-value-editable::after { opacity: 0.6; }
+
+/* Empty-lens hint in the explorer tree (applyLensVisibility). */
+.lens-empty-hint {
+  padding: 10px 12px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted-fg);
+}
 
 .execute-popover-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -5013,6 +5124,41 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .gd-ctx-chip:hover { border-color: var(--gd-ink-4); }
 .gd-ctx-chip:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
+/* Ctxbar chip family — the branch chip and the account chip are built
+   by other modules (.branch-chip-btn / .auth-*) with their own legacy
+   chrome (26px, radius 3, mixed font sizes). Inside the context bar
+   they sit shoulder-to-shoulder with the .gd-ctx-chip pills, so unify
+   size / radius / type here — one control family per bar. */
+#gd-ctxbar .branch-chip-btn {
+  height: 32px;
+  border-radius: 8px;
+  padding: 0 11px;
+  font-size: 12.5px;
+  border: 1px solid var(--gd-line-2);
+  background: var(--gd-paper-2);
+  color: var(--gd-ink);
+  max-width: 180px;
+}
+#gd-ctxbar .branch-chip-btn:hover {
+  background: var(--gd-paper-2);
+  color: var(--gd-ink);
+  border-color: var(--gd-ink-4);
+}
+#gd-ctxbar .branch-chip-btn.branch-chip-non-default,
+#gd-ctxbar .branch-chip-btn.branch-chip-non-default:hover {
+  background: var(--gd-flow);
+  border-color: var(--gd-flow);
+  color: var(--on-accent);
+}
+#gd-ctxbar .auth-lock-btn { height: 32px; }
+#gd-ctxbar .auth-signin {
+  font-size: 12.5px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--gd-line-2);
+  background: var(--gd-paper-2);
+  color: var(--gd-ink);
+}
 .gd-ctx-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gd-flow); }
 .gd-ctx-k {
   font-size: 10.5px;

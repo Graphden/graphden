@@ -118,6 +118,9 @@ function createArgOverlay(node, container) {
   if (editable) {
     content.style.cursor = 'pointer';
     content.title = isTruncated ? rawLabel : 'Click to edit value';
+    // Visible affordance on hover (CSS ::after ✎) — click-to-edit was
+    // pure cursor+title before, i.e. invisible until stumbled upon.
+    content.classList.add('arg-value-editable');
     content.addEventListener('click', (e) => {
       e.stopPropagation();
       enterArgValueEditMode(arg, content);
@@ -239,9 +242,10 @@ function createArgSourceLink(node) {
   const qualified = (fn && typeof getQualifiedFnName === 'function')
                     ? getQualifiedFnName(fn) : null;
   if (qualified && qualified !== '(anonymous)') {
+    // Same-tab hash navigation — a provenance hop is ordinary
+    // navigation, not a "keep both open" action; middle-click /
+    // ctrl-click still opens a new tab the standard way.
     link.href = '#' + encodeURIComponent(qualified);
-    link.target = '_blank';
-    link.rel = 'noopener';
   }
   // Don't let a tap on the affordance also drag the overlay.
   link.addEventListener('mousedown', (e) => e.stopPropagation());

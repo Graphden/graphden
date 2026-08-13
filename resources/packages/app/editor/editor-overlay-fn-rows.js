@@ -29,6 +29,19 @@ function appendUseSiteHeader(overlay, ctx) {
   const hasExpansion = expansionState.has(nodeId);
   useSite.classList.add('fn-use-site-header');   // static looks in editor-styles.css
   useSite.style.cursor = hasExpansion ? 'pointer' : 'default';
+  // With no expansion the header has no text and no job of its own —
+  // a full 21px empty colored band reads as a missing title. Collapse
+  // it to a slim color-tie stripe (the marker semantics stay); the
+  // full-height band returns when there IS an expansion to collapse,
+  // because then it is a real click target. Mirrored in
+  // editor-layout.js USE_SITE_HEADER_SLIM_HEIGHT.
+  if (!hasExpansion) {
+    useSite.classList.add('fn-use-site-header-slim');
+    useSite.style.height = '6px';
+    useSite.style.minHeight = '6px';
+    useSite.style.padding = '0';
+    useSite.style.overflow = 'hidden';
+  }
   setRowBg(useSite, ROOT_BG);
   // The use-site header carries no buttons — it's a visual marker
   // that this card is being used as a value somewhere in the
@@ -381,6 +394,17 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   line.textContent = displayLabel(lineFn.name);
   const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
   const lineFnEntity = lookups?.fnMap?.get(lineFn.fnId) || null;
+  // Secret fns wear the same 🔒 the tree rows use — on canvas the only
+  // tell used to be the parent name "secret-leaf". The marker also
+  // explains the model: the graph stores the VAULT PATH, never the value.
+  if (lineFnEntity && typeof isSecretFn === 'function' && isSecretFn(lineFnEntity)) {
+    const lock = document.createElement('span');
+    lock.className = 'fn-row-secret-mark';
+    lock.textContent = '🔒 ';
+    lock.title = 'Secret — the value lives in the vault; the graph stores only its path';
+    lock.setAttribute('aria-label', 'Secret');
+    line.prepend(lock);
+  }
   const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
 
   // All the per-row affordances now live in the row-actions popover

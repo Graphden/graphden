@@ -600,6 +600,16 @@ function dereferenceType(t) {
 // status line.
 function validateLiteralAgainstType(parsed, expected) {
   const expanded = dereferenceType(expected);
+  // Keyword literals serialise WITHOUT their colon on the wire (the
+  // codec strips it — same reality closedEnumOf and the [:in] dual
+  // accept already handle). A bare string arriving into a
+  // keyword-typed slot IS that keyword, not text — normalise before
+  // classifying, or every stored keyword literal flags a false
+  // "text is not a keyword" mismatch ring on the canvas.
+  if (typeof parsed === 'string' && parsed.charAt(0) !== ':'
+      && isKeywordType(expanded)) {
+    parsed = ':' + parsed;
+  }
   const actual = classifyLiteralJS(parsed);
   if (actual === null) return { ok: true, message: '' };  // unrecognised — defer
   if (expanded === 'any' || expanded === 'jsonb' || actual === 'any' || actual === 'null') {
@@ -651,8 +661,12 @@ function validateLiteralAgainstType(parsed, expected) {
       return { ok: false, message: actual + ' is not a ' + base };
     }
     const sat = refinementOK(parsed, constraint);
-    if (sat === true)  return { ok: true,  message: 'OK (satisfies ' + JSON.stringify(constraint) + ')' };
-    if (sat === false) return { ok: false, message: 'doesn’t satisfy ' + JSON.stringify(constraint) };
+    // Human constraint text ("≥ 1 and ≤ 65535"), not raw JSON — the
+    // chip next to the input already speaks this language.
+    const cHuman = (typeof constraintHuman === 'function')
+      ? constraintHuman(constraint) : JSON.stringify(constraint);
+    if (sat === true)  return { ok: true,  message: 'OK (satisfies: ' + cHuman + ')' };
+    if (sat === false) return { ok: false, message: 'must satisfy: ' + cHuman };
     return { ok: true, message: 'OK (' + actual + '; constraint not statically checked)' };
   }
   // Structural fn / list / record — value-edit popover only deals

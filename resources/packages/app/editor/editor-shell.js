@@ -305,8 +305,29 @@
   // fields + the SAME server-computed richTypes the card strips read.
   function gdInspOverviewHtml(fn, parentIds, lk) {
     let html = '';
+    // An ANONYMOUS direct parent is an implementation detail — showing
+    // "(anonymous)" here while the Bindings tab's provenance names the
+    // real ancestor made the two tabs contradict each other. Walk up to
+    // the first NAMED ancestor and show that (marked "via anonymous").
+    const firstNamed = function walk(pid, depth) {
+      const p = lk?.fnMap?.get(pid) ?? null;
+      if (!p || depth > 6) return null;
+      if (p.name) return p;
+      for (const gp of (Array.isArray(p['parent-ids']) ? p['parent-ids'] : [])) {
+        const hit = walk(gp, depth + 1);
+        if (hit) return hit;
+      }
+      return null;
+    };
     const parentChips = parentIds.map((pid) => {
       const p = lk?.fnMap?.get(pid) ?? null;
+      if (p && !p.name) {
+        const named = firstNamed(pid, 0);
+        if (named) {
+          return '<span class="gd-chip gd-chip-ref" title="Through an anonymous intermediate parent">→ '
+            + esc(fnLabel(named)) + '</span>';
+        }
+      }
       return '<span class="gd-chip gd-chip-ref">→ ' + esc(fnLabel(p)) + '</span>';
     }).join(' ');
     if (parentChips) html += inspRow('Parent', '<span class="gd-insp-v">' + parentChips + '</span>');
@@ -370,7 +391,16 @@
       .then((txt) => {
         if (inspDetailToken !== fnId) return; // selection moved on
         const host = document.getElementById('gd-insp-detail');
-        if (host) host.innerHTML = txt;
+        if (host) {
+          host.innerHTML = txt;
+          // One type notation everywhere: re-render the partial's
+          // raw-EDN type strings through formatTypeHint (raw kept
+          // in title=). Also folds generated `a-NNNN` aliases into
+          // their definitions instead of leaking internal ids.
+          if (typeof formatServerTypeTexts === 'function') {
+            formatServerTypeTexts(host);
+          }
+        }
       })
       .catch(() => {
         if (inspDetailToken !== fnId) return;

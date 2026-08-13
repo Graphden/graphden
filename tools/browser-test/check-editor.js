@@ -81,23 +81,18 @@ async function checkEditor() {
       }
 
       if (overlay) {
-        // Click the per-row expand-control chevron (slot l-1) — the row
-        // body itself is no longer the click target since the
-        // hover-to-show action-icon redesign.
+        // Expansion = a real click on the ancestor ROW at that depth
+        // (editor-expansion.js sets fullDepth to the clicked level).
+        // The old `.expand-control` chevron no longer exists.
         const lines = await overlay.$$('.ancestor-line');
         const targetLine = lines.length > level ? lines[level] : lines[lines.length - 1];
         if (!targetLine) {
           console.log(`  Warning: no ancestor lines available`);
           continue;
         }
-        const chev = await targetLine.$('.expand-control');
-        if (chev) {
-          await chev.click();
-          await page.waitForTimeout(300);
-          console.log(`  Clicked level ${level} chevron`);
-        } else {
-          console.log(`  Warning: no expand-control on level ${level}`);
-        }
+        await targetLine.click({ position: { x: 40, y: 8 } });
+        await page.waitForTimeout(600);
+        console.log(`  Clicked level ${level} ancestor row`);
       } else {
         console.log(`  Warning: node "${nodeName}" not found`);
       }

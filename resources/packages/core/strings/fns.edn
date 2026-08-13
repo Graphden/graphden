@@ -189,4 +189,11 @@
    :description "True iff `:pattern` (a regex) matches somewhere inside `:string`. Returns false for nil / non-string input. General regex-match primitive — compose it into a `:_refinement-narrow` `:test` to build an `:ensure-*` narrower for a `:matches`-constrained refinement."
    :args {:string {:type :any :required false :description "String to search. Non-string / nil → false."}
           :pattern {:type :text :description "Regex pattern (Java syntax)."}}
-   :return-type :bool}]}
+   :return-type :bool}
+
+  {:name :re-replace
+   :description "Replace every match of the regex `:pattern` in `:string` with `:replacement` (`clojure.string/replace` over a compiled pattern — the regex sibling of the literal-only `:str-replace`; same safe-compile caps as `:re-find?`). Nil `:string` flows through unchanged. `$1`-style group refs work in `:replacement`."
+   :args {:string {:type :nullable-text :description "Source string (nil → returns nil)."}
+          :pattern {:type :text :description "Regex pattern (Java syntax)."}
+          :replacement {:type :text :description "Replacement string (`$1` group refs supported)."}}
+   :return-type :nullable-text}]}

@@ -76,8 +76,8 @@
     :pg-notify :pg-query :pg-tx :pick-encoding :position-in :postwalk
     :pr-str :publish-package-apply :query-entities :query-param
     :query-ref-many-owners :range :re-find? :read-resource-or-nil
-    :realize-request-body :recent-failures :reduce :render-hiccup
-    :render-prometheus :repeat :reset :resolve-branch-ref :resolve-fn
+    :re-replace :realize-request-body :recent-failures :reduce
+    :render-hiccup :repeat :reset :resolve-branch-ref :resolve-fn
     :resolve-fn-version-id :resolve-form :resolve-package-version
     :resolve-type-fn-id :response-immutable? :rest :reverse
     :rewrite-refs-to-version
@@ -115,7 +115,7 @@
     :gte :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str :range
-    :re-find? :render-hiccup :repeat :rest :reverse :select-keys :digest-hex
+    :re-find? :re-replace :render-hiccup :repeat :rest :reverse :select-keys :digest-hex
     :slurp :some? :sort :str :str-contains? :str-join :str-len :str-lower
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
     :str-upper :sub :subs :take :throw :throwable-class-name :throwable-message

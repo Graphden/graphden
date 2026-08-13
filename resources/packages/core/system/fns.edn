@@ -212,11 +212,183 @@
    :return-type :jsonb
    :effects #{:io}}                 ; process-global mutable state — varies per call
 
+  ;; ---------------------------------------------------------------------
+  ;; :render-prometheus — OpenMetrics exposition as GRAPH composition.
+  ;;
+  ;; The former Clojure formatter hand-rolled the whole exposition
+  ;; (recursive flatten + key sanitise + numeric filter + line format +
+  ;; join) while claiming to be a "library adapter" — there is no
+  ;; library; it was multi-step composition, so it lives in the graph.
+  ;;
+  ;; Same `:fix` worklist idiom as `:install-package` (pure here — the
+  ;; recursion only builds data). State: `{:stack [frame …] :lines [l …]}`;
+  ;; frame = `{:prefix <text> :ks [k …] :m <map>}`. Each step consumes ONE
+  ;; key of the top frame: a nested map pushes a child frame ON TOP of the
+  ;; advanced stack (depth-first, so a subtree's lines land before the
+  ;; parent's remaining keys — same order the recursive `mapcat` emitted);
+  ;; a numeric leaf appends `<key> <v>`; other leaves drop (a Prometheus
+  ;; sample value is numeric). Empty frame pops; empty stack returns lines.
+  ;; ---------------------------------------------------------------------
+
+  ;; --- initial state over the (nil-safe) input map ---
+  {:name :_prom-m
+   :parent :coalesce
+   :args {:value {:as :m :type :nullable-jsonb} :default {:value {}}}}
+  {:name :_prom-root-ks
+   :parent :keys
+   :args {:map {:ref :_prom-m :type [:map :any :any]}}}
+  {:name :_prom-root-frame
+   :parent :zipmap
+   :args {:keys [{:value :prefix} {:value :ks} {:value :m}]
+          :vals [{:value "graphden"} :_prom-root-ks :_prom-m]}}
+  {:name :_prom-initial-stack
+   :parent :list
+   :args {:items [:_prom-root-frame]}}
+  {:name :_prom-initial-state
+   :parent :zipmap
+   :args {:keys [{:value :stack} {:value :lines}]
+          :vals [:_prom-initial-stack {:value []}]}}
+
+  ;; --- state / frame accessors (pure) ---
+  {:name :_prom-stack
+   :parent :get :args {:coll {:as :input} :key {:value :stack}}}
+  {:name :_prom-lines
+   :parent :get :args {:coll {:as :input} :key {:value :lines}}}
+  {:name :_prom-stack-empty?
+   :parent :empty? :args {:coll {:ref :_prom-stack :type [:list :any]}}}
+  {:name :_prom-frame
+   :parent :first :args {:coll {:ref :_prom-stack :type [:list :any]}}}
+  {:name :_prom-stack-rest
+   :parent :rest :args {:coll {:ref :_prom-stack :type [:list :any]}}}
+  {:name :_prom-ks
+   :parent :get :args {:coll :_prom-frame :key {:value :ks}}}
+  {:name :_prom-ks-empty?
+   :parent :empty? :args {:coll {:ref :_prom-ks :type [:list :any]}}}
+  {:name :_prom-frame-m
+   :parent :get :args {:coll :_prom-frame :key {:value :m}}}
+  {:name :_prom-prefix
+   :parent :get :args {:coll :_prom-frame :key {:value :prefix}}}
+  {:name :_prom-k
+   :parent :first :args {:coll {:ref :_prom-ks :type [:list :any]}}}
+  {:name :_prom-v
+   :parent :get
+   :args {:coll {:ref :_prom-frame-m :type [:map :any :any]} :key :_prom-k}}
+
+  ;; --- advance the top frame past the consumed key ---
+  {:name :_prom-ks-rest
+   :parent :rest :args {:coll {:ref :_prom-ks :type [:list :any]}}}
+  {:name :_prom-frame-advanced
+   :parent :assoc
+   :args {:map :_prom-frame :key {:value :ks} :value :_prom-ks-rest}}
+  {:name :_prom-stack-advanced
+   :parent :cons
+   :args {:item :_prom-frame-advanced
+          :coll {:ref :_prom-stack-rest :type [:list :any]}}}
+
+  ;; --- metric key: prefix _ sanitise(lower(name k)) ---
+  {:name :_prom-k-name
+   :parent :name
+   :args {:value :_prom-k}}
+  {:name :_prom-k-lower
+   :parent :str-lower
+   :args {:string {:ref :_prom-k-name :type :text}}}
+  {:name :_prom-seg
+   :parent :re-replace
+   :args {:string :_prom-k-lower
+          :pattern {:value "[^a-z0-9_]"}
+          :replacement {:value "_"}}}
+  {:name :_prom-key
+   :parent :str
+   :args {:parts [:_prom-prefix {:value "_"} :_prom-seg]}}
+
+  ;; --- dispatch on the value's shape ---
+  {:name :_prom-v-map?
+   :parent :is-a?
+   :args {:type {:value :map} :value :_prom-v}}
+  {:name :_prom-v-num?
+   :parent :is-a?
+   :args {:type {:value :numeric} :value :_prom-v}}
+
+  ;; nested map → push its frame on top (depth-first descent)
+  {:name :_prom-child-ks
+   :parent :keys
+   :args {:map {:ref :_prom-v :type [:map :any :any]}}}
+  {:name :_prom-child-frame
+   :parent :zipmap
+   :args {:keys [{:value :prefix} {:value :ks} {:value :m}]
+          :vals [:_prom-key :_prom-child-ks :_prom-v]}}
+  {:name :_prom-stack-descend
+   :parent :cons
+   :args {:item :_prom-child-frame
+          :coll {:ref :_prom-stack-advanced :type [:list :any]}}}
+  {:name :_prom-state-descend
+   :parent :zipmap
+   :args {:keys [{:value :stack} {:value :lines}]
+          :vals [:_prom-stack-descend :_prom-lines]}}
+  {:name :_prom-recurse-descend
+   :parent :invoke
+   :args {:func {:as :self} :arg :_prom-state-descend}}
+
+  ;; numeric leaf → append "<key> <v>"
+  {:name :_prom-line
+   :parent :str
+   :args {:parts [:_prom-key {:value " "} :_prom-v]}}
+  {:name :_prom-lines-emit
+   :parent :conj
+   :args {:coll {:ref :_prom-lines :type [:list :any]} :item :_prom-line}}
+  {:name :_prom-state-emit
+   :parent :zipmap
+   :args {:keys [{:value :stack} {:value :lines}]
+          :vals [:_prom-stack-advanced :_prom-lines-emit]}}
+  {:name :_prom-recurse-emit
+   :parent :invoke
+   :args {:func {:as :self} :arg :_prom-state-emit}}
+
+  ;; non-numeric leaf → drop it
+  {:name :_prom-state-skip
+   :parent :zipmap
+   :args {:keys [{:value :stack} {:value :lines}]
+          :vals [:_prom-stack-advanced :_prom-lines]}}
+  {:name :_prom-recurse-skip
+   :parent :invoke
+   :args {:func {:as :self} :arg :_prom-state-skip}}
+
+  ;; exhausted frame → pop it
+  {:name :_prom-state-pop
+   :parent :zipmap
+   :args {:keys [{:value :stack} {:value :lines}]
+          :vals [:_prom-stack-rest :_prom-lines]}}
+  {:name :_prom-recurse-pop
+   :parent :invoke
+   :args {:func {:as :self} :arg :_prom-state-pop}}
+
+  ;; --- one worklist iteration ---
+  {:name :_prom-dispatch
+   :parent :cond
+   :args {:clauses [:_prom-v-map? :_prom-recurse-descend
+                    :_prom-v-num? :_prom-recurse-emit
+                    {:value true}  :_prom-recurse-skip]}}
+  {:name :_prom-frame-step
+   :parent :if
+   :args {:test :_prom-ks-empty?
+          :then :_prom-recurse-pop
+          :else :_prom-dispatch}}
+  {:name :_prom-step
+   :parent :if
+   :args {:test :_prom-stack-empty?
+          :then :_prom-lines
+          :else :_prom-frame-step}}
+
+  {:name :_prom-fixed
+   :parent :fix
+   :args {:step :_prom-step :input :_prom-initial-state}}
+
   {:name :render-prometheus
-   :description "Render a metrics map as an OpenMetrics / Prometheus text exposition — one `graphden_<flattened_key> <number>` line per numeric leaf (nested maps flatten with `_`; non-numeric labels dropped). Pure map → text, the text-exposition counterpart of `:to-json-string`, for a Prometheus scrape target."
-   :args {:m {:type :jsonb :description "Metrics map (the JVM snapshot + structural counters built for /metrics)."}}
-   :return-type :text
-   :effects #{}}
+   :description "Render a metrics map as an OpenMetrics / Prometheus text exposition — one `graphden_<flattened_key> <number>` line per numeric leaf (nested maps flatten with `_`; keys sanitised to `[a-z0-9_]`; non-numeric labels dropped). Pure graph composition — a `:fix` worklist over the nested map, joined with newlines."
+   :parent :str-join
+   :args {:coll {:ref :_prom-fixed :type [:list :any]}
+          :separator {:value "\n"}}
+   :return-type :text}
 
   ;; jvm-info composed from atomic base-fns via assoc chain
   {:name :jvm-info

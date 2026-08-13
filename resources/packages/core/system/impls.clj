@@ -135,36 +135,12 @@
   (counters/snapshot))
 
 
-(defn- prometheus-lines
-  "Flatten a (possibly nested) metrics map into OpenMetrics gauge samples,
-   depth-first: nested maps join their keys with `_`, each key is sanitised to
-   `[a-z0-9_]` and prefixed `graphden_`, and only NUMERIC leaves emit (string
-   labels like hostname are dropped — a Prometheus sample value is numeric)."
-  [prefix m]
-  (mapcat (fn [[k v]]
-            (let [seg (str/replace (str/lower-case (name k)) #"[^a-z0-9_]" "_")
-                  metric-key (if (seq prefix) (str prefix "_" seg) seg)]
-              (cond
-                (map? v)    (prometheus-lines metric-key v)
-                (number? v) [(str metric-key " " v)]
-                :else       nil)))
-          m))
-
-
-(defn render-prometheus-text
-  "Metrics map → OpenMetrics / Prometheus text exposition (one
-   `graphden_<flattened_key> <number>` line per numeric leaf). Pure formatter,
-   the text-exposition counterpart of `:to-json-string`."
-  [m]
-  (str/join "\n" (prometheus-lines "graphden" (or m {}))))
-
-
-(defbase render-prometheus
-  "Render a metrics map as an OpenMetrics / Prometheus text exposition for a
-   scrape target. Pure map → text formatting (a library-adapter primitive,
-   like `:render-hiccup`); drops non-numeric leaves."
-  [m]
-  (render-prometheus-text m))
+;; :render-prometheus is a GRAPH fn-def now (core/system/fns.edn) — a
+;; `:fix` worklist over the nested metrics map (flatten / sanitise via
+;; `:re-replace` / numeric-filter / format / `:str-join`). The former
+;; Clojure formatter claimed to be "a library-adapter primitive, like
+;; :render-hiccup", but wrapped no library — the whole OpenMetrics
+;; exposition was hand-rolled composition, which belongs in the graph.
 
 
 (defbase log-warn-fn
@@ -343,7 +319,6 @@
    :os-processors os-processors-fn
    :os-load-average os-load-average-fn
    :counters-snapshot counters-snapshot
-   :render-prometheus render-prometheus
    :log-warn log-warn-fn
    :current-time-ms current-time-ms
    :env env-fn

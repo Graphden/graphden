@@ -267,6 +267,17 @@
                 (re-find (safe-compile-regex pattern) string))))
 
 
+(defbase re-replace-fn
+  "Replace every match of the regex `pattern` in `string` with
+   `replacement` — `clojure.string/replace` over a compiled pattern
+   (the regex sibling of the literal-only `:str-replace`). Nil
+   `string` flows through unchanged. Compilation goes through the
+   same safe-compile boundary (size + complexity caps) as
+   `:str-split` / `:re-find?`."
+  [string pattern replacement]
+  (when string (str/replace string (safe-compile-regex pattern) replacement)))
+
+
 ;; === Registry ===
 
 (def impls
@@ -302,4 +313,5 @@
    :str-contains?      {:impl str-contains?-fn      :taint-propagate? true}
    :str-starts-with?   {:impl str-starts-with?-fn   :taint-propagate? true}
    :str-replace        {:impl str-replace-fn        :taint-propagate? true}
-   :re-find?           {:impl re-find?-fn           :taint-propagate? true}})
+   :re-find?           {:impl re-find?-fn           :taint-propagate? true}
+   :re-replace         {:impl re-replace-fn         :taint-propagate? true}})

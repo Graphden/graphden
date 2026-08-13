@@ -96,7 +96,6 @@
                   "packages/app/editor/editor-roles-admin.js"
                   "packages/app/editor/editor-orgs-admin.js"
                   "packages/app/editor/editor-platform-access.js"
-                  "packages/app/editor/editor-packages.js"
                   "packages/app/editor/editor-quota.js"
                   "packages/app/editor/editor-stats.js"
                   "packages/app/editor/editor-errors.js"
@@ -212,6 +211,14 @@
              [:span {:class "gd-ctx-k"} "workspace"]
              [:b "All functions"]]
             [:div {:id "branch-mount"}]
+            ;; Packages (dependencies) — a BUILD-surface act (add building blocks
+            ;; to your project), so it lives with the workspace/branch context,
+            ;; NOT on the Organization admin page. Hidden until JS confirms the
+            ;; optional registry package is present (window.API probe).
+            [:button {:type "button" :id "gd-pkg-chip" :class "gd-ctx-chip" :hidden "hidden"
+                      :title "Packages — browse & install"}
+             [:span {:class "gd-ctx-k"} "packages"]
+             [:b "Browse"]]
             [:div {:id "org-mount"}]
             ;; (No global search chip: it was a dead affordance — never wired to
             ;; anything. The live function search is the Explorer filter, which

@@ -1010,9 +1010,9 @@ function updateEntityList(data) {
     // Platform-access delegation → Platform surface (manage-platform-access).
     mountAdminSection(platHost, platNavHost, 'platform-access', buildPlatformAccessSection);
   }
-  if (!searchMode && typeof buildPackagesSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'packages', buildPackagesSection);
-  }
+  // Packages (install/browse) live on the BUILD surface via the #gd-pkg-chip
+  // context-bar chip → popover (editor-shell.js), NOT the Organization admin
+  // pane — install is a build act. Nothing to mount into the sidebar here.
   if (!searchMode && typeof buildStatsSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'stats', buildStatsSection);
   }

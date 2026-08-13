@@ -467,14 +467,20 @@ UUIDs (AD-2). No symbolic-ref column.
 - `GET /api/packages/installed` — this branch's pins (for the editor).
 - `GET /api/packages/:name/:version` — full bundle (export / self-hosted pull) — shipped.
 
-**Editor (shipped):** a "Packages" sidebar section (parallels the Secrets /
-Grants admin sections) lists the current branch's installed pins with their
-version, a per-row update/rollback version input (`↑`) + uninstall (`×`), the
-registry as a nested `<details>` browse (Install / Fork per version), and a
-"Publish a namespace" form. Server-rendered via `GET /partials/packages-panel`;
-`editor-packages.js` owns the collapsible-section lifecycle only. (The only
-piece NOT built is a proactive "update available" indicator — the manual
-version input covers update/rollback.)
+**Editor (shipped):** a **Build-surface "packages" context-bar chip**
+(`#gd-pkg-chip`, sibling of the workspace/branch chips) opens a browse/install
+browser — install is a build act, so it lives with the project context, not on
+the Organization admin pane. The browser lists the current branch's installed
+pins with their version, a per-row update/rollback version input (`↑`) +
+uninstall (`×`), and the registry as a nested `<details>` browse (Install / Fork
+per version). Server-rendered via `GET /partials/packages-panel`; the chip +
+popover lifecycle lives in `editor-shell.js` (`gdRevealPkgChip` / `gdOpenPkgPop`,
+gated on the `window.API` registry probe). **Publish is NOT on the chip** — it is
+a namespace authoring action (packages spec §3); its `<details>` is excluded from
+the panel root and a namespace-scoped affordance is the next slice, though the
+`/api/packages/panel-publish` POST route stays live. (Also not yet built: a
+proactive "update available" indicator — the manual version input covers
+update/rollback.)
 
 ---
 

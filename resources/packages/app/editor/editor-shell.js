@@ -546,4 +546,45 @@
   const wsChip = document.getElementById('gd-ws-chip');
   if (wsChip) wsChip.addEventListener('click', gdOpenWsPop);
   gdWsChipLabel();
+
+  // ---- Packages (build-surface: browse + install) --------------------------
+  // Install is a BUILD act (add a dependency to your project), so it lives with
+  // the workspace/branch context — not on the Organization admin page. The chip
+  // shows only when the OPTIONAL registry package is present (its /api/packages/*
+  // routes appear in window.API only when its router was installed at boot);
+  // its popover lazy-loads the same server-rendered panel.
+  function gdRevealPkgChip() {
+    const chip = document.getElementById('gd-pkg-chip');
+    if (!chip) return;
+    chip.hidden = !(typeof window.API === 'object' && window.API
+      && typeof window.API.api_packages_installed !== 'undefined');
+  }
+  function gdClosePkgPop() {
+    const p = document.getElementById('gd-pkg-pop'); if (p) p.remove();
+    const s = document.getElementById('gd-pkg-scrim'); if (s) s.remove();
+  }
+  function gdOpenPkgPop() {
+    gdClosePkgPop();
+    const chip = document.getElementById('gd-pkg-chip');
+    if (!chip) return;
+    const scrim = document.createElement('div');
+    scrim.id = 'gd-pkg-scrim';
+    scrim.className = 'gd-pop-scrim';
+    scrim.addEventListener('click', gdClosePkgPop);
+    document.body.appendChild(scrim);
+    const pop = document.createElement('div');
+    pop.id = 'gd-pkg-pop';
+    pop.className = 'gd-pop';
+    pop.innerHTML = '<h5>Packages</h5>'
+      + '<div class="ns-children" hx-get="/partials/packages-panel" hx-trigger="load" hx-swap="innerHTML">'
+      +   '<div class="loading">Loading…</div></div>';
+    const r = chip.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 468)) + 'px';
+    pop.style.top = (r.bottom + 6) + 'px';
+    document.body.appendChild(pop);
+    if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(pop);
+  }
+  const pkgChip = document.getElementById('gd-pkg-chip');
+  if (pkgChip) pkgChip.addEventListener('click', gdOpenPkgPop);
+  gdRevealPkgChip();
 })();

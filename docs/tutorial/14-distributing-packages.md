@@ -2,16 +2,18 @@
 
 **Goal**: by the end of this lesson you can publish a namespace
 as an immutable package version, then browse the registry and
-install / update / roll back / uninstall / fork packages from the
-**Packages** section on the editor's **Operate** surface — all
-without leaving the graph.
+install / update / roll back / uninstall / fork packages — all
+without leaving the graph. Placement follows intent: **install is
+a build act**, so it lives on the **Build** surface's *packages*
+context-bar chip; **publish** (freezing a namespace into the
+registry) is done through the `/api/packages/publish` endpoint.
 
 **Concepts introduced**: `registry`, `:package-version`,
 `publish`, `pin` (`:package-install`), `reference-install` vs
 `fork` (copy-on-write), `version constraint` / `latest` /
-`rollback`, the **Packages** section (on the **Operate** surface),
-and — beyond the registry —
-an **external package pulled by git coord** (`executor-packages.edn`).
+`rollback`, the **packages chip** (Build surface), and — beyond
+the registry — an **external package pulled by git coord**
+(`executor-packages.edn`).
 
 ## Authoring vs distributing
 
@@ -49,19 +51,19 @@ how the registry indexes it. Bump a fn in `mycorp.hello`,
 `bb rebuild`, and publish again as `1.1.0` — now the registry
 holds **both** versions. `GET /api/packages` lists the index.
 
-You can also publish **from the editor**: the **Packages** section
-on the **Operate** surface has a
-"Publish a namespace" form (name / version / ns-root) — the same
-export-and-freeze step, no `curl` needed. The `curl` above is the
-programmatic equivalent for scripts / CI. Either way, publishing is
-a deliberate "author decides to release" action; everything after
-happens in the panel.
+Publishing is a deliberate "author decides to release" action —
+distinct from the everyday build act of *installing*. (An in-editor
+publish affordance on the namespace is planned; for now publish is
+the `curl`/API call above, and everything after — browse, install,
+update, fork — happens on the packages chip below.)
 
-## The Packages panel
+## The packages chip — browse & install
 
-Open the editor, sign in (the section is auth-gated), and open the
-**Operate** surface from the left rail. It has a **Packages**
-section:
+Installing is a **build** act — you're adding a building block to
+your project — so it lives with the other project-context chips on
+the **Build** surface, not on an admin page. In the context bar
+(top of the Build surface, alongside the *workspace* and *branch*
+chips) click **packages**. A popover opens:
 
 ```
 Packages
@@ -76,7 +78,8 @@ The top table is what's **installed on the current branch**
 (remember branches from Lesson 8 — pins are per-branch, so dev
 and prod can run different versions). The `<details>` below it
 is the **registry** — every published version, with an action
-per row.
+per row. (The **packages** chip appears only when the optional
+`registry` package is installed on the deployment.)
 
 ## Install — by reference, not by copy
 
@@ -141,8 +144,9 @@ empty-state notice.
 1. Publish `mycorp.hello` as `hello` `1.0.0` (the `curl` above).
 2. Edit `:greet` in `mycorp.hello/fns.edn` (change the greeting),
    `bb rebuild`, publish again as `1.1.0`.
-3. In the panel, open **+ Install a package**, click **Install**
-   on `hello 1.1.0`. Watch the pin appear.
+3. Open the **packages** chip in the Build context bar, expand
+   **+ Install a package**, click **Install** on `hello 1.1.0`.
+   Watch the pin appear.
 4. Type `1.0.0` in the installed row's version box, click `↑` —
    you've rolled back. Type `1.1.0`, `↑` — forward again.
 5. Click **Fork** on `hello 1.0.0`, reload — `mycorp.hello`'s fns

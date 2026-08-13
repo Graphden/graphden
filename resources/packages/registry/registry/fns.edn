@@ -1123,9 +1123,10 @@
    :args {:path "/packages/installed" :handler :list-installed-handler}}
 
   ;; ---------------------------------------------------------------------
-  ;; GET /partials/packages-panel — the editor's Packages sidebar section,
+  ;; GET /partials/packages-panel — the editor's Packages browse/install browser,
   ;; server-rendered hiccup (graph-first). Read-only table: Package | Version
-  ;; over the current branch's pins. Mounted by editor-packages.js via hx-get.
+  ;; over the current branch's pins. Lazy-loaded via hx-get by the Build-surface
+  ;; packages chip popover (editor-shell.js `gdOpenPkgPop`).
   ;; ---------------------------------------------------------------------
 
   {:name :_pkg-panel-th-name
@@ -1321,11 +1322,20 @@
   ;; (uninstall / install / update / fork) swaps with hx-swap="outerHTML", so
   ;; the whole panel (installed pins + the browse <details>) re-renders from
   ;; fresh desired-state each time.
+  ;;
+  ;; Install is a BUILD act: this panel is the browse/install browser reached
+  ;; from the Build-surface "packages" context-bar chip. Publish is NOT here —
+  ;; it is an authoring action on a namespace (packages spec §3). The publish
+  ;; <details> (`:_pkg-publish-details`) is intentionally excluded from this
+  ;; root; its POST route (`:api-packages-panel-publish`) stays live at the API
+  ;; level, and a namespace-scoped publish affordance is the next slice (A2).
+  ;; Until then publish is simply not surfaced in the editor — deliberate, not
+  ;; an orphan to "fix" by re-adding it to the chip.
   {:name :_pkg-panel-root
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:data-packages-panel "1"}}
-          :children [:_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
+          :children [:_pkg-panel-body :_pkg-avail-details]}}
 
   {:name :_pkg-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-panel-root}}

@@ -1210,6 +1210,12 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    so size it to sit in the same 15×15 frame as the ✎/+ icons. */
 .ns-hide-btn { font-size: 11px; line-height: 1; }
 
+/* Packages popover (from the #gd-pkg-chip context-bar chip). Wider than the
+   workspace popover — it hosts the installed pins + browse/install table (the
+   `.packages-*` table styling lives in the shared `.gd-pop`-scoped block). */
+#gd-pkg-pop { width: 460px; max-width: 92vw; max-height: 70vh; padding: 10px; }
+#gd-pkg-pop .loading { padding: 8px; }
+
 /* Disabled (greyed-out) state for the delete button when the entity
    can't be removed safely. The button stays in the row layout so its
    absence doesn't shift the icon group; tooltip carries the reason.
@@ -4834,33 +4840,38 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-apps .app-create-btn { align-self: flex-start; background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
 .sidebar-apps .app-create-btn:hover { background: var(--hover-bg); }
 
-/* Packages sidebar section (3e) — installed pins + browse/install registry. */
-.sidebar-packages .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
-.sidebar-packages .packages-panel-table th,
-.sidebar-packages .packages-panel-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
-.sidebar-packages .packages-panel-empty { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
-.sidebar-packages .packages-uninstall { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; line-height: 1; }
-.sidebar-packages .packages-uninstall:hover { color: var(--error-fg); }
+/* Packages content — installed pins + browse/install registry. Rendered inside
+   the Build packages chip popover `#gd-pkg-pop` (a `.gd-pop`); these
+   `.packages-*` classes appear only in packages content, so scoping to
+   `.gd-pop` never touches other popovers. (Was `.sidebar-packages` when the
+   panel lived in the Organization sidebar; that mount was retired when install
+   became a Build act.) */
+.gd-pop .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.gd-pop .packages-panel-table th,
+.gd-pop .packages-panel-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.gd-pop .packages-panel-empty { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
+.gd-pop .packages-uninstall { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; line-height: 1; }
+.gd-pop .packages-uninstall:hover { color: var(--error-fg); }
 /* Browse/install registry — native <details> disclosure below the pins. */
-.sidebar-packages .packages-available { margin-top: 6px; border-top: 1px solid var(--border); }
-.sidebar-packages .packages-available > summary { padding: 4px; font-size: 11px; color: var(--muted-fg); cursor: pointer; }
-.sidebar-packages .packages-available > summary:hover { color: var(--fg); }
-.sidebar-packages .packages-install-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
-.sidebar-packages .packages-install-btn:hover { background: var(--hover-bg); }
+.gd-pop .packages-available { margin-top: 6px; border-top: 1px solid var(--border); }
+.gd-pop .packages-available > summary { padding: 4px; font-size: 11px; color: var(--muted-fg); cursor: pointer; }
+.gd-pop .packages-available > summary:hover { color: var(--fg); }
+.gd-pop .packages-install-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
+.gd-pop .packages-install-btn:hover { background: var(--hover-bg); }
 /* per-row update/rollback form — version input + ↑ submit, inline with ×. */
-.sidebar-packages .packages-update-form { display: inline-flex; gap: 2px; align-items: center; }
-.sidebar-packages .packages-version-input { width: 44px; font-size: 10px; padding: 0 2px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
-.sidebar-packages .packages-update-btn { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 2px; line-height: 1; }
-.sidebar-packages .packages-update-btn:hover { color: var(--accent); }
+.gd-pop .packages-update-form { display: inline-flex; gap: 2px; align-items: center; }
+.gd-pop .packages-version-input { width: 44px; font-size: 10px; padding: 0 2px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.gd-pop .packages-update-btn { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 2px; line-height: 1; }
+.gd-pop .packages-update-btn:hover { color: var(--accent); }
 /* Fork button (browse row) + transient fork notice. */
-.sidebar-packages .packages-fork-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); cursor: pointer; font-size: 10px; margin-left: 3px; padding: 1px 6px; }
-.sidebar-packages .packages-fork-btn:hover { background: var(--hover-bg); color: var(--fg); }
-.sidebar-packages .packages-fork-note { font-size: 10px; padding: 3px 6px; margin-bottom: 4px; border-radius: 3px; }
-.sidebar-packages .packages-fork-ok { color: var(--success-fg); }
-.sidebar-packages .packages-fork-err { color: var(--error-fg); }
-/* Publish-a-namespace form — stacked inputs + Publish submit. */
-.sidebar-packages .packages-publish-form { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
-.sidebar-packages .packages-publish-input { font-size: 10px; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.gd-pop .packages-fork-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); cursor: pointer; font-size: 10px; margin-left: 3px; padding: 1px 6px; }
+.gd-pop .packages-fork-btn:hover { background: var(--hover-bg); color: var(--fg); }
+.gd-pop .packages-fork-note { font-size: 10px; padding: 3px 6px; margin-bottom: 4px; border-radius: 3px; }
+.gd-pop .packages-fork-ok { color: var(--success-fg); }
+.gd-pop .packages-fork-err { color: var(--error-fg); }
+/* Publish-a-namespace form (rendered in the panel-publish response). */
+.gd-pop .packages-publish-form { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
+.gd-pop .packages-publish-input { font-size: 10px; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
 
 .sidebar-grants-admin .grant-delete,
 .sidebar-users-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }
@@ -5001,7 +5012,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    never overflow. The account chip always stays reachable. */
 @media (max-width: 640px) {
   #gd-ctxbar { gap: 6px; padding: 0 8px; min-width: 0; }
-  #gd-ctxbar #gd-ws-chip { display: none; }
+  #gd-ctxbar #gd-ws-chip,
+  #gd-ctxbar #gd-pkg-chip { display: none; }
   #gd-ctxbar .gd-ctx-k { display: none; }
   #gd-ctxbar #branch-mount,
   #gd-ctxbar #org-mount { min-width: 0; }
@@ -5019,6 +5031,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    bearing on managing an org — so hide them there. The org switcher + account
    chip stay global (you may need to re-scope or sign out from any surface). */
 body:not([data-surface="build"]) #gd-ws-chip,
+body:not([data-surface="build"]) #gd-pkg-chip,
 body:not([data-surface="build"]) #gd-ctxbar #branch-mount { display: none; }
 
 /* ---- Context-bar popover (workspace switcher) ---- */

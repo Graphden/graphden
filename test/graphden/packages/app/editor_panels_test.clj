@@ -1,13 +1,15 @@
 (ns graphden.packages.app.editor-panels-test
   "Unit tests for the `app.editor-panels` boundary impl —
-   `:type-diagnostics-list` joins the in-memory per-branch diagnostics
-   store with an ORG-SCOPED fn-name read. The store itself has no org
-   dimension (branch×fn only), and on a multi-tenant pod every org
-   shares the default branch — so the join is the org boundary: a
-   fn-id the scoped read doesn't return must be DROPPED, not emitted
-   UUID-named with its diagnostic body (expected/actual types +
-   source file/line = a cross-org metadata leak). Loader-pattern
-   direct invocation, mirrors `core.logic-test`."
+   `:branch-diagnostics-flat` joins the in-memory per-branch
+   diagnostics store with an ORG-SCOPED fn-name read. The store itself
+   has no org dimension (branch×fn only), and on a multi-tenant pod
+   every org shares the default branch — so the join is the org
+   boundary: a fn-id the scoped read doesn't return must be DROPPED,
+   not emitted UUID-named with its diagnostic body (expected/actual
+   types + source file/line = a cross-org metadata leak).
+   Loader-pattern direct invocation, mirrors `core.logic-test`. The
+   display reshape over the flat entries is graph composition —
+   covered by `type-diagnostics-graph-test`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.protocol.core :as sp]
@@ -37,26 +39,28 @@
   (let [own-id (UUID/randomUUID)
         foreign-id (UUID/randomUUID)
         ctx {:storage (stub-storage {own-id {:id own-id :name "my-broken-fn"}})}
-        f (impls/impl-of :type-diagnostics-list)]
+        f (impls/impl-of :branch-diagnostics-flat)]
     (binding [diag/*diagnostics-override* (atom {})]
       ;; Both orgs' recorders write into the SAME nil-branch bucket.
       (diag/record! nil own-id [{:message "Type mismatch on arg :x" :arg-name :x}])
       (diag/record! nil foreign-id [{:message "foreign org's expected/actual detail"}])
       (let [rows (f {} ctx)]
-        (testing "own fn's diagnostics render with its name"
+        (testing "own fn's diagnostics join with its name; the diag rides whole"
           (is (= ["my-broken-fn"] (mapv :fn-name rows)))
-          (is (= "x" (:arg (first rows)))))
-        (testing "the foreign fn-id is gone entirely — no UUID row, no message"
+          (is (= :x (get-in (first rows) [:diag :arg-name]))))
+        (testing "the foreign fn-id is gone entirely — no entry, no message"
           (is (= 1 (count rows)))
-          (is (not-any? #(re-find #"foreign" (:message %)) rows)))))))
+          (is (not-any? #(re-find #"foreign" (str (:message (:diag %)))) rows)))))))
 
 
-(deftest anonymous-own-fn-keeps-uuid-fallback
+(deftest anonymous-own-fn-entry-survives-with-nil-name
   (let [anon-id (UUID/randomUUID)
         ctx {:storage (stub-storage {anon-id {:id anon-id :name nil}})}
-        f (impls/impl-of :type-diagnostics-list)]
+        f (impls/impl-of :branch-diagnostics-flat)]
     (binding [diag/*diagnostics-override* (atom {})]
       (diag/record! nil anon-id [{:message "broken anonymous"}])
-      (is (= [(str anon-id)] (mapv :fn-name (f {} ctx)))
-          "an own-org anonymous fn still rows up, UUID-labelled — the
-           fallback is for nil :name, not for missing rows"))))
+      (let [rows (f {} ctx)]
+        (is (= [(str anon-id)] (mapv :fn-id rows)))
+        (is (= [nil] (mapv :fn-name rows))
+            "an own-org anonymous fn still rows up — nil :fn-name; the
+             uuid display label is the graph reshape's coalesce")))))

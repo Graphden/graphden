@@ -12,13 +12,17 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-(defbase type-diagnostics-list
+(defbase branch-diagnostics-flat
   ;; Error-tolerance Phase 3 — the CURRENT branch's recorded type
-  ;; diagnostics as flat display rows. The store is derived in-memory
-  ;; state ({fn-id [diagnostic …]} per branch, re-recorded by every
-  ;; post-write check), so the only storage round-trip is the batched
-  ;; fn-name join. Branch comes from the request's versioned storage
-  ;; (nil = default branch), same as the post-write recorder.
+  ;; diagnostics joined with fn names, one entry per diagnostic:
+  ;; `{:fn-id <str> :fn-name <str-or-nil> :diag <d>}`. The store is
+  ;; derived in-memory state ({fn-id [diagnostic …]} per branch,
+  ;; re-recorded by every post-write check), so the only storage
+  ;; round-trip is the batched fn-name join. Branch comes from the
+  ;; request's versioned storage (nil = default branch), same as the
+  ;; post-write recorder. The DISPLAY reshape (row keys, arg
+  ;; coalescing, uuid-name fallback, sort) is graph composition —
+  ;; `:type-diagnostics-list` in fns.edn.
   []
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
@@ -34,28 +38,19 @@
          ;; types, source file/line) across orgs. An own-org fn ALWAYS
          ;; joins (the recorder ran under this same scoped storage), so
          ;; nothing legitimate is lost. An anonymous own fn joins too —
-         ;; the UUID fallback below is for its nil `:name`, not for
-         ;; missing rows.
+         ;; its `:fn-name` is nil; the uuid label is graph composition.
+         ;; This drop is a SECURITY boundary — it stays impl-side,
+         ;; adjacent to the join, never graph-reachable to skip.
          (keep (fn [[fn-id diags]]
                  (when-let [row (get fn-rows fn-id)]
                    [fn-id (:name row) diags])))
          (mapcat (fn [[fn-id fn-name diags]]
-                   (let [fn-name (or fn-name (str fn-id))]
-                     (map (fn [d]
-                            {:fn-id (str fn-id)
-                             :fn-name fn-name
-                             ;; `:arg-name` when the checker stamped one;
-                             ;; a ref-mismatch diagnostic carries the
-                             ;; bound fn under `:binding` instead.
-                             :arg (or (some-> (:arg-name d) name)
-                                      (when (keyword? (:binding d))
-                                        (name (:binding d)))
-                                      "")
-                             :message (str (:message d))})
-                          diags))))
-         (sort-by :fn-name)
+                   (map (fn [d] {:fn-id (str fn-id)
+                                 :fn-name fn-name
+                                 :diag d})
+                        diags)))
          vec)))
 
 
 (def impls
-  {:type-diagnostics-list type-diagnostics-list})
+  {:branch-diagnostics-flat branch-diagnostics-flat})

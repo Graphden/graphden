@@ -128,11 +128,91 @@
   ;; one row per diagnostic: fn name (native #hash link), arg, short
   ;; message. Mirrors the error-log family above.
   ;; ---------------------------------------------------------------------
-  {:name :type-diagnostics-list
-   :description "The CURRENT branch's recorded type diagnostics as flat display rows — `[{:fn-id :fn-name :arg :message} …]`, sorted by fn name. Reads the in-memory per-branch diagnostics store (`graphden.types.diagnostics/branch-errors`, branch = the request's versioned storage, nil = default) and joins fn names in one batched read. Empty when the branch has no recorded diagnostics."
+  {:name :branch-diagnostics-flat
+   :description "The CURRENT branch's recorded type diagnostics joined with fn names, one entry per diagnostic — `[{:fn-id :fn-name :diag} …]` (`:fn-name` nil for anonymous fns). Reads the in-memory per-branch diagnostics store (`graphden.types.diagnostics/branch-errors`, branch = the request's versioned storage, nil = default), joins fn names in one batched org-scoped read, and DROPS foreign-org fn-ids (the security boundary — stays impl-side). Empty when the branch has no recorded diagnostics."
    :args {}
    :return-type [:list :keyword-map]
    :effects #{:db}}
+
+  ;; --- display reshape (formerly inside the impl): per-diagnostic row
+  ;;     build + arg coalescing + uuid-name fallback + sort. ---
+
+  {:name :_tdl-flat
+   :parent :branch-diagnostics-flat}
+
+  ;; row-build callback (per flat entry)
+  {:name :_tdl-e-fn-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default {:value ""}}}
+  {:name :_tdl-e-name-raw
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default nil}}
+  ;; an anonymous own fn rows up UUID-labelled — the fallback is for
+  ;; its nil :fn-name, not for missing rows (those were dropped).
+  {:name :_tdl-e-name
+   :parent :coalesce
+   :args {:value :_tdl-e-name-raw :default {:ref :_tdl-e-fn-id :type :text}}}
+  {:name :_tdl-e-diag
+   :parent :get
+   :args {:coll {:as :item} :key {:value :diag} :default {:value {}}}}
+  ;; `:arg-name` when the checker stamped one; a ref-mismatch
+  ;; diagnostic carries the bound fn under `:binding` instead.
+  {:name :_tdl-arg-name-raw
+   :parent :get
+   :args {:coll :_tdl-e-diag :key {:value :arg-name} :default nil}}
+  {:name :_tdl-arg-from-name
+   :parent :name
+   :args {:value :_tdl-arg-name-raw}}
+  {:name :_tdl-binding-raw
+   :parent :get
+   :args {:coll :_tdl-e-diag :key {:value :binding} :default nil}}
+  {:name :_tdl-binding-kw?
+   :parent :is-a?
+   :args {:type {:value :keyword} :value :_tdl-binding-raw}}
+  {:name :_tdl-binding-name
+   :parent :name
+   :args {:value :_tdl-binding-raw}}
+  {:name :_tdl-arg-from-binding
+   :parent :if
+   :args {:test :_tdl-binding-kw?
+          :then :_tdl-binding-name
+          :else {:value nil}}}
+  {:name :_tdl-arg-fallback
+   :parent :coalesce
+   :args {:value :_tdl-arg-from-binding :default {:value ""}}}
+  {:name :_tdl-arg
+   :parent :coalesce
+   :args {:value :_tdl-arg-from-name :default :_tdl-arg-fallback}}
+  {:name :_tdl-message-raw
+   :parent :get
+   :args {:coll :_tdl-e-diag :key {:value :message} :default {:value ""}}}
+  {:name :_tdl-message
+   :parent :to-str
+   :args {:value :_tdl-message-raw}}
+  {:name :_tdl-row
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :arg} {:value :message}]
+          :vals [:_tdl-e-fn-id :_tdl-e-name :_tdl-arg :_tdl-message]}}
+
+  {:name :_tdl-rows
+   :parent :map
+   :args {:func :_tdl-row
+          :coll {:ref :_tdl-flat :type [:list :keyword-map]}}}
+
+  ;; sort-key callback
+  {:name :_tdl-sort-key
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default {:value ""}}}
+  {:name :_tdl-sorted
+   :parent :sort-by
+   :args {:key-fn :_tdl-sort-key
+          :coll {:ref :_tdl-rows :type [:list :any]}}}
+
+  {:name :type-diagnostics-list
+   :description "The CURRENT branch's recorded type diagnostics as flat display rows — `[{:fn-id :fn-name :arg :message} …]`, sorted by fn name. Pure graph reshape over `:branch-diagnostics-flat` (the org-scoped join); the arg coalescing (`:arg-name`, else a keyword `:binding`, else empty) and the uuid label for anonymous fns are graph-visible. Empty when the branch has no recorded diagnostics."
+   :parent :vec
+   :args {:coll {:ref :_tdl-sorted :type [:list :any]}}
+   :return-type [:list :keyword-map]}
 
   {:name :_pterr-rows
    :parent :type-diagnostics-list}

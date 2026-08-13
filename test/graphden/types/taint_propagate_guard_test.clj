@@ -42,7 +42,8 @@
     :_seq-update-load-item :_slot-effective-type-raw
     :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
     :assert-some :assoc :assoc-in :atom :auth-active?
-    :authenticate-request :blank? :brotli-bytes :build-form :byte-count
+    :authenticate-request :blank? :branch-diagnostics-flat
+    :brotli-bytes :build-form :byte-count
     :byte-len :cached-api-routes-js :call :call-noargs
     :cancel-execution! :case :cell :chain-has-process-effect?
     :classify-literal :closed-enum-of :coalesce :comp
@@ -98,7 +99,7 @@
     :throw :throwable-class-name :throwable-message :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create
     :try-apply-seq-append :try-apply-seq-update :try-apply-tighten
-    :try-apply-update :type-check-binding-rej :type-diagnostics-list
+    :try-apply-update :type-check-binding-rej
     :type-name-kinds :update-entity :update-in :update-keys
     :update-vals :url-decode :usage-all-org-stats
     :usage-fn-stats :usage-org-daily :usage-org-fn-stats

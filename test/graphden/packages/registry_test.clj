@@ -232,8 +232,11 @@
                 :package-dependencies []
                 :secrets [{:fn :sec-pass :arg :in}]
                 :secret-paths-included? false}
+        ;; :publish-package (not the -apply core): the core returns the
+        ;; row-or-nil since the envelope moved into the graph — the
+        ;; envelope contract is asserted at the graph fn-def.
         pub (exec/execute-with-named-args
-              ctx (get all-name->id :publish-package-apply)
+              ctx (get all-name->id :publish-package)
               {:pkg-name "sec.pkg" :pkg-version "1.0.0" :bundle bundle})]
     (testing "publish returns + persists the secrets manifest"
       (is (true? (:ok pub)))
@@ -264,7 +267,10 @@
   ;; tenant publish is private unless the explicit opt-in is set. Readers
   ;; (browse badge, RLS select arm) key on the flag alone, never on org-id.
   (let [{:keys [ctx all-name->id]} *bootstrap*
-        apply-id (get all-name->id :publish-package-apply)
+        ;; :publish-package (not the -apply core) — the :ok/:public
+        ;; envelope is graph composition now; the row-level :public?
+        ;; assertions below still pin the write-time normalisation.
+        apply-id (get all-name->id :publish-package)
         bundle {:namespace "pubflag"
                 :namespaces ["pubflag"]
                 :fns [{:name :pf-x :namespace "pubflag" :parent :const

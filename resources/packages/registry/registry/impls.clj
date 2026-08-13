@@ -54,11 +54,12 @@
 ;; exists, else hash + insert. The existence check stays ADJACENT to the
 ;; insert (one base-fn) to keep the check-then-insert race window
 ;; minimal until the DB-level UNIQUE(name, version) hardening noted in
-;; the schema ships. The empty-bundle rejection is a pure input
-;; predicate with no race relevance, so it lives in the graph
-;; (`:publish-package` is now an `:if` fn-def over this core). Returns a
-;; tagged `{:ok …}` result so the route serialises success and conflict
-;; the same way (no throw/`:try`).
+;; the schema ships. Returns the CREATED ROW (nil = version already
+;; exists) — both result envelopes, like the empty-bundle rejection,
+;; are graph composition (`:_pub-ok` / `:_pub-err-exists` under
+;; `:publish-package`), so the response shape is admin-visible. The
+;; content-hash + `:public?` normalisation stay here: both are STORED
+;; on the row at write time (readers never re-derive them).
 (defbase publish-package-apply
   [pkg-name pkg-version bundle pkg-public]
   ;; Authz chokepoint: publishing to an ORG's registry requires the
@@ -76,47 +77,32 @@
   (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)
         fns (:fns bundle)]
-    (if (seq (sp/query-entities storage :package-version
-                                {:name pkg-name :version pkg-version}))
-      {:ok false :reason "version-exists" :name pkg-name :version pkg-version}
-      (let [content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
-            ;; Public = the explicit opt-in OR a platform-tier publish
-            ;; (single-tenant / operator — the shared registry). Normalised
-            ;; AT WRITE time so readers never re-derive tier from org-id:
-            ;; a row is platform-visible iff `:public?` is true. A tenant
-            ;; publish without the opt-in stays private to its org
-            ;; (`:org-id` stamped by the tenancy decorator, spec §5).
-            public? (boolean (or pkg-public (tc/current-platform-tier?)))
-            row (sp/create-entity storage :package-version
-                                  {:name pkg-name
-                                   :version pkg-version
-                                   :ns-root (:namespace bundle)
-                                   :fns fns
-                                   :dependencies (:dependencies bundle)
-                                   :package-dependencies (:package-dependencies bundle)
-                                   :secrets (vec (:secrets bundle))
-                                   :content-hash content-hash
-                                   ;; Same value the tenancy decorator stamps when
-                                   ;; scoped (it overwrites with `(tc/current-org)`
-                                   ;; too) — set here as well so SINGLE-TENANT rows
-                                   ;; carry the public org instead of NULL and the
-                                   ;; governance catalog's org-equality filter works
-                                   ;; identically with and without the addon.
-                                   :org-id (tc/current-org)
-                                   :public? public?
-                                   :published-at (java.time.Instant/now)})]
-        {:ok true
-         :id (str (:id row))
-         :name pkg-name
-         :version pkg-version
-         :public public?
-         :content-hash content-hash
-         :fn-count (count fns)
-         :dependencies (:dependencies bundle)
-         ;; What the bundle's export STRIPPED (vault paths) — the
-         ;; publisher's "nothing left silently" warning, and the seed
-         ;; of the installer's :needs-definition.
-         :secrets (vec (:secrets bundle))}))))
+    (when-not (seq (sp/query-entities storage :package-version
+                                      {:name pkg-name :version pkg-version}))
+      ;; Public = the explicit opt-in OR a platform-tier publish
+      ;; (single-tenant / operator — the shared registry). Normalised
+      ;; AT WRITE time so readers never re-derive tier from org-id:
+      ;; a row is platform-visible iff `:public?` is true. A tenant
+      ;; publish without the opt-in stays private to its org
+      ;; (`:org-id` stamped by the tenancy decorator, spec §5).
+      (sp/create-entity storage :package-version
+                        {:name pkg-name
+                         :version pkg-version
+                         :ns-root (:namespace bundle)
+                         :fns fns
+                         :dependencies (:dependencies bundle)
+                         :package-dependencies (:package-dependencies bundle)
+                         :secrets (vec (:secrets bundle))
+                         :content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
+                         ;; Same value the tenancy decorator stamps when
+                         ;; scoped (it overwrites with `(tc/current-org)`
+                         ;; too) — set here as well so SINGLE-TENANT rows
+                         ;; carry the public org instead of NULL and the
+                         ;; governance catalog's org-equality filter works
+                         ;; identically with and without the addon.
+                         :org-id (tc/current-org)
+                         :public? (boolean (or pkg-public (tc/current-platform-tier?)))
+                         :published-at (java.time.Instant/now)}))))
 
 
 ;; `:list-package-versions` / `:fetch-package-version` are pure graph

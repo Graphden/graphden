@@ -77,12 +77,12 @@
    :return-type :text}
 
   {:name :publish-package-apply
-   :description "Atomic publish core — reject if `(:pkg-name, :pkg-version)` already exists (immutable registry), else hash + insert. The existence check stays adjacent to the insert to keep the race window minimal until the DB-level UNIQUE(name, version) hardening ships. Returns a tagged `{:ok …}` result."
+   :description "Atomic publish core — reject if `(:pkg-name, :pkg-version)` already exists (immutable registry), else hash + insert. The existence check stays adjacent to the insert to keep the race window minimal until the DB-level UNIQUE(name, version) hardening ships. Returns the CREATED ROW, or nil when the version already exists — both result envelopes are graph composition under `:publish-package`."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
           :pkg-version {:type :text :description "Semver version string, e.g. \"1.2.0\"."}
           :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}
           :pkg-public {:type :nullable-bool :required false :description "Truthy → platform-visible (`:public?` on the row — the explicit publish-publicly opt-in, spec §5). Absent/nil → private to the publisher's org; a platform-tier publish is always public."}}
-   :return-type :keyword-map
+   :return-type :nullable-keyword-map
    :effects #{:db :time}}
 
   ;; Publish = a graph guard over the atomic core. The empty-bundle
@@ -117,12 +117,74 @@
           :bundle {:as :bundle}
           :pkg-public {:as :pkg-public}}}
 
+  ;; --- result envelopes over the core's row-or-nil (formerly built
+  ;;     inside the Clojure impl) ---
+
+  {:name :_pub-dup?
+   :description "nil row = the (name, version) pair already exists."
+   :parent :nil?
+   :args {:value :_pub-apply}}
+
+  {:name :_pub-err-exists
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :name} {:value :version}]
+          :vals [{:value false} {:value "version-exists"} {:as :pkg-name} {:as :pkg-version}]}}
+
+  {:name :_pub-row-id
+   :parent :to-str
+   :args {:value {:parent :get
+                  :args {:coll {:ref :_pub-apply :type :keyword-map}
+                         :key {:value :id} :default nil}}}}
+
+  {:name :_pub-public
+   :parent :get
+   :args {:coll {:ref :_pub-apply :type :keyword-map}
+          :key {:value :public?} :default nil}}
+
+  {:name :_pub-content-hash
+   :parent :get
+   :args {:coll {:ref :_pub-apply :type :keyword-map}
+          :key {:value :content-hash} :default nil}}
+
+  {:name :_pub-fn-count
+   :parent :count
+   :args {:coll :_pub-fns}}
+
+  {:name :_pub-deps
+   :parent :get
+   :args {:coll {:as :bundle :type :package-bundle-shape}
+          :key {:value :dependencies} :default nil}}
+
+  ;; What the bundle's export STRIPPED (vault paths) — the publisher's
+  ;; "nothing left silently" warning, and the seed of the installer's
+  ;; :needs-definition.
+  {:name :_pub-secrets
+   :parent :vec
+   :args {:coll {:parent :get
+                 :args {:coll {:as :bundle :type :package-bundle-shape}
+                        :key {:value :secrets} :default {:value []}}}}}
+
+  {:name :_pub-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :id} {:value :name} {:value :version}
+                 {:value :public} {:value :content-hash} {:value :fn-count}
+                 {:value :dependencies} {:value :secrets}]
+          :vals [{:value true} :_pub-row-id {:as :pkg-name} {:as :pkg-version}
+                 :_pub-public :_pub-content-hash :_pub-fn-count
+                 :_pub-deps :_pub-secrets]}}
+
+  {:name :_pub-result
+   :parent :if
+   :args {:test :_pub-dup?
+          :then :_pub-err-exists
+          :else :_pub-ok}}
+
   {:name :publish-package
-   :description "Publish a bundle as an immutable :package-version row. Graph `:if` — rejects an empty bundle up front (`:reason \"empty-bundle\"`), else delegates to the atomic `:publish-package-apply` core (existence check + hash + insert → `:ok` or `:reason \"version-exists\"`)."
+   :description "Publish a bundle as an immutable :package-version row. Graph `:if` — rejects an empty bundle up front (`:reason \"empty-bundle\"`), else the atomic `:publish-package-apply` core writes the row and BOTH result envelopes (`:ok` / `:reason \"version-exists\"`) assemble in the graph from the row-or-nil."
    :parent :if
    :args {:test :_pub-fns-empty?
           :then :_pub-err-empty
-          :else :_pub-apply}
+          :else :_pub-result}
    :return-type :keyword-map}
 
   ;; ---------------------------------------------------------------------

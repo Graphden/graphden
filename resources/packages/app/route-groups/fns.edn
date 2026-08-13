@@ -19,6 +19,7 @@
    ;; in versioning/storage/core's batch update path, pinned by
    ;; `upsert-onto-versionless-identity-writes-a-version-test`.
    :args {:items [:favicon
+                  :auth-me-fallback
                   :editor
                   :editor-js-asset
                   :api-routes-js-asset

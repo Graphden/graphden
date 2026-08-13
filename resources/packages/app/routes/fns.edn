@@ -426,6 +426,25 @@
    :parent :text-ok-response
    :args {:body "ok"}}
 
+  ;; --- /auth/me — accounts-addon-absent fallback (root-level, open) ---
+  ;; The accounts addon owns `/auth/me` via its route-collection seam, which
+  ;; runs BEFORE the graph router and returns `{account}`/401 when mounted — so
+  ;; this graph route only fires on a deployment WITHOUT the accounts addon
+  ;; (single-tenant / self-hosted). It returns `200 {"account": null}` so the
+  ;; editor's boot probe (`probeAccountsAuth`, editor-auth.js) reads "no accounts"
+  ;; cleanly instead of hitting a 404 that the browser logs to the console.
+  ;; MUST be open (`:get-route`, not `:get-auth-required`): with admin-token auth
+  ;; active a 401 here would be mis-read by the probe as "accounts present".
+  {:name :auth-me-fallback
+   :description "GET /auth/me — root-level fallback returning `200 {\"account\": null}` when the accounts addon is not mounted (its seam handles this path when present). Kills the boot-probe 404 on single-tenant deployments."
+   :parent :get-route
+   :args {:path "/auth/me" :handler :_auth-me-fallback-handler}}
+
+  {:name :_auth-me-fallback-handler
+   :description "Ring handler returning `200 {\"account\": null}` as JSON — the addon-absent answer for the editor's accounts probe."
+   :parent :json-ok-response
+   :args {:body "{\"account\":null}"}}
+
   ;; --- /api/value-kinds — value_kind schema enum ---
 
   {:name :api-value-kinds

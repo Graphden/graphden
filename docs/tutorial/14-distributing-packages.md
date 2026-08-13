@@ -5,15 +5,15 @@ as an immutable package version, then browse the registry and
 install / update / roll back / uninstall / fork packages — all
 without leaving the graph. Placement follows intent: **install is
 a build act**, so it lives on the **Build** surface's *packages*
-context-bar chip; **publish** (freezing a namespace into the
-registry) is done through the `/api/packages/publish` endpoint.
+context-bar chip; **publish is an authoring act on what you built**,
+so it lives as a **⬆ action on the namespace** in the Explorer.
 
 **Concepts introduced**: `registry`, `:package-version`,
 `publish`, `pin` (`:package-install`), `reference-install` vs
 `fork` (copy-on-write), `version constraint` / `latest` /
-`rollback`, the **packages chip** (Build surface), and — beyond
-the registry — an **external package pulled by git coord**
-(`executor-packages.edn`).
+`rollback`, the **packages chip** (Build surface) and the
+per-namespace **⬆ publish** action, and — beyond the registry —
+an **external package pulled by git coord** (`executor-packages.edn`).
 
 ## Authoring vs distributing
 
@@ -51,11 +51,20 @@ how the registry indexes it. Bump a fn in `mycorp.hello`,
 `bb rebuild`, and publish again as `1.1.0` — now the registry
 holds **both** versions. `GET /api/packages` lists the index.
 
-Publishing is a deliberate "author decides to release" action —
-distinct from the everyday build act of *installing*. (An in-editor
-publish affordance on the namespace is planned; for now publish is
-the `curl`/API call above, and everything after — browse, install,
-update, fork — happens on the packages chip below.)
+You can also publish **from the editor** — and because publishing
+is an authoring act on a namespace, it lives *on the namespace*.
+In the Explorer, hover a namespace row and click its **⬆** button
+(next to rename / add / hide). A small popover opens with the
+package **name** (pre-filled from the namespace's last segment) and
+a **version**; the namespace itself is the `ns-root`. Click
+**Publish** — the same export-and-freeze step, no `curl` needed, and
+it confirms with the published fn-count. The `curl` above is the
+programmatic equivalent for scripts / CI. Either way, publishing is
+a deliberate "author decides to release" action; installing happens
+on the packages chip below.
+
+(The **⬆** action shows only when the optional `registry` package
+is installed on the deployment, and only when you're signed in.)
 
 ## The packages chip — browse & install
 
@@ -141,9 +150,10 @@ empty-state notice.
 
 ## Try it
 
-1. Publish `mycorp.hello` as `hello` `1.0.0` (the `curl` above).
+1. Hover the `mycorp.hello` namespace in the Explorer, click **⬆**,
+   and publish it as `hello` `1.0.0` (or use the `curl` above).
 2. Edit `:greet` in `mycorp.hello/fns.edn` (change the greeting),
-   `bb rebuild`, publish again as `1.1.0`.
+   `bb rebuild`, publish again as `1.1.0` (the **⬆** popover again).
 3. Open the **packages** chip in the Build context bar, expand
    **+ Install a package**, click **Install** on `hello 1.1.0`.
    Watch the pin appear.

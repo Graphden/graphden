@@ -162,6 +162,25 @@ function buildNsRowButtons(actionsEl, nsId, nsPath) {
     openChildCreateMenu(plusBtn, nsId, nsPath);
   });
 
+  // Publish (packages spec §3): publishing a namespace as an immutable package
+  // version is an authoring act on the thing you built, so it lives on the
+  // namespace — not on the Build packages chip (that is install/browse) and not
+  // on the Organization page. Shown only when the OPTIONAL registry package is
+  // present (window.API probe, never a name).
+  let publishBtn = null;
+  if (registryPresent()) {
+    publishBtn = document.createElement('button');
+    publishBtn.className = 'create-btn create-btn-inline ns-publish-btn';
+    publishBtn.title = 'Publish this namespace as a package';
+    publishBtn.setAttribute('aria-label', 'Publish ' + nsPath + ' as a package');
+    publishBtn.textContent = '⬆'; // release this subtree to the registry
+    publishBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!ensureAuth()) return;
+      openNsPublishPopover(publishBtn, nsPath);
+    });
+  }
+
   // Personal "hide from my view" (⊘) — a workspace overlay, NOT a graph edit:
   // removes this namespace from THIS browser's explorer only (restore from the
   // workspace chip). No auth needed — it's a view preference, works signed-out.
@@ -182,7 +201,101 @@ function buildNsRowButtons(actionsEl, nsId, nsPath) {
     blockReason: nsDeleteBlockReason(nsId)
   }));
   actionsEl.appendChild(plusBtn);
+  if (publishBtn) actionsEl.appendChild(publishBtn);
   actionsEl.appendChild(hideBtn);
+}
+
+// True iff the optional `registry` package contributed its routes at boot —
+// its `/api/packages/*` endpoints appear in window.API only then. Never a name.
+function registryPresent() {
+  return typeof window.API === 'object' && window.API !== null
+    && typeof window.API.api_packages_installed !== 'undefined';
+}
+
+let activeNsPublishPop = null;
+function closeNsPublishPopover() {
+  if (activeNsPublishPop) { activeNsPublishPop.remove(); activeNsPublishPop = null; }
+  const s = document.getElementById('gd-nspub-scrim');
+  if (s) s.remove();
+}
+
+// Per-namespace publish popover (packages spec §3). Pre-fills `ns-root` = the
+// clicked namespace and POSTs JSON {name, version, ns-root} to the EXISTING
+// JSON publish route — no new server code, so it adds no boot-time type-check
+// load (an earlier server-side variant did, and hung boot). The result notice
+// is rendered client-side from the {ok, fn-count, …} JSON. Values are set via
+// DOM properties (never interpolated into innerHTML) so a namespace path can't
+// inject markup.
+function openNsPublishPopover(anchorEl, nsPath) {
+  closeNsPublishPopover();
+  const scrim = document.createElement('div');
+  scrim.id = 'gd-nspub-scrim';
+  scrim.className = 'gd-pop-scrim';
+  scrim.addEventListener('click', closeNsPublishPopover);
+  document.body.appendChild(scrim);
+
+  const pop = document.createElement('div');
+  pop.id = 'gd-nspub-pop';
+  pop.className = 'gd-pop';
+  pop.innerHTML = ''
+    + '<h5>Publish namespace</h5>'
+    + '<div class="gd-nspub-sub"></div>'
+    + '<div class="gd-nspub-field"><label>Package name</label>'
+    +   '<input type="text" class="packages-publish-input" id="gd-nspub-name"></div>'
+    + '<div class="gd-nspub-field"><label>Version</label>'
+    +   '<input type="text" class="packages-publish-input" id="gd-nspub-version" placeholder="1.0.0"></div>'
+    + '<div class="gd-nspub-actions">'
+    +   '<button type="button" class="packages-install-btn" id="gd-nspub-go">Publish</button></div>'
+    + '<div id="gd-nspub-result" class="gd-nspub-result"></div>';
+  pop.querySelector('.gd-nspub-sub').textContent = nsPath;
+  const nameInput = pop.querySelector('#gd-nspub-name');
+  const versionInput = pop.querySelector('#gd-nspub-version');
+  nameInput.value = nsPath.split('.').pop() || nsPath;
+  versionInput.value = '1.0.0';
+
+  const r = anchorEl.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 320)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+  document.body.appendChild(pop);
+  activeNsPublishPop = pop;
+
+  const resultEl = pop.querySelector('#gd-nspub-result');
+  const goBtn = pop.querySelector('#gd-nspub-go');
+  const setResult = (msg, ok) => {
+    resultEl.textContent = msg;
+    resultEl.className = 'gd-nspub-result ' + (ok ? 'packages-fork-ok' : 'packages-fork-err');
+  };
+  const doPublish = async () => {
+    const name = nameInput.value.trim();
+    const version = versionInput.value.trim();
+    if (!name || !version) { setResult('Name and version are required.', false); return; }
+    goBtn.disabled = true;
+    setResult('Publishing…', true);
+    try {
+      const resp = await authFetch(API.api_packages_publish, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, version, 'ns-root': nsPath }),
+      });
+      if (resp.ok) {
+        let fnCount = null;
+        try { fnCount = (await resp.json())['fn-count']; } catch (_) { /* body optional */ }
+        setResult('Published ' + name + '@' + version
+          + (fnCount != null ? ' (' + fnCount + ' fns)' : '')
+          + ' — install it from the packages chip.', true);
+      } else {
+        setResult(authFetchErrorMessage(resp, { fallback: 'Publish failed (HTTP ' + resp.status + ').' }), false);
+        goBtn.disabled = false;
+      }
+    } catch (e) {
+      setResult((e && e.message) || 'Publish failed.', false);
+      goBtn.disabled = false;
+    }
+  };
+  goBtn.addEventListener('click', doPublish);
+  versionInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doPublish(); } });
+  nameInput.focus();
+  nameInput.select();
 }
 
 function ensureAuth() {

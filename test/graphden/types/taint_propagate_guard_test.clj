@@ -50,7 +50,7 @@
     :constant-time-equal? :constantly :contains? :count
     :counters-snapshot :create-branch! :create-entity :cron-fire-after
     :cron-parse :current-branch-id :current-branch-router
-    :current-slot-value :current-time-ms :declarable-effect-categories
+    :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :deref
     :describe-type-mismatch :detect-conflicts :diff-branches
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc

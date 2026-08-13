@@ -1,0 +1,174 @@
+---
+description: Packages & Dependencies (install / publish / registry) model, placement, lifecycle, and safety invariants for the Graphden editor. Apply when touching registry/, app/editor package/workspace/surface UI, or the package-version/package-install schema.
+globs:
+  - resources/packages/registry/**
+  - resources/packages/app/editor/**
+  - resources/packages/app/routes/**
+  - src/graphden/schema/packages/**
+alwaysApply: false
+---
+
+# Packages & Dependencies — spec
+
+This rule captures the ONE conceptual model that package install/publish/registry
+must obey, so the feature lands coherently (not as uncoordinated fragments).
+It is grounded in cross-cutting editor principles that ALL editor work shares.
+
+## 0. Governing principles (cross-cutting — never violate)
+
+- **P1 Placement follows intent.** Three surfaces, three intents:
+  - **Build** = author *your* project (Explorer tree, graph canvas, and the
+    context-bar chips: workspace scope, branch, packages). Anything you do
+    *while building* lives here.
+  - **Organization** = governance / administration of the org.
+  - **Platform** = cross-org administration.
+  An affordance lives where its intent lives. Corollary for packages:
+  *install* is a build act (add a building block) → Build; *publish* is an
+  authoring act on what you built → an action on the thing; *govern* (catalog,
+  who-may-publish, audit) → Organization.
+- **P2 Personal overlay vs shared graph.** Per-user *view* state is per-browser
+  `localStorage` (workspace scope + hidden set, lens, branch selection). Shared
+  truth is the graph/DB. A personal choice must never mutate the shared graph or
+  another user's view. Tenant data must never leak across orgs.
+- **P3 Graph-native, minimal entities.** Reuse what exists: inheritance
+  (`parent-ids` + binding overrides) as "change a bit"; immutable
+  content-addressed `:package-version`; per-branch fn-versioning. Per-function
+  PROPERTIES follow `.cursor/rules/function-metadata-and-identity.mdc`:
+  graph by default (inherit a marker / a binding / a type), a DB column only for
+  identity-dedup / org-RLS / VCS plumbing, NEVER a name or prefix. Add a field
+  or entity ONLY when that rule says the graph can't serve it, and justify it in
+  the diff. (`:package-version.org_id` in §5 is such a justified column: RLS.)
+- **P4 No hardcoding of names or name-parts in code.** Dispatch, identity,
+  classification, and cache keys use ids, or a real field (e.g. `role`), or
+  graph structure — never a literal fn/package name, and never a name PREFIX
+  (`_`, `_anon-`, etc.). This is worse than schema bloat. (Cosmetic display of a
+  naming *convention* is tolerated only where NO behavior/identity depends on
+  it.)
+- **P5 Safe by default.** Privileged acts are capability-gated; tenant data is
+  org-scoped + RLS-isolated; no request-outliving cache is un-org/principal
+  keyed; the user sees what they're getting (effects, contents) before install.
+
+## 1. The two version axes (must stay distinct)
+
+- **Package version** = an immutable, content-addressed RELEASE TAG in the
+  registry (`:package-version`, `name@version`, content hash; republishing the
+  same `(name,version)` is rejected).
+- **Internal versioning** = our per-branch fn-version rows + merge. This is the
+  live graph's VCS.
+- **Relationship:** *publish* snapshots the current (branch-resolved) state of a
+  namespace subtree into an immutable bundle. *install* MATERIALIZES that bundle
+  into the graph as ordinary fns (which then live under branch-versioning and
+  propagate on merge) + writes a **pin** `(branch, package-name) → version`.
+  The package version is provenance metadata layered over branch-versioning;
+  the two never conflict. Install is branch-scoped (stage on dev → merge to prod).
+
+## 2. Install — a Build act
+
+- Entry point: a **Build-surface context-bar chip "packages"** (sibling of the
+  workspace/branch chips; hidden off Build; hidden entirely when the optional
+  `registry` package is absent — probe `window.API`, never a name). It opens a
+  **browser**, NOT an Organization panel.
+- The browser provides: **search**; a **per-package detail** view showing its
+  **versions**, its **public interface** (the package root namespace's fns —
+  see §6), and the **effects it requests**; a **version selector** (install ANY
+  version, including older — rollback is the same symmetric operation);
+  and an **"update available"** affordance when a newer version exists.
+- Installs are **pinned** — never auto-updated. Updating/rolling back is an
+  explicit act that repoints the pin, re-materializes, and rewrites the
+  project's own refs old→new (package-internal refs never mix across versions).
+- Install writes into the current branch (staging); it propagates on merge.
+
+## 3. Publish — an authoring act on your work
+
+- Entry point: a **"Publish" action on a namespace** (the project/subtree you
+  built) — NOT a form buried in a shared panel, and NOT on the Organization
+  page. It reuses the namespace = project unit (same unit Workspaces scopes).
+- **Gated by a `publish-packages` capability** (tenancy grant vocabulary). An
+  un-capable member cannot publish. (Install needs no capability beyond auth,
+  unless a deployment chooses to restrict it.)
+- Publish **freezes the transitive dependency versions** into the published
+  bundle (a baked lockfile) → installs are reproducible.
+- Publish targets the org's **private registry by default**; publishing publicly
+  is an explicit, separate opt-in.
+
+## 4. Governance — on the Organization surface
+
+- The Organization surface hosts the **read-mostly governance view**: the org's
+  package catalog (what is published), **who may publish** (the capability),
+  and an **install audit** (what is installed where). It is NOT where a user
+  clicks "install".
+
+## 5. Registry isolation (data must not leak) — the one justified new field
+
+- `:package-version` gains **`:org_id`** (nullable) + Postgres RLS, exactly
+  mirroring the `:fn`/`:ns` org-scoping. This is the single new field the model
+  adds, and it is necessary (isolation cannot be expressed otherwise).
+- Publish → the publisher's org (private) by default; an explicit "public" flag
+  makes a version platform-visible.
+- Browse/install shows **[My org] + [Public]** only. Another org's private
+  package is neither visible nor installable. Install-pins (`:package-install`)
+  are already per-org + per-branch — keep that.
+
+## 6. Encapsulation — interface vs internals (a GRAPH property)
+
+Follow `.cursor/rules/function-metadata-and-identity.mdc` — visibility is a
+SEMANTIC property, so it lives in the GRAPH, exactly like `secret` (a fn is a
+secret by inheriting `:secret-leaf`), NOT in a name prefix (P4) and NOT in a new
+DB column (P3).
+
+- A package's **public interface = the fns the package marks public in the
+  graph** — via a visibility marker (inheritance from a public/interface marker
+  fn, the `secret-leaf` precedent) or an explicit export construct on the
+  package's entry fn. The exact graph shape is a design task in the
+  implementation (see the fn-metadata rule's "refactor direction").
+- Install materializes ALL fns (internals are the implementation — needed to
+  run). The UI presents the graph-marked public fns as the interface; the rest
+  are collapsed/hidden (the same collapse/Workspaces-hide machinery).
+- This graph representation supersedes the earlier "public = root namespace /
+  internals = nested sub-namespace (visual only)" idea. It is structure-visible
+  and can be enforced later; until enforcement exists it is still a graph fact,
+  not a name/prefix or column.
+- It also gives "private" a real representation, retiring the last cosmetic
+  `_`-prefix use (`displayLabel`) — do that as part of this, per the fn-metadata
+  rule.
+
+## 7. Customizing a package without forking; contributing back
+
+- **"Change a bit" → inheritance**: a child fn `parent-ids: [package-fn]` with
+  binding overrides. The package stays pinned/immutable; the override is your
+  own fn, private to your branch/org unless you publish it. This is the primary
+  path.
+- **Fork = escape hatch** (copy-on-write into your namespace, unpins) for
+  editing a package's *internals*.
+- **Contribute upstream**: fork + publish your own variant, OR the author grants
+  you `publish-packages` on that package. A cross-author PR-to-package flow is a
+  NON-GOAL here (see §9).
+
+## 8. Dependency updates propagate only through explicit package releases
+
+- A package's dependency versions are frozen in its published version (§3). So
+  a package's *consumers* never see a dep update spontaneously — only the
+  package *author* does, and they surface it by publishing a new package
+  version. Consumers pick it up via an explicit package update (§2).
+
+## 9. Non-goals (do not build these under this rule)
+
+- Cross-author PR-to-package (propose a diff, author accepts). Future; the
+  branch + diff primitives exist if it is ever scoped.
+- Enforced (non-visual) private members; fully-opaque compiled packages.
+- Cross-device per-user sync of personal state (localStorage stays per-browser,
+  consistent with workspace/lens/branch prefs).
+
+## 10. Acceptance invariants (every slice must hold)
+
+- No name/prefix hardcode introduced (P4); classification via id/field/structure.
+- Install, publish, and governance each sit on their intent surface (P1).
+- Publish is capability-gated; no unauthorized publish path exists.
+- Org A cannot see or install org B's private package (RLS-verified with a
+  two-org test).
+- Installs are pinned; update/rollback is explicit and symmetric; the version
+  selector offers older versions.
+- Installs are reproducible (frozen transitive dep versions).
+- Registry-absent deployments hide all package UI (window.API probe, not a name).
+- Per slice: `bb ci` green, `bb visual` green (baselines updated only for the
+  intended UI), and a Playwright behavioral check of the slice's user flow.

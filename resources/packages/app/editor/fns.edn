@@ -549,7 +549,7 @@
   ;; PAGE COMPOSITION (fn-defs)
   ;; =============================================================================
 
-  ;; Build head elements list for cytoscape
+  ;; Build head elements list for the editor page
   {:name :head-elements-0
    :description "Initial head-elements vector — single entry: `:_editor-css-link` (`<link rel=\"stylesheet\">` to the cached `/assets/editor.css` bundle). Subsequent fn-defs append CDN scripts."
    :parent :conj
@@ -628,7 +628,7 @@
   ;; / registry / loadPartial primitives) + graphden-actions-
   ;; builtin.js (navigate + submit-form + custom). Loaded INSTEAD
   ;; of editor.js on pages that don't host the editor canvas
-  ;; (editor.js is ~700 KB and initialises Cytoscape + WebSocket
+  ;; (editor.js is ~700 KB and initialises the graph canvas + WebSocket
   ;; subscriptions that crash a stripped-down page).
   {:name :_graphden-runtime-js-paths
    :parent :const

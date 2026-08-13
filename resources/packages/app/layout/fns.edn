@@ -13,7 +13,7 @@
 
 
 {:namespace "app.layout"
- :description "Graph-layout pass — turns raw fn/arg entities + per-call expansion specs into the {:nodes :edges :grid-pos :validation} cytoscape response."
+ :description "Graph-layout pass — turns raw fn/arg entities + per-call expansion specs into the {:nodes :edges :grid-pos :validation} graph-elements response."
  :fns
  [;; =============================================================================
   ;; SHAPES: layout-pipeline stage records
@@ -24,7 +24,7 @@
   ;; =============================================================================
 
   {:name :_parse-layout-request-shape
-   :description "Output of `:_parse-layout-request` — the layout root and the per-fn expansion-level map keyed by cytoscape node-id."
+   :description "Output of `:_parse-layout-request` — the layout root and the per-fn expansion-level map keyed by graph node-id."
    :type {:root-id :uuid :expansions :text-keyed-map}}
 
   {:name :_graph-snapshot-shape
@@ -37,7 +37,7 @@
           :args        [:list :jsonb]}}
 
   {:name :_layout-elements-shape
-   :description "Output of `:_layout-build-elements` — the cytoscape node / edge lists (each element a `{:data … :position?}` map) before grid placement."
+   :description "Output of `:_layout-build-elements` — the graph node / edge lists (each element a `{:data … :position?}` map) before grid placement."
    :type {:nodes [:list :jsonb]
           :edges [:list :jsonb]}}
 
@@ -68,7 +68,7 @@
    :return-type :_parse-layout-request-shape}
 
   {:name :_layout-build-apply
-   :description "Single library call — build cytoscape `{:nodes :edges}` from the graph snapshot + parsed request. Throws ExceptionInfo on `:execution-error/not-found`."
+   :description "Single library call — build graph `{:nodes :edges}` from the graph snapshot + parsed request. Throws ExceptionInfo on `:execution-error/not-found`."
    :args {:graph {:type :_graph-snapshot-shape}
           :parsed {:type :_parse-layout-request-shape}}
    :return-type :_layout-elements-shape}
@@ -165,7 +165,7 @@
           :parsed {:as :parsed}}}
 
   {:name :_layout-build-elements
-   :description "Stage A — pass an upstream `{:ok false}` parse result through, otherwise build cytoscape `{:nodes :edges}`."
+   :description "Stage A — pass an upstream `{:ok false}` parse result through, otherwise build graph `{:nodes :edges}`."
    :parent :if
    :args {:test :_layout-build-parsed-failed?
           :then {:as :parsed}

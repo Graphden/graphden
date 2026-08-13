@@ -19,7 +19,7 @@
    `ExceptionInfo` catch for build, pass-through guards on upstream
    `{:ok false}` payloads — is graph composition via `:try` / `:case` /
    `:if`. Each base-fn here is ONE library call: load entities from
-   storage, parse a request, build the cytoscape element lists, or
+   storage, parse a request, build the graph element lists, or
    grid-place them."
   (:require
     [graphden.crud.types-api :as types-api]
@@ -68,7 +68,7 @@
 
 
 (defbase _layout-build-apply
-  "Single library call — build cytoscape `{:nodes :edges}` for the
+  "Single library call — build graph `{:nodes :edges}` for the
    requested subgraph. Throws `ExceptionInfo` (`:execution-error/not-
    found`) when `:root-id` doesn't resolve; the graph's `:try` turns
    that into `{:ok false :error}`."

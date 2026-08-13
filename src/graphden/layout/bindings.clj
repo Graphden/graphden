@@ -35,7 +35,7 @@
 (defn arg-ids-from
   "Pluck slot-id/binding-id/item-id/fn-id from an arg row so it can be
    merged into the internal `compute-display-args` arg-row shape and
-   eventually surface on the emitted cytoscape node via
+   eventually surface on the emitted graph node via
    `arg-row->node-id-fields`."
   [arg]
   (select-keys arg [:slot-id :binding-id :item-id :fn-id]))

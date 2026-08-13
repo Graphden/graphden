@@ -290,7 +290,7 @@
 
 (defn- parse-expansions
   "Parse raw expansions map from request.
-   Keys are cytoscape node-ids (`fn-<...>` strings). Under per-call-site
+   Keys are graph node-ids (`fn-<...>` strings). Under per-call-site
    scoping a non-root node id has the form `fn-<caller-tag>-<source-arg-id>`
    which is NOT a single UUID, so we just keep the full id string as the
    map key. Layout looks up the spec using the exact same string it
@@ -331,7 +331,7 @@
    (the `{:fns :slots …}` snapshot already enriched with `:args` —
    see `graphden.layout.graph/load-graph-entities-uncached`) plus the
    request's `:root-id` and parsed `:expansions`, and produces the
-   cytoscape `{:nodes [...] :edges [...]}` for that subgraph.
+   graph `{:nodes [...] :edges [...]}` for that subgraph.
 
    Throws `:execution-error/not-found` when `root-id` isn't in the
    graph."

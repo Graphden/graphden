@@ -453,11 +453,11 @@
 
 (defn create-inline-binding
   "POST /api/secrets/binding — write VALUE to vault at PATH, then create
-   a `:secret-path`-kinded binding on (`fn-id`, `slot-id`) so the user's
+   a `:vault-get`-resolver binding on (`fn-id`, `slot-id`) so the user's
    fn picks the secret up at exec time. Skips the wrapper-fn-def step
    (`create-secret` above) — the binding IS the secret-fetch.
 
-   `crud-entities/create-entity` runs `secret-path-rej`, which rejects
+   `crud-entities/create-entity` runs `resolver-rej`, which rejects
    when the slot's declared type doesn't contain `:secret`. On graphden
    failure (gate reject OR uniqueness collision) we vault-delete the
    path so the stores stay in sync.

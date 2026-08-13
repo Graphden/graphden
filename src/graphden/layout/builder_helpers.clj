@@ -9,7 +9,7 @@
      / `spec-trivial?`);
    - state-recording side helpers (`record-optional-unset!` /
      `record-hof-captured!`);
-   - cytoscape node/edge field shaping (`arg-row->node-id-fields` /
+   - graph node/edge field shaping (`arg-row->node-id-fields` /
      `arg-source-fn-fields` / `edge-source-fields`);
    - value / unset arg-node emission (`add-arg-value-node` /
      `add-unset-arg-node`);
@@ -37,7 +37,7 @@
 ;; =============================================================================
 
 (defn get-effective-spec
-  "Look up expansion spec by cytoscape node-id string. The `expansions`
+  "Look up expansion spec by graph node-id string. The `expansions`
    map is keyed by the same node-id that `add-fn-node` emits, so the
    match is exact."
   [expansions node-id]
@@ -811,7 +811,7 @@
 
 
 (defn add-fn-node
-  "Emit (or reuse) a cytoscape fn-node for `original-fn-id`. The node-id
+  "Emit (or reuse) a graph fn-node for `original-fn-id`. The node-id
    uniquely identifies the call-site: root fns key by `\"fn-<id>\"`; nested
    fns key by `(caller-node-id, source-arg-id)` so two usages of the
    same fn from different bindings are distinct nodes (matches Clojure

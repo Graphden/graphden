@@ -8,7 +8,7 @@
    - the cycle-guarded `process-*` mutual-recursion family
      (`process-any-fn` / `process-fn` / `process-expanded-fn` /
      `process-expanded-fn-impl`) that walks a fn-graph rooted at one fn
-     and emits cytoscape nodes/edges into a shared `state` atom;
+     and emits graph nodes/edges into a shared `state` atom;
    - the three post-processing transforms (`annotate-optionals` /
      `migrate-captured-edges` / `dedup-overlays`) that shape the wire
      output after the walkers have populated `state`;
@@ -48,7 +48,7 @@
 ;; Graph traversal — process-* family.
 ;;
 ;; The four functions below cooperatively walk a fn-graph rooted at one fn
-;; and emit cytoscape nodes/edges into a shared `state` atom, sharing the
+;; and emit graph nodes/edges into a shared `state` atom, sharing the
 ;; ~10 walk values through an explicit `ctx` map. Roles:
 ;;
 ;;   process-any-fn            — dispatch: leaf vs in-place vs expanded
@@ -810,7 +810,7 @@
         ;; `(swap! state update :nodes conj …)` / `(:nodes @state)` to read.
         ;;
         ;; Keys:
-        ;;   :nodes / :edges                  — accumulated cytoscape elements
+        ;;   :nodes / :edges                  — accumulated graph elements
         ;;   :added-node-ids                  — set of emitted node-ids (dedup)
         ;;   :processed-arg-targets           — arg-target keys already wired
         ;;   :processed-fn-nodes              — fn-process keys already done

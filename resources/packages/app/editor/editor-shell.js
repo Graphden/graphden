@@ -1,8 +1,10 @@
 // Editor Shell — redesign 2026-08. Owns the left-rail surface switching.
 //
-// Build is the graph editor. Review opens the branch-diff modal; Operate /
-// Workspaces / Settings are real <section>s (see REAL_SURFACES). The rail's
-// inline onclick calls the single exported entry point
+// Build is the graph editor; Operate (labeled "Organization") / Platform /
+// Settings are real <section>s (see REAL_SURFACES). Review and Workspaces
+// were retired as surfaces: a branch diff is the Δ button in the branch
+// switcher, a workspace is the ctxbar chip's popover. The rail's inline
+// onclick calls the single exported entry point
 // `window.gdShellSurface(name, btn)`. (There is no Run surface — running a fn
 // is the ▶ action on its node/card; its history is the inspector Runs tab.)
 (function () {

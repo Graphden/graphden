@@ -4,13 +4,22 @@
    inside the request scope). Returns a response on a matched `/auth/...` path,
    or nil to fall through.
 
-   Endpoints:
+   Endpoints (pages + JSON; the full behavior table is docs/ACCOUNTS.md):
+     GET  /login /account /reset   self-contained HTML pages
+     GET  /auth/me                 current account (or {account:null}) — editor probe
+     GET  /auth/tfa-state          {enabled} for the signed-in account
      POST /auth/signup             {email,password} → set gd_session, send verify
-     POST /auth/login              {email,password} → set gd_session
+     POST /auth/login              {email,password} → set gd_session (or 2fa step)
+     POST /auth/totp               second login step: gd_2fa cookie + code → session
+     POST /auth/totp/enroll|confirm|disable   TOTP lifecycle for the account
      POST /auth/logout             revoke session + clear cookie
+     POST /auth/logout-all         revoke every session of the account
      POST /auth/forgot             {email} → email a reset link (never enumerates)
      POST /auth/reset              {token,password} → set new pw, sign out everywhere
+     POST /auth/resend-verification  re-send the verify mail (rate-limited)
      GET  /auth/verify?token=      consume email-verification link → redirect
+     GET  /auth/identities         linked sign-in methods
+     POST /auth/unlink             unlink a method (last one is refused)
      GET  /auth/:provider/start    (github|google) 302 to the provider + state cookie
      GET  /auth/:provider/callback (github|google) exchange → session → redirect
      GET  /auth/telegram/callback  verify widget HMAC → session → redirect

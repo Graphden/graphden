@@ -29,6 +29,12 @@ exclude = [
   # the wrong question — the check would only pass by handing CI a token,
   # i.e. by making a link-checker an authenticated client of our own repos.
   '^https://github\.com/graphden/graphden-(mathx|examples|cloud)',
+  # The repo's OWN CI badge in README (self-referential, always valid). lychee
+  # hits github.com's actions/badge endpoint over HTTP/2, which github
+  # intermittently rejects ("HTTP/2 protocol error. Server may not support
+  # HTTP/2 properly") — a runner/github flake, not a broken link. Checking our
+  # own ever-present badge is self-referential noise; skip it.
+  '^https://github\.com/Graphden/graphden/actions/',
   # A personal host used as a deploy EXAMPLE in deploy/kind/README.md. Its
   # uptime is not a property of this repository.
   '^https?://izpa\.xyz',

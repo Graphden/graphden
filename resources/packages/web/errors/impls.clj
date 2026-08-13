@@ -2,7 +2,6 @@
   "Base-fn impls for the web/errors module — thin boundaries over
    `graphden.web.errors`, the single :type → HTTP mapping."
   (:require
-    [cheshire.core :as json]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.web.errors :as errors]))
 
@@ -25,27 +24,13 @@
   (errors/status-for (cond-> error-type (string? error-type) keyword)))
 
 
-(defbase json-envelope-response
-  "Ring JSON response whose STATUS comes from the envelope itself:
-   `:http-status` (default 200) is read and stripped, the rest is the
-   body. 429 additionally carries `Retry-After: 1`. The graph-side
-   rejection builders declare their status right where they build the
-   envelope — one response seam, statuses visible at the source.
-   Mirrors `html-action-response` for the JSON families."
-  [envelope]
-  ;; NB: no self-shadowing let over a defbase arg — the macro's symbol
-  ;; substitution skips the shadowed scope including the shadow's own
-  ;; RHS.
-  (let [env (or envelope {})
-        status (or (:http-status env) 200)
-        body (dissoc env :http-status)]
-    {:status status
-     :headers (cond-> {"Content-Type" "application/json"}
-                (= 429 status) (assoc "Retry-After" "1"))
-     :body (json/generate-string body)}))
+;; :json-envelope-response is a GRAPH fn-def now (web/errors/fns.edn) —
+;; status extraction, body strip, JSON serialise (`:to-json-string`) and
+;; the 429 → `Retry-After: 1` header policy all compose over
+;; `:ring-response`, so the retry policy is graph-visible and tunable
+;; instead of a literal nailed into a Clojure impl.
 
 
 (def impls
   {:error-boundary-wrap error-boundary-wrap
-   :error-http-status error-http-status
-   :json-envelope-response json-envelope-response})
+   :error-http-status error-http-status})

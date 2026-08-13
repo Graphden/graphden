@@ -64,7 +64,7 @@
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
     :http-request :http-server :http-stop :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
-    :json-envelope-response :json-to-type :jvm-uptime-ms :keys
+    :json-to-type :jvm-uptime-ms :keys
     :keyword-to-str :list :list-all-graph-entities :log-warn
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :max-memory :merge :merge-branch!

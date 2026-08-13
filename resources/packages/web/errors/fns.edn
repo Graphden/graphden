@@ -14,9 +14,70 @@
    :return-type :http-status
    :expects-effects #{}}
 
+  ;; ---------------------------------------------------------------------
+  ;; :json-envelope-response — GRAPH composition over :ring-response.
+  ;;
+  ;; Formerly a Clojure impl that assembled the `{:status :headers :body}`
+  ;; map by hand and nailed the `429 → Retry-After: 1` policy into code.
+  ;; Every seam is graph-visible now: status extraction (`:get` +
+  ;; `:coalesce` 200), body strip (`:dissoc`), serialisation
+  ;; (`:to-json-string`), and the retry-header policy (an `:if` over the
+  ;; status) — a deployment wanting a different Retry-After composes its
+  ;; own variant without a Clojure change.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_jer-env
+   :description "nil envelope renders as an empty 200 body."
+   :parent :coalesce
+   :args {:value {:as :envelope :type :nullable-keyword-map}
+          :default {:value {}}}}
+
+  {:name :_jer-status-read
+   :parent :get
+   :args {:coll {:ref :_jer-env :type :keyword-map}
+          :key {:value :http-status} :default nil}}
+
+  {:name :_jer-status
+   :parent :coalesce
+   :args {:value :_jer-status-read :default {:value 200}}}
+
+  {:name :_jer-body-map
+   :description "The envelope minus its transport field — what serialises."
+   :parent :dissoc
+   :args {:map {:ref :_jer-env :type :keyword-map}
+          :key {:value :http-status}}}
+
+  {:name :_jer-json
+   :parent :to-json-string
+   :args {:data :_jer-body-map}}
+
+  {:name :_jer-429?
+   :parent :equal?
+   :args {:a :_jer-status :b {:value 429}}}
+
+  {:name :_jer-headers-json
+   :parent :const
+   :args {:value {"Content-Type" "application/json"}}}
+
+  {:name :_jer-headers-retry
+   :description "429 additionally advertises an immediate retry window."
+   :parent :assoc
+   :args {:map :_jer-headers-json
+          :key {:value :Retry-After}
+          :value {:value "1"}}}
+
+  {:name :_jer-headers
+   :parent :if
+   :args {:test :_jer-429?
+          :then :_jer-headers-retry
+          :else :_jer-headers-json}}
+
   {:name :json-envelope-response
-   :description "Ring JSON response whose status comes from the envelope's :http-status (default 200, stripped from the body); 429 carries Retry-After. Rejection builders declare their status where they build the envelope — the JSON twin of :html-action-response."
-   :args {:envelope {:type :nullable-keyword-map
+   :description "Ring JSON response whose status comes from the envelope's :http-status (default 200, stripped from the body); 429 carries Retry-After. Rejection builders declare their status where they build the envelope — the JSON twin of :html-action-response. Pure graph composition over :ring-response."
+   :parent :ring-response
+   :args {:status {:ref :_jer-status :type :http-status}
+          :headers {:ref :_jer-headers :type :text-map}
+          :body :_jer-json
+          :envelope {:type :nullable-keyword-map
                      :description "The response envelope; :http-status (int, optional) selects the HTTP status. nil renders as an empty 200 body (a nil-returning primitive behind a guard unions :null into the computed type)."}}
-   :return-type :ring-response-shape
-   :expects-effects #{}}]}
+   :return-type :ring-response-shape}]}

@@ -9,7 +9,8 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]))
 
 
 (def ^:dynamic *bootstrap* nil)
@@ -255,6 +256,54 @@
   {:request-method :post
    :body (json/generate-string body)
    :headers {"content-type" "application/json"}})
+
+
+(deftest publish-public-flag-normalisation
+  ;; Spec §5: `:public?` is normalised AT WRITE time — a platform-tier
+  ;; publish (single-tenant / operator) is always platform-visible; a
+  ;; tenant publish is private unless the explicit opt-in is set. Readers
+  ;; (browse badge, RLS select arm) key on the flag alone, never on org-id.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        apply-id (get all-name->id :publish-package-apply)
+        bundle {:namespace "pubflag"
+                :namespaces ["pubflag"]
+                :fns [{:name :pf-x :namespace "pubflag" :parent :const
+                       :args {:value {:value 1}}}]
+                :dependencies [:const]
+                :package-dependencies []
+                :secrets []
+                :secret-paths-included? false}]
+    (testing "platform-tier publish normalises :public? true without the opt-in"
+      (let [res (exec/execute-with-named-args
+                  ctx apply-id
+                  {:pkg-name "pubflag.plat" :pkg-version "1.0.0" :bundle bundle})]
+        (is (true? (:ok res)))
+        (is (true? (:public res)))
+        (is (true? (:public? (first (sp/query-entities (storage) :package-version
+                                                       {:name "pubflag.plat"})))))))
+    (testing "org-bound publish defaults to private; the opt-in makes it public"
+      ;; Simulate a tenant: bind a real org + grant the publish capability
+      ;; through the org-cap seam (default-deny would 403 first).
+      (try
+        (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+        (binding [tc/*current-org* "org-priv-test"]
+          (let [private-res (exec/execute-with-named-args
+                              ctx apply-id
+                              {:pkg-name "pubflag.priv" :pkg-version "1.0.0" :bundle bundle})
+                public-res (exec/execute-with-named-args
+                             ctx apply-id
+                             {:pkg-name "pubflag.pub" :pkg-version "1.0.0" :bundle bundle
+                              :pkg-public true})]
+            (is (true? (:ok private-res)))
+            (is (false? (:public private-res)))
+            (is (false? (:public? (first (sp/query-entities (storage) :package-version
+                                                            {:name "pubflag.priv"})))))
+            (is (true? (:ok public-res)))
+            (is (true? (:public public-res)))
+            (is (true? (:public? (first (sp/query-entities (storage) :package-version
+                                                           {:name "pubflag.pub"})))))))
+        (finally
+          (tc/install-org-cap-fn! nil))))))
 
 
 (deftest publish-handler-creates-and-rejects-duplicate

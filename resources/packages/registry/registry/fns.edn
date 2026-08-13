@@ -75,7 +75,8 @@
    :description "Atomic publish core — reject if `(:pkg-name, :pkg-version)` already exists (immutable registry), else hash + insert. The existence check stays adjacent to the insert to keep the race window minimal until the DB-level UNIQUE(name, version) hardening ships. Returns a tagged `{:ok …}` result."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
           :pkg-version {:type :text :description "Semver version string, e.g. \"1.2.0\"."}
-          :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}}
+          :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}
+          :pkg-public {:type :nullable-bool :required false :description "Truthy → platform-visible (`:public?` on the row — the explicit publish-publicly opt-in, spec §5). Absent/nil → private to the publisher's org; a platform-tier publish is always public."}}
    :return-type :keyword-map
    :effects #{:db :time}}
 
@@ -108,7 +109,8 @@
    :parent :publish-package-apply
    :args {:pkg-name {:as :pkg-name}
           :pkg-version {:as :pkg-version}
-          :bundle {:as :bundle}}}
+          :bundle {:as :bundle}
+          :pkg-public {:as :pkg-public}}}
 
   {:name :publish-package
    :description "Publish a bundle as an immutable :package-version row. Graph `:if` — rejects an empty bundle up front (`:reason \"empty-bundle\"`), else delegates to the atomic `:publish-package-apply` core (existence check + hash + insert → `:ok` or `:reason \"version-exists\"`)."
@@ -187,6 +189,10 @@
    :description "Nil-safe `(str (:ns-root body))` — the subtree to export."
    :parent :to-str :args {:value :_publish-ns-root-raw}}
 
+  {:name :_publish-public-raw
+   :description "`:public` from the body — the explicit publish-publicly opt-in (spec §5); absent → private to the publisher's org."
+   :parent :get :args {:coll :_publish-body :key {:value :public} :default nil}}
+
   {:name :_publish-bundle
    :description "Exported bundle for the requested root namespace."
    :parent :export-namespace :args {:root :_publish-ns-root}}
@@ -196,7 +202,8 @@
    :parent :publish-package
    :args {:pkg-name :_publish-name
           :pkg-version :_publish-version
-          :bundle :_publish-bundle}}
+          :bundle :_publish-bundle
+          :pkg-public :_publish-public-raw}}
 
   {:name :publish-package-handler
    :lambda-params [:request]
@@ -247,15 +254,24 @@
   {:name :_pie-dependencies
    :parent :get :args {:coll {:as :item} :key {:value :dependencies} :default nil}}
 
+  {:name :_pie-org-id
+   :parent :get :args {:coll {:as :item} :key {:value :org-id} :default nil}}
+
+  ;; Emitted as plain `:public` (not the row's `:public?`) for a clean JSON
+  ;; key. `false` = a private (org-scoped) row; `true` = platform-visible;
+  ;; null = a legacy pre-scoping row (shared).
+  {:name :_pie-public
+   :parent :get :args {:coll {:as :item} :key {:value :public?} :default nil}}
+
   {:name :_pkg-index-entry
    :description "One registry-index entry — the JSON reshape of a :package-version row."
    :parent :zipmap
    :args {:keys [{:value :id} {:value :name} {:value :version} {:value :ns-root}
                  {:value :content-hash} {:value :published-at} {:value :fn-count}
-                 {:value :dependencies}]
+                 {:value :dependencies} {:value :org-id} {:value :public}]
           :vals [:_pie-id :_pie-name :_pie-version :_pie-ns-root
                  :_pie-content-hash :_pie-published-at :_pie-fn-count
-                 :_pie-dependencies]}}
+                 :_pie-dependencies :_pie-org-id :_pie-public]}}
 
   {:name :list-package-versions
    :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle. Pure graph composition over `:query-entities` + a HOF reshape."
@@ -1282,8 +1298,24 @@
   {:name :_pkg-avail-fork-btn
    :parent :hiccup
    :args {:tag {:value "button"} :attrs :_pkg-avail-fork-attrs :children [{:value "Fork"}]}}
+  ;; Private-to-org badge (spec §5): `:public?` false = an org-private row.
+  ;; Publish normalises the flag at WRITE time (platform-tier → true), so
+  ;; `false` is exactly "private"; legacy shared rows carry nil, not false,
+  ;; and get no badge.
+  {:name :_pkg-avail-public-val
+   :parent :get :args {:coll {:as :item} :key {:value :public} :default nil}}
+  {:name :_pkg-avail-private?
+   :parent :equal? :args {:a :_pkg-avail-public-val :b {:value false}}}
+  {:name :_pkg-avail-private-badge
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "packages-private-badge"}}
+          :children [{:value "private"}]}}
+  {:name :_pkg-avail-badge-maybe
+   :parent :if
+   :args {:test :_pkg-avail-private? :then :_pkg-avail-private-badge :else {:value nil}}}
   {:name :_pkg-avail-td-name
-   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-name-val]}}
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-name-val :_pkg-avail-badge-maybe]}}
   {:name :_pkg-avail-td-version
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-version-val]}}
   {:name :_pkg-avail-td-action
@@ -1606,7 +1638,12 @@
   {:name :_pkg-publish-result
    :parent :publish-package
    :args {:pkg-name :_pkg-publish-name :pkg-version :_pkg-publish-version
-          :bundle :_pkg-publish-bundle}}
+          :bundle :_pkg-publish-bundle
+          ;; Pinned: the legacy panel form has no public checkbox — a panel
+          ;; publish is always private-by-default (platform-tier publishes
+          ;; normalise to public in the apply core). Pinning also keeps the
+          ;; free arg from leaking into the panel's handler chain.
+          :pkg-public {:value false}}}
   ;; The notice reads the FORM's name+version, NOT the effectful publish
   ;; result: publish-package has :db/:time effects so it is NOT memoised —
   ;; referencing its result from the notice too would run the publish a SECOND

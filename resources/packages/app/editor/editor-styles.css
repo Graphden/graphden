@@ -4866,6 +4866,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 /* Fork button (browse row) + transient fork notice. */
 .gd-pop .packages-fork-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); cursor: pointer; font-size: 10px; margin-left: 3px; padding: 1px 6px; }
 .gd-pop .packages-fork-btn:hover { background: var(--hover-bg); color: var(--fg); }
+.gd-pop .packages-private-badge { border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); font-size: 9px; margin-left: 5px; padding: 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
 .gd-pop .packages-fork-note { font-size: 10px; padding: 3px 6px; margin-bottom: 4px; border-radius: 3px; }
 .gd-pop .packages-fork-ok { color: var(--success-fg); }
 .gd-pop .packages-fork-err { color: var(--error-fg); }
@@ -4879,6 +4880,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 #gd-nspub-pop .gd-nspub-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
 #gd-nspub-pop .gd-nspub-field label { font-size: 11px; color: var(--muted-fg); }
 #gd-nspub-pop .packages-publish-input { font-size: 12px; padding: 4px 6px; }
+#gd-nspub-pop .gd-nspub-public { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-fg); margin-bottom: 8px; cursor: pointer; }
 #gd-nspub-pop .gd-nspub-actions { display: flex; justify-content: flex-end; }
 #gd-nspub-pop .gd-nspub-result { margin-top: 8px; font-size: 11px; }
 #gd-nspub-pop .gd-nspub-result.packages-fork-ok { color: var(--success-fg); }

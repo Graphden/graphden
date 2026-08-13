@@ -50,7 +50,7 @@
 ;; tagged `{:ok …}` result so the route serialises success and conflict
 ;; the same way (no throw/`:try`).
 (defbase publish-package-apply
-  [pkg-name pkg-version bundle]
+  [pkg-name pkg-version bundle pkg-public]
   ;; Authz chokepoint: publishing to an ORG's registry requires the
   ;; `:publish-packages` org capability. Guard the deepest effectful core so
   ;; NO route (JSON or panel) can bypass it. Single-tenant-safe via the
@@ -70,6 +70,13 @@
                                 {:name pkg-name :version pkg-version}))
       {:ok false :reason "version-exists" :name pkg-name :version pkg-version}
       (let [content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
+            ;; Public = the explicit opt-in OR a platform-tier publish
+            ;; (single-tenant / operator — the shared registry). Normalised
+            ;; AT WRITE time so readers never re-derive tier from org-id:
+            ;; a row is platform-visible iff `:public?` is true. A tenant
+            ;; publish without the opt-in stays private to its org
+            ;; (`:org-id` stamped by the tenancy decorator, spec §5).
+            public? (boolean (or pkg-public (tc/current-platform-tier?)))
             row (sp/create-entity storage :package-version
                                   {:name pkg-name
                                    :version pkg-version
@@ -79,11 +86,13 @@
                                    :package-dependencies (:package-dependencies bundle)
                                    :secrets (vec (:secrets bundle))
                                    :content-hash content-hash
+                                   :public? public?
                                    :published-at (java.time.Instant/now)})]
         {:ok true
          :id (str (:id row))
          :name pkg-name
          :version pkg-version
+         :public public?
          :content-hash content-hash
          :fn-count (count fns)
          :dependencies (:dependencies bundle)

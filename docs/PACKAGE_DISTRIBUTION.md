@@ -60,9 +60,24 @@ implementation tasks.
 - **`:package-version` entity** — `src/graphden/schema/packages/schema.clj`.
   Immutable, content-hashed EDN snapshot of a namespace subtree's fn-defs +
   declared dependencies. Columns: `name`, `version`, `ns-root`, `fns` (jsonb
-  bundle), `dependencies` (jsonb), `content-hash`, `published-at`. NOT
+  bundle), `dependencies` (jsonb), `content-hash`, `published-at`, plus the
+  org-scoped-registry pair `org-id` / `public?` (packages spec §5, below). NOT
   versioned (immutable by contract — the publish path rejects re-publishing an
   existing `(name, version)`).
+- **Org-scoped registry (packages spec §5).** `:package-version` is an
+  org-scoped entity in the tenancy addon (`default-scoped-entities`): a
+  tenant's publish stamps `org-id` and is invisible to every other org —
+  browse, resolve and install all read through the scoped storage. The
+  explicit `public?` opt-in (the publish popover checkbox / `public` in the
+  publish JSON body) makes a row platform-visible while writes stay own-only,
+  so the publisher keeps provenance and can revoke public visibility. The
+  flag is **normalised at write time**: a platform-tier publish
+  (single-tenant / operator) always lands `public? = true`, so readers key on
+  the flag alone, never on the org value. Postgres RLS mirrors both rules
+  (an extra `"public?" IS TRUE` SELECT arm on `package_version`; own-only
+  writes). Legacy NULL-org rows read as the shared tier. Known limitation:
+  package NAMES are not org-scoped — `(name, version)` can exist once per
+  org; per-org name scoping is a future design task.
 - **Base-fns + HTTP routes** — `resources/packages/registry/registry/{fns.edn,impls.clj}`:
   `export-namespace`, `publish-package`, `list-package-versions`,
   `fetch-package-version`, `install-package`, wired to
@@ -440,7 +455,7 @@ above says exactly which are proven vs documented vs coupled.
 
 | Entity | Change | Versioned? | Rationale |
 |---|---|---|---|
-| `:package-version` | unchanged | no | immutable artifact (shipped) |
+| `:package-version` | `org-id` + `public?` (nullable, packages spec §5) | no | immutable artifact (shipped); org-RLS is a sanctioned column case (fn-metadata rule) — the registry row must be filterable before any graph materialisation exists |
 | `:package-install` | **new** — `(id, branch-id, package-name, version, org-id)`; UNIQUE `(branch-id, package-name)` | no | desired-state pin, same class as `:service`; per-branch so it lands in the branch's compile context with no new cache dimension |
 | `package.edn :dependencies` | value may be `{"name" "constraint"}` | — | version constraints (Task 2); bare string still accepted |
 

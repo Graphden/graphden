@@ -3,6 +3,7 @@
 You are implementing the Graphden **Packages & Dependencies** redesign. Two
 Cursor rules are authoritative — read BOTH first and treat every principle as
 binding:
+
 - **`.cursor/rules/function-metadata-and-identity.mdc`** — the single rule for
   WHERE a function property lives (graph by default → DB column only for
   identity-dedup/org-RLS/VCS → NEVER a name/prefix). It also carries the
@@ -13,6 +14,8 @@ binding:
 Also honor CLAUDE.md, docs/PHILOSOPHY.md, and docs/PACKAGE_DISTRIBUTION.md.
 
 ## Prime directives
+
+
 - **Property placement follows the fn-metadata rule.** A per-function property
   lives in the GRAPH by default (inherit a marker / a binding / a type — the
   `secret` = inherit `:secret-leaf` precedent); a DB column ONLY for
@@ -35,6 +38,8 @@ Also honor CLAUDE.md, docs/PHILOSOPHY.md, and docs/PACKAGE_DISTRIBUTION.md.
   release red. Chat in Russian, code/comments/commits in English.
 
 ## Current state (fold in before starting)
+
+
 - **Slice A1 is IMPLEMENTED and locally verified but NOT committed.** It relocated
   the packages panel off the Organization surface onto a Build-surface context-bar
   chip (`#gd-pkg-chip`) → popover (`#gd-pkg-pop`, 460px) that lazy-loads the
@@ -141,17 +146,27 @@ STILL TODO in this theme (deferred, optional): informed-consent at INSTALL time
 (surface the package's requested effects + public interface before install) — not
 yet built.
 
-**Slice C — org-scoped private registry (schema + RLS).**
-Add `:package-version.org_id` (nullable) + Postgres RLS mirroring `:fn`/`:ns`
-(versioned-column change = schema + codec + versioned-mirror + version-data-fields
-per the repo's enum/field checklist; rollback-tolerant migration). Publish →
-publisher's org (private) by default; an explicit "public" opt-in sets a
-platform-visible row (org_id NULL or a public flag — choose the shape that keeps
-RLS simple). Browser shows [My org] + [Public]; another org's private packages
-are invisible + uninstallable. Keep `:package-install` per-org/branch as-is.
-Verify: a two-org integration test — org A publishes private; org B cannot see or
-install it; org A publishes public; org B can. RLS FORCEd; operator sees only
-public unless scoped.
+**Slice C — org-scoped private registry (schema + RLS). ✅ SHIPPED 2026-08-13.**
+Done, with the "public flag" shape (spec §5's sanctioned alternative — it keeps
+RLS write policies own-only and preserves provenance + publisher revocation):
+`:package-version` += `org-id` (nullable text) AND `public?` (nullable bool),
+both justified in the schema docstring; NOT versioned, so no codec/mirror sites
+— the boot column-migration added both automatically. `publish-package-apply`
+normalises `public?` AT WRITE time (`(or opt-in platform-tier?)`), so readers
+key on the flag alone, never an org literal. Wired: `public` in the publish
+JSON body → `:_publish-public-raw`; a "Public" checkbox in the ns-publish
+popover (shown only when tenancy is active); panel form pins `{:value false}`;
+index reshape passes `org-id`/`public` + a "private" badge on `public ===
+false` rows. Tenancy repo: `default-scoped-entities` += `:package-version`,
+`visible?` gains a `(:public? row)` arm, `rls.clj` package_version SELECT
+policy gains `"public?" IS TRUE` (hand-quoted — `?` fails ident->sql's DDL
+pattern). Tests: registry_test `publish-public-flag-normalisation` (platform
+vs org-bound publish), storage_test `package-version-private-unless-public-flag`
+(two-org decorator: invisible private / visible public / own-only revoke),
+rls_test `rls-package-version-public-flag-arm` (raw-SQL two-org + revoke/delete
+blocked). All focused suites + lint green; rebuild healthy; live smoke
+verified columns + normalisation + index JSON. Known limitation documented:
+package NAMES are not org-scoped ((name,version) can exist once per org).
 
 **Slice — Governance view (Organization surface).**
 A read-mostly Organization panel: the org's package catalog, who-may-publish
@@ -159,6 +174,8 @@ A read-mostly Organization panel: the org's package catalog, who-may-publish
 install button.
 
 ## Coherence guardrails (from the review — hold these)
+
+
 - Encapsulation (interface vs internals) is a GRAPH property (a visibility
   marker via inheritance, the `secret-leaf` precedent) — never a name/prefix and
   never a new DB column (per the fn-metadata rule + §6). Until enforcement is
@@ -169,10 +186,13 @@ install button.
 - The context-bar hosts project-context selectors (workspace, branch, packages);
   the explorer filter-bar hosts the view lens. Do not move one into the other.
 - Registry-absent ⇒ all package UI hidden via `window.API` probe.
-- Until Slice C lands, do NOT advertise cross-org safety — publish/browse are
-  still global; Slice C is what makes the isolation claim true.
+- Slice C is what makes the cross-org isolation claim true — it landed
+  2026-08-13 (decorator + RLS + two-org tests), so the claim may now be made.
 
 ## Definition of done
+
 All acceptance invariants in the spec §10 hold; A1–C + governance shipped to prod
-via the release-train, each verified; no name/prefix hardcode; the single new
-field is `:package-version.org_id`; a two-org isolation test is green.
+via the release-train, each verified; no name/prefix hardcode; the new fields
+are `:package-version.org_id` + `:package-version.public?` (the spec-§5
+"public flag" shape, justified in the schema docstring); a two-org isolation
+test is green.

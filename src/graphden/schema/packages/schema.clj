@@ -30,10 +30,32 @@
    `versioning.storage.resolution/entity-config` — same as `:fn-execution`
    / `:service`.
 
+   ## Org-scoped registry (spec §5)
+
+   `:package-version` carries TWO tenancy fields, both justified against
+   the fn-metadata rule (a registry row is not a graph fn — its
+   visibility cannot be a graph marker):
+
+   - `:org-id` (nullable) — the publisher's org, stamped by the tenancy
+     addon's OrgScopedStorage exactly like `:fn`/`:ns`. NULL ≡ the
+     shared platform tier (pre-existing rows, single-tenant writes).
+     RLS mirrors the own+public read / own-only write policy.
+   - `:public?` (nullable bool) — the explicit publish-publicly opt-in.
+     A tenant's row stays in ITS org (provenance, own-only writes keep
+     holding at the RLS layer), while `:public? true` makes it
+     platform-visible. The flag — rather than re-stamping `org-id` to
+     public — keeps the RLS write policies own-only AND lets the
+     publisher revoke public visibility later (its row stays its own).
+
+   Known limitation (documented, not solved here): package NAMES are not
+   org-scoped, so `(name, version)` can exist once per org — an org that
+   sees both its own private row and a same-named public row gets
+   whichever the query returns first. Per-org name scoping is a future
+   design task.
+
    Future (NOT Phase 1):
    - DB-level `UNIQUE (name, version)` — currently enforced application-
      side in the publish flow.
-   - org-scoping for private registries (Phase 2).
    - `:yanked?` flag for soft-deprecating a bad version."
   (:require
     [graphden.schema.protocol.protocol :as ds]))
@@ -91,6 +113,17 @@
   #uuid "c559dbeb-742a-444b-8c26-848ae3c462c8")
 
 
+;; Publisher's org (nullable — NULL ≡ shared platform tier; see ns-doc
+;; § Org-scoped registry). Stamped by the tenancy addon's decorator.
+(def ^:private pv-org-id-field-uuid
+  #uuid "b1f6c2d8-4a7e-4b53-9e0d-2c8f5a1d7e94")
+
+
+;; Explicit publish-publicly opt-in (see ns-doc § Org-scoped registry).
+(def ^:private pv-public-field-uuid
+  #uuid "e7a3d9f1-5c28-4e6b-8d40-9b2f6c4a8e17")
+
+
 (def ^:private pv-published-at-field-uuid
   #uuid "d9527115-fdff-4333-a027-5c2459d2eda9")
 
@@ -132,8 +165,10 @@
    after `services.schema/extend-builder`.
 
    - `:package-version` — immutable published snapshot (content-addressed).
-     Platform-global (no `:org-id`): a published package is shared, not
-     tenant-owned.
+     Org-scoped (`:org-id` + `:public?`, see ns-doc § Org-scoped
+     registry): a tenant's publish is private to its org unless the
+     explicit public opt-in is set; NULL-org rows are the shared
+     platform registry.
    - `:package-install` — a per-branch version PIN (desired-state: \"branch B
      uses package P at version V\"). Carries `:org-id` because pins ARE
      tenant-owned — each org installs/updates packages in its own project.
@@ -164,6 +199,12 @@
                                 :nullable? true}
                       :content-hash {:uuid pv-content-hash-field-uuid
                                      :type :text}
+                      :org-id {:uuid pv-org-id-field-uuid
+                               :type :text
+                               :nullable? true}
+                      :public? {:uuid pv-public-field-uuid
+                                :type :bool
+                                :nullable? true}
                       :published-at {:uuid pv-published-at-field-uuid
                                      :type :timestamptz
                                      :nullable? true}})

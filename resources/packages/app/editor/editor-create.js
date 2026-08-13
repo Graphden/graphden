@@ -257,6 +257,14 @@ function openNsPublishPopover(anchorEl, nsPath) {
     +   '<input type="text" class="packages-publish-input" id="gd-nspub-name"></div>'
     + '<div class="gd-nspub-field"><label>Version</label>'
     +   '<input type="text" class="packages-publish-input" id="gd-nspub-version" placeholder="1.0.0"></div>'
+    // Public opt-in (spec §5): only meaningful under the tenancy addon — a
+    // tenant publish is private to its org unless this is checked. Single-
+    // tenant / operator publishes are always platform-visible, so the
+    // checkbox is omitted there rather than shown pre-checked and disabled.
+    + (typeof window.graphdenTenancyActive === 'function' && window.graphdenTenancyActive()
+      ? '<label class="gd-nspub-public"><input type="checkbox" id="gd-nspub-public"> '
+        + 'Public — visible outside your organization</label>'
+      : '')
     + '<div class="gd-nspub-actions">'
     +   '<button type="button" class="packages-install-btn" id="gd-nspub-go">Publish</button></div>'
     + '<div id="gd-nspub-result" class="gd-nspub-result"></div>';
@@ -285,10 +293,14 @@ function openNsPublishPopover(anchorEl, nsPath) {
     goBtn.disabled = true;
     setResult('Publishing…', true);
     try {
+      const publicInput = pop.querySelector('#gd-nspub-public');
       const resp = await authFetch(API.api_packages_publish, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, version, 'ns-root': nsPath }),
+        body: JSON.stringify({
+          name, version, 'ns-root': nsPath,
+          public: !!publicInput?.checked,
+        }),
       });
       if (resp.ok) {
         let fnCount = null;

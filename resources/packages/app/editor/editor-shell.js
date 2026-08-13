@@ -488,7 +488,10 @@
     // without the popover closing (multi-select checklist).
     const render = () => {
       const roots = gdWsRoots();
-      const current = (typeof graphdenWorkspaceRoots === 'function') ? graphdenWorkspaceRoots() : [];
+      // window-qualified: the bare identifier is shadowed by editor-branches.js's
+      // top-level `let graphdenWorkspaceRoots` (the backing ARRAY), so only the
+      // window property reaches the () accessor that returns a copy.
+      const current = (typeof window.graphdenWorkspaceRoots === 'function') ? window.graphdenWorkspaceRoots() : [];
       const hidden = (typeof graphdenHiddenList === 'function') ? graphdenHiddenList() : [];
       const active = current.length > 0;
       let html = '<h5>Workspace — choose what you see</h5>'

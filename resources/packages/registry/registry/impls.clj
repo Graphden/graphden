@@ -16,6 +16,7 @@
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -50,6 +51,17 @@
 ;; the same way (no throw/`:try`).
 (defbase publish-package-apply
   [pkg-name pkg-version bundle]
+  ;; Authz chokepoint: publishing to an ORG's registry requires the
+  ;; `:publish-packages` org capability. Guard the deepest effectful core so
+  ;; NO route (JSON or panel) can bypass it. Single-tenant-safe via the
+  ;; platform-tier short-circuit — mirrors the `:view-all-stats` precedent in
+  ;; app/execution/impls.clj; the org-cap seam is default-deny without the
+  ;; tenancy addon, so the short-circuit keeps self-hosted/operator publishing
+  ;; open. `:authz/forbidden` → 403 in the tenancy request-scope wrapper.
+  (when-not (or (tc/current-platform-tier?)
+                (tc/current-has-org-cap? :publish-packages))
+    (throw (ex-info "Publishing requires the publish-packages capability."
+                    {:type :authz/forbidden :capability :publish-packages})))
   (cr/record-effect! :db)
   (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)

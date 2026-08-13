@@ -108,6 +108,34 @@
   (boolean (@platform-cap-fn cap)))
 
 
+;; Fine-grained ORG-capability SEAM. The org axis (`:manage-users`,
+;; `:publish-packages`, …) is scoped to the current org, not cross-org — but
+;; the shape mirrors the platform-cap seam exactly: policy (grants + roles +
+;; owner-implies-all) lives in the addon, core keeps only the installable hook.
+;; The addon installs `org-admin/current-has-org-capability?` (owner ⇒ every
+;; org cap). Default-DENY with no addon, so a gate MUST pair this with a
+;; `current-platform-tier?` short-circuit to stay open in single-tenant /
+;; operator contexts — see the `:view-all-stats` precedent in
+;; `app/execution/impls.clj`.
+(defonce ^:private org-cap-fn (atom (constantly false)))
+
+
+(defn install-org-cap-fn!
+  "Install the addon's 1-arg org-capability predicate `(fn [cap] bool)` scoped
+   to the current org. `nil` restores the no-op default (no org capabilities)."
+  [f]
+  (reset! org-cap-fn (or f (constantly false))))
+
+
+(defn current-has-org-cap?
+  "True when the current principal effectively holds ORG capability `cap` in the
+   org in scope — a direct grant, a role bundle, or the owner umbrella — via the
+   installed seam. Default-deny with no tenancy addon; pair with
+   `current-platform-tier?` for single-tenant-safe gates."
+  [cap]
+  (boolean (@org-cap-fn cap)))
+
+
 (def ^:dynamic *current-principal*
   "The authenticated principal (`AuthProvider` result) for the current
    request, bound by the addon's request-scope. Read by per-namespace grant

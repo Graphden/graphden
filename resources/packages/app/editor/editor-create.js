@@ -166,9 +166,12 @@ function buildNsRowButtons(actionsEl, nsId, nsPath) {
   // version is an authoring act on the thing you built, so it lives on the
   // namespace — not on the Build packages chip (that is install/browse) and not
   // on the Organization page. Shown only when the OPTIONAL registry package is
-  // present (window.API probe, never a name).
+  // present (window.API probe, never a name) AND the principal may publish:
+  // default-SHOW (single-tenant / operator has no capability system), hidden
+  // only when the tenancy addon is active and withholds the `publish-packages`
+  // org capability — mirroring the server guard's platform-tier short-circuit.
   let publishBtn = null;
-  if (registryPresent()) {
+  if (registryPresent() && canPublishPackages()) {
     publishBtn = document.createElement('button');
     publishBtn.className = 'create-btn create-btn-inline ns-publish-btn';
     publishBtn.title = 'Publish this namespace as a package';
@@ -210,6 +213,16 @@ function buildNsRowButtons(actionsEl, nsId, nsPath) {
 function registryPresent() {
   return typeof window.API === 'object' && window.API !== null
     && typeof window.API.api_packages_installed !== 'undefined';
+}
+
+// May the current principal publish packages? Default-SHOW: single-tenant and
+// operator instances have no capability system (graphdenTenancyActive() false),
+// so publishing is open. When the tenancy addon IS active, require the
+// `publish-packages` org capability — matching the server guard, which
+// short-circuits on platform-tier and otherwise demands the same capability.
+function canPublishPackages() {
+  if (typeof window.graphdenTenancyActive !== 'function' || !window.graphdenTenancyActive()) return true;
+  return typeof window.graphdenHasCap === 'function' && window.graphdenHasCap('publish-packages');
 }
 
 let activeNsPublishPop = null;

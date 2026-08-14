@@ -106,6 +106,17 @@ check that the interface shows/hides by the graph marker.
 > (rows whose parent is the `:exports` base-fn), never a name. The
 > interface-is-small property also fits: enumerate the public few, not
 > the private many.
+>
+> **REFRAMED 2026-08-13 (design discussion, recorded in
+> [docs/ROADMAP.md § Package Interface Declaration](../docs/ROADMAP.md#package-interface-declaration-packages-spec-6-reframed)
+> — read THAT entry first, it supersedes §6's "hide internals"
+> wording):** the feature is an UPDATE-CONTRACT declaration, not
+> hiding — cross-language survey shows visibility's real function is
+> protecting refactoring rights across versions (Hyrum's law), and our
+> §7 fork/inherit flows require readable internals, so enforced privacy
+> is a PERMANENT non-goal and the UI treatment stays visual-only
+> (collapse). Implementation trigger = first real update breakage or
+> unusably noisy install browser, not design readiness.
 
 **Slice A1-finish — Build-surface browser (no schema).**
 Turn the relocated popover from "the old combined panel" into the spec's

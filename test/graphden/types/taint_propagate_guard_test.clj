@@ -82,6 +82,9 @@
     :pr-str :publish-package-apply :query-entities :query-param
     :query-ref-many-owners :quot :range :re-find? :read-resource-or-nil
     :re-replace :realize-request-body :recent-failures :reduce
+    ;; :request-capabilities reads the request-scope SEAM (server-derived
+    ;; capability names), never caller content — no taint to propagate.
+    :request-capabilities
     :render-hiccup :repeat :reset :resolve-branch-ref :resolve-fn
     :resolve-fn-version-id :resolve-form :resolve-package-version
     :resolve-type-fn-id :response-immutable? :rest :reverse

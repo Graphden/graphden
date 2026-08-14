@@ -30,6 +30,11 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
       () => !!document.querySelector('.node-overlay')
             && !!document.querySelector('#gd-inspector .gd-insp-name'),
       null, {timeout: 30000, polling: 100});
+    // The Overview tab is a server partial now (/partials/inspector-overview)
+    // — wait for its swap before reading the effects chips.
+    await page.waitForFunction(
+      () => !!document.querySelector('#gd-insp-overview .effects-chip'),
+      null, {timeout: 15000, polling: 100});
 
     // --- 1. Inspector reflects the selected fn ---
     const insp = await page.evaluate(() => ({

@@ -186,6 +186,11 @@
    :parent :get-route
    :args {:path "/partials/inspector-detail" :handler :_partial-inspector-detail-handler}}
 
+  {:name :partial-inspector-overview
+   :description "GET /partials/inspector-overview?fn-id={uuid} — the inspector's Overview tab (parent chips with named-ancestor resolution, return type, effects chips), computed server-side off the fn row + rich-types registry. PUBLIC for the same reason as `/partials/inspector-detail`. editor-shell.js swaps it into #gd-insp-overview and post-formats `.gd-prov-mono` type texts."
+   :parent :get-route
+   :args {:path "/partials/inspector-overview" :handler :_partial-inspector-overview-handler}}
+
   {:name :partial-fn-picker-incompat
    :description "GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid} — server-rendered incompat-explainer popover fragment for the fn-picker's `explainAndOfferAnyway` flow."
    :parent :get-auth-required

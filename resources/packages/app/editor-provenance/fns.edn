@@ -1403,4 +1403,239 @@
    :lambda-params [:request]
    :description "Ring handler for `GET /partials/inspector-detail?fn-id=` — bindings (3-way literal/ref/free) + provenance for the selected fn, as `text/html`. editor-shell.js swaps the response into #gd-insp-detail."
    :parent :html-ok-response
-   :args {:body :_insp-html}}]}
+   :args {:body :_insp-html}}
+
+  ;; =====================================================================
+  ;; GET /partials/inspector-overview — the inspector's OVERVIEW tab
+  ;; (round-3): parent chips (anonymous parents resolved to their first
+  ;; NAMED ancestor), the return type, the effects chips. Formerly a
+  ;; client innerHTML assembly that mirrored server reasoning three ways
+  ;; (formatTypeHint, the effects-chip loop, the ancestor walk that
+  ;; could contradict this file's own provenance). Server renders raw
+  ;; type text in `.gd-prov-mono`; editor-shell runs
+  ;; `formatServerTypeTexts` after the swap — same contract as the
+  ;; Bindings tab, so no second server-side type formatter exists.
+  ;; Shares the `:_insp-fn-id` / `:_insp-row` / `:_insp-entry` prefix.
+  ;; =====================================================================
+
+  {:name :_iov-parent-ids
+   :parent :get
+   :args {:coll :_insp-row :key {:value :parent-ids} :default {:value []}}}
+  {:name :_iov-has-parents?
+   :parent :not
+   :args {:value {:parent :empty?
+                  :args {:coll {:ref :_iov-parent-ids :type [:list :any]}}}}}
+
+  ;; --- first-NAMED-ancestor walk for an anonymous parent: the same
+  ;;     depth-6 DFS the client ran, as a `:fix` worklist over
+  ;;     `{:stack [[fn-id depth] …]}`. nil when nothing named in reach.
+  {:name :_iov-w-stack
+   :parent :get :args {:coll {:as :input} :key {:value :stack}}}
+  {:name :_iov-w-empty?
+   :parent :empty? :args {:coll {:ref :_iov-w-stack :type [:list :any]}}}
+  {:name :_iov-w-head
+   :parent :first :args {:coll {:ref :_iov-w-stack :type [:list :any]}}}
+  {:name :_iov-w-rest
+   :parent :rest :args {:coll {:ref :_iov-w-stack :type [:list :any]}}}
+  {:name :_iov-w-id
+   :parent :first :args {:coll {:ref :_iov-w-head :type [:list :any]}}}
+  {:name :_iov-w-depth
+   :parent :get :args {:coll {:ref :_iov-w-head :type [:list :any]} :key {:value 1} :default {:value 0}}}
+  {:name :_iov-w-row
+   :parent :get-entity
+   :args {:entity-type {:value "fn"} :id {:ref :_iov-w-id :type :uuid}}}
+  {:name :_iov-w-name
+   :parent :get :args {:coll :_iov-w-row :key {:value :name} :default nil}}
+  {:name :_iov-w-named?
+   :parent :some? :args {:value :_iov-w-name}}
+  {:name :_iov-w-too-deep?
+   :parent :gt :args {:nums [:_iov-w-depth {:value 6}]}}
+  {:name :_iov-w-child-depth
+   :parent :add :args {:nums [:_iov-w-depth {:value 1}]}}
+  ;; child frames [[gp-id d+1] …] — DFS: children go on TOP of the rest.
+  {:name :_iov-w-child-frame
+   :parent :list
+   :args {:items [{:as :witem} :_iov-w-child-depth]}}
+  {:name :_iov-w-children
+   :parent :map
+   :args {:func :_iov-w-child-frame
+          :coll {:parent :get
+                 :args {:coll :_iov-w-row :key {:value :parent-ids} :default {:value []}}}}}
+  {:name :_iov-w-descend-stack
+   :parent :concat
+   :args {:colls [:_iov-w-children {:ref :_iov-w-rest :type [:list :any]}]}}
+  {:name :_iov-w-state-descend
+   :parent :zipmap
+   :args {:keys [{:value :stack}] :vals [:_iov-w-descend-stack]}}
+  {:name :_iov-w-state-skip
+   :parent :zipmap
+   :args {:keys [{:value :stack}] :vals [{:ref :_iov-w-rest :type [:list :any]}]}}
+  {:name :_iov-w-recurse-descend
+   :parent :invoke :args {:func {:as :self} :arg :_iov-w-state-descend}}
+  {:name :_iov-w-recurse-skip
+   :parent :invoke :args {:func {:as :self} :arg :_iov-w-state-skip}}
+  {:name :_iov-w-step
+   :parent :cond
+   :args {:clauses [:_iov-w-empty?    {:value nil}
+                    :_iov-w-named?    :_iov-w-name
+                    :_iov-w-too-deep? :_iov-w-recurse-skip
+                    {:value true}     :_iov-w-recurse-descend]}}
+  {:name :_iov-w-initial-frame
+   :parent :list :args {:items [{:as :item} {:value 0}]}}
+  {:name :_iov-w-initial-stack
+   :parent :list :args {:items [:_iov-w-initial-frame]}}
+  {:name :_iov-w-initial
+   :parent :zipmap
+   :args {:keys [{:value :stack}] :vals [:_iov-w-initial-stack]}}
+  {:name :_iov-named-ancestor
+   :description "First NAMED ancestor of parent `:item` (depth ≤ 6), or nil — resolves an anonymous intermediate to the fn a person would recognise, matching the Bindings tab's provenance."
+   :parent :fix
+   :args {:step :_iov-w-step :input :_iov-w-initial}}
+
+  ;; --- one chip per DIRECT parent ---
+  {:name :_iov-pc-row
+   :parent :get-entity
+   :args {:entity-type {:value "fn"} :id {:as :item :type :uuid}}}
+  {:name :_iov-pc-name
+   :parent :get :args {:coll :_iov-pc-row :key {:value :name} :default nil}}
+  {:name :_iov-pc-named?
+   :parent :some? :args {:value :_iov-pc-name}}
+  {:name :_iov-pc-direct-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-chip gd-chip-ref"}}
+          :children [{:value "→ "} {:parent :to-str :args {:value :_iov-pc-name}}]}}
+  {:name :_iov-pc-resolved
+   :parent :_iov-named-ancestor}
+  {:name :_iov-pc-via-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-chip gd-chip-ref"
+                          :title "Through an anonymous intermediate parent"}}
+          :children [{:value "→ "} {:parent :to-str :args {:value :_iov-pc-resolved}}]}}
+  {:name :_iov-pc-anon-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "gd-chip gd-chip-ref"}}
+          :children [{:value "→ (anonymous)"}]}}
+  {:name :_iov-parent-chip
+   :description "Chip for one direct parent: its name, or (for an anonymous parent) the first named ancestor marked 'via anonymous', or the anonymous placeholder."
+   :parent :cond
+   :args {:clauses [:_iov-pc-named? :_iov-pc-direct-chip
+                    {:parent :some? :args {:value :_iov-pc-resolved}} :_iov-pc-via-chip
+                    {:value true} :_iov-pc-anon-chip]}}
+  {:name :_iov-parent-chips
+   :parent :map
+   :args {:func :_iov-parent-chip
+          :coll {:ref :_iov-parent-ids :type [:list :any]}}}
+
+  {:name :_iov-parents-row-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-row"}}
+          :children [{:value [:span {:class "gd-insp-k"} "Parent"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-insp-v"}}
+                             :children [:_iov-parent-chips]}}]}}
+  {:name :_iov-parents-row
+   :parent :if
+   :args {:test :_iov-has-parents?
+          :then :_iov-parents-row-shown
+          :else {:value [:span {:hidden "1"}]}}}
+
+  ;; --- Returns: RAW type text; the client's formatServerTypeTexts
+  ;;     prettifies `.gd-prov-mono` after the swap (raw kept in title).
+  {:name :_iov-return
+   :parent :get :args {:coll :_insp-entry :key {:value :return} :default nil}}
+  {:name :_iov-return-some?
+   :parent :some? :args {:value :_iov-return}}
+  {:name :_iov-returns-row-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-row"}}
+          :children [{:value [:span {:class "gd-insp-k"} "Returns"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-insp-v"}}
+                             :children [{:parent :hiccup
+                                         :args {:tag {:value "span"}
+                                                :attrs {:value {:class "gd-chip gd-chip-type gd-prov-mono"}}
+                                                :children [{:parent :pr-str :args {:value :_iov-return}}]}}]}}]}}
+  {:name :_iov-returns-row
+   :parent :if
+   :args {:test :_iov-return-some?
+          :then :_iov-returns-row-shown
+          :else {:value [:span {:hidden "1"}]}}}
+
+  ;; --- Effects chips (or the explicit `pure` note when the registry
+  ;;     entry exists but lists none).
+  {:name :_iov-effects
+   :parent :get :args {:coll :_insp-entry :key {:value :effects} :default {:value []}}}
+  {:name :_iov-effects-any?
+   :parent :not
+   :args {:value {:parent :empty?
+                  :args {:coll {:ref :_iov-effects :type [:list :any]}}}}}
+  {:name :_iov-eff-name
+   :parent :name :args {:value {:as :item}}}
+  {:name :_iov-effect-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class}]
+                         :vals [{:parent :str
+                                 :args {:parts [{:value "effects-chip effects-chip-"}
+                                                :_iov-eff-name]}}]}}
+          :children [:_iov-eff-name]}}
+  {:name :_iov-effect-chips
+   :parent :map
+   :args {:func :_iov-effect-chip
+          :coll {:ref :_iov-effects :type [:list :any]}}}
+  {:name :_iov-effects-row-chips
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-row"}}
+          :children [{:value [:span {:class "gd-insp-k"} "Effects"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "gd-insp-v gd-insp-effects"}}
+                             :children [:_iov-effect-chips]}}]}}
+  {:name :_iov-entry-some?
+   :parent :some? :args {:value :_insp-entry}}
+  {:name :_iov-effects-row
+   :parent :cond
+   :args {:clauses [:_iov-effects-any? :_iov-effects-row-chips
+                    :_iov-entry-some? {:value [:div {:class "gd-insp-row"}
+                                               [:span {:class "gd-insp-k"} "Effects"]
+                                               [:span {:class "gd-insp-v gd-insp-pure"} "pure"]]}
+                    {:value true} {:value [:span {:hidden "1"}]}]}}
+
+  ;; --- Assembly: the three rows, or the empty note when there is
+  ;;     nothing to show (no parents, no registry entry).
+  {:name :_iov-anything?
+   :parent :or
+   :args {:values [:_iov-has-parents? :_iov-entry-some?]}}
+  {:name :_iov-rows
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-insp-overview"}}
+          :children [:_iov-parents-row :_iov-returns-row :_iov-effects-row]}}
+  {:name :_iov-full
+   :parent :if
+   :args {:test :_iov-anything?
+          :then :_iov-rows
+          :else {:value [:div {:class "gd-insp-sec-empty"} "No further type info."]}}}
+  {:name :_iov-body
+   :description "Empty span for a nil id (keeps the reads off the nil path); the overview otherwise."
+   :parent :if
+   :args {:test :_insp-fn-id-nil?
+          :then {:value [:span {:hidden "1"}]}
+          :else :_iov-full}}
+  {:name :_iov-html
+   :parent :render-hiccup
+   :args {:hiccup :_iov-body}}
+  {:name :_partial-inspector-overview-handler
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/inspector-overview?fn-id=` — the inspector's Overview tab (parent chips with named-ancestor resolution, return type, effects) as `text/html`. editor-shell.js swaps it into #gd-insp-overview and runs formatServerTypeTexts."
+   :parent :html-ok-response
+   :args {:body :_iov-html}}]}

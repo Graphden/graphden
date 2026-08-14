@@ -205,12 +205,12 @@
   // were removed with the rail button.)
 
   // ---- Right inspector ------------------------------------------------------
-  // First slice: identity Overview off DIRECT fn fields the client already has
-  // (name, namespace, description, parents) — no re-derivation of server-known
-  // state. The rich panels (bindings, resolved types, effects, provenance, and
-  // this function's OWN stats/errors) arrive next as `GET /partials/inspector`.
-  // graph-first-exception (temporary, tracked): richer content migrates to a
-  // server-rendered partial; this keeps the selection→inspector loop legible.
+  // The persistent HEAD renders client-side off DIRECT fn fields the lookups
+  // cache already holds (name, namespace, description, the 2-line kind
+  // classifier) — deliberate: the selection→head loop stays local and
+  // re-derives no server reasoning. ALL tab content is server partials now:
+  // Overview (/partials/inspector-overview), Bindings (/inspector-detail),
+  // Runs (/execute-history), Versions (/fn-versions).
   const INSP_EMPTY =
     '<div class="gd-insp-empty">Select a node to inspect its bindings, types, '
     + 'effects, and this function’s own run history.</div>';
@@ -256,7 +256,6 @@
       ns = parts.join('.');
     }
 
-    const parentIds = Array.isArray(fn['parent-ids']) ? fn['parent-ids'] : [];
     const kind = gdFnKind(fn);
 
     let head = '<div class="gd-insp-head">'
@@ -284,10 +283,10 @@
           x.classList.toggle('active', on);
           x.setAttribute('aria-selected', String(on));
         });
-        renderInspTab(fnId, fn, kind, parentIds, lk);
+        renderInspTab(fnId, fn);
       });
     });
-    renderInspTab(fnId, fn, kind, parentIds, lk);
+    renderInspTab(fnId, fn);
 
     // On narrow viewports the inspector is a bottom sheet — reveal it on
     // selection; the × (shown only ≤1100 via CSS) dismisses it. On wide
@@ -297,66 +296,41 @@
     if (closeBtn) closeBtn.onclick = () => document.body.classList.remove('gd-insp-open');
   }
 
-  function inspRow(k, v) {
-    return '<div class="gd-insp-row"><span class="gd-insp-k">' + k + '</span>' + v + '</div>';
-  }
-
-  // Overview = identity extras (parents / returns / effects) off DIRECT fn
-  // fields + the SAME server-computed richTypes the card strips read.
-  function gdInspOverviewHtml(fn, parentIds, lk) {
-    let html = '';
-    // An ANONYMOUS direct parent is an implementation detail — showing
-    // "(anonymous)" here while the Bindings tab's provenance names the
-    // real ancestor made the two tabs contradict each other. Walk up to
-    // the first NAMED ancestor and show that (marked "via anonymous").
-    const firstNamed = function walk(pid, depth) {
-      const p = lk?.fnMap?.get(pid) ?? null;
-      if (!p || depth > 6) return null;
-      if (p.name) return p;
-      for (const gp of (Array.isArray(p['parent-ids']) ? p['parent-ids'] : [])) {
-        const hit = walk(gp, depth + 1);
-        if (hit) return hit;
-      }
-      return null;
-    };
-    const parentChips = parentIds.map((pid) => {
-      const p = lk?.fnMap?.get(pid) ?? null;
-      if (p && !p.name) {
-        const named = firstNamed(pid, 0);
-        if (named) {
-          return '<span class="gd-chip gd-chip-ref" title="Through an anonymous intermediate parent">→ '
-            + esc(fnLabel(named)) + '</span>';
+  // Overview content is a server partial (`GET /partials/inspector-overview`)
+  // — the parent-chip ancestor walk, type formatting and effects chips render
+  // where the reasoning lives; the client only mounts and post-formats.
+  let inspOverviewToken = null;
+  function gdLoadInspectorOverview(fnId) {
+    inspOverviewToken = fnId;
+    const url = '/partials/inspector-overview?fn-id=' + encodeURIComponent(fnId);
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+      .then((txt) => {
+        if (inspOverviewToken !== fnId) return; // selection moved on
+        const host = document.getElementById('gd-insp-overview');
+        if (host) {
+          host.innerHTML = txt;
+          // One type notation everywhere — same post-pass as the
+          // Bindings tab (raw kept in title=).
+          if (typeof formatServerTypeTexts === 'function') {
+            formatServerTypeTexts(host);
+          }
         }
-      }
-      return '<span class="gd-chip gd-chip-ref">→ ' + esc(fnLabel(p)) + '</span>';
-    }).join(' ');
-    if (parentChips) html += inspRow('Parent', '<span class="gd-insp-v">' + parentChips + '</span>');
-
-    const rt = (typeof richTypes === 'object' && richTypes && fn.name) ? richTypes[fn.name] : null;
-    let returnStr = (rt && typeof formatTypeHint === 'function') ? formatTypeHint(rt.return) : null;
-    if (!returnStr && fn['return-type']) returnStr = fn['return-type'];
-    if (returnStr) {
-      html += inspRow('Returns', '<span class="gd-insp-v"><span class="gd-chip gd-chip-type">'
-        + esc(returnStr) + '</span></span>');
-    }
-    const effects = (rt && Array.isArray(rt.effects)) ? rt.effects : [];
-    if (effects.length) {
-      const effChips = effects.map((e) => {
-        const nm = String(e).replace(/^:/, '');
-        return '<span class="effects-chip effects-chip-' + esc(nm) + '">' + esc(nm) + '</span>';
-      }).join(' ');
-      html += inspRow('Effects', '<span class="gd-insp-v gd-insp-effects">' + effChips + '</span>');
-    } else if (rt) {
-      html += inspRow('Effects', '<span class="gd-insp-v gd-insp-pure">pure</span>');
-    }
-    return html || '<div class="gd-insp-sec-empty">No further type info.</div>';
+      })
+      .catch(() => {
+        if (inspOverviewToken !== fnId) return;
+        const host = document.getElementById('gd-insp-overview');
+        if (host) host.innerHTML = '<div class="gd-insp-sec-empty">Could not load overview.</div>';
+      });
   }
 
-  function renderInspTab(fnId, fn, kind, parentIds, lk) {
+  function renderInspTab(fnId, fn) {
     const body = document.getElementById('gd-insp-tabbody');
     if (!body) return;
     if (inspTab === 'overview') {
-      body.innerHTML = gdInspOverviewHtml(fn, parentIds, lk);
+      body.innerHTML = '<div id="gd-insp-overview" class="gd-insp-overview-host">'
+        + '<div class="gd-insp-runs-loading">Loading overview…</div></div>';
+      gdLoadInspectorOverview(fnId);
       return;
     }
     if (inspTab === 'bindings') {

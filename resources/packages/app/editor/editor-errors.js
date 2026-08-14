@@ -19,9 +19,6 @@ function buildErrorsSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-errors';
   wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo">'
-    +   '<span class="ns-label">Errors</span>'
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/error-log" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

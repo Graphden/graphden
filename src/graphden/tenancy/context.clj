@@ -120,11 +120,27 @@
 (defonce ^:private org-cap-fn (atom (constantly false)))
 
 
+;; Install-state flag alongside the fn: the presence of an installed
+;; org-cap policy IS the "tenancy addon active" fact — the server-side
+;; twin of the editor's capability-header probe (graphdenTenancyActive).
+(defonce ^:private org-cap-installed? (atom false))
+
+
 (defn install-org-cap-fn!
   "Install the addon's 1-arg org-capability predicate `(fn [cap] bool)` scoped
    to the current org. `nil` restores the no-op default (no org capabilities)."
   [f]
+  (reset! org-cap-installed? (some? f))
   (reset! org-cap-fn (or f (constantly false))))
+
+
+(defn tenancy-addon-active?
+  "True when the tenancy addon has installed its org-capability policy —
+   i.e. this deployment runs the multi-tenant addon. Lets server-rendered
+   copy branch on the SAME fact the editor derives from capability
+   headers, instead of duplicating the branch client-side."
+  []
+  @org-cap-installed?)
 
 
 (defn current-has-org-cap?

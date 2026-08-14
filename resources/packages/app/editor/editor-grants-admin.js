@@ -29,9 +29,6 @@ function buildGrantsAdminSection() {
   // The .ns-children hx-get lazy-loads the server-rendered panel on insert;
   // the panel's own hx-post/hx-delete then handle create/delete + swap.
   wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo">'
-    +   '<span class="ns-label">Grants</span>'
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/grants-admin" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

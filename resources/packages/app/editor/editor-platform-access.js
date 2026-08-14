@@ -20,9 +20,6 @@ function buildPlatformAccessSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-platform-access';
   wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo">'
-    +   '<span class="ns-label">Platform access</span>'
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/platform-access" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

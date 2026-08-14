@@ -97,7 +97,8 @@
     :str-to-keyword :str-to-uuid :str-trim :str-upper
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
     :sub :subs :subtype?
-    :swap :sync-fn-defs-branch! :system-property :take :thread-count
+    :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
+    :thread-count
     :throw :throwable-class-name :throwable-message :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create
     :try-apply-seq-append :try-apply-seq-update :try-apply-tighten

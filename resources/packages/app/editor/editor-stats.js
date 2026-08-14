@@ -21,9 +21,6 @@ function buildStatsSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-stats';
   wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo">'
-    +   '<span class="ns-label">Stats</span>'
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/stats" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

@@ -25,9 +25,6 @@ function buildRolesAdminSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-roles-admin';
   wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo">'
-    +   '<span class="ns-label">Roles</span>'
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/roles-admin" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

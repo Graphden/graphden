@@ -44,6 +44,13 @@
    :parent :ring-response
    :args {:status 500}}
 
+  ;; NOTE (round-3 reachability audit): :unauthorized-response /
+  ;; :too-many-requests-response and their text-* twins are currently
+  ;; UNREFERENCED by first-party routes (core emits 401/429 through the
+  ;; web.errors envelope seam). They stay DELIBERATELY: web.response is
+  ;; user-facing starter vocabulary (like web.components) and the
+  ;; status × content-type matrix is kept complete — do not re-flag as
+  ;; dead code.
   {:name :unauthorized-response
    :description "Status axis: 401 Unauthorized."
    :parent :ring-response

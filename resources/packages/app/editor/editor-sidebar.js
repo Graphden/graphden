@@ -119,20 +119,11 @@ function buildPackagesGovernanceSection() {
   // Optional registry package absent → no /api/packages/* in window.API →
   // no governance section (probe, never a name).
   if (!window.API?.api_packages_installed) return null;
-  const tenancy = typeof window.graphdenTenancyActive === 'function'
-    && window.graphdenTenancyActive();
+  // Pure mount shell — the who-may-publish note ships INSIDE the partial
+  // now (server branches on the same tenancy fact via :tenancy-active?).
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-packages-governance';
   wrap.innerHTML = ''
-    + '<div class="packages-gov-who">'
-    + (tenancy
-      ? 'Publishing requires the <code>publish-packages</code> capability — the '
-        + 'org owner always holds it; grant it to members in Roles or Grants. '
-        + 'Published versions are private to this organization unless the '
-        + 'publish dialog’s “Public” opt-in is checked.'
-      : 'Publishing is open on this instance (no organization capability '
-        + 'system); published versions are visible to every user.')
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/packages-governance" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

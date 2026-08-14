@@ -191,7 +191,13 @@
 
 (defn- run-audit
   []
-  (let [packages (pkg/load-packages ["core" "storage" "web" "app" "examples"])
+  ;; The FULL first-party set incl. the optional registry/mcp packages —
+  ;; without them their fn-defs (and anything only they reference, e.g.
+  ;; :fn-id-by-name) show as false-positive dead (round-3 audit gap).
+  ;; NOTE: fns executed BY NAME from src (execute-by-name — the
+  ;; auth-pages/value-form/_form-* templates) still look unreachable to
+  ;; this structural walk; grep before believing a "dead" verdict.
+  (let [packages (pkg/load-packages ["core" "storage" "web" "app-base" "app" "registry" "mcp" "examples"])
         base-fn-defs (:base-fn-defs packages)
         fn-defs (:fn-defs packages)
         base-by-name (into {}

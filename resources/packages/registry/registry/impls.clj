@@ -83,6 +83,15 @@
   (tc/current-org))
 
 
+(defbase tenancy-active?
+  "True when the tenancy addon is wired (its org-capability policy is
+   installed). Single seam read (§3.1) — lets server-rendered copy
+   (the governance who-may-publish note) branch on the SAME fact the
+   editor derives from capability headers."
+  []
+  (tc/tenancy-addon-active?))
+
+
 (defbase graph-rows
   []
   (cr/record-effect! :db)
@@ -421,6 +430,7 @@
    :encode-unreadable-kws encode-unreadable-kws-fn
    :namespace-external-deps namespace-external-deps
    :current-org-id current-org-id
+   :tenancy-active? tenancy-active?
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply
    :resolve-package-version resolve-package-version

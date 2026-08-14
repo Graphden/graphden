@@ -22,9 +22,6 @@ function buildTypeErrorsSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-type-errors';
   wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo">'
-    +   '<span class="ns-label">Type errors</span>'
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/type-errors" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

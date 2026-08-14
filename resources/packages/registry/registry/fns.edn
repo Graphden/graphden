@@ -264,6 +264,11 @@
    :args {}
    :return-type :text}
 
+  {:name :tenancy-active?
+   :description "True when the tenancy addon is wired (its org-capability policy installed) — the server-side twin of the editor's capability-header probe. Branches server-rendered copy on the deployment shape."
+   :args {}
+   :return-type :bool}
+
   {:name :publish-package-apply
    :description "Atomic publish core — reject if `(:pkg-name, :pkg-version)` already exists (immutable registry), else hash + insert. The existence check stays adjacent to the insert to keep the race window minimal until the DB-level UNIQUE(name, version) hardening ships. Returns the CREATED ROW, or nil when the version already exists — both result envelopes are graph composition under `:publish-package`."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
@@ -1817,11 +1822,24 @@
    :args {:tag {:value "h4"}
           :attrs {:value {:class "packages-gov-title"}}
           :children [{:value "Installed (all branches)"}]}}
+  ;; Who-may-publish note (round-3): formerly two paragraphs of product
+  ;; copy hard-coded in editor-sidebar.js, branched client-side on the
+  ;; capability headers — the same fact :tenancy-active? reads at the
+  ;; seam. The copy now lives with the panel it introduces.
+  {:name :_gov-who
+   :parent :if
+   :args {:test {:parent :tenancy-active?}
+          :then {:value [:div {:class "packages-gov-who"}
+                         "Publishing requires the " [:code "publish-packages"]
+                         " capability — the org owner always holds it; grant it to members in Roles or Grants. Published versions are private to this organization unless the publish dialog’s “Public” opt-in is checked."]}
+          :else {:value [:div {:class "packages-gov-who"}
+                         "Publishing is open on this instance (no organization capability system); published versions are visible to every user."]}}}
+
   {:name :_gov-root
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "packages-governance"}}
-          :children [:_gov-cat-title :_gov-cat-block :_gov-pin-title :_gov-pin-block]}}
+          :children [:_gov-who :_gov-cat-title :_gov-cat-block :_gov-pin-title :_gov-pin-block]}}
   {:name :_gov-html
    :parent :render-hiccup :args {:hiccup :_gov-root}}
   {:name :_partial-packages-governance-handler

@@ -24,9 +24,6 @@ function buildOrgsAdminSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-orgs-admin';
   wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo">'
-    +   '<span class="ns-label">Orgs</span>'
-    + '</div>'
     + '<div class="ns-children" hx-get="/partials/orgs-admin" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';

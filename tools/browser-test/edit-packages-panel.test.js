@@ -1,9 +1,13 @@
-// Packages panel lifecycle e2e — the sidebar Packages section end to end.
+// Packages panel lifecycle e2e — the Build-surface packages chip popover
+// end to end (install moved OFF the Organization page in c2e68420:
+// install is a build act, so the browse/install browser hangs off the
+// #gd-pkg-chip context chip; Operate keeps only the governance view).
 //
 // Publishes a package at two versions (setup, via the JSON API), then
 // drives the FULL editor panel workflow in a real browser:
 //
-//   • Sidebar Packages section renders (auth-gated), header "Packages".
+//   • The packages chip reveals (registry package present) and its
+//     popover loads the server-rendered panel, header "Packages".
 //   • The browse <details> lists the published registry versions, each
 //     with an Install button.
 //   • Install (by reference) → the pin appears in the installed table
@@ -29,7 +33,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, nodeApi, nodeApiJson, openOperate} = require('./edit-test-helpers');
+const {assert, newContext, nodeApi, nodeApiJson} = require('./edit-test-helpers');
 
 
 // Per-run unique package name so reruns against a shared stack stay
@@ -58,7 +62,7 @@ const BH = {'X-Graphden-Branch': BRANCH};
 // "Loading…" re-renders the sidebar emits when it rebuilds the section.
 async function panelState(page) {
   return page.evaluate(() => {
-    const sec = document.querySelector('.sidebar-packages');
+    const sec = document.querySelector('#gd-pkg-pop');
     const root = sec && sec.querySelector('[data-packages-panel]');
     // Installed table is the DIRECT child of the panel root; the browse
     // table lives inside <details>, so `>` disambiguates them.
@@ -71,7 +75,7 @@ async function panelState(page) {
       : [];
     return {
       hasSection: !!sec,
-      label: sec?.querySelector('.ns-label')?.textContent?.trim(),
+      label: sec?.querySelector('h5')?.textContent?.trim(),
       loaded: !!root,
       emptyNotice: !!(root && root.querySelector(':scope > .packages-panel-empty')),
       installedRows: rows,
@@ -143,21 +147,20 @@ async function panelState(page) {
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/?branch=' + encodeURIComponent(BRANCH));
-    // Un-collapse the sidebar in case a stale pref persisted (a fresh
-    // e2e context won't have it, but keep the dev-demo run robust).
-    await page.evaluate(() => document.body.classList.remove('sidebar-collapsed'));
-    await openOperate(page); // panels live on the Operate surface (redesign 2026-08)
-    await page.waitForSelector('.sidebar-packages', {timeout: 15000});
+    // The chip reveals once window.API confirms the optional registry
+    // package is present; its popover lazy-loads the panel on click.
+    await page.waitForSelector('#gd-pkg-chip:not([hidden])', {timeout: 15000});
+    await page.click('#gd-pkg-chip');
 
     // ===================================================================
-    // Phase A: section renders + panel content loads (auth-gated).
+    // Phase A: popover opens + panel content loads (auth-gated).
     // ===================================================================
     await page.waitForFunction(() => {
-      const sec = document.querySelector('.sidebar-packages');
+      const sec = document.querySelector('#gd-pkg-pop');
       return sec && sec.querySelector('[data-packages-panel]');
     }, null, {timeout: 15000, polling: 100});
     const a = await panelState(page);
-    assert(a.hasSection, '.sidebar-packages section rendered');
+    assert(a.hasSection, '#gd-pkg-pop packages popover rendered');
     assert(a.label === 'Packages', 'header label is "Packages": ' + a.label);
     assert(a.loaded, 'panel content loaded (not stuck on Loading…)');
     assert(a.emptyNotice, 'nothing installed yet → empty-state notice shown');
@@ -166,11 +169,11 @@ async function panelState(page) {
     // Phase B: browse <details> lists both published versions.
     // ===================================================================
     await page.evaluate(() => {
-      const d = document.querySelector('.sidebar-packages details.packages-available');
+      const d = document.querySelector('#gd-pkg-pop details.packages-available');
       if (d) d.open = true;
     });
     await page.waitForFunction((pkg) => {
-      const posts = [...document.querySelectorAll('.sidebar-packages .packages-install-btn')]
+      const posts = [...document.querySelectorAll('#gd-pkg-pop .packages-install-btn')]
         .map((b) => b.getAttribute('hx-post') || '');
       return posts.some((p) => p.includes('version=1.0.0') && p.includes(pkg))
           && posts.some((p) => p.includes('version=1.1.0') && p.includes(pkg));
@@ -185,12 +188,12 @@ async function panelState(page) {
     // Phase C: Install 1.0.0 → pin appears in the installed table.
     // ===================================================================
     await page.evaluate((pkg) => {
-      const d = document.querySelector('.sidebar-packages details.packages-available');
+      const d = document.querySelector('#gd-pkg-pop details.packages-available');
       if (d) d.open = true;
       // Scope by BOTH name and version — the registry may hold other
       // packages that also publish a 1.0.0 (matching version alone would
       // click the wrong row).
-      const btn = [...document.querySelectorAll('.sidebar-packages .packages-install-btn')]
+      const btn = [...document.querySelectorAll('#gd-pkg-pop .packages-install-btn')]
         .find((x) => {
           const p = x.getAttribute('hx-post') || '';
           return p.includes('name=' + pkg) && p.includes('version=1.0.0');
@@ -201,7 +204,7 @@ async function panelState(page) {
     // PERF note at the top of this file — no longer a full-graph freeze);
     // 30s is GC-stall tolerance for the constrained stack, not freeze headroom.
     await page.waitForFunction((pkg) => {
-      const root = document.querySelector('.sidebar-packages [data-packages-panel]');
+      const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
       const t = root && root.querySelector(':scope > .packages-panel-table');
       return t && [...t.querySelectorAll('tbody tr td:first-child')]
         .some((td) => td.textContent === pkg);
@@ -216,7 +219,7 @@ async function panelState(page) {
     // Phase D: Update 1.0.0 → 1.1.0 via the version input + ↑.
     // ===================================================================
     await page.evaluate((pkg) => {
-      const root = document.querySelector('.sidebar-packages [data-packages-panel]');
+      const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
       const tr = [...root.querySelectorAll(':scope > .packages-panel-table tbody tr')]
         .find((r) => r.querySelector('td')?.textContent === pkg);
       tr.querySelector('.packages-version-input').value = '1.1.0';
@@ -227,7 +230,7 @@ async function panelState(page) {
     // heaviest panel op, but no longer a full-graph freeze. 30s covers a GC
     // stall on the constrained stack.
     await page.waitForFunction((pkg) => {
-      const root = document.querySelector('.sidebar-packages [data-packages-panel]');
+      const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
       const t = root && root.querySelector(':scope > .packages-panel-table');
       return t && [...t.querySelectorAll('tbody tr')].some((tr) => {
         const td = [...tr.querySelectorAll('td')];
@@ -249,11 +252,11 @@ async function panelState(page) {
     // hx-delete never fires. There is exactly one installed pin here, so
     // the child-combinator selector is unambiguous.
     await page.click(
-      '.sidebar-packages [data-packages-panel] > .packages-panel-table .packages-uninstall');
+      '#gd-pkg-pop [data-packages-panel] > .packages-panel-table .packages-uninstall');
     // uninstall only drops the pin (no materialize/recompile) — the cheapest
     // op; 30s is plenty of GC-stall margin.
     await page.waitForFunction((pkg) => {
-      const root = document.querySelector('.sidebar-packages [data-packages-panel]');
+      const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
       if (!root) return false;
       const t = root.querySelector(':scope > .packages-panel-table');
       const stillThere = t && [...t.querySelectorAll('tbody tr td:first-child')]

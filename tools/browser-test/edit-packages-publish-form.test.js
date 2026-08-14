@@ -1,22 +1,24 @@
-// Real HTMX form-submit e2e on the SINGLE-TENANT stack.
+// Publish-a-namespace e2e — the ⬆ namespace row-action, single-tenant.
 //
-// The packages panel's
-// "Publish a namespace" form is a genuine `<form hx-post>` served on the
-// plain stack, so this file drives it end-to-end through HTMX itself:
-// fill inputs → submit button → HTMX intercepts, form-encodes, POSTs
-// with the Authorization header from the htmx:configRequest bridge →
-// server publishes + re-renders → outerHTML swap of
-// `[data-packages-panel]` → the browse list shows the new version.
+// Publishing moved OFF the packages panel (packages spec §3, 87565ee6):
+// it is an AUTHORING act on the thing you built, so it lives on the
+// namespace row — a ⬆ button that opens `#gd-nspub-pop` (name pre-filled
+// from the ns tail, version input), which POSTs JSON
+// {name, version, ns-root} to /api/packages/publish and renders the
+// {ok, fn-count} result client-side. The old panel `<form hx-post>` is
+// deliberately not surfaced anymore (its POST route stays live at the
+// API level only), so this file drives the SHIPPED path end to end:
+// expand the tree → ⬆ on app.contact-demo → fill → Publish → result
+// note → the registry (server-side truth) carries the new version.
 //
 // Publish only exports the namespace + writes an immutable
 // :package-version row — it does NOT materialise fns into the graph
 // (only install/fork do), so there are no recompile waits and cleanup
-// is a single branch DELETE (pins + package-version rows are
-// branch-scoped; see edit-packages-panel.test.js for the long form of
-// that argument).
+// is a single branch DELETE (package-version rows are branch-scoped;
+// see edit-packages-panel.test.js for the long form of that argument).
 
 const {chromium} = require('playwright');
-const {assert, newContext, nodeApi, nodeApiJson, waitForServerHealthy, openOperate} =
+const {assert, newContext, nodeApi, nodeApiJson, waitForServerHealthy} =
   require('./edit-test-helpers');
 
 
@@ -33,75 +35,73 @@ const BH = {'X-Graphden-Branch': BRANCH};
   page.on('console', (m) => {
     if (m.type() === 'error') console.log('  (console.error: ' + m.text().slice(0, 160) + ')');
   });
-  console.log('edit-packages-publish-form — real hx-post form submit, single-tenant');
+  console.log('edit-packages-publish-form — ⬆ ns row-action publish, single-tenant');
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/?branch=' + encodeURIComponent(BRANCH));
     await page.evaluate(() => document.body.classList.remove('sidebar-collapsed'));
-    await openOperate(page); // panels live on the Operate surface (redesign 2026-08)
-    await page.waitForSelector('.sidebar-packages', {timeout: 15000});
-    await page.waitForFunction(() => {
-      const sec = document.querySelector('.sidebar-packages');
-      return sec && sec.querySelector('[data-packages-panel]');
-    }, null, {timeout: 15000, polling: 100});
 
-    // ===================================================================
-    // Drive the publish form THROUGH HTMX — no JS fetch, no node API.
-    // ===================================================================
-    await page.evaluate(() => {
-      const form = document.querySelector('.packages-publish-form');
-      const details = form && form.closest('details');
-      if (details) details.open = true;
+    // The lazy tree ships namespaces up front — expand `app` so the
+    // app.contact-demo row (the canonical always-present fixture ns,
+    // documented intent in its fns.edn header) is in the DOM.
+    await page.waitForSelector('[data-ns-path="app"] .ns-label', {timeout: 15000});
+    await page.click('[data-ns-path="app"] .ns-label');
+    await page.waitForSelector('[data-ns-path="app.contact-demo"]', {timeout: 15000});
+
+    // ⬆ is a row-action (hover-revealed) — fire its listener directly;
+    // the popover anchors on the button either way.
+    const hasBtn = await page.evaluate(() => {
+      const row = document.querySelector('[data-ns-path="app.contact-demo"]');
+      const btn = row && row.querySelector('.ns-publish-btn');
+      if (btn) btn.click();
+      return !!btn;
     });
-    await page.fill('.packages-publish-form input[name="name"]', PKG);
-    await page.fill('.packages-publish-form input[name="version"]', '1.0.0');
-    // app.contact-demo is the canonical always-present fixture namespace
-    // (documented intent in its fns.edn header; the panel lifecycle e2e
-    // publishes it too).
-    await page.fill('.packages-publish-form input[name="ns-root"]', 'app.contact-demo');
+    assert(hasBtn, 'the app.contact-demo row offers the ⬆ publish action');
+
+    await page.waitForSelector('#gd-nspub-pop', {timeout: 5000});
+    const prefill = await page.evaluate(() => ({
+      sub: document.querySelector('#gd-nspub-pop .gd-nspub-sub')?.textContent,
+      name: document.querySelector('#gd-nspub-name')?.value,
+      version: document.querySelector('#gd-nspub-version')?.value,
+    }));
+    assert(prefill.sub === 'app.contact-demo',
+           'popover cites the namespace: ' + prefill.sub);
+    assert(prefill.name === 'contact-demo',
+           'package name pre-fills from the ns tail: ' + prefill.name);
+    assert(prefill.version === '1.0.0', 'version defaults to 1.0.0');
+
+    await page.fill('#gd-nspub-name', PKG);
+    await page.fill('#gd-nspub-version', '1.0.0');
     // The publish is SYNCHRONOUS whole-package work server-side and can
     // queue behind a full-graph recompile a PREVIOUS sweep file kicked
-    // off — measured >60s first-attempt / ~5s on retry (bimodal, so no
-    // fixed bound is honest against it). Absorb any in-flight stall
-    // BEFORE the click, the same pattern service-lifecycle uses for its
-    // Save: /health stalls with the compile, so this waits it out and
-    // the bounded swap-wait below then measures only the publish itself.
+    // off — absorb any in-flight stall BEFORE the click (same pattern
+    // service-lifecycle uses for its Save).
     await waitForServerHealthy();
-    // A REAL click on the submit button — HTMX owns everything after it.
-    await page.click('.packages-publish-form button');
+    await page.click('#gd-nspub-go');
 
-    // The response swaps the WHOLE [data-packages-panel] via outerHTML.
-    // The swapped-in browse list must now offer the just-published
-    // version (its Install button's hx-post carries name+version).
-    //
-    // 60s (was 30s): the publish request is SYNCHRONOUS whole-package
-    // work server-side (materialize + sweep + recompile of a changed
-    // graph), and its latency swings with the executor's load window —
-    // measured 17s..30s+ across gate runs. Under WTQ_FLAKE_STRICT a
-    // borderline bound IS a flake source, so the bound reflects the
-    // operation's honest worst case; the poll still returns the moment
-    // the swap lands.
+    // The client renders the {ok, fn-count} result into the popover.
+    // 60s: the export is synchronous server-side and its latency swings
+    // with the executor's load window (measured 17s..30s+ across gate
+    // runs); the poll returns the moment the note lands.
     await page.waitForFunction((pkg) => {
-      const sec = document.querySelector('.sidebar-packages');
-      if (!sec || !sec.querySelector('[data-packages-panel]')) return false;
-      const posts = [...sec.querySelectorAll('.packages-install-btn')]
-        .map((b) => b.getAttribute('hx-post') || '');
-      return posts.some((p) => p.includes('name=' + pkg) && p.includes('version=1.0.0'));
+      const r = document.querySelector('#gd-nspub-result');
+      return r && r.className.includes('packages-fork-ok')
+          && r.textContent.includes('Published ' + pkg + '@1.0.0');
     }, PKG, {timeout: 60000, polling: 150});
-    assert(true, 'panel outerHTML swap landed and lists ' + PKG + '@1.0.0');
+    const note = await page.evaluate(
+      () => document.querySelector('#gd-nspub-result')?.textContent || '');
+    assert(/\(\d+ fns\)/.test(note),
+           'result note carries the fn-count: ' + note);
 
-    // Server-side truth, not just DOM: the freshly-rendered partial on
-    // this branch carries the published row.
+    // Server-side truth, not just DOM: the registry on this branch
+    // carries the published row (the panel partial's browse list offers
+    // it to install).
     const partial = await nodeApi('GET', '/partials/packages-panel', undefined, BH);
     assert(partial.ok, 'GET /partials/packages-panel → 200 (got ' + partial.status + ')');
     const html = await partial.text();
     assert(html.includes(PKG), 'server-rendered panel mentions the package');
     assert(html.includes('1.0.0'), 'server-rendered panel mentions the version');
-
-    // The form was form-encoded by HTMX itself — a blank-fields
-    // regression (the :lambda-params wire-break class) would have
-    // published an empty-named package or 4xx'd; both are caught above.
 
     console.log('PASS edit-packages-publish-form');
   } catch (e) {

@@ -4,7 +4,8 @@
 // Coverage:
 //   • Fresh load (no fn selected): the sidebar shows namespace headers
 //     but ZERO fn rows — nothing is fetched until a namespace opens.
-//   • The "(root)" pseudo-namespace shows a fn count from the :tree
+//   • The "(primitives)" pseudo-namespace (the old "(root)" label —
+//     a developer-ism users never shared) shows a fn count from the :tree
 //     payload even though its leaves are not loaded.
 //   • Expanding a namespace lazily fetches + renders its fn leaves.
 //
@@ -45,11 +46,11 @@ const {assert, newContext} = require('./edit-test-helpers');
     const initial = await page.evaluate(() => ({
       nsHeaders: document.querySelectorAll('.ns-header').length,
       entityItems: document.querySelectorAll('.entity-item').length,
-      // The (root) node's count badge comes from the :tree counts, not
+      // The (primitives) node's count badge comes from the :tree counts, not
       // from loaded leaves.
       rootCount: (() => {
         const hdr = [...document.querySelectorAll('.ns-header')]
-          .find((h) => /\(root\)/.test(h.textContent || ''));
+          .find((h) => /\(primitives\)/.test(h.textContent || ''));
         const badge = hdr && hdr.querySelector('.ns-count');
         return badge ? Number(badge.textContent) : null;
       })(),
@@ -60,7 +61,7 @@ const {assert, newContext} = require('./edit-test-helpers');
            'NO fn leaves are loaded before any namespace is expanded: '
            + initial.entityItems);
     assert(initial.rootCount !== null && initial.rootCount > 0,
-           'the (root) node shows a fn count from :tree without loading its '
+           'the (primitives) node shows a fn count from :tree without loading its '
            + 'leaves: ' + initial.rootCount);
 
     // ===================================================================
@@ -89,7 +90,7 @@ const {assert, newContext} = require('./edit-test-helpers');
            + loaded.join(', '));
 
     console.log('✓ lazy sidebar verified — O(namespaces) init, leaves on expand, '
-                + '(root) count from :tree');
+                + '(primitives) count from :tree');
   } catch (e) {
     process.exitCode = 1;
     console.error('✗ test failed:', e.message);

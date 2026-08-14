@@ -59,8 +59,13 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     // ===================================================================
     // Phase A: secrets no longer get their own sidebar section — the
     // "+ New secret" affordance is #secret-add-btn in the filter bar,
-    // auth-gated (visible because newContext seeds an admin token).
+    // auth-gated (visible because newContext seeds an admin token) AND
+    // lens-gated: it reveals only with the `secrets` LENS active
+    // (creating a secret belongs with viewing them), so focus the
+    // lens via its 🔒 chip first.
     // ===================================================================
+    await page.waitForSelector('#kind-filters [data-kind="secrets"]', {timeout: 15000});
+    await page.click('#kind-filters [data-kind="secrets"]');
     await page.waitForFunction(() => {
       const b = document.getElementById('secret-add-btn');
       return b && !b.hidden;
@@ -70,9 +75,9 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
       return {present: !!b, visible: !!b && !b.hidden, title: b?.title};
     });
     assert(addState.present && addState.visible,
-           '#secret-add-btn visible in the filter bar (admin authed)');
-    assert(addState.title === 'New secret',
-           'add button title is "New secret": ' + addState.title);
+           '#secret-add-btn visible with the secrets lens active (admin authed)');
+    assert(addState.title === 'Create a new secret',
+           'add button title: ' + addState.title);
 
     // ===================================================================
     // Phase B: click + → create form popover.

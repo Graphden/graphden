@@ -19,6 +19,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.postgres.util :as util]
+    [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]
     [next.jdbc :as jdbc]))
@@ -1318,3 +1319,38 @@
             "empty set → [] (matches nothing)")
         (finally
           (sp/close storage))))))
+
+
+;; 2026-08-15 fresh-boot killer: JDBC PreparedStatements cap at 65,535
+;; bind params, and params scale rows × columns — a row-count cap can't
+;; guard it. The batch ops chunk by parameter budget; this drives each op
+;; past the budget (12k rows × 6 cols = 72k params) and asserts the full
+;; result comes back. `*max-batch-size*` is bound up like the trusted
+;; bootstrap path does — the row cap is a USER-write guard, not a
+;; statement-shape law.
+(deftest batch-ops-chunk-past-the-statement-param-limit
+  (binding [sp-config/*max-batch-size* 100000]
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:f1 {:uuid #uuid "00000000-0000-0000-0000-000000000011" :type :text}
+                                          :f2 {:uuid #uuid "00000000-0000-0000-0000-000000000012" :type :text}
+                                          :f3 {:uuid #uuid "00000000-0000-0000-0000-000000000013" :type :text}
+                                          :f4 {:uuid #uuid "00000000-0000-0000-0000-000000000014" :type :text}
+                                          :f5 {:uuid #uuid "00000000-0000-0000-0000-000000000015" :type :text}})
+          _ (sp/initialize storage schema)
+          n 12000
+          rows (mapv (fn [i]
+                       {:id (random-uuid)
+                        :f1 (str "a" i) :f2 (str "b" i) :f3 (str "c" i)
+                        :f4 (str "d" i) :f5 (str "e" i)})
+                     (range n))]
+      (testing "create-entities chunks the INSERT and returns every row"
+        (let [created (sp/create-entities storage :user rows)]
+          (is (= n (count created)))))
+      (testing "upsert-entities chunks the INSERT..ON CONFLICT and updates every row"
+        (let [upserted (sp/upsert-entities storage :user (mapv #(assoc % :f1 "upd") rows))]
+          (is (= n (count upserted)))
+          (is (every? #(= "upd" (:f1 %)) upserted))))
+      (testing "update-entities chunks UPDATE..FROM VALUES and updates every row"
+        (let [updated (sp/update-entities storage :user (mapv #(assoc % :f2 "upd2") rows))]
+          (is (= n (count updated)))
+          (is (every? #(= "upd2" (:f2 %)) updated)))))))

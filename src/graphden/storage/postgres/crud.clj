@@ -40,6 +40,28 @@
   (mapv (fn [row] (mapv #(get row %) columns)) rows))
 
 
+(def ^:private max-statement-params
+  "PostgreSQL's JDBC driver caps one PreparedStatement at 65,535 bind
+   parameters. Parameters scale with rows × columns, so a ROW-count cap
+   can't guard this: the bundled-package bootstrap legitimately writes
+   10k+ `:binding-version` rows × 7 columns = 70k+ params in one batch
+   (2026-08-15, the fresh-DB boot killer). Budget kept under the cap
+   with headroom."
+  60000)
+
+
+(defn- chunk-rows
+  "Split `rows` into chunks that each stay under the statement
+   parameter budget for `n-cols` columns — one chunk for any batch
+   small enough for a single statement (the common case). A multi-chunk
+   batch executes as several statements on the SAME `ds`; mid-batch
+   failure semantics match the existing multi-statement entity-type
+   sequence in the sync path (no new transaction is opened here — `ds`
+   may already BE a caller's transaction, and nesting would break it)."
+  [rows n-cols]
+  (partition-all (max 1 (quot max-statement-params (max 1 n-cols))) rows))
+
+
 (defn- merge-back-ref-many
   "Pair `result-rows` from JDBC back with the `ref-many-records` we
    stripped off before persistence, so the returned records reflect
@@ -385,14 +407,17 @@
             [columnar-records ref-many-records] (split-ref-many-batch records fields)
             rows (mapv #(entity->row % fields) columnar-records)
             columns (collect-batch-columns rows)
-            values (batch-row-values rows columns)
-            query (sql/format {:insert-into table-name
-                               :columns columns
-                               :values values
-                               :returning [:*]}
-                              {:quoted true})
-            result-rows (batch-execute! ds query :create-entities
-                                        entity-name batch-ids batch-size)
+            result-rows (into []
+                              (mapcat (fn [chunk]
+                                        (batch-execute!
+                                          ds
+                                          (sql/format {:insert-into table-name
+                                                       :columns columns
+                                                       :values (batch-row-values (vec chunk) columns)
+                                                       :returning [:*]}
+                                                      {:quoted true})
+                                          :create-entities entity-name batch-ids batch-size)))
+                              (chunk-rows rows (count columns)))
             expected-count batch-size
             actual-count (count result-rows)]
         ;; Validate that all records were inserted
@@ -587,9 +612,14 @@
                                  :missing-ids missing})))
               (map #(get existing (:id %)) records))
             ;; Normal case: have columns to update
-            (let [query (build-batch-update-sql table-name-str rows columns update-columns fields)
-                  result-rows (batch-execute! ds query :update-entities
-                                              entity-name batch-ids batch-size)
+            (let [result-rows (into []
+                                    (mapcat (fn [chunk]
+                                              (batch-execute!
+                                                ds
+                                                (build-batch-update-sql table-name-str (vec chunk)
+                                                                        columns update-columns fields)
+                                                :update-entities entity-name batch-ids batch-size)))
+                                    (chunk-rows rows (count columns)))
                   actual-count (count result-rows)]
               ;; Validate that all records were updated
               (when (not= batch-size actual-count)
@@ -629,19 +659,22 @@
             [columnar-records ref-many-records] (split-ref-many-batch records fields)
             rows (mapv #(entity->row % fields) columnar-records)
             columns (collect-batch-columns rows)
-            values (batch-row-values rows columns)
             ;; Build ON CONFLICT DO UPDATE SET for all columns except :id
             ;; HoneySQL auto-generates SET col = EXCLUDED.col when given a vector
             update-columns (vec (remove #{:id} columns))
-            query (sql/format {:insert-into table-name
-                               :columns columns
-                               :values values
-                               :on-conflict [:id]
-                               :do-update-set update-columns
-                               :returning [:*]}
-                              {:quoted true})
-            result-rows (batch-execute! ds query :upsert-entities
-                                        entity-name batch-ids batch-size)
+            result-rows (into []
+                              (mapcat (fn [chunk]
+                                        (batch-execute!
+                                          ds
+                                          (sql/format {:insert-into table-name
+                                                       :columns columns
+                                                       :values (batch-row-values (vec chunk) columns)
+                                                       :on-conflict [:id]
+                                                       :do-update-set update-columns
+                                                       :returning [:*]}
+                                                      {:quoted true})
+                                          :upsert-entities entity-name batch-ids batch-size)))
+                              (chunk-rows rows (count columns)))
             expected-count batch-size
             actual-count (count result-rows)]
         ;; Validate that all records were upserted

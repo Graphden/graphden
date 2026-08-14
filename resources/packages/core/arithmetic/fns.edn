@@ -32,6 +32,12 @@
           :divisor {:type :numeric :description "Non-zero divisor."}}
    :return-type :numeric}
 
+  {:name :quot
+   :description "Integer quotient of `dividend / divisor` (Clojure's `quot` — truncates toward zero, so int inputs stay ints where `:div` would produce a ratio). Throws on a zero divisor."
+   :args {:dividend {:type :numeric :description "Number being divided."}
+          :divisor {:type :numeric :description "Non-zero divisor."}}
+   :return-type :numeric}
+
   {:name :neg
    :description "Negate a number."
    :args {:number {:type :numeric :description "Number to negate."}}

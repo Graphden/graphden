@@ -107,6 +107,16 @@
 ;; cases (main-branch / has-children) stay inside apply because they
 ;; surface as exceptions from `vs/delete-branch!` — pre-checking them
 ;; would duplicate underlying constraint logic.
+;;
+;; DECISION (2026-08 decomposition audit): delete stays ONE base-fn.
+;; The post-delete steps (router cache drop, eager service stop, epoch
+;; note) are write+invalidation coupling — the same accepted class as
+;; `:fork-package-fns` / `:materialize-package-fns`: they are
+;; router/epoch CONSISTENCY MACHINERY of the delete itself, not domain
+;; composition a user should be able to vary (a delete composed
+;; without them serves a dead branch's compiled registry). Contrast
+;; merge, whose post-commit carries a dedicated-thread invariant and
+;; a cross-branch target — worth its own primitive.
 
 
 

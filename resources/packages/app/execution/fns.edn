@@ -718,12 +718,49 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
-  {:name :usage-fn-stats
-   :description "7-day-style usage rollup for one fn from the pre-aggregated `:usage-stat` table — `{:runs :failed :cancelled :avg-ms}`, counts + durations ONLY (never args/results/errors), scoped to the CURRENT org (tenant → own runs; public → platform). Zeros when no rows or no pool."
+  {:name :fn-stats-raw
+   :description "Raw usage rollup read for one fn from the pre-aggregated `:usage-stat` table — `{:runs :failed :cancelled :duration-ms-sum}` (zeros when no rows or no pool), counts + durations ONLY (never args/results/errors), scoped to the CURRENT org (tenant → own runs; public → platform). The derived :avg-ms and the display envelope are graph composition (`:usage-fn-stats`)."
    :args {:fn-id {:type :uuid :description "The fn whose executions to aggregate."}
           :days {:type :int :description "Trailing window in days (e.g. 7)."}}
-   :return-type {:runs :int :failed :int :cancelled :int :avg-ms :int}
+   :return-type {:runs :int :failed :int :cancelled :int :duration-ms-sum :int}
    :effects #{:db}}
+
+  ;; --- :usage-fn-stats — the display rollup as graph composition:
+  ;;     raw read → derived run-weighted average (lazy :if guards the
+  ;;     zero-runs case) → envelope. ---
+  {:name :_ufs-raw
+   :parent :fn-stats-raw}
+  {:name :_ufs-runs
+   :parent :get
+   :args {:coll :_ufs-raw :key {:value :runs} :default {:value 0}}}
+  {:name :_ufs-failed
+   :parent :get
+   :args {:coll :_ufs-raw :key {:value :failed} :default {:value 0}}}
+  {:name :_ufs-cancelled
+   :parent :get
+   :args {:coll :_ufs-raw :key {:value :cancelled} :default {:value 0}}}
+  {:name :_ufs-sum
+   :parent :get
+   :args {:coll :_ufs-raw :key {:value :duration-ms-sum} :default {:value 0}}}
+  {:name :_ufs-has-runs?
+   :parent :gt
+   :args {:nums [:_ufs-runs {:value 0}]}}
+  {:name :_ufs-avg-raw
+   :parent :quot
+   :args {:dividend :_ufs-sum :divisor :_ufs-runs}}
+  ;; lazy :if — the quotient is only forced when runs > 0.
+  {:name :_ufs-avg
+   :parent :if
+   :args {:test :_ufs-has-runs?
+          :then :_ufs-avg-raw
+          :else {:value 0}}}
+
+  {:name :usage-fn-stats
+   :description "7-day-style usage rollup for one fn — `{:runs :failed :cancelled :avg-ms}`, counts + durations ONLY (never args/results/errors), scoped to the CURRENT org. Zeros when no rows or no pool. Pure graph composition over `:fn-stats-raw`; the run-weighted average is a graph-visible `:quot` behind a zero-guard `:if`."
+   :parent :zipmap
+   :args {:keys [{:value :runs} {:value :failed} {:value :cancelled} {:value :avg-ms}]
+          :vals [:_ufs-runs :_ufs-failed :_ufs-cancelled :_ufs-avg]}
+   :return-type :keyword-map}
 
   ;; Org-scoped rollups for the editor's Stats panel — every one reads ONLY
   ;; counts + durations from `:usage-stat`, always scoped to the CURRENT org

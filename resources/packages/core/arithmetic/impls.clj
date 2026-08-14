@@ -87,6 +87,14 @@
   (mod dividend divisor))
 
 
+(defbase quot-fn [dividend divisor]
+  (when (zero? divisor)
+    (throw (ex-info "Integer division by zero"
+                    {:type :execution-error/division-by-zero
+                     :dividend dividend :divisor divisor})))
+  (quot dividend divisor))
+
+
 (defbase neg [number]
   (- number))
 
@@ -188,6 +196,7 @@
    :mul {:impl mul :return-type-rule mul-return-rule :taint-propagate? true}
    :div {:impl div :taint-propagate? true}
    :mod {:impl mod-fn :return-type-rule mod-return-rule :taint-propagate? true}
+   :quot {:impl quot-fn :taint-propagate? true}
    :neg {:impl neg :return-type-rule neg-return-rule :taint-propagate? true}
    :abs {:impl abs-fn :return-type-rule abs-return-rule :taint-propagate? true}
    :eq {:impl eq :taint-propagate? true}

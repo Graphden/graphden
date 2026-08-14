@@ -60,7 +60,8 @@
     :error-http-status :every? :ex-data
     :ex-info :extract-entity-params
     :filter :filter-xf :find-first :first :fix :flatten
-    :fn-names-with-tag :fn-type-bound-effects :fork-package-fns
+    :fn-names-with-tag :fn-stats-raw :fn-type-bound-effects
+    :fork-package-fns
     :free-arg-slot-map :free-memory :future :get :get-entity
     :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
@@ -79,7 +80,7 @@
     :parse-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding :position-in :postwalk
     :pr-str :publish-package-apply :query-entities :query-param
-    :query-ref-many-owners :range :re-find? :read-resource-or-nil
+    :query-ref-many-owners :quot :range :re-find? :read-resource-or-nil
     :re-replace :realize-request-body :recent-failures :reduce
     :render-hiccup :repeat :reset :resolve-branch-ref :resolve-fn
     :resolve-fn-version-id :resolve-form :resolve-package-version
@@ -103,7 +104,7 @@
     :try-apply-update :type-check-binding-rej
     :type-name-kinds :update-entity :update-in :update-keys
     :update-vals :url-decode :usage-all-org-stats
-    :usage-fn-stats :usage-org-daily :usage-org-fn-stats
+    :usage-org-daily :usage-org-fn-stats
     :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
     :vault-get :vault-metadata-get :vault-metadata-put :vault-put :vec
     :version-qualified-ns :write-rej :zero? :zipmap})
@@ -120,7 +121,8 @@
     :empty? :eq :equal? :ex-data :ex-info :first :flatten :get :get-in :gt
     :gte :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
-    :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str :range
+    :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str
+    :quot :range
     :re-find? :re-replace :render-hiccup :repeat :rest :reverse :select-keys :digest-hex
     :slurp :some? :sort :str :str-contains? :str-join :str-len :str-lower
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim

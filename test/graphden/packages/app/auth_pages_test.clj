@@ -17,12 +17,14 @@
 (use-fixtures :once (harness/exec-fixture (str (ns-name *ns*))))
 
 
-(defn- render [fn-name args]
+(defn- render
+  [fn-name args]
   (exec/execute-with-named-args
     harness/*context* (harness/fn-id fn-name) args))
 
 
-(defn- provider-map [provider-set]
+(defn- provider-map
+  [provider-set]
   (into {} (map (fn [p] [p true])) provider-set))
 
 

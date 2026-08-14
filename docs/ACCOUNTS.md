@@ -115,11 +115,25 @@ on purpose — the limiter's existence isn't probeable.
 
 ## Login & account pages
 
-`/login`, `/account` and `/reset` are self-contained HTML
-(`accounts.pages`) served straight from the accounts router — inline
-CSS/JS calling the JSON `/auth/*` endpoints, brand-matched, with no
-editor coupling: enable the addon and a self-hosted instance has a
-working auth surface. Social sign-in renders **one unified button style**
+`/login`, `/account` and `/reset` are self-contained HTML served
+straight from the accounts router — inline CSS/JS calling the JSON
+`/auth/*` endpoints, brand-matched, with no editor coupling: enable the
+addon and a self-hosted instance has a working auth surface.
+
+The PRESENTATION is graph composition: the primary render path is the
+`app.auth-pages` fn-defs (page shell, social section, behavior JS as
+assets; also the verification/reset **email bodies**), executed on the
+platform ctx when `:accounts/routes-install` is wired with the optional
+`:ctx #ig/ref :exec/context` — re-theme the auth surface in the editor,
+no Clojure fork. The module still stays a drop-in: routes depend on an
+injected `page-renderer`/`email-renderer` callback, and with no ctx (or
+any graph render failure) they fall back to the built-in Clojure shell
+in `accounts.pages` / templates in `accounts.email`, so login survives
+a graph outage. The two sides are pinned byte-for-byte by
+`graphden.packages.app.auth-pages-test` — edit both together. The
+pages render on the platform ctx, which tenant graph writes never
+reach (org-scoped versions + the version-plane authz arm), so only a
+platform-trusted principal can vary this surface. Social sign-in renders **one unified button style**
 for GitHub, Google and Telegram — for Telegram the official widget's
 un-restylable iframe button is skipped; its script is loaded only for
 `Telegram.Login.auth`, wired to an own-styled button, and the payload

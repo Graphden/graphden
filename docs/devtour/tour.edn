@@ -943,9 +943,12 @@
     {:ns graphden.accounts.routes :defn make-router
      :say "The whole HTTP surface as one route-collection Ring router:
            password + social + telegram callbacks, verify links, identities
-           list/unlink, TOTP enroll/confirm/login-step, and the self-contained
-           /login + /account pages. Installed before the graph router; returns
-           nil to fall through, so an instance without the addon never sees it."}
+           list/unlink, TOTP enroll/confirm/login-step, and the /login +
+           /account pages. Installed before the graph router; returns nil to
+           fall through, so an instance without the addon never sees it. The
+           page/email PRESENTATION renders through the injected graph seam
+           (`app.auth-pages` on the platform ctx) with the built-in Clojure
+           shell as the graph-outage fallback — see `graph-page` just above."}
     {:ns graphden.accounts.totp :defn valid?
      :say "RFC 6238 in ~100 lines: base32, HOTP, a ±1-step skew window and a
            constant-time compare, verified against the RFC's reference vectors.

@@ -43,7 +43,6 @@
 (def ^:private type-label         #'vf/type-label)
 (def ^:private registry-pairs     #'vf/registry-pairs)
 (def ^:private build-leaf-form    #'vf/build-leaf-form)
-(def ^:private build-form         #'vf/build-form)
 (def ^:private inheritance-chain-info #'vf/inheritance-chain-info)
 
 

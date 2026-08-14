@@ -10,7 +10,10 @@
     [graphden.test-infra.exec-harness :as harness]))
 
 
-(use-fixtures :once (harness/exec-fixture (str (ns-name *ns*)) ["core" "web"]))
+;; The DEFAULT golden set — web/errors ships in `web`, and the budget
+;; sanctions exactly three package-set goldens (a bespoke ["core" "web"]
+;; would mint a fourth bootstrap nobody shares).
+(use-fixtures :once (harness/exec-fixture (str (ns-name *ns*))))
 
 
 (defn- respond

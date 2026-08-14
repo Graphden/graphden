@@ -137,3 +137,20 @@
     (testing "an account owns exactly its linked identities"
       (is (= #{"password" "github"}
              (set (map :provider (accounts/identities-for-account (storage) account-id))))))))
+
+
+(deftest ^:integration accounts-of-batches-and-matches-account-of
+  (let [mk #(accounts/create-account! (storage) {:display-name % :primary-email (str % "@example.com")})
+        a (mk "batch-a")
+        b (mk "batch-b")
+        ids [(str (:id a)) (str (:id b))]]
+    (testing "batch result row-for-row equals the per-id reads"
+      (is (= {(str (:id a)) (accounts/account-of (storage) (str (:id a)))
+              (str (:id b)) (accounts/account-of (storage) (str (:id b)))}
+             (accounts/accounts-of (storage) ids))))
+    (testing "unknown / nil / duplicate ids are tolerated and absent from the result"
+      (is (= #{(str (:id a))}
+             (set (keys (accounts/accounts-of
+                          (storage)
+                          [nil (str (:id a)) (str (:id a))
+                           (str (random-uuid)) "not-a-uuid"]))))))))

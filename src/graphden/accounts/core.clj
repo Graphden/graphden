@@ -78,6 +78,25 @@
         (first (sp/query-entities storage :account {:id account-id})))))
 
 
+(defn accounts-of
+  "Batch `account-of`: map of string account-id → `:account` row for every id
+   that resolves (absent otherwise). One `read-entities` round trip — the
+   admin-panel joins (org members, platform access) were calling `account-of`
+   per subject, an N+1. A non-uuid id resolves to nothing: account ids are
+   minted as `(str (:id account))`, and `account-of`'s text-query arm is
+   rejected by the where-clause type validation anyway."
+  [storage account-ids]
+  (let [ids (into [] (comp (remove nil?) (map str) (distinct)) account-ids)
+        uuid-of (into {} (keep (fn [s] (some->> (parse-uuid s) (vector s)))) ids)
+        rows (when (seq uuid-of)
+               (sp/read-entities storage :account (vec (vals uuid-of))))]
+    (into {}
+          (keep (fn [s]
+                  (when-let [acct (some->> (get uuid-of s) (get rows))]
+                    [s acct])))
+          ids)))
+
+
 (defn account-by-email
   "The single account whose VERIFIED `primary-email` is `email`, or nil."
   [storage email]

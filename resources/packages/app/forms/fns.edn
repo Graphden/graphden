@@ -188,20 +188,20 @@
    :parent :list
    :args {:items [{:value "div"} {:value {"class" "value-form-field"}}
                   :_form-field-label
-                  {:as :control :type :jsonb}]}}
+                  {:as :control :type :hiccup-node}]}}
 
   {:name :_form-record-group
    :description "A record editor — the `value-form-group` wrapper around the already-rendered field rows."
    :parent :concat
    :args {:colls [{:value ["div" {"class" "value-form-group"}]}
-                  {:as :fields :type [:list :jsonb]}]}}
+                  {:as :fields :type [:list :hiccup-node]}]}}
 
   {:name :_form-union-select
    :description "The union's branch `<select>` — wrapper attrs here; the `<option>` rows (type labels + the pre-selected branch) come computed from the assembler."
    :parent :concat
    :args {:colls [{:value ["select" {"class" "arg-value-edit-input value-form-union-select"
                                      "data-union-select" ""}]}
-                  {:as :options :type [:list :jsonb]}]}}
+                  {:as :options :type [:list :hiccup-node]}]}}
 
   ;; One union branch wrapper — indexed, hidden unless active.
   {:name :_form-union-branch-attrs-base
@@ -221,7 +221,7 @@
   {:name :_form-union-branch
    :description "One union branch — the indexed `value-form-union-branch` wrapper (hidden unless active) around the branch's control."
    :parent :list
-   :args {:items [{:value "div"} :_form-union-branch-attrs {:as :control :type :jsonb}]}}
+   :args {:items [{:value "div"} :_form-union-branch-attrs {:as :control :type :hiccup-node}]}}
 
   {:name :_form-union-wrap-attrs
    :parent :zipmap
@@ -229,12 +229,12 @@
           :vals [{:value "value-form-union"} {:value ""} {:as :active :type :text}]}}
   {:name :_form-union-head
    :parent :list
-   :args {:items [{:value "div"} :_form-union-wrap-attrs {:as :select :type :jsonb}]}}
+   :args {:items [{:value "div"} :_form-union-wrap-attrs {:as :select :type :hiccup-node}]}}
   {:name :_form-union-wrap
    :description "The union editor — outer wrapper (active-branch marker) around the branch `<select>` and the branch divs."
    :parent :concat
    :args {:colls [:_form-union-head
-                  {:as :branches :type [:list :jsonb]}]}}
+                  {:as :branches :type [:list :hiccup-node]}]}}
 
   {:name :_value-form-registry
    :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]); the resolver subtype-matches the slot's effective type, most-specific wins, falling back to _form-json."

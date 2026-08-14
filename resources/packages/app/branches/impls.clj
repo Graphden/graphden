@@ -178,120 +178,106 @@
 
 
 (defbase merge-branch!
-  "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` —
-   switches to the target branch, then folds source's history in.
-   Returns the merge record on success. Throws `ex-info` on
-   `:merge-conflict` (which the graph `:on-throw` handler dispatches
-   on via `:ex-data → :type`). The switch + merge are intrinsically
-   coupled — splitting them would break the atomic semantics, so the
-   single base-fn is the natural §3.1 unit.
-
-   After a successful merge, invalidates the TARGET branch's
-   cached per-branch handler / compiled-registry in the branch
-   router — the merge changes which versions resolve on target but
-   writes no row that the standard CRUD-notify path would touch.
-   Without this invalidate the target branch keeps serving its
-   pre-merge compiled closures and the merged-in versions are
-   invisible to readers until something else triggers a recompile
-   (verified by manual `bb deploy`).
-
-   Also restarts every running service whose `:branch-id` matches
-   the target branch via `recon/restart-services-on-branch!`.
-   HTTP-server services pick up new closures lazily on the next
-   request (the per-branch Ring-callable re-reads its registry),
-   but cron-loop services hold their fn-graph in a closed-over
-   reference and would otherwise keep firing the pre-merge graph
-   forever. The restart is best-effort — when no reconciler
-   singleton is wired (test contexts without `:exec/service-
-   reconciler`) the call is a no-op."
+  "The atomic merge core: `vs/switch-branch` → policy check →
+   `vs/merge-branch!`. Returns the merge record on success. Throws
+   `ex-info` on `:merge-conflict` / `:merge-protection-violation`
+   (the graph `:on-throw` handler dispatches on `:ex-data → :type`).
+   The three steps share the SAME switched-to-target storage OBJECT —
+   a runtime value no graph slot can carry — so they stay one
+   base-fn; everything around them (post-commit invalidation, the
+   `:skipped` audit) is graph composition (`:_merge-apply-record`)."
   [source-branch-id target-branch-id resolutions]
   (cr/record-effect! :db)
   (let [storage (vs/switch-branch (request/require-storage ctx) target-branch-id)
         ;; Error-tolerance Phase 5 — when the TARGET branch row carries
         ;; `:forbid-invalid?`, refuse while recorded type diagnostics
-        ;; exist on either side (throws :merge-protection-violation;
-        ;; the graph `:on-throw` case-dispatch renders the envelope).
+        ;; exist on either side (throws :merge-protection-violation).
         ;; Part of the atomic boundary: it must judge the same
         ;; switched-to-target storage the merge itself uses.
-        _ (merge-policy/validate-branch-policy! storage source-branch-id)
-        result (vs/merge-branch! storage source-branch-id
-                                 {:conflict-resolutions resolutions})]
-    ;; Invalidate only the fns the merge touched (source's version
-    ;; owners) — a DELTA, so the next request recompiles just those +
-    ;; their reverse-deps, not the whole registry. `invalidate-graph-
-    ;; cache!` runs `delta-recompile!`, which expands the seeds to their
-    ;; reverse-deps AND re-registers type-aliases (so a merged-in
-    ;; type-row resolves). With the branch-router, invalidate the
-    ;; merge's TARGET ctx — not the request's current ctx — which keeps
-    ;; a cross-branch merge correct. Without a router (single-branch /
-    ;; test harness), the request's own ctx IS the only view, so
-    ;; invalidate that. Only reached on SUCCESS: a `:merge-conflict`
-    ;; throws out of `vs/merge-branch!` above, so a rejected merge
-    ;; invalidates nothing.
-    ;; The invalidate + service restart run on a DEDICATED thread and
-    ;; the request thread joins it: the merge record is already
-    ;; committed, and an aborted client interrupts the http-kit worker
-    ;; — running these post-commit steps inline would let that
-    ;; interrupt skip them, leaving the target branch serving
-    ;; pre-merge closures until an unrelated recompile (a committed
-    ;; but invisible merge). On the dedicated thread they always
-    ;; finish; an interrupt during join only re-flags the worker.
-    (let [merge-bumps (some-> epoch/*request-bump-log* deref seq vec)
-          post-commit!
-          (fn []
-            (let [affected (mrg/merge-affected-fn-ids
-                             (branches/base-storage ctx) source-branch-id)]
-              (when (seq affected)
-                (exec-ctx/invalidate-graph-cache!
-                  (if-let [router (br/current-router)]
-                    (br/ctx-for router target-branch-id)
-                    ctx)
-                  affected)))
-            (try
-              (recon/restart-services-on-branch! ctx recon/running
-                                                 target-branch-id)
-              (catch Exception e
-                ;; Restart is observability-grade — the merge already
-                ;; succeeded; surface the failure but don't fail the API.
-                (log/warn e "post-merge service restart failed"
-                          {:target-branch-id target-branch-id})))
-            ;; Eager work done — mark this merge's bumps applied.
-            ;; `merge-bumps` was captured on the REQUEST thread: dynamic
-            ;; bindings don't convey to a raw Thread, so the 1-arity
-            ;; (request-log-draining) note would see nothing here.
-            (br/note-graph-epoch-validated!
-              (request/require-storage ctx) merge-bumps))
-          t (Thread. ^Runnable post-commit! "merge-post-commit")]
-      (Thread/.start t)
-      (try
-        (Thread/.join t)
-        (catch InterruptedException _
-          ;; Do NOT re-interrupt: this is a POOLED http-kit worker, and
-          ;; a re-set flag survives the return to the pool and kills the
-          ;; NEXT request on this thread (audit-7 e2e: a series of
-          ;; aborted merges poisoned enough workers that /health failed
-          ;; for 60s). The post-commit thread finishes regardless; the
-          ;; "preserve interrupt status" idiom is for threads the caller
-          ;; owns, which a pool thread is not.
-          (log/warn "client aborted during post-merge invalidation — invalidation continues on its own thread"
-                    {:target-branch-id target-branch-id}))))
-    ;; Attach the audit log — fns that have a version on the source
-    ;; branch but won't surface on the target after merge because
-    ;; their effective `:branch-local?` filtered them out at the
-    ;; resolver. API consumers (and the editor's post-merge alert)
-    ;; consume this directly. nil-safe shape: empty :branch-local
-    ;; key always present so downstream :zipmap envelopes don't
-    ;; have to special-case the no-skips case.
-    (assoc result
-           :skipped {:branch-local
-                     (mrg/skipped-as-branch-local
-                       (branches/base-storage ctx) source-branch-id)})))
+        _ (merge-policy/validate-branch-policy! storage source-branch-id)]
+    (vs/merge-branch! storage source-branch-id
+                      {:conflict-resolutions resolutions})))
+
+
+(defbase merge-post-commit!
+  "Post-commit finisher for a COMMITTED merge — delta-invalidate the
+   TARGET branch's ctx (seeded by `mrg/merge-affected-fn-ids`, so just
+   the touched fns + reverse-deps recompile, and a merged-in type-row
+   re-registers), then restart the target's services (cron loops hold
+   their fn-graph in a closed-over reference and would keep firing the
+   pre-merge graph forever; best-effort — no reconciler wired = no-op),
+   then note the epoch bumps.
+
+   The three steps run on a DEDICATED thread the request thread joins:
+   an aborted client interrupts the http-kit worker, and running them
+   inline would let that interrupt skip them — a committed but
+   invisible merge (the target keeps serving pre-merge closures until
+   an unrelated recompile). The thread + join + interrupt handling is
+   the indivisible invariant; the steps inside run on that thread and
+   therefore cannot be graph steps. With the branch-router this
+   invalidates the merge's TARGET ctx — not the request's current ctx
+   — which keeps a cross-branch merge correct. Returns nil."
+  [source-branch-id target-branch-id]
+  (cr/record-effect! :db)
+  (let [merge-bumps (some-> epoch/*request-bump-log* deref seq vec)
+        post-commit!
+        (fn []
+          (let [affected (mrg/merge-affected-fn-ids
+                           (branches/base-storage ctx) source-branch-id)]
+            (when (seq affected)
+              (exec-ctx/invalidate-graph-cache!
+                (if-let [router (br/current-router)]
+                  (br/ctx-for router target-branch-id)
+                  ctx)
+                affected)))
+          (try
+            (recon/restart-services-on-branch! ctx recon/running
+                                               target-branch-id)
+            (catch Exception e
+              ;; Restart is observability-grade — the merge already
+              ;; succeeded; surface the failure but don't fail the API.
+              (log/warn e "post-merge service restart failed"
+                        {:target-branch-id target-branch-id})))
+          ;; Eager work done — mark this merge's bumps applied.
+          ;; `merge-bumps` was captured on the REQUEST thread: dynamic
+          ;; bindings don't convey to a raw Thread, so the 1-arity
+          ;; (request-log-draining) note would see nothing here.
+          (br/note-graph-epoch-validated!
+            (request/require-storage ctx) merge-bumps))
+        t (Thread. ^Runnable post-commit! "merge-post-commit")]
+    (Thread/.start t)
+    (try
+      (Thread/.join t)
+      (catch InterruptedException _
+        ;; Do NOT re-interrupt: this is a POOLED http-kit worker, and
+        ;; a re-set flag survives the return to the pool and kills the
+        ;; NEXT request on this thread (audit-7 e2e: a series of
+        ;; aborted merges poisoned enough workers that /health failed
+        ;; for 60s). The post-commit thread finishes regardless; the
+        ;; "preserve interrupt status" idiom is for threads the caller
+        ;; owns, which a pool thread is not.
+        (log/warn "client aborted during post-merge invalidation — invalidation continues on its own thread"
+                  {:target-branch-id target-branch-id})))
+    nil))
+
+
+(defbase merge-skipped-branch-local
+  "Audit read — fns that have a version on the source branch but won't
+   surface on the target after merge because their effective
+   `:branch-local?` filtered them out at the resolver. One library
+   call (`mrg/skipped-as-branch-local`); the `{:branch-local […]}`
+   wrapper and its attachment to the merge record are graph steps."
+  [source-branch-id]
+  (cr/record-effect! :db)
+  (mrg/skipped-as-branch-local (branches/base-storage ctx) source-branch-id))
 
 
 (def impls
-  {:resolve-branch-ref  resolve-branch-ref
-   :diff-branches       diff-branches
-   :create-branch!      create-branch!
-   :delete-branch!      delete-branch!
-   :detect-conflicts    detect-conflicts
-   :merge-branch!       merge-branch!})
+  {:resolve-branch-ref         resolve-branch-ref
+   :diff-branches              diff-branches
+   :create-branch!             create-branch!
+   :delete-branch!             delete-branch!
+   :detect-conflicts           detect-conflicts
+   :merge-branch!              merge-branch!
+   :merge-post-commit!         merge-post-commit!
+   :merge-skipped-branch-local merge-skipped-branch-local})

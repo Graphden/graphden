@@ -70,6 +70,7 @@
     :keyword-to-str :list :list-all-graph-entities :log-warn
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :max-memory :merge :merge-branch!
+    :merge-post-commit! :merge-skipped-branch-local
     :middleware :missing-package-dependencies :mod :mul :name
     :namespace-external-deps :neg :neq
     :nil? :non-blank? :not :notify-after-write :or :os-arch

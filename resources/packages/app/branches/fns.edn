@@ -1478,25 +1478,80 @@
   ;; dispatch on `:type` from `(ex-data e)` uses the new `:ex-data`
   ;; primitive in `core.system`.
   {:name :merge-branch!
-   :description "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` — switches to target then folds source in. Throws ex-info `{:type :merge-conflict :conflicts [...]}` when resolutions don't cover every conflict, or `{:type :merge-protection-violation :invalid-fn-names [...]}` when the target branch's `:forbid-invalid?` policy refuses recorded type diagnostics (error-tolerance Phase 5); other failures surface as plain Exception."
+   :description "The atomic merge core: `vs/switch-branch` → `:forbid-invalid?` policy check → `vs/merge-branch!` (the three share one switched-to-target storage OBJECT — a runtime value no graph slot can carry). Throws ex-info `{:type :merge-conflict :conflicts [...]}` when resolutions don't cover every conflict, or `{:type :merge-protection-violation :invalid-fn-names [...]}` when the target branch's `:forbid-invalid?` policy refuses recorded type diagnostics (error-tolerance Phase 5); other failures surface as plain Exception. Post-commit invalidation and the :skipped audit are graph steps (`:_merge-apply-record`)."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}
           :resolutions {:type :nullable-keyword-map :required false :description "Per-conflict resolution map; absent for first-attempt merges."}}
    :return-type :keyword-map
    :effects #{:db}}
 
-  ;; --- Success path: build the response body off the merge record.
-  {:name :_merge-apply-record
-   :description "Stage 1 — actually run the merge. Throws on :merge-conflict; the `:try` outside catches. `:assert-some` wraps mirror the outer `:cond` (rejects nil source/target upstream); bridges the type-checker's per-arm narrowing gap."
+  {:name :merge-post-commit!
+   :description "Post-commit finisher for a COMMITTED merge — delta-invalidate the TARGET branch's ctx (seeds = the merge's touched fns), restart the target's services, note the epoch. Runs on a dedicated joined thread so a client abort can't skip it (a committed but invisible merge); the thread+join+interrupt handling is the indivisible invariant, so the three steps stay one base-fn. Returns nil."
+   :args {:source-branch-id {:type :uuid :description "Source branch id (seeds the affected-fn delta)."}
+          :target-branch-id {:type :uuid :description "Target branch id (whose ctx/services refresh)."}}
+   :return-type :null
+   :effects #{:db}}
+
+  {:name :merge-skipped-branch-local
+   :description "Audit read — fns with a version on the source branch that won't surface on the target after merge (effective `:branch-local?` filtered them at the resolver). One library call; empty vector = everything visible propagated."
+   :args {:source-branch-id {:type :uuid :description "Source branch id."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  ;; --- Success path: the merge WRITE SEQUENCE, graph-visible
+  ;;     (formerly one opaque Clojure body): commit → post-commit →
+  ;;     attach the :skipped audit. ---
+
+  ;; `:assert-some` wraps mirror the outer `:cond` (rejects nil
+  ;; source/target upstream); bridges the type-checker's per-arm
+  ;; narrowing gap.
+  {:name :_merge-source-id
+   :parent :assert-some
+   :args {:value {:parent :get
+                  :args {:coll {:as :source} :key {:value :id} :default nil}}}}
+  {:name :_merge-target-id
+   :parent :assert-some
+   :args {:value {:parent :get
+                  :args {:coll {:as :target} :key {:value :id} :default nil}}}}
+
+  {:name :_merge-record-committed
+   :description "Stage 1 — the atomic switch+policy+merge. Throws on :merge-conflict / :merge-protection-violation; the `:try` outside catches, so nothing later in the sequence runs on a rejected merge."
    :parent :merge-branch!
-   :args {:source-branch-id {:parent :assert-some
-                             :args {:value {:parent :get
-                                            :args {:coll {:as :source} :key {:value :id} :default nil}}}}
-          :target-branch-id {:parent :assert-some
-                             :args {:value {:parent :get
-                                            :args {:coll {:as :target} :key {:value :id} :default nil}}}}
+   :args {:source-branch-id :_merge-source-id
+          :target-branch-id :_merge-target-id
           :resolutions {:parent :get
                         :args {:coll {:as :parsed} :key {:value :resolutions} :default nil}}}}
+
+  {:name :_merge-post-commit
+   :description "Stage 2 — the post-commit finisher, sequenced AFTER the commit by the `:do` (so a rejected merge invalidates nothing) and targeting the merge's TARGET ctx (correct for a cross-branch merge)."
+   :parent :merge-post-commit!
+   :args {:source-branch-id :_merge-source-id
+          :target-branch-id :_merge-target-id}}
+
+  {:name :_merge-skipped-rows
+   :parent :merge-skipped-branch-local
+   :args {:source-branch-id :_merge-source-id}}
+
+  ;; nil-safe shape: the :branch-local key is always present so
+  ;; downstream envelopes don't special-case the no-skips case.
+  {:name :_merge-skipped-map
+   :parent :zipmap
+   :args {:keys [{:value :branch-local}]
+          :vals [:_merge-skipped-rows]}}
+
+  {:name :_merge-record-with-skipped
+   :description "The merge record + the :skipped audit the API consumers (and the editor's post-merge alert) read."
+   :parent :assoc
+   :args {:map :_merge-record-committed
+          :key {:value :skipped}
+          :value :_merge-skipped-map}}
+
+  {:name :_merge-apply-record
+   :description "The merge write sequence: commit (stage 1) → post-commit invalidate/restart (stage 2) → attach the :skipped audit. `:do` forces the steps in order and returns the last; `:_merge-record-committed` is result-cached, so the assoc re-reads the record without re-running the merge."
+   :parent :do
+   :args {:steps [:_merge-record-committed
+                  :_merge-post-commit
+                  :_merge-record-with-skipped]}}
 
   {:name :_merge-apply-record-id
    :parent :get :args {:coll :_merge-apply-record :key {:value :id} :default nil}}
@@ -1539,7 +1594,7 @@
           :vals [{:value true} :_merge-apply-record-shaped :_merge-apply-skipped]}}
 
   {:name :_merge-apply-success
-   :description "Success path — `:do` forces `:_merge-apply-record` (which performs the merge and THROWS on `:merge-conflict`, so the outer `:try` catches it and nothing below runs), then returns `:_merge-apply-success-envelope`. Cache invalidation is deliberately NOT a graph step here: the `:merge-branch!` base-fn does it in Clojure, as a DELTA on the merge's TARGET ctx seeded by the touched fns (`mrg/merge-affected-fn-ids`). That placement is what lets it (a) run only on success — a rejected merge invalidates nothing, (b) target the merge's target branch rather than the request's current ctx (correct for a cross-branch merge), and (c) be a delta rather than a full registry clear. `:do` returns the last step."
+   :description "Success path — `:do` forces `:_merge-apply-record` (the commit → post-commit → audit sequence; the commit THROWS on `:merge-conflict`, so the outer `:try` catches it and nothing below runs), then returns `:_merge-apply-success-envelope`. The post-commit invalidation is a graph step now (`:_merge-post-commit`); its three guarantees are preserved by construction: (a) it runs only on success — sequenced after the commit in the `:do`, (b) it targets the merge's TARGET ctx, not the request's current ctx (inside `:merge-post-commit!`), and (c) it is a DELTA seeded by the touched fns, not a full registry clear. `:do` returns the last step."
    :parent :do
    :args {:steps [:_merge-apply-record
                   :_merge-apply-success-envelope]}}

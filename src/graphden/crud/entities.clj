@@ -712,8 +712,8 @@
      ;; tolerance Phase 3) — a cheap in-memory map lookup; realised
      ;; only by the `:tree` / `:subtree` scopes that surface them.
      :diag-counts (delay (into {}
-                              (map (fn [[fid ds]] [fid (count ds)]))
-                              (diag/branch-errors (vcore/current-branch-id storage))))
+                               (map (fn [[fid ds]] [fid (count ds)]))
+                               (diag/branch-errors (vcore/current-branch-id storage))))
      :namespaces (delay (vec (sp/query-entities storage :ns {})))}))
 
 

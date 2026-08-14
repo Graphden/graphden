@@ -610,6 +610,16 @@
     :else                  (pr-str t)))
 
 
+(defn- render-template
+  "Execute one of the `app.forms` composite structure templates
+   (`:_form-record-group` / `:_form-record-field` / `:_form-union-*`)
+   — the presentational shells live in the GRAPH (restyle them there,
+   like the leaf controls); this assembler computes the parts and hands
+   them in."
+  [ctx template-name args]
+  (executor/execute-by-name ctx template-name args))
+
+
 (defn build-form
   "Recursively assemble the form hiccup for a `resolve-form` descriptor.
    `path` is the dotted `data-field-path` prefix; `id` (when non-nil)
@@ -622,28 +632,33 @@
    the branch the current value fits, the editor swaps on change; a
    union branch that is itself composite falls back to a JSON editor.
    Lists fall back to a JSON editor (items are edited via
-   `/api/sequence/*`)."
+   `/api/sequence/*`).
+
+   The recursion + type logic (branch fit, labels, bounds) live HERE;
+   the presentational wrappers are graph templates (`render-template`)."
   [ctx desc path id value]
   (case (:kind desc)
     :record
-    (into ["div" {"class" "value-form-group"}]
-          (map (fn [f]
-                 (let [fname  (name (:name f))
-                       fp     (if (str/blank? path) fname (str path "." fname))
-                       ;; A nested record / union is a group — its
-                       ;; label is a heading, not a `<label for>`.
-                       group? (boolean (#{:record :union} (:kind (:form f))))
-                       fid    (when-not group? (str "vf-" fp))
-                       fval   (when (map? value)
-                                (if (contains? value (keyword fname))
-                                  (get value (keyword fname))
-                                  (get value fname)))]
-                   ["div" {"class" "value-form-field"}
-                    (if fid
-                      ["label" {"class" "value-form-label" "for" fid} fname]
-                      ["div" {"class" "value-form-label"} fname])
-                    (build-form ctx (:form f) fp fid fval)]))
-               (:fields desc)))
+    (render-template
+      ctx "_form-record-group"
+      {:fields
+       (mapv (fn [f]
+               (let [fname  (name (:name f))
+                     fp     (if (str/blank? path) fname (str path "." fname))
+                     ;; A nested record / union is a group — its
+                     ;; label is a heading, not a `<label for>`.
+                     group? (boolean (#{:record :union} (:kind (:form f))))
+                     fid    (when-not group? (str "vf-" fp))
+                     fval   (when (map? value)
+                              (if (contains? value (keyword fname))
+                                (get value (keyword fname))
+                                (get value fname)))]
+                 (render-template
+                   ctx "_form-record-field"
+                   {:field-id fid
+                    :field-name fname
+                    :control (build-form ctx (:form f) fp fid fval)})))
+             (:fields desc))})
 
     :union
     (let [branches (:branches desc)
@@ -651,32 +666,32 @@
                                 (fn [i br] (when (value-fits? value (:type br)) i))
                                 branches))
                        0)
-          select   (into ["select" {"class" "arg-value-edit-input value-form-union-select"
-                                    "data-union-select" ""}]
-                         (map-indexed
-                           (fn [i br]
-                             ["option" (cond-> {"value" (str i)}
-                                         (= i active) (assoc "selected" "selected"))
-                              (type-label (:type br))])
-                           branches))
+          options  (map-indexed
+                     (fn [i br]
+                       ["option" (cond-> {"value" (str i)}
+                                   (= i active) (assoc "selected" "selected"))
+                        (type-label (:type br))])
+                     branches)
+          select   (render-template ctx "_form-union-select"
+                                    {:options (vec options)})
           ;; Branch controls share `path` and carry no `id` — only the
           ;; active (visible) branch is collected. A composite branch
           ;; falls back to a JSON editor.
           branch-divs
           (map-indexed
             (fn [i br]
-              ["div" (cond-> {"class" "value-form-union-branch"
-                              "data-union-branch" (str i)}
-                       (not= i active) (assoc "hidden" "hidden"))
-               (build-leaf-form ctx
-                                (if (= :leaf (:kind (:form br))) (:type br) :any)
-                                path nil)])
+              (render-template
+                ctx "_form-union-branch"
+                {:index (str i)
+                 :active? (= i active)
+                 :control (build-leaf-form ctx
+                                           (if (= :leaf (:kind (:form br))) (:type br) :any)
+                                           path nil)}))
             branches)]
-      (into ["div" {"class" "value-form-union"
-                    "data-form-union" ""
-                    "data-union-active" (str active)}
-             select]
-            branch-divs))
+      (render-template ctx "_form-union-wrap"
+                       {:select select
+                        :branches (vec branch-divs)
+                        :active (str active)}))
 
     :list
     (build-leaf-form ctx :any path id)

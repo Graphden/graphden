@@ -150,6 +150,92 @@
    :args {:value ["div" {"class" "value-form-widget"
                          "data-form-widget" "secret-binding"}]}}
 
+  ;; ===================================================================
+  ;; COMPOSITE structure templates (round-2 decomposition): the
+  ;; record/union WRAPPERS the server-side assembler
+  ;; (`crud.value-form/build-form`) renders THROUGH the graph — restyle
+  ;; the composite editors here, exactly like the leaf controls above.
+  ;; The recursion and the type logic (union branch fit, refinement
+  ;; bounds, enum members) stay in Clojure; the graph owns the
+  ;; presentational shells it wraps the computed parts in. Hiccup tags
+  ;; and attr keys are STRINGS by design (the editor renders this form
+  ;; data client-side), same as the leaf consts.
+  ;; ===================================================================
+
+  ;; A record field's label — <label for> when the control has an id,
+  ;; a plain heading div for a nested group.
+  {:name :_form-field-has-id?
+   :parent :some?
+   :args {:value {:as :field-id :type :nullable-text}}}
+  {:name :_form-field-label-attrs
+   :parent :zipmap
+   :args {:keys [{:value "class"} {:value "for"}]
+          :vals [{:value "value-form-label"} {:as :field-id}]}}
+  {:name :_form-field-label-el
+   :parent :list
+   :args {:items [{:value "label"} :_form-field-label-attrs {:as :field-name :type :text}]}}
+  {:name :_form-field-heading-el
+   :parent :list
+   :args {:items [{:value "div"} {:value {"class" "value-form-label"}} {:as :field-name}]}}
+  {:name :_form-field-label
+   :parent :if
+   :args {:test :_form-field-has-id?
+          :then :_form-field-label-el
+          :else :_form-field-heading-el}}
+
+  {:name :_form-record-field
+   :description "One record field row — the label/heading plus the field's control, in the `value-form-field` wrapper."
+   :parent :list
+   :args {:items [{:value "div"} {:value {"class" "value-form-field"}}
+                  :_form-field-label
+                  {:as :control :type :jsonb}]}}
+
+  {:name :_form-record-group
+   :description "A record editor — the `value-form-group` wrapper around the already-rendered field rows."
+   :parent :concat
+   :args {:colls [{:value ["div" {"class" "value-form-group"}]}
+                  {:as :fields :type [:list :jsonb]}]}}
+
+  {:name :_form-union-select
+   :description "The union's branch `<select>` — wrapper attrs here; the `<option>` rows (type labels + the pre-selected branch) come computed from the assembler."
+   :parent :concat
+   :args {:colls [{:value ["select" {"class" "arg-value-edit-input value-form-union-select"
+                                     "data-union-select" ""}]}
+                  {:as :options :type [:list :jsonb]}]}}
+
+  ;; One union branch wrapper — indexed, hidden unless active.
+  {:name :_form-union-branch-attrs-base
+   :parent :zipmap
+   :args {:keys [{:value "class"} {:value "data-union-branch"}]
+          :vals [{:value "value-form-union-branch"} {:as :index :type :text}]}}
+  {:name :_form-union-branch-attrs-hidden
+   :parent :assoc
+   :args {:map :_form-union-branch-attrs-base
+          :key {:value "hidden"}
+          :value {:value "hidden"}}}
+  {:name :_form-union-branch-attrs
+   :parent :if
+   :args {:test {:as :active? :type :bool}
+          :then :_form-union-branch-attrs-base
+          :else :_form-union-branch-attrs-hidden}}
+  {:name :_form-union-branch
+   :description "One union branch — the indexed `value-form-union-branch` wrapper (hidden unless active) around the branch's control."
+   :parent :list
+   :args {:items [{:value "div"} :_form-union-branch-attrs {:as :control :type :jsonb}]}}
+
+  {:name :_form-union-wrap-attrs
+   :parent :zipmap
+   :args {:keys [{:value "class"} {:value "data-form-union"} {:value "data-union-active"}]
+          :vals [{:value "value-form-union"} {:value ""} {:as :active :type :text}]}}
+  {:name :_form-union-head
+   :parent :list
+   :args {:items [{:value "div"} :_form-union-wrap-attrs {:as :select :type :jsonb}]}}
+  {:name :_form-union-wrap
+   :description "The union editor — outer wrapper (active-branch marker) around the branch `<select>` and the branch divs."
+   :parent :concat
+   :args {:colls [:_form-union-head
+                  {:as :branches :type [:list :jsonb]}]}}
+
   {:name :_value-form-registry
    :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]); the resolver subtype-matches the slot's effective type, most-specific wins, falling back to _form-json."
    :parent :const

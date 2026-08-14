@@ -582,34 +582,10 @@
       (finally (sp/close storage)))))
 
 
-(deftest build-form-test
-  (let [storage (setup/create-test-storage)]
-    (try
-      (let [ctx (forms-ctx storage)]
-        (testing "a record descriptor becomes a labelled fieldset"
-          (let [f (build-form ctx (vf/resolve-form {:host :text :port :int})
-                              "" nil {:host "h" :port 8080})]
-            (is (in-tree? f "value-form-group"))
-            (is (in-tree? f "value-form-field"))
-            (is (in-tree? f "host"))
-            (is (in-tree? f "port"))))
-        (testing "a union descriptor renders a branch <select> plus branches,
-                  pre-selecting the branch the current value fits"
-          (let [int-fit  (build-form ctx (vf/resolve-form [:union :int :text])
-                                     "" nil 5)
-                text-fit (build-form ctx (vf/resolve-form [:union :int :text])
-                                     "" nil "hello")]
-            (is (in-tree? int-fit "value-form-union"))
-            (is (= "0" (get (nth int-fit 1) "data-union-active")))
-            (is (= "1" (get (nth text-fit 1) "data-union-active")))))
-        (testing "a list descriptor falls back to a JSON editor"
-          (is (= "textarea"
-                 (first (build-form ctx (vf/resolve-form [:list :int])
-                                    "" nil [1 2])))))
-        (testing "a leaf descriptor delegates to build-leaf-form"
-          (is (= "input"
-                 (first (build-form ctx (vf/resolve-form :int) "" nil 7))))))
-      (finally (sp/close storage)))))
+;; `build-form`'s composite arms render through the app.forms graph
+;; structure templates now — covered on the golden clone in
+;; `graphden.crud.value-form-graph-test`; the leaf path stays covered by
+;; `apply-value-form-test` below.
 
 
 (deftest apply-value-form-test

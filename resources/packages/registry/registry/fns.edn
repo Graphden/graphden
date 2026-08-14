@@ -150,7 +150,7 @@
   ;; the value flows down by name-match — the :json-handler idiom.
   {:name :_xn-root
    :parent :const
-   :args {:value {:as :root}}}
+   :args {:value {:as :root :type :text}}}
 
   {:name :export-namespace
    :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract. Pure graph composition — root filter, secret-strip policy, dependency analysis and the bundle assembly are all graph-visible."

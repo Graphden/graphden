@@ -206,12 +206,12 @@
   {:name :_tdl-sorted
    :parent :sort-by
    :args {:key-fn :_tdl-sort-key
-          :coll {:ref :_tdl-rows :type [:list :any]}}}
+          :coll :_tdl-rows}}
 
   {:name :type-diagnostics-list
    :description "The CURRENT branch's recorded type diagnostics as flat display rows — `[{:fn-id :fn-name :arg :message} …]`, sorted by fn name. Pure graph reshape over `:branch-diagnostics-flat` (the org-scoped join); the arg coalescing (`:arg-name`, else a keyword `:binding`, else empty) and the uuid label for anonymous fns are graph-visible. Empty when the branch has no recorded diagnostics."
    :parent :vec
-   :args {:coll {:ref :_tdl-sorted :type [:list :any]}}
+   :args {:coll :_tdl-sorted}
    :return-type [:list :keyword-map]}
 
   {:name :_pterr-rows

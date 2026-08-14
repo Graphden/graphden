@@ -174,11 +174,11 @@
    :args {:parts [{:value "<div class='card'><h1>Your account</h1><p class='sub' id='who'>&nbsp;</p><div id='verify-banner'></div><div class='sec'><h2>Sign-in methods</h2><div id='idents'>Loading…</div><div class='social' style='margin-top:12px'>"}
                   :_auth-link-gh
                   :_auth-link-goog
-                  {:value "</div></div><div class='sec'><h2>Two-factor authentication</h2><div id='tfa'>Loading…</div></div><button class='btn-primary' style='background:transparent;border:1px solid var(--line);color:var(--muted)' onclick='logout()'>Sign out</button><div class='msg' id='msg'></div></div><script>"}
+                  {:value "</div></div><div class='sec'><h2>Two-factor authentication</h2><div id='tfa'>Loading…</div></div><div class='sec' id='tok-sec' style='display:none'><h2>API tokens</h2><p class='sub' style='margin:0 0 6px'>Long-lived keys for MCP and API clients, sent as <code>Authorization: Bearer</code>. Each token carries exactly your access.</p><div id='tok-reveal'></div><div id='toks'>Loading…</div><div style='display:flex;gap:8px;margin-top:12px'><input type='text' id='tok-label' placeholder='Label (e.g. laptop MCP)'><button class='btn-primary' style='width:auto;margin-top:0;white-space:nowrap' onclick='mintToken()'>Create</button></div></div><button class='btn-primary' style='background:transparent;border:1px solid var(--line);color:var(--muted)' onclick='logout()'>Sign out</button><div class='msg' id='msg'></div></div><script>"}
                   :_auth-account-js
                   {:value "</script>"}]}}
   {:name :auth-account-page
-   :description "The /account settings page — identities + link buttons for the enabled providers, 2FA enrollment, sign-out. Data loads client-side from /auth/* against the session cookie."
+   :description "The /account settings page — identities + link buttons for the enabled providers, 2FA enrollment, self-serve API tokens (the section shows itself only where /api/my-tokens routes exist — i.e. the tenancy addon is active), sign-out. Data loads client-side from /auth/* + /api/my-tokens/* against the session cookie."
    :parent :_auth-page-shell
    :args {:title {:value "Account"}
           :body :_auth-account-body

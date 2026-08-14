@@ -7,6 +7,7 @@
    graph health — this pins the two sides together; edit both when
    changing either."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.accounts.email :as email]
     [graphden.accounts.pages :as pages]
@@ -45,6 +46,18 @@
     (testing (str "providers=" provs)
       (is (= (pages/account-page provs)
              (render "auth-account-page" {:providers (provider-map provs)}))))))
+
+
+(deftest account-page-api-tokens-panel
+  ;; The self-serve API-tokens section: present but hidden by default — the
+  ;; page JS reveals it only when GET /api/my-tokens/list answers 200 (the
+  ;; routes exist only under the tenancy addon; open-core 404s and the
+  ;; section stays invisible).
+  (let [html (pages/account-page #{})]
+    (is (str/includes? html "id='tok-sec' style='display:none'"))
+    (is (str/includes? html "/api/my-tokens/list"))
+    (is (str/includes? html "function mintToken"))
+    (is (str/includes? html "function revokeToken"))))
 
 
 (deftest reset-page-parity

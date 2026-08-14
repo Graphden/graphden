@@ -212,6 +212,14 @@
       (when (contains? enabled-providers "google") (str "<a class='btn-social' href='/auth/google/start'>" google-mark "Link Google</a>"))
       "</div></div>"
       "<div class='sec'><h2>Two-factor authentication</h2><div id='tfa'>Loading…</div></div>"
+      ;; API-tokens section — hidden until /api/my-tokens/list answers 200
+      ;; (the routes exist only where the tenancy addon is active).
+      "<div class='sec' id='tok-sec' style='display:none'><h2>API tokens</h2>"
+      "<p class='sub' style='margin:0 0 6px'>Long-lived keys for MCP and API clients, sent as <code>Authorization: Bearer</code>. Each token carries exactly your access.</p>"
+      "<div id='tok-reveal'></div><div id='toks'>Loading…</div>"
+      "<div style='display:flex;gap:8px;margin-top:12px'>"
+      "<input type='text' id='tok-label' placeholder='Label (e.g. laptop MCP)'>"
+      "<button class='btn-primary' style='width:auto;margin-top:0;white-space:nowrap' onclick='mintToken()'>Create</button></div></div>"
       "<button class='btn-primary' style='background:transparent;border:1px solid var(--line);color:var(--muted)' onclick='logout()'>Sign out</button>"
       "<div class='msg' id='msg'></div></div>"
       "<script>"
@@ -222,7 +230,7 @@
       "if(s!==200){location.href='/login';return;}"
       "let n=j.identities.length;"
       "document.getElementById('idents').innerHTML=j.identities.map(i=>"
-      "`<div class='row'><div><div class='prov'>${i.provider}</div><div class='em'>${i.email||''}${i.provider==='password'&&!i['email-verified?']?\" · unverified\":''}</div></div>`+"
+      "`<div class='row'><div><div class='prov'>${i.provider}</div><div class='em'>${esc(i.email||'')}${i.provider==='password'&&!i['email-verified?']?\" · unverified\":''}</div></div>`+"
       "(n>1?`<button class='btn-ghost' onclick=\"unlink('${i.provider}')\">Unlink</button>`:'')+`</div>`).join('');}"
       "async function unlink(p){let[s,j]=await post('/auth/unlink',{provider:p});if(s===200){loadIdents();say('Unlinked '+p,true);}else{say('Could not unlink.');}}"
       "async function enroll(){let[s,j]=await post('/auth/totp/enroll');if(s!==200){say('Could not start enrollment.');return;}"
@@ -247,7 +255,28 @@
       "`<button class='btn-primary' onclick='resendVerify()'>Resend verification email</button></div>`;}}"
       "async function resendVerify(){await post('/auth/resend-verification');say('If your email is unverified, a new link is on its way.',true);}"
       "async function logout(){await post('/auth/logout');location.href='/login';}"
-      "whoami();loadIdents();loadTfaState();"
+      ;; API-tokens panel: probe /api/my-tokens/list; 200+array → reveal the
+      ;; section. Labels/ids go through esc() before landing in innerHTML.
+      ;; mint/revoke POST form-urlencoded — the graph routes parse the body
+      ;; with :parse-form-body-kw, not JSON.
+      "function esc(s){return String(s==null?'':s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));}"
+      "async function postForm(u,b){let r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(b).toString()});return[r.status,await r.json().catch(()=>({}))];}"
+      "async function loadTokens(){let[s,j]=await get('/api/my-tokens/list');if(s!==200||!Array.isArray(j)){return;}"
+      "document.getElementById('tok-sec').style.display='';"
+      "document.getElementById('toks').innerHTML=j.length?j.map(t=>"
+      "`<div class='row'><div><div class='prov' style='text-transform:none'>${esc(t.label)||'(unlabeled)'}</div><div class='em'>created ${esc(String(t['created-at']||'').slice(0,10))}</div></div><button class='btn-ghost' onclick=\"revokeToken('${esc(t.id)}')\">Revoke</button></div>`"
+      ").join(''):`<p class='sub' style='margin:0'>No API tokens yet.</p>`;}"
+      "async function mintToken(){let l=document.getElementById('tok-label').value.trim();"
+      "let[s,j]=await postForm('/api/my-tokens',{label:l});"
+      "if(s!==200||!j.token){say('Could not create a token.');return;}"
+      "document.getElementById('tok-label').value='';"
+      "document.getElementById('tok-reveal').innerHTML=`<p class='sub' style='margin:10px 0 6px'>Copy your new token now — it will not be shown again:</p><code class='secret'>${esc(j.token)}</code><button class='btn-ghost' onclick='copyToken(this)'>Copy</button>`;"
+      "loadTokens();say('Token created.',true);}"
+      "function copyToken(b){let c=document.querySelector('#tok-reveal code');if(c){navigator.clipboard.writeText(c.textContent).then(()=>{b.textContent='Copied';});}}"
+      "async function revokeToken(id){if(!confirm('Revoke this token? Anything still using it will stop working.'))return;"
+      "let[s,j]=await postForm('/api/my-tokens/revoke',{id});"
+      "if(s===200){document.getElementById('tok-reveal').innerHTML='';loadTokens();say('Token revoked.',true);}else{say('Could not revoke that token.');}}"
+      "whoami();loadIdents();loadTfaState();loadTokens();"
       "</script>")))
 
 

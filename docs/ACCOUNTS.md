@@ -66,7 +66,7 @@ HttpOnly `gd_session` cookie (Max-Age 24 h); cookies are written as raw
 | Route | Behavior |
 |-------|----------|
 | `GET /login` | Self-contained sign-in page (email/password + enabled social buttons) |
-| `GET /account` | Self-contained account-management page (identities, 2FA, verify banner) |
+| `GET /account` | Self-contained account-management page (identities, 2FA, verify banner, API-tokens panel — the panel reveals itself only where `/api/my-tokens/*` answers, i.e. the tenancy addon is active) |
 | `GET /reset` | Password-reset form (consumes the emailed token) |
 | `POST /auth/signup` | `{email,password}` → account + session cookie, sends verify mail |
 | `POST /auth/login` | `{email,password}` → session cookie, or `{totp-required}` + short-lived `gd_2fa` cookie |

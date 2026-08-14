@@ -1454,6 +1454,7 @@
    :parent :add :args {:nums [:_iov-w-depth {:value 1}]}}
   ;; child frames [[gp-id d+1] …] — DFS: children go on TOP of the rest.
   {:name :_iov-w-child-frame
+   :lambda-params [:witem]
    :parent :list
    :args {:items [{:as :witem} :_iov-w-child-depth]}}
   {:name :_iov-w-children

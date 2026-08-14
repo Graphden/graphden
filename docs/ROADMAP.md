@@ -539,7 +539,8 @@ store repopulates after a JVM restart.**
   time by `assert-sweep-failures-match-allowlist!` (a broken
   first-party fn still blocks boot/CI).
 - *Phase 3 (done)*: the editor surfaces. `GET /partials/type-errors`
-  (the `:_pterr-*` family + `:type-diagnostics-list` base-fn) renders
+  (the `:_pterr-*` family + the `:type-diagnostics-list` graph
+  reshape over the `:branch-diagnostics-flat` join base-fn) renders
   the current branch's recorded diagnostics as a sidebar section
   (`editor-type-errors.js`, error-log pattern); the `:subtree` graph
   payload carries `:type-error-count` per fn (⚠ badge on the card

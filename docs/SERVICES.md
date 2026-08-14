@@ -162,7 +162,8 @@ ctx. A typical workflow:
 Two `:service` rows — `{:fn-id :dev-server  :branch-id dev}` and
 `{:fn-id :prod-server :branch-id main}` — both run.
 
-`merge-branch!` calls `recon/restart-services-on-branch!` on the
+The merge's `:merge-post-commit!` step calls
+`recon/restart-services-on-branch!` on the
 target so cron loops pick up new fn-versions (HTTP servers re-
 read their registry lazily, cron closes over the fn-graph at
 spawn time). `delete-branch!` cascade-soft-disables services

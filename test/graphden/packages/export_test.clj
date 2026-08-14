@@ -58,11 +58,13 @@
         (t)))))
 
 
-(defn- export-namespace-bundle* [root]
+(defn- export-namespace-bundle*
+  [root]
   (exec/execute-by-name *ctx* "export-namespace" {:root root}))
 
 
-(defn- export-graph-bundle* []
+(defn- export-graph-bundle*
+  []
   (exec/execute-by-name *ctx* "export-graph" {:include-secret-paths nil}))
 
 

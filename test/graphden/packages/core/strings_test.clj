@@ -3,6 +3,7 @@
    primitives. Mirrors `system_test` / `logic_test`: the package's
    impls.clj is slurp+eval'd via the loader's `load-module-impls`."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.test-infra.impls :as impls]))
 
@@ -43,6 +44,6 @@
     (testing "oversized pattern rejected by the safe-compile boundary"
       (is (thrown? clojure.lang.ExceptionInfo
             (impl {:string (delay "abc")
-                   :pattern (delay (apply str (repeat 10000 "a")))
+                   :pattern (delay (str/join (repeat 10000 "a")))
                    :replacement (delay "_")}
                   nil))))))

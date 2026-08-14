@@ -629,11 +629,15 @@
            at the package loader and the remote bundle reader. In-memory and
            JSONB paths keep raw keywords — the storage codec round-trips
            them."}
-    {:ns graphden.packages.export :defn export-namespace
-     :say "Scoped export: a namespace SUBTREE as a publishable bundle — fns
-           under the root are the package's content, refs pointing OUT of the
-           subtree become its declared `:dependencies` (what install must
-           already have). This is the unit the in-graph registry versions."}
+    {:ns graphden.packages.export :defn external-deps
+     :say "Scoped export: a namespace SUBTREE becomes a publishable bundle —
+           fns under the root are the package's content, and this analysis
+           pass turns refs pointing OUT of the subtree into its declared
+           `:dependencies` (what install must already have) plus the
+           `:package-dependencies` those refs' `@`-versioned namespaces map
+           to. The bundle ASSEMBLY around it is graph composition — the
+           `:export-namespace` fn-def in registry/registry/fns.edn. This is
+           the unit the in-graph registry versions."}
     {:ns graphden.packages.export :defn strip-secret-paths
      :say "The share-safety policy: vault paths are STRIPPED from bundles by
            default (the slot stays a free `[:secret :text]` arg) and the

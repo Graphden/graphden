@@ -13,7 +13,8 @@
 (use-fixtures :once (harness/exec-fixture (str (ns-name *ns*)) ["core"]))
 
 
-(defn- render [m]
+(defn- render
+  [m]
   (exec/execute-with-named-args
     harness/*context* (harness/fn-id "render-prometheus") {:m m}))
 

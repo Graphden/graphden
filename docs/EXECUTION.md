@@ -249,7 +249,8 @@ never fails the execution). The table stores **counts and durations only** —
 never args, results, or error text — so it is privacy-safe to aggregate and
 grows with distinct keys, not traffic.
 
-Reads: the `:usage-fn-stats` base-fn (`{:runs :failed :cancelled :avg-ms}`
+Reads: the `:usage-fn-stats` graph fn-def — a `:quot`-derived average over
+the `:fn-stats-raw` read base-fn (`{:runs :failed :cancelled :avg-ms}`
 for one fn over a trailing window, scoped to the CURRENT org) feeds the
 "7d: N runs · M failed · avg K ms" strip at the top of the editor's
 execute-history panel; `org-stats` (src-level) lists an org's busiest fns for

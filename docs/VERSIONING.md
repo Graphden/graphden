@@ -321,9 +321,9 @@ branch-specific bindings (dev port + prod port live side-by-side).
   reconciler picks up the row immediately and starts it inside
   the chosen branch's ctx.
 - A bug fix on branch X immediately re-rolls the X-scoped service
-  via `recon/restart-services-on-branch!` (wired into
-  `merge-branch!` as well, so post-merge cron loops pick up the
-  fresh closures).
+  via `recon/restart-services-on-branch!` (wired into the merge's
+  `:merge-post-commit!` step as well, so post-merge cron loops pick
+  up the fresh closures).
 - Legacy rows without `:branch-id` fall back to the reconciler's
   base ctx (= main behavior), so the migration is transparent.
 
@@ -338,7 +338,7 @@ coordination beyond the existing advisory locks).
 The `:branch` row carries a nullable boolean `:forbid-invalid?`
 (non-versioned entity — a plain column, no version mirror). When set
 on the merge TARGET, `versioning.merge.core/validate-branch-policy!`
-(run by the live `:merge-branch!` base-fn after the target switch, and
+(run inside the live `:merge-branch!` atomic core after the target switch, and
 by `validate-merge!`) refuses the merge while recorded type
 diagnostics (`graphden.types.diagnostics`) exist on either the source
 or the target branch — `:merge-protection-violation`, 409, message

@@ -45,9 +45,10 @@
                  (when-let [row (get fn-rows fn-id)]
                    [fn-id (:name row) diags])))
          (mapcat (fn [[fn-id fn-name diags]]
-                   (map (fn [d] {:fn-id (str fn-id)
-                                 :fn-name fn-name
-                                 :diag d})
+                   (map (fn [d]
+                          {:fn-id (str fn-id)
+                           :fn-name fn-name
+                           :diag d})
                         diags)))
          vec)))
 

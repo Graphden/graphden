@@ -13,13 +13,15 @@
 (use-fixtures :once (harness/exec-fixture (str (ns-name *ns*)) ["core" "web"]))
 
 
-(defn- respond [envelope]
+(defn- respond
+  [envelope]
   (exec/execute-with-named-args
     harness/*context* (harness/fn-id "json-envelope-response")
     {:envelope envelope}))
 
 
-(defn- header [response nm]
+(defn- header
+  [response nm]
   (some (fn [[k v]] (when (= nm (name k)) v)) (:headers response)))
 
 

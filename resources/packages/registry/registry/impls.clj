@@ -7,13 +7,12 @@
     [clojure.string :as str]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.executor.composition.interface :as composition]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.export :as export]
-    [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
@@ -201,10 +200,8 @@
   [storage ns-root version fns]
   (let [materialized (mapv (fn [fd]
                              (update fd :namespace #(version-qualified-ns ns-root version %)))
-                           fns)
-        ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) materialized))]
-    (composition/sync-fns-to-storage! storage materialized ns-id-map)
-    (mapv #(ids/fn-id (:namespace %) (:name %)) materialized)))
+                           fns)]
+    (pkg-sync/sync-bundle! storage materialized)))
 
 
 ;; True if the version's first fn already exists under its version-qualified
@@ -331,9 +328,7 @@
   [fns]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
-        ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))
-        forked-ids (mapv #(ids/fn-id (:namespace %) (:name %)) fns)]
-    (composition/sync-fns-to-storage! storage fns ns-id-map)
+        forked-ids (pkg-sync/sync-bundle! storage fns)]
     ;; Delta-invalidate: the forked fns (+ dependents) recompile, not the
     ;; whole registry — a full clear here froze constrained instances.
     (exec-ctx/invalidate-graph-cache! ctx forked-ids)

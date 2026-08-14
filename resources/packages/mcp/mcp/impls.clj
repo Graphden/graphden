@@ -15,11 +15,9 @@
     [clojure.edn :as edn]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.executor.composition.interface :as composition]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.packages.loader :as loader]
-    [graphden.packages.records.ids :as ids]
+    [graphden.packages.sync :as pkg-sync]
     [graphden.system.branch-router :as br]
     [graphden.versioning.storage.core :as vs]))
 
@@ -46,9 +44,7 @@
   [branch-id fn-defs]
   (cr/record-effect! :db)
   (let [storage (vs/switch-branch (request/require-storage ctx) branch-id)
-        ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))
-        _ (composition/sync-fns-to-storage! storage fn-defs ns-id-map)
-        fn-ids (mapv #(ids/fn-id (:namespace %) (:name %)) fn-defs)]
+        fn-ids (pkg-sync/sync-bundle! storage fn-defs)]
     ;; Invalidate the TARGET branch's ctx, not the request's own: the AI
     ;; writes to `ai/…` while its POST /mcp rides main. Same shape as
     ;; merge-branch!'s post-merge delta.

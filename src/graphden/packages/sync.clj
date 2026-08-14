@@ -333,6 +333,19 @@
       :base-fns base-fns-map})))
 
 
+(defn sync-bundle!
+  "Sync a BUNDLE of fn-defs into `storage` and return their deterministic
+   fn-ids: namespace upsert (`pkg/sync-namespaces!`) →
+   `fn-composition/sync-fns-to-storage!` → `records/fn-id` per def. The
+   shared core of the registry's fork/materialize apply-cores and the MCP
+   branch sync (formerly three verbatim copies); each caller owns its
+   divergent tail — ns-rewrite prefix, invalidation target, branch switch."
+  [storage fn-defs]
+  (let [ns-id-map (pkg/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))]
+    (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)
+    (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)))
+
+
 (defn- run-type-check-sweep!
   "Topological-order type-check sweep across `expanded-fn-defs`.
 

@@ -42,6 +42,8 @@
                   :partial-return-type-rule
                   :partial-inspector-detail
                   :partial-inspector-overview
+                  :partial-settings-build
+                  :partial-settings-access
                   :partial-fn-picker-incompat
                   :partial-execute-popover
                   :partial-type-name-datalist

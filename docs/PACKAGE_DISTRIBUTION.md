@@ -83,10 +83,14 @@ implementation tasks.
   `fetch-package-version`, `install-package`, wired to
   `POST /api/packages/publish`, `GET /api/packages`,
   `GET /api/packages/:name/:version`, `POST /api/packages/install`.
-- **Round-trip exporter** — `src/graphden/packages/export.clj` (`export-namespace`):
-  serialises a live namespace subtree back into a publishable `fns.edn`-shaped
-  bundle. This is the reverse of the EDN→rows sync and is the core of both
-  publish and self-hosted extract.
+- **Round-trip exporter** — the `:export-namespace` GRAPH fn-def
+  (`registry/registry/fns.edn`) assembles the publishable `fns.edn`-shaped
+  bundle by composing `export/export-graph` (the records↔EDN codec that
+  stays in `src/graphden/packages/export.clj`) with
+  `:namespace-external-deps` / secret-path stripping / keyword encoding.
+  This is the reverse of the EDN→rows sync and is the core of both publish
+  and self-hosted extract; `export.clj` keeps only the codec + the
+  `external-deps` dependency-analysis pass.
 
 ### 2.2 Loader — package discovery + external seam
 

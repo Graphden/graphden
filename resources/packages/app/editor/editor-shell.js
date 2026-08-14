@@ -165,36 +165,34 @@
       // duplicate. hardReload is the prefs module's own implementation.
       reloadBtn.onclick = () => { hardReload(); };
     }
-    const verEl = document.getElementById('gd-set-version');
-    if (verEl && !verEl.dataset.loaded) {
-      verEl.dataset.loaded = '1';
-      fetch('/version')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((v) => {
-          if (!v) return;
-          verEl.innerHTML = ['backend', 'packages'].map((k) =>
-            '<div class="gd-set-ver"><span>' + k + '</span><code>'
-            + esc(String(v[k] || '—').slice(0, 12)) + '</code></div>').join('');
-        })
-        .catch(() => {});
-    }
-
-    const caps = document.getElementById('gd-set-caps');
-    if (caps) {
-      if (document.body.classList.contains('gd-tenancy')) {
-        const canWrite = !document.body.classList.contains('gd-no-write');
-        const canExec = !document.body.classList.contains('gd-no-execute');
-        const chip = (label, on) => '<span class="gd-cap ' + (on ? 'gd-cap-on' : 'gd-cap-off')
-          + '">' + (on ? '✓ ' : '✕ ') + label + '</span>';
-        caps.innerHTML = chip('write', canWrite) + chip('execute', canExec);
-      } else {
-        caps.innerHTML = '<div class="gd-set-hint">Single-tenant — every action is available.</div>';
-      }
-    }
+    // Build hashes + capability chips are server partials — the hash rows
+    // come off the same baked resource /version serves, and the ✓/✕ chips
+    // render from the request-scope seam the capability HEADER is stamped
+    // from, so the copy and the on/off logic live with the fact. The
+    // frontend hash above deliberately stays client (window.BUILD_HASH
+    // witnesses what the BROWSER runs). This module only mounts.
+    const mountPartial = (id, url, once) => {
+      const el = document.getElementById(id);
+      if (!el || (once && el.dataset.loaded)) return;
+      el.dataset.loaded = '1';
+      fetch(url)
+        .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
+        .then((txt) => { el.innerHTML = txt; })
+        .catch(() => { delete el.dataset.loaded; });
+    };
+    // Hashes are boot-constant → once; capabilities re-fetch per open
+    // (a grant change shows on the next open, as the header-derived
+    // render did before).
+    mountPartial('gd-set-version', '/partials/settings-build', true);
+    mountPartial('gd-set-caps', '/partials/settings-access', false);
   }
   window.gdRenderSettings = gdRenderSettings;
 
   // ---- Shared helpers -------------------------------------------------------
+  // graph-first-exception: the 2-field kind classifier stays client — it feeds
+  // the persistent inspector HEAD, which renders synchronously from the lookups
+  // cache on every selection (sub-100ms path); the server-owned kind reasoning
+  // ships in /partials/inspector-overview alongside it.
   function gdFnKind(fn) {
     const parentIds = Array.isArray(fn['parent-ids']) ? fn['parent-ids'] : [];
     return parentIds.length ? 'fn-def' : (fn['return-type-fn-id'] ? 'base-fn' : 'type');

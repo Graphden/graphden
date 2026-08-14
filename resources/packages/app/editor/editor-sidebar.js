@@ -59,6 +59,9 @@ const _adminNavBtns = new Map();
 // Human labels for the ops sections. Each mounts as ONE titled pane selected
 // from a section list on the left — a clean settings layout, not a grid of
 // look-alike tiles.
+// graph-first-exception: pure nav chrome for the CLIENT-side section list —
+// the pane bodies themselves are lazy hx-get server partials; only their menu
+// entries live here, next to the mount wiring that owns which sections exist.
 const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring', apps: 'Apps',
@@ -193,6 +196,12 @@ function saveLens() {
 // EVERY kind a fn-row belongs to. A fn can be several at once (an app's
 // handler may also be a service), so membership is a set — the lens matches
 // on ANY, and the row renders a marker per kind.
+// graph-first-exception: the kind set drives the interactive lens filter —
+// an in-place `hidden` flip over ~hundreds of already-rendered rows with no
+// refetch (the workspace-popover class of client-cache-driven state). It
+// combines one server field (role) with three server-primed caches
+// (services / app-routes / secrets), so no reasoning is re-derived — only
+// membership is assembled where the flip happens.
 function fnKindSet(fn) {
   const kinds = new Set();
   if (typeof isSecretFn === 'function' && isSecretFn(fn)) kinds.add('secrets');

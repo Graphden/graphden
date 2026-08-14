@@ -273,6 +273,10 @@ function enterSecretBindingEditMode(arg, anchorEl) {
       // `control.addEventListener('keydown', …)` calls work — they
       // expect an Element. The wrapper also lets `doSave` look up the
       // two inputs by `data-secret-field`.
+      // graph-first-exception: the whole form is client-built by design —
+      // the server must NOT see the vault path / secret value while the
+      // user types (skill §6 security carve-out); its labels ride along
+      // with the controls they caption.
       const wrap = document.createElement('div');
       wrap.className = 'arg-value-edit-secret-form';
       wrap.tabIndex = -1;

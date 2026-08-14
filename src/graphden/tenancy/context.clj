@@ -152,6 +152,24 @@
   (boolean (@org-cap-fn cap)))
 
 
+(def ^:dynamic *current-capabilities*
+  "The capability names (strings) the tenancy addon computed for the current
+   request — the SAME list it stamps into the `X-Graphden-Capabilities`
+   response header. Bound by the addon's request-scope around the handler so
+   server-rendered surfaces (the Settings access card) can show the
+   principal's own capabilities from the source instead of the editor
+   re-deriving them from response headers client-side. nil = no addon /
+   single-tenant → everything is allowed and there is no list to show."
+  nil)
+
+
+(defn current-capabilities
+  "The current request's capability names, or nil outside a tenancy-addon
+   request scope (single-tenant)."
+  []
+  *current-capabilities*)
+
+
 (def ^:dynamic *current-principal*
   "The authenticated principal (`AuthProvider` result) for the current
    request, bound by the addon's request-scope. Read by per-namespace grant

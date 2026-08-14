@@ -408,7 +408,7 @@ The full registry lives in `resources/packages/app/routes/fns.edn`
 `app/editor/fns.edn` (`;; HTMX PARTIALS` and the sections after it),
 `app/execution/fns.edn` (execute-result / service-popover /
 execute-history) and `app/{branches,secrets,registry}` for their
-panels. 27 partials as of 2026-08-13, by consumer surface:
+panels. 30 partials as of 2026-08-14, by consumer surface:
 
 | Partial (route name)                | Path (+key params)                                        | JS consumer |
 |-------------------------------------|-----------------------------------------------------------|-------------|
@@ -431,6 +431,9 @@ panels. 27 partials as of 2026-08-13, by consumer surface:
 | `:partial-provenance`                | GET /partials/provenance?binding-id= + optional item-id (public)  | editor-provenance-popover.js |
 | `:partial-return-type-rule`          | GET /partials/return-type-rule?fn= (public)               | editor-provenance-popover.js (Type-rule popover) |
 | `:partial-inspector-detail`          | GET /partials/inspector-detail?fn-id= (public — projects structure already readable via /api/graph/entities) | editor-shell.js (inspector Bindings tab) |
+| `:partial-inspector-overview`        | GET /partials/inspector-overview?fn-id= (public — same rationale as inspector-detail) | editor-shell.js (inspector Overview tab, `gdLoadInspectorOverview` + `formatServerTypeTexts` post-pass) |
+| `:partial-settings-build`            | GET /partials/settings-build (public — same facts as /version) | editor-shell.js (Settings "About this build" hash rows) |
+| `:partial-settings-access`           | GET /partials/settings-access (public — renders the requester's OWN capabilities) | editor-shell.js (Settings access card: ✓/✕ capability chips, or the single-tenant copy) |
 | `:partial-fn-picker-incompat`        | GET /partials/fn-picker-incompat?expected=&candidate-fn-id= (auth) | editor-fn-picker.js |
 | `:partial-type-name-datalist`        | GET /partials/type-name-datalist (auth)                   | editor-create-type.js (name autocomplete) |
 | `:partial-compatible-type-options`   | GET /partials/compatible-type-options?expected= + optional current / primitives=true (auth) | editor-edit-modes-type.js + editor-overlay-type-expand.js |

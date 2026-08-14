@@ -59,8 +59,9 @@ the right-hand **Inspector** panel shows it. Four tabs:
 - **Versions** — the fn's version timeline across branches
   (Lesson 08).
 
-Overview renders instantly from what the editor already knows;
-the other three tabs are fetched from the server when you open
+The Inspector's head (name, namespace, description) renders
+instantly from what the editor already knows; all four tabs,
+Overview included, are fetched from the server when you open
 them, so they're always current.
 
 The Inspector is the "read" side of the editor: popovers are for

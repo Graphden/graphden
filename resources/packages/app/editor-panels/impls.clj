@@ -8,6 +8,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
@@ -53,5 +54,17 @@
          vec)))
 
 
+(defbase request-capabilities
+  ;; The tenancy addon's per-request capability list (the same strings it
+  ;; stamps into `X-Graphden-Capabilities`), read off the core seam and
+  ;; coerced to a membership map (`{"write" true …}`) so graph composition
+  ;; can `:get` individual capabilities. nil = no addon / single-tenant —
+  ;; the Settings access card renders its single-tenant copy on that.
+  []
+  (when-let [caps (tc/current-capabilities)]
+    (zipmap caps (repeat true))))
+
+
 (def impls
-  {:branch-diagnostics-flat branch-diagnostics-flat})
+  {:branch-diagnostics-flat branch-diagnostics-flat
+   :request-capabilities request-capabilities})

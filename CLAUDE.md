@@ -578,6 +578,8 @@ resources/packages/     # First-party packages (fns.edn + impls.clj per module)
                         #   modules (editor-row-actions / editor-provenance /
                         #   editor-execute / editor-edit-forms / editor-branches /
                         #   editor-panels), lookups / execution / branches / secrets,
+                        #   auth-pages (accounts page/email presentation) + forms
+                        #   (value-form structure templates),
                         #   routes + route-groups, server (the handler chain)
 
 external-packages/      # Kept OUT of the prod resources tree: mathx (Type-2 impl+fns,

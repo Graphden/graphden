@@ -191,6 +191,16 @@
    :parent :get-route
    :args {:path "/partials/inspector-overview" :handler :_partial-inspector-overview-handler}}
 
+  {:name :partial-settings-build
+   :description "GET /partials/settings-build — the Settings 'About this build' backend/packages hash rows as text/html, off the same baked `:build-hashes` resource `/version` serves. PUBLIC like `/version` itself. editor-shell.js swaps it into #gd-set-version."
+   :parent :get-route
+   :args {:path "/partials/settings-build" :handler :_partial-settings-build-handler}}
+
+  {:name :partial-settings-access
+   :description "GET /partials/settings-access — the Settings access card body as text/html: the requester's OWN write/execute capability chips under a tenancy addon (the fact every response already carries in `X-Graphden-Capabilities`), or the single-tenant copy. PUBLIC — per-request, per-principal, nothing cross-principal readable. editor-shell.js swaps it into #gd-set-caps."
+   :parent :get-route
+   :args {:path "/partials/settings-access" :handler :_partial-settings-access-handler}}
+
   {:name :partial-fn-picker-incompat
    :description "GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid} — server-rendered incompat-explainer popover fragment for the fn-picker's `explainAndOfferAnyway` flow."
    :parent :get-auth-required

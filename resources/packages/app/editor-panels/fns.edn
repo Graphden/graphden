@@ -683,4 +683,125 @@
    :lambda-params [:request]
    :description "Ring handler for GET /partials/stats?days=7|30|90 — the current org's run statistics as text/html (headline, period switcher, per-day trend with CSS bars, top-fns; plus the operator-only by-org section). Auth-required (route side); org-scoped by construction (every rollup base-fn reads the CURRENT org only; the cross-org read returns [] for tenants impl-side)."
    :parent :html-ok-response
-   :args {:body :_pstats-html}}]}
+   :args {:body :_pstats-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; SETTINGS partials (round-4 audit) — the two dynamic bodies of the
+  ;; Settings surface. `/partials/settings-build` renders the deployed
+  ;; backend/packages hash rows off `:build-hashes` (the same resource
+  ;; `/version` serves); `/partials/settings-access` renders the
+  ;; principal's capability chips off the request-scope seam — the SAME
+  ;; fact the addon stamps into `X-Graphden-Capabilities`, so the copy
+  ;; and the ✓/✕ logic live server-side instead of the editor re-deriving
+  ;; them from response headers. editor-shell.js only mounts.
+  ;; ---------------------------------------------------------------------
+
+  {:name :request-capabilities
+   :description "Membership map (`{\"write\" true …}`) of the capability names the tenancy addon computed for the CURRENT request — the same list it stamps into the `X-Graphden-Capabilities` header, read off the core seam (`graphden.tenancy.context/current-capabilities`). nil without the addon (single-tenant: everything allowed, nothing to list)."
+   :args {}
+   :return-type [:union :null [:map :text :bool]]}
+
+  ;; --- Build card: one `.gd-set-ver` row per baked section hash. ---
+  {:name :_setb-hash
+   :parent :get
+   :args {:coll :build-hashes :key {:as :section} :default {:value ""}}}
+
+  {:name :_setb-hash12
+   :description "First 12 hex chars of the section hash — or an em-dash when the build carries no hash for it (dev jars)."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll {:ref :_setb-hash :type :text}}}
+          :then {:value "—"}
+          :else {:parent :subs
+                 :args {:string {:ref :_setb-hash :type :text}
+                        :start {:value 0}
+                        :end {:value 12}}}}}
+
+  {:name :_setb-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-set-ver"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :children [{:as :section}]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "code"}
+                             :children [:_setb-hash12]}}]}}
+
+  {:name :_setb-rows
+   :parent :list
+   :args {:items [{:parent :_setb-row :args {:section "backend"}}
+                  {:parent :_setb-row :args {:section "packages"}}]}}
+
+  {:name :_setb-html
+   :parent :render-hiccup
+   :args {:hiccup :_setb-rows}}
+
+  {:name :_partial-settings-build-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/settings-build — the Settings 'About this build' backend/packages hash rows as text/html. Static content (nothing read off the request) — `:lambda-params []`, the tutorial-page handler shape. The FRONTEND hash deliberately stays client-side (`window.BUILD_HASH` is baked into the bundle so it witnesses what the BROWSER runs — a server render would defeat its cache-staleness purpose)."
+   :parent :html-ok-response
+   :args {:body :_setb-html}}
+
+  ;; --- Access card: capability chips (tenancy) or the single-tenant
+  ;;     copy. The chip template exposes :label + :on frees; the two
+  ;;     instances bind them to the write/execute membership reads. ---
+  {:name :_seta-caps
+   :description "The current request's capability membership map (nil = single-tenant)."
+   :parent :request-capabilities}
+
+  {:name :_seta-single-tenant?
+   :parent :nil?
+   :args {:value :_seta-caps}}
+
+  {:name :_seta-chip-mark
+   :parent :if
+   :args {:test {:as :on} :then {:value "✓ "} :else {:value "✕ "}}}
+
+  {:name :_seta-chip-onoff
+   :parent :if
+   :args {:test {:as :on} :then {:value "gd-cap-on"} :else {:value "gd-cap-off"}}}
+
+  {:name :_seta-chip-class
+   :parent :str
+   :args {:parts [{:value "gd-cap "} :_seta-chip-onoff]}}
+
+  {:name :_seta-chip-text
+   :parent :str
+   :args {:parts [:_seta-chip-mark {:as :label}]}}
+
+  {:name :_seta-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class}]
+                         :vals [:_seta-chip-class]}}
+          :children [:_seta-chip-text]}}
+
+  {:name :_seta-can-write
+   :parent :get
+   :args {:coll :_seta-caps :key {:value "write"} :default {:value false}}}
+
+  {:name :_seta-can-execute
+   :parent :get
+   :args {:coll :_seta-caps :key {:value "execute"} :default {:value false}}}
+
+  {:name :_seta-chips
+   :parent :list
+   :args {:items [{:parent :_seta-chip :args {:label "write" :on :_seta-can-write}}
+                  {:parent :_seta-chip :args {:label "execute" :on :_seta-can-execute}}]}}
+
+  {:name :_seta-body
+   :parent :if
+   :args {:test :_seta-single-tenant?
+          :then {:value [:div {:class "gd-set-hint"} "Single-tenant — every action is available."]}
+          :else :_seta-chips}}
+
+  {:name :_seta-html
+   :parent :render-hiccup
+   :args {:hiccup :_seta-body}}
+
+  {:name :_partial-settings-access-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/settings-access — the Settings access card body as text/html: the principal's own write/execute capability chips under a tenancy addon, or the single-tenant copy without one. Nothing is read off the REQUEST MAP (`:lambda-params []`) — the per-principal fact arrives via the request-scope seam binding, not the Ring map. Shows the requester THEIR OWN capabilities (the same fact every response already carries in `X-Graphden-Capabilities`) — nothing cross-principal to leak."
+   :parent :html-ok-response
+   :args {:body :_seta-html}}]}

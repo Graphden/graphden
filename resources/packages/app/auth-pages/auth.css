@@ -43,4 +43,11 @@
   .sec h2{font-size:14px;margin:0 0 10px}
   code.secret{display:block;background:var(--ink);border:1px solid var(--line);border-radius:8px;
     padding:10px;margin:10px 0;word-break:break-all;font-size:13px;color:var(--accent-hi)}
+  select{width:100%;padding:10px 12px;background:var(--ink);border:1px solid var(--line);
+    border-radius:8px;color:var(--text);font-size:15px}
+  select:focus{outline:none;border-color:var(--accent-hi)}
+  .scopes{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 0}
+  .scopes label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);
+    margin:0;cursor:pointer}
+  .scopes input{accent-color:var(--accent)}
   a{color:var(--accent-hi)}

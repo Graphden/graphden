@@ -203,7 +203,8 @@
 (defn mint-session!
   "Create a `:session` for `account-id`, returning the RAW token (this is the
    only moment it exists in the clear — only its hash is stored). `opts`:
-   `:ttl-ms` (default 24h; nil ⇒ never expires), `:kind`, `:label`."
+   `:ttl-ms` (default 24h; nil ⇒ never expires), `:kind`, `:label`,
+   `:scopes` (space-separated scope names for an API bearer; nil ⇒ unscoped)."
   ([storage account-id] (mint-session! storage account-id nil))
   ([storage account-id opts]
    (let [ttl-ms (get opts :ttl-ms default-session-ttl-ms)
@@ -214,14 +215,27 @@
                         :expires-at (when ttl-ms (+ (now) ttl-ms))
                         :kind (:kind opts)
                         :label (:label opts)
+                        :scopes (:scopes opts)
                         :created-at (now)})
      token)))
+
+
+(defn parse-scopes
+  "The `:session.scopes` string as a set of keywords, or nil when unscoped.
+   \"write execute\" → #{:write :execute}. Blank/whitespace-only → nil."
+  [scopes-str]
+  (when-not (str/blank? scopes-str)
+    (into #{} (map keyword) (str/split (str/trim scopes-str) #"\s+"))))
 
 
 (defn authenticate-token
   "Resolve a raw session/bearer token to its ACTIVE account, or nil. Matches
    the session by hash, requires an authenticating `:kind` (nil/\"api\") that is
-   still live, and an account whose status is \"active\". Fails closed."
+   still live, and an account whose status is \"active\". Fails closed.
+
+   The returned account map is enriched with the SESSION's `:token-kind` and
+   `:token-scopes` (parsed set, nil = unscoped) so a policy layer can apply a
+   per-token ceiling without re-reading the session row."
   [storage token]
   (when-not (str/blank? token)
     (when-let [s (first (sp/query-entities storage :session
@@ -229,7 +243,9 @@
       (when (and (contains? #{nil "api"} (:kind s)) (session-live? s))
         (when-let [acct (account-of storage (:account-id s))]
           (when (= "active" (:status acct))
-            acct))))))
+            (assoc acct
+                   :token-kind (:kind s)
+                   :token-scopes (parse-scopes (:scopes s)))))))))
 
 
 (defn revoke-token!

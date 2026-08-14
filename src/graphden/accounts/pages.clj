@@ -60,6 +60,13 @@
   .sec h2{font-size:14px;margin:0 0 10px}
   code.secret{display:block;background:var(--ink);border:1px solid var(--line);border-radius:8px;
     padding:10px;margin:10px 0;word-break:break-all;font-size:13px;color:var(--accent-hi)}
+  select{width:100%;padding:10px 12px;background:var(--ink);border:1px solid var(--line);
+    border-radius:8px;color:var(--text);font-size:15px}
+  select:focus{outline:none;border-color:var(--accent-hi)}
+  .scopes{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 0}
+  .scopes label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);
+    margin:0;cursor:pointer}
+  .scopes input{accent-color:var(--accent)}
   a{color:var(--accent-hi)}")
 
 
@@ -215,8 +222,17 @@
       ;; API-tokens section — hidden until /api/my-tokens/list answers 200
       ;; (the routes exist only where the tenancy addon is active).
       "<div class='sec' id='tok-sec' style='display:none'><h2>API tokens</h2>"
-      "<p class='sub' style='margin:0 0 6px'>Long-lived keys for MCP and API clients, sent as <code>Authorization: Bearer</code>. Each token carries exactly your access.</p>"
+      "<p class='sub' style='margin:0 0 6px'>Long-lived keys for MCP and API clients, sent as <code>Authorization: Bearer</code>. A token can only narrow your access: pick its scopes and lifetime.</p>"
       "<div id='tok-reveal'></div><div id='toks'>Loading…</div>"
+      "<div class='scopes' id='tok-scopes'>"
+      "<label><input type='checkbox' value='write' checked> Edit graph &amp; branches</label>"
+      "<label><input type='checkbox' value='execute' checked> Execute functions</label>"
+      "<label><input type='checkbox' value='merge'> Merge branches</label>"
+      "<label><input type='checkbox' value='services'> Manage services</label>"
+      "<label><input type='checkbox' value='secrets'> Write secrets</label>"
+      "<label><input type='checkbox' value='packages'> Publish packages</label></div>"
+      "<label style='margin:10px 0 6px'>Expires</label>"
+      "<select id='tok-ttl'><option value='7'>7 days</option><option value='30'>30 days</option><option value='90' selected>90 days</option><option value='365'>1 year</option><option value=''>Never</option></select>"
       "<div style='display:flex;gap:8px;margin-top:12px'>"
       "<input type='text' id='tok-label' placeholder='Label (e.g. laptop MCP)'>"
       "<button class='btn-primary' style='width:auto;margin-top:0;white-space:nowrap' onclick='mintToken()'>Create</button></div></div>"
@@ -264,10 +280,12 @@
       "async function loadTokens(){let[s,j]=await get('/api/my-tokens/list');if(s!==200||!Array.isArray(j)){return;}"
       "document.getElementById('tok-sec').style.display='';"
       "document.getElementById('toks').innerHTML=j.length?j.map(t=>"
-      "`<div class='row'><div><div class='prov' style='text-transform:none'>${esc(t.label)||'(unlabeled)'}</div><div class='em'>created ${esc(String(t['created-at']||'').slice(0,10))}</div></div><button class='btn-ghost' onclick=\"revokeToken('${esc(t.id)}')\">Revoke</button></div>`"
+      "`<div class='row'><div><div class='prov' style='text-transform:none'>${esc(t.label)||'(unlabeled)'}</div><div class='em'>${esc(t.scopes||'unscoped')} · ${t['expires-at']?'expires '+new Date(t['expires-at']).toISOString().slice(0,10):'no expiry'}</div></div><button class='btn-ghost' onclick=\"revokeToken('${esc(t.id)}')\">Revoke</button></div>`"
       ").join(''):`<p class='sub' style='margin:0'>No API tokens yet.</p>`;}"
       "async function mintToken(){let l=document.getElementById('tok-label').value.trim();"
-      "let[s,j]=await postForm('/api/my-tokens',{label:l});"
+      "let sc=[...document.querySelectorAll('#tok-scopes input:checked')].map(c=>c.value).join(' ');"
+      "if(!sc){say('Pick at least one scope.');return;}"
+      "let[s,j]=await postForm('/api/my-tokens',{label:l,scopes:sc,'ttl-days':document.getElementById('tok-ttl').value});"
       "if(s!==200||!j.token){say('Could not create a token.');return;}"
       "document.getElementById('tok-label').value='';"
       "document.getElementById('tok-reveal').innerHTML=`<p class='sub' style='margin:10px 0 6px'>Copy your new token now — it will not be shown again:</p><code class='secret'>${esc(j.token)}</code><button class='btn-ghost' onclick='copyToken(this)'>Copy</button>`;"

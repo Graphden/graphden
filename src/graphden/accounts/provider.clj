@@ -48,11 +48,16 @@
       ;; :email / :totp-enabled? ride along so a policy layer (tenancy's
       ;; operator-by-email, enforced 2FA) can act without re-reading the
       ;; account. NO :org — org is the policy layer's job (membership).
+      ;; :api-token? / :token-scopes ride along the same way: a policy layer
+      ;; applies the per-token scope ceiling; open core stores but does not
+      ;; enforce (nil scopes = unscoped).
       {:authenticated? true
        :user-id (str (:id acct))
        :user (or (:primary-email acct) (:display-name acct) (str (:id acct)))
        :email (:primary-email acct)
-       :totp-enabled? (boolean (:totp-enabled? acct))}
+       :totp-enabled? (boolean (:totp-enabled? acct))
+       :api-token? (= "api" (:token-kind acct))
+       :token-scopes (:token-scopes acct)}
       {:authenticated? false})))
 
 

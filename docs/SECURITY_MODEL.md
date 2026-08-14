@@ -75,6 +75,21 @@ infrastructure configuration, never exposed to a tenant graph; a tenant reaches
 a secret only through the `:vault-get` base-fn, whose result is typed
 `[:secret :text]`. See [SECRETS.md](SECRETS.md).
 
+## API-token scopes (least privilege for MCP / CLI)
+
+A self-serve API bearer ([ACCOUNTS.md § session](ACCOUNTS.md)) can carry
+**scopes** and an **expiry**, picked at mint time on the `/account` panel.
+Semantics are a **ceiling**: the token's effective rights are the account's
+grants **∩** its scopes — a token can only ever narrow, never widen. The
+accounts module *stores* scopes and surfaces them on the principal
+(`:api-token?` / `:token-scopes`); the **tenancy layer enforces** them, so on
+a single-tenant self-host without the addon a bearer is as powerful as its
+account (same as a browser session there). Two rules are categorical on the
+enforced (cloud) surface, independent of scopes: an API token can never reach
+user/org/platform management (invites, grants, roles, members, registration),
+and can never mint or revoke API tokens (`/api/my-tokens/*` requires a
+browser session).
+
 ## Your responsibility (self-host)
 
 Graphden provides the isolation layers above; the deployment perimeter is

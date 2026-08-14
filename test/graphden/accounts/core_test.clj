@@ -103,7 +103,28 @@
       (let [t (accounts/mint-session! (storage) account-id)]
         (is (some? (accounts/authenticate-token (storage) t)))
         (accounts/revoke-all-for-account! (storage) account-id)
-        (is (nil? (accounts/authenticate-token (storage) t)))))))
+        (is (nil? (accounts/authenticate-token (storage) t)))))
+    (testing "scopes round-trip: stored on mint, surfaced parsed on authenticate"
+      (let [scoped (accounts/mint-session! (storage) account-id
+                                           {:kind "api" :ttl-ms nil
+                                            :scopes "write execute merge"})
+            acct (accounts/authenticate-token (storage) scoped)]
+        (is (= "api" (:token-kind acct)))
+        (is (= #{:write :execute :merge} (:token-scopes acct))))
+      (let [unscoped (accounts/mint-session! (storage) account-id {:kind "api" :ttl-ms nil})
+            acct (accounts/authenticate-token (storage) unscoped)]
+        (is (nil? (:token-scopes acct)) "nil scopes = unscoped (legacy)"))
+      (let [cookie-like (accounts/mint-session! (storage) account-id)
+            acct (accounts/authenticate-token (storage) cookie-like)]
+        (is (nil? (:token-kind acct)) "browser session carries no token-kind")))))
+
+
+(deftest parse-scopes-shapes
+  (is (= #{:write :execute} (accounts/parse-scopes "write execute")))
+  (is (= #{:write} (accounts/parse-scopes "  write  ")))
+  (is (nil? (accounts/parse-scopes nil)))
+  (is (nil? (accounts/parse-scopes "")))
+  (is (nil? (accounts/parse-scopes "   "))))
 
 
 (deftest ^:integration suspended-account-cannot-authenticate

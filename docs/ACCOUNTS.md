@@ -28,7 +28,7 @@ credentials, public origin) are listed in
 |--------|----|-----------|
 | `:account` | a **person** — the stable authz subject downstream grants/roles key on | `id`, `display-name?`, `primary-email?` (UNIQUE-when-present; the linking + operator-by-email lookup, set only from a **verified** email), `status` (`active`/`suspended`), `created-at` |
 | `:identity` | **one way to sign in**, bound to an account (1 account ↔ N identities → linking) | `account-id`, `provider` (`password`/`google`/`github`/`telegram`), `subject` (provider's stable id; the lower-cased email for `password`), `secret-data?` (bcrypt hash for `password`), `email?`, `email-verified?`, `created-at`. **UNIQUE (provider, subject)** |
-| `:session` | an authenticating token, org-agnostic | `token-hash` (SHA-256, UNIQUE — the raw token is never stored), `account-id`, `expires-at?` (nil = never), `kind?` (nil/`api` authenticate), `label?`, `created-at` |
+| `:session` | an authenticating token, org-agnostic | `token-hash` (SHA-256, UNIQUE — the raw token is never stored), `account-id`, `expires-at?` (nil = never), `kind?` (nil/`api` authenticate), `label?`, `scopes?` (space-separated scope names for an `api` bearer; nil = unscoped — accounts stores and surfaces them on the principal as `:token-scopes`/`:api-token?`, the tenancy layer enforces them as a ceiling over the account's grants), `created-at` |
 
 All three are non-versioned platform entities (like the tenancy identity
 entities) — no version mirror, the cheap schema path.
@@ -66,7 +66,7 @@ HttpOnly `gd_session` cookie (Max-Age 24 h); cookies are written as raw
 | Route | Behavior |
 |-------|----------|
 | `GET /login` | Self-contained sign-in page (email/password + enabled social buttons) |
-| `GET /account` | Self-contained account-management page (identities, 2FA, verify banner, API-tokens panel — the panel reveals itself only where `/api/my-tokens/*` answers, i.e. the tenancy addon is active) |
+| `GET /account` | Self-contained account-management page (identities, 2FA, verify banner, API-tokens panel with per-token scopes + expiry — the panel reveals itself only where `/api/my-tokens/*` answers, i.e. the tenancy addon is active; see [SECURITY_MODEL.md § API-token scopes](SECURITY_MODEL.md)) |
 | `GET /reset` | Password-reset form (consumes the emailed token) |
 | `POST /auth/signup` | `{email,password}` → account + session cookie, sends verify mail |
 | `POST /auth/login` | `{email,password}` → session cookie, or `{totp-required}` + short-lived `gd_2fa` cookie |

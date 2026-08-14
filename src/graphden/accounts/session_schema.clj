@@ -20,6 +20,12 @@
    - `label`      — human label for a self-serve API key (\"laptop CLI\"); the
                     only thing a listing can show since the hash never leaves
                     the server. Nullable.
+   - `scopes`     — space-separated scope names (\"write execute merge\") for a
+                    `kind` \"api\" bearer. NULL = unscoped (a legacy or
+                    browser session; the POLICY layer decides what that
+                    means — accounts only stores and surfaces it). The open
+                    core does not enforce scopes; the tenancy addon applies
+                    them as a ceiling over the account's grants.
    - `created-at` — epoch millis.
 
    Platform-managed, non-versioned."
@@ -51,6 +57,10 @@
   #uuid "3051143f-b997-4ad9-8a5a-818a8880deda")
 
 
+(def ^:private session-scopes-field-uuid
+  #uuid "cbdddd4a-1f58-48b5-a0a7-c1954122ec6d")
+
+
 (def ^:private session-created-at-field-uuid
   #uuid "79ecedec-cdb7-4f2e-a5a4-8692f21becd5")
 
@@ -73,5 +83,8 @@
                       :label {:uuid session-label-field-uuid
                               :type :text
                               :nullable? true}
+                      :scopes {:uuid session-scopes-field-uuid
+                               :type :text
+                               :nullable? true}
                       :created-at {:uuid session-created-at-field-uuid :type :int}})
       (ds/add-constraint :session {:type :unique :fields [:token-hash]})))

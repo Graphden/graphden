@@ -1,0 +1,255 @@
+;; app.auth-pages — the accounts module's PRESENTATION layer as graph
+;; composition (round-2 decomposition audit).
+;;
+;; The auth pages (/login, /account, /reset) and the transactional email
+;; bodies were string-concatenation pipelines inside
+;; `src/graphden/accounts/{pages,email}.clj` — pure look/copy with zero
+;; security logic, which forced a Clojure fork on any deployment that
+;; wanted its own branding. They are graph fn-defs now: the accounts
+;; router renders them through the PLATFORM executor ctx (an optional
+;; `:ctx` on `:accounts/routes-install`) and falls back to the built-in
+;; Clojure emergency shell when the graph cannot render (the login page
+;; must survive a graph outage — same availability argument as the
+;; alerter staying in Clojure).
+;;
+;; TRUST BOUNDARY: these render on the platform/default ctx. Tenant
+;; graph writes are org-scoped and never reach that view (and the
+;; version-plane authz arm blocks cross-org version rows), so only a
+;; platform-trusted principal can vary this surface — the same set of
+;; people who could edit the Clojure. The /auth/* endpoint URLs and the
+;; behavior JS live here as fixed assets/consts: editing them is
+;; possible for that trusted principal, exactly like editing the module
+;; itself, and nobody else.
+;;
+;; NOTE on the accounts module boundary: accounts stays a drop-in —
+;; it depends on a `page-renderer` CALLBACK (injected by init), not on
+;; this package; without a ctx it serves its built-in pages.
+{:namespace "app.auth-pages"
+ :description "Auth-surface presentation — /login /account /reset page composition + verification/reset email bodies, rendered by the accounts router through the platform ctx."
+ :fns
+ [;; =====================================================================
+  ;; Assets — CSS + behavior JS, one file each (diff-able, not EDN-escaped).
+  ;; =====================================================================
+  {:name :_auth-css
+   :parent :read-resource
+   :return-type :text
+   :args {:path "packages/app/auth-pages/auth.css"}}
+  {:name :_auth-login-js
+   :parent :read-resource
+   :return-type :text
+   :args {:path "packages/app/auth-pages/login.js"}}
+  {:name :_auth-account-js
+   :parent :read-resource
+   :return-type :text
+   :args {:path "packages/app/auth-pages/account.js"}}
+  {:name :_auth-reset-js
+   :parent :read-resource
+   :return-type :text
+   :args {:path "packages/app/auth-pages/reset.js"}}
+
+  ;; =====================================================================
+  ;; Page shell — head/brand chrome shared by all three pages. Free args
+  ;; :title + :body; the λ mark is the SAME graph-λ as the editor rail.
+  ;; =====================================================================
+  {:name :_auth-page-shell
+   :description "Branded HTML document shell for the auth pages — doctype/head/inline CSS + the λ brand row around `:body`."
+   :parent :str
+   :args {:parts [{:value "<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>"}
+                  {:as :title}
+                  {:value " — Graphden</title><style>"}
+                  :_auth-css
+                  {:value "</style></head><body><div class='wrap'><div class='brand'>"}
+                  {:value "<svg viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'><g stroke='currentColor' stroke-width='3' stroke-linecap='round'><line x1='9' y1='6' x2='25' y2='26'/><line x1='17' y1='16' x2='8' y2='26'/></g><g fill='currentColor'><circle cx='9' cy='6' r='3'/><circle cx='25' cy='26' r='3'/><circle cx='8' cy='26' r='3'/></g></svg>"}
+                  {:value "<b>Graphden</b></div>"}
+                  {:as :body}
+                  {:value "</div></body></html>"}]}}
+
+  ;; =====================================================================
+  ;; Social sign-in section. `:providers` is a {"github" true …} map (the
+  ;; router adapts its enabled set); `:telegram` is {:bot-token …} or nil.
+  ;; =====================================================================
+  {:name :_auth-providers-empty?
+   :parent :empty?
+   :args {:coll {:as :providers :type [:map :text :any]}}}
+  {:name :_auth-gh?
+   :parent :contains?
+   :args {:coll {:as :providers :type [:map :text :any]} :key {:value "github"}}}
+  {:name :_auth-goog?
+   :parent :contains?
+   :args {:coll {:as :providers :type [:map :text :any]} :key {:value "google"}}}
+
+  {:name :_auth-social-gh
+   :parent :if
+   :args {:test :_auth-gh?
+          :then {:value "<a class='btn-social' href='/auth/github/start'><svg viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'><path d='M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z'/></svg>Continue with GitHub</a>"}
+          :else {:value ""}}}
+  {:name :_auth-social-goog
+   :parent :if
+   :args {:test :_auth-goog?
+          :then {:value "<a class='btn-social' href='/auth/google/start'><svg viewBox='0 0 48 48' aria-hidden='true'><path fill='#4285F4' d='M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z'/><path fill='#34A853' d='M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9h-7.3v5.7C6.1 41.1 14.4 46 24 46z'/><path fill='#FBBC05' d='M11.8 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 17.1 2 20.4 2 24s1 6.9 2.5 9.9l7.3-5.7z'/><path fill='#EA4335' d='M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 4.1 29.9 2 24 2 14.4 2 6.1 6.9 4.5 14.1l7.3 5.7c1.7-5.2 6.5-9.1 12.2-9.1z'/></svg>Continue with Google</a>"}
+          :else {:value ""}}}
+
+  {:name :_auth-social-oauth-body
+   :parent :str
+   :args {:parts [{:value "<div class='divider'>or</div><div class='social'>"}
+                  :_auth-social-gh
+                  :_auth-social-goog
+                  {:value "</div>"}]}}
+  {:name :_auth-social-oauth
+   :parent :if
+   :args {:test :_auth-providers-empty?
+          :then {:value ""}
+          :else :_auth-social-oauth-body}}
+
+  ;; Telegram: our own .btn-social button + `Telegram.Login.auth` (the
+  ;; official widget iframe can't be restyled). `bot_id` = the numeric
+  ;; prefix of the bot token, split at the first ':'.
+  {:name :_auth-tg-token
+   :parent :get
+   :args {:coll {:as :telegram :type :nullable-keyword-map}
+          :key {:value :bot-token} :default nil}}
+  {:name :_auth-tg?
+   :parent :some?
+   :args {:value :_auth-tg-token}}
+  {:name :_auth-tg-parts
+   :parent :str-split
+   :args {:string {:ref :_auth-tg-token :type :text}
+          :separator {:value ":"}
+          :limit {:value 2}}}
+  {:name :_auth-tg-bot-id
+   :parent :first
+   :args {:coll {:ref :_auth-tg-parts :type [:list :text]}}}
+  {:name :_auth-tg-block-body
+   :parent :str
+   :args {:parts [{:value "<script async src='https://telegram.org/js/telegram-widget.js?22'></script><div class='social' style='margin-top:10px'><button type='button' class='btn-social' id='tg-login'><svg viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'><path d='M23.1 3.8 19.6 20c-.26 1.16-.95 1.44-1.92.9l-5.32-3.92-2.57 2.47c-.28.28-.52.52-1.07.52l.38-5.42 9.85-8.9c.43-.38-.09-.6-.67-.22L6.03 13.1 1.4 11.65c-1.15-.36-1.17-1.15.24-1.7L21.6 2.2c.95-.35 1.79.22 1.5 1.6z'/></svg>Continue with Telegram</button></div><script>document.getElementById('tg-login').addEventListener('click',function(){if(!window.Telegram||!window.Telegram.Login){return;}window.Telegram.Login.auth({bot_id:'"}
+                  :_auth-tg-bot-id
+                  {:value "',request_access:'write'},function(u){if(!u){return;}var q=Object.keys(u).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(u[k]);}).join('&');window.location='/auth/telegram/callback?'+q;});});</script>"}]}}
+  {:name :_auth-tg-block
+   :parent :if
+   :args {:test :_auth-tg?
+          :then :_auth-tg-block-body
+          :else {:value ""}}}
+
+  {:name :_auth-social
+   :description "The full social sign-in section — OAuth buttons (divider + GitHub/Google when enabled) followed by the Telegram button block."
+   :parent :str
+   :args {:parts [:_auth-social-oauth :_auth-tg-block]}}
+
+  ;; =====================================================================
+  ;; /login — tabs (sign in / create account), email+password form with
+  ;; the TOTP step, social section, behavior JS.
+  ;; =====================================================================
+  {:name :_auth-login-body
+   :parent :str
+   :args {:parts [{:value "<div class='card'><div class='tabs'><button id='t-in' class='on' onclick='mode(false)'>Sign in</button><button id='t-up' onclick='mode(true)'>Create account</button></div><h1 id='hd'>Welcome back</h1><p class='sub' id='sb'>Sign in to your Graphden account.</p><form id='f' onsubmit='return submitForm(event)'><label>Email</label><input type='email' id='email' required autocomplete='email'><label>Password</label><input type='password' id='password' required autocomplete='current-password'><div id='totp-wrap' style='display:none'><label>Authentication code</label><input type='text' id='code' inputmode='numeric' autocomplete='one-time-code' placeholder='123456'></div><button class='btn-primary' id='go' type='submit'>Sign in</button><div class='msg' id='msg'></div><p style='margin:10px 0 0;font-size:13px;text-align:center'><a href='#' id='forgot' onclick='return forgot()'>Forgot password?</a></p></form>"}
+                  :_auth-social
+                  {:value "</div><script>"}
+                  :_auth-login-js
+                  {:value "</script>"}]}}
+  {:name :auth-login-page
+   :description "The /login + /signup page — branded shell, sign-in/sign-up tabs, the enabled social providers, TOTP step. `:providers` is a {\"github\" true …} map of ENABLED oauth providers; `:telegram` is `{:bot-token …}` or nil. Rendered by the accounts router through the platform ctx; a deployment re-themes it here, in the graph."
+   :parent :_auth-page-shell
+   :args {:title {:value "Sign in"}
+          :body :_auth-login-body
+          :providers {:type [:map :text :any] :description "Enabled oauth providers as a {\"github\" true} map (empty = none)."}
+          :telegram {:type :nullable-keyword-map :description "{:bot-token …} when Telegram login is configured, else nil (the router always binds the key)."}}
+   :return-type :text}
+
+  ;; =====================================================================
+  ;; /account — settings: identities, link buttons, 2FA, sign-out.
+  ;; =====================================================================
+  {:name :_auth-link-gh
+   :parent :if
+   :args {:test :_auth-gh?
+          :then {:value "<a class='btn-social' href='/auth/github/start'><svg viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'><path d='M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.7 1.3 3.4 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z'/></svg>Link GitHub</a>"}
+          :else {:value ""}}}
+  {:name :_auth-link-goog
+   :parent :if
+   :args {:test :_auth-goog?
+          :then {:value "<a class='btn-social' href='/auth/google/start'><svg viewBox='0 0 48 48' aria-hidden='true'><path fill='#4285F4' d='M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.6v5.5h7.1c4.1-3.8 6.6-9.4 6.6-16.1z'/><path fill='#34A853' d='M24 46c5.9 0 10.9-2 14.5-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.5-3.8-12.2-9h-7.3v5.7C6.1 41.1 14.4 46 24 46z'/><path fill='#FBBC05' d='M11.8 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.5C3 17.1 2 20.4 2 24s1 6.9 2.5 9.9l7.3-5.7z'/><path fill='#EA4335' d='M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C34.9 4.1 29.9 2 24 2 14.4 2 6.1 6.9 4.5 14.1l7.3 5.7c1.7-5.2 6.5-9.1 12.2-9.1z'/></svg>Link Google</a>"}
+          :else {:value ""}}}
+
+  {:name :_auth-account-body
+   :parent :str
+   :args {:parts [{:value "<div class='card'><h1>Your account</h1><p class='sub' id='who'>&nbsp;</p><div id='verify-banner'></div><div class='sec'><h2>Sign-in methods</h2><div id='idents'>Loading…</div><div class='social' style='margin-top:12px'>"}
+                  :_auth-link-gh
+                  :_auth-link-goog
+                  {:value "</div></div><div class='sec'><h2>Two-factor authentication</h2><div id='tfa'>Loading…</div></div><button class='btn-primary' style='background:transparent;border:1px solid var(--line);color:var(--muted)' onclick='logout()'>Sign out</button><div class='msg' id='msg'></div></div><script>"}
+                  :_auth-account-js
+                  {:value "</script>"}]}}
+  {:name :auth-account-page
+   :description "The /account settings page — identities + link buttons for the enabled providers, 2FA enrollment, sign-out. Data loads client-side from /auth/* against the session cookie."
+   :parent :_auth-page-shell
+   :args {:title {:value "Account"}
+          :body :_auth-account-body
+          :providers {:type [:map :text :any] :description "Enabled oauth providers as a {\"github\" true} map."}}
+   :return-type :text}
+
+  ;; =====================================================================
+  ;; /reset — one new-password field; POSTs /auth/reset with the token
+  ;; from the query string.
+  ;; =====================================================================
+  {:name :_auth-reset-body
+   :parent :str
+   :args {:parts [{:value "<div class='card'><h1>Choose a new password</h1><p class='sub'>After resetting you'll be signed out everywhere.</p><form onsubmit='return doReset(event)'><label>New password</label><input type='password' id='password' required minlength='8' autocomplete='new-password'><button class='btn-primary' type='submit'>Set password</button><div class='msg' id='msg'></div></form></div><script>"}
+                  :_auth-reset-js
+                  {:value "</script>"}]}}
+  {:name :auth-reset-page
+   :description "The /reset?token=… page the emailed link opens — one new-password field."
+   :parent :_auth-page-shell
+   :args {:title {:value "Reset password"}
+          :body :_auth-reset-body}
+   :return-type :text}
+
+  ;; =====================================================================
+  ;; Transactional email bodies — {:subject :text :html} records. The
+  ;; link paths (/auth/verify, /reset) are part of the auth surface and
+  ;; live here as fixed parts.
+  ;; =====================================================================
+  {:name :_auth-verify-link
+   :parent :str
+   :args {:parts [{:as :base-url} {:value "/auth/verify?token="} {:as :token}]}}
+  {:name :_auth-verify-text
+   :parent :str
+   :args {:parts [{:value "Confirm your email for Graphden by opening this link:\n\n"}
+                  :_auth-verify-link
+                  {:value "\n\nThe link expires in 24 hours. If you didn't create a Graphden account, ignore this email."}]}}
+  {:name :_auth-verify-html
+   :parent :str
+   :args {:parts [{:value "<p>Confirm your email for Graphden:</p><p><a href=\""}
+                  :_auth-verify-link
+                  {:value "\">Verify my email</a></p><p>Or paste this link into your browser:<br>"}
+                  :_auth-verify-link
+                  {:value "</p><p>The link expires in 24 hours. If you didn't create a Graphden account, ignore this email.</p>"}]}}
+  {:name :auth-verify-email
+   :description "Email-verification message — `{:subject :text :html}` over `:base-url` + `:token`. The copy/branding is graph-composable; the /auth/verify link path is a fixed part of the auth surface."
+   :parent :zipmap
+   :args {:keys [{:value :subject} {:value :text} {:value :html}]
+          :vals [{:value "Verify your Graphden email"} :_auth-verify-text :_auth-verify-html]
+          :base-url {:type :text :description "Public app origin, e.g. https://app.graphden.dev."}
+          :token {:type :text :description "base64url verification token (URL-safe, no escaping needed)."}}
+   :return-type {:subject :text :text :text :html :text}}
+
+  {:name :_auth-reset-link
+   :parent :str
+   :args {:parts [{:as :base-url} {:value "/reset?token="} {:as :token}]}}
+  {:name :_auth-reset-text
+   :parent :str
+   :args {:parts [{:value "Someone (hopefully you) asked to reset the Graphden password for this address.\n\nSet a new password here:\n\n"}
+                  :_auth-reset-link
+                  {:value "\n\nThe link expires in 1 hour. If you didn't ask, ignore this email — nothing changes."}]}}
+  {:name :_auth-reset-html
+   :parent :str
+   :args {:parts [{:value "<p>Someone (hopefully you) asked to reset the Graphden password for this address.</p><p><a href=\""}
+                  :_auth-reset-link
+                  {:value "\">Set a new password</a></p><p>Or paste this link into your browser:<br>"}
+                  :_auth-reset-link
+                  {:value "</p><p>The link expires in 1 hour. If you didn't ask, ignore this email — nothing changes.</p>"}]}}
+  {:name :auth-reset-email
+   :description "Password-reset message — `{:subject :text :html}` over `:base-url` + `:token`. The /reset link path is a fixed part of the auth surface."
+   :parent :zipmap
+   :args {:keys [{:value :subject} {:value :text} {:value :html}]
+          :vals [{:value "Reset your Graphden password"} :_auth-reset-text :_auth-reset-html]
+          :base-url {:type :text :description "Public app origin."}
+          :token {:type :text :description "base64url reset token."}}
+   :return-type {:subject :text :text :text :html :text}}]}

@@ -84,9 +84,12 @@
 
 
 (defn verification-email-body
-  "Subject + html + text for an email-verification message. The link is
-   `<app-base-url>/auth/verify?token=<token>` — the token is base64url (no
-   padding), already URL-safe, so it needs no escaping."
+  "BUILT-IN (fallback) subject + html + text for an email-verification
+   message — the primary copy is the `:auth-verify-email` graph fn-def
+   (`app.auth-pages`); this serves when no ctx is wired or the graph cannot
+   render. Parity is pinned by `graphden.packages.app.auth-pages-test`.
+   The link is `<app-base-url>/auth/verify?token=<token>` — the token is
+   base64url (no padding), already URL-safe, so it needs no escaping."
   [app-base-url token]
   (let [link (str app-base-url "/auth/verify?token=" token)]
     {:subject "Verify your Graphden email"
@@ -100,7 +103,9 @@
 
 
 (defn reset-email-body
-  "Subject + html + text for a password-reset message. The link opens
+  "BUILT-IN (fallback) subject + html + text for a password-reset message —
+   the primary copy is the `:auth-reset-email` graph fn-def; see
+   `verification-email-body` for the seam. The link opens
    `<app-base-url>/reset?token=<token>`."
   [app-base-url token]
   (let [link (str app-base-url "/reset?token=" token)]

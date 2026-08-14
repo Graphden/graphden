@@ -20,8 +20,42 @@
     [graphden.accounts.provider :as provider]
     [graphden.accounts.routes :as routes]
     [graphden.accounts.session-schema :as session-schema]
+    [graphden.executor.interface :as exec]
     [graphden.system.route-collection :as rc]
     [integrant.core :as ig]))
+
+
+;; The graph render seam (`app.auth-pages`): the page/email presentation
+;; is graph composition on the PLATFORM ctx — a deployment re-themes the
+;; auth surface in the editor. The renderers are optional callbacks so
+;; the module stays a drop-in: no ctx wired (or a graph render failure)
+;; → routes/flows fall back to the built-in Clojure pages/templates.
+
+(def ^:private page-fn-names
+  {:login "auth-login-page"
+   :account "auth-account-page"
+   :reset "auth-reset-page"})
+
+
+(def ^:private email-fn-names
+  {:verify "auth-verify-email"
+   :reset "auth-reset-email"})
+
+
+(defn- make-page-renderer
+  [ctx]
+  (when ctx
+    (fn [page-kw args]
+      (when-let [fn-name (page-fn-names page-kw)]
+        (exec/execute-by-name ctx fn-name args)))))
+
+
+(defn- make-email-renderer
+  [ctx]
+  (when ctx
+    (fn [kind base-url token]
+      (when-let [fn-name (email-fn-names kind)]
+        (exec/execute-by-name ctx fn-name {:base-url base-url :token token})))))
 
 
 (defn schema-extension
@@ -63,16 +97,19 @@
 
 
 (defmethod ig/init-key :accounts/routes-install
-  [_ {:keys [storage mailer app-origin oauth-providers telegram]}]
+  [_ {:keys [storage mailer app-origin oauth-providers telegram ctx]}]
   (let [oauth (enabled-oauth oauth-providers)
         tg (when-not (str/blank? (:bot-token telegram)) telegram)]
     (log/info "Accounts: installing /auth/* routes"
               {:oauth (keys oauth) :telegram (some? tg)
+               :graph-pages (some? ctx)
                :app-origin (if (str/blank? (str app-origin)) :from-host app-origin)})
     (rc/install-router! :accounts
                         (routes/make-router {:storage storage :mailer mailer
                                              :app-origin app-origin
-                                             :oauth-providers oauth :telegram tg}))
+                                             :oauth-providers oauth :telegram tg
+                                             :page-renderer (make-page-renderer ctx)
+                                             :email-renderer (make-email-renderer ctx)}))
     :installed))
 
 

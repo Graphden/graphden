@@ -30,6 +30,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.accounts.core :as core]
     [graphden.accounts.crypto :as crypto]
     [graphden.accounts.flows :as flows]
@@ -38,6 +39,22 @@
     [graphden.accounts.provider :as provider]
     [graphden.accounts.telegram :as telegram]
     [graphden.crud.request :as req]))
+
+
+(defn- graph-page
+  "Render a page through the injected graph `page-renderer` (the
+   `app.auth-pages` fn-defs on the platform ctx), falling back to
+   `fallback-thunk` (the built-in Clojure shell) when no renderer is
+   wired or the graph cannot render — the login page must survive a
+   graph outage."
+  [page-renderer page-kw args fallback-thunk]
+  (or (when page-renderer
+        (try (page-renderer page-kw args)
+             (catch Exception e
+               (log/warn e "accounts: graph page render failed — serving the built-in shell"
+                         {:page page-kw})
+               nil)))
+      (fallback-thunk)))
 
 
 (def ^:private session-max-age-secs (* 24 60 60))
@@ -163,11 +180,12 @@
 
 
 (defn- handle-signup
-  [storage mailer origin request]
+  [storage mailer email-renderer origin request]
   (let [{:keys [email password]} (req/read-json-body request)]
     (try
       (let [{:keys [account-id token]} (core/password-signup! storage {:email email :password password})]
-        (flows/request-verification! storage mailer origin account-id email)
+        (flows/request-verification! storage mailer origin account-id email
+                                     email-renderer)
         (json-resp 200 {:ok true :verification-sent true} (session-cookie token origin)))
       (catch clojure.lang.ExceptionInfo e
         (json-resp 409 {:ok false :error (name (or (:type (ex-data e)) :error))})))))
@@ -177,7 +195,7 @@
   "Re-send the verification email for the signed-in account's still-unverified
    password identity. Idempotent-ish (mints a fresh token each call); answers
    200 whether or not there was anything to send (no state leak)."
-  [storage mailer origin request]
+  [storage mailer email-renderer origin request]
   (if-let [acct (current-account storage request)]
     (do
       (when-let [ident (->> (core/identities-for-account storage (str (:id acct)))
@@ -185,7 +203,8 @@
                                           (not (:email-verified? %))
                                           (:email %)))
                             first)]
-        (flows/request-verification! storage mailer origin (str (:id acct)) (:email ident)))
+        (flows/request-verification! storage mailer origin (str (:id acct)) (:email ident)
+                                     email-renderer))
       (json-resp 200 {:ok true}))
     (json-resp 401 {:ok false :error "unauthenticated"})))
 
@@ -272,9 +291,9 @@
 (defn- handle-forgot
   "POST /auth/forgot {email} — always 200 with the same body whether or not
    the email exists (no account enumeration); the reset link goes by email."
-  [storage mailer origin request]
+  [storage mailer email-renderer origin request]
   (let [{:keys [email]} (req/read-json-body request)]
-    (flows/request-password-reset! storage mailer origin email)
+    (flows/request-password-reset! storage mailer origin email email-renderer)
     (json-resp 200 {:ok true :reset-sent true})))
 
 
@@ -339,9 +358,17 @@
   "Build the `/auth/*` Ring router. `opts`:
    `:storage` `:mailer` `:app-origin` (nil ⇒ derive from Host),
    `:oauth-providers` `{\"github\" {:client-id :client-secret} …}` (enabled only),
-   `:telegram` `{:bot-token …}` or nil."
-  [{:keys [storage mailer app-origin oauth-providers telegram]}]
+   `:telegram` `{:bot-token …}` or nil,
+   `:page-renderer` (optional) `(fn [page-kw args] → html-or-nil)` — the graph
+   render seam (`app.auth-pages`); nil / throw ⇒ built-in pages,
+   `:email-renderer` (optional) `(fn [kind base-url token] → {:subject …}-or-nil)`
+   — same seam for the transactional email bodies."
+  [{:keys [storage mailer app-origin oauth-providers telegram
+           page-renderer email-renderer]}]
   (let [provider-keys (set (keys oauth-providers))
+        ;; The graph pages take providers as a {\"github\" true} map — a
+        ;; JSONB-friendly membership map for the graph `:contains?`.
+        provider-map (into {} (map (fn [p] [p true])) provider-keys)
         ;; Per-IP fixed-window limiters: login blunts password brute-force
         ;; (bcrypt slows but doesn't bound attempts), signup blunts
         ;; mass-account abuse, forgot blunts reset-mail spam. Over-quota →
@@ -357,13 +384,18 @@
           (let [origin (resolve-origin app-origin request)]
             (cond
               (and (= method :get) (= uri "/login"))
-              (html-resp (pages/login-page provider-keys telegram))
+              (html-resp (graph-page page-renderer :login
+                                     {:providers provider-map :telegram telegram}
+                                     #(pages/login-page provider-keys telegram)))
 
               (and (= method :get) (= uri "/account"))
-              (html-resp (pages/account-page provider-keys))
+              (html-resp (graph-page page-renderer :account
+                                     {:providers provider-map}
+                                     #(pages/account-page provider-keys)))
 
               (and (= method :get) (= uri "/reset"))
-              (html-resp (pages/reset-page))
+              (html-resp (graph-page page-renderer :reset {}
+                                     #(pages/reset-page)))
 
               (and (= method :get) (= uri "/auth/me"))
               (handle-me storage request)
@@ -376,7 +408,7 @@
 
               (and (= method :post) (= uri "/auth/signup"))
               (if (signup-limit (client-ip request))
-                (handle-signup storage mailer origin request)
+                (handle-signup storage mailer email-renderer origin request)
                 (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/login"))
@@ -387,7 +419,7 @@
 
               (and (= method :post) (= uri "/auth/forgot"))
               (if (forgot-limit (client-ip request))
-                (handle-forgot storage mailer origin request)
+                (handle-forgot storage mailer email-renderer origin request)
                 (json-resp 200 {:ok true :reset-sent true}))
 
               (and (= method :post) (= uri "/auth/reset"))
@@ -395,7 +427,7 @@
 
               (and (= method :post) (= uri "/auth/resend-verification"))
               (if (forgot-limit (client-ip request))
-                (handle-resend-verification storage mailer origin request)
+                (handle-resend-verification storage mailer email-renderer origin request)
                 (json-resp 200 {:ok true}))
 
               (and (= method :post) (= uri "/auth/logout"))

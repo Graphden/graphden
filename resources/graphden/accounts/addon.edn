@@ -36,7 +36,12 @@
  ;; "" → OFF), so social login is per-provider opt-in. GRAPHDEN_APP_ORIGIN is
  ;; the public origin used for redirect URIs + verification links; unset → the
  ;; request Host is used.
+ ;; `:ctx` wires the GRAPH render seam: /login /account /reset and the
+ ;; email bodies render from the `app.auth-pages` fn-defs on the platform
+ ;; ctx (re-theme them in the editor). Omit it — or let the graph fail —
+ ;; and the built-in Clojure pages/templates serve instead.
  :accounts/routes-install {:storage #ig/ref :db/postgres
+                           :ctx #ig/ref :exec/context
                            :mailer #ig/ref :accounts/mailer
                            :app-origin #env GRAPHDEN_APP_ORIGIN
                            :oauth-providers {"github" {:client-id #env GITHUB_CLIENT_ID

@@ -1,10 +1,13 @@
 (ns graphden.accounts.pages
-  "Self-contained HTML for the accounts module's own pages — `/login` and
-   `/account` — served straight from the accounts router. Keeping the auth UI in
-   the module (rather than wiring it into the editor shell) is what makes
-   accounts a drop-in opt-in: enable the addon and a self-hosted instance gets a
-   working sign-in + account-management surface, brand-matched (ink ground,
-   Graphden blue, the λ mark), with no editor changes.
+  "BUILT-IN (fallback) HTML for the accounts module's own pages — `/login`,
+   `/account`, `/reset`. The PRIMARY render path is the `app.auth-pages`
+   GRAPH fn-defs (round-2 decomposition audit): when `:accounts/routes-install`
+   is wired with the platform `:ctx`, the router renders the pages from the
+   graph so a deployment re-themes them in the editor. THIS namespace serves
+   when no ctx is wired or the graph cannot render — the login page must
+   survive a graph outage — so it must stay a working, dependency-free shell.
+   Behavioural parity with the graph copies is pinned byte-for-byte by
+   `graphden.packages.app.auth-pages-test`; edit BOTH sides together.
 
    The pages are plain HTML + inline CSS/JS that call the JSON `/auth/*`
    endpoints. No external assets (the only remote script is the optional

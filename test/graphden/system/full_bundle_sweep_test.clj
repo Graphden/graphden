@@ -23,6 +23,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.sync :as pkg-sync]
+    [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -40,10 +41,17 @@
       ;; create-branch parsed vs the widened :_create-branch-data
       ;; shape) passed this test and killed the CANDIDATE image boot
       ;; in the landing gate's e2e phase instead.
-      (pkg-sync/bootstrap-from-packages! storage
-                                         ["core" "storage" "web" "app-base"
-                                          "app" "registry" "mcp"]
-                                         {:skip-type-check? false})
+      ;; `*max-batch-size*` shrunk to 100: the bulk sync MUST bind its
+      ;; own ceiling (sync-fn-entities-from-packages!) — 2026-08-15 the
+      ;; cloud graph outgrew the global 10000 cap and every FRESH-DB
+      ;; boot died :batch-error/batch-too-large while incremental
+      ;; deployments kept working. This binding makes the superset
+      ;; bootstrap overflow any un-ceilinged batch path immediately.
+      (binding [sp-config/*max-batch-size* 100]
+        (pkg-sync/bootstrap-from-packages! storage
+                                           ["core" "storage" "web" "app-base"
+                                            "app" "registry" "mcp"]
+                                           {:skip-type-check? false}))
       (let [ctx (exec/create-context {:storage storage})]
         ;; Eager compile of EVERY fn — the production
         ;; `:exec/compiled-registry` path. Ambiguous lambda-params,

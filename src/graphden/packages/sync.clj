@@ -29,6 +29,7 @@
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
     [graphden.services.port-check :as port-check]
+    [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
@@ -305,32 +306,37 @@
    ;; or a bare route's handler declares a wire-breaking :lambda-params.
    (validate-no-name-collisions! packages)
    (validate-route-handler-shapes! packages)
-   (let [base-fn-defs (:base-fn-defs packages)
-         ;; Sync namespace entities first (creates ns hierarchy in DB)
-         ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
-                                         (:ns-descriptions packages))
-         ;; Full name→id map covering base-fns + composed fn-defs so
-         ;; either sync can resolve a reference into the other set.
-         all-name->id (compute-all-fn-name-ids packages)
-         ;; Map of {fn-name → impl} threaded through to `:exec/context`
-         ;; via integrant — sidesteps the process-global registry so
-         ;; concurrent test-scope start! calls can't race on the atom.
-         ;; `extra-base-fns` is merged on top of package impls. Same
-         ;; map is also pushed into the global registry for back-compat
-         ;; with direct `exec/get-base-fn` / REPL callers.
-         base-fns-map (merge (registry/compute-base-fns-map base-fn-defs)
-                             extra-base-fns)]
-     (registry/sync-primitives! storage)
-     ;; Register refinement type-aliases BEFORE base-fn rich-type
-     ;; recording so `:http-server :args {:port :port}` stores the
-     ;; structural `[:refine :int …]` form, not the bare keyword.
-     (register-type-aliases! (:fn-defs packages))
-     (doseq [[fn-name impl] base-fns-map]
-       (exec/register-base-fn! fn-name impl))
-     (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)
-     {:ns-id-map ns-id-map
-      :all-name->id all-name->id
-      :base-fns base-fns-map})))
+   ;; Trusted-bootstrap batch ceiling — same rationale as the binding in
+   ;; `sync-fn-entities-from-packages!` (which see): `*max-batch-size*`
+   ;; guards USER writes; the bundled sync legitimately writes every
+   ;; ns/base-fn row in single batches and must not die as the set grows.
+   (binding [sp-config/*max-batch-size* (max sp-config/*max-batch-size* 100000)]
+     (let [base-fn-defs (:base-fn-defs packages)
+           ;; Sync namespace entities first (creates ns hierarchy in DB)
+           ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
+                                           (:ns-descriptions packages))
+           ;; Full name→id map covering base-fns + composed fn-defs so
+           ;; either sync can resolve a reference into the other set.
+           all-name->id (compute-all-fn-name-ids packages)
+           ;; Map of {fn-name → impl} threaded through to `:exec/context`
+           ;; via integrant — sidesteps the process-global registry so
+           ;; concurrent test-scope start! calls can't race on the atom.
+           ;; `extra-base-fns` is merged on top of package impls. Same
+           ;; map is also pushed into the global registry for back-compat
+           ;; with direct `exec/get-base-fn` / REPL callers.
+           base-fns-map (merge (registry/compute-base-fns-map base-fn-defs)
+                               extra-base-fns)]
+       (registry/sync-primitives! storage)
+       ;; Register refinement type-aliases BEFORE base-fn rich-type
+       ;; recording so `:http-server :args {:port :port}` stores the
+       ;; structural `[:refine :int …]` form, not the bare keyword.
+       (register-type-aliases! (:fn-defs packages))
+       (doseq [[fn-name impl] base-fns-map]
+         (exec/register-base-fn! fn-name impl))
+       (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)
+       {:ns-id-map ns-id-map
+        :all-name->id all-name->id
+        :base-fns base-fns-map}))))
 
 
 (defn sync-bundle!
@@ -608,8 +614,23 @@
                                   (when fn-name
                                     [fn-name (assoc fn-def :name fn-name)])))
                           (:base-fn-defs packages))
-         fns (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
-                                                  extra-name->id extra-defs)
+         ;; The bundled-package bulk sync writes every fn/slot/binding row
+         ;; of the whole graph in single batches — 10485 fn rows as of
+         ;; 2026-08-15, past the 10000 `*max-batch-size*` cap, which
+         ;; guards USER-submitted writes, not this trusted bootstrap path
+         ;; (its own docstring says so). Fresh-DB boots (a new deployment,
+         ;; `bb deploy`, the golden test bootstrap) died on
+         ;; :batch-error/batch-too-large; incremental re-syncs never hit
+         ;; it, which is why long-lived deployments kept working. Bind a
+         ;; generous ceiling for exactly this call instead of raising the
+         ;; global cap again (5000→10000 was already this whack-a-mole).
+         ;; NB: bind the CONFIG var — `sp/*max-batch-size*` is a load-time
+         ;; VALUE alias of it, and `validate-batch-size!` reads the config
+         ;; var; rebinding the sp copy would be a silent no-op.
+         fns (binding [sp-config/*max-batch-size*
+                       (max sp-config/*max-batch-size* 100000)]
+               (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
+                                                    extra-name->id extra-defs))
          ;; ROOT FIX (audit-4): heal namespace-moved package
          ;; identities at the moment of the move — see the fn
          ;; docstring. Before the seed/sweep so registry + compile

@@ -14,7 +14,7 @@
    | Variable                        | Default  | Description                           |
    |---------------------------------|----------|---------------------------------------|
    | `*query-timeout-ms*`            | 30000    | Query timeout (min 1000ms for JDBC)   |
-   | `*max-batch-size*`              | 1000     | Max entities per batch operation      |
+   | `*max-batch-size*`              | 10000    | Max entities per batch operation      |
    | `*max-graph-iterations*`        | 10000    | Max BFS iterations for graph resolve  |
    | `*max-recursion-depth*`         | 1000     | Max depth for graph-level `:fix`      |
 

@@ -51,7 +51,8 @@
            :renamed-fields (atom [])
            :created-enums (atom [])
            :renamed-enums (atom {})
-           :created-enum-values (atom [])}
+           :created-enum-values (atom [])
+           :renamed-enum-values (atom [])}
           extra-keys)))
 
 
@@ -61,7 +62,8 @@
   {:entities {:created @(:created-entities ctx) :renamed @(:renamed-entities ctx)}
    :fields {:created @(:created-fields ctx) :renamed @(:renamed-fields ctx)}
    :enums {:created @(:created-enums ctx) :renamed @(:renamed-enums ctx)}
-   :enum-values {:created @(:created-enum-values ctx)}})
+   :enum-values {:created @(:created-enum-values ctx)
+                 :renamed @(:renamed-enum-values ctx)}})
 
 
 ;; === Type compatibility checks ===
@@ -101,11 +103,32 @@
 ;; === Enum processing ===
 
 (defn- process-existing-enum-value!
-  "Adds a new value to an existing enum if not present in old metadata."
+  "Adds a new value to an existing enum if its uuid is absent from old
+   metadata; RENAMES the pg enum label when the uuid is present but
+   the keyword changed (the uuid is the identity — same contract as
+   entity/field renames). Without the rename arm the keyword change
+   was a silent no-op: pg kept the old label while save-metadata!
+   recorded the new one, the drift became invisible to every later
+   uuid-keyed diff, and the first write with the new label failed at
+   pg ('invalid input value for enum'). A backend without the
+   callback fails loudly instead of silently diverging."
   [callbacks old-metadata enum-name value-kw value-uuid ctx]
-  (when-not (get (:enum-values old-metadata) value-uuid)
-    ((:on-add-enum-value! callbacks) ctx enum-name value-kw)
-    (swap! (:created-enum-values ctx) conj {:enum enum-name :value value-kw})))
+  (if-let [old-entry (get (:enum-values old-metadata) value-uuid)]
+    (when (not= (:value old-entry) value-kw)
+      (if-let [rename! (:on-rename-enum-value! callbacks)]
+        (do (rename! ctx enum-name (:value old-entry) value-kw)
+            (swap! (:renamed-enum-values ctx) conj
+                   {:enum enum-name :old (:value old-entry) :new value-kw}))
+        (throw (ex-info (str "enum value renamed (" enum-name ": "
+                             (:value old-entry) " -> " value-kw
+                             ") but the backend has no "
+                             ":on-rename-enum-value! callback — refusing "
+                             "to let metadata diverge from storage")
+                        {:type :migration/enum-value-rename-unsupported
+                         :enum enum-name
+                         :old (:value old-entry) :new value-kw}))))
+    (do ((:on-add-enum-value! callbacks) ctx enum-name value-kw)
+        (swap! (:created-enum-values ctx) conj {:enum enum-name :value value-kw}))))
 
 
 (defn- process-single-enum!
@@ -201,11 +224,19 @@
    should be safe (`DROP COLUMN IF EXISTS` semantics on the backend
    side). The framework only knows about the call; correctness lives
    in the callback."
-  [callbacks schema ctx]
+  [callbacks old-metadata schema ctx]
   (when-let [on-delete (:on-delete-field! callbacks)]
     (doseq [[entity-name field-map] (ds/retired-fields schema)
-            [field-name _uuid] field-map]
-      (on-delete ctx entity-name field-name))))
+            [field-name uuid] field-map]
+      ;; Drop by the CURRENT column name resolved from old metadata's
+      ;; uuid index, falling back to the declared tombstone name. The
+      ;; name-only drop was a fully silent no-op when a deployment
+      ;; skipped an intermediate rename release (uuid exempted from
+      ;; the removal warn, IF EXISTS swallowed the miss, the column
+      ;; lingered).
+      (let [current-name (or (get-in old-metadata [:fields uuid :field])
+                             field-name)]
+        (on-delete ctx entity-name current-name)))))
 
 
 (defn do-migration!
@@ -231,7 +262,7 @@
           (ds/entities schema))
 
     ;; Process retired fields — DROP COLUMN equivalents.
-    (process-retired-fields! callbacks schema ctx)
+    (process-retired-fields! callbacks old-metadata schema ctx)
 
     ;; Optional post-processing (e.g., datomic transact + validate)
     (when-let [post-fn (:post-process! callbacks)]

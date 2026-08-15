@@ -113,9 +113,24 @@
     field-type))
 
 
+(defn- validate-bool-attrs!
+  "Validates the OTHER boolean field attributes (:indexed?,
+   :nulls-not-distinct?) — :nullable? had a boolean check while these
+   accepted any value and only misbehaved downstream (a truthy string
+   silently created an index; DDL read the constraint flag as set)."
+  [entity-name field-name field-spec]
+  (doseq [k [:indexed? :nulls-not-distinct?]]
+    (when (and (contains? field-spec k)
+               (not (boolean? (get field-spec k))))
+      (throw (ex-info (str "Field " k " must be a boolean")
+                      {:entity entity-name :field field-name
+                       :attr k :spec field-spec})))))
+
+
 (defn- validate-nullable!
   "Validates :nullable? attribute if present."
   [entity-name field-name field-spec in-variant?]
+  (validate-bool-attrs! entity-name field-name field-spec)
   (when (contains? field-spec :nullable?)
     (if in-variant?
       (throw (ex-info "Union variant cannot have :nullable? attribute"
@@ -425,6 +440,13 @@
   (when-not (keyword? (:value entry))
     (throw (ex-info "Enum value :value must be a keyword"
                     {:enum-name enum-name :entry entry})))
+  ;; Unknown extra keys are declaration typos ({:uuid u :vaule :x}
+  ;; would otherwise pass with the misspelled key silently ignored).
+  (let [extra (remove #{:uuid :value} (keys entry))]
+    (when (seq extra)
+      (throw (ex-info "Enum value entry has unsupported keys"
+                      {:enum-name enum-name :entry entry
+                       :unsupported-keys (vec extra)}))))
   ;; Validate enum value name is suitable for SQL identifier conversion
   (validate-identifier-name! {:enum-name enum-name :enum-value (:value entry)}
                              (:value entry))

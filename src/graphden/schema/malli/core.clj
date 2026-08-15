@@ -78,8 +78,12 @@
     (when-not (vector? values)
       (throw (ex-info "Enum values must be a vector"
                       {:enum-name enum-name :values values})))
-    ;; Validate each value entry
-    (run! #(v/validate-single-enum-value known-uuids enum-name %) values)
+    ;; Validate each value entry — against known-uuids WITH the enum's
+    ;; own uuid already reserved, so a value uuid equal to the enum's
+    ;; uuid is caught (and the later bookkeeping can't overwrite the
+    ;; enum's own known-uuids entry with a value location).
+    (let [known+self (assoc known-uuids enum-uuid (str "enum " enum-name))]
+      (run! #(v/validate-single-enum-value known+self enum-name %) values))
     ;; Check for duplicate values (single-pass with early exit)
     (when-let [dup (v/find-first-duplicate (map :value values))]
       (throw (ex-info "Enum has duplicate values"
@@ -228,6 +232,15 @@
     ;; at build time. (Idempotent re-declaration of the same tombstone
     ;; is fine — the uniqueness check only fires for a DIFFERENT
     ;; location claiming the uuid.)
+    ;; Re-retiring the same (entity, field) with a DIFFERENT uuid is a
+    ;; conflicting declaration, not an update — last-wins would leave
+    ;; the first tombstone reserved but exemption-less.
+    (when-let [prev (get-in retired-fields-map [entity-name field-name])]
+      (when (not= prev field-uuid)
+        (throw (ex-info (str "Field already retired with a different uuid: "
+                             entity-name "/" field-name)
+                        {:entity-name entity-name :field-name field-name
+                         :existing prev :new field-uuid}))))
     (let [tombstone-loc (str "retired field " entity-name "/" field-name)]
       (when-not (= tombstone-loc (get known-uuids field-uuid))
         (v/check-uuid-uniqueness known-uuids field-uuid tombstone-loc))
@@ -238,6 +251,18 @@
 
   (build
     [_this]
+    ;; A name that is BOTH live and retired is an add+drop race in the
+    ;; migration txn followed by permanent metadata inconsistency —
+    ;; the order-dependent guard in retire-field can't catch the
+    ;; retire-then-re-add order, so the build does.
+    (doseq [[entity-name field-map] (or retired-fields-map {})
+            field-name (keys field-map)]
+      (when (contains? (get entities-map entity-name {}) field-name)
+        (throw (ex-info (str "Field is both live and retired: "
+                             entity-name "/" field-name
+                             " — a retired name cannot be re-added; "
+                             "use a NEW field name (and uuid).")
+                        {:entity-name entity-name :field-name field-name}))))
     (v/validate-field-specs entities-map)
     (v/validate-union-variants entities-map)
     (v/validate-refs entities-map enums-map)

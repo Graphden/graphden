@@ -381,3 +381,91 @@
             "the migration pass creates the newly-declared index")
         (finally
           (sp/close storage))))))
+
+
+(deftest enum-value-rename-test
+  (testing "an enum VALUE keyword change under a stable uuid renames the
+            pg label (uuid is the identity — same contract as
+            entity/field renames; previously a silent no-op that left
+            metadata claiming the new label while pg kept the old)"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [schema1 (-> (mds/create-builder)
+                          (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000007010"
+                                       [{:uuid #uuid "00000000-0000-0000-0000-000000007011"
+                                         :value :actve}]) ; typo release
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000007001"
+                                         {:name {:uuid #uuid "00000000-0000-0000-0000-000000007002"
+                                                 :type :text}})
+                          ds/build)
+              _ (sp/initialize storage schema1)
+              schema2 (-> (mds/create-builder)
+                          (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000007010"
+                                       [{:uuid #uuid "00000000-0000-0000-0000-000000007011"
+                                         :value :active}]) ; fixed
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000007001"
+                                         {:name {:uuid #uuid "00000000-0000-0000-0000-000000007002"
+                                                 :type :text}})
+                          ds/build)
+              changes (sp/initialize storage schema2)]
+          (is (= [{:enum :status :old :actve :new :active}]
+                 (:renamed (:enum-values changes))))
+          ;; The pg label really changed — re-running the migration is a
+          ;; no-op (uuid matches, keyword matches).
+          (let [changes3 (sp/initialize storage schema2)]
+            (is (empty? (:renamed (:enum-values changes3))))))
+        (finally (sp/close storage))))))
+
+
+(deftest retired-field-dropped-and-uuid-resolved-test
+  (testing "retire-field drops the column on migration"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [schema1 (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000008002"
+                                                      :type :text}
+                                               :flag {:uuid #uuid "00000000-0000-0000-0000-000000008003"
+                                                      :type :text
+                                                      :nullable? true}})
+              _ (sp/initialize storage schema1)
+              schema2 (-> (mds/create-builder)
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                         {:name {:uuid #uuid "00000000-0000-0000-0000-000000008002"
+                                                 :type :text}})
+                          (ds/retire-field :user :flag #uuid "00000000-0000-0000-0000-000000008003")
+                          ds/build)
+              _ (sp/initialize storage schema2)
+              cols (->> (jdbc/execute! (:pool storage)
+                                       ["select column_name from information_schema.columns where table_name = 'user'"])
+                        (map :columns/column_name)
+                        set)]
+          (is (not (contains? cols "flag"))
+              "retired column is DROPped on the migration path"))
+        (finally (sp/close storage)))))
+
+  (testing "the drop resolves the CURRENT column name from the tombstone
+            uuid when a rename release was skipped"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [schema1 (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000008012"
+                                                      :type :text}
+                                               :old-flag {:uuid #uuid "00000000-0000-0000-0000-000000008013"
+                                                          :type :text
+                                                          :nullable? true}})
+              _ (sp/initialize storage schema1)
+              ;; The tombstone declares the NEW name the column never
+              ;; had on this deployment (the rename release was
+              ;; skipped) — uuid resolution must find :old-flag.
+              schema2 (-> (mds/create-builder)
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                         {:name {:uuid #uuid "00000000-0000-0000-0000-000000008012"
+                                                 :type :text}})
+                          (ds/retire-field :user :new-flag #uuid "00000000-0000-0000-0000-000000008013")
+                          ds/build)
+              _ (sp/initialize storage schema2)
+              cols (->> (jdbc/execute! (:pool storage)
+                                       ["select column_name from information_schema.columns where table_name = 'user'"])
+                        (map :columns/column_name)
+                        set)]
+          (is (not (contains? cols "old_flag"))
+              "the STALE-named column is dropped via uuid resolution"))
+        (finally (sp/close storage))))))

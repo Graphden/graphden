@@ -43,6 +43,18 @@
                                                      " ADD VALUE IF NOT EXISTS '" (util/enum-value->sql value) "'")] {})))
 
 
+(defn rename-enum-value!
+  "Renames a VALUE inside a PostgreSQL enum type (PG 10+).
+
+   Security: identifiers/values validated like add-enum-value!."
+  [ds enum-name old-value new-value]
+  (util/with-sql-error-handling "DDL error" :rename-enum-value
+                                {:enum-name enum-name :old old-value :new new-value}
+                                (util/exec! ds [(str "ALTER TYPE " (util/ident->sql enum-name)
+                                                     " RENAME VALUE '" (util/enum-value->sql old-value)
+                                                     "' TO '" (util/enum-value->sql new-value) "'")] {})))
+
+
 (defn rename-enum!
   "Renames a PostgreSQL enum type.
 

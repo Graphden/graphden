@@ -165,3 +165,25 @@
               (ds/add-entity :item (uuid) {:field {:uuid (uuid) :type :text
                                                    :extra-attr "value"}})
               (ds/build))))))
+
+
+(deftest live-and-retired-name-collision-test
+  (testing "a field name both live and retired fails the build (add+drop
+            race in the migration txn otherwise)"
+    (let [tomb (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"both live and retired"
+            (-> (mds/create-builder)
+                (ds/retire-field :item :flag tomb)
+                (ds/add-entity :item (uuid) {:flag {:uuid (uuid) :type :text}})
+                (ds/build)))))))
+
+
+(deftest re-retire-with-different-uuid-test
+  (testing "re-retiring the same field with a DIFFERENT uuid throws
+            (conflicting declaration, not an update)"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"different uuid"
+          (-> (mds/create-builder)
+              (ds/retire-field :item :flag (uuid))
+              (ds/retire-field :item :flag (uuid)))))))

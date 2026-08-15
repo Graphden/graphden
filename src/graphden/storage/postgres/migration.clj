@@ -115,6 +115,10 @@
    (fn [_ctx enum-name value-kw]
      (ddl/add-enum-value! tx enum-name value-kw))
 
+   :on-rename-enum-value!
+   (fn [_ctx enum-name old-kw new-kw]
+     (ddl/rename-enum-value! tx enum-name old-kw new-kw))
+
    :on-rename-enum!
    (fn [_ctx old-name new-name]
      (ddl/rename-enum! tx old-name new-name))

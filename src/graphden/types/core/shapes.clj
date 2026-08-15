@@ -165,11 +165,13 @@
    carrying an opaque `constraint` payload (e.g. `[:gt 0]` for
    :positive-int). Phase 4 of TYPES.md.
 
-   The constraint is opaque to subtype reasoning — two refinement
-   types are subtype-related ONLY when they share the same
-   constraint AND base. The system does NOT prove that `:positive-int`
-   is a subtype of `[:refine :int [:gte 0]]`; it forces an explicit
-   `:validate-refinement` conversion node instead."
+   Subtype reasoning over constraints lives in
+   `types.core/constraint-implies?` — it DOES prove implications like
+   `:positive-int ⊆ [:refine :int [:>= 0]]` for the supported atom
+   shapes (numeric comparisons, `:=`/`:not=`/`:in`/`:matches`,
+   `:and`/`:or`); unsupported shapes fall back to structural equality,
+   and widening (`B ⊄ [:refine B c]`) still requires an explicit
+   `:ensure-*` refinement-narrower node."
   [t]
   (and (vector? t) (= :refine (first t)) (= 3 (count t))))
 

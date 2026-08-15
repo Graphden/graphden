@@ -45,8 +45,11 @@
      defer (no structural shape we can compare statically).
    - `{:as :name}` rename-only bindings defer (they keep the slot
      free under a new name; the next caller is what gets type-checked).
-   - Refinement-on-refinement subtype comparison is constraint
-     equality only — no SMT-style narrowing reasoning.
+   - Refinement-on-refinement subtype comparison uses
+     `constraint-implies?` — real implication over the
+     numeric-comparison / `:in` / `:matches` atoms and `:and`/`:or`
+     combinators; constraint shapes outside that set fall back to
+     structural equality (no SMT-style reasoning).
 
    ## Why this namespace is large — do not re-litigate the split
 

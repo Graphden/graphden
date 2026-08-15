@@ -285,6 +285,16 @@
                      unique))
         unique (if (seq absorbed) absorbed unique)]
     (cond
+      ;; Union of NO members is the bottom type — nothing inhabits it.
+      ;; Without this arm, `(make-union [])` produced the malformed
+      ;; literal `[:union]` (not union-type?, rejected by well-formed?),
+      ;; reachable from `check-sequence-items` on an EMPTY literal
+      ;; vector bound to a `[:list a]` slot — the malformed type then
+      ;; bound into the substitution and leaked into recorded registry
+      ;; types. `:never` is the principled answer (dual of the
+      ;; `:never`-absorption above) and downstream `[:list :never]`
+      ;; subtypes any `[:list T]` covariantly.
+      (empty? unique) :never
       (= 1 (count unique)) (first unique)
       (some #{:any} unique) :any        ; :any absorbs everything
       :else (into [:union] unique))))
@@ -1043,15 +1053,11 @@
         ;; [:= x]  ⊆ [:not= y]  iff  x ≠ y
         (and (= ak :=) (= bk :not=))
         (not= av bv)
-        ;; Regex equality — `[:matches P]` ⊆ `[:matches P]`. Different
-        ;; patterns are NOT subtype-comparable: even if one regex is
-        ;; provably stricter (e.g. `"^https://"` ⊆ `"^https?://"`),
-        ;; deciding regex containment in general requires a regex
-        ;; engine theorem prover. Equality covers the common
-        ;; same-pattern case (a child fn-def reaffirming its parent's
-        ;; refinement) without false positives.
-        (and (= ak :matches) (= bk :matches))
-        (= av bv)
+        ;; NOTE on `[:matches P]` ⊆ `[:matches Q]`: different patterns
+        ;; are NOT subtype-comparable (regex containment needs a
+        ;; theorem prover); the identical-pattern case is already
+        ;; caught by the `(= a b)` arm at the top, so no `:matches`
+        ;; pair arm is needed here.
         ;; `[:matches P]` ⊆ `[:not= ""]` iff P cannot match the EMPTY
         ;; string — then every string matching P is non-empty. Testing
         ;; `(re-find P "")` is decidable and cheap; the previous heuristic
@@ -1139,22 +1145,34 @@
 
 
 (defn subtype?
-  "Is `sub` a subtype of `sup`? Reflexive, transitive, anti-symmetric.
-   Type variables compare by identity for now — unification handles
-   the substitution case before subtype check is meaningful.
+  "Is `sub` a subtype of `sup`? Reflexive and transitive; a PREORDER,
+   not a partial order — antisymmetry holds only up to semantic
+   equivalence (e.g. `[:refine B [:and c]]` and `[:refine B c]` are
+   mutual subtypes while structurally distinct), so don't rely on
+   `subtype?`-both-ways implying structural equality. Type variables
+   compare by identity for now — unification handles the substitution
+   case before subtype check is meaningful.
 
    Refinement rules (Phase 4):
    - `[:refine B c] ⊆ B`            (refinement is a subtype of base)
    - `B ⊄ [:refine B c]`             (no implicit narrowing — caller
                                        must insert `:validate-refinement`)
-   - `[:refine B c1] ⊆ [:refine B c2]` iff `c1 = c2` (no constraint
-                                       reasoning — equality only;
-                                       SMT-style logic is out of scope
-                                       per TYPES.md).
+   - `[:refine B c1] ⊆ [:refine B c2]` iff `constraint-implies? c1 c2`
+     — real implication reasoning over the numeric-comparison /
+     `:in` / `:matches` atoms and `:and`/`:or` combinators (so
+     `:positive-int ⊆ :non-negative-int`, `:user-port ⊆ :port`).
+     Unknown constraint shapes fall back to structural equality;
+     full SMT-style logic stays out of scope per TYPES.md.
 
    Union rules:
    - `[:union T1 T2 …] ⊆ S` iff every Tᵢ ⊆ S          (disjunction)
-   - `T ⊆ [:union T1 T2 …]` iff T ⊆ Tᵢ for some i      (membership)"
+   - `T ⊆ [:union T1 T2 …]` iff T ⊆ Tᵢ for some i      (membership)
+
+   Known deliberate hole: `:any` is the top type, so a marker-carrying
+   type may first widen into an `:any`-shaped context
+   (`[:list [:secret :text]] ⊆ [:list :any]`) and from there reach
+   sinks the direct marker guards refuse — label tracking ends where
+   `:any` begins. See SECRETS.md § Limitations."
   [sub sup]
   (check-type-compare-depth! "subtype?" sub sup)
   (binding [*type-compare-depth* (inc (long *type-compare-depth*))]
@@ -1177,18 +1195,31 @@
         (= sup :never)                           false
 
         ;; `:empty-map` — sentinel from `classify-literal` for `{}`.
-        ;; Vacuous-truth subtype of every map-shaped target: it carries
-        ;; no entries to violate any structural constraint. Without it
-        ;; an `:_storage-where-map`-typed slot bound to `{:value {}}`
-        ;; fails the `:jsonb ⊄ [:map :keyword :any]` rule below.
+        ;; Vacuous-truth subtype of every HOMOGENEOUS map-shaped target
+        ;; (`:jsonb` / `[:map K V]`): it carries no entries to violate
+        ;; a per-entry constraint. Without it an `:_storage-where-map`-
+        ;; typed slot bound to `{:value {}}` fails the
+        ;; `:jsonb ⊄ [:map :keyword :any]` rule below.
+        ;;
+        ;; NOT a subtype of a record type: a record's fields are
+        ;; REQUIRED (record-subtype? demands every sup field present),
+        ;; and `{}` has none — `{} ⊆ {:name :text}` would promise a
+        ;; `:text` at `(:name {})` = nil. The vacuous truth only holds
+        ;; where there is no required structure.
         ;;
         ;; Unions: an `:empty-map` is a subtype of `[:union :null [:map K V]]`
         ;; because it's a subtype of the map-shape member. Descend so the
         ;; nullable-map shapes (common boundary type for read-or-nil sites
         ;; like `:resolve-branch-ref`) accept empty-map literals too.
+        ;; Marker sups descend into the inner type (auto-promote on
+        ;; entry, same as the general marker rule below) so e.g.
+        ;; `:empty-map ⊆ [:secret :jsonb]` — restores transitivity
+        ;; through `record ⊆ [:secret :jsonb]` chains.
         (= sub :empty-map)
         (boolean (or (= sup :empty-map) (= sup :jsonb)
-                     (map-type? sup) (record-type? sup)
+                     (map-type? sup)
+                     (and (marker-type? sup)
+                          (subtype? :empty-map (marker-inner sup)))
                      (and (union-type? sup)
                           (some #(subtype? :empty-map %) (union-members sup)))))
         (= sup :empty-map)                       false
@@ -1283,6 +1314,16 @@
         (and (list-type? sub) (list-type? sup))  (list-subtype? sub sup)
         (and (map-type? sub) (map-type? sup))    (map-subtype? sub sup)
         (and (tuple-type? sub) (tuple-type? sup)) (tuple-subtype? sub sup)
+        ;; A fixed-length tuple IS a list at runtime (both are
+        ;; `:sequence`-shaped on the wire) — `[:tuple :int :int]` is a
+        ;; valid `[:list :int]` value when every position fits the
+        ;; element type. Typevar on the sup elem accepts (passive
+        ;; recursion context, same rationale as `list-subtype?`). The
+        ;; reverse direction stays false: a list has no length
+        ;; guarantee to offer a tuple.
+        (and (tuple-type? sub) (list-type? sup))
+        (or (type-var? (list-elem sup))
+            (every? #(subtype? % (list-elem sup)) (tuple-elems sub)))
         ;; A concrete keyword-keyed record IS a valid homogeneous-map
         ;; value when the map's key type admits keywords and every field
         ;; value fits the map's value type — lets a literal map (which
@@ -1357,7 +1398,14 @@
    When BOTH sides carry effect constraints, the bound fn's effects
    must be a subset of the slot's allowed set. Either side
    nil/`:any` skips the check. Mirrors `fn-subtype?`'s
-   `effects-compatible?` rule."
+   `effects-compatible?` rule.
+
+   WARNING — the effect check is DIRECTION-SENSITIVE inside an
+   otherwise symmetric unifier: it assumes the caller convention
+   `(unify expected actual)` (slot first). Swapping operands silently
+   skips the constraint. Direct call sites keep the order; if you add
+   a code path that can reach `unify-fn` with swapped fn-types (e.g. a
+   new union-fallback arm), preserve the convention."
   [a b subst]
   (let [a-args (fn-args a)
         b-args (fn-args b)]
@@ -1570,10 +1618,18 @@
          ;; compatible refinements flow through unchanged.
          (or (and (primitive? a) (primitive? b)
                   (or (primitive-subtype? a b) (primitive-subtype? b a)))
+             ;; Marker guard mirrors `subtype?`'s jsonb arm: a compound
+             ;; carrying a nested information-flow label must not be
+             ;; declared jsonb-compatible here either. Without it,
+             ;; `unify(:jsonb, [:list [:secret :text]])` succeeded
+             ;; where `subtype?` deliberately refuses both directions —
+             ;; drift between the two relations.
              (and (= a :jsonb)
+                  (not (contains-marker? b))
                   (or (record-type? b) (list-type? b) (map-type? b)
                       (tuple-type? b) (refine-type? b)))
              (and (= b :jsonb)
+                  (not (contains-marker? a))
                   (or (record-type? a) (list-type? a) (map-type? a)
                       (tuple-type? a) (refine-type? a)))
              ;; Refinement ↔ (primitive OR refinement) — defer to
@@ -1585,16 +1641,18 @@
              ;; into the `::fail` arm, even though the relation holds.
              (and (or (refine-type? a) (refine-type? b))
                   (or (subtype? a b) (subtype? b a)))
-             ;; `:empty-map` is the bottom of map shapes — vacuous-truth
-             ;; subtype of every map-shaped target (the same rule
-             ;; `subtype?` already grants). Without this branch a
+             ;; `:empty-map` is the bottom of HOMOGENEOUS map shapes —
+             ;; vacuous-truth subtype of `:jsonb` / `[:map K V]` (the
+             ;; same rule `subtype?` grants). Without this branch a
              ;; `{:value {}}` binding to `:coalesce :default a` after
              ;; `:value` resolved `a := :jsonb` falls into the `:else
              ;; ::fail` arm — the subtype-aware leniency for `:jsonb`
              ;; above only fires for record/list/map/tuple/refine
              ;; literal classifications, not the `:empty-map` sentinel.
-             (and (= a :empty-map) (or (= b :jsonb) (map-type? b) (record-type? b)))
-             (and (= b :empty-map) (or (= a :jsonb) (map-type? a) (record-type? a))))
+             ;; NOT compatible with record types — their fields are
+             ;; required and `{}` supplies none (mirrors `subtype?`).
+             (and (= a :empty-map) (or (= b :jsonb) (map-type? b)))
+             (and (= b :empty-map) (or (= a :jsonb) (map-type? a))))
          subst
          (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
          (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)

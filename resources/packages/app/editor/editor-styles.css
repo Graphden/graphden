@@ -5330,16 +5330,13 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 body.sidebar-collapsed #app.gd-redesign #main-container {
   grid-template-columns: 0 minmax(0, 1fr) var(--gd-inspector-w);
 }
-/* Explicit column assignment — the collapsed Explorer is `display: none`,
-   which removes it from grid AUTO-placement and would otherwise shift the
-   canvas into the 0-width first column (and the inspector into the canvas
-   column). Pin each pane to its track so collapse just zeroes column 1. */
-#app.gd-redesign #side-menu { grid-column: 1; grid-row: 1; }
-#app.gd-redesign #graph-container { grid-column: 2; grid-row: 1; }
-#app.gd-redesign #gd-inspector { grid-column: 3; grid-row: 1; }
 
 /* Explorer — the former absolute-overlay sidebar, now a real grid column. */
 #app.gd-redesign #side-menu {
+  /* explicit track: display:none (collapsed) removes this pane from grid
+     auto-placement — unpinned, the canvas would shift into column 1 (0px) */
+  grid-column: 1;
+  grid-row: 1;
   position: relative;
   top: auto; left: auto;
   width: auto; height: 100%;
@@ -5361,6 +5358,8 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 
 /* Canvas — the dot-grid drafting substrate (the signature). */
 #app.gd-redesign #graph-container {
+  grid-column: 2;
+  grid-row: 1;
   position: relative;
   min-height: 0;
   overflow: hidden;
@@ -5372,6 +5371,8 @@ body.sidebar-collapsed #app.gd-redesign #side-menu { display: none; }
 
 /* ---- RIGHT INSPECTOR ---- */
 #gd-inspector {
+  grid-column: 3;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;

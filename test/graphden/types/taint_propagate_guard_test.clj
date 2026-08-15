@@ -93,7 +93,7 @@
     :ring-route-paths :ring-router :routes->js-bundle
     :rule-owner-of-name :running-entry :secret-leaf :secret-path-args
     :select-keys
-    :service-blocking-free-args :sleep :sleep-until-ms
+    :service-blocking-free-args :set-branch-policy! :sleep :sleep-until-ms
     :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
     :sql-query :storage-query-identities :str :str-contains? :str-join
     :str-len :str-lower :str-replace :str-split :str-starts-with?

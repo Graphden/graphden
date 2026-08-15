@@ -58,7 +58,7 @@
    semantic core is one mutually-recursive strongly-connected component:
 
        effective-binding-type ↔ effective-ref-return
-                              ↔ effective-ref-return-uncached
+                              ↔ effective-ref-return*
        effective-binding-type → base-fn-type-rule
                               → bindings-info-for-rule
                               → effective-binding-type   (closes the loop)
@@ -1159,7 +1159,7 @@
    value bindings: `{:value [1 2 3]}` classifies as `[:list :int]`
    and IS comparable against `[:list :text]` — we should check, not
    defer. Only rename / metadata / vector chains still defer."
-  [_expected b-form]
+  [b-form]
   (or (and (map? b-form)
            (or (contains? b-form :as)
                (and (contains? b-form :ref)
@@ -1324,7 +1324,7 @@
       (check-sequence-items primary-parent fn-name arg-name expected b-form subst)
 
       ;; Deferred cases (see `deferred-binding?` for the breakdown).
-      (deferred-binding? expected b-form)
+      (deferred-binding? b-form)
       subst
 
       (ref-binding? b-form)
@@ -1531,14 +1531,19 @@
             :ref-map   (or (some-> (:type item) types/resolve-alias)
                            (ref-return-narrowed (:ref item))
                            :any)
-            :meta-map  (or (:type item) :any)
+            ;; Resolve the alias like `sequence-item-actual-type`
+            ;; does for the same AST shape — a record/refinement
+            ;; alias keyword must not leak raw into :elem-types
+            ;; (shape-dispatching rules like merge's all-records
+            ;; branch would misclassify it and degrade).
+            :meta-map  (or (some-> (:type item) types/resolve-alias) :any)
             (or (lit/classify-literal item) :any)))
         items))
 
 
 (declare base-fn-type-rule
          effective-ref-return
-         effective-ref-return-uncached
+         effective-ref-return*
          signature-return)
 
 
@@ -1584,10 +1589,10 @@
       ;; return for `ref-name` than the static registry view. Skip
       ;; re-firing the rule and use the override directly.
       override
-      (effective-ref-return-uncached ref-name caller-bindings seen depth))))
+      (effective-ref-return* ref-name caller-bindings seen depth))))
 
 
-(defn- effective-ref-return-uncached
+(defn- effective-ref-return*
   [ref-name caller-bindings seen depth]
   (when-let [info (registry/rich-type-of ref-name)]
     (let [seen' (conj seen ref-name)
@@ -1932,7 +1937,7 @@
    direction for a result type; on the CHECKED path `check-binding!`'s
    HM-strict unify has already rejected such a conflict, so the join
    arm only ever fires on the uncheckable re-fire path in
-   `effective-ref-return-uncached`), then resolve the declared return
+   `effective-ref-return*`), then resolve the declared return
    through the joined substitution.
 
    Degrades to `static-ret` whenever nothing binds or a var stays
@@ -2180,8 +2185,9 @@
    enforced by `check-effects-policy!`. Authors who want a binding
    contract should use that field instead.
 
-   `:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
-   `:process` / `:raw-sql` — same set the runtime accepts.
+   The accepted vocabulary is `types/known-effect-categories` — one
+   shared set (10 categories incl. `:state` and the platform-only
+   `:cross-org`); don't enumerate it here, it drifts.
 
    `:expects-effects` is skipped here (that path has its own drift
    check)."
@@ -2321,8 +2327,10 @@
    `registry/rich-type-of` (`resolve-parent-info`, `effective-ref-return`).
    A def checked BEFORE the def it references resolves that ref to `:any`
    instead of its real type — no error, just a silently looser check.
-   Callers (`sync-fn-entities-from-packages!`) topo-sort before calling;
-   the narrowing passes below have the same ordering dependency."
+   NOTE: production (`packages/sync`) rolls its own fault-tolerant
+   per-fn-def loop instead of calling this — this fn is the plain
+   all-or-nothing variant kept for tests/REPL sweeps. Both topo-sort
+   first; the narrowing passes have the same ordering dependency."
   [fn-defs]
   (into {}
         (map (fn [fn-def]

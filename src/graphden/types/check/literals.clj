@@ -95,7 +95,7 @@
    constraint server-side so a closed-over fn-graph doesn't have to
    re-implement the `[:fn …]`-shape parse in JS."
   [expected]
-  (let [t (or (types/resolve-alias expected) expected)]
+  (let [t (types/resolve-alias expected)]
     (when (and (vector? t) (= :fn (first t)) (= 4 (count t)))
       (let [eff (nth t 3)]
         (when-not (#{:any "any" :_any} eff)
@@ -123,7 +123,7 @@
    popovers can surface the allowed-values list server-side instead
    of duplicating the type-walk in JS."
   [expected]
-  (let [t (or (types/resolve-alias expected) expected)]
+  (let [t (types/resolve-alias expected)]
     (when (and (vector? t) (= :refine (first t)))
       (let [base (nth t 1)
             c    (nth t 2)]
@@ -159,7 +159,7 @@
    classified value."
   ([value expected] (diff-value-against-type value expected ""))
   ([value expected path]
-   (let [exp (or (types/resolve-alias expected) expected)
+   (let [exp (types/resolve-alias expected)
          leaf (fn [actual] [{:path path :expected exp :actual actual}])]
      (cond
        (or (= :any exp) (= :jsonb exp))

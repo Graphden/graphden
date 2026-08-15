@@ -368,7 +368,9 @@ function renderAuthLock() {
   const authed = isAuthenticated();
   btn.innerHTML = authed ? LOCK_OPEN_SVG : LOCK_CLOSED_SVG;
   btn.classList.toggle('auth-lock-open', authed);
-  btn.title = authed ? 'Sign out' : (loginIsTenant() ? 'Sign in' : 'Admin login');
+  // The chip opens the shell MENU now (settings + session actions) — the
+  // title names the menu when authed, the primary intent when not.
+  btn.title = authed ? 'Account & settings' : (loginIsTenant() ? 'Sign in' : 'Admin login');
   // "Sign out everywhere" only makes sense for a real server-side session.
   if (allBtn) allBtn.classList.toggle('hidden', !(authed && loginIsTenant()));
 }

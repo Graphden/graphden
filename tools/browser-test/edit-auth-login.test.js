@@ -1,8 +1,9 @@
-// Auth login flow e2e — the 🔒 lock chip + popover password entry.
+// Auth login flow e2e — the 🔒 lock chip + shell menu + popover password entry.
 //
-// Coverage:
+// Coverage (menu-first shell, 2026-08-15: the chip opens the SHELL MENU —
+// Settings/Organization + session actions; 'Sign in' swaps to the form):
 //   • Initial state: locked (no localStorage password).
-//   • Click lock → popover opens with password input + Save/Cancel.
+//   • Click lock → menu; 'Sign in' → password input + Save/Cancel.
 //   • Wrong password → 401 from /api/auth/check → "Wrong password."
 //     error message renders, popover stays open.
 //   • Correct password → 200 → password stored → popover closes →
@@ -95,7 +96,7 @@ async function freshContext() {
            'popover starts hidden');
 
     // ===================================================================
-    // Phase B: click lock → popover opens.
+    // Phase B: click lock → shell MENU; 'Sign in' → the login form.
     // ===================================================================
     await page.click('#auth-lock-btn');
     await page.waitForFunction(
@@ -103,6 +104,16 @@ async function freshContext() {
               ?.classList.contains('hidden'),
       null,
       {timeout: 5000});
+    const menu = await page.evaluate(() => {
+      const p = document.getElementById('auth-popover');
+      const items = [...p.querySelectorAll('.auth-menu-item')].map((b) => b.textContent);
+      return {content: p.dataset.gdContent, items};
+    });
+    assert(menu.content === 'menu', 'chip click opens the shell menu first');
+    assert(menu.items.includes('Settings') && menu.items.includes('Sign in'),
+           'menu offers Settings + Sign in when signed out: ' + JSON.stringify(menu.items));
+    await page.click('#auth-popover .auth-menu-item:text-is("Sign in")');
+    await page.waitForSelector('#auth-password-input', {timeout: 5000});
     const opened = await page.evaluate(() => {
       const p = document.getElementById('auth-popover');
       return {
@@ -112,7 +123,7 @@ async function freshContext() {
         hasCancel: !!p.querySelector('#auth-cancel-btn'),
       };
     });
-    assert(!opened.hidden, 'popover visible after lock click');
+    assert(!opened.hidden, 'popover visible after Sign in click');
     assert(opened.hasInput && opened.hasSave && opened.hasCancel,
            'popover has password input + Save + Cancel buttons');
 
@@ -172,15 +183,17 @@ async function freshContext() {
            'popover closes after successful auth');
     assert(unlocked.lockOpen,
            'lock icon flipped to "open" (.auth-lock-open)');
-    assert(unlocked.title === 'Sign out',
-           'tooltip flips to "Sign out": ' + unlocked.title);
+    assert(unlocked.title === 'Account & settings',
+           'tooltip flips to the menu name: ' + unlocked.title);
     assert(unlocked.storedPw === AUTH,
            'password stored in localStorage');
 
     // ===================================================================
-    // Phase E: sign-out via lock click → confirm() auto-accepted.
+    // Phase E: sign-out via the menu's Sign out → confirm() auto-accepted.
     // ===================================================================
     await page.click('#auth-lock-btn');
+    await page.waitForSelector('#auth-popover .auth-menu-item', {timeout: 5000});
+    await page.click('#auth-popover .auth-menu-item:text-is("Sign out")');
     await page.waitForFunction(
       () => {
         const btn = document.getElementById('auth-lock-btn');
@@ -199,14 +212,12 @@ async function freshContext() {
            'password cleared from localStorage');
 
     // ===================================================================
-    // Phase F: Escape dismisses popover without submitting.
+    // Phase F: Escape dismisses the login form without submitting.
     // ===================================================================
     await page.click('#auth-lock-btn');
-    await page.waitForFunction(
-      () => !document.getElementById('auth-popover')
-        ?.classList.contains('hidden'),
-      null,
-      {timeout: 5000});
+    await page.waitForSelector('#auth-popover .auth-menu-item', {timeout: 5000});
+    await page.click('#auth-popover .auth-menu-item:text-is("Sign in")');
+    await page.waitForSelector('#auth-password-input', {timeout: 5000});
     await page.locator('#auth-password-input').focus();
     await page.keyboard.press('Escape');
     // (escape dispatched; the following assertion gates the next step)

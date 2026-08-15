@@ -43,7 +43,7 @@
     // Explorer's left-edge expand tab only makes sense on Build (the other
     // surfaces are full overlays with no Explorer).
     document.body.setAttribute('data-surface', name);
-    if (!opts || opts.pushHash !== false) gdPushSurfaceHash(name);
+    if (opts?.pushHash !== false) gdPushSurfaceHash(name);
 
     // Build = the graph editor (explorer | canvas | inspector), no cover.
     if (name === 'build') return;
@@ -127,7 +127,7 @@
   // the hash addressed a surface (handled here), false for fn-name hashes.
   // `@settings/account` opens Settings scrolled to the Account card.
   function gdRouteSurfaceHash(hash) {
-    if (!hash || hash.charAt(0) !== '@') {
+    if (hash?.charAt(0) !== '@') {
       // A fn-name (or empty) hash while a management surface is up means the
       // user navigated BACK to the editor — return to Build without pushing.
       if (document.body.getAttribute('data-surface') !== 'build') {

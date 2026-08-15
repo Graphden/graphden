@@ -93,7 +93,7 @@ async function gdAcctLoadTfa() {
   const host = document.getElementById('gd-acct-tfa');
   if (!host) return;
   const [, j] = await gdAcctGet('/auth/tfa-state');
-  host.innerHTML = (j && j.enabled)
+  host.innerHTML = j?.enabled
     ? "<div class='gd-set-hint'>Two-factor is <b>on</b>.</div>"
       + "<button type='button' class='gd-set-btn' onclick='gdAcctTotpDisable()'>Disable 2FA</button>"
     : "<div class='gd-set-hint'>Add a second factor with an authenticator app.</div>"

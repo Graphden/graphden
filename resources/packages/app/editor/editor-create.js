@@ -313,7 +313,7 @@ function openNsPublishPopover(anchorEl, nsPath) {
         goBtn.disabled = false;
       }
     } catch (e) {
-      setResult((e && e.message) || 'Publish failed.', false);
+      setResult(e?.message || 'Publish failed.', false);
       goBtn.disabled = false;
     }
   };

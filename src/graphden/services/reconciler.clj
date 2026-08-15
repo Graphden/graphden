@@ -512,7 +512,9 @@
               ;; the first free of its N slots. `slot` = the acquired slot, or
               ;; nil when a sibling holds every slot (or no lock connection).
               pool-size (svc-schema/effective-pool-size svc)
-              lock-gated? (some? pool-size)
+              ;; via the schema-layer resolver (its docstring is the
+              ;; contract) — not a local (some? pool-size) re-derive.
+              lock-gated? (svc-schema/lock-gated? svc)
               slot (when (and lock-gated? (some? lock-conn))
                      (acquire-pool-slot! lock-conn sid pool-size))
               acquired? (or (not lock-gated?) (some? slot) (nil? lock-conn))]

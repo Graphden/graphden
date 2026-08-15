@@ -208,6 +208,12 @@
                       :published-at {:uuid pv-published-at-field-uuid
                                      :type :timestamptz
                                      :nullable? true}})
+      ;; :branch-id is a bare :uuid, NOT {:type :ref :ref-entity :branch}
+      ;; like every other branch pointer — no FK, so an install row
+      ;; survives deletion of the branch it was made on (installs are
+      ;; per-branch state the user may re-point; a cascade/reject on
+      ;; branch delete would be wrong either way). If you add the ref,
+      ;; you take on that lifecycle question.
       (ds/add-entity :package-install package-install-entity-uuid
                      {:branch-id {:uuid pi-branch-id-field-uuid
                                   :type :uuid}

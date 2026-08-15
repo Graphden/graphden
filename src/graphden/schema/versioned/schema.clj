@@ -412,7 +412,18 @@
                           [fname (-> (mirror-field-spec spec)
                                      (assoc :uuid u)
                                      (merge (get tweaks fname)))]))))
-              base-fields)]
+              base-fields)
+        ;; The reverse direction must fail loudly too: a pinned uuid
+        ;; whose base field no longer exists is a leftover from a
+        ;; field removal — silently ignoring it would let the pin map
+        ;; rot indefinitely.
+        orphan-pins (remove #(contains? data-fields %) (keys uuids))]
+    (when (seq orphan-pins)
+      (throw (ex-info (str "Orphan version-mirror uuid pin(s) for " entity
+                           ": " (pr-str (vec orphan-pins))
+                           " — the base field(s) no longer exist (or went "
+                           "identity-level); drop the stale pins.")
+                      {:entity entity :orphans (vec orphan-pins)})))
     (merge framework data-fields)))
 
 

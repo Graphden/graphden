@@ -8,10 +8,7 @@
    - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.schema.fields.types :as ft]
-    [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [example-schema]]
-    [graphden.schema.malli.types :as mtypes]
     [graphden.schema.protocol.protocol :as ds]))
 
 
@@ -72,14 +69,3 @@
   (testing "constraints are accessible"
     (is (= [{:type :unique :fields [:name]}]
            (ds/entity-constraints example-schema :fn)))))
-
-
-(deftest malli-schema-access-test
-  (testing "can access underlying malli schema"
-    (let [malli-schema (mds/schema->malli example-schema :fn)]
-      (is (some? malli-schema)))))
-
-
-(deftest type-mapping-completeness-test
-  (testing "malli-type-mapping covers all supported field types"
-    (is (= ft/supported-types (set (keys mtypes/malli-type-mapping))))))

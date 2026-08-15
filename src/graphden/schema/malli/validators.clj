@@ -281,8 +281,12 @@
 
 ;; === Union variant validation ===
 
-(defn- find-first-duplicate
-  "Returns first duplicate in seq, or nil. Single-pass with early exit."
+(defn find-first-duplicate
+  "Returns the first duplicated value in `xs`, or nil when all are
+   distinct. Single-pass with early exit. PUBLIC shared helper — the
+   builder in `malli.core` uses it too; the previous two copies each
+   leaked the transient seen-set on the no-duplicate path and papered
+   over it with divergent call-site type-guards."
   [xs]
   (let [result (reduce (fn [seen x]
                          (if (contains? seen x)
@@ -290,7 +294,10 @@
                            (conj! seen x)))
                        (transient #{})
                        xs)]
-    (when (map? result) result)))  ; variant-identity returns maps
+    ;; reduced → a duplicate; otherwise the reduce returns the
+    ;; transient set itself — that means "clean".
+    (when-not (instance? clojure.lang.ITransientCollection result)
+      result)))
 
 
 (defn- variant-identity

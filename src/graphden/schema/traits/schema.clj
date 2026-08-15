@@ -57,22 +57,3 @@
                       :trait-id {:uuid binding-trait-trait-id-field-uuid
                                  :type :ref :ref-entity :trait}})
       (ds/add-constraint :binding-trait {:type :unique :fields [:binding-id :trait-id]})))
-
-
-(defn seed-traits!
-  [storage]
-  (let [sp (requiring-resolve 'graphden.storage.protocol.core/create-entity)
-        read-entity (requiring-resolve 'graphden.storage.protocol.core/read-entity)]
-    (when-not (@read-entity storage :trait merge-protected-trait-uuid)
-      (@sp storage :trait
-           {:id merge-protected-trait-uuid
-            :name "merge-protected"
-            :description "Value will not be transferred during branch merge"}))))
-
-
-(def trait-entities
-  #{:trait :binding-trait})
-
-
-(def well-known-traits
-  {:merge-protected merge-protected-trait-uuid})

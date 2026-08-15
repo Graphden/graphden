@@ -20,6 +20,7 @@
     [clojure.string :as str]
     [graphden.schema.traits.schema :as vts]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.traits-seed :as traits-seed]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
@@ -159,7 +160,7 @@
   (let [base-storage (if (vs/versioned-storage? storage)
                        (vs/unwrap storage)
                        storage)]
-    (vts/seed-traits! base-storage)
+    (traits-seed/seed-traits! base-storage)
     (when-not (has-merge-protected-trait? base-storage binding-id)
       (sp/create-entity base-storage :binding-trait
                         {:binding-id binding-id

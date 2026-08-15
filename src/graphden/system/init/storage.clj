@@ -18,6 +18,7 @@
     [graphden.storage.postgres.core :as postgres]
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.traits-seed :as traits-seed]
     [graphden.system.sse :as sse]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
@@ -70,7 +71,7 @@
                                 :password password
                                 :pool-size pool-size})
                     (sp/initialize-with-cleanup! schema))]
-    (vts/seed-traits! storage)
+    (traits-seed/seed-traits! storage)
     (log/info (str storage-name " initialized"))
     storage))
 

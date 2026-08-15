@@ -36,7 +36,6 @@
    chain and subtracting the slots it binds. Sequences live as
    list-typed slots with `binding-list-item` rows."
   (:require
-    [graphden.schema.fields.types :as ft]
     [graphden.schema.protocol.protocol :as ds]))
 
 
@@ -588,12 +587,14 @@
 ;; =============================================================================
 
 (defn- value-kind-enum-values
+  "Derived from `value-kind-values` KEYS — the single declaration of
+   the kind set — so a kind added there reaches the DB enum too.
+   (Previously built from `[:null :any :fn] + ft/supported-types`: a
+   key added only to `value-kind-values` would flow into
+   `/api/value-kinds` and the codec heuristic but silently never
+   reach the enum.)"
   []
-  (into [{:uuid (get value-kind-values :null) :value :null}
-         {:uuid (get value-kind-values :any) :value :any}
-         {:uuid (get value-kind-values :fn) :value :fn}]
-        (map (fn [t] {:uuid (get value-kind-values t) :value t})
-             ft/supported-types)))
+  (mapv (fn [[k uuid]] {:uuid uuid :value k}) value-kind-values))
 
 
 (defn- override-kind-enum-values
@@ -610,6 +611,12 @@
   [builder]
   (-> builder
       ;; Enums
+      ;; :value-kind — the PG enum TYPE is currently referenced by no
+      ;; column (the columns that once used it are retired); the
+      ;; declaration stays until a retire-enum mechanism exists — an
+      ;; unused pg enum type is inert (same status as :override-kind
+      ;; below). The `value-kind-values` MAP itself is load-bearing:
+      ;; codec heuristic + /api/value-kinds.
       (ds/add-enum :value-kind value-kind-enum-uuid (value-kind-enum-values))
       (ds/add-enum :override-kind override-kind-enum-uuid (override-kind-enum-values))
 

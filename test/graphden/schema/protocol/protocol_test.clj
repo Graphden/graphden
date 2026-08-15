@@ -399,30 +399,6 @@
     (is (nil? (ds/enum-uuid test-schema :unknown)))))
 
 
-(deftest validate-entity-test
-  (testing "valid entity returns nil"
-    (is (nil? (ds/validate-entity test-schema :account
-                                  {:id (random-uuid) :name "test"}))))
-
-  (testing "invalid entity returns errors map"
-    (let [result (ds/validate-entity test-schema :account
-                                     {:id (random-uuid) :name nil})]
-      (is (map? result))
-      (is (contains? result :errors))))
-
-  (testing "unknown entity returns error"
-    (let [result (ds/validate-entity test-schema :unknown {:id (random-uuid)})]
-      (is (some? result))
-      (is (contains? (:errors result) :entity))))
-
-  (testing "extra fields are rejected (closed schema)"
-    (let [result (ds/validate-entity test-schema :account
-                                     {:id (random-uuid)
-                                      :name "test"
-                                      :extra-field "bad"})]
-      (is (some? result)))))
-
-
 ;; === Constraints tests ===
 
 (deftest add-constraint-test

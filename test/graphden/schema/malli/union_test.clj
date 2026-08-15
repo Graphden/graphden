@@ -35,46 +35,6 @@
               (ds/build))))))
 
 
-(deftest union-with-ref-variant-test
-  (testing "union with ref variant validates correctly"
-    (let [schema (-> (mds/create-builder)
-                     (ds/add-entity :user (uuid) {:name {:uuid (uuid) :type :text}})
-                     (ds/add-entity :item (uuid)
-                                    {:owner {:uuid (uuid)
-                                             :type :union
-                                             :variants [{:type :ref :ref-entity :user}
-                                                        {:type :text}]}})
-                     ds/build)]
-      ;; Valid with UUID (ref to user)
-      (is (nil? (ds/validate-entity schema :item {:id (uuid) :owner (uuid)})))
-      ;; Valid with string (text variant)
-      (is (nil? (ds/validate-entity schema :item {:id (uuid) :owner "some text"})))
-      ;; Invalid with number
-      (let [errors (ds/validate-entity schema :item {:id (uuid) :owner 123})]
-        (is (some? (:errors errors)))))))
-
-
-(deftest union-with-enum-variant-test
-  (testing "union with enum variant validates correctly"
-    (let [schema (-> (mds/create-builder)
-                     (ds/add-enum :status (uuid)
-                                  [{:uuid (uuid) :value :active}
-                                   {:uuid (uuid) :value :inactive}])
-                     (ds/add-entity :item (uuid)
-                                    {:state {:uuid (uuid)
-                                             :type :union
-                                             :variants [{:type :enum :enum-name :status}
-                                                        {:type :int}]}})
-                     ds/build)]
-      ;; Valid with enum value
-      (is (nil? (ds/validate-entity schema :item {:id (uuid) :state :active})))
-      ;; Valid with int
-      (is (nil? (ds/validate-entity schema :item {:id (uuid) :state 42})))
-      ;; Invalid with string
-      (let [errors (ds/validate-entity schema :item {:id (uuid) :state "invalid"})]
-        (is (some? (:errors errors)))))))
-
-
 (deftest union-variant-nullable-error-test
   (testing "union variant with :nullable? throws"
     (is (thrown-with-msg?

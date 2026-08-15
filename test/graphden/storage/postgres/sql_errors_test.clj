@@ -471,8 +471,6 @@
 
                         (enum-uuid [_ _] nil)
 
-                        (validate-entity [_ _ _] nil)
-
                         (entity-constraints
                           [_ _entity-name]
                           [{:type :unique :fields [:name]}])

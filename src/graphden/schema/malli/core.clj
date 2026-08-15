@@ -2,30 +2,15 @@
   "Malli-based implementation of DataSchema protocol."
   (:require
     [clojure.set :as set]
-    [graphden.schema.malli.schema :as schema]
     [graphden.schema.malli.types :as types]
     [graphden.schema.malli.validators :as v]
-    [graphden.schema.protocol.protocol :as ds]
-    [malli.core :as m]
-    [malli.error :as me]))
-
-
-(defn- find-first-duplicate
-  "Returns first duplicate value in seq, or nil if none.
-   Uses transient set for O(n) single-pass detection with early exit."
-  [xs]
-  (reduce (fn [seen x]
-            (if (contains? seen x)
-              (reduced x)
-              (conj! seen x)))
-          (transient #{})
-          xs))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 ;; === MalliDataSchema record ===
 
 (defrecord MalliDataSchema
-  [enums-map entities-map entity-uuids-map constraints-map retired-fields-map compiled-schemas]
+  [enums-map entities-map entity-uuids-map constraints-map retired-fields-map]
 
   ds/DataSchema
 
@@ -52,14 +37,6 @@
   (enum-uuid
     [_this enum-name]
     (get-in enums-map [enum-name :uuid]))
-
-
-  (validate-entity
-    [_this entity-name data]
-    (if-let [schema (get compiled-schemas entity-name)]
-      (when-not (m/validate schema data)
-        {:errors (me/humanize (m/explain schema data))})
-      {:errors {:entity [(str "Unknown entity: " entity-name)]}}))
 
 
   (entity-constraints
@@ -104,17 +81,15 @@
     ;; Validate each value entry
     (run! #(v/validate-single-enum-value known-uuids enum-name %) values)
     ;; Check for duplicate values (single-pass with early exit)
-    (when-let [dup (find-first-duplicate (map :value values))]
-      (when (keyword? dup)
-        (throw (ex-info "Enum has duplicate values"
-                        {:enum-name enum-name
-                         :duplicates [dup]}))))
+    (when-let [dup (v/find-first-duplicate (map :value values))]
+      (throw (ex-info "Enum has duplicate values"
+                      {:enum-name enum-name
+                       :duplicates [dup]})))
     ;; Check for duplicate UUIDs within values (single-pass with early exit)
-    (when-let [dup (find-first-duplicate (map :uuid values))]
-      (when (uuid? dup)
-        (throw (ex-info "Enum has duplicate value UUIDs"
-                        {:enum-name enum-name
-                         :duplicates [dup]}))))
+    (when-let [dup (v/find-first-duplicate (map :uuid values))]
+      (throw (ex-info "Enum has duplicate value UUIDs"
+                      {:enum-name enum-name
+                       :duplicates [dup]})))
     ;; Store as {:uuid enum-uuid :values {value-keyword value-uuid ...}}
     ;; Also add all UUIDs to known-uuids for O(1) future lookups
     ;; Single-pass: build both maps simultaneously
@@ -255,21 +230,11 @@
     (v/validate-union-variants entities-map)
     (v/validate-refs entities-map enums-map)
     (v/validate-constraints entities-map constraints-map)
-    (let [compiled (into {}
-                         (for [[entity-name fields] entities-map]
-                           [entity-name (schema/make-entity-schema fields enums-map)]))]
-      (->MalliDataSchema enums-map entities-map entity-uuids-map constraints-map
-                         (or retired-fields-map {}) compiled))))
+    (->MalliDataSchema enums-map entities-map entity-uuids-map constraints-map
+                       (or retired-fields-map {}))))
 
 
 (defn create-builder
   "Creates a new MalliDataSchemaBuilder."
   []
   (->MalliDataSchemaBuilder {} {} {} {} {} {}))
-
-
-(defn schema->malli
-  "Returns the underlying malli schema for an entity.
-   Useful for advanced validation or schema introspection."
-  [data-schema entity-name]
-  (get (:compiled-schemas data-schema) entity-name))

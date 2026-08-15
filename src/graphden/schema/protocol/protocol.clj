@@ -2,7 +2,7 @@
   "Protocol for data schema definition.
 
    Data schema describes entities that can be stored in various storage backends
-   (PostgreSQL, Datomic, in-memory, etc.). Each entity has:
+   (PostgreSQL today; the protocol keeps backends swappable). Each entity has:
    - A unique name (keyword)
    - A stable UUID (for tracking identity across renames)
    - A set of fields with types (each field has its own UUID)
@@ -19,9 +19,10 @@
    - :enum - enumeration type with a set of allowed keyword values
    - :union - value can be one of several types, specified via :variants
 
-   Constraints are metadata for storage implementations. They are not enforced
-   by validate-entity (which validates a single entity in isolation), but should
-   be enforced by storage backends (e.g., as database indexes).")
+   Constraints are metadata for storage implementations — enforced by
+   storage backends (e.g., as database indexes), not by the schema
+   layer itself. (Per-entity runtime VALUE validation lives in
+   storage/protocol/crud_validation, not in this protocol.)")
 
 
 (defprotocol DataSchema
@@ -43,16 +44,25 @@
      Each field is a map with :uuid (required), :type (required), and
      type-specific attributes. Allowed attributes per field type:
 
-     Base types (:uuid, :text, :int, :bool, :numeric, :timestamptz, :jsonb, :bytes):
+     Base types (:uuid, :text, :int, :bool, :numeric, :timestamptz,
+     :jsonb, :bytes, :sequence, :keyword — plus the permissive :any
+     and :fn, a fn-reference stored as UUID):
        - :uuid (required, stable identifier)
        - :type (required)
        - :nullable? (optional, default false)
+       - :indexed? (optional — ask the backend for a plain index)
 
      :ref (reference to another entity, always points to :id):
        - :uuid (required, stable identifier)
        - :type (required, must be :ref)
        - :ref-entity (required, keyword naming the referenced entity)
        - :nullable? (optional, default false)
+
+     :ref-many (many-to-many; junction table in PG, public API reads
+     a vector of UUIDs — e.g. :fn/:parent-ids):
+       - :uuid (required, stable identifier)
+       - :type (required, must be :ref-many)
+       - :ref-entity (required)
 
      :enum (enumeration with predefined keyword values):
        - :uuid (required, stable identifier)
@@ -91,15 +101,6 @@
   (enum-uuid
     [this enum-name]
     "Returns the UUID of the given enum, or nil if enum not found.")
-
-  (validate-entity
-    [this entity-name data]
-    "Validates data against the entity schema.
-     Returns nil if valid, or a map with :errors key if invalid.
-     Returns {:errors {:entity [\"Unknown entity: ...\"]}} for unknown entities.
-
-     Note: This validates structure and types only. Constraints (like uniqueness)
-     are not validated here - they require access to all stored data.")
 
   (entity-constraints
     [this entity-name]

@@ -147,15 +147,3 @@
       (is (= #{(:id trait1) (:id trait2)}
              (set (map :trait-id binding-traits))))
       (sp/close storage))))
-
-
-(deftest well-known-traits-test
-  (testing "well-known traits are defined"
-    (is (uuid? vts/merge-protected-trait-uuid))
-    (is (= vts/merge-protected-trait-uuid
-           (:merge-protected vts/well-known-traits)))))
-
-
-(deftest trait-entities-test
-  (testing "trait-entities set is correct"
-    (is (= #{:trait :binding-trait} vts/trait-entities))))

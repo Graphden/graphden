@@ -50,9 +50,9 @@
                  :clojure-type 'Object}
    :bytes       {:description "Binary data"
                  :clojure-type 'bytes}
-   :sequence    {:description "Ordered linked-list of args (stored via next-arg-id chain)"
+   :sequence    {:description "Ordered sequence — items live in binding-list-item rows under a list-typed binding"
                  :clojure-type 'clojure.lang.Sequential}
-   :keyword     {:description "Clojure keyword (`:foo-bar`). Stored in JSONB as `\":foo\"` string; the codec's `normalize-parsed-json` restores the keyword on read. Slots typed `:keyword` accept bare keyword literals in fn-defs (no `:literal? true` escape)."
+   :keyword     {:description "Clojure keyword (`:foo-bar`). Inside JSONB the codec stores it as the tagged carrier `{:_kw \"foo-bar\"}` (the old `\":foo\"`-string scheme collided with user strings and is retired — see storage/postgres/codec.clj). Slots typed `:keyword` accept bare keyword literals in fn-defs (no `:literal? true` escape)."
                  :clojure-type 'clojure.lang.Keyword}})
 
 
@@ -64,40 +64,35 @@
 ;; === Backend Mappings ===
 
 (def type-mappings
-  "Complete type mapping reference for all storage backends.
-   Keys are abstract types, values are maps of backend -> concrete type.
-
-   Usage:
-     (get-in type-mappings [:uuid :postgres]) ;=> \"UUID\"
-     (get-in type-mappings [:int :datomic])   ;=> :db.type/long"
-  {:uuid        {:postgres "UUID"        :datomic :db.type/uuid    :memory :any}
-   :text        {:postgres "TEXT"        :datomic :db.type/string  :memory :any}
-   :int         {:postgres "BIGINT"      :datomic :db.type/long    :memory :any}
-   :bool        {:postgres "BOOLEAN"     :datomic :db.type/boolean :memory :any}
-   :numeric     {:postgres "NUMERIC"     :datomic :db.type/bigdec  :memory :any}
-   :timestamptz {:postgres "TIMESTAMPTZ" :datomic :db.type/instant :memory :any}
-   :jsonb       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
-   :bytes       {:postgres "BYTEA"       :datomic :db.type/bytes   :memory :any}
+  "Postgres column type per abstract type — REFERENCE data documenting
+   how each type is stored (the DDL layer keeps its own runtime map in
+   `storage/postgres/util`). The former :datomic/:memory columns were
+   dropped 2026-08-15: those backends never existed in this repo and
+   the only accessor parameterised by backend was itself dead."
+  {:uuid        "UUID"
+   :text        "TEXT"
+   :int         "BIGINT"
+   :bool        "BOOLEAN"
+   :numeric     "NUMERIC"
+   :timestamptz "TIMESTAMPTZ"
+   :jsonb       "JSONB"
+   :bytes       "BYTEA"
    ;; :sequence is a marker type — concrete items live in
-   ;; `binding-list-item` rows under a list-typed binding. Backends
-   ;; don't need a column for the sequence itself; we map to JSONB
-   ;; for forward compat with dumps.
-   :sequence    {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
-   ;; :keyword stored as TEXT (Clojure keyword serialised via `(str kw)`,
-   ;; deserialised via `(keyword (subs s 1))`). For dedicated columns
-   ;; only — bindings' `:value` field is JSONB and uses cheshire's
-   ;; `:` prefix convention via `normalize-parsed-json` regardless
-   ;; of slot type.
-   :keyword     {:postgres "TEXT"        :datomic :db.type/keyword :memory :any}
+   ;; `binding-list-item` rows under a list-typed binding. No column
+   ;; needed for the sequence itself; JSONB for forward compat with
+   ;; dumps.
+   :sequence    "JSONB"
+   ;; :keyword stored as TEXT for dedicated columns (`(str kw)` /
+   ;; `(keyword (subs s 1))`); inside JSONB values the codec uses the
+   ;; `{:_kw …}` carrier regardless of slot type.
+   :keyword     "TEXT"
    ;; Special types for references
-   :ref         {:postgres "UUID"        :datomic :db.type/ref     :memory :any}
-   ;; :ref-many = many-to-many relationship.
-   ;; Stored as junction table in PostgreSQL, db.cardinality/many in Datomic, vector in memory.
-   ;; The field-spec MUST include :ref-entity. Backends materialize the relationship differently
-   ;; but the public API always returns a vector of UUIDs for the field.
-   :ref-many    {:postgres :junction     :datomic :db.cardinality/many :memory :any}
-   :enum        {:postgres :custom       :datomic :db.type/ref     :memory :any}
-   :union       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}})
+   :ref         "UUID"
+   ;; :ref-many = many-to-many; junction table, public API returns a
+   ;; vector of UUIDs. Field-spec MUST include :ref-entity.
+   :ref-many    :junction
+   :enum        :custom
+   :union       "JSONB"})
 
 
 ;; === Type Widening Rules ===
@@ -169,130 +164,3 @@
   (if-let [validator (get type-validators type-kw)]
     (validator value)
     true))  ; Unknown types are permissively accepted
-
-
-;; === Custom Type Registry ===
-;;
-;; Allows registering custom field types at runtime.
-;; Useful for domain-specific types that need special encoding/decoding.
-
-;; Registry for custom field types registered via plugins.
-;; Structure: {type-kw {:validator fn, :encoder fn, :decoder fn, :backend-mappings {...}}}
-(defonce ^:private custom-types-registry (atom {}))
-
-
-(defn register-custom-type!
-  "Registers a custom field type with encoder/decoder/validator.
-
-   Arguments:
-   - type-kw: Keyword name for the custom type (e.g., :email, :phone)
-   - opts: Map with keys:
-     - :validator - (fn [value] -> boolean) - validates values of this type
-     - :encoder - (fn [value] -> storage-value) - converts to storage format
-     - :decoder - (fn [storage-value] -> value) - converts from storage format
-     - :backend-mappings - (optional) Map of {:postgres \"TYPE\" :datomic :db.type/...}
-     - :description - (optional) Human-readable description
-
-   Example:
-   ```clojure
-   (register-custom-type! :email
-     {:validator #(and (string? %) (re-matches #\".+@.+\\..+\" %))
-      :encoder identity
-      :decoder identity
-      :backend-mappings {:postgres \"TEXT\" :datomic :db.type/string :memory :any}
-      :description \"Email address\"})
-   ```
-
-   Returns nil."
-  [type-kw {:keys [validator encoder decoder backend-mappings description]
-            :or {validator (constantly true)
-                 encoder identity
-                 decoder identity
-                 backend-mappings {:postgres "TEXT" :datomic :db.type/string :memory :any}
-                 description "Custom type"}}]
-  (when-not (keyword? type-kw)
-    (throw (ex-info "Custom type key must be a keyword"
-                    {:type :invalid-custom-type
-                     :type-kw type-kw})))
-  (when (contains? supported-types type-kw)
-    (throw (ex-info "Cannot override built-in type"
-                    {:type :invalid-custom-type
-                     :type-kw type-kw
-                     :built-in-types supported-types})))
-  (swap! custom-types-registry assoc type-kw
-         {:validator validator
-          :encoder encoder
-          :decoder decoder
-          :backend-mappings backend-mappings
-          :description description})
-  nil)
-
-
-(defn unregister-custom-type!
-  "Removes a custom field type from the registry.
-   Returns nil."
-  [type-kw]
-  (swap! custom-types-registry dissoc type-kw)
-  nil)
-
-
-(defn get-custom-type
-  "Returns custom type spec or nil if not registered."
-  [type-kw]
-  (get @custom-types-registry type-kw))
-
-
-(defn custom-type?
-  "Returns true if type-kw is a registered custom type."
-  [type-kw]
-  (contains? @custom-types-registry type-kw))
-
-
-(defn all-custom-types
-  "Returns set of all registered custom type keywords."
-  []
-  (set (keys @custom-types-registry)))
-
-
-(defn all-supported-types
-  "Returns set of all supported types (built-in + custom)."
-  []
-  (into supported-types (all-custom-types)))
-
-
-(defn get-type-validator
-  "Returns validator function for type (built-in or custom).
-   Returns (constantly true) for unknown types."
-  [type-kw]
-  (or (get type-validators type-kw)
-      (:validator (get-custom-type type-kw))
-      (constantly true)))
-
-
-(defn get-type-encoder
-  "Returns encoder function for custom type, or identity for built-in types."
-  [type-kw]
-  (if-let [custom (get-custom-type type-kw)]
-    (:encoder custom)
-    identity))
-
-
-(defn get-type-decoder
-  "Returns decoder function for custom type, or identity for built-in types."
-  [type-kw]
-  (if-let [custom (get-custom-type type-kw)]
-    (:decoder custom)
-    identity))
-
-
-(defn get-backend-mapping
-  "Returns backend type mapping for a type (built-in or custom).
-
-   Arguments:
-   - type-kw: Type keyword
-   - backend: Backend keyword (:postgres, :datomic, :memory)
-
-   Returns the backend-specific type or nil."
-  [type-kw backend]
-  (or (get-in type-mappings [type-kw backend])
-      (get-in (get-custom-type type-kw) [:backend-mappings backend])))

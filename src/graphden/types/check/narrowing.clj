@@ -38,11 +38,27 @@
 ;; =============================================================================
 
 (defn- ref-binding-name
+  "Extract a fn-ref from an `:args` value: bare keyword or `{:ref X}`.
+   Inline anons are expanded to synthetic names before either pass
+   runs, so those two shapes are all we ever see. Shared by BOTH
+   passes (α' ref-tree building and #170 branch extraction)."
   [b]
   (cond
     (keyword? b) b
     (and (map? b) (contains? b :ref) (keyword? (:ref b))) (:ref b)
     :else nil))
+
+
+(defn- rename-only-binding?
+  "True when an `:args` value is a pure `{:as :name}` rename — keeps
+   the slot free under a new name, binds no value/ref. The α' pass
+   needs this twice (collect AS-names; detect the rebind-stop) — one
+   predicate so the two sites can't drift."
+  [b]
+  (and (map? b)
+       (contains? b :as)
+       (not (contains? b :value))
+       (not (contains? b :ref))))
 
 
 (defn- ref-children-of
@@ -69,12 +85,7 @@
    args (NOT inherited)."
   [fd]
   (into #{}
-        (keep (fn [[_ b]]
-                (when (and (map? b)
-                           (contains? b :as)
-                           (not (contains? b :value))
-                           (not (contains? b :ref)))
-                  (:as b))))
+        (keep (fn [[_ b]] (when (rename-only-binding? b) (:as b))))
         (or (:args fd) {})))
 
 
@@ -104,10 +115,7 @@
                   callee-args (or (:args callee-fd) {})
                   under-key (get callee-args arg-name)
                   rebinds? (not (or (nil? under-key)
-                                    (and (map? under-key)
-                                         (contains? under-key :as)
-                                         (not (contains? under-key :value))
-                                         (not (contains? under-key :ref)))))]
+                                    (rename-only-binding? under-key)))]
               (if rebinds?
                 (recur queue visited' acc)
                 (let [as-names (rename-as-names-in callee-fd)
@@ -126,9 +134,11 @@
   "Pass 2 — narrowings for rename-host fn-defs. Returns
    `{rename-host-name → {as-name → narrowed-type}}`.
 
-   PRECONDITION: call AFTER a full `check-all-defs!` sweep — it reads
-   each ref's `:return` via `registry/rich-type-of`, so an under-
-   populated registry silently produces no narrowings."
+   PRECONDITION: call AFTER the full per-fn-def check sweep
+   (`packages/sync`'s fault-tolerant check loop in production;
+   `check-all-defs!` in tests) — it reads each ref's `:return` via
+   `registry/rich-type-of`, so an under-populated registry silently
+   produces no narrowings."
   [fn-defs]
   (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
         known-names     (set (keys fn-defs-by-name))
@@ -139,11 +149,17 @@
     (reduce
       (fn [acc fd]
         (let [F-name (:name fd)
-              parent-info  (or (when-let [p (first (or (some-> fd :parents seq)
-                                                       (some-> fd :parent vector)))]
-                                 (registry/rich-type-of p))
-                               {})
-              parent-slots (set (keys (or (:args parent-info) {})))]
+              ;; ALL parents' slots, not just the primary's — the
+              ;; checker merges the full MI parent list
+              ;; (`merge-mi-parent-infos`), and this exclusion must
+              ;; match it: a binding to a SECONDARY parent's contract
+              ;; slot is parent-contract fulfilment, not a lifted free
+              ;; arg, and must not seed rename-host propagation.
+              parent-slots (into #{}
+                                 (comp (keep registry/rich-type-of)
+                                       (mapcat (fn [info] (keys (:args info)))))
+                                 (or (some-> fd :parents seq)
+                                     (some-> fd :parent vector)))]
           (reduce
             (fn [acc [arg-name b]]
               (let [ref-name (ref-binding-name b)]
@@ -243,15 +259,37 @@
    :float       :float})
 
 
-(defn- ref-of-binding-form
-  "Extract a fn-ref from an `:args` value: bare keyword, `{:ref X}`,
-   or `{:parent _ :args _}` inline anon — but inline anons are
-   expanded to synthetic names before this pass runs, so we only see
-   keywords or `{:ref X}`."
-  [b]
-  (cond
-    (keyword? b) b
-    (and (map? b) (keyword? (:ref b))) (:ref b)))
+(defn- merge-branch-override-maps
+  "Merge per-target narrowings for a branch ref reachable from MORE
+   THAN ONE branch of the same `:if`/`:cond` (e.g. `:then` and `:else`
+   referencing the same fn). Sound combination is per-target: narrowed
+   on BOTH paths → union of the two narrowings; narrowed on only one
+   path → the other path sees the target's full static type, and
+   union-with-static is static — so the narrowing is DROPPED. The old
+   `assoc` overwrite kept only the LAST branch's narrowing, typing a
+   shared `:some?`-guarded branch fn as if the target were `:null`."
+  [m1 m2]
+  (into {}
+        (keep (fn [[target n1]]
+                (when-some [n2 (get m2 target)]
+                  [target (if (= n1 n2)
+                            n1
+                            (types/make-union [n1 n2]))])))
+        m1))
+
+
+(defn- add-branch-override
+  "Attach `override-map` for `branch-ref` into the `{branch-ref →
+   {target → narrowed}}` accumulator, merging via
+   `merge-branch-override-maps` when the ref already has an entry."
+  [acc branch-ref override-map]
+  (if (and branch-ref (seq override-map))
+    (update acc branch-ref
+            (fn [existing]
+              (if existing
+                (merge-branch-override-maps existing override-map)
+                override-map)))
+    acc))
 
 
 (defn- narrowed-type-for-predicate
@@ -283,22 +321,25 @@
   [fd]
   (let [args      (or (:args fd) {})
         test-b    (get args :test)
-        test-ref  (ref-of-binding-form test-b)
+        test-ref  (ref-binding-name test-b)
         pred      (direct-predicate-of-ref test-ref)
-        then-ref  (ref-of-binding-form (get args :then))
-        else-ref  (ref-of-binding-form (get args :else))]
+        then-ref  (ref-binding-name (get args :then))
+        else-ref  (ref-binding-name (get args :else))]
     (if-not pred
       {}
       (let [[pred-kind target type-tag] pred
             target-static (:return (registry/rich-type-of target) :any)
             taken-narrow     (narrowed-type-for-predicate pred-kind :taken     target-static type-tag)
             not-taken-narrow (narrowed-type-for-predicate pred-kind :not-taken target-static type-tag)]
+        ;; `add-branch-override` (not assoc) so `:then` and `:else`
+        ;; referencing the SAME fn union their narrowings instead of
+        ;; the else entry silently overwriting the then entry.
         (cond-> {}
-          (and then-ref (some? taken-narrow))
-          (assoc then-ref {target taken-narrow})
+          (some? taken-narrow)
+          (add-branch-override then-ref {target taken-narrow})
 
-          (and else-ref (some? not-taken-narrow))
-          (assoc else-ref {target not-taken-narrow}))))))
+          (some? not-taken-narrow)
+          (add-branch-override else-ref {target not-taken-narrow}))))))
 
 
 (defn- cond-branch-overrides
@@ -321,21 +362,23 @@
           (if (empty? remaining)
             acc
             (let [[test-item result-item] (first remaining)
-                  test-ref     (ref-of-binding-form test-item)
+                  test-ref     (ref-binding-name test-item)
                   pred         (direct-predicate-of-ref test-ref)
-                  result-ref   (ref-of-binding-form result-item)
+                  result-ref   (ref-binding-name result-item)
                   this-taken   (when pred
                                  (let [[k t tag] pred
                                        static (:return (registry/rich-type-of t) :any)]
                                    {t (narrowed-type-for-predicate k :taken static tag)}))
                   for-this     (merge prior-not-taken this-taken)
+                  ;; `add-branch-override` (not assoc): the same
+                  ;; result fn referenced from SEVERAL clauses unions
+                  ;; per-target narrowings across its paths — the old
+                  ;; assoc kept only the LAST clause's view.
+                  acc'         (add-branch-override acc result-ref for-this)
                   this-not-taken (when pred
                                    (let [[k t tag] pred
                                          static (:return (registry/rich-type-of t) :any)]
                                      {t (narrowed-type-for-predicate k :not-taken static tag)}))
-                  acc'         (if (and result-ref (seq for-this))
-                                 (assoc acc result-ref for-this)
-                                 acc)
                   prior'       (merge prior-not-taken this-not-taken)]
               (recur (rest remaining) prior' acc'))))))))
 
@@ -378,11 +421,12 @@
    entry, so the type-checker sees narrowed returns when re-checking
    a fn-def reachable only from a provably-non-null guarded branch.
 
-   PRECONDITION: call AFTER a full `check-all-defs!` sweep — this reads
-   every target's `:return` via `registry/rich-type-of`, so a registry
-   not yet fully populated yields empty / `:any` overrides (no error,
-   just no narrowing). Same ordering dependency as `build-caller-
-   narrowings`."
+   PRECONDITION: call AFTER the full per-fn-def check sweep
+   (`packages/sync`'s check loop in production; `check-all-defs!` in
+   tests) — this reads every target's `:return` via
+   `registry/rich-type-of`, so a registry not yet fully populated
+   yields empty / `:any` overrides (no error, just no narrowing).
+   Same ordering dependency as `build-caller-narrowings`."
   [fn-defs]
   (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
         known-names     (set (keys fn-defs-by-name))

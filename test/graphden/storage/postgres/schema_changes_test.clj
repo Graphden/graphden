@@ -393,7 +393,7 @@
         (let [schema1 (-> (mds/create-builder)
                           (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000007010"
                                        [{:uuid #uuid "00000000-0000-0000-0000-000000007011"
-                                         :value :aktive}]) ; misspelled release
+                                         :value :legacy-label}]) ; pre-rename release
                           (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000007001"
                                          {:name {:uuid #uuid "00000000-0000-0000-0000-000000007002"
                                                  :type :text}})
@@ -408,7 +408,7 @@
                                                  :type :text}})
                           ds/build)
               changes (sp/initialize storage schema2)]
-          (is (= [{:enum :status :old :aktive :new :active}]
+          (is (= [{:enum :status :old :legacy-label :new :active}]
                  (:renamed (:enum-values changes))))
           ;; The pg label really changed — re-running the migration is a
           ;; no-op (uuid matches, keyword matches).

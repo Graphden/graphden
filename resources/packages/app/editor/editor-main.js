@@ -306,7 +306,9 @@ async function initGraph() {
   // fn's subtree loaded (its slots/bindings/closure), not still in
   // flight — callers read `lookups.fnMap` right after.
   const hash = window.location.hash.slice(1);
-  if (hash) {
+  if (typeof gdRouteSurfaceHash === 'function' && gdRouteSurfaceHash(decodeURIComponent(hash))) {
+    // `#@settings` / `#@organization` / … — a surface deep link, no fn to select.
+  } else if (hash) {
     await selectFnByName(decodeURIComponent(hash), false);
   }
 }
@@ -383,9 +385,10 @@ async function loadGraphData() {
   // unconditional `renderGraph` here fired a second, redundant layout +
   // subtree re-fetch on every mutation.
   const hash = window.location.hash.slice(1);
-  if (hash && typeof selectFnByName === 'function') {
+  if (hash && hash.charAt(0) !== '@' && typeof selectFnByName === 'function') {
     await selectFnByName(decodeURIComponent(hash), false);
   } else if (typeof renderGraph === 'function') {
+    // `@`-surface hash (management screen up) or no hash — just repaint.
     renderGraph(true);
   }
 }
@@ -401,6 +404,9 @@ async function loadGraphData() {
 // nothing.
 function _onHashNav() {
   const hash = window.location.hash.slice(1);
+  // Surface deep links (`#@settings` …) route to the shell; a fn-name (or
+  // empty) hash also pulls the shell back to Build when a surface was up.
+  if (typeof gdRouteSurfaceHash === 'function' && gdRouteSurfaceHash(decodeURIComponent(hash))) return;
   if (hash && graphData) selectFnByName(decodeURIComponent(hash), false);
 }
 window.addEventListener('popstate', _onHashNav);

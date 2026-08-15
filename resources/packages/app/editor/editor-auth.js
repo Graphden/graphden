@@ -253,11 +253,13 @@ function initAuthLock() {
 // true when the fields are mounted + wired, false on fetch failure (the popover
 // then holds an inline error). The form is a fragment so the fields stay direct
 // flex children of `.auth-popover`.
-let _authFieldsMounted = false;
+// The popover hosts EITHER the shell menu or the login form; the dataset
+// flag records which, so 'Sign in' from the menu can swap to the form and
+// a later open doesn't refetch over it.
 async function mountAuthPopoverFields() {
-  if (_authFieldsMounted) return true;
   const popover = document.getElementById('auth-popover');
   if (!popover) return false;
+  if (popover.dataset.gdContent === 'form') return true;
   try {
     // Unauthenticated — this IS the login form; authFetch works with or
     // without a bearer.
@@ -269,7 +271,7 @@ async function mountAuthPopoverFields() {
       '<div class="auth-error">Couldn\'t load the login form — reload the page.</div>';
     return false;
   }
-  _authFieldsMounted = true;
+  popover.dataset.gdContent = 'form';
 
   // The served variant declares its submit mode (core = "admin"; the tenancy
   // addon's shadowing partial = "tenant") — see loginIsTenant().
@@ -372,29 +374,43 @@ function renderAuthLock() {
 }
 
 
-// The account chip's menu (accounts mode, signed in): who you are + operator
-// badge, and the self-service actions. Rendered into the shared #auth-popover.
-function openAccountMenu() {
+// The account chip's menu — the SETTINGS HUB (redesign 2026-08-15, the rail
+// is retired). One menu for every auth mode: identity head (when known), the
+// management destinations (Settings always — appearance works signed-out too;
+// Organization always; Platform behind the platform right), then the session
+// actions for the current mode. Sections the principal has no rights to
+// simply don't appear. Rendered into the shared #auth-popover.
+function openShellMenu() {
   const pop = document.getElementById('auth-popover');
   if (!pop) return;
-  const a = window.gdAccount || {};
-  const who = a.email || a['display-name'] || a.id || 'signed in';
-  const isOp = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
   const menu = document.createElement('div');
   menu.className = 'auth-menu';
-  const head = document.createElement('div');
-  head.className = 'auth-menu-head';
-  const whoEl = document.createElement('div');
-  whoEl.className = 'auth-menu-who';
-  whoEl.textContent = who;
-  head.appendChild(whoEl);
-  if (isOp) {
-    const badge = document.createElement('span');
-    badge.className = 'auth-menu-badge';
-    badge.textContent = 'operator';
-    head.appendChild(badge);
+
+  // Identity head — accounts identity, or the bearer-session kinds.
+  const isOp = (typeof window.graphdenHasCap === 'function') && window.graphdenHasCap('platform-admin');
+  let who = null;
+  if (accountsMode && accountsAuthed) {
+    const a = window.gdAccount || {};
+    who = a.email || a['display-name'] || a.id || 'signed in';
+  } else if (isAuthenticated()) {
+    who = loginIsTenant() ? 'Signed in' : 'Signed in as admin';
   }
-  menu.appendChild(head);
+  if (who) {
+    const head = document.createElement('div');
+    head.className = 'auth-menu-head';
+    const whoEl = document.createElement('div');
+    whoEl.className = 'auth-menu-who';
+    whoEl.textContent = who;
+    head.appendChild(whoEl);
+    if (isOp) {
+      const badge = document.createElement('span');
+      badge.className = 'auth-menu-badge';
+      badge.textContent = 'operator';
+      head.appendChild(badge);
+    }
+    menu.appendChild(head);
+  }
+
   const item = (label, onClick) => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -403,17 +419,63 @@ function openAccountMenu() {
     b.addEventListener('click', onClick);
     menu.appendChild(b);
   };
-  item('Account & security', () => { window.location.href = '/account'; });
-  item('Sign out', async () => {
-    try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
-    window.location.reload();
-  });
-  item('Sign out everywhere', async () => {
-    try { await fetch('/auth/logout-all', { method: 'POST' }); } catch (_) {}
-    window.location.reload();
-  });
+  const divider = () => {
+    const d = document.createElement('div');
+    d.className = 'auth-menu-div';
+    menu.appendChild(d);
+  };
+  const goSurface = (name) => {
+    closeAuthPopover();
+    if (typeof gdShellSurface === 'function') gdShellSurface(name);
+  };
+
+  // Management destinations — rare places, one click deep by design.
+  item('Settings', () => goSurface('settings'));
+  item('Organization', () => goSurface('operate'));
+  if (document.body.classList.contains('gd-platform') || isOp) {
+    item('Platform', () => goSurface('platform'));
+  }
+  divider();
+
+  // Session actions per auth mode.
+  if (accountsMode) {
+    if (accountsAuthed) {
+      item('Sign out', async () => {
+        try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+        window.location.reload();
+      });
+      item('Sign out everywhere', async () => {
+        try { await fetch('/auth/logout-all', { method: 'POST' }); } catch (_) {}
+        window.location.reload();
+      });
+    } else {
+      item('Sign in', () => { window.location.href = '/login'; });
+    }
+  } else if (isAuthenticated()) {
+    item('Sign out', async () => {
+      if (!confirm('Sign out?')) return;
+      if (loginIsTenant()) {
+        try { await authFetch(API.api_logout, { method: 'POST' }); } catch (_) {}
+        clearAuthPassword();
+        window.location.reload();
+      } else {
+        clearAuthPassword();
+        closeAuthPopover();
+      }
+    });
+    if (loginIsTenant()) item('Sign out everywhere', logoutEverywhere);
+  } else {
+    // Bearer modes sign in via the popover form — swap the menu for it.
+    item('Sign in', () => {
+      pop.classList.add('hidden');
+      pop.dataset.gdContent = '';
+      pop.innerHTML = '';
+      void openAuthPopover();
+    });
+  }
+
   pop.replaceChildren(menu);
-  _authFieldsMounted = true; // it's the menu now, not the login form — don't refetch
+  pop.dataset.gdContent = 'menu';
   pop.classList.remove('hidden');
   positionAuthPopover();
 }
@@ -438,38 +500,15 @@ async function logoutEverywhere() {
   window.location.reload();
 }
 
-// Click on the lock toggles between login (when closed) and logout
-// (when open). Logout asks for confirmation since it loses the
-// in-progress edit session.
-async function toggleAuthAction() {
-  if (accountsMode) {
-    // Accounts addon: signed in → the account menu (identity + Account /
-    // Sign out / Sign out everywhere); signed out → the /login page.
-    if (accountsAuthed) {
-      const pop = document.getElementById('auth-popover');
-      if (pop && !pop.classList.contains('hidden')) { closeAuthPopover(); return; }
-      openAccountMenu();
-    } else {
-      window.location.href = '/login';
-    }
-    return;
-  }
-  if (isAuthenticated()) {
-    if (!confirm('Sign out?')) return;
-    // Multi-tenant: invalidate the session token server-side (POST /api/logout
-    // deletes the :token, so a leaked bearer can't be replayed) before clearing
-    // local storage, then reload to drop back to the anonymous view. Single-
-    // tenant has no server session — just clear the stored admin password.
-    if (loginIsTenant()) {
-      try { await authFetch(API.api_logout, { method: 'POST' }); } catch (_) {}
-      clearAuthPassword();
-      window.location.reload();
-    } else {
-      clearAuthPassword();
-    }
-  } else {
-    await openAuthPopover();
-  }
+// The chip always toggles the shell menu — identity + Settings /
+// Organization / Platform + the session actions for the current auth mode
+// (sign-out moved INTO the menu; a bearer-mode 'Sign in' swaps the popover
+// to the login form). Settings stays reachable signed-out: appearance is
+// personal, not privileged.
+function toggleAuthAction() {
+  const pop = document.getElementById('auth-popover');
+  if (pop && !pop.classList.contains('hidden')) { closeAuthPopover(); return; }
+  openShellMenu();
 }
 
 async function openAuthPopover(errorMsg) {
@@ -481,6 +520,10 @@ async function openAuthPopover(errorMsg) {
   }
   const popover = document.getElementById('auth-popover');
   if (!popover) return;
+  if (popover.dataset.gdContent === 'menu') {
+    popover.dataset.gdContent = '';
+    popover.innerHTML = '';
+  }
   // Fields are a graph partial mounted on first open; if the fetch fails, show
   // the popover anyway so its inline error is visible.
   if (!(await mountAuthPopoverFields())) {

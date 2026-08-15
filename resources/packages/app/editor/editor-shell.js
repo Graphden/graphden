@@ -1,12 +1,18 @@
-// Editor Shell — redesign 2026-08. Owns the left-rail surface switching.
+// Editor Shell — redesign 2026-08. Owns the surface switching.
 //
 // Build is the graph editor; Operate (labeled "Organization") / Platform /
-// Settings are real <section>s (see REAL_SURFACES). Review and Workspaces
-// were retired as surfaces: a branch diff is the Δ button in the branch
-// switcher, a workspace is the ctxbar chip's popover. The rail's inline
-// onclick calls the single exported entry point
-// `window.gdShellSurface(name, btn)`. (There is no Run surface — running a fn
-// is the ▶ action on its node/card; its history is the inspector Runs tab.)
+// Settings are real <section>s (see REAL_SURFACES). The RAIL is retired
+// (2026-08-15): surface ENTRY is the account chip's menu (editor-auth.js) +
+// the deep-link hashes below; the brand button in the top bar is the way
+// back to Build. Review and Workspaces were retired as surfaces earlier: a
+// branch diff is the Δ button in the branch switcher, a workspace is the
+// Explorer chip's popover. (There is no Run surface — running a fn is the ▶
+// action on its node/card; its history is the inspector Runs tab.)
+//
+// Deep links: surfaces are hash-addressable with an `@` prefix — `#@settings`,
+// `#@settings/account`, `#@organization`, `#@platform`. `@` can't start a fn
+// name (valid-identifier?), so the namespace never collides with the
+// `#<fn-name>` selection hashes; editor-main.js routes `@` hashes here.
 (function () {
   // Progressive disclosure (redesign 2026-08): cards start COMPACT — the dense
   // return-type + effects metadata strips are hidden by default (that data is
@@ -29,13 +35,15 @@
   // Workspaces were retired — see the rail comments in fns.edn). Build is the
   // graph editor; the rest are real <section>s (see REAL_SURFACES). The
   // placeholder overlay is only a defensive fallback for an unknown name.
-  function gdShellSurface(name, btn) {
-    gdSetRailPressed(btn ? btn.getAttribute('data-surface') : name);
+  // opts.pushHash=false suppresses the history write (used when the CALL
+  // originates from hash routing — pushing again would double the entry).
+  function gdShellSurface(name, btn, opts) {
     gdHideAllSurfaces();
     // Record the active surface so surface-scoped chrome can gate on it — the
     // Explorer's left-edge expand tab only makes sense on Build (the other
     // surfaces are full overlays with no Explorer).
     document.body.setAttribute('data-surface', name);
+    if (!opts || opts.pushHash !== false) gdPushSurfaceHash(name);
 
     // Build = the graph editor (explorer | canvas | inspector), no cover.
     if (name === 'build') return;
@@ -81,19 +89,66 @@
     }
   }
 
-  // The rail surfaces that own a real <section> (vs the placeholder overlay).
+  // The surfaces that own a real <section> (vs the placeholder overlay).
   const REAL_SURFACES = {
     operate: 'gd-operate',
     platform: 'gd-platform',
     settings: 'gd-settings',
   };
 
-  function gdSetRailPressed(activeSurface) {
-    const rail = document.getElementById('gd-rail');
-    if (!rail) return;
-    rail.querySelectorAll('.gd-rail-btn[data-surface]').forEach((b) => {
-      b.setAttribute('aria-pressed', b.getAttribute('data-surface') === activeSurface ? 'true' : 'false');
-    });
+  // ---- Surface deep links ---------------------------------------------------
+  // surface name <-> `@` hash token. `organization` is the user-facing token
+  // for the internal `operate` id (mechanics + e2e stay on `operate`).
+  const SURFACE_TO_HASH = { operate: '@organization', platform: '@platform', settings: '@settings' };
+  const HASH_TO_SURFACE = { organization: 'operate', platform: 'platform', settings: 'settings' };
+
+  // Mirror the active surface into the URL the same way fn selection does
+  // (pushState — no hashchange feedback loop, and browser Back walks the
+  // trail). Build restores the selected fn's hash, or clears it.
+  function gdPushSurfaceHash(name) {
+    try {
+      if (name === 'build') {
+        let fnHash = '';
+        const lk = (typeof lookups !== 'undefined') ? lookups : null;
+        const sel = (typeof selectedFnId !== 'undefined') ? selectedFnId : null;
+        const fn = (sel && lk?.fnMap) ? lk.fnMap.get(sel) : null;
+        if (fn && typeof getQualifiedFnName === 'function') fnHash = '#' + getQualifiedFnName(fn);
+        if ((window.location.hash || '') === fnHash) return;
+        window.history.pushState(null, '', window.location.pathname + window.location.search + fnHash);
+      } else {
+        const want = '#' + SURFACE_TO_HASH[name];
+        if (window.location.hash === want) return;
+        window.history.pushState(null, '', want);
+      }
+    } catch (_) { /* ignore — hash is a mirror, not state */ }
+  }
+
+  // Route an `@` surface hash (already stripped of '#'). Returns true when
+  // the hash addressed a surface (handled here), false for fn-name hashes.
+  // `@settings/account` opens Settings scrolled to the Account card.
+  function gdRouteSurfaceHash(hash) {
+    if (!hash || hash.charAt(0) !== '@') {
+      // A fn-name (or empty) hash while a management surface is up means the
+      // user navigated BACK to the editor — return to Build without pushing.
+      if (document.body.getAttribute('data-surface') !== 'build') {
+        gdShellSurface('build', null, { pushHash: false });
+      }
+      return false;
+    }
+    const parts = hash.slice(1).split('/');
+    const name = HASH_TO_SURFACE[parts[0]];
+    if (!name) return true; // unknown @token: swallow, never a fn name
+    gdShellSurface(name, null, { pushHash: false });
+    if (name === 'settings' && parts[1] === 'account') {
+      const card = document.getElementById('gd-set-account');
+      if (card) card.scrollIntoView({ block: 'start' });
+    }
+    return true;
+  }
+
+  // Brand button — from any surface, back to the editor.
+  function gdShellGoHome() {
+    gdShellSurface('build');
   }
 
   function gdHideAllSurfaces() {
@@ -106,6 +161,8 @@
   }
 
   window.gdShellSurface = gdShellSurface;
+  window.gdRouteSurfaceHash = gdRouteSurfaceHash;
+  window.gdShellGoHome = gdShellGoHome;
 
   // (Review surface retired: comparing a branch against main is the per-branch
   // diff button in the branch switcher — `.branch-row-diff` → showBranchDiff in
@@ -150,10 +207,10 @@
       compactBtn.onclick = () => { gdToggleCardDetails(null); gdRenderSettings(); };
     }
 
-    // (No Account card here — your account is the single hub behind the avatar
-    // chip in the top bar: who you are, Account & security → /account, Sign
-    // out / Sign out everywhere. Duplicating it in Settings only split the
-    // identity actions across two places.)
+    // Account card — the merged /account page (identity, sign-in methods,
+    // 2FA, API tokens). editor-account.js owns it; hidden outside the
+    // accounts addon.
+    if (typeof gdRenderAccountCard === 'function') gdRenderAccountCard();
 
     const hashEl = document.getElementById('gd-set-hash');
     if (hashEl) {

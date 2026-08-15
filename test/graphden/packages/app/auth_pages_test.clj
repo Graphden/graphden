@@ -1,11 +1,14 @@
 (ns graphden.packages.app.auth-pages-test
   "Byte-for-byte parity between the `app.auth-pages` GRAPH fn-defs (the
-   primary render path for /login /account /reset + the transactional
-   email bodies) and the built-in Clojure fallbacks in
+   primary render path for /login /reset + the transactional email
+   bodies) and the built-in Clojure fallbacks in
    `graphden.accounts.{pages,email}` that serve during a graph outage.
    A drifting pair would flip the auth surface's look/copy depending on
    graph health — this pins the two sides together; edit both when
-   changing either."
+   changing either. /account DIVERGES BY DESIGN (2026-08-15): the graph
+   page (editor always present alongside it) redirects into the editor's
+   Settings → Account card, while the built-in fallback keeps the full
+   standalone page for headless deployments."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
@@ -41,11 +44,14 @@
                      {:providers (provider-map provs) :telegram tg}))))))
 
 
-(deftest account-page-parity
-  (doseq [provs [#{} #{"github"} #{"github" "google"}]]
-    (testing (str "providers=" provs)
-      (is (= (pages/account-page provs)
-             (render "auth-account-page" {:providers (provider-map provs)}))))))
+(deftest account-page-redirects-into-editor
+  ;; The graph /account page is a redirect into the editor's Settings →
+  ;; Account deep link — intentionally NOT parity with the standalone
+  ;; fallback (which serves headless deployments).
+  (let [html (render "auth-account-page" {})]
+    (is (str/includes? html "location.replace('/#@settings/account')"))
+    (is (str/includes? html "href='/#@settings/account'")
+        "no-JS fallback link present")))
 
 
 (deftest account-page-api-tokens-panel

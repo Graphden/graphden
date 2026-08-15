@@ -234,6 +234,12 @@
         (is (str/includes? (:body resp) "/auth/github/start"))))
     (testing "GET /account renders HTML"
       (is (= 200 (:status (router {:request-method :get :uri "/account"})))))
+    (testing "GET /auth/providers lists the enabled oauth providers, no auth needed"
+      (let [resp (router {:request-method :get :uri "/auth/providers"})
+            body (json/parse-string (:body resp) true)]
+        (is (= 200 (:status resp)))
+        (is (:ok body))
+        (is (= {:github true} (:providers body)))))
     (testing "GET /auth/me needs auth and returns the account when signed in"
       (is (= 401 (:status (router {:request-method :get :uri "/auth/me"}))))
       (let [session (set-cookie-token (router {:request-method :post :uri "/auth/signup"

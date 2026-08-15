@@ -31,7 +31,7 @@ The client finds out the addon is live from a response header:
 the first `/api/*` response that carries
 `X-Graphden-Capabilities` flips the editor into tenancy mode.
 Only then — and only when you're signed in — does the **Organization**
-surface (open it from the left rail) grow the admin sections,
+surface (open it from your avatar's menu in the top bar) grow the admin sections,
 among them **Grants**, **Members** and **Packages**.
 
 ## The table

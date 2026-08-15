@@ -154,8 +154,7 @@
   --gd-crit: #c0453c;
   --gd-crit-wash: #f4e0de;
   /* shell geometry (theme-independent) */
-  --gd-rail-w: 58px;
-  --gd-ctxbar-h: 52px;
+  --gd-ctxbar-h: 44px;
   --gd-explorer-w: 260px;
   --gd-inspector-w: 344px;
   --gd-r: 9px;
@@ -364,15 +363,17 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
    sidebar. */
 .sidebar-expand-floating {
   /* The Explorer's EXPAND affordance while collapsed: a slim tab flush against
-     the rail's right edge (= the left edge of the canvas, where the Explorer
-     reappears), pointing right (›). Shown ONLY on Build + collapsed (rule
-     below) — the Explorer doesn't exist on the overlay surfaces, so neither
-     does its toggle. Not over the rail/brand, which used to swallow its clicks. */
+     the viewport's left edge (where the Explorer reappears), pointing right
+     (›). Shown ONLY on Build + collapsed (rule below) — the Explorer doesn't
+     exist on the overlay surfaces, so neither does its toggle. On a
+     NON-default branch it also carries the branch-name badge (child span
+     .gd-edge-branch, synced by editor-branches.js) so the write-context stays
+     visible with the chrome collapsed. */
   position: fixed;
-  top: calc(var(--gd-ctxbar-h, 48px) + 10px);
-  left: var(--gd-rail-w, 58px);
+  top: calc(var(--gd-ctxbar-h, 44px) + 10px);
+  left: 0;
   z-index: 320;
-  width: 18px; height: 46px; padding: 0;
+  width: 18px; min-height: 46px; padding: 0;
   background: var(--gd-panel); color: var(--gd-ink-2);
   border: 1px solid var(--gd-line); border-left: none;
   border-radius: 0 7px 7px 0;
@@ -446,9 +447,11 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    A distinct ACCENT treatment (accent text + border + tint + weight) so the
    applied lens is unmistakable at a glance, and never collides with :hover. */
 .kind-toggle[aria-pressed="true"] {
-  color: var(--accent);
+  /* flow-ink on flow-wash — the same AA-passing pair as .gd-pop-item.sel
+     (bare --accent on --selected-bg measured 4.05:1 at 11px, under AA). */
+  color: var(--gd-flow-ink);
   border-color: var(--accent);
-  background: var(--selected-bg);
+  background: var(--gd-flow-wash);
   font-weight: 600;
 }
 .kind-toggle[aria-pressed="true"]:hover { filter: brightness(0.98); }
@@ -620,6 +623,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   font-size: 13px; padding: 7px 8px; border-radius: 4px; color: var(--fg);
 }
 .auth-menu-item:hover { background: var(--bg); }
+.auth-menu-div { height: 1px; margin: 4px 2px; background: var(--border); }
 
 /* "Sign out everywhere" — same chrome as the lock, sits beside it. */
 .auth-logout-all-btn {
@@ -5031,69 +5035,14 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 #app.gd-redesign {
   height: 100vh;
   display: grid;
-  grid-template-columns: var(--gd-rail-w) 1fr;
+  grid-template-columns: 1fr;
   /* FIXED-height row tracks (not `1fr`) so the tall explorer content can't
      blow a track out past the viewport — `minmax(0,1fr)` resolved to the
-     content's max-content here. The rail spans both rows; the context bar
-     tops the main column. Descendants scroll within the main track. */
+     content's max-content here. The top bar tops the single column;
+     descendants scroll within the main track. */
   grid-template-rows: var(--gd-ctxbar-h) calc(100vh - var(--gd-ctxbar-h));
-  grid-template-areas: "rail bar" "rail main";
+  grid-template-areas: "bar" "main";
 }
-
-/* ---- LEFT RAIL ---- */
-#gd-rail {
-  grid-area: rail;
-  z-index: 300;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 10px 0;
-  font-family: var(--gd-ui-font);
-  background: var(--gd-panel);
-  border-right: 1px solid var(--gd-line);
-}
-.gd-rail-btn {
-  position: relative;
-  width: 44px; height: 44px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--gd-ink-3);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-.gd-rail-btn svg { width: 21px; height: 21px; }
-.gd-rail-btn:hover { background: var(--gd-paper-2); color: var(--gd-ink); }
-.gd-rail-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
-.gd-rail-btn[aria-pressed="true"] { background: var(--gd-flow-wash); color: var(--gd-flow); }
-/* Brand mark, NOT a control: it carries `.gd-rail-btn` only for rail layout
-   (size/centering). `pointer-events: none` stops it faking a hover/click and
-   stops it swallowing clicks meant for anything beneath it in the corner. */
-.gd-brand { color: var(--gd-flow); cursor: default; margin-bottom: 6px; pointer-events: none; }
-.gd-brand svg { width: 20px; height: 20px; }
-.gd-rail-spacer { flex: 1 1 auto; }
-/* rail label — reveals on hover/focus as a small flag beside the icon */
-.gd-rail-cap {
-  position: absolute;
-  left: 50px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--gd-panel);
-  background: var(--gd-ink);
-  box-shadow: var(--gd-shadow-pop);
-  opacity: 0;
-  transform: translateX(-4px);
-  pointer-events: none;
-  transition: opacity 0.12s, transform 0.12s;
-  z-index: 320;
-}
-.gd-rail-btn:hover .gd-rail-cap,
-.gd-rail-btn:focus-visible .gd-rail-cap { opacity: 1; transform: none; }
 
 /* ---- CONTEXT BAR ---- */
 #gd-ctxbar {
@@ -5107,6 +5056,27 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   background: var(--gd-panel);
   border-bottom: 1px solid var(--gd-line);
 }
+/* Brand — the way BACK to the editor from any management surface (and a
+   no-op resting state on Build). A real button, not decoration. */
+.gd-brand-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gd-ink);
+  font-family: inherit;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.gd-brand-home svg { color: var(--gd-flow); }
+.gd-brand-home:hover { background: var(--gd-paper-2); }
+.gd-brand-home:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 .gd-ctx-chip {
   display: inline-flex;
   align-items: center;
@@ -5124,30 +5094,67 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .gd-ctx-chip:hover { border-color: var(--gd-ink-4); }
 .gd-ctx-chip:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
-/* Ctxbar chip family — the branch chip and the account chip are built
-   by other modules (.branch-chip-btn / .auth-*) with their own legacy
-   chrome (26px, radius 3, mixed font sizes). Inside the context bar
-   they sit shoulder-to-shoulder with the .gd-ctx-chip pills, so unify
-   size / radius / type here — one control family per bar. */
-#gd-ctxbar .branch-chip-btn {
-  height: 32px;
+/* Explorer context row — workspace / branch / packages, the Build context.
+   The branch chip is built by editor-branches.js with its own legacy chrome
+   (26px, radius 3, mixed font sizes); unify size / radius / type here so the
+   row reads as one control family. Chips wrap on narrow sidebars. */
+#gd-exp-ctx {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 8px 14px;
+  font-family: var(--gd-ui-font);
+  border-bottom: 1px solid var(--gd-line);
+}
+#gd-exp-ctx .branch-chip-btn {
+  height: 28px;
   border-radius: 8px;
-  padding: 0 11px;
-  font-size: 12.5px;
+  padding: 0 10px;
+  font-size: 12px;
   border: 1px solid var(--gd-line-2);
   background: var(--gd-paper-2);
   color: var(--gd-ink);
   max-width: 180px;
 }
-#gd-ctxbar .branch-chip-btn:hover {
+#gd-exp-ctx .branch-chip-btn:hover {
   background: var(--gd-paper-2);
   color: var(--gd-ink);
   border-color: var(--gd-ink-4);
 }
-#gd-ctxbar .branch-chip-btn.branch-chip-non-default,
-#gd-ctxbar .branch-chip-btn.branch-chip-non-default:hover {
+#gd-exp-ctx .branch-chip-btn.branch-chip-non-default,
+#gd-exp-ctx .branch-chip-btn.branch-chip-non-default:hover {
   background: var(--gd-flow);
   border-color: var(--gd-flow);
+  color: var(--on-accent);
+}
+#gd-exp-ctx .gd-ctx-chip { height: 28px; padding: 0 10px; font-size: 12px; }
+#gd-exp-ctx #branch-mount { display: flex; align-items: center; }
+/* Collapsed-state branch badge on the left-edge expand tab: only rendered
+   (by editor-branches.js) when the branch is NON-default — on main the tab
+   stays a bare chevron and the screen stays clean. */
+.gd-edge-branch {
+  writing-mode: vertical-rl;
+  padding: 6px 0;
+  max-height: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--on-accent);
+}
+.sidebar-expand-floating.gd-edge-nondefault {
+  flex-direction: column;
+  gap: 2px;
+  height: auto;
+  padding: 8px 0;
+  background: var(--gd-flow);
+  color: var(--on-accent);
+  border-color: var(--gd-flow);
+}
+.sidebar-expand-floating.gd-edge-nondefault:hover {
+  background: var(--gd-flow-2);
   color: var(--on-accent);
 }
 #gd-ctxbar .auth-lock-btn { height: 32px; }
@@ -5168,24 +5175,16 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--gd-ink-3);
 }
 .gd-bar-spacer { flex: 1 1 auto; }
-/* The relocated theme/collapse/branch/org/auth mounts flow inline here. */
-#gd-ctxbar #prefs-mount,
-#gd-ctxbar #branch-mount,
+/* The org/auth mounts flow inline on the bar's right side. */
 #gd-ctxbar #org-mount,
 #gd-ctxbar #auth-mount { display: flex; align-items: center; gap: 6px; }
-/* Narrow / phone: the context bar's chips (workspace + branch + org) don't fit
-   a phone width and DISTENDED the whole page (horizontal scroll). Hide the
-   workspace-scope chip (a desktop power feature), drop the uppercase labels,
-   and let the branch/org mounts shrink + truncate — the bar, and the page,
-   never overflow. The account chip always stays reachable. */
+/* Narrow / phone: the bar holds only brand + org + account now; let the org
+   mount shrink + truncate so the bar, and the page, never overflow. The
+   Build-context chips live in the Explorer, which is collapsed by default on
+   narrow viewports. */
 @media (max-width: 640px) {
   #gd-ctxbar { gap: 6px; padding: 0 8px; min-width: 0; }
-  #gd-ctxbar #gd-ws-chip,
-  #gd-ctxbar #gd-pkg-chip { display: none; }
-  #gd-ctxbar .gd-ctx-k { display: none; }
-  #gd-ctxbar #branch-mount,
   #gd-ctxbar #org-mount { min-width: 0; }
-  #gd-ctxbar #branch-mount > *,
   #gd-ctxbar #org-mount > * {
     max-width: 96px;
     overflow: hidden;
@@ -5193,14 +5192,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
     white-space: nowrap;
   }
 }
-/* Contextual chrome is a function of the SURFACE, not the shell: the workspace
-   scope + branch chip belong to Build (you author graph IN a branch/scope). On
-   Organization / Platform / Settings they're meaningless — a branch has no
-   bearing on managing an org — so hide them there. The org switcher + account
-   chip stay global (you may need to re-scope or sign out from any surface). */
-body:not([data-surface="build"]) #gd-ws-chip,
-body:not([data-surface="build"]) #gd-pkg-chip,
-body:not([data-surface="build"]) #gd-ctxbar #branch-mount { display: none; }
+/* (No surface-scoped chip hiding needed: the Build context lives inside the
+   Explorer, and the management surfaces overlay the whole #main-container —
+   the chrome disappears with the surface it belongs to.) */
 
 /* ---- Context-bar popover (workspace switcher) ---- */
 .gd-pop-scrim { position: fixed; inset: 0; z-index: 340; }
@@ -5336,6 +5330,13 @@ body:not([data-surface="build"]) #gd-ctxbar #branch-mount { display: none; }
 body.sidebar-collapsed #app.gd-redesign #main-container {
   grid-template-columns: 0 minmax(0, 1fr) var(--gd-inspector-w);
 }
+/* Explicit column assignment — the collapsed Explorer is `display: none`,
+   which removes it from grid AUTO-placement and would otherwise shift the
+   canvas into the 0-width first column (and the inspector into the canvas
+   column). Pin each pane to its track so collapse just zeroes column 1. */
+#app.gd-redesign #side-menu { grid-column: 1; grid-row: 1; }
+#app.gd-redesign #graph-container { grid-column: 2; grid-row: 1; }
+#app.gd-redesign #gd-inspector { grid-column: 3; grid-row: 1; }
 
 /* Explorer — the former absolute-overlay sidebar, now a real grid column. */
 #app.gd-redesign #side-menu {
@@ -5626,13 +5627,8 @@ body.gd-cards-compact .effects-strip { display: none; }
   background: var(--gd-paper);
 }
 #gd-operate[hidden], #gd-platform[hidden] { display: none; }
-/* The Platform rail button is hidden until a platform right arrives
-   (body.gd-platform, set from X-Graphden-Capabilities). */
-.gd-rail-btn.gd-platform-only { display: none; }
-/* Match the sibling rail buttons' `display: grid; place-items: center`
-   (NOT flex) — flex left-aligns the icon/cap so the button reads as
-   shifted left of the rail column. */
-body.gd-platform .gd-rail-btn.gd-platform-only { display: grid; }
+/* (The Platform ENTRY is a menu item in the account chip's menu now —
+   editor-auth.js gates it on body.gd-platform / the capability probe.) */
 /* Tenancy-adaptive copy: show the org/RBAC wording only when the tenancy addon
    is active (body.gd-tenancy, set from X-Graphden-Capabilities); a single-tenant
    instance sees the operational-only variant. */
@@ -5819,6 +5815,63 @@ body.gd-tenancy .gd-solo-only { display: none; }
 .gd-set-btn:hover { border-color: var(--gd-flow); color: var(--gd-flow); }
 .gd-set-btn:focus-visible { outline: 2px solid var(--gd-flow); outline-offset: 2px; }
 a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center; }
+/* ---- Settings: Account card (the merged /account page) ---- */
+.gd-acct-h {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gd-ink-3);
+}
+.gd-acct-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+}
+.gd-acct-row + .gd-acct-row { border-top: 1px solid var(--gd-line); }
+.gd-acct-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.gd-acct-secret {
+  display: block;
+  margin: 8px 0;
+  padding: 6px 8px;
+  word-break: break-all;
+  user-select: all;
+}
+.gd-acct-input, .gd-acct-mint select {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--gd-line-2);
+  border-radius: 8px;
+  background: var(--gd-paper-2);
+  color: var(--gd-ink);
+  font-family: var(--gd-ui-font);
+  font-size: 12.5px;
+}
+.gd-acct-input:focus-visible, .gd-acct-mint select:focus-visible {
+  outline: 2px solid var(--gd-flow); outline-offset: 1px;
+}
+.gd-acct-scopes { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 10px 0; }
+.gd-acct-scopes label {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--gd-ink-2);
+}
+.gd-acct-mint { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.gd-acct-mint .gd-acct-input { flex: 1 1 auto; min-width: 0; }
+.gd-acct-banner {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--gd-warn);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--gd-ink-2);
+}
+.gd-acct-banner .gd-set-btn { margin-top: 8px; }
+.gd-acct-msg { margin-top: 10px; font-size: 12.5px; min-height: 16px; }
+.gd-acct-msg.ok { color: var(--gd-ok); }
+.gd-acct-msg.err { color: var(--gd-crit); }
 .gd-set-acct-btns { display: flex; gap: 8px; flex: none; }
 .gd-set-badge {
   font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
@@ -5870,9 +5923,9 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 .gd-ws-pin:hover { opacity: 0.8; }
 .gd-ws-pin.pinned { opacity: 1; background: var(--gd-flow-wash); border-color: var(--gd-flow); }
 
-/* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet, the
- *      rail stays (it's already thin). Below the sidebar breakpoint the
- *      explorer auto-collapses (handled by editor-prefs.js). ---- */
+/* ---- Responsive: iPad / narrow — inspector becomes a bottom sheet.
+ *      Below the sidebar breakpoint the explorer auto-collapses (handled
+ *      by editor-prefs.js). ---- */
 @media (max-width: 1100px) {
   /* Two columns (explorer | canvas); the inspector leaves the grid and
      returns as a bottom sheet, revealed on selection (body.gd-insp-open). */
@@ -5880,7 +5933,7 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   body.sidebar-collapsed #app.gd-redesign #main-container { grid-template-columns: 0 minmax(0, 1fr); }
   #gd-inspector {
     position: fixed;
-    left: var(--gd-rail-w);
+    left: 0;
     right: 0;
     bottom: 0;
     z-index: 260;

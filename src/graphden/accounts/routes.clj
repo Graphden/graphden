@@ -388,9 +388,12 @@
                                      {:providers provider-map :telegram telegram}
                                      #(pages/login-page provider-keys telegram)))
 
+              ;; The graph :account page (editor present) redirects into the
+              ;; editor's Settings → Account card and takes no args; the
+              ;; built-in fallback stays the full standalone page (headless).
               (and (= method :get) (= uri "/account"))
               (html-resp (graph-page page-renderer :account
-                                     {:providers provider-map}
+                                     {}
                                      #(pages/account-page provider-keys)))
 
               (and (= method :get) (= uri "/reset"))
@@ -399,6 +402,12 @@
 
               (and (= method :get) (= uri "/auth/me"))
               (handle-me storage request)
+
+              ;; Enabled oauth providers, for clients that render link/sign-in
+              ;; buttons OUTSIDE the served pages (the editor's Account card).
+              ;; Public by design — /login exposes the same set in its HTML.
+              (and (= method :get) (= uri "/auth/providers"))
+              (json-resp 200 {:ok true :providers provider-map})
 
               (and (= method :get) (= uri "/auth/tfa-state"))
               (handle-tfa-state storage request)

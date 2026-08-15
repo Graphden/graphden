@@ -363,7 +363,34 @@ function renderBranchChip() {
   btn.title = name === DEFAULT_BRANCH
     ? 'On main — click to switch branch'
     : 'On "' + name + '" — click to switch';
+  gdSyncEdgeBranchBadge();
 }
+
+// Collapsed-Explorer branch badge — the branch chip lives in the Explorer
+// now, so collapsing it would hide the WRITE CONTEXT. On a non-default
+// branch the left-edge expand tab carries the branch name (and the accent
+// wash); on main it stays a bare chevron and the screen stays clean.
+function gdSyncEdgeBranchBadge() {
+  const tab = document.getElementById('sidebar-expand-floating');
+  if (!tab) return;
+  const name = getCurrentBranchName();
+  const nonDefault = name !== DEFAULT_BRANCH;
+  tab.classList.toggle('gd-edge-nondefault', nonDefault);
+  let badge = tab.querySelector('.gd-edge-branch');
+  if (nonDefault) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'gd-edge-branch';
+      tab.appendChild(badge);
+    }
+    badge.textContent = name;
+    tab.title = 'Show the function browser — on branch "' + name + '"';
+  } else if (badge) {
+    badge.remove();
+    tab.title = 'Show the function browser';
+  }
+}
+window.gdSyncEdgeBranchBadge = gdSyncEdgeBranchBadge;
 
 function toggleBranchPopover() {
   const popover = document.getElementById('branch-popover');

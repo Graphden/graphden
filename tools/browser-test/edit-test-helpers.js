@@ -646,15 +646,13 @@ async function deleteOrThrow(path, name) {
 
 
 // Redesign 2026-08: the ops/admin panels (packages, stats, errors, type-
-// errors, apps, grants, users) moved OUT of the explorer onto the Operate
-// surface (#gd-operate), hidden until the Operate rail button is active. Tests
-// that interact with those panels call this after navigating.
+// errors, apps, grants, users) moved OUT of the explorer onto the
+// Organization surface (#gd-operate), reached through the account chip's
+// menu (the rail is retired). Panel tests aren't shell tests — drive the
+// exported surface entry point directly.
 async function openOperate(page) {
-  const btn = await page.$('#gd-rail .gd-rail-btn[data-surface="operate"]');
-  if (btn) {
-    await btn.click();
-    await page.waitForSelector('#gd-operate:not([hidden])', { timeout: 5000 }).catch(() => {});
-  }
+  await page.evaluate(() => window.gdShellSurface && window.gdShellSurface('operate'));
+  await page.waitForSelector('#gd-operate:not([hidden])', { timeout: 5000 }).catch(() => {});
 }
 
 module.exports = { assert, deepEqual, newContext, api, getEntities,

@@ -31,7 +31,7 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
   try {
     await page.goto(BASE + '/#web-server');
-    await page.waitForSelector('#gd-rail .gd-rail-btn[data-surface="build"]', {timeout: 30000});
+    await page.waitForSelector('#gd-brand-home', {timeout: 30000});
     await page.waitForFunction(() => !!document.querySelector('.node-overlay'),
                               null, {timeout: 30000, polling: 100});
 
@@ -63,7 +63,7 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
     // Branch popover: create/merge/delete (writes) hidden; the list +
     // switch/diff (reads) stay usable.
-    await page.click('#gd-rail .gd-rail-btn[data-surface="build"]');
+    await page.evaluate(() => window.gdShellGoHome());
     await page.click('#branch-chip-btn');
     await page.waitForSelector('#branch-popover .branch-popover-list', {timeout: 10000});
     assert(await hidden('.branch-popover-create'),

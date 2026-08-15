@@ -208,6 +208,9 @@ function installFloatingExpandBtn() {
   btn.innerHTML = EXPAND_SVG;
   btn.addEventListener('click', () => toggleCollapsed(false));
   document.body.appendChild(btn);
+  // Branch badge on the tab (non-default branch only) — the branch module
+  // may have rendered its chip before this tab existed.
+  if (typeof window.gdSyncEdgeBranchBadge === 'function') window.gdSyncEdgeBranchBadge();
 }
 
 // =============================================================================

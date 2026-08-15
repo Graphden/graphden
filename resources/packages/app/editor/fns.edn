@@ -105,8 +105,13 @@
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
                   "packages/app/editor/editor-render.js"
-                  ;; Redesign shell — left-rail surface switching. Loads before
-                  ;; main so window.gdShellSurface exists for the rail onclicks.
+                  ;; Account card on the Settings surface (the merged /account
+                  ;; page) — loads before shell so gdRenderSettings can call
+                  ;; its render hook.
+                  "packages/app/editor/editor-account.js"
+                  ;; Redesign shell — surface switching + deep-link hashes.
+                  ;; Loads before main so window.gdShellSurface / the hash
+                  ;; router exist for the boot navigation.
                   "packages/app/editor/editor-shell.js"
                   "packages/app/editor/editor-main.js"]}}
 
@@ -144,98 +149,43 @@
           ;; requires every page element be inside a landmark; without
           ;; this, screen-readers see flat content with no structure.
           [:div {:id "app" :class "gd-redesign"}
-           ;; LEFT RAIL — primary surface navigation (redesign 2026-08).
-           ;; Icon buttons switch the primary surface; editor-shell.js drives
-           ;; the active state + placeholder panes for not-yet-built surfaces.
-           ;; Build is the live surface today.
-           [:nav {:id "gd-rail" :aria-label "Surfaces"}
-            [:span {:class "gd-rail-btn gd-brand" :title "Graphden" :aria-hidden "true"}
-             [:svg {:viewBox "0 0 32 32" :fill "none" :width "20" :height "20"}
+           ;; TOP BAR (redesign 2026-08-15 — the rail is retired). The editor
+           ;; vs everything-else split is GLOBAL now: you live on Build; the
+           ;; management screens (Settings / Organization / Platform) are rare
+           ;; destinations reached through the account chip's menu, not
+           ;; permanent navigation. The bar keeps only what must stay visible
+           ;; from ANY surface: the brand (→ back to Build), the org switcher
+           ;; (whose graph am I looking at) and the account chip. The BUILD
+           ;; context (workspace / branch / packages) lives in the Explorer
+           ;; head — it collapses away with the Explorer.
+           [:header {:id "gd-ctxbar"}
+            [:button {:type "button" :id "gd-brand-home" :class "gd-brand-home"
+                      :title "Back to the editor"
+                      :aria-label "Back to the editor"
+                      :onclick "gdShellGoHome()"}
+             [:svg {:viewBox "0 0 32 32" :fill "none" :width "20" :height "20" :aria-hidden "true"}
               [:g {:stroke "currentColor" :stroke-width "3" :stroke-linecap "round"}
                [:line {:x1 "9" :y1 "6" :x2 "25" :y2 "26"}]
                [:line {:x1 "17" :y1 "16" :x2 "8" :y2 "26"}]]
               [:g {:fill "currentColor"}
                [:circle {:cx "9" :cy "6" :r "3"}]
                [:circle {:cx "25" :cy "26" :r "3"}]
-               [:circle {:cx "8" :cy "26" :r "3"}]]]]
-            [:button {:type "button" :class "gd-rail-btn" :data-surface "build"
-                      :aria-pressed "true" :onclick "gdShellSurface('build', this)"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
-              [:circle {:cx "6" :cy "6" :r "2.4"}] [:circle {:cx "18" :cy "6" :r "2.4"}]
-              [:circle {:cx "12" :cy "18" :r "2.4"}] [:path {:d "M8 7l3 9M16 7l-3 9"}]]
-             [:span {:class "gd-rail-cap"} "Build"]]
-            ;; (No Review surface: comparing branches is a MODE of the editor,
-            ;; not a separate screen. The per-branch diff already lives in the
-            ;; branch switcher — `.branch-row-diff` → showBranchDiff — which is
-            ;; where merge/compare belongs.)
-            ;; "Organization" — your org: members / roles / grants (RBAC) +
-            ;; its operational panels (packages / stats / errors / apps). The
-            ;; internal surface id stays "operate" (mechanics + e2e unchanged);
-            ;; only the user-facing label is the org-management name.
-            [:button {:type "button" :class "gd-rail-btn" :data-surface "operate"
-                      :aria-pressed "false" :onclick "gdShellSurface('operate', this)"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.7" :aria-hidden "true"}
-              [:path {:d "M4 7h16M4 12h16M4 17h16"}]
-              [:circle {:cx "9" :cy "7" :r "1.6" :fill "currentColor" :stroke "none"}]
-              [:circle {:cx "15" :cy "12" :r "1.6" :fill "currentColor" :stroke "none"}]
-              [:circle {:cx "7" :cy "17" :r "1.6" :fill "currentColor" :stroke "none"}]]
-             [:span {:class "gd-rail-cap"} "Organization"]]
-            ;; "Platform" — cross-org / platform-wide (org registry today; the
-            ;; landing + cross-org stats + platform-rights land here next).
-            ;; Hidden unless the principal holds a platform right (body.gd-platform).
-            [:button {:type "button" :class "gd-rail-btn gd-platform-only" :data-surface "platform"
-                      :aria-pressed "false" :onclick "gdShellSurface('platform', this)"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
-              [:circle {:cx "12" :cy "12" :r "8"}]
-              [:path {:d "M3 12h18M12 4c2.5 2.3 2.5 13.7 0 16M12 4c-2.5 2.3-2.5 13.7 0 16"}]]
-             [:span {:class "gd-rail-cap"} "Platform"]]
-            [:span {:class "gd-rail-spacer"}]
-            ;; (No Workspaces surface: a workspace is a scope switch, not a place
-            ;; you navigate to — the switcher is the ctxbar chip's popover
-            ;; (#gd-ws-chip → gdOpenWsPop). A full-page surface duplicated it.)
-            [:button {:type "button" :class "gd-rail-btn" :data-surface "settings"
-                      :aria-pressed "false" :onclick "gdShellSurface('settings', this)"}
-             [:svg {:viewBox "0 0 24 24" :fill "none" :stroke "currentColor" :stroke-width "1.8" :aria-hidden "true"}
-              [:circle {:cx "12" :cy "12" :r "3"}]
-              [:path {:d "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"}]]
-             [:span {:class "gd-rail-cap"} "Settings"]]]
-           ;; CONTEXT BAR (redesign 2026-08). Hosts the CONTEXTUAL controls —
-           ;; the workspace scope + branch chip (shown only on the Build
-           ;; surface; they're meaningless while managing an org / the platform)
-           ;; — plus the always-global org switcher + account chip. See
-           ;; editor-styles.css `body:not([data-surface="build"])`.
-           [:header {:id "gd-ctxbar"}
-            [:button {:type "button" :id "gd-ws-chip" :class "gd-ctx-chip"
-                      :title "Switch workspace scope"}
-             [:span {:class "gd-ctx-dot"}]
-             [:span {:class "gd-ctx-k"} "workspace"]
-             [:b "All functions"]]
-            [:div {:id "branch-mount"}]
-            ;; Packages (dependencies) — a BUILD-surface act (add building blocks
-            ;; to your project), so it lives with the workspace/branch context,
-            ;; NOT on the Organization admin page. Hidden until JS confirms the
-            ;; optional registry package is present (window.API probe).
-            [:button {:type "button" :id "gd-pkg-chip" :class "gd-ctx-chip" :hidden "hidden"
-                      :title "Packages — browse & install"}
-             [:span {:class "gd-ctx-k"} "packages"]
-             [:b "Browse"]]
-            [:div {:id "org-mount"}]
+               [:circle {:cx "8" :cy "26" :r "3"}]]]
+             [:b "Graphden"]]
             ;; (No global search chip: it was a dead affordance — never wired to
             ;; anything. The live function search is the Explorer filter, which
             ;; hits ?scope=search. One search, where the functions are.)
             [:span {:class "gd-bar-spacer"}]
-            ;; (No #prefs-mount quick-actions cluster: theme + reload were
-            ;; duplicates of Settings controls. The context bar's right side is
-            ;; just the account chip now.)
+            [:div {:id "org-mount"}]
             [:div {:id "auth-mount"}]]
            [:div {:id "main-container"}
             ;; Side menu \u2014 semantic <aside> + ARIA label since the
             ;; visible <h2>"Graphden" doubles as the app title rather
             ;; than the sidebar's heading.
             [:aside {:id "side-menu" :aria-label "Function browser"}
-             ;; Redesign 2026-08: the brand moved to the rail and the
-             ;; branch/org/auth/theme mounts moved to the context bar
-             ;; (#gd-ctxbar). The explorer keeps just a slim title.
+             ;; Redesign 2026-08: the brand and the org/auth mounts live in the
+             ;; top bar (#gd-ctxbar); the explorer keeps a slim title plus the
+             ;; Build-context row below it.
              [:div {:class "gd-exp-head"}
               [:span {:class "gd-exp-title"} "Explorer"]
               ;; Collapse the Explorer — the toggle lives WITH the panel it
@@ -250,6 +200,28 @@
                       :stroke "currentColor" :stroke-width "2.4"
                       :stroke-linecap "round" :stroke-linejoin "round" :aria-hidden "true"}
                 [:polyline {:points "15 18 9 12 15 6"}]]]]
+             ;; BUILD CONTEXT — what you author IN: workspace scope, branch,
+             ;; packages. Lives with the Explorer (one collapse hides the whole
+             ;; browsing/context chrome, leaving the canvas nearly bare); the
+             ;; chips keep their ids — the owning modules (editor-shell /
+             ;; editor-branches) wire them by id, unchanged. When the Explorer
+             ;; is collapsed on a NON-default branch, the left-edge expand tab
+             ;; grows a branch badge so the write-context never becomes
+             ;; invisible (editor-prefs.js/gdSyncEdgeBranchBadge).
+             [:div {:id "gd-exp-ctx"}
+              [:button {:type "button" :id "gd-ws-chip" :class "gd-ctx-chip"
+                        :title "Switch workspace scope"}
+               [:span {:class "gd-ctx-dot"}]
+               [:span {:class "gd-ctx-k"} "workspace"]
+               [:b "All functions"]]
+              [:div {:id "branch-mount"}]
+              ;; Packages (dependencies) — a BUILD-surface act (add building
+              ;; blocks to your project). Hidden until JS confirms the optional
+              ;; registry package is present (window.API probe).
+              [:button {:type "button" :id "gd-pkg-chip" :class "gd-ctx-chip" :hidden "hidden"
+                        :title "Packages — browse & install"}
+               [:span {:class "gd-ctx-k"} "packages"]
+               [:b "Browse"]]]
              [:div {:id "search-bar" :role "search"}
               [:label {:for "search-input" :class "visually-hidden"} "Filter functions"]
               [:input {:id "search-input" :type "text" :placeholder "Filter..."
@@ -362,7 +334,7 @@
               [:div {:class "gd-surface-title"} "Coming"]
               [:div {:class "gd-surface-sub"} ""]
               [:button {:type "button" :class "gd-surface-back"
-                        :onclick "gdShellSurface('build', document.querySelector('#gd-rail .gd-rail-btn[data-surface=build]'))"}
+                        :onclick "gdShellGoHome()"}
                "Back to Build"]]]
             ;; OPERATE surface — the ops/admin panels (packages, monitoring,
             ;; errors, type-errors, grants, users, apps) mount here instead of
@@ -415,8 +387,17 @@
                  [:div {:class "gd-set-label"} "Graph cards"]
                  [:div {:class "gd-set-hint"} "Compact hides the type / effect strips until you reveal them."]]
                 [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]]
-              ;; (No Account card — your account lives behind the avatar chip in
-              ;; the top bar: identity, Account & security → /account, Sign out.)
+              ;; ACCOUNT — the /account page merged in (2026-08-15): sign-in
+              ;; methods, 2FA, API tokens, the verify-email banner. Shown only
+              ;; under the open accounts addon (editor-account.js unhides it
+              ;; after the /auth/me boot probe answers); the standalone
+              ;; /account page remains as the headless-deployment fallback and
+              ;; redirects here when the editor serves it. Body content is
+              ;; session-state fetched client-side from the /auth/* JSON API —
+              ;; a graph partial can't render another principal's session.
+              [:div {:class "gd-set-card" :id "gd-set-account" :hidden "hidden"}
+               [:h2 "Account"]
+               [:div {:id "gd-acct-root"}]]
               [:div {:class "gd-set-card"}
                [:h2 "About this build"]
                [:div {:class "gd-set-row"}

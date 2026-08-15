@@ -1,7 +1,8 @@
 // edit-redesign-shell — e2e coverage for the 2026-08 editor redesign shell.
 //
 // Exercises the NEW surfaces so the redesign is regression-covered:
-//   1. Rail surface switching  — Operate reveals the ops panels; Build hides them.
+//   1. Surface switching — the account chip's menu opens Organization; the
+//      brand button returns to Build (the rail is retired, 2026-08-15).
 //   2. Inspector on selection  — selecting a fn fills the right inspector
 //                                (name + resolved effects), no empty state.
 //   3. Workspace switcher      — scoping to a namespace root filters the
@@ -25,7 +26,7 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   try {
     await page.goto(BASE + '/#web-server');
     // Shell + a rendered graph + the inspector are all up.
-    await page.waitForSelector('#gd-rail .gd-rail-btn[data-surface="build"]', {timeout: 30000});
+    await page.waitForSelector('#gd-brand-home', {timeout: 30000});
     await page.waitForFunction(
       () => !!document.querySelector('.node-overlay')
             && !!document.querySelector('#gd-inspector .gd-insp-name'),
@@ -46,19 +47,25 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
     assert(!insp.hasEmpty, 'inspector left the empty state once a fn is selected');
     assert(insp.effects > 0, 'inspector lists this fn’s effects (got ' + insp.effects + ')');
 
-    // --- 2. Rail: Operate reveals the ops panels; Build hides them ---
-    // Packages split by intent (spec §1/§4): INSTALL browse lives on the
-    // Build-surface context chip (#gd-pkg-chip); Operate hosts the
-    // read-mostly GOVERNANCE view.
-    await page.click('#gd-rail .gd-rail-btn[data-surface="operate"]');
+    // --- 2. Menu: Organization reveals the ops panels; brand → Build ---
+    // Surface ENTRY is the account chip's menu now (rail retired); the way
+    // back is the brand button. Packages split by intent (spec §1/§4):
+    // INSTALL browse lives on the Explorer context chip (#gd-pkg-chip);
+    // Organization hosts the read-mostly GOVERNANCE view.
+    await page.click('#auth-lock-btn');
+    await page.waitForSelector('#auth-popover .auth-menu-item', {timeout: 5000});
+    await page.click('#auth-popover .auth-menu-item:text-is("Organization")');
     await page.waitForSelector('#gd-operate:not([hidden])', {timeout: 5000});
     const opVisible = await page.evaluate(
       () => !!document.querySelector('#gd-operate-panels .sidebar-packages-governance'));
-    assert(opVisible, 'Operate surface hosts the packages GOVERNANCE panel');
-    await page.click('#gd-rail .gd-rail-btn[data-surface="build"]');
+    assert(opVisible, 'Organization surface hosts the packages GOVERNANCE panel');
+    const surfaceHash = await page.evaluate(() => location.hash);
+    assert(surfaceHash === '#@organization',
+           'surface deep-link hash set (got ' + surfaceHash + ')');
+    await page.click('#gd-brand-home');
     const opHidden = await page.evaluate(
       () => document.getElementById('gd-operate').hidden === true);
-    assert(opHidden, 'Build hides the Operate surface again');
+    assert(opHidden, 'brand button returns to Build and hides Organization');
 
     // --- 3. Workspace switcher scopes the explorer to a namespace root ---
     await page.click('#gd-ws-chip');

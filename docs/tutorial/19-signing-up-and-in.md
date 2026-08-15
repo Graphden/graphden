@@ -10,7 +10,7 @@ operator lessons that follow ([16 Members](16-users-admin.md),
 
 **Concepts introduced**: the `/login` page, accounts and sign-in
 *identities* (one account, many ways in), email verification,
-account linking, personal orgs, the `/account` page, TOTP 2FA.
+account linking, personal orgs, the Account settings, TOTP 2FA.
 
 ## Accounts and identities
 
@@ -48,7 +48,7 @@ Signing up through a social button skips the password entirely:
 the provider proves who you are, and a provider-verified email is
 trusted as verified from the start. (Telegram has no email, so a
 Telegram-created account starts email-less — you can add one
-later from `/account`.)
+later from your account settings.)
 
 Sessions ride an HttpOnly cookie — sign in once and the editor,
 the API and every page share it. Signed out, `/` bounces you to
@@ -68,9 +68,12 @@ password may be compromised. Then sign back in.
 sign-up — a burst of attempts quietly gets the same generic
 answer.)
 
-## The `/account` page
+## Account settings
 
-Once signed in, `/account` is your self-service surface:
+Once signed in, your self-service surface lives in the editor:
+click your avatar in the top bar → **Settings** → the **Account**
+card (deep link: `/#@settings/account`; the old `/account` URL
+redirects here). It holds:
 
 - **Sign-in methods** — the identities linked to your account.
   Link GitHub/Google from here; unlink any of them (the last
@@ -80,7 +83,11 @@ Once signed in, `/account` is your self-service surface:
   then on password sign-ins ask for the code. (An org can also
   *require* 2FA — [Lesson 17](17-grants.md) shows the
   `require-2fa` capability.)
-- **Sign out** — this device, or everywhere at once.
+- **API tokens** — long-lived scoped keys for MCP/API clients
+  (the section appears on cloud/tenancy deployments).
+
+**Sign out** (this device, or everywhere at once) is in the same
+avatar menu.
 
 ## The same surface, self-hosted
 
@@ -88,7 +95,8 @@ Run graphden yourself and the sign-in surface depends on what you
 enable:
 
 - **accounts addon enabled** (`GRAPHDEN_ADDON_CONFIGS=graphden/accounts/addon.edn`)
-  → the same `/login` + `/account` pages as the cloud. Each social
+  → the same `/login` page + in-editor Account settings as the
+  cloud. Each social
   provider turns on only when you configure its credentials; with
   no email provider configured, verification links are printed to
   the server log instead of emailed — everything still works.
@@ -109,11 +117,11 @@ On a cloud instance:
    a password (8+ chars).
 2. Submit → you land in the editor with your personal org already
    provisioned; check your inbox and click the verification link.
-3. Open `/account` → link a social provider (e.g. GitHub), then
-   sign out and sign back in with that provider instead of the
-   password — same account, same org.
-4. Still in `/account`, enable 2FA: scan/enter the secret in an
-   authenticator app, confirm the code, sign out, sign in with
+3. Click your avatar → **Settings** → **Account**: link a social
+   provider (e.g. GitHub), then sign out and sign back in with
+   that provider instead of the password — same account, same org.
+4. Back in the Account card, enable 2FA: scan/enter the secret in
+   an authenticator app, confirm the code, sign out, sign in with
    the password — the code is now required.
 
 That's the whole account lifecycle. Managing *other* people in

@@ -440,8 +440,8 @@
   (when-not (keyword? (:value entry))
     (throw (ex-info "Enum value :value must be a keyword"
                     {:enum-name enum-name :entry entry})))
-  ;; Unknown extra keys are declaration typos ({:uuid u :vaule :x}
-  ;; would otherwise pass with the misspelled key silently ignored).
+  ;; Unknown extra keys are declaration typos (a misspelled :value
+  ;; key would otherwise pass, its entry silently ignored).
   (let [extra (remove #{:uuid :value} (keys entry))]
     (when (seq extra)
       (throw (ex-info "Enum value entry has unsupported keys"

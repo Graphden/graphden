@@ -106,3 +106,37 @@
     (is (t/well-formed? (t/make-union [])))
     (is (t/subtype? [:list (t/make-union [])] [:list :int])
         "[:list :never] from an empty literal vector fits any list slot")))
+
+
+(deftest make-union-absorption-agrees-with-subtype
+  (testing "record sibling does NOT absorb :empty-map (no subtype relation)"
+    ;; Absorbing recorded a branch-union return claiming the record's
+    ;; required fields are always present while the runtime can yield {}.
+    (is (= [:union :empty-map {:name :text}]
+           (t/make-union [:empty-map {:name :text}]))))
+  (testing "homogeneous map shapes still absorb it (vacuous truth holds)"
+    (is (= :jsonb (t/make-union [:empty-map :jsonb])))
+    (is (= [:map :keyword :int] (t/make-union [:empty-map [:map :keyword :int]]))))
+  (testing "generic law: an absorbed member must be a subtype of a survivor"
+    (doseq [pair [[:empty-map {:name :text}]
+                  [:empty-map :jsonb]
+                  [[:refine :int [:> 0]] :int]
+                  [:never :text]]]
+      (let [u (t/make-union pair)
+            members (if (t/union-type? u) (t/union-members u) [u])]
+        (doseq [m pair]
+          (is (or (some #(= m %) members)
+                  (some #(t/subtype? m %) members))
+              (str (pr-str m) " vanished from " (pr-str u)
+                   " without a supertype survivor")))))))
+
+
+(deftest unify-agrees-with-subtype-on-tuple-list
+  (testing "a [:list a] slot bound to a tuple BINDS the elem var"
+    (let [s (t/unify [:list 'a] [:tuple :int :int])]
+      (is (t/unified? s))
+      (is (= :int (get s 'a)))))
+  (testing "heterogeneous tuple unifies elem-wise (int then text vs elem var → fail on conflict)"
+    (is (t/fail? (t/unify [:list :int] [:tuple :int :text]))))
+  (testing "concrete elem accepts conforming tuple"
+    (is (t/unified? (t/unify [:list :numeric] [:tuple :int :float])))))

@@ -129,3 +129,24 @@
               (ds/add-entity :item (uuid) {:name {:uuid (uuid) :type :text}})
               (ds/add-entity :item (uuid) {:other {:uuid (uuid) :type :text}})
               (ds/build))))))
+
+
+(deftest retired-uuid-is-reserved-test
+  (testing "a new field reusing a retired field's uuid throws at build"
+    ;; Without the reservation the migration layer would see the old
+    ;; column as a rename target while process-retired-fields!
+    ;; simultaneously drops it.
+    (let [tombstone (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Duplicate UUID"
+            (-> (mds/create-builder)
+                (ds/add-entity :item (uuid) {:name {:uuid (uuid) :type :text}})
+                (ds/retire-field :item :old-col tombstone)
+                (ds/add-entity :other (uuid) {:reused {:uuid tombstone :type :text}}))))))
+  (testing "a tombstone colliding with an existing field uuid throws too"
+    (let [field-uuid (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Duplicate UUID"
+            (-> (mds/create-builder)
+                (ds/add-entity :item (uuid) {:name {:uuid field-uuid :type :text}})
+                (ds/retire-field :item :other-col field-uuid)))))))

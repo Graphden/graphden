@@ -57,6 +57,14 @@
            (keep f [:base-fn-id :element-fn-id :return-type-fn-id])
            (keep :ref-fn-id bs)
            (keep :type-override-fn-id bs)
+           ;; Resolver-backed value bindings (vault secrets): the
+           ;; resolver graph-fn runs at arg-resolution time, so it IS
+           ;; part of the closure. Without this edge a fleet cell
+           ;; (`load-cell!` → forward-closure) compiled a fn with a
+           ;; resolver binding WITHOUT the resolver's closure — first
+           ;; force → registry miss → fn-not-found; evict-cell!'s
+           ;; refcount had the same blind spot.
+           (keep :resolver-fn-id bs)
            (keep :ref-fn-id items)])))
 
 

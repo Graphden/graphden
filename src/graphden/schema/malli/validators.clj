@@ -286,7 +286,14 @@
    distinct. Single-pass with early exit. PUBLIC shared helper — the
    builder in `malli.core` uses it too; the previous two copies each
    leaked the transient seen-set on the no-duplicate path and papered
-   over it with divergent call-site type-guards."
+   over it with divergent call-site type-guards.
+
+   CAVEAT for future callers: a duplicated FALSY value (false/nil)
+   is indistinguishable from clean under a when-let at the call
+   site, and a value that is itself a transient collection would
+   be misclassified. Fine for every current caller (pre-validated
+   keywords / uuids / persistent maps) - don't feed it those
+   shapes."
   [xs]
   (let [result (reduce (fn [seen x]
                          (if (contains? seen x)

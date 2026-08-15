@@ -93,9 +93,6 @@
 ;;   - `types.core/fresh-counter` — monotonic int counter. Tests may
 ;;     see different values across runs but the values are just
 ;;     unique identifiers, not test inputs.
-;;   - `schema.fields.types/custom-types-registry` — used by exactly
-;;     one test ns (`schema.fields.types-test`) which both registers
-;;     and unregisters in symmetric pairs.
 ;;   - `clients.vault/active-client` — production JVM-wide singleton;
 ;;     tests don't touch it.
 ;;   - `executor_runtime.core/system` — production singleton.

@@ -221,7 +221,19 @@
                            entity-name "/" field-name
                            " — drop the field's entry from add-entity first.")
                       {:entity-name entity-name :field-name field-name})))
-    (assoc-in this [:retired-fields-map entity-name field-name] field-uuid))
+    ;; The tombstone uuid stays RESERVED: a later field reusing it
+    ;; would make the migration layer see the dropped column as a
+    ;; rename target while process-retired-fields! simultaneously
+    ;; drops it. Register it in known-uuids so the reuse fails loudly
+    ;; at build time. (Idempotent re-declaration of the same tombstone
+    ;; is fine — the uniqueness check only fires for a DIFFERENT
+    ;; location claiming the uuid.)
+    (let [tombstone-loc (str "retired field " entity-name "/" field-name)]
+      (when-not (= tombstone-loc (get known-uuids field-uuid))
+        (v/check-uuid-uniqueness known-uuids field-uuid tombstone-loc))
+      (-> this
+          (assoc-in [:retired-fields-map entity-name field-name] field-uuid)
+          (assoc-in [:known-uuids field-uuid] tombstone-loc))))
 
 
   (build

@@ -231,19 +231,26 @@
         ;; but `:never` members collapses back to `:never`.
         non-never (remove #{:never} flat)
         flat (if (seq non-never) non-never flat)
-        ;; `:empty-map` gets absorbed by any sibling map-shape
-        ;; (`:jsonb` / `[:map K V]` / record-type) the same way
-        ;; `:never` gets absorbed by everything. Without this the
-        ;; union of an `:if`'s branches surfaces
-        ;; `[:union :empty-map record]` upstream — each downstream
-        ;; check then has to special-case the sentinel. Members
-        ;; ` ⊆ :empty-map`-test is performed via `subtype?` (already
-        ;; loaded above), so `:empty-map` itself is preserved when
-        ;; it's the ONLY sibling and the union collapses to it.
+        ;; `:empty-map` gets absorbed by a sibling HOMOGENEOUS
+        ;; map-shape (`:jsonb` / `[:map K V]`) — the shapes it is a
+        ;; subtype of — the same way `:never` gets absorbed by
+        ;; everything. Without this the union of an `:if`'s branches
+        ;; surfaces `[:union :empty-map [:map …]]` upstream and each
+        ;; downstream check has to special-case the sentinel.
+        ;;
+        ;; RECORD siblings do NOT absorb it: `:empty-map ⊄ record`
+        ;; (record fields are required, `{}` has none — see the
+        ;; subtype? arm), so `[:union :empty-map <record>]` must keep
+        ;; both members. Absorbing would record a branch-union return
+        ;; claiming the record's fields are always present while the
+        ;; runtime can yield `{}` — the exact unsoundness the
+        ;; subtype-level fix closed. (The generic subtype-absorption
+        ;; pass below handles it consistently anyway; this
+        ;; special-case exists only because `:empty-map` is a bare
+        ;; keyword the generic pass's typevar guard would skip.)
         has-map-shape? (some (fn [m]
                                (or (= m :jsonb)
-                                   (map-type? m)
-                                   (record-type? m)))
+                                   (map-type? m)))
                              flat)
         flat (if has-map-shape? (remove #{:empty-map} flat) flat)
         ;; Stable order to keep the canonical form deterministic for
@@ -1656,6 +1663,24 @@
          subst
          (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
          (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)
+         ;; Tuple ↔ list — mirrors the subtype rule `[:tuple …] ⊆
+         ;; [:list E]`: every tuple position unifies against the list
+         ;; elem (so a `[:list a]` slot bound to a tuple-returning ref
+         ;; BINDS `a` instead of silently keeping it free when the
+         ;; post-subtype unify fell to ::fail). Direction-agnostic:
+         ;; unify is symmetric, and the length guarantee only matters
+         ;; for the subtype direction, which check-binding! has
+         ;; already established.
+         (and (tuple-type? a) (list-type? b))
+         (reduce (fn [s x]
+                   (if (= s ::fail) (reduced ::fail)
+                       (unify x (list-elem b) s)))
+                 subst (tuple-elems a))
+         (and (list-type? a) (tuple-type? b))
+         (reduce (fn [s x]
+                   (if (= s ::fail) (reduced ::fail)
+                       (unify (list-elem a) x s)))
+                 subst (tuple-elems b))
          (and (map-type? a) (map-type? b))
          (let [s (unify (map-key a) (map-key b) subst)]
            (if (= s ::fail) ::fail (unify (map-val a) (map-val b) s)))

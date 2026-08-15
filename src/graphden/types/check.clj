@@ -163,8 +163,8 @@
    unconstrained) — `normalise` would rewrite to `:any` (slot
    meaning), which is wrong for a sub.
 
-   Returns `:any` (a permissive sentinel) ONLY when the registry has
-   no entry for the name yet."
+   Returns nil ONLY when the registry has no entry for the name yet —
+   the caller's `if-let` then defers the check entirely."
   [fn-name]
   (when-let [info (registry/rich-type-of fn-name)]
     (let [ret (or (:return info) :any)

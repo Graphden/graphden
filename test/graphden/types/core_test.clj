@@ -18,7 +18,7 @@
     ;; the owner-collision-warning + per-ns-qualified tests): those escape the
     ;; parallel plugin's per-thread override and mutate the shared atoms; the
     ;; restore rolls that back even if a test's own cleanup is skipped, so a
-    ;; type-checking sibling (e.g. deps `check-order-and-warn`) never sees a
+    ;; type-checking sibling never sees a
     ;; stray alias. Order-independent.
     (let [snap (t/global-aliases-snapshot)]
       (try
@@ -985,8 +985,9 @@
                         ;; accumulated vector — leaking it out of a
                         ;; with-redefs'd GLOBAL log* poisons parallel
                         ;; NSes that assert on a `log/warn` caller's
-                        ;; return (deps-test's check-order-and-warn
-                        ;; gate flake, 2026-08-02).
+                        ;; return (a deps-test log-assertion
+                        ;; gate flake, 2026-08-02; that deftest is
+                        ;; since deleted, the leak class remains).
                         nil)]
           (t/register-type-alias! :collide-probe :text owner-a)
           (testing "same owner re-registering is silent"

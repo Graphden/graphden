@@ -32,17 +32,24 @@
           REF     #uuid "00000000-0000-0000-0000-000000000005"
           OVER    #uuid "00000000-0000-0000-0000-000000000006"
           ITEM    #uuid "00000000-0000-0000-0000-000000000007"
+          RESOLVE #uuid "00000000-0000-0000-0000-000000000008"
           ME      #uuid "00000000-0000-0000-0000-00000000000a"
           B1      #uuid "00000000-0000-0000-0000-00000000000b"
+          B2      #uuid "00000000-0000-0000-0000-00000000000c"
           graph (->graph
                   [{:id ME :parent-ids [PARENT]
                     :base-fn-id BASE :element-fn-id ELEMENT
                     :return-type-fn-id RETURN}]
-                  [{:id B1 :fn-id ME :ref-fn-id REF :type-override-fn-id OVER}]
+                  [{:id B1 :fn-id ME :ref-fn-id REF :type-override-fn-id OVER}
+                   ;; resolver-backed value binding (vault secret) —
+                   ;; the resolver runs at arg-resolution time, so a
+                   ;; fleet cell must carry its closure (load-cell!'s
+                   ;; forward-closure walks exactly these edges).
+                   {:id B2 :fn-id ME :value-present true :resolver-fn-id RESOLVE}]
                   [{:binding-id B1 :ref-fn-id ITEM}])
           edges (deps/forward-deps-of ME (deps/index-graph graph))]
-      (is (= #{PARENT BASE ELEMENT RETURN REF OVER ITEM} edges)
-          "edge contributions: parent-ids + base/element/return + ref-fn-id (binding) + type-override + ref-fn-id (item)")))
+      (is (= #{PARENT BASE ELEMENT RETURN REF OVER ITEM RESOLVE} edges)
+          "edge contributions: parent-ids + base/element/return + ref-fn-id (binding) + type-override + resolver-fn-id + ref-fn-id (item)")))
 
   (testing "nil edge sources are dropped"
     (let [ME #uuid "00000000-0000-0000-0000-00000000000a"

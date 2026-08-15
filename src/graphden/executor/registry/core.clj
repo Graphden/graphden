@@ -835,8 +835,14 @@
                                 name-keys)))]
      (swap! (target-rich-types-atom) drop-entry)
      (when-let [org (current-tenant-org)]
-       (swap! (target-per-org-rich-atom) update org
-              (fn [slice] (when slice (drop-entry slice)))))
+       ;; Only touch an EXISTING slice — the bare `update` used to
+       ;; assoc `{org nil}` for orgs that delete before ever
+       ;; recording, slowly accumulating nil-valued keys.
+       (swap! (target-per-org-rich-atom)
+              (fn [m]
+                (if (contains? m org)
+                  (update m org (fn [slice] (some-> slice drop-entry)))
+                  m))))
      nil)))
 
 

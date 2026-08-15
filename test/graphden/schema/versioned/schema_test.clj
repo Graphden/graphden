@@ -190,7 +190,18 @@
                   :fn
                   {:brand-new {:uuid (random-uuid) :type :text}}
                   {:identity-fields #{:brand-new} :uuids {}}
-                  {}))))))
+                  {}))))
+    (testing "the REVERSE drift fails loud too: a pinned uuid whose base
+              field no longer exists (or went identity-level) throws"
+      (let [ex (try (vds/derive-version-fields
+                      :fn
+                      {}
+                      {:identity-fields #{} :uuids {:ghost (random-uuid)}}
+                      {})
+                    nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? ex))
+        (is (= {:entity :fn :orphans [:ghost]} (ex-data ex)))))))
 
 
 (deftest extend-builder-test

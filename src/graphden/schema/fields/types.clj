@@ -116,7 +116,7 @@
    Used for comparison to avoid false 'incompatible type' errors — a
    migration that only flips a field between two members of the same group
    is a storage no-op (no column rewrite). Groups follow `type-mappings`'
-   `:postgres` column type."
+   postgres column type (the map is flat: type → pg column)."
   #{#{:uuid :ref}              ; :ref stored as UUID
     #{:jsonb :union :sequence} ; :union / :sequence stored as JSONB
     #{:text :keyword}})        ; :keyword stored as TEXT (via `(str kw)`)

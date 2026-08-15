@@ -1290,7 +1290,26 @@
       ;; legitimately closure-captured per the runtime contract.
       (and (types/fn-type? expected) (ref-binding? b-form))
       (if-let [actual (assemble-fn-type b-form)]
-        (let [actual' (strip-closure-captures expected actual b-form)]
+        ;; Freshen the callee's typevars BEFORE unifying — same move
+        ;; the plain :ref path makes for `ref-return-narrowed`. The
+        ;; assembled type carries the callee's OWN scope of 'a/'b;
+        ;; without renaming, a callee arg var that happens to share a
+        ;; NAME with the slot's return var aliases them in the subst
+        ;; (e.g. :invoke's `[:fn {:arg a} b]` against a callee
+        ;; `[:fn {:_item b} <record>]` bound a := b := <record>, so
+        ;; the sibling `:arg a` slot was checked against the callee's
+        ;; RETURN type — masked for years by the since-removed
+        ;; `:empty-map ⊆ record` leniency).
+        ;; `freshen` intentionally drops the 4th (effects) element
+        ;; (see the closed resolve*/freshen* note) — re-attach the
+        ;; assembled effects so the slot-effect-constraint check
+        ;; still sees the callee's real set, not the `:any` that
+        ;; `normalise` would infer for a bare 3-element form.
+        (let [fresh (types/freshen actual)
+              fresh (if-let [eff (types/fn-effects actual)]
+                      (conj [:fn (types/fn-args fresh) (types/fn-ret fresh)] eff)
+                      fresh)
+              actual' (strip-closure-captures expected fresh b-form)]
           (check-binding! primary-parent arg-name expected actual' subst fn-name b-form))
         subst)
 

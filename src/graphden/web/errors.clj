@@ -44,6 +44,7 @@
    :user/exists 409
    ;; authz
    :authz/forbidden 403
+   :authz/branch-protected 403
    ;; capacity / size
    :execution/over-capacity 429
    :quota/entity-limit 429

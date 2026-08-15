@@ -334,6 +334,65 @@
         "default fork picks the wrapper's current branch (main)")))
 
 
+;; =============================================================================
+;; Protected branches (Stage 1) — write-policy on create + the
+;; set-branch-policy-handler (POST /api/branches/:ref/policy).
+;; =============================================================================
+
+(deftest create-branch-with-write-policy
+  (let [name (uniq "guarded")
+        body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches"
+                                          {:name name :write-policy "owner"})))]
+    (is (:ok body))
+    (is (= "owner" (-> body :branch :write-policy))
+        "create surfaces the stored policy in the row envelope")
+    (is (= "owner" (:write-policy (first (sp/query-entities (vs/unwrap *storage*)
+                                                            :branch {:name name}))))
+        "policy persisted on the branch row")))
+
+
+(deftest create-branch-invalid-write-policy-rejected
+  (let [body (json-body (gh/via :create-branch-handler
+                                (json-req "/api/branches"
+                                          {:name (uniq "guarded")
+                                           :write-policy "bogus"})))]
+    (is (not (:ok body)) "invalid policy value refused at create")))
+
+
+(deftest set-branch-policy-roundtrip
+  (let [name (uniq "guarded")
+        _ (mk-branch! name)
+        set-resp (json-body (gh/via :set-branch-policy-handler
+                                    (json-req (str "/api/branches/" name "/policy")
+                                              {:write-policy "admins"})))
+        cleared (json-body (gh/via :set-branch-policy-handler
+                                   (json-req (str "/api/branches/" name "/policy")
+                                             {:write-policy "open"})))]
+    (is (:ok set-resp))
+    (is (= "admins" (:write-policy set-resp)))
+    (is (:ok cleared))
+    (is (nil? (:write-policy cleared)) "\"open\" clears back to nil")
+    (is (nil? (:write-policy (first (sp/query-entities (vs/unwrap *storage*)
+                                                       :branch {:name name}))))
+        "cleared policy persisted as NULL")))
+
+
+(deftest set-branch-policy-guards
+  (let [name (uniq "guarded")
+        _ (mk-branch! name)
+        invalid (json-body (gh/via :set-branch-policy-handler
+                                   (json-req (str "/api/branches/" name "/policy")
+                                             {:write-policy "bogus"})))
+        missing (json-body (gh/via :set-branch-policy-handler
+                                   (json-req (str "/api/branches/" (uniq "nope") "/policy")
+                                             {:write-policy "open"})))]
+    (is (not (:ok invalid)))
+    (is (re-find #"open, owner, admins" (:error invalid)))
+    (is (not (:ok missing)))
+    (is (re-find #"not found" (:error missing)))))
+
+
 (deftest create-branch-explicit-base
   (let [feat (mk-branch! (uniq "feat"))
         body (json-body (gh/via :create-branch-handler

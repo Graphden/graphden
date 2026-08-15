@@ -141,9 +141,10 @@ read endpoints sit behind it too (matches `/api/services`).
 
 | Verb   | Path                                     | Body                                  | Returns                              |
 |--------|------------------------------------------|---------------------------------------|--------------------------------------|
-| GET    | `/api/branches`                          |                                       | `{ok, count, branches: [{id, name, base-branch-id, created-at}]}` |
+| GET    | `/api/branches`                          |                                       | `{ok, count, branches: [{id, name, base-branch-id, created-at, owner-id, write-policy}]}` |
 | GET    | `/api/branches/:ref`                     |                                       | `{ok, branch}` or `{ok: false, error}` |
-| POST   | `/api/branches`                          | `{name, base-branch-id?, forbid-invalid??}` | `{ok, branch}`                       |
+| POST   | `/api/branches`                          | `{name, base-branch-id?, forbid-invalid??, write-policy?}` | `{ok, branch}` — the creating principal's stable id is stamped as `owner-id` |
+| POST   | `/api/branches/:ref/policy`              | `{write-policy}` ∈ `open`/`owner`/`admins` | `{ok, write-policy}` (`open` clears to null) — WHO may flip is the tenancy authorize-writer's call |
 | DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}` |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
 | GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
@@ -191,10 +192,33 @@ core's `case` matcher.
 | Affordance | Where | What it does |
 |------------|-------|--------------|
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
-| Branch popover | click chip | Branch list + inline create + Δ diff + ⇢ merge + × delete |
+| Branch popover | click chip | Branch list + inline create + Δ diff + ⇢ merge + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks protected rows |
 | Diff modal | click Δ in row | Full-viewport list of differences (`:added-in-source` / `:added-in-target` / `:modified`); :fn rows are clickable → navigate |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
+
+## Protected branches (Stage 1, 2026-08-15)
+
+A branch may carry a `write-policy` (nullable text on the `:branch`
+identity row, next to `owner-id` — the creating principal's stable
+`:user-id`, stamped whenever one is bound):
+
+- `nil` / `"open"` — anyone the ordinary namespace grants admit
+  (the default; behaviour unchanged).
+- `"owner"` — only the branch owner writes; the org's
+  `:manage-grants` holders (and the org owner, via owner-implies-all)
+  pass too, so a departed owner can't fossilize a branch.
+- `"admins"` — `:manage-grants` holders only.
+
+"Write" covers every content mutation ON the branch — the
+version-plane rows all carry `:branch-id`, so edits, creates,
+deletes AND merges INTO the branch hit the same check. Enforcement
+lives in the tenancy addon's `authorize-writer` (violations throw
+`:authz/branch-protected` → 403); core stores the fields, serves the
+API and renders the UI, but without principals the policy is inert —
+which is why the editor shows the ⛨ / Advanced affordances only under
+`body.gd-tenancy`. Flipping a policy (or deleting a protected branch)
+is itself gated on owner / `:manage-grants`.
 
 ## Demo seeder
 

@@ -3,6 +3,7 @@
    live here — URL parsing, query-string parsing, predicate guards, and
    response-envelope wrapping are all graph fn-defs in `fns.edn`."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.branches :as branches]
     [graphden.crud.request :as request]
@@ -11,7 +12,9 @@
     [graphden.executor.defbase :refer [defbase]]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.graph-epoch :as epoch]
+    [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.tenancy.context :as tc]
     [graphden.versioning.merge.core :as merge-policy]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]))
@@ -77,20 +80,53 @@
 
 
 
+(def write-policies
+  "The valid `:branch.write-policy` values (protected branches, Stage 1).
+   \"open\" normalises to nil (the default — anyone the ordinary grants
+   admit); \"owner\" admits the branch owner (+ the org's :manage-grants
+   holders as the unlock escalation); \"admins\" admits :manage-grants
+   holders only. Enforcement lives in the tenancy addon's
+   authorize-writer; core stores the policy."
+  #{"owner" "admins"})
+
+
+(defn- normalize-write-policy
+  "nil/blank/\"open\" → nil; a valid policy string → itself; anything
+   else → `:branches/invalid-write-policy`."
+  [p]
+  (let [p (some-> p str/trim)]
+    (cond
+      (or (nil? p) (= "" p) (= "open" p)) nil
+      (contains? write-policies p) p
+      :else (throw (ex-info (str "invalid write-policy: " p)
+                            {:type :branches/invalid-write-policy
+                             :write-policy p
+                             :valid (conj write-policies "open")})))))
+
+
 (defbase create-branch!
   "Single library call over `vs/create-branch!` — write a new branch
    row off `:branch-name` + `:base-branch-id` (+ the optional
-   `:forbid-invalid?` merge-policy flag, error-tolerance Phase 5) and
-   return the row. Atomic §3.1 boundary; the response-shape building
+   `:forbid-invalid?` merge-policy flag, error-tolerance Phase 5, and
+   the optional `:write-policy` protection level) and return the row.
+   The creating principal's stable id is stamped as `:owner-id`
+   whenever one is bound — provenance always, enforcement only when a
+   policy is set. Atomic §3.1 boundary; the response-shape building
    lives in graph (`:_create-branch-apply` → `:as-json-branch` +
    `:zipmap` envelope), not here."
-  [branch-name base-branch-id forbid-invalid?]
+  [branch-name base-branch-id forbid-invalid? write-policy]
   (cr/record-effect! :db)
-  (let [row (vs/create-branch! (request/require-storage ctx)
+  (let [policy (normalize-write-policy write-policy)
+        owner (:user-id tc/*current-principal*)
+        row (vs/create-branch! (request/require-storage ctx)
                                branch-name
                                (cond-> {:base-branch-id base-branch-id}
                                  (some? forbid-invalid?)
-                                 (assoc :forbid-invalid? forbid-invalid?)))]
+                                 (assoc :forbid-invalid? forbid-invalid?)
+                                 (some? owner)
+                                 (assoc :owner-id owner)
+                                 (some? policy)
+                                 (assoc :write-policy policy)))]
     ;; A fresh branch needs no invalidation (its ctx builds lazily),
     ;; but the epoch bump must still be NOTED — un-noted it ages past
     ;; grace and triggers a spurious heal ~10s after every branch
@@ -282,6 +318,24 @@
   (mrg/skipped-as-branch-local (branches/base-storage ctx) source-branch-id))
 
 
+(defbase set-branch-policy!
+  "Update a branch's `:write-policy` (protected branches, Stage 1).
+   `write-policy` ∈ {\"open\"→nil, \"owner\", \"admins\"} — anything
+   else throws `:branches/invalid-write-policy`. Writes through the
+   still-org-scoped base storage, so the tenancy addon's
+   authorize-writer gates WHO may flip a policy (owner / org
+   :manage-grants); without the addon the write is open, matching the
+   rest of single-tenant. Explicit nil IS written (clears back to
+   open)."
+  [branch-id write-policy]
+  (cr/record-effect! :db)
+  (let [policy (normalize-write-policy write-policy)]
+    (sp/update-entity (branches/base-storage ctx) :branch branch-id
+                      {:write-policy policy})
+    (epoch/bump! (branches/base-storage ctx) :branch)
+    policy))
+
+
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
@@ -290,4 +344,5 @@
    :detect-conflicts           detect-conflicts
    :merge-branch!              merge-branch!
    :merge-post-commit!         merge-post-commit!
-   :merge-skipped-branch-local merge-skipped-branch-local})
+   :merge-skipped-branch-local merge-skipped-branch-local
+   :set-branch-policy!         set-branch-policy!})

@@ -307,13 +307,14 @@
    :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :branch} :default {:value ""}}}}}
 
   {:name :_mcp-create-branch-parsed
-   :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main. `:forbid-invalid?` is carried as nil — the MCP tool doesn't expose the branch policy flag (yet); the parsed record must still satisfy the pipeline's shape."
+   :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main. `:forbid-invalid?` and `:write-policy` are carried as nil — the MCP tool exposes neither policy flag (yet); the parsed record must still satisfy the pipeline's shape."
    :parent :zipmap
-   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?}]
+   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?} {:value :write-policy}]
           :vals [{:parent :to-str
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :name} :default {:value ""}}}}}
                  {:parent :to-str
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :base} :default {:value "main"}}}}}
+                 {:parent :const :args {:value nil}}
                  {:parent :const :args {:value nil}}]}}
 
   {:name :_mcp-tool-create-branch

@@ -82,6 +82,26 @@
   #uuid "c7251e69-b9eb-469e-b936-0cca96cc874f")
 
 
+(def ^:private branch-owner-id-field-uuid
+  ;; Protected branches (Stage 1, 2026-08-15) — the creating principal's
+  ;; STABLE user id (`:user-id`, not the mutable username), stamped at
+  ;; create when a principal is bound. nil in single-tenant / system
+  ;; writes. Same nullable-text shape as `:org-id`.
+  #uuid "8777efc7-d205-45c1-a001-b5b190ee35d2")
+
+
+(def ^:private branch-write-policy-field-uuid
+  ;; Protected branches — who may WRITE (version-plane rows + merges
+  ;; into this branch). nil ≡ open (anyone the ordinary grants admit);
+  ;; "owner" ≡ the branch owner (+ the org's :manage-grants holders as
+  ;; the unlock escalation); "admins" ≡ :manage-grants holders only.
+  ;; Enforced by the tenancy addon's authorize-writer; without the
+  ;; addon there are no principals to tell apart and the field is
+  ;; inert. Free-form nullable text like `:org-id` — the value set is
+  ;; validated at the API boundary (set-branch-policy!).
+  #uuid "a242bbb7-ba6c-4275-a4b4-fdd4b8dfb68a")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :branch-merge
 ;; =============================================================================
@@ -564,7 +584,14 @@
                       ;; type diagnostics exist on either side. NULL ≡ off.
                       :forbid-invalid? {:uuid branch-forbid-invalid-field-uuid
                                         :type :bool
-                                        :nullable? true}})
+                                        :nullable? true}
+                      ;; Protected branches (Stage 1): creator + write policy.
+                      :owner-id {:uuid branch-owner-id-field-uuid
+                                 :type :text
+                                 :nullable? true}
+                      :write-policy {:uuid branch-write-policy-field-uuid
+                                     :type :text
+                                     :nullable? true}})
       (ds/add-constraint :branch {:type :unique :fields [:org-id :name]
                                   :nulls-not-distinct? true})
 

@@ -816,6 +816,29 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .branch-popover-create-row { display: flex; gap: 4px; }
 .branch-section-rows { display: flex; flex-direction: column; }
+/* Protected branches (Stage 1): row lock + ⛨ policy editor + the Advanced
+   create block. All THREE are tenancy-only — without principals a write
+   policy has no one to tell apart — and the mutating affordances also
+   respect gd-no-write. */
+.branch-row-lock { font-size: 9px; margin-left: 2px; }
+.branch-row-policy { display: none; }
+body.gd-tenancy .branch-row-policy { display: inline-flex; }
+body.gd-tenancy.gd-no-write .branch-row-policy { display: none; }
+.branch-adv { display: none; }
+body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
+.branch-adv summary {
+  font-size: 10px; color: var(--muted-fg); cursor: pointer;
+  user-select: none;
+}
+.branch-adv summary:hover { color: var(--fg); }
+.branch-adv-label {
+  display: block; font-size: 10px; color: var(--muted-fg); margin: 6px 0 2px;
+}
+.branch-adv select {
+  width: 100%; font-size: 11px; padding: 3px 4px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 3px;
+}
 .branch-popover-create input {
   flex: 1; font-size: 11px; padding: 4px 6px;
   border: 1px solid var(--fg); border-radius: 3px;

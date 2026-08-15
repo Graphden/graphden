@@ -457,6 +457,18 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
+  // Protected-branch shield (tenancy only — CSS hides it otherwise):
+  // a mini-menu of the three write policies; picking one POSTs
+  // /api/branches/:ref/policy and reloads the popover. WHO may flip a
+  // policy is enforced server-side (owner / org admins) — a rejected
+  // change surfaces in the shared error slot.
+  popover.querySelectorAll('.branch-row-policy').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openBranchPolicyMenu(btn);
+    });
+  });
+
   popover.querySelectorAll('.branch-row-delete').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -490,6 +502,72 @@ function wireBranchPopoverHandlers(popover, current) {
 
 }
 
+const BRANCH_POLICY_OPTIONS = [
+  ['open', 'Everyone with write access'],
+  ['owner', 'Only the owner (org admins can unlock)'],
+  ['admins', 'Org admins only'],
+];
+
+function closeBranchPolicyMenu() {
+  const p = document.getElementById('gd-branch-policy-pop');
+  if (p) p.remove();
+  const s = document.getElementById('gd-branch-policy-scrim');
+  if (s) s.remove();
+}
+
+// Mini-menu on the row's ⛨ — pick who may write this branch.
+function openBranchPolicyMenu(btn) {
+  closeBranchPolicyMenu();
+  const row = btn.closest('.branch-row');
+  const branchName = btn.getAttribute('data-policy-branch');
+  const current = row?.getAttribute('data-write-policy') || 'open';
+  const scrim = document.createElement('div');
+  scrim.id = 'gd-branch-policy-scrim';
+  scrim.className = 'gd-pop-scrim';
+  scrim.addEventListener('click', closeBranchPolicyMenu);
+  document.body.appendChild(scrim);
+  const pop = document.createElement('div');
+  pop.id = 'gd-branch-policy-pop';
+  pop.className = 'gd-pop';
+  let html = '<h5>Who can write ' + branchName + '</h5>';
+  BRANCH_POLICY_OPTIONS.forEach(([value, label]) => {
+    const on = value === (current || 'open');
+    html += '<button type="button" class="gd-pop-item' + (on ? ' sel' : '') + '"'
+      + ' data-policy-value="' + value + '">'
+      + '<span class="gd-pi">' + (on ? '●' : '○') + '</span>' + label + '</button>';
+  });
+  pop.innerHTML = html;
+  pop.querySelectorAll('[data-policy-value]').forEach((item) => {
+    item.addEventListener('click', async () => {
+      closeBranchPolicyMenu();
+      const err = document.getElementById('branch-popover-error');
+      try {
+        const resp = await window.authFetch(API.api_branches_ref_policy(branchName), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 'write-policy': item.getAttribute('data-policy-value') }),
+        });
+        const body = await resp.json();
+        if (body.ok) {
+          openBranchPopover(); // re-render rows with the new lock state
+        } else if (err) {
+          err.textContent = body.error || 'Could not change the branch protection';
+          err.classList.remove('hidden');
+        }
+      } catch (e2) {
+        if (err) {
+          err.textContent = 'Network error: ' + (e2?.message || e2);
+          err.classList.remove('hidden');
+        }
+      }
+    });
+  });
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+  document.body.appendChild(pop);
+}
+
 async function createBranchFromInput(parentName) {
   const input = document.getElementById('branch-create-input');
   const err = document.getElementById('branch-popover-error');
@@ -500,11 +578,18 @@ async function createBranchFromInput(parentName) {
     return;
   }
   err.classList.add('hidden');
+  // Advanced → protected-branch write policy; "open" (the default) is
+  // simply not sent, so the ordinary path stays a plain branch.
+  const policySel = document.getElementById('branch-create-policy');
+  const policy = policySel && policySel.value !== 'open' ? policySel.value : null;
   try {
     const resp = await window.authFetch(API.api_branches, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, 'base-branch-id': parentName }),
+      body: JSON.stringify(Object.assign(
+        { name, 'base-branch-id': parentName },
+        policy ? { 'write-policy': policy } : {}
+      )),
     });
     const body = await resp.json();
     if (resp.status === 401) {

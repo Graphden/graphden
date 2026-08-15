@@ -181,13 +181,15 @@
           :else nil}}
 
   {:name :as-json-branch
-   :description "Convert a `:branch` storage row into a JSON-safe map — `{:id (str id) :name name :base-branch-id (some-> base-branch-id str) :created-at (some-> created-at str)}`. Own pin `:branch-row`. Used by `:_get-branch-data` and reusable by any other handler that surfaces a branch row."
+   :description "Convert a `:branch` storage row into a JSON-safe map — `{:id (str id) :name name :base-branch-id (some-> base-branch-id str) :created-at (some-> created-at str) :owner-id owner-id :write-policy write-policy}`. Own pin `:branch-row`. Used by `:_get-branch-data` and reusable by any other handler that surfaces a branch row."
    :parent :zipmap
-   :args {:keys [{:value :id} {:value :name} {:value :base-branch-id} {:value :created-at}]
+   :args {:keys [{:value :id} {:value :name} {:value :base-branch-id} {:value :created-at} {:value :owner-id} {:value :write-policy}]
           :vals [:_branch-id-str
                  :_branch-row-name
                  :_branch-base-id-str
-                 :_branch-created-at-str]
+                 :_branch-created-at-str
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :owner-id} :default nil}}
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :write-policy} :default nil}}]
           :branch-row {:type :nullable-keyword-map
                        :description "Storage row of a `:branch` entity — fields stringified for the JSON wire."}}}
 
@@ -820,11 +822,42 @@
           :key {:value :forbid-invalid?}
           :default nil}}
 
+  {:name :_create-branch-write-policy
+   :description "Raw `:write-policy` from the body (nil when missing) — the protected-branch level (\"open\"/\"owner\"/\"admins\"). Validated inside `:create-branch!`; nil leaves the column unwritten."
+   :parent :get
+   :args {:coll :_create-branch-body
+          :key {:value :write-policy}
+          :default nil}}
+
   {:name :_create-branch-parsed
-   :description "Parse POST /api/branches body into `{:branch-name :base-ref :forbid-invalid?}`. Pure graph composition over `:parse-json-body` + `:get` + `:to-str` + `:str-trim` + `:if` + `:zipmap`."
+   :description "Parse POST /api/branches body into `{:branch-name :base-ref :forbid-invalid? :write-policy}`. Pure graph composition over `:parse-json-body` + `:get` + `:to-str` + `:str-trim` + `:if` + `:zipmap`."
    :parent :zipmap
-   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?}]
-          :vals [:_create-branch-name :_create-branch-base-ref :_create-branch-forbid-invalid]}}
+   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?} {:value :write-policy}]
+          :vals [:_create-branch-name :_create-branch-base-ref :_create-branch-forbid-invalid :_create-branch-write-policy]}}
+
+  {:name :_create-branch-policy-value
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :write-policy} :default nil}}
+
+  ;; Same JSONB-keywordize trap note as `:_branch-policy-invalid?` — the
+  ;; membership test is an :or of :equal?, not a map :contains?.
+  {:name :_create-branch-policy-invalid?
+   :description "Guard — a PRESENT body `:write-policy` must be open/owner/admins; absent (nil) is fine (no policy)."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_create-branch-policy-value}}
+                   {:parent :not
+                    :args {:value {:parent :or
+                                   :args {:values [{:parent :equal?
+                                                    :args {:a :_create-branch-policy-value :b {:value "open"}}}
+                                                   {:parent :equal?
+                                                    :args {:a :_create-branch-policy-value :b {:value "owner"}}}
+                                                   {:parent :equal?
+                                                    :args {:a :_create-branch-policy-value :b {:value "admins"}}}]}}}}]}}
+
+  {:name :_create-branch-err-policy-invalid
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "write-policy must be one of: open, owner, admins"}}}
 
   {:name :_create-branch-name-blank?
    :description "Guard #1 — `:name` missing or blank. `:blank?` is nil-safe, so it covers both cases in one call."
@@ -935,10 +968,11 @@
   ;; composition below — admins can swap the envelope or per-row
   ;; shape without touching Clojure.
   {:name :create-branch!
-   :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` (+ optional `:forbid-invalid?` merge-policy flag) and returns the row."
+   :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` (+ optional `:forbid-invalid?` merge-policy flag and `:write-policy` protection level; the creating principal is stamped as `:owner-id`) and returns the row."
    :args {:branch-name {:type :text :description "New branch's display name."}
           :base-branch-id {:type :uuid :description "Parent branch's id; the new branch forks from this point."}
-          :forbid-invalid? {:type :nullable-bool :required false :description "Error-tolerance Phase 5 merge policy: truthy → merges INTO this branch are refused while recorded type diagnostics exist on either side. Absent/nil ≡ off."}}
+          :forbid-invalid? {:type :nullable-bool :required false :description "Error-tolerance Phase 5 merge policy: truthy → merges INTO this branch are refused while recorded type diagnostics exist on either side. Absent/nil ≡ off."}
+          :write-policy {:type :nullable-text :required false :description "Protected-branch write policy: \"open\" (nil ≡ open — anyone the ordinary grants admit), \"owner\" (branch owner + the org's :manage-grants holders), \"admins\" (:manage-grants holders only). Enforced by the tenancy addon; inert without it."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -957,7 +991,11 @@
           :forbid-invalid? {:parent :get :type :nullable-bool
                             :args {:coll {:as :parsed}
                                    :key {:value :forbid-invalid?}
-                                   :default nil}}}}
+                                   :default nil}}
+          :write-policy {:parent :get :type :nullable-text
+                         :args {:coll {:as :parsed}
+                                :key {:value :write-policy}
+                                :default nil}}}}
 
   {:name :_create-branch-apply-shaped
    :description "Stage 2 — reshape the new row via the shared `:as-json-branch` converter (stringified ids + created-at)."
@@ -974,6 +1012,7 @@
    :description "POST /api/branches — flat `:cond` of `[name-blank? → 400, name-taken? → 400-dynamic, base-missing? → 400-dynamic, true → apply]`."
    :parent :cond
    :args {:clauses [:_create-branch-name-blank?  :_err-name-blank
+                    :_create-branch-policy-invalid? :_create-branch-err-policy-invalid
                     :_create-branch-name-taken?  :_create-branch-err-name-taken
                     :_create-branch-base-missing? :_create-branch-err-base-missing
                     {:value true}                 :_create-branch-apply]
@@ -985,6 +1024,104 @@
    :description "Ring handler for POST /api/branches (auth-required)."
    :parent :json-handler
    :args {:data :_create-branch-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/branches/:ref/policy — set / clear the branch's write
+  ;; policy (protected branches, Stage 1). Body `{write-policy}` with
+  ;; "open" | "owner" | "admins"; "open" clears back to nil. WHO may
+  ;; flip a policy is gated by the tenancy addon's authorize-writer on
+  ;; the underlying `:branch` row write (owner / :manage-grants).
+  ;; ---------------------------------------------------------------------
+
+  ;; --- :set-branch-policy! atomic primitive ---
+  {:name :set-branch-policy!
+   :description "Atomic library boundary — update `:branch.write-policy` by branch id. Validates the policy value (`:branches/invalid-write-policy` otherwise); \"open\" normalises to nil (cleared). Returns the stored policy (nil when cleared)."
+   :args {:branch-id {:type :uuid :description "Branch id whose policy to set."}
+          :write-policy {:type :nullable-text :description "\"open\" (clear), \"owner\" or \"admins\"."}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
+  {:name :_branch-policy-parsed
+   :description "Parse POST /api/branches/:ref/policy into `{:branch-ref :write-policy}` — ref from the URL (shared `:_branches-target-ref`), policy from the JSON body."
+   :parent :zipmap
+   :args {:keys [{:value :branch-ref} {:value :write-policy}]
+          :vals [:_branches-target-ref
+                 {:parent :get
+                  :args {:coll {:parent :parse-json-body}
+                         :key {:value :write-policy}
+                         :default nil}}]}}
+
+  {:name :_branch-policy-resolved
+   :description "Resolve the URL ref to a branch row; nil when missing."
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :branch-ref} :default nil}}}}
+
+  {:name :_branch-policy-missing?
+   :parent :nil?
+   :args {:value {:as :resolved}}}
+
+  {:name :_branch-policy-err-missing
+   :description "JSON 404-style rejection — the URL ref resolved to no branch."
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "Branch not found"}}}
+
+  {:name :_branch-policy-value
+   :description "Body `:write-policy` string out of `:parsed` — shared by the validity guard and the apply arm."
+   :parent :get
+   :args {:coll {:as :parsed}
+          :key {:value :write-policy}
+          :default nil}}
+
+  ;; NOT a `:contains?` over a literal map: a fn-def map literal rides
+  ;; JSONB, which keywordizes its KEYS — {"open" true} arrives as
+  ;; {:open true} and a string lookup always misses.
+  {:name :_branch-policy-invalid?
+   :description "Guard — body `:write-policy` must be one of open/owner/admins (a missing value is invalid: this endpoint always states the target policy)."
+   :parent :not
+   :args {:value {:parent :or
+                  :args {:values [{:parent :equal?
+                                   :args {:a :_branch-policy-value :b {:value "open"}}}
+                                  {:parent :equal?
+                                   :args {:a :_branch-policy-value :b {:value "owner"}}}
+                                  {:parent :equal?
+                                   :args {:a :_branch-policy-value :b {:value "admins"}}}]}}}}
+
+  {:name :_branch-policy-err-invalid
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "write-policy must be one of: open, owner, admins"}}}
+
+  {:name :_branch-policy-apply-set
+   :description "Apply — `:set-branch-policy!` on the resolved row's id with the validated body policy."
+   :parent :set-branch-policy!
+   :args {:branch-id {:parent :assert-some
+                      :args {:value {:parent :get
+                                     :args {:coll {:as :resolved}
+                                            :key {:value :id}
+                                            :default nil}}}}
+          :write-policy :_branch-policy-value}}
+
+  {:name :_branch-policy-apply
+   :description "Success — `{:ok true :write-policy <stored-or-nil>}`."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :write-policy}]
+          :vals [{:value true} :_branch-policy-apply-set]}}
+
+  {:name :_branch-policy-data
+   :description "POST /api/branches/:ref/policy — flat `:cond` of `[invalid? → 400, missing? → 404-envelope, true → apply]`."
+   :parent :cond
+   :args {:clauses [:_branch-policy-invalid?  :_branch-policy-err-invalid
+                    :_branch-policy-missing?  :_branch-policy-err-missing
+                    {:value true}             :_branch-policy-apply]
+          :parsed :_branch-policy-parsed
+          :resolved :_branch-policy-resolved}}
+
+  {:name :set-branch-policy-handler
+   :lambda-params [:request :default :limit]
+   :description "Ring handler for POST /api/branches/:ref/policy (auth-required)."
+   :parent :json-handler
+   :args {:data :_branch-policy-data}}
 
   ;; ---------------------------------------------------------------------
   ;; DELETE /api/branches/:ref — delete branch + all its version rows.
@@ -1622,11 +1759,15 @@
                  :target {:id :nullable-text
                           :name :any
                           :base-branch-id :nullable-text
-                          :created-at :nullable-text}
+                          :created-at :nullable-text
+                          :owner-id :any
+                          :write-policy :any}
                  :source {:id :nullable-text
                           :name :any
                           :base-branch-id :nullable-text
-                          :created-at :nullable-text}
+                          :created-at :nullable-text
+                          :owner-id :any
+                          :write-policy :any}
                  :conflicts [:list {:entity-name :any
                                     :entity-id :text
                                     :source-version :jsonb
@@ -1856,19 +1997,58 @@
           :key {:value :data-branch-name}
           :value :_bp-row-name}}
 
-  {:name :_bp-row-attrs
+  {:name :_bp-row-attrs-3
    :parent :assoc
    :args {:map :_bp-row-attrs-2
           :key {:value :aria-selected}
           :value :_bp-row-aria-selected}}
 
+  ;; data-write-policy: "" when open — the JS policy editor reads its
+  ;; current value off the row instead of a second fetch.
+  {:name :_bp-row-attrs
+   :parent :assoc
+   :args {:map :_bp-row-attrs-3
+          :key {:value :data-write-policy}
+          :value {:parent :if
+                  :args {:test :_bp-row-protected?
+                         :then :_bp-row-policy
+                         :else {:value ""}}}}}
+
   ;; --- Children spans ---
+
+  {:name :_bp-row-policy
+   :parent :get
+   :args {:coll {:as :item} :key {:value :write-policy} :default nil}}
+
+  {:name :_bp-row-protected?
+   :parent :some?
+   :args {:value :_bp-row-policy}}
 
   {:name :_bp-row-name-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-name"}}
           :children [:_bp-row-name]}}
+
+  ;; --- Protected-branch lock glyph (write-policy set) ---
+  {:name :_bp-row-lock-title
+   :parent :str
+   :args {:parts [{:value "Protected — writes limited to: "} :_bp-row-policy]}}
+
+  {:name :_bp-row-lock-span-shown
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "branch-row-lock" :aria-hidden "true"}}
+                         :key {:value :title}
+                         :value :_bp-row-lock-title}}
+          :children [{:value "🔒"}]}}
+
+  {:name :_bp-row-lock-span
+   :parent :if
+   :args {:test :_bp-row-protected?
+          :then :_bp-row-lock-span-shown
+          :else :_bp-row-empty-placeholder}}
 
   {:name :_bp-row-tag-span-shown
    :description "`<span class=\"branch-row-tag\">current</span>` — visible only on the active branch's row."
@@ -2026,18 +2206,45 @@
           :then :_bp-row-delete-btn-shown
           :else :_bp-row-empty-placeholder}}
 
+  {:name :_bp-row-policy-title
+   :parent :str
+   :args {:parts [{:value "Protection of "} :_bp-row-name
+                  {:value " — who may write"}]}}
+
+  {:name :_bp-row-policy-attrs-1
+   :parent :assoc
+   :args {:map {:value {:class "branch-row-policy"}}
+          :key {:value :data-policy-branch}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-policy-attrs
+   :parent :assoc
+   :args {:map :_bp-row-policy-attrs-1
+          :key {:value :title}
+          :value :_bp-row-policy-title}}
+
+  ;; Shield — opens the JS write-policy mini-menu. Rendered on every
+  ;; row; CSS shows it only under the tenancy addon (body.gd-tenancy —
+  ;; without principals a policy has no one to tell apart) and hides it
+  ;; under gd-no-write.
+  {:name :_bp-row-policy-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-policy-attrs
+          :children [{:value "⛨"}]}}
+
   {:name :_bp-row-actions-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-actions"}}
-          :children [:_bp-row-diff-btn :_bp-row-merge-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-diff-btn :_bp-row-merge-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
 
   ;; The full per-branch row — assembled via the named children.
   {:name :_bp-row
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs :_bp-row-attrs
-          :children [:_bp-row-name-span :_bp-row-tag-span :_bp-row-meta-span :_bp-row-actions-span]}}
+          :children [:_bp-row-name-span :_bp-row-lock-span :_bp-row-tag-span :_bp-row-meta-span :_bp-row-actions-span]}}
 
   ;; ---------------------------------------------------------------------
   ;; Sort policy: main first, current second, rest alpha. Composite
@@ -2125,11 +2332,44 @@
           :attrs {:value {:class "branch-popover-create-row"}}
           :children [:_bp-create-input :_bp-create-btn]}}
 
+  ;; Advanced — protected-branch write policy at create. Plain static
+  ;; hiccup; CSS reveals it only under the tenancy addon
+  ;; (body.gd-tenancy). Default stays a plain open branch — zero extra
+  ;; clicks on the ordinary path.
+  {:name :_bp-create-adv
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "branch-adv"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "summary"}
+                             :attrs {:value {}}
+                             :children [{:value "Advanced"}]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "label"}
+                             :attrs {:value {:class "branch-adv-label"
+                                             :for "branch-create-policy"}}
+                             :children [{:value "Who can write"}]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "select"}
+                             :attrs {:value {:id "branch-create-policy"}}
+                             :children [{:parent :hiccup
+                                         :args {:tag {:value "option"}
+                                                :attrs {:value {:value "open" :selected "1"}}
+                                                :children [{:value "Everyone with write access (default)"}]}}
+                                        {:parent :hiccup
+                                         :args {:tag {:value "option"}
+                                                :attrs {:value {:value "owner"}}
+                                                :children [{:value "Only me (org admins can unlock)"}]}}
+                                        {:parent :hiccup
+                                         :args {:tag {:value "option"}
+                                                :attrs {:value {:value "admins"}}
+                                                :children [{:value "Org admins only"}]}}]}}]}}
+
   {:name :_bp-create-div
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "branch-popover-create"}}
-          :children [:_bp-create-row]}}
+          :children [:_bp-create-row :_bp-create-adv]}}
 
   {:name :_bp-error-div
    :parent :hiccup

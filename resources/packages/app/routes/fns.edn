@@ -580,6 +580,11 @@
    :parent :post
    :args {:path "/branches/:ref/merge" :handler :merge-branch-handler}}
 
+  {:name :api-branch-policy
+   :description "POST /api/branches/:ref/policy — set / clear the branch's protected-branch write policy. Body `{write-policy}` ∈ open/owner/admins. Auth-required; WHO may flip is the tenancy authorize-writer's call."
+   :parent :post
+   :args {:path "/branches/:ref/policy" :handler :set-branch-policy-handler}}
+
   ;; --- /api/fns/:fn-id/versions — history of one fn across branches ---
 
   {:name :api-fn-versions
@@ -655,6 +660,7 @@
                   :api-branch-diff
                   :api-branch-conflicts
                   :api-branch-merge
+                  :api-branch-policy
                   :api-fn-versions
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
                   ;; live in the OPTIONAL `registry` package now and install via

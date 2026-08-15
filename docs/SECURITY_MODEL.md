@@ -28,7 +28,10 @@ so a gap in one does not by itself cross tenants:
 
 1. **Application-layer scoping** — `OrgScopedStorage` stamps and filters every
    entity by the caller's org; a tenant reads and writes only its own rows
-   (plus the shared, read-only public library).
+   (plus the shared, read-only public library). Within an org, per-namespace
+   grants gate WHO edits WHAT, and a branch's `write-policy` (protected
+   branches — owner / org admins) gates writes and merges per branch
+   ([VERSIONING.md § Protected branches](VERSIONING.md#protected-branches-stage-1-2026-08-15)).
 2. **Database-layer RLS** — Postgres Row-Level Security (`FORCE`) filters every
    row by the connection's `graphden.current_org`, so even a raw-SQL path that
    bypassed the decorator stays confined. **Strict by default**: the app must

@@ -25,7 +25,7 @@ shape, self-hosted included.
 | `:user/exists` | 409 |
 | `:user/invalid`, `:grant/invalid-capability`, `:domain/unverified` (tenancy control-plane) | 400 |
 | execute already-running-as-service | 409 |
-| `:authz/forbidden`, `capability/*` (incl. secret-leaf gate) | 403 |
+| `:authz/forbidden`, `:authz/branch-protected`, `capability/*` (incl. secret-leaf gate) | 403 |
 | execute over-capacity | 429 + `Retry-After` |
 | `:quota/entity-limit` (tenant fn row-cap, #7) | 429 |
 | execute args-too-large (256 KB) | 413 |
@@ -48,6 +48,8 @@ handler's declared `:lambda-params` outside `[]`/`[:request]`),
 sync),
 `:merge-conflict`, `:vault/not-configured`, `:refinement/violated`,
 `:capability/secret-leaf-restricted`, `:authz/forbidden`,
+`:authz/branch-protected` (a write to a branch whose `write-policy`
+excludes the principal — see [VERSIONING.md § Protected branches](VERSIONING.md#protected-branches-stage-1-2026-08-15)),
 `:branch-router/handler-not-found`, `:storage-error/unsupported-opts`
 (500 — internal misuse), `:packages/unresolved-ref`,
 421 `misdirected-request` (off-shard, tenancy), execute

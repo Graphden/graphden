@@ -38,11 +38,21 @@ the org's branches (`main` and your current branch sort first).
 ```
 Create              → type a name, click Create
                       (forks from the current branch)
+Advanced            → (cloud/tenancy only) pick who can write the
+                      new branch: everyone / only me / org admins
 row → switch        → click a branch row to switch to it
 Δ (diff)            → show the diff vs another branch
 ⇢ (merge)           → fold another branch into this one
+⛨ (protection)      → (cloud/tenancy only) change who can write;
+                      a 🔒 marks protected rows
 × delete
 ```
+
+A *protected* branch refuses edits — and merges into it — from
+anyone outside its policy (the branch owner and the org's admins
+always keep access, so nothing can be locked forever). On a
+self-hosted single-user instance there are no other users to keep
+out, so the protection affordances stay hidden.
 
 ### Try it
 

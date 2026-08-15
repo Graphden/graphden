@@ -31,22 +31,13 @@ was forked from.
 
 ## The fork → edit → diff → merge loop
 
-In the editor's top bar there's a branch chip showing your
-current branch. Click it for the branch popover.
-
-The popover groups branches into two sections:
-
-- **Mine** — your personal branches. Their names carry a `~`
-  prefix (there's no per-user owner on a branch, so the prefix is
-  the marker — it also shows on the branch chip, so you always know
-  when you're standing on a personal branch). Use these to
-  experiment privately, then drop them when you're done.
-- **Shared** — team-wide branches, including `main`.
+At the top of the Explorer there's a branch chip showing your
+current branch. Click it for the branch popover — a flat list of
+the org's branches (`main` and your current branch sort first).
 
 ```
-Create              → type a name, pick Shared or Mine, click Create
+Create              → type a name, click Create
                       (forks from the current branch)
-＋ New personal…    → shortcut: create a ~-prefixed branch under Mine
 row → switch        → click a branch row to switch to it
 Δ (diff)            → show the diff vs another branch
 ⇢ (merge)           → fold another branch into this one
@@ -56,11 +47,8 @@ row → switch        → click a branch row to switch to it
 ### Try it
 
 1. Click the branch chip. In the create row, type `feat-tutorial`
-   and click **Create** (the **Shared** mode is the default). The
-   editor reloads on `feat-tutorial`; the URL gets
-   `?branch=feat-tutorial`. (To make a *personal* branch instead,
-   flip the toggle to **Mine** first — the name gets a `~` prefix
-   and it lands under **Mine**.)
+   and click **Create**. The editor reloads on `feat-tutorial`;
+   the URL gets `?branch=feat-tutorial`.
 2. Navigate to any fn-def with a literal value (e.g. one of the
    tutorial fns you made in lesson 01). Edit the value.
 3. Switch back to `main`. The fn-def is unchanged — your edit

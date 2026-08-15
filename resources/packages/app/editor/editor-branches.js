@@ -23,12 +23,6 @@
 const BRANCH_STORAGE_KEY = 'graphden.branch';
 const BRANCH_HEADER = 'X-Graphden-Branch';
 const DEFAULT_BRANCH = 'main';
-// Personal branches carry a `~` prefix (see :_bp-is-personal?-cb in
-// branches/fns.edn) — the durable "Mine" marker, since :branch has no
-// owner column. The create form's mode toggle decides whether a new
-// branch gets the prefix; default is a shared/team branch.
-const PERSONAL_PREFIX = '~';
-let branchCreateMode = 'shared'; // 'shared' | 'personal' — reset per popover open
 
 function readUrlBranch() {
   try { return new URLSearchParams(location.search).get('branch'); }
@@ -494,59 +488,17 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   }
 
-  // Create-mode toggle (Shared | Mine). Fresh partial → reset to the
-  // default shared mode, then reflect the graph's initial `.active`.
-  branchCreateMode = 'shared';
-  const modeBtns = popover.querySelectorAll('.branch-create-mode-btn[data-create-mode]');
-  modeBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      setBranchCreateMode(btn.getAttribute('data-create-mode'), current);
-      if (createInput) createInput.focus();
-    });
-  });
-
-  // "New personal branch" CTA in the Mine section header — a shortcut
-  // to personal mode + the create input.
-  const personalCta = popover.querySelector('[data-create-personal]');
-  if (personalCta) {
-    personalCta.addEventListener('click', () => {
-      setBranchCreateMode('personal', current);
-      if (createInput) createInput.focus();
-    });
-  }
-}
-
-// Switch the create form between shared/personal: track the mode, move
-// the `.active` class, and swap the input placeholder so the `~` prefix
-// is discoverable before submit.
-function setBranchCreateMode(mode, current) {
-  branchCreateMode = mode === 'personal' ? 'personal' : 'shared';
-  document.querySelectorAll('.branch-create-mode-btn[data-create-mode]').forEach((btn) => {
-    btn.classList.toggle('active', btn.getAttribute('data-create-mode') === branchCreateMode);
-  });
-  const input = document.getElementById('branch-create-input');
-  if (input) {
-    input.placeholder = branchCreateMode === 'personal'
-      ? 'Personal branch name (~ added, forks from ' + current + ')'
-      : 'New branch name (forks from ' + current + ')';
-  }
 }
 
 async function createBranchFromInput(parentName) {
   const input = document.getElementById('branch-create-input');
   const err = document.getElementById('branch-popover-error');
-  const raw = input.value.trim();
-  // In personal mode, guarantee exactly one `~` prefix (tolerate a user
-  // who typed it themselves). The bare word must be non-empty.
-  const base = branchCreateMode === 'personal'
-    ? raw.replace(/^~+/, '')
-    : raw;
-  if (!base) {
+  const name = input.value.trim();
+  if (!name) {
     err.textContent = 'Branch name is required';
     err.classList.remove('hidden');
     return;
   }
-  const name = branchCreateMode === 'personal' ? PERSONAL_PREFIX + base : base;
   err.classList.add('hidden');
   try {
     const resp = await window.authFetch(API.api_branches, {

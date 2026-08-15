@@ -218,3 +218,52 @@
           (is (contains? proj sid-g-x)
               "G's :x slot-id (reached via ref) is in the cache key — no collapse"))
         (finally (sp/close storage))))))
+
+
+(deftest resolved-value-binding-covers-slot-test
+  ;; Regression: `classify-slot` emits `:resolved-value` for
+  ;; resolver-backed bindings (`:value-present` + `:resolver-fn-id`,
+  ;; e.g. vault secrets). Both deep-free walkers' `case` forms missed
+  ;; the kind after the `:secret-value` → `:resolved-value` rename and
+  ;; threw `No matching clause` — from `execute` with named args, from
+  ;; `make-single-arg-callable`, and (worst) from `compile-fn`'s
+  ;; `cache-projection-frees` on any fn that refs the resolver-bound
+  ;; fn, failing the whole rebuild.
+  (testing "resolver-backed binding is a covered slot, not a crash"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [resolver (setup/build-fn! storage
+                                        {:name "rvb-resolver"
+                                         :return-type :text})
+              base     (setup/build-fn! storage
+                                        {:name "rvb-base"
+                                         :slots [{:name "secret" :type :text}
+                                                 {:name "other" :type :int}]})
+              fn-s     (setup/build-fn! storage
+                                        {:name "rvb-secret-fn" :parent base})
+              _        (sp/create-entity storage :binding
+                                         {:fn-id (-> fn-s :fn :id)
+                                          :slot-id (-> base :slots (get "secret") :id)
+                                          :value-present true
+                                          :resolver-fn-id (-> resolver :fn :id)})
+              lookups  (support/lookups-for storage)]
+          (is (= [:other]
+                 (mapv :ext-name
+                       (r/deep-free-ext-entries (-> fn-s :fn :id) lookups)))
+              "entries walker: resolver slot covered, only :other free")
+          (is (= [:other]
+                 (r/deep-free-ext-names (-> fn-s :fn :id) lookups))
+              "names walker: same coverage")
+          (testing "a caller that refs the resolver-bound fn still compiles its frees"
+            (let [base-c (setup/build-fn! storage
+                                          {:name "rvb-caller-base"
+                                           :slots [{:name "y" :type :int}]})
+                  fn-c   (setup/build-fn! storage
+                                          {:name "rvb-caller"
+                                           :parent base-c
+                                           :bindings {"y" {:ref fn-s}}})
+                  lookups2 (support/lookups-for storage)
+                  proj (r/cache-projection-frees (-> fn-c :fn :id) lookups2)]
+              (is (contains? proj :other)
+                  "the ref-target's remaining free arg projects into the cache key"))))
+        (finally (sp/close storage))))))

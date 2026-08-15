@@ -459,7 +459,12 @@
                                              n)]
                                   (when (and n' (not (next-covered n')))
                                     (emit! n')))))
-                      :value nil))
+                      :value nil
+                      ;; Resolver-backed value (`:resolver-fn-id`, e.g.
+                      ;; vault secrets) — covered slot, caller doesn't
+                      ;; supply it. Keep this case in sync with
+                      ;; `classify-slot` (compile/bindings.clj).
+                      :resolved-value nil))
                   ;; Env-bindings are synthetic shared computations
                   ;; (`:cond` / `:if` patterns like `:args {:test … :parsed :_…}`
                   ;; where `:parsed` isn't a parent's slot). Their ref-targets
@@ -537,7 +542,7 @@
                       ;; Cover by slot-id, mirroring
                       ;; `deep-free-ext-names*`'s own-primaries logic
                       ;; but slot-id-keyed:
-                      ;;   - `:value`, `:secret-value`, `:seq`,
+                      ;;   - `:value`, `:resolved-value`, `:seq`,
                       ;;     `:is-fn :ref` cover their root slot.
                       ;;   - `:ref :is-fn false` does NOT cover —
                       ;;     the ref-target reads names from the same
@@ -606,7 +611,9 @@
                                              (not (next-covered sid)))
                                     (emit! {:ext-name ext :slot-id sid})))))
                       :value nil
-                      :secret-value nil))
+                      ;; Resolver-backed value — same coverage rule as
+                      ;; `:value`; see the name-keyed walker above.
+                      :resolved-value nil))
                   ;; Env-binding ref-walk mirrors
                   ;; `deep-free-ext-names*` — synthetic shared
                   ;; computations still propagate free args of their

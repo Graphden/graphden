@@ -204,10 +204,12 @@
            / `binding` / `binding-list-item` entities and the `:ref` edges
            between them. This is the concrete table + foreign-key layout that
            every traversal walks."}
-    {:ns graphden.schema.malli.schema :defn make-entity-schema
-     :say "Turns a field map into a closed malli `:map` (nullable field →
-           optional key). The concrete link between a schema's field-spec and
-           the validated shape of a stored row."}
+    {:ns graphden.schema.fields.types :defn valid-type?
+     :say "The runtime link between a field-spec's declared type and an
+           actual value: one predicate per abstract type, permissive on
+           unknown types. `storage/protocol/crud_validation` runs this on
+           every write — the live value-validation path (the old parallel
+           malli validate-entity pipeline was dead code and is gone)."}
     {:ns graphden.storage.protocol.graph :defn ExecutionGraphResult
      :say "The record every resolver returns: the entity collections plus
            by-fn / by-binding indexes. Know this shape first and the two

@@ -98,8 +98,10 @@ Graphden is a visual functional programming environment where functions and thei
     `:env`. See [docs/VERSIONING.md § branch-local](docs/VERSIONING.md).
 - `slot` — atomic `(name, type-fn-id)` pair, immutable post-create. Shared across fns through `fn-slot`.
 - `fn-slot` — junction `(fn-id, slot-id, position)`. "Which slots does this fn expose, in what order."
-- `binding` — per-`(fn-id, slot-id)` customization: `value`, `ref-fn-id`, `rename-to`,
-  `type-override-fn-id`, `terminal`, `list-append`, `list-closed`, `description`.
+- `binding` — per-`(fn-id, slot-id)` customization: `value`, `ref-fn-id`,
+  `type-override-fn-id`, `terminal`, `list-append`, `list-closed`, `description`,
+  `resolver-fn-id`. (Renames are rename-view SLOTS via `slot.source-slot-id`,
+  not a binding column — `rename-to` is dropped.)
 - `binding-list-item` — sequence content under a list-typed binding, ordered by `position`.
 - `service` — desired-state row "keep THIS fn running". `branch-id` scopes
   it to a per-branch `ExecutionContext` so the same fn can run on dev +

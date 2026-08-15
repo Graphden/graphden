@@ -169,7 +169,7 @@ for the up-to-date field list.
 | `fn` | function or type-row; `parent-ids` ref-many for inheritance |
 | `slot` | atomic `(name, type-fn-id)`; immutable post-create |
 | `fn-slot` | junction `(fn-id, slot-id, position)` |
-| `binding` | per-`(fn, slot)` overlay (value, ref-fn-id, rename-to, type-override-fn-id, terminal, list-{append,closed}, description) |
+| `binding` | per-`(fn, slot)` overlay (value, ref-fn-id, type-override-fn-id, terminal, list-{append,closed}, description, resolver-fn-id) |
 | `binding-list-item` | sequence content under a list-typed binding |
 
 ### Inheritance through parent-ids

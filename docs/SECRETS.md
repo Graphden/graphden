@@ -370,8 +370,16 @@ every share-shaped bundle treats it explicitly:
 
 3. **`:any`-typed slots** are the documented escape hatch. A
    `[:secret :text]` value flows into an `:any` slot and the marker
-   is lost. A future audit pass could narrow specific `:any` slots
-   to refuse secrets.
+   is lost. This composes into a two-step laundering path the direct
+   guards can't see: `[:list [:secret :text]] ⊆ [:list :any]`
+   (covariance + top) and `[:list :any] ⊆ :jsonb` — so a
+   list-of-secrets can reach a jsonb sink through an `:any`-widened
+   intermediate even though the direct `[:list [:secret :text]] ⊆
+   :jsonb` step is refused (`contains-marker?` guard, in BOTH
+   `subtype?` and `unify` since 2026-08-15). Label tracking ends
+   where `:any` begins — that is the price of having a top type. A
+   future audit pass could narrow specific `:any` slots to refuse
+   secrets.
 
 4. **`:secret-leaf` is gated at the create path.** A user can't
    `parent :secret-leaf` directly through `/api/entities/fn` or any

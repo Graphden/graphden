@@ -39,7 +39,7 @@ purposeful set:
   does this fn expose, in what order." Position drives the editor
   layout and the impl arg order for base-fns.
 - **binding** — per-`(fn-id, slot-id)` overlay carrying any of:
-  `value`, `ref-fn-id`, `rename-to`, `type-override-fn-id`,
+  `value`, `ref-fn-id`, `type-override-fn-id`,
   `terminal`, `list-append`, `list-closed`, `description`,
   `resolver-fn-id`. Closer-fn-wins via inheritance walk.
 - **binding-list-item** — sequence content under a list-typed
@@ -253,7 +253,6 @@ Storage-layer graph resolution caps walks via
 | slot-id             ref<slot>                              |
 | value               jsonb NULL                             |
 | ref-fn-id           ref<fn> NULL                           |
-| rename-to           text NULL                              |
 | type-override-fn-id ref<fn> NULL                           |
 | description         text NULL                              |
 | terminal            bool NULL  -- seal slot from descendants|
@@ -512,8 +511,10 @@ Bindings reference other fns via `binding.ref-fn-id`. EDN sugar:
 ### Free-arg propagation
 
 Unbound slots of a referenced fn surface as free slots of the
-caller — that's how reusable templates work. Renames (`:rename-to`)
-swap the public name; type-overrides
+caller — that's how reusable templates work. Renames (`{:as :name}`,
+stored as a rename-view slot whose `slot.source-slot-id` FK points at
+the renamed slot — the old `binding.rename-to` text column is
+dropped) swap the public name; type-overrides
 (`:type-override-fn-id`) swap the effective type for that one
 fn.
 

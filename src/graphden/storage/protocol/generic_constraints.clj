@@ -64,9 +64,17 @@
         (let [fn-rec (sp/read-entity storage :fn current-id)
               bindings (sp/query-entities storage :binding {:fn-id current-id})
               binding-refs (into #{}
-                                 (keep (fn [b]
-                                         (or (:ref-fn-id b)
-                                             (:type-override-fn-id b))))
+                                 ;; ALL edges per binding -- the old
+                                 ;; (or ref override) dropped the
+                                 ;; type-override edge whenever a
+                                 ;; binding carried BOTH (an order-
+                                 ;; dependent cycle false-negative);
+                                 ;; resolver edges are part of the
+                                 ;; closure since the fleet-cell fix.
+                                 (comp (mapcat (juxt :ref-fn-id
+                                                     :type-override-fn-id
+                                                     :resolver-fn-id))
+                                       (filter some?))
                                  bindings)
               ;; Single batched query for ALL list-items belonging to
               ;; this fn's bindings (was N queries — one per binding).

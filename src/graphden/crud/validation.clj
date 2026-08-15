@@ -409,7 +409,21 @@
     :binding
     (let [own-id (:fn-id entity-data)]
       (or (cycle-check-pair storage own-id (:ref-fn-id entity-data))
-          (cycle-check-pair storage own-id (:type-override-fn-id entity-data))))
+          (cycle-check-pair storage own-id (:type-override-fn-id entity-data))
+          ;; Resolver graph-fns run at the owner's arg-resolution time
+          ;; -- a (owner -> resolver) cycle is unbounded runtime
+          ;; recursion. forward-deps-of carries this edge since the
+          ;; fleet-cell fix; the write guard must mirror it. The BARE
+          ;; self case needs the explicit arm: the shared pair-checker
+          ;; deliberately passes owner==ref (ref self-loops get killed
+          ;; later by the sync topo-sort), but resolvers have NO later
+          ;; structural gate.
+          (when (and own-id (= own-id (:resolver-fn-id entity-data)))
+            {:reason (str "a binding cannot use its OWNER fn as its own "
+                          "resolver — the resolver runs while resolving "
+                          "the owner's args (unbounded recursion at "
+                          "first force)")})
+          (cycle-check-pair storage own-id (:resolver-fn-id entity-data))))
 
     :binding-list-item
     ;; Items live under a binding; the OWNING fn-id is the cycle's
@@ -600,6 +614,28 @@
         (nil? resolver)
         {:reason (str "resolver-fn-id does not resolve to a fn: "
                       (:resolver-fn-id data))}
+
+        ;; A resolver binding without a stored input is meaningless —
+        ;; classify-slot requires value-present and would silently
+        ;; treat the slot as :free, ignoring the resolver. write-rej
+        ;; runs on the RAW payload (value-present normalisation
+        ;; happens inside sp/create-entity), so a supplied :value key
+        ;; counts as will-be-present.
+        (not (or (:value-present data) (contains? data :value)))
+        {:reason (str "a :resolver-fn-id binding needs a stored input "
+                      "(:value) — the stored value is what the resolver "
+                      "receives at arg-resolution time")}
+
+        ;; The runtime invokes the resolver as a SINGLE-arg callable
+        ;; over the stored value; a resolver exposing 2+ free args
+        ;; would receive the stored value as its whole named-args map
+        ;; and fail opaquely at first force. Best-effort: skip when
+        ;; the registry has no entry yet.
+        (some-> (registry/rich-type-of-id (:id resolver)) :args count (> 1))
+        {:reason (str "resolver " (pr-str (:name resolver))
+                      " exposes more than one free arg — the runtime "
+                      "calls a resolver with exactly the stored value; "
+                      "bind its extra args first")}
 
         (some-> (registry/rich-type-of-id (:id resolver)) :return
                 types/contains-hide-result-marker?)

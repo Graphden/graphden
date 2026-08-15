@@ -462,8 +462,20 @@
                  ;; INPUT to the resolver graph fn at arg-resolution
                  ;; ("stored → runtime"). Round-trip twin of the
                  ;; exporter's :resolver emission.
-                 (and resolver-name (contains? name->id resolver-name))
-                 (assoc :resolver-fn-id (resolve-ref-id name->id resolver-name)
+                 resolver-name
+                 (assoc :resolver-fn-id
+                        (or (when (contains? name->id resolver-name)
+                              (resolve-ref-id name->id resolver-name))
+                            ;; A typo'd resolver name used to fall through
+                            ;; BOTH this arm and the literal fallback
+                            ;; (which tests resolver-name truthy), writing
+                            ;; a binding with neither value nor resolver --
+                            ;; the slot silently became free. Throw like
+                            ;; the {:secret-path ...} sugar does.
+                            (throw (ex-info (str "{:resolver " resolver-name
+                                                 "} does not resolve to a known fn")
+                                            {:type :packages/resolver-missing
+                                             :resolver resolver-name})))
                         :value value
                         :value-present true)
 

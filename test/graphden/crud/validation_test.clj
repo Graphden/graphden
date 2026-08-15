@@ -617,5 +617,18 @@
           (is (nil? (v/write-rej storage :binding
                                  {:fn-id (:id owner)
                                   :resolver-fn-id (:id plain)
-                                  :value "v" :value-present true})))))
+                                  :value "v" :value-present true}))))
+        (testing "resolver without a stored input → rejected (classify-slot
+                  would silently treat the slot as free)"
+          (is (re-find #"stored input"
+                       (:reason (v/write-rej storage :binding
+                                             {:fn-id (:id owner)
+                                              :resolver-fn-id (:id plain)})))))
+        (testing "SELF-resolver → rejected as a cycle (unbounded recursion
+                  at first force; write guard mirrors forward-deps-of)"
+          (is (some? (v/write-rej storage :binding
+                                  {:fn-id (:id owner)
+                                   :slot-id (:id owner-slot)
+                                   :resolver-fn-id (:id owner)
+                                   :value "v" :value-present true})))))
       (finally (sp/close storage)))))

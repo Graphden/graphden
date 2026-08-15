@@ -637,16 +637,22 @@
    - `:as-ref`    — fn-id → #bindings + #list-items whose `ref-fn-id`
      points at it.
 
-   These are exactly the two dependency kinds the delete guard blocks on
+   These are exactly the dependency kinds the delete guard blocks on
    (`web/crud` `:_delete-fn-*`), so the editor's up-front gate matches the
-   server's 409 instead of drifting from it. `type-override-fn-id` /
-   `slot.type-fn-id` are intentionally NOT counted — the delete guard
-   doesn't block on them either."
+   server's 409 instead of drifting from it. `resolver-fn-id` counts as a
+   ref: the resolver runs at the owner's arg-resolution time, so deleting
+   an in-use resolver breaks EXECUTION (fn-not-found at first force), not
+   just typing. `type-override-fn-id` / `slot.type-fn-id` are intentionally
+   NOT counted — typing degrades gracefully and the delete guard doesn't
+   block on them either."
   [graph]
   {:as-parent (reduce (fn [m f] (reduce (fn [m pid] (update m pid (fnil inc 0))) m (:parent-ids f)))
                       {} (:fns graph))
    :as-ref (as-> {} m
-                 (reduce (fn [m b] (if-let [r (:ref-fn-id b)] (update m r (fnil inc 0)) m)) m (:bindings graph))
+                 (reduce (fn [m b]
+                           (let [m (if-let [r (:ref-fn-id b)] (update m r (fnil inc 0)) m)]
+                             (if-let [rz (:resolver-fn-id b)] (update m rz (fnil inc 0)) m)))
+                         m (:bindings graph))
                  (reduce (fn [m it] (if-let [r (:ref-fn-id it)] (update m r (fnil inc 0)) m)) m (:list-items graph)))})
 
 

@@ -25,12 +25,17 @@
     (into #{} (mapcat arg-value-fn-refs) arg-value)
 
     (map? arg-value)
-    ;; {:as :name :ref :fn-name} or {:as :name :value :fn-name}
+    ;; {:as :name :ref :fn-name} / {:as :name :value :fn-name} /
+    ;; {:resolver :fn-name ...} -- the resolver runs at
+    ;; arg-resolution time, so it must be synced BEFORE its consumer
+    ;; (same topo-sort dependency as a plain ref).
     (let [r (parsing/parse-fn-ref (:ref arg-value))
-          v (parsing/parse-fn-ref (:value arg-value))]
+          v (parsing/parse-fn-ref (:value arg-value))
+          rz (parsing/parse-fn-ref (:resolver arg-value))]
       (cond-> #{}
         r (conj r)
-        v (conj v)))
+        v (conj v)
+        rz (conj rz)))
 
     :else #{}))
 

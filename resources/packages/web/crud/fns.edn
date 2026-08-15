@@ -2330,6 +2330,67 @@
    :parent :filter
    :args {:pred :_ref-owner-eq? :coll :_ref-owner-bind-resolved}}
 
+  ;; --- resolver variant: bindings whose :resolver-fn-id is the target.
+  ;; A resolver runs at the owner's arg-resolution time, so deleting an
+  ;; in-use resolver breaks EXECUTION (fn-not-found at first force) —
+  ;; the delete gate must count these exactly like plain refs. Mirrors
+  ;; the binding variant above keyed on :resolver-fn-id.
+  {:name :_resolver-owner-where
+   :parent :assoc-empty
+   :args {:key {:value :resolver-fn-id}
+          :value {:as :target-fn-id :type :nullable-uuid
+                  :description "Fn-id whose resolver-consumers to find."}}}
+
+  {:name :_resolver-owner-bind-id-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"} :where :_resolver-owner-where}}
+
+  {:name :_resolver-owner-bind-id-ids
+   :parent :map :args {:func :_ref-owner-get-id :coll :_resolver-owner-bind-id-rows}}
+
+  {:name :_resolver-owner-bind-ver-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-version"} :where :_resolver-owner-where}}
+
+  {:name :_resolver-owner-bind-ver-ids
+   :parent :map :args {:func :_ref-owner-get-binding-id :coll :_resolver-owner-bind-ver-rows}}
+
+  {:name :_resolver-owner-bind-concat
+   :parent :concat :args {:colls [:_resolver-owner-bind-id-ids :_resolver-owner-bind-ver-ids]}}
+
+  {:name :_resolver-owner-bind-distinct
+   :parent :distinct :args {:coll :_resolver-owner-bind-concat}}
+
+  {:name :_resolver-owner-bind-cand-ids
+   :parent :vec :args {:coll :_resolver-owner-bind-distinct}}
+
+  {:name :_resolver-owner-bind-empty?
+   :parent :empty? :args {:coll :_resolver-owner-bind-cand-ids}}
+
+  {:name :_resolver-owner-bind-cand-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_resolver-owner-bind-cand-ids]}}}}
+
+  {:name :_resolver-owner-bind-cand-resolved
+   :parent :resolve-binding-rows
+   :args {:identities :_resolver-owner-bind-cand-identities :branch-chain :current-branch-chain}}
+
+  {:name :_resolver-owner-bind-resolved
+   :parent :if
+   :args {:test :_resolver-owner-bind-empty? :then {:value []} :else :_resolver-owner-bind-cand-resolved}}
+
+  {:name :_resolver-owner-eq?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :resolver-fn-id} :default nil}}
+          :b {:as :target-fn-id}}}
+
+  {:name :resolver-owner-bindings
+   :description "RESOLVED binding rows whose :resolver-fn-id is :target-fn-id (version-aware; twin of :ref-owner-bindings)."
+   :parent :filter
+   :args {:pred :_resolver-owner-eq? :coll :_resolver-owner-bind-resolved}}
+
   ;; --- list-item variant (FK to identity is :item-id) ---
   {:name :_ref-owner-item-id-rows
    :parent :storage-query-identities
@@ -2393,10 +2454,20 @@
   {:name :_delete-fn-ref-items-count
    :parent :count :args {:coll :_delete-fn-ref-items}}
 
+  ;; Bindings consuming the target as their RESOLVER — execution
+  ;; breaks if it goes away, so they gate the delete like plain refs.
+  {:name :_delete-fn-resolver-bindings
+   :parent :resolver-owner-bindings
+   :args {:target-fn-id :_delete-target-id}}
+
+  {:name :_delete-fn-resolver-bindings-count
+   :parent :count :args {:coll :_delete-fn-resolver-bindings}}
+
   {:name :_delete-fn-refs-total
-   :description "Sum of binding-ref + list-item-ref counts."
+   :description "Sum of binding-ref + list-item-ref + resolver-consumer counts."
    :parent :add
-   :args {:nums [:_delete-fn-ref-bindings-count :_delete-fn-ref-items-count]}}
+   :args {:nums [:_delete-fn-ref-bindings-count :_delete-fn-ref-items-count
+                 :_delete-fn-resolver-bindings-count]}}
 
   ;; Predicates over the counts.
   {:name :_delete-fn-has-dependents?

@@ -3,11 +3,13 @@
    F and a ref-target R, plus deep-walking R's free args to populate
    HOF lambda-param lists.
 
-   In the slot/fn-slot/binding model the rename information lives in
-   `binding.rename-to`. F's caller-facing name for slot S is the
-   closest binding's `:rename-to` if any, else slot.name. Walking
-   non-HOF refs collects R's leftover free slots so the outer F can
-   thread them through."
+   In the slot/fn-slot/binding model a rename is a dedicated
+   rename-view SLOT: an own slot row whose `:source-slot-id` FK points
+   at the renamed (inherited) slot — Phase 6c made the FK canonical
+   (the old `binding.rename-to` text column is retired). F's
+   caller-facing name for slot S is its closest rename slot's name if
+   any, else S's own name. Walking non-HOF refs collects R's leftover
+   free slots so the outer F can thread them through."
   (:require
     [clojure.set :as set]
     [graphden.executor.compile.bindings :as b]
@@ -190,14 +192,15 @@
    {names HOF callbacks in F's tree read from F's caller's fa}.
 
    The HOF closure-capture component comes from `hof-wrap`'s
-   `(merge fa lambda-args)` (`compile_eager.clj:234`): when F invokes
+   `(merge fa lambda-args)` (see `hof-wrap` in `compile_eager.clj` —
+   don't cite line numbers here, they rot): when F invokes
    a HOF target H, H's body sees F's fa snapshot plus the per-call
    lambda-args. Anything H reads beyond its lambda-params is read
    from F's fa — and thus part of F's effective evaluation
    dependencies even though it's NOT part of F's caller-facing
    interface.
 
-   Production bug closed by this (commit `[...]`):
+   Production bug closed by this:
    `_shape-secret-bindings`'s `:filter :pred` reads `:fn-row` via
    closure capture; `deep-free-ext-names` returned `#{}` for
    `_shape-secret-bindings`, so the cache key omitted `:fn-row` and
@@ -252,8 +255,10 @@
 
    Returns a vector of counter-examples
    `[{:fn-id F :missing #{names…}} …]`, EMPTY when the invariant
-   holds. Used by tests and by ad-hoc nREPL probes to verify the
-   walker before deploying the cache-projection switch.
+   holds. Enforced by
+   `deep-free-ext-entries-test/cache-projection-superset-invariant-…`
+   over a mixed fixture graph; also handy for ad-hoc nREPL probes
+   against a full corpus.
 
    Wired BEFORE `compile-eager` swaps to `cache-projection-frees` —
    if any counter-example surfaces, the walker is broken and would
@@ -1027,20 +1032,6 @@
                 acc))
             {}
             r-entries)))
-
-
-(defn apply-renames
-  "Apply `{R-name → F-name}`: for each entry, expose F's value under
-   R's name and drop the F-name key. Extra keys pass through."
-  [free-args renames]
-  (reduce-kv (fn [acc r-name f-name]
-               (if (contains? acc f-name)
-                 (-> acc
-                     (assoc r-name (get acc f-name))
-                     (dissoc f-name))
-                 acc))
-             free-args
-             renames))
 
 
 (defn compute-rename-aliases

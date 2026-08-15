@@ -34,10 +34,10 @@
      - keyword value = reference to another fn by name
      - other values = literals
 
-   ## Order Matters
+   ## Order Does Not Matter
 
-   Define fns AFTER their dependencies. If order is wrong,
-   a warning is printed with suggested fix."
+   Definitions are topologically sorted before sync (`deps/topo-sort`)
+   — file order is free; cycles are rejected."
   (:require
     [graphden.executor.composition.core :as core]))
 

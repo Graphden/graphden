@@ -95,8 +95,7 @@
      :deep-frees-cache   (atom {})
      :deep-free-ext-entries-cache (atom {})
      :cache-projection-frees-cache (atom {})
-     :bindings-cache     (atom {})
-     :global-env-cache   (atom nil)}))
+     :bindings-cache     (atom {})}))
 
 
 (def ^:private cached-build-lookups-max-size

@@ -2,8 +2,8 @@
   "Tests for `graphden.executor.compile.renames` — free-arg name
    translation and HOF lambda-param classification.
 
-   `apply-renames` is pure; the rest walk the graph, so those tests
-   build a real graph and `l/build-lookups` over it."
+   These walk the graph, so tests build a real graph and
+   `l/build-lookups` over it."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile.renames :as r]
@@ -13,22 +13,6 @@
 
 
 (use-fixtures :once (setup/create-container-fixture))
-
-
-;; ============================================================================
-;; apply-renames — pure
-;; ============================================================================
-
-(deftest apply-renames-test
-  (testing "each {R-name → F-name} entry exposes F's value under R's name"
-    (is (= {:x 1 :b 2} (r/apply-renames {:a 1 :b 2} {:x :a}))))
-
-  (testing "an entry whose F-name is absent is a no-op; extra keys pass through"
-    (is (= {:b 2} (r/apply-renames {:b 2} {:x :a})))
-    (is (= {:a 1} (r/apply-renames {:a 1} {}))))
-
-  (testing "multiple renames are applied together"
-    (is (= {:x 1 :y 2} (r/apply-renames {:a 1 :b 2} {:x :a :y :b})))))
 
 
 ;; ============================================================================

@@ -68,17 +68,3 @@
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (= :fn-composition/circular-dependency (:type (ex-data ex))))
       (is (= #{:a :b} (:remaining (ex-data ex)))))))
-
-
-;; ============================================================================
-;; check-order-and-warn
-;; ============================================================================
-
-(deftest check-order-and-warn-test
-  (let [base  {:name :base :return-type :int}
-        child {:name :child :parent :base}]
-    (testing "matching order → no-op (nil), no exception"
-      (is (nil? (deps/check-order-and-warn [base child] [base child]))))
-
-    (testing "mismatched order → still nil (it only logs), no exception"
-      (is (nil? (deps/check-order-and-warn [child base] [base child]))))))

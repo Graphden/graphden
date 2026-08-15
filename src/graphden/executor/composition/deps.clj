@@ -1,12 +1,9 @@
 (ns graphden.executor.composition.deps
   "Dependency analysis and topological sort over fn-defs. Used by
-   `sync-fns-to-storage!` to (a) warn when the caller supplied an order
-   that's not dependency-safe, and (b) produce a safe order to process
-   records in."
+   `sync-fns-to-storage!` to produce a dependency-safe order to
+   process records in (file order is free; cycles are rejected)."
   (:require
     [clojure.set :as set]
-    [clojure.string :as str]
-    [clojure.tools.logging :as log]
     [graphden.executor.composition.parsing :as parsing]))
 
 
@@ -160,15 +157,3 @@
                       {:new-ready rest-ready :new-in-degree in-degree}
                       dependents)]
           (recur (conj sorted current) new-ready new-in-degree))))))
-
-
-(defn check-order-and-warn
-  "Checks if fn-defs are in valid topological order.
-   Logs warning if not, with suggested order."
-  [fn-defs sorted-defs]
-  (let [original-order (mapv :name fn-defs)
-        sorted-order (mapv :name sorted-defs)]
-    (when (not= original-order sorted-order)
-      (log/warn "fn-defs are not in dependency order."
-                "Current order:" (str/join " -> " (map name original-order))
-                "Suggested order:" (str/join " -> " (map name sorted-order))))))

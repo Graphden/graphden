@@ -14,6 +14,7 @@
      under the new name."
   (:require
     [graphden.executor.compile.lookups :as l]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
 
 
@@ -160,10 +161,14 @@
       (let [override (some (fn [fid]
                              (get binding-by-fn-slot [fid (:id rename-slot)]))
                            (l/inheritance-chain* fn-id lookups))]
+        ;; The shared predicates — NOT bare `(some? (:value …))` —
+        ;; so a rename-slot override to literal nil is still an
+        ;; override (`:value-present` is the authoritative marker;
+        ;; see `value-binding?`'s docstring for the bug class).
         (if (and override
-                 (or (some? (:value override))
-                     (some? (:ref-fn-id override))
-                     (true? (:list-append override))))
+                 (or (value-binding? override)
+                     (ref-binding? override)
+                     (list-binding? override)))
           override
           primary)))))
 
@@ -252,9 +257,14 @@
 (defn- compute-fn-typed-fn-ids
   "Set of fn-ids whose row identifies a HOF-callable slot. Two flavours:
 
-   1. The bare-keyword primitive `:fn` row — its `:name` is literally
-      `\"fn\"` / `:fn` (text-column codec roundtrip preserves both
-      shapes, match either).
+   1. The primitive `:fn` row — matched by its DETERMINISTIC id
+      (`ids/primitive-fn-id :fn`, the exact id `boot-primitive-records`
+      upserts), never by name: fn names are per-namespace
+      (ADR-identity-model stage 5), so a user/tenant fn merely NAMED
+      `fn` must not become a HOF marker. The previous
+      `(#{\"fn\" :fn} (:name f))` name-match had exactly that hole —
+      and being a set-predicate over rows it slipped past the
+      `id_resolution_guard_test` `=`/`case` patterns.
    2. Structural fn-type rows that came from EDN's `[:fn args ret]`
       declarations. Their `:constraint` is `[:fn …]`. Named ones
       (`:fn-type`) plus anonymous-by-shape rows both qualify — the
@@ -267,13 +277,14 @@
    Clojure value (e.g. a Ring response map) when it expected a
    callable."
   [{:keys [fn-map]}]
-  (into #{}
-        (keep (fn [[id f]]
-                (when (or (#{"fn" :fn} (:name f))
-                          (and (vector? (:constraint f))
-                               (= :fn (first (:constraint f)))))
-                  id)))
-        fn-map))
+  (let [fn-primitive-id (ids/primitive-fn-id :fn)]
+    (into #{}
+          (keep (fn [[id f]]
+                  (when (or (= id fn-primitive-id)
+                            (and (vector? (:constraint f))
+                                 (= :fn (first (:constraint f)))))
+                    id)))
+          fn-map)))
 
 
 (defn- collect-bindings*

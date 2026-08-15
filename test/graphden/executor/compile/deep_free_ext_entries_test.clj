@@ -267,3 +267,40 @@
               (is (contains? proj :other)
                   "the ref-target's remaining free arg projects into the cache key"))))
         (finally (sp/close storage))))))
+
+
+(deftest cache-projection-superset-invariant-holds-on-fixture-graph
+  ;; First wired-in caller of the exhaustive invariant checker (its
+  ;; docstring long claimed "used by tests" while nothing called it):
+  ;; cache-projection-frees must be a superset of deep-free-ext-names
+  ;; for EVERY fn — a counter-example means a stale cache hit can
+  ;; return a closure as data (the bug class the projection switch
+  ;; was guarded against).
+  (testing "no fn in a mixed fixture graph violates the superset invariant"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [resolver (setup/build-fn! storage {:name "cpsi-resolver"
+                                                 :return-type :text})
+              base   (setup/build-fn! storage
+                                      {:name "cpsi-base"
+                                       :slots [{:name "secret" :type :text}
+                                               {:name "a" :type :int}
+                                               {:name "cb" :type :fn}]})
+              inner  (setup/build-fn! storage
+                                      {:name "cpsi-inner"
+                                       :slots [{:name "x" :type :int}]})
+              inner-fn (setup/build-fn! storage {:name "cpsi-inner-fn"
+                                                 :parent inner})
+              f      (setup/build-fn! storage
+                                      {:name "cpsi-f" :parent base
+                                       :bindings {"cb" {:ref inner-fn}}})
+              _      (sp/create-entity storage :binding
+                                       {:fn-id (-> f :fn :id)
+                                        :slot-id (-> base :slots (get "secret") :id)
+                                        :value-present true
+                                        :resolver-fn-id (-> resolver :fn :id)})
+              lookups (support/lookups-for storage)]
+          (is (= [] (r/verify-cache-projection-frees-superset-of-deep-free!
+                      lookups))
+              "counter-examples list must be empty"))
+        (finally (sp/close storage))))))

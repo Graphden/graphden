@@ -11,7 +11,7 @@
      (then=else typed the shared fn as if the guarded target were
      `:null`)."
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is]]
     [graphden.executor.registry.core :as reg]
     [graphden.types.check.narrowing :as nar]))
 

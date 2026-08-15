@@ -1,10 +1,9 @@
 (ns graphden.executor.compile.renames-pure-test
   "Pure-helper tests for `executor.compile.renames` — kept in a
    sibling NS to renames-test so they don't need the
-   container-backed fixture (renames-test's `apply-renames-test`
-   is the only existing pure test there; everything else builds a
-   real graph). These exercise the small data-shape transforms
-   that the rename layer is built on."
+   container-backed fixture (renames-test builds real graphs).
+   These exercise the small data-shape transforms that the rename
+   layer is built on."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile.renames :as r]))
@@ -79,25 +78,3 @@
              {:item 7}
              [{:chain-name :coll       :rename-name :item}
               {:chain-name :branch-row :rename-name :item}])))))
-
-
-(deftest apply-renames-test
-  ;; Mirrors the existing apply-renames-test in renames-test BUT
-  ;; with explicit edge cases collected here so the pure-test ns
-  ;; carries enough density to surface a regression cleanly.
-  (testing "empty renames → input passed through"
-    (is (= {:a 1 :b 2} (r/apply-renames {:a 1 :b 2} {}))))
-
-  (testing "rename surfaces F-name's value under R-name + drops F-name"
-    (is (= {:r 7 :other 1}
-           (r/apply-renames {:f 7 :other 1} {:r :f}))))
-
-  (testing "missing F-name in free-args → no work for that mapping"
-    (is (= {:other 1}
-           (r/apply-renames {:other 1} {:r :f}))
-        "no :f to rename → :r doesn't appear either"))
-
-  (testing "multiple renames in one pass"
-    (is (= {:a-new 1 :b-new 2 :extra 3}
-           (r/apply-renames {:a 1 :b 2 :extra 3}
-                            {:a-new :a, :b-new :b})))))

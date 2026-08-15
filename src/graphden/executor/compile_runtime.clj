@@ -463,6 +463,30 @@
           (try (f) (finally (java.util.concurrent.Semaphore/.release sem)))))))
 
 
+(defn- prep-compile-inputs
+  "The shared read-side prep of every (re)compile path, applied to a
+   graph already in hand: register DB-declared type-aliases, refresh
+   the always-fresh set, and build lookups with the ctx's base-fns
+   attached. Returns `{:graph g :fns-map m :lookups l}` with `:fns`
+   normalised to an id-keyed map regardless of the seq/map shape the
+   source (read-graph vs :graph-cache) delivered.
+
+   Four call sites (`rebuild!`, `rebuild-optimistic!`,
+   `delta-recompile!`, `load-cell!`) previously copy-pasted this
+   block with small drifts — the audit's :resolved-value walker bug
+   showed what per-site drift costs; keep the sequence HERE only."
+  [ctx graph]
+  (register-type-aliases-from-db! graph)
+  (let [fns-map (if (map? (:fns graph))
+                  (:fns graph)
+                  (into {} (map (juxt :id identity)) (:fns graph)))]
+    (prime-always-fresh! (vals fns-map))
+    {:graph graph
+     :fns-map fns-map
+     :lookups (assoc (l/cached-build-lookups graph)
+                     :base-fns (:base-fns ctx))}))
+
+
 (defn rebuild-optimistic!
   "Stale-while-revalidate rebuild for the epoch heal: read + compile
    OUTSIDE the invalidation lock (concurrent write requests' delta
@@ -486,13 +510,10 @@
           {:keys [graph compiled]}
           (call-with-compile-permit
             (fn []
-              (let [storage (compile-storage ctx)
-                    graph (read-graph storage (:executor-orgs ctx))
-                    _ (register-type-aliases-from-db! graph)
-                    base-fns (:base-fns ctx)
-                    lookups (assoc (l/cached-build-lookups graph)
-                                   :base-fns base-fns)
-                    _ (prime-always-fresh! (:fns graph))]
+              (let [{:keys [graph lookups]}
+                    (prep-compile-inputs
+                      ctx (read-graph (compile-storage ctx)
+                                      (:executor-orgs ctx)))]
                 {:graph graph :compiled (ce/compile-all lookups)})))]
       (call-with-invalidation-lock
         ctx
@@ -532,13 +553,10 @@
           (let [{:keys [graph compiled]}
                 (call-with-compile-permit
                   (fn []
-                    (let [storage (compile-storage ctx)
-                          graph (read-graph storage (:executor-orgs ctx))
-                          _ (register-type-aliases-from-db! graph)
-                          base-fns (:base-fns ctx)
-                          lookups (assoc (l/cached-build-lookups graph)
-                                         :base-fns base-fns)
-                          _ (prime-always-fresh! (:fns graph))]
+                    (let [{:keys [graph lookups]}
+                          (prep-compile-inputs
+                            ctx (read-graph (compile-storage ctx)
+                                            (:executor-orgs ctx)))]
                       {:graph graph :compiled (ce/compile-all lookups)})))]
             (reset! (:compiled-registry ctx) compiled)
             (prime-graph-cache! ctx graph)
@@ -679,15 +697,10 @@
                               (identical? (storage-root storage)
                                           (storage-root (:storage ctx))))
                      (some-> (:graph-cache ctx) deref))
-            graph (or cached (read-graph storage (:executor-orgs ctx)))
-            _ (register-type-aliases-from-db! graph)
-            base-fns (:base-fns ctx)
-            fns-map (if (map? (:fns graph))
-                      (:fns graph)
-                      (into {} (map (juxt :id identity)) (:fns graph)))
-            _ (prime-always-fresh! (vals fns-map))
-            blast (deps/transitive-blast reverse-deps changed-fn-ids)
-            lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)]
+            {:keys [graph fns-map lookups]}
+            (prep-compile-inputs
+              ctx (or cached (read-graph storage (:executor-orgs ctx))))
+            blast (deps/transitive-blast reverse-deps changed-fn-ids)]
         ;; CRUD impls invoke `invalidate-graph-cache!` directly on
         ;; the http-kit worker thread (see `crud/entities.clj`), so
         ;; two concurrent client requests can land here against the
@@ -739,18 +752,13 @@
     (f ctx root-fn-id)
     (let [holder (:compiled-registry ctx)
           storage (compile-storage ctx)
-          graph (read-graph storage (:executor-orgs ctx))
-          _ (register-type-aliases-from-db! graph)
-          base-fns (:base-fns ctx)
-          fns-map (if (map? (:fns graph))
-                    (:fns graph)
-                    (into {} (map (juxt :id identity)) (:fns graph)))
-          _ (prime-always-fresh! (vals fns-map))
+          {:keys [graph fns-map lookups]}
+          (prep-compile-inputs
+            ctx (read-graph storage (:executor-orgs ctx)))
           forward-deps (ctx-forward-deps ctx (constantly graph))
           cell (into #{}
                      (filter #(contains? fns-map %))
-                     (deps/forward-closure forward-deps [root-fn-id]))
-          lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)]
+                     (deps/forward-closure forward-deps [root-fn-id]))]
       (when (seq cell)
         (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
         (prime-graph-cache! ctx graph)
@@ -866,8 +874,14 @@
    cold start. Shared by `free-arg-ext-names` and the slot-id-keyed
    public-API translator."
   [ctx]
+  ;; Cold fallback reads via `compile-storage` — the SAME handle every
+  ;; compile path uses (and the one `prime-graph-cache!` fills the warm
+  ;; cache from). Reading `(:storage ctx)` here instead would let a
+  ;; cold multi-tenant ctx build the public-boundary translator from
+  ;; the org-scoped view while the registry compiled from the
+  ;; privileged one — a view divergence with no upside.
   (let [graph (or (some-> (:graph-cache ctx) deref)
-                  (read-graph (:storage ctx) (:executor-orgs ctx)))]
+                  (read-graph (compile-storage ctx) (:executor-orgs ctx)))]
     (assoc (l/cached-build-lookups graph)
            :base-fns (:base-fns ctx))))
 
@@ -1257,14 +1271,23 @@
        (let [result (try (java.util.concurrent.Future/.get
                            fut (long timeout-ms) java.util.concurrent.TimeUnit/MILLISECONDS)
                          (catch java.util.concurrent.TimeoutException _ ::timeout)
-                         (catch Exception _ ::error))]
+                         (catch Exception e
+                           ;; The sentinel is what callers dispatch on, but
+                           ;; the CAUSE must not vanish — an undifferentiable
+                           ;; ::error made failing handlers undebuggable.
+                           (log/warn (or (ex-cause e) e)
+                                     "run-with-timeout: handler threw")
+                           ::error))]
          (when (identical? result ::timeout)
            (java.util.concurrent.Future/.cancel fut true))
          result)
        ::rejected)
      (let [fut (future (thunk))
            result (try (deref fut timeout-ms ::timeout)
-                       (catch Exception _ ::error))]
+                       (catch Exception e
+                         (log/warn (or (ex-cause e) e)
+                                   "run-with-timeout: handler threw")
+                         ::error))]
        (when (identical? result ::timeout) (future-cancel fut))
        result))))
 

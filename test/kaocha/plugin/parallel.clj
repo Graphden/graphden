@@ -216,6 +216,8 @@
 (def ^:private isolation-var-seeders
   '{graphden.executor.compile-eager/*trace-sample-rate*
     graphden.executor.compile-eager/trace-sample-rate-isolation-seed
+    graphden.executor.compile-eager/*always-fresh-fn-ids*
+    graphden.executor.compile-eager/always-fresh-isolation-seed
     graphden.executor.registry.core/*rich-types-override*
     graphden.executor.registry.core/snapshot-for-isolation
     graphden.executor.registry/*registry-override*

@@ -58,12 +58,34 @@
 
 
 (defn set-always-fresh-fn-ids!
-  "Refresh the set of always-fresh (cache-bypass) fn-ids — anything
+  "Merge `ids` into the always-fresh (cache-bypass) set — anything
    whose registered `:effects` intersects `#{:time :random}`. Called
    by `compile_runtime`'s `rebuild!` / `delta-recompile!` after a
-   compile pass, since the set drives every `:ref` invocation."
+   compile pass, since the set drives every `:ref` invocation.
+
+   UNION, not reset: primes run per-ctx (per branch / per shard), each
+   from its OWN graph view — a reset from branch A's view dropped
+   branch B's `:time` fns until B's next rebuild, and an optimistic
+   rebuild whose swap lost the `unchanged?` race still clobbered the
+   set from its stale snapshot with no rollback. Union is monotone
+   and sound: a stale member (deleted fn) is an id that is never
+   invoked; the worst case of over-membership is a skipped cache hit
+   on a fn that stopped being time/random mid-process — correct
+   results, marginally less caching. The set resets only with the
+   process (or a test's isolation binding)."
   [ids]
-  (reset! *always-fresh-fn-ids* (set ids)))
+  ;; Coerce a non-set current value to #{} first — the parallel
+  ;; plugin's DEFAULT isolation seed is `{}` (a map), which the old
+  ;; reset! semantics happened to mask.
+  (swap! *always-fresh-fn-ids*
+         (fn [cur] (into (if (set? cur) cur #{}) ids))))
+
+
+(defn always-fresh-isolation-seed
+  "Seeder for the parallel plugin's isolation atom — the set must
+   start as a SET (the plugin's default seed is `{}`)."
+  []
+  #{})
 
 
 (def trace-all

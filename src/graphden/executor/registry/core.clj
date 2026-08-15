@@ -268,7 +268,14 @@
   "The ambient tenant org — `tc/current-org` via `resolve` (registry/core can't
    require the tenancy layer; same trick as branch-router's `current-scope`).
    nil when tenancy isn't loaded (single-tenant) → `rich-type-of` falls to the
-   global. The var is cached after the first successful resolve."
+   global. The var is cached after the first SUCCESSFUL resolve only —
+   absence is DELIBERATELY not latched: `resolve` returns the var only
+   once the tenancy ns is loaded, and load order isn't guaranteed
+   (tests may read the registry before requiring the seam; the addon
+   loads mid-init). Latching a miss would permanently hide per-org
+   slices for the process. The repeated miss costs one ns-map lookup
+   per read in single-tenant — measured noise; don't 'optimize' it
+   back into a load-order bug."
   []
   (when-let [v (or @current-org-var
                    (reset! current-org-var

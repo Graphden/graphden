@@ -10,6 +10,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
@@ -108,6 +109,21 @@
       (try
         (let [f (setup/create-base-fn! storage "rtfi-known")]
           (is (= (:id f) (tc/resolve-type-fn-id storage "rtfi-known"))))
+        (finally (sp/close storage)))))
+
+  (testing "a PRIMITIVE name resolves to the deterministic primitive id,
+            even when a same-named user fn exists (per-ns names make the
+            name query pick an arbitrary row — the type position must
+            never land on the impostor)"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [impostor (setup/create-base-fn! storage "fn")]
+          (is (= (ids/primitive-fn-id :fn)
+                 (tc/resolve-type-fn-id storage "fn")))
+          (is (not= (:id impostor)
+                    (tc/resolve-type-fn-id storage "fn")))
+          (is (= (ids/primitive-fn-id :int)
+                 (tc/resolve-type-fn-id storage "int"))))
         (finally (sp/close storage)))))
 
   (testing "an unknown name throws :crud/unknown-type-ref"

@@ -118,6 +118,37 @@
   (= :fn-ref (binding-shape v)))
 
 
+(defn- any-ref-binding?
+  "A fn-ref in EITHER surface shape — bare keyword or explicit
+   `{:ref :name}` map. The two are semantically identical (the ref's
+   return flows into the slot at runtime); the checker must treat
+   them identically too — the map form used to fall through
+   `deferred-binding?` and skip both the scalar subtype check and
+   the fn-typed assemble/unify path entirely."
+  [v]
+  (contains? #{:fn-ref :ref-map} (binding-shape v)))
+
+
+(defn- any-ref-name
+  "The referenced fn-name from either ref shape."
+  [v]
+  (if (keyword? v) v (:ref v)))
+
+
+(defn- ref-map-override
+  "The `:type` override on a `{:ref X :type T}` map, alias-resolved —
+   the author's narrowed-contract claim, already lie-checked against
+   the ref's raw return by `check-ref-type-overrides!` (override must
+   be a SUBTYPE of the raw return). Once validated, the override IS
+   the binding's effective type at this site: checking the RAW return
+   against the slot instead would reject exactly the narrowing the
+   override exists to assert (e.g. `{:ref :nullable-x :type :text}`
+   into a `:text` slot). nil for bare-keyword refs / no override."
+  [v]
+  (when (map? v)
+    (some-> (:type v) types/resolve-alias)))
+
+
 (defn- metadata-only-binding?
   "True iff `v` is a map binding that carries ONLY metadata
    (`:as`, `:required`, `:type`) without an explicit value or ref.
@@ -922,7 +953,15 @@
    placeholders and can bind to anything; the override pins one
    specific instantiation, which is monotonic by construction."
   [{fn-name :name :as fn-def} parent-name]
-  (doseq [[arg-name b-form] (:args fn-def)]
+  (doseq [[arg-name b-form0] (:args fn-def)
+          ;; Item-level `{:ref X :type T}` / `{:value V :type T}`
+          ;; inside a vector binding is the SAME escape hatch in a
+          ;; different position — walk items with identical
+          ;; lie-detection (they used to be trusted outright by
+          ;; sequence-item-actual-type / vector-binding-elem-types).
+          b-form (if (vector? b-form0)
+                   (filter map? b-form0)
+                   [b-form0])]
     (when (and (map? b-form) (contains? b-form :type))
       (let [override (some-> (:type b-form) types/resolve-alias)
             ;; ref-binding → check against ref's return.
@@ -1161,9 +1200,7 @@
    defer. Only rename / metadata / vector chains still defer."
   [b-form]
   (or (and (map? b-form)
-           (or (contains? b-form :as)
-               (and (contains? b-form :ref)
-                    (not (contains? b-form :value)))))
+           (contains? b-form :as))
       ;; A metadata-only binding (e.g. `{:required true}` or
       ;; `{:type T}`) carries no value to check — defer to the
       ;; pre-pass that validates the metadata itself
@@ -1288,8 +1325,15 @@
       ;; `[:fn {:parsed _, :journal _} _]` rejects against `:try
       ;; :body [:fn {} a :any]` — the two captured args are
       ;; legitimately closure-captured per the runtime contract.
-      (and (types/fn-type? expected) (ref-binding? b-form))
-      (if-let [actual (assemble-fn-type b-form)]
+      ;; A validated `:type` override on the ref-map wins here too —
+      ;; the author pinned the callable's contract; check THAT against
+      ;; the slot instead of the assembled surface.
+      (and (types/fn-type? expected) (some? (ref-map-override b-form)))
+      (check-binding! primary-parent arg-name expected
+                      (ref-map-override b-form) subst fn-name b-form)
+
+      (and (types/fn-type? expected) (any-ref-binding? b-form))
+      (if-let [actual (assemble-fn-type (any-ref-name b-form))]
         ;; Freshen the callee's typevars BEFORE unifying — same move
         ;; the plain :ref path makes for `ref-return-narrowed`. The
         ;; assembled type carries the callee's OWN scope of 'a/'b;
@@ -1300,16 +1344,14 @@
         ;; the sibling `:arg a` slot was checked against the callee's
         ;; RETURN type — masked for years by the since-removed
         ;; `:empty-map ⊆ record` leniency).
-        ;; `freshen` intentionally drops the 4th (effects) element
-        ;; (see the closed resolve*/freshen* note) — re-attach the
-        ;; assembled effects so the slot-effect-constraint check
-        ;; still sees the callee's real set, not the `:any` that
-        ;; `normalise` would infer for a bare 3-element form.
-        (let [fresh (types/freshen actual)
-              fresh (if-let [eff (types/fn-effects actual)]
-                      (conj [:fn (types/fn-args fresh) (types/fn-ret fresh)] eff)
-                      fresh)
-              actual' (strip-closure-captures expected fresh b-form)]
+        ;; `freshen-with-effects` — plain `freshen` drops the effects
+        ;; element at EVERY nesting level (a nested fn-typed arg's
+        ;; concrete set would degrade to `:any` and flip a would-pass
+        ;; slot-effect check into fail); this variant preserves them
+        ;; throughout.
+        (let [fresh (types/freshen-with-effects actual)
+              actual' (strip-closure-captures expected fresh
+                                              (any-ref-name b-form))]
           (check-binding! primary-parent arg-name expected actual' subst fn-name b-form))
         subst)
 
@@ -1346,7 +1388,7 @@
       (deferred-binding? b-form)
       subst
 
-      (ref-binding? b-form)
+      (any-ref-binding? b-form)
       ;; Freshen the ref's return-type so its `'a`/`'b` don't collide
       ;; with the caller's free typevars. Without this an actual like
       ;; `[:union :null a]` (from a fn-def whose computed return is
@@ -1355,7 +1397,9 @@
       ;; fails because the typevar appears in its own value. After
       ;; freshening the actual carries `'a-N` (fresh per use site) so
       ;; unify cleanly binds `'a := [:union :null 'a-N]`.
-      (let [actual (or (some-> (ref-return-narrowed b-form) types/freshen)
+      (let [actual (or (ref-map-override b-form)
+                       (some-> (ref-return-narrowed (any-ref-name b-form))
+                               types/freshen)
                        :any)]
         (check-binding! primary-parent arg-name expected actual subst fn-name b-form))
 

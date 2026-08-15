@@ -144,6 +144,16 @@
 (declare literal-satisfies-refinement?)
 
 
+(defn- path-seg
+  "Render a map key as a diff-path segment. The previous bare
+   clojure.core/name call crashed with ClassCastException on
+   non-named keys — `[:map :int V]` values are expressible via alias
+   registration, and this runs on the mismatch-explainer path where
+   crashing eats the diagnostic."
+  [k]
+  (if (or (keyword? k) (symbol? k) (string? k)) (name k) (pr-str k)))
+
+
 (defn diff-value-against-type
   "Walk a literal value against an expected type expression, returning
    the leaf-level disagreements as `[{:path :expected :actual}, …]`.
@@ -211,7 +221,7 @@
          (leaf (classify-literal value))
          (let [v-type (nth exp 2)]
            (vec (mapcat (fn [[k v]]
-                          (diff-value-against-type v v-type (str path "." (name k))))
+                          (diff-value-against-type v v-type (str path "." (path-seg k))))
                         value))))
 
        (and (vector? exp) (= :tuple (first exp)))
@@ -231,10 +241,10 @@
          (leaf (classify-literal value))
          (vec (mapcat (fn [[k field-type]]
                         (if-not (contains? value k)
-                          [{:path (str path "." (name k))
+                          [{:path (str path "." (path-seg k))
                             :expected field-type :actual "missing"}]
                           (diff-value-against-type (get value k) field-type
-                                                   (str path "." (name k)))))
+                                                   (str path "." (path-seg k)))))
                       exp)))
 
        (or (keyword? exp) (string? exp))

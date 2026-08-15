@@ -136,7 +136,7 @@
     (let [s (t/unify [:list 'a] [:tuple :int :int])]
       (is (t/unified? s))
       (is (= :int (get s 'a)))))
-  (testing "heterogeneous tuple unifies elem-wise (int then text vs elem var → fail on conflict)"
+  (testing "heterogeneous tuple against a concrete elem type fails on the conflicting position"
     (is (t/fail? (t/unify [:list :int] [:tuple :int :text]))))
   (testing "concrete elem accepts conforming tuple"
     (is (t/unified? (t/unify [:list :numeric] [:tuple :int :float])))))

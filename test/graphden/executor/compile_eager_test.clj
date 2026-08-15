@@ -365,3 +365,17 @@
       (binding [registry-core/*rich-types-override* (atom {})]
         (is (not= (cache-key lookups)
                   (cache-key (assoc lookups :base-fns {:add (fn [_ _])}))))))))
+
+
+(deftest always-fresh-set-is-a-union-not-a-clobber-test
+  ;; Primes run per-ctx (per branch / shard), each from its OWN graph
+  ;; view. The old reset! semantics meant branch A's rebuild dropped
+  ;; branch B's :time fns from the set until B's next rebuild — and an
+  ;; optimistic rebuild losing the unchanged? race still clobbered the
+  ;; set from its stale snapshot. Union is monotone and sound.
+  (binding [ce/*always-fresh-fn-ids* (atom #{})]
+    (let [id-a (random-uuid) id-b (random-uuid)]
+      (ce/set-always-fresh-fn-ids! #{id-a})
+      (ce/set-always-fresh-fn-ids! #{id-b})
+      (is (= #{id-a id-b} @ce/*always-fresh-fn-ids*)
+          "the second prime (another ctx's view) must not drop the first's ids"))))

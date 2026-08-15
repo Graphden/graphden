@@ -1013,11 +1013,17 @@
           #"fn-ref → :returns-text"
           (check/check-fn-def! {:name :b :parent :int-add :args {:a :returns-text}}))))
 
-  ;; NOTE: `{:ref X}` and bare-vector bindings get DEFERRED by
-  ;; `deferred-binding?` — they keep the slot free for the next
-  ;; caller — so they don't trigger throws here. The
-  ;; `describe-binding` cases for those shapes can only fire if a
-  ;; future code path lands them at check-binding! directly.
+  (testing "the explicit {:ref X} map form is checked identically to the bare keyword"
+    ;; It used to be deferred - the old comment here even claimed it
+    ;; keeps the slot free, which was false: collect-free-args
+    ;; classifies {:ref X} as real-bound and the ref's return flows
+    ;; at runtime. Same mismatch, same throw.
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"ref .*:returns-text"
+          (check/check-fn-def! {:name :b2 :parent :int-add
+                                :args {:a {:ref :returns-text}}}))))
+  ;; Bare-vector bindings still defer to the sequence-item walker.
   )
 
 

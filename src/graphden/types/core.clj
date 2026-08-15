@@ -156,7 +156,13 @@
    substituting them, as long as the inner names are known."
   [t]
   (cond
-    (or (primitive? t) (type-var? t)) true
+    ;; Classifier sentinels are valid types alongside primitives and
+    ;; vars: `:empty-map` (the `{}` literal) survives into canonical
+    ;; `make-union` outputs (`[:union :empty-map <record>]` branch
+    ;; returns); `:never` is the bottom type. Neither is in
+    ;; `primitives` nor an alias.
+    (or (primitive? t) (type-var? t)
+        (contains? #{:empty-map :never} t)) true
     (keyword? t)     (boolean (get (aliases-snapshot) t))
     (record-type? t) (every? well-formed? (vals t))
     (fn-type? t)     (and (map? (fn-args t))
@@ -187,7 +193,8 @@
    that shape of failure."
   [t]
   (cond
-    (or (primitive? t) (type-var? t)) []
+    (or (primitive? t) (type-var? t)
+        (contains? #{:empty-map :never} t)) []
     (keyword? t)     (if (get (aliases-snapshot) t) [] [t])
     (record-type? t) (mapcat unresolved-refs (vals t))
     (fn-type? t)     (concat (mapcat unresolved-refs (vals (fn-args t)))
@@ -231,28 +238,12 @@
         ;; but `:never` members collapses back to `:never`.
         non-never (remove #{:never} flat)
         flat (if (seq non-never) non-never flat)
-        ;; `:empty-map` gets absorbed by a sibling HOMOGENEOUS
-        ;; map-shape (`:jsonb` / `[:map K V]`) — the shapes it is a
-        ;; subtype of — the same way `:never` gets absorbed by
-        ;; everything. Without this the union of an `:if`'s branches
-        ;; surfaces `[:union :empty-map [:map …]]` upstream and each
-        ;; downstream check has to special-case the sentinel.
-        ;;
-        ;; RECORD siblings do NOT absorb it: `:empty-map ⊄ record`
-        ;; (record fields are required, `{}` has none — see the
-        ;; subtype? arm), so `[:union :empty-map <record>]` must keep
-        ;; both members. Absorbing would record a branch-union return
-        ;; claiming the record's fields are always present while the
-        ;; runtime can yield `{}` — the exact unsoundness the
-        ;; subtype-level fix closed. (The generic subtype-absorption
-        ;; pass below handles it consistently anyway; this
-        ;; special-case exists only because `:empty-map` is a bare
-        ;; keyword the generic pass's typevar guard would skip.)
-        has-map-shape? (some (fn [m]
-                               (or (= m :jsonb)
-                                   (map-type? m)))
-                             flat)
-        flat (if has-map-shape? (remove #{:empty-map} flat) flat)
+        ;; NOTE on `:empty-map`: no special case needed — the generic
+        ;; subtype-absorption pass below drops it next to any sibling
+        ;; it subtypes (`:jsonb` / `[:map K V]`) and keeps it next to
+        ;; records (`:empty-map ⊄ record` — required fields). The
+        ;; typevar guard in that pass skips SYMBOLS only; keywords
+        ;; like the sentinel are evaluated normally.
         ;; Stable order to keep the canonical form deterministic for
         ;; equality. `pr-str` sorts heterogeneous keywords/vectors
         ;; without confusing comparators.
@@ -572,7 +563,18 @@
 
    Individual failures don't abort the batch — they're collected and
    returned. Caller decides whether to log / surface them. Returns
-   `{:registered #{names} :failed [{:name n :body b :reason r} ...]}`."
+   `{:registered #{names} :failed [{:name n :body b :reason r} ...]}`.
+
+   DELIBERATE BOUNDARY vs the singular `register-type-alias!`: the
+   batch records owner diagnostics (warn on cross-owner overwrite)
+   but does NOT register qualified `:ns/name` variants or ambiguity
+   throw-records — its production caller (`register-type-aliases-
+   from-db!`) has no namespace rows in the graph shape to derive
+   qualified names from, and flipping DB-path collisions from
+   last-write-wins+warn to throw would break existing graphs with no
+   qualified escape hatch. Collision blast radius is bounded by the
+   per-org alias slices (an org resolves only public + its own).
+   Revisit when ns rows join the read-graph shape."
   [pairs]
   (let [proposed-names (into #{} (keep first) pairs)
         owner-of (into {}
@@ -636,6 +638,9 @@
   [t]
   (let [t' (resolve-alias t)]
     (cond
+      ;; `:empty-map` — classifier sentinel for the `{}` literal;
+      ;; jsonb-shaped at rest like every map value.
+      (= t' :empty-map)    :jsonb
       (or (= t' :never) (= t' :input-stream)) :any
       (= t' :decimal)      :numeric
       (primitive? t')   t'
@@ -649,19 +654,50 @@
 
 
 (defn unregister-type-alias!
-  "Drop ONE alias (and its owner-diagnostic entry when writing the
-   global registry). Counterpart of `register-type-alias!` for delete
-   paths and for tests that probe the global registry and must clean
-   up after themselves without nuking sibling registrations."
-  [alias-name]
-  (when (nil? *type-aliases-override*)
-    (swap! alias-owners dissoc alias-name)
-    ;; Drop the qualified variants + ambiguity bookkeeping too.
-    (doseq [q (vals (get @alias-qualified alias-name))]
-      (swap! (aliases-atom) dissoc q))
-    (swap! alias-qualified dissoc alias-name))
-  (swap! (aliases-atom) dissoc alias-name)
-  nil)
+  "Drop an alias registration. Two arities with DIFFERENT blast radius:
+
+   1-arity (tests / full-clear): drops the bare name, EVERY owner's
+   qualified variant, and the whole ambiguity record — the nuke the
+   test-cleanup paths want.
+
+   2-arity `[alias-name owner-fn-id]` (the delete-path form): drops
+   ONLY that owner's qualified alias + its ambiguity entry. The bare
+   name is removed only when no other owner remains; when exactly one
+   sibling owner survives, the bare name is re-pointed at ITS body so
+   bare references resolve again instead of throwing ambiguous. The
+   1-arity's collateral deletion of SIBLING owners' qualified
+   registrations was the audited hazard this arity exists to avoid."
+  ([alias-name]
+   (when (nil? *type-aliases-override*)
+     (swap! alias-owners dissoc alias-name)
+     ;; Drop the qualified variants + ambiguity bookkeeping too.
+     (doseq [q (vals (get @alias-qualified alias-name))]
+       (swap! (aliases-atom) dissoc q))
+     (swap! alias-qualified dissoc alias-name))
+   (swap! (aliases-atom) dissoc alias-name)
+   nil)
+  ([alias-name owner-fn-id]
+   (if (some? *type-aliases-override*)
+     ;; Override-bound (test isolation) registries carry no ambiguity
+     ;; bookkeeping — fall back to the plain drop.
+     (swap! (aliases-atom) dissoc alias-name)
+     (let [owners (get @alias-qualified alias-name)
+           own-q  (get owners owner-fn-id)
+           rest-owners (dissoc owners owner-fn-id)]
+       (when (and own-q (not= own-q alias-name))
+         (swap! (aliases-atom) dissoc own-q))
+       (if (seq rest-owners)
+         (do (swap! alias-qualified assoc alias-name rest-owners)
+             ;; Exactly one survivor → bare name resolves to it again.
+             (when (= 1 (count rest-owners))
+               (let [[surv-owner surv-q] (first rest-owners)]
+                 (swap! alias-owners assoc alias-name surv-owner)
+                 (when-let [body (get @(aliases-atom) surv-q)]
+                   (swap! (aliases-atom) assoc alias-name body)))))
+         (do (swap! alias-qualified dissoc alias-name)
+             (swap! alias-owners dissoc alias-name)
+             (swap! (aliases-atom) dissoc alias-name)))))
+   nil))
 
 
 (defn clear-aliases!
@@ -1663,19 +1699,16 @@
          subst
          (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
          (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)
-         ;; Tuple ↔ list — mirrors the subtype rule `[:tuple …] ⊆
-         ;; [:list E]`: every tuple position unifies against the list
-         ;; elem (so a `[:list a]` slot bound to a tuple-returning ref
-         ;; BINDS `a` instead of silently keeping it free when the
-         ;; post-subtype unify fell to ::fail). Direction-agnostic:
-         ;; unify is symmetric, and the length guarantee only matters
-         ;; for the subtype direction, which check-binding! has
-         ;; already established.
-         (and (tuple-type? a) (list-type? b))
-         (reduce (fn [s x]
-                   (if (= s ::fail) (reduced ::fail)
-                       (unify x (list-elem b) s)))
-                 subst (tuple-elems a))
+         ;; List-expected × tuple-actual ONLY — mirrors the subtype
+         ;; rule `[:tuple …] ⊆ [:list E]`: every tuple position
+         ;; unifies against the list elem, so a `[:list a]` slot
+         ;; bound to a tuple-returning ref BINDS `a` instead of
+         ;; silently keeping it free. The REVERSE direction (tuple
+         ;; expected, list actual) is deliberately absent: a list
+         ;; carries no length guarantee, `subtype?` refuses it, and a
+         ;; unify arm here would fire exactly on check-binding!'s
+         ;; after-subtype-FAILED fallback — admitting `[:list :int]`
+         ;; into a `[:tuple a a]` slot with no length check.
          (and (list-type? a) (tuple-type? b))
          (reduce (fn [s x]
                    (if (= s ::fail) (reduced ::fail)
@@ -1777,6 +1810,61 @@
   "Freshen the type-vars of a SINGLE type. Standard let-polymorphism
    move for a value-bound ref's return-type: each use site gets its
    own scope of `'a`/`'b` so the caller's free typevars can't
-   accidentally collide with the callee's."
+   accidentally collide with the callee's.
+
+   NOTE: `freshen*` rebuilds fn-types as 3-element forms — the 4th
+   (effects) element is dropped at EVERY nesting level (a deliberate
+   historical contract other call sites rely on). Callers that need
+   effects preserved use `freshen-with-effects` below."
   [t]
   (freshen* t (atom {})))
+
+
+(defn- restore-fn-effects
+  "Walk `fresh` alongside the ORIGINAL `t`, re-attaching each fn-type's
+   effects element that `freshen*` dropped — at every nesting level.
+   The two trees are structurally parallel for every shape except
+   unions (freshen* renames vars only), so keyed/positional descent
+   is safe there."
+  [t fresh]
+  (cond
+    (and (fn-type? t) (fn-type? fresh))
+    (let [args (into {}
+                     (map (fn [[k v]]
+                            [k (restore-fn-effects (get (fn-args t) k) v)]))
+                     (fn-args fresh))
+          ret (restore-fn-effects (fn-ret t) (fn-ret fresh))
+          eff (fn-effects t)]
+      (if (and eff (not= eff :any))
+        [:fn args ret eff]
+        [:fn args ret]))
+    (and (list-type? t) (list-type? fresh))
+    [:list (restore-fn-effects (list-elem t) (list-elem fresh))]
+    (and (map-type? t) (map-type? fresh))
+    [:map (restore-fn-effects (map-key t) (map-key fresh))
+     (restore-fn-effects (map-val t) (map-val fresh))]
+    (and (tuple-type? t) (tuple-type? fresh))
+    (into [:tuple] (map restore-fn-effects (tuple-elems t) (tuple-elems fresh)))
+    (and (record-type? t) (record-type? fresh))
+    (into {} (map (fn [[k v]] [k (restore-fn-effects (get t k) v)])) fresh)
+    (and (refine-type? t) (refine-type? fresh))
+    [:refine (restore-fn-effects (refine-base t) (refine-base fresh))
+     (refine-constraint fresh)]
+    (and (marker-type? t) (marker-type? fresh))
+    [(marker-tag fresh) (restore-fn-effects (marker-inner t) (marker-inner fresh))]
+    ;; Unions: freshen* runs make-union which may reorder/merge
+    ;; members — positional descent is unsafe; effects inside union
+    ;; members stay dropped (conservative; a union rarely sits in
+    ;; slot-constraint position).
+    :else fresh))
+
+
+(defn freshen-with-effects
+  "`freshen`, but fn-type effects elements survive at EVERY nesting
+   level — for the checker's assembled-callee path, where a nested
+   fn-typed arg's concrete effect set participates in the
+   slot-effect-constraint check (a dropped set normalises to `:any`
+   on the sub side, which `effects-compatible?` reads as cannot-
+   satisfy — flipping would-pass into fail)."
+  [t]
+  (restore-fn-effects t (freshen t)))

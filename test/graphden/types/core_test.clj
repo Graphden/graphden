@@ -1120,3 +1120,35 @@
     (is (= 1 (count failed)))
     (is (str/includes? (:reason (first failed)) ":no-such-type-xyz")
         "the unresolved inner ref is named in the reason")))
+
+
+(deftest unregister-owner-scoped-arity-test
+  ;; The 2-arity drop removes ONE owner's registration without the
+  ;; 1-arity's collateral deletion of sibling owners' qualified
+  ;; aliases (the audited delete-path hazard).
+  (let [snap (t/global-aliases-snapshot)
+        owner-a (random-uuid)
+        owner-b (random-uuid)]
+    ;; Ambiguity bookkeeping runs against the GLOBAL registry only —
+    ;; unbind the parallel fixture's override for the probe (same move
+    ;; as alias-owner-collision-warning-test) and restore after.
+    (binding [t/*type-aliases-override* nil]
+      (try
+        (t/register-type-alias! :owner-scoped-probe :text owner-a :ns-a/owner-scoped-probe)
+        (t/register-type-alias! :owner-scoped-probe :int owner-b :ns-b/owner-scoped-probe)
+        (testing "two owners → bare name is ambiguous, both qualified live"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ambiguous"
+                (t/resolve-alias :owner-scoped-probe)))
+          (is (= :text (t/resolve-alias :ns-a/owner-scoped-probe)))
+          (is (= :int (t/resolve-alias :ns-b/owner-scoped-probe))))
+        (testing "dropping owner-a keeps owner-b's qualified AND re-points the bare name"
+          (t/unregister-type-alias! :owner-scoped-probe owner-a)
+          (is (= :int (t/resolve-alias :ns-b/owner-scoped-probe))
+              "sibling's qualified alias survives")
+          (is (= :int (t/resolve-alias :owner-scoped-probe))
+              "single survivor → bare name resolves to it again"))
+        (testing "dropping the last owner clears everything"
+          (t/unregister-type-alias! :owner-scoped-probe owner-b)
+          (is (= :owner-scoped-probe (t/resolve-alias :owner-scoped-probe))
+              "unknown keyword passes through unresolved"))
+        (finally (t/restore-global-aliases! snap))))))

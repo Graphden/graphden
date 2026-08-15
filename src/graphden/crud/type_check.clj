@@ -20,6 +20,7 @@
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.types.check :as types-check]
@@ -56,6 +57,15 @@
   [storage v]
   (when-not (str/blank? v)
     (or (request/parse-uuid-or-clear v)
+        ;; PRIMITIVE names resolve deterministically to the seeded
+        ;; primitive row — never through the name query. fn names are
+        ;; per-namespace, so `query-fn-by-name` picks an arbitrary row
+        ;; among same-named candidates; for the type-position that
+        ;; allowed a user fn literally named `fn` (or `int`, …) to
+        ;; shadow the primitive and, pre-id-keyed HOF marker, become a
+        ;; bogus HOF marker. The deterministic id is the exact one
+        ;; boot-primitive-records upserts.
+        (get (ids/primitive-fn-ids) (keyword v))
         (let [match (lookup/query-fn-by-name storage v)]
           (or (:id match)
               (throw (ex-info (str "Unknown type reference: " (pr-str v)

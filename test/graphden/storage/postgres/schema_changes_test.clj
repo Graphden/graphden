@@ -469,3 +469,43 @@
           (is (not (contains? cols "old_flag"))
               "the STALE-named column is dropped via uuid resolution"))
         (finally (sp/close storage))))))
+
+
+(deftest enum-label-recycle-orders-rename-first-test
+  (testing "a release that RECYCLES a renamed-away label gets the rename
+            first, so the add really adds (declaration-order interleave
+            used to leave pg without the label while metadata claimed it)"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [schema1 (-> (mds/create-builder)
+                          (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000009010"
+                                       [{:uuid #uuid "00000000-0000-0000-0000-000000009011"
+                                         :value :a}])
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000009001"
+                                         {:name {:uuid #uuid "00000000-0000-0000-0000-000000009002"
+                                                 :type :text}})
+                          ds/build)
+              _ (sp/initialize storage schema1)
+              ;; uuid1 renames :a → :b while uuid2 claims the freed :a.
+              ;; Declared adds-first on purpose — the two-pass must
+              ;; reorder.
+              schema2 (-> (mds/create-builder)
+                          (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000009010"
+                                       [{:uuid #uuid "00000000-0000-0000-0000-000000009012"
+                                         :value :a}
+                                        {:uuid #uuid "00000000-0000-0000-0000-000000009011"
+                                         :value :b}])
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000009001"
+                                         {:name {:uuid #uuid "00000000-0000-0000-0000-000000009002"
+                                                 :type :text}})
+                          ds/build)
+              changes (sp/initialize storage schema2)
+              labels (->> (jdbc/execute! (:pool storage)
+                                         ["select e.enumlabel from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'status'"])
+                          (map :pg_enum/enumlabel)
+                          set)]
+          (is (= [{:enum :status :old :a :new :b}]
+                 (:renamed (:enum-values changes))))
+          (is (= #{"a" "b"} labels)
+              "pg carries BOTH labels — the recycled :a exists"))
+        (finally (sp/close storage))))))

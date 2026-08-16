@@ -1152,3 +1152,17 @@
           (is (= :owner-scoped-probe (t/resolve-alias :owner-scoped-probe))
               "unknown keyword passes through unresolved"))
         (finally (t/restore-global-aliases! snap))))))
+
+
+(deftest reserved-sentinel-alias-guard-test
+  (testing ":empty-map cannot be rebound as an alias (sentinel hijack
+            would let {} satisfy a required-fields record)"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"shadows a primitive/sentinel"
+          (t/register-type-alias! :empty-map {:hijacked :int})))
+    (is (contains? (:failed->names
+                     {:failed->names
+                      (into #{} (map :nm)
+                            (:failed (t/register-type-aliases-batch
+                                       [[:empty-map {:hijacked :int} nil]])))})
+                   :empty-map))))

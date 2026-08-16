@@ -140,3 +140,18 @@
     (is (t/fail? (t/unify [:list :int] [:tuple :int :text]))))
   (testing "concrete elem accepts conforming tuple"
     (is (t/unified? (t/unify [:list :numeric] [:tuple :int :float])))))
+
+
+(deftest unify-record-map-orientation
+  ;; The record-EXPECTED × map-ACTUAL arm must keep the expected side
+  ;; in the a-position of nested unify calls — the old operand swap
+  ;; inverted the direction-sensitive arms (tuple→list, fn-effects)
+  ;; one nesting level down.
+  (testing "a list map-value is NOT admitted where a record field demands a tuple"
+    (is (t/fail? (t/unify {:point [:tuple 'a 'a]} [:map :keyword [:list :int]]))))
+  (testing "an :io callable is NOT admitted where the record field's effect set says pure"
+    (is (t/fail? (t/unify {:handler [:fn {} :any #{}]}
+                          [:map :keyword [:fn {} :any #{:io}]]))))
+  (testing "both sound orientations still unify"
+    (is (t/unified? (t/unify [:map :keyword :int] {:a :int})))
+    (is (t/unified? (t/unify {:a :int} [:map :keyword :int])))))

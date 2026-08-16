@@ -609,7 +609,16 @@
    no-strip rule at runtime (same rationale as `secret-path-rej`)."
   [storage entity-type data]
   (when (and (#{:binding} entity-type) (:resolver-fn-id data))
-    (let [resolver (sp/read-entity storage :fn (:resolver-fn-id data))]
+    (let [;; UPDATE payloads are PARTIAL (versioned update merges over
+          ;; the current row) — merge the existing row under the
+          ;; payload before the stored-input arm, or a legitimate
+          ;; `{:resolver-fn-id X}`-only PUT on a binding that already
+          ;; carries :value-present is falsely rejected.
+          data (if-let [row (some->> (:id data)
+                                     (sp/read-entity storage :binding))]
+                 (merge row data)
+                 data)
+          resolver (sp/read-entity storage :fn (:resolver-fn-id data))]
       (cond
         (nil? resolver)
         {:reason (str "resolver-fn-id does not resolve to a fn: "

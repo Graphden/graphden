@@ -114,17 +114,17 @@
 
 
 (defn- validate-bool-attrs!
-  "Validates the OTHER boolean field attributes (:indexed?,
-   :nulls-not-distinct?) — :nullable? had a boolean check while these
-   accepted any value and only misbehaved downstream (a truthy string
-   silently created an index; DDL read the constraint flag as set)."
+  "Validates :indexed? is a boolean when present -- :nullable? had a
+   boolean check while this accepted any value and a truthy string
+   silently created an index. (:nulls-not-distinct? is a CONSTRAINT
+   attribute, not a field one -- field specs reject the key outright
+   and its boolean check lives in add-constraint.)"
   [entity-name field-name field-spec]
-  (doseq [k [:indexed? :nulls-not-distinct?]]
-    (when (and (contains? field-spec k)
-               (not (boolean? (get field-spec k))))
-      (throw (ex-info (str "Field " k " must be a boolean")
-                      {:entity entity-name :field field-name
-                       :attr k :spec field-spec})))))
+  (when (and (contains? field-spec :indexed?)
+             (not (boolean? (:indexed? field-spec))))
+    (throw (ex-info "Field :indexed? must be a boolean"
+                    {:entity entity-name :field field-name
+                     :spec field-spec}))))
 
 
 (defn- validate-nullable!

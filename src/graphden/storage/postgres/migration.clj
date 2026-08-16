@@ -255,10 +255,11 @@
         enums-created (count (get-in changes [:enums :created] []))
         enums-renamed (count (get-in changes [:enums :renamed] {}))
         enum-values-created (count (get-in changes [:enum-values :created] []))
+        enum-values-renamed (count (get-in changes [:enum-values :renamed] []))
         total-changes (+ entities-created entities-renamed
                          fields-created fields-renamed
                          enums-created enums-renamed
-                         enum-values-created)]
+                         enum-values-created enum-values-renamed)]
     (if (zero? total-changes)
       (log/info "Schema migration completed: no changes needed")
       (log/info (if first-init? "Schema initialized" "Schema migrated")
@@ -268,7 +269,8 @@
                  :fields-renamed fields-renamed
                  :enums-created enums-created
                  :enums-renamed enums-renamed
-                 :enum-values-created enum-values-created}))))
+                 :enum-values-created enum-values-created
+                 :enum-values-renamed enum-values-renamed}))))
 
 
 ;; === Entry point ===

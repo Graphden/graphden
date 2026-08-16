@@ -24,7 +24,7 @@
 ;; chain-walk views of "which keywords inside a constraint vector
 ;; are type-row references" agree.
 (def ^:private constraint-op-keywords
-  #{:union :variant :fn :refine :and :or :not
+  #{:union :variant :fn :refine :map :tuple :and :or :not
     :> :>= :< :<= := :not= :matches :in :exists :every})
 
 

@@ -81,3 +81,14 @@
               (ds/add-constraint :item {:type :unique :fields [:name]})
               (ds/add-constraint :item {:type :unique :fields [:name]})
               (ds/build))))))
+
+
+(deftest nulls-not-distinct-must-be-boolean-test
+  (testing "a truthy string no longer silently creates a PG-15
+            NULLS-NOT-DISTINCT unique index"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be a boolean"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid) {:name {:uuid (uuid) :type :text}})
+              (ds/add-constraint :item {:type :unique :fields [:name]
+                                        :nulls-not-distinct? "yes"}))))))

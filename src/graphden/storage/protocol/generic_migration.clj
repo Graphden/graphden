@@ -20,6 +20,13 @@
      that verifies a field exists in the database (consistency check).
    - :on-create-enum!       (fn [ctx enum-name values] -> nil)
    - :on-add-enum-value!    (fn [ctx enum-name value-kw] -> nil)
+   - :on-rename-enum-value! (fn [ctx enum-name old-kw new-kw] -> nil)
+                            effectively REQUIRED: an enum-value rename
+                            with no callback throws rather than letting
+                            metadata diverge from storage
+   - :on-delete-field!      (fn [ctx entity-name field-name] -> nil)
+                            optional: without it retired fields stay
+                            in storage (logged no-op)
    - :on-create-entity!     (fn [ctx schema entity-name] -> nil)
    - :on-create-field!      (fn [ctx entity-name field-name field-spec] -> nil)
    - :save-metadata!        (fn [schema] -> nil)
@@ -141,10 +148,22 @@
         (when-let [rename-fn (:on-rename-enum! callbacks)]
           (rename-fn ctx old-enum-name enum-name))
         (swap! (:renamed-enums ctx) assoc old-enum-name enum-name))
-      ;; Add new values
-      (run! (fn [[value-kw value-uuid]]
-              (process-existing-enum-value! callbacks old-metadata enum-name value-kw value-uuid ctx))
-            values))
+      ;; Two-pass: RENAMES (uuid present in old metadata) before ADDS.
+      ;; Declaration-order interleave let a release RECYCLE a
+      ;; renamed-away label silently: ADD VALUE IF NOT EXISTS on the
+      ;; still-present old label no-ops, then the RENAME removes it --
+      ;; pg ends without the label while metadata claims it exists
+      ;; (the same silent-drift class the rename arm itself closes).
+      (let [{renames true adds false}
+            (group-by (fn [[_ value-uuid]]
+                        (contains? (:enum-values old-metadata) value-uuid))
+                      values)]
+        (run! (fn [[value-kw value-uuid]]
+                (process-existing-enum-value! callbacks old-metadata enum-name value-kw value-uuid ctx))
+              renames)
+        (run! (fn [[value-kw value-uuid]]
+                (process-existing-enum-value! callbacks old-metadata enum-name value-kw value-uuid ctx))
+              adds)))
     ;; New enum
     (do
       ((:on-create-enum! callbacks) ctx enum-name values)

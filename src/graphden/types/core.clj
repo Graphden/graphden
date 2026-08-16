@@ -63,6 +63,11 @@
 ;; `…core.shapes` ns directly.
 
 (def primitives                    shapes/primitives)
+
+
+;; Classifier sentinels that behave as types but are NOT in
+;; `primitives` — reserved so no alias can rebind their semantics.
+(def ^:private reserved-sentinels #{:empty-map})
 (def primitive?                    shapes/primitive?)
 (def runtime-predicates            shapes/runtime-predicates)
 (def type-var?                     shapes/type-var?)
@@ -448,8 +453,14 @@
   ([alias-name t] (register-type-alias! alias-name t nil))
   ([alias-name t owner-fn-id] (register-type-alias! alias-name t owner-fn-id nil))
   ([alias-name t owner-fn-id qualified-name]
-   (when (primitives alias-name)
-     (throw (ex-info (str "type-alias name shadows a primitive: " (pr-str alias-name))
+   (when (or (primitives alias-name)
+             ;; Reserved classifier sentinels — an alias named
+             ;; `:empty-map` would REBIND the sentinel's subtype
+             ;; semantics (a `{}` literal could then satisfy a
+             ;; required-fields record via the hijacked body).
+             (reserved-sentinels alias-name))
+     (throw (ex-info (str "type-alias name shadows a primitive/sentinel: "
+                          (pr-str alias-name))
                      {:type :types/invalid-alias
                       :name alias-name})))
    (binding [*alias-view* (assoc @(aliases-atom) alias-name :any)]
@@ -586,9 +597,11 @@
         (fn [[nm body]]
           (cond
             (nil? nm)              {:nm nm :body body :reason "alias name is nil"}
-            (primitives nm)        {:nm nm :body body
-                                    :reason (str "name " (pr-str nm)
-                                                 " shadows a primitive")}
+            (or (primitives nm)
+                (reserved-sentinels nm))
+            {:nm nm :body body
+             :reason (str "name " (pr-str nm)
+                          " shadows a primitive/sentinel")}
             (not (well-formed? body))
             {:nm nm :body body
              :reason (let [dangling (distinct (unresolved-refs body))]
@@ -684,9 +697,18 @@
      (let [owners (get @alias-qualified alias-name)
            own-q  (get owners owner-fn-id)
            rest-owners (dissoc owners owner-fn-id)]
+       ;; No bookkeeping entry for THIS owner (e.g. everything came
+       ;; through the DB batch path, which records no qualified
+       ;; ownership) → we cannot prove the caller owns the bare name;
+       ;; deleting it would violate the "drops ONLY that owner's"
+       ;; contract. No-op instead.
        (when (and own-q (not= own-q alias-name))
          (swap! (aliases-atom) dissoc own-q))
-       (if (seq rest-owners)
+       (cond
+         ;; unknown owner — leave everything in place
+         (and (seq owners) (nil? own-q)) nil
+
+         (seq rest-owners)
          (do (swap! alias-qualified assoc alias-name rest-owners)
              ;; Exactly one survivor → bare name resolves to it again.
              (when (= 1 (count rest-owners))
@@ -694,6 +716,8 @@
                  (swap! alias-owners assoc alias-name surv-owner)
                  (when-let [body (get @(aliases-atom) surv-q)]
                    (swap! (aliases-atom) assoc alias-name body)))))
+
+         :else
          (do (swap! alias-qualified dissoc alias-name)
              (swap! alias-owners dissoc alias-name)
              (swap! (aliases-atom) dissoc alias-name)))))
@@ -1504,11 +1528,35 @@
               shared))))
 
 
+(defn- unify-record-map
+  "Orientation twin of `unify-map-record` below, for the
+   record-EXPECTED × map-ACTUAL arm. `unify` is direction-sensitive
+   in two arms (fn-effects convention, tuple→list) — nested calls
+   must keep the EXPECTED side in the a-position. The old operand
+   swap `(unify-map-record b a)` inverted both direction-sensitive
+   checks one nesting level down: a `[:list :int]` map value was
+   admitted where a record field demanded a 2-tuple, and an `:io`
+   callable where the field's effect set said pure."
+  [rec map-t subst]
+  (let [k-step (unify :keyword (map-key map-t) subst)]
+    (if (= k-step ::fail)
+      ::fail
+      (reduce (fn [s v]
+                (if (= s ::fail)
+                  (reduced ::fail)
+                  (unify v (map-val map-t) s)))
+              k-step
+              (vals rec)))))
+
+
 (defn- unify-map-record
   "Unify a homogeneous-map type `[:map K V]` with a concrete
    keyword-keyed record. Mirrors the `subtype?` rule
    `record ⊆ [:map :keyword V]`: the record's keyword keys fix
    `K := :keyword`, every field value unifies against `V`.
+   For the reversed operand order use `unify-record-map` above —
+   swapping operands into this fn inverts the direction-sensitive
+   arms.
 
    Without this, a `[:map k v]`-typed slot (`:keys` / `:vals` /
    `:zipmap`'s return) would reject a record argument even though
@@ -1728,7 +1776,7 @@
          ;; A keyword-keyed record unifies with `[:map K V]` — same
          ;; relation `subtype?` already grants (`record ⊆ [:map …]`).
          (and (map-type? a) (record-type? b))    (unify-map-record a b subst)
-         (and (record-type? a) (map-type? b))    (unify-map-record b a subst)
+         (and (record-type? a) (map-type? b))    (unify-record-map a b subst)
          :else                ::fail)))))
 
 

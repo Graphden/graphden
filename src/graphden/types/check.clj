@@ -145,7 +145,7 @@
    override exists to assert (e.g. `{:ref :nullable-x :type :text}`
    into a `:text` slot). nil for bare-keyword refs / no override."
   [v]
-  (when (map? v)
+  (when (and (map? v) (contains? v :ref))
     (some-> (:type v) types/resolve-alias)))
 
 

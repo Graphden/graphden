@@ -189,6 +189,13 @@
                            :invalid-fields (vec non-keywords)}))))
       ;; Reject extra attributes (`:nulls-not-distinct?` toggles PG 15+
       ;; NULLS-NOT-DISTINCT uniqueness — see postgres/ddl create-constraint!).
+      ;; :nulls-not-distinct? toggles PG-15 NULLS-NOT-DISTINCT
+      ;; uniqueness; DDL reads it as truthy, so a string here silently
+      ;; created the index -- boolean-check it like :nullable?.
+      (when (and (contains? constraint :nulls-not-distinct?)
+                 (not (boolean? (:nulls-not-distinct? constraint))))
+        (throw (ex-info "Constraint :nulls-not-distinct? must be a boolean"
+                        {:entity entity-name :constraint constraint})))
       (let [extra-keys (set/difference (set (keys constraint)) #{:type :fields :nulls-not-distinct?})]
         (when (seq extra-keys)
           (throw (ex-info "Constraint has unsupported attributes"

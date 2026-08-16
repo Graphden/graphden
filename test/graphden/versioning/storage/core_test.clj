@@ -14,6 +14,7 @@
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
+    [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.versioning.storage.core :as vs]
@@ -1679,4 +1680,128 @@
                             {:conflict-resolutions {[:fn id] :source}})
           (is (nil? (sp/read-entity vb :fn id))
               "the target's edit is overridden by the chosen source deletion")))
+      (finally (sp/close base)))))
+
+
+;; ============================================================================
+;; M2 — a merge must not COMMIT a corrupt per-branch resolved view. Two
+;; DISTINCT entities independently created on divergent branches with the
+;; same per-branch-unique key are NOT a conflict (detect-conflicts keys on
+;; [entity-name entity-id]); surfacing BOTH onto the target would leave two
+;; live rows sharing (namespace-id, name) [fn] or (binding-id, position)
+;; [list-item] — which direct create/update reject. The post-merge
+;; uniqueness guard must reject the merge (and roll it back) instead.
+;; ============================================================================
+
+(deftest merge-rejects-duplicate-fn-name-collision-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      ;; Two sibling branches off main, each independently creating a
+      ;; DISTINCT fn (different id) with the same root-namespace name.
+      (let [target (vs/create-branch! v "dup-name-target")
+            source (vs/create-branch! v "dup-name-source")
+            vt (vs/switch-branch v (:id target))
+            vsrc (vs/switch-branch v (:id source))
+            f-t (sp/create-entity vt :fn {:name "twin" :parent-ids [] :description "t"})
+            f-s (sp/create-entity vsrc :fn {:name "twin" :parent-ids [] :description "s"})]
+        (is (not= (:id f-t) (:id f-s))
+            "distinct identity rows sharing (nil-ns, name) — NOT a conflict")
+        (testing "merging source into target is rejected — would duplicate the live fn name"
+          (let [ex (try (vs/merge-branch! vt (:id source))
+                        (is false "merge should have thrown on the name collision")
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :constraint-violation/fn-name-collision (:type (ex-data ex))))))
+        (testing "the merge rolled back — no branch-merge record, target keeps ONE live twin"
+          (is (empty? (sp/query-entities base :branch-merge {:source-branch-id (:id source)}))
+              "the corrupt merge did not commit")
+          (is (= 1 (count (filter #(= "twin" (:name %)) (sp/query-entities vt :fn {}))))
+              "target's resolved view keeps exactly one live twin")))
+      (finally (sp/close base)))))
+
+
+(deftest merge-rejects-duplicate-list-item-position-collision-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      ;; Binding lives on main so both siblings inherit its identity; each
+      ;; then adds a DISTINCT item (random id) at position 0.
+      (let [b (make-list-binding! v "mrg")
+            target (vs/create-branch! v "li-dup-target")
+            source (vs/create-branch! v "li-dup-source")
+            vt (vs/switch-branch v (:id target))
+            vsrc (vs/switch-branch v (:id source))
+            item-t (sp/create-entity vt :binding-list-item
+                                     {:binding-id (:id b) :position 0 :value "t"})
+            item-s (sp/create-entity vsrc :binding-list-item
+                                     {:binding-id (:id b) :position 0 :value "s"})]
+        (is (not= (:id item-t) (:id item-s))
+            "distinct items sharing (binding-id, position 0) across siblings")
+        (testing "merging source into target is rejected — two items would share position 0"
+          (let [ex (try (vs/merge-branch! vt (:id source))
+                        (is false "merge should have thrown on the position collision")
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :constraint-violation/position-collision (:type (ex-data ex))))))
+        (testing "the merge rolled back — no branch-merge record"
+          (is (empty? (sp/query-entities base :branch-merge {:source-branch-id (:id source)}))
+              "the corrupt merge did not commit")))
+      (finally (sp/close base)))))
+
+
+;; ============================================================================
+;; M3 — a versioned create writes a base-identity row AND a version row.
+;; Off the lock path (a plain :binding / :fn-slot create has no advisory-lock
+;; key) both must land under ONE transaction, else a crash between them leaves
+;; a versionless GHOST identity (invisible to resolved reads). Fault-inject
+;; the version write and assert the base row rolled back with it.
+;; ============================================================================
+
+(deftest versioned-single-create-is-transactional-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [type-fn (sp/create-entity v :fn {:name "m3s-type" :parent-ids [] :description "h"})
+            owner   (sp/create-entity v :fn {:name "m3s-owner" :parent-ids [] :description "h"})
+            slot    (sp/create-entity v :slot {:name "m3s-x" :type-fn-id (:id type-fn)})
+            bid (random-uuid)
+            threw? (atom false)]
+        ;; Redef the private version-row writer to blow up AFTER the base
+        ;; :binding row insert inside `do-create!`.
+        (with-redefs-fn {#'vs/create-version-record!
+                         (fn [& _] (throw (ex-info "boom" {:injected true})))}
+          (fn []
+            (try
+              (sp/create-entity v :binding {:id bid :fn-id (:id owner)
+                                            :slot-id (:id slot) :value 1})
+              (catch clojure.lang.ExceptionInfo _ (reset! threw? true)))))
+        (is @threw? "the injected version-write failure propagates")
+        (is (nil? (sp/read-entity base :binding bid))
+            "base :binding identity row rolled back with the failed version write — no ghost"))
+      (finally (sp/close base)))))
+
+
+(deftest versioned-batch-create-is-transactional-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [type-fn (sp/create-entity v :fn {:name "m3b-type" :parent-ids [] :description "h"})
+            owner   (sp/create-entity v :fn {:name "m3b-owner" :parent-ids [] :description "h"})
+            slot    (sp/create-entity v :slot {:name "m3b-x" :type-fn-id (:id type-fn)})
+            bid (random-uuid)
+            threw? (atom false)]
+        ;; The batch path writes base rows then version rows through the
+        ;; postgres `create-entities` — inject a failure on the version
+        ;; entity, delegating the base write to the real impl.
+        (binding [pg-crud/*create-entities-override*
+                  (fn [ds ename dseq fields]
+                    (if (= :binding-version ename)
+                      (throw (ex-info "boom" {:injected true}))
+                      (#'pg-crud/create-entities-impl ds ename dseq fields)))]
+          (try
+            (sp/create-entities v :binding [{:id bid :fn-id (:id owner)
+                                             :slot-id (:id slot) :value 1}])
+            (catch clojure.lang.ExceptionInfo _ (reset! threw? true))))
+        (is @threw? "the injected batch version-write failure propagates")
+        (is (nil? (sp/read-entity base :binding bid))
+            "base :binding identity rows rolled back with the failed version batch — no ghost"))
       (finally (sp/close base)))))

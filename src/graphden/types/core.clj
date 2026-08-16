@@ -934,19 +934,20 @@
     (>= (count b) 2)
     (every? (fn [[k bt]]
               (when-let [at (get a k)]
-                ;; `:any` or a free type-var on the slot side is "no
-                ;; concrete constraint" — the callee may narrow it
-                ;; freely (assertion-style: "I expect this loose slot
-                ;; to actually carry T"). Typevar specifically: the
-                ;; slot's `a` gets bound at the call site, so any
-                ;; concrete callee arg-type is a valid satisfying
-                ;; assignment. Without the typevar arm, a callee
-                ;; tightened by upstream propagation (e.g. `:item
+                ;; A free type-var on the slot side is "no concrete
+                ;; constraint" — the slot's `a` gets bound at the call
+                ;; site, so any concrete callee arg-type is a valid
+                ;; satisfying assignment. Without the typevar arm, a
+                ;; callee tightened by upstream propagation (e.g. `:item
                 ;; [:union :null …]` after `:get :coll` narrowed the
                 ;; inferred shape) rejects a `[:fn {:item a} …]`
                 ;; slot even though the contravariant relation
                 ;; trivially holds under unification.
-                (or (= bt :any) (type-var? bt) (subtype? bt at))))
+                ;; NOTE: `:any` is NOT "no constraint" here — matching
+                ;; the positional arm (subtype-fn-test:414): the slot
+                ;; promises `:any` at call time and a callee narrowing
+                ;; the arg to `:int` would crash on a non-int input.
+                (or (type-var? bt) (subtype? bt at))))
             b)
 
     ;; Single-arg / nullary slot, callee of the same arity — positional.

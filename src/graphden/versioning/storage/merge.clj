@@ -17,6 +17,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.resolution :as res]
+    [graphden.versioning.storage.uniqueness :as uniq]
     [next.jdbc :as jdbc])
   (:import
     (java.time
@@ -469,6 +470,48 @@
                (or item-fn-ids #{}))))
 
 
+(defn- assert-merge-preserves-uniqueness!
+  "Guards the per-branch RESOLVED-VIEW uniqueness invariants across a
+   merge. `detect-conflicts` keys on `[entity-name entity-id]`, so two
+   DISTINCT entities independently created on divergent branches with the
+   same per-branch-unique key — a `:fn`'s `(namespace-id, name)` or a
+   `:binding-list-item`'s `(binding-id, position)` — are NOT a conflict.
+   Merging one branch into the other then surfaces BOTH onto the target,
+   leaving a resolved view that direct create/update reject and that
+   name→id resolution / sync (`:packages/ambiguous-ref`) treat as an error.
+
+   Runs INSIDE the merge transaction, AFTER the merge record + any
+   resolutions are written on `storage` — so it resolves the actual
+   POST-merge target view (the surfaced source rows now win/appear there).
+   Re-uses the SAME resolved-view checks the create/update path uses
+   (`uniqueness.clj`); a collision throws `:constraint-violation/*`, which
+   rolls the whole merge tx back rather than committing a corrupt view.
+
+   Only entities the merge SURFACES need checking — those with a version
+   row on the merged-in source branch. Branch-local source fns resolve to
+   nil / the target's own row on the target and so can't introduce a
+   collision (they never propagate), which resolving on the target handles
+   for free."
+  [storage source-branch-id target-branch-id]
+  ;; :fn — (namespace-id, name)
+  (let [src-fn-ids (into #{} (keep :fn-id)
+                         (sp/query-entities storage :fn-version
+                                            {:branch-id source-branch-id}))]
+    (doseq [fid src-fn-ids
+            :let [resolved (res/resolve-entity storage :fn fid target-branch-id)]
+            :when (:name resolved)]
+      (uniq/check-fn-name-collision! storage target-branch-id :fn resolved)))
+  ;; :binding-list-item — (binding-id, position)
+  (let [src-item-ids (into #{} (keep :item-id)
+                           (sp/query-entities storage :binding-list-item-version
+                                              {:branch-id source-branch-id}))
+        resolved (keep #(res/resolve-entity storage :binding-list-item % target-branch-id)
+                       src-item-ids)]
+    (when (seq resolved)
+      (uniq/check-list-item-position-collisions! storage target-branch-id
+                                                 :binding-list-item (vec resolved)))))
+
+
 (defn merge-branch!
   "Merges source branch into the current (target) branch.
 
@@ -524,6 +567,13 @@
                                                              target-branch-id merge-ts)]
                       (apply-resolutions! storage conflicts conflict-resolutions
                                           target-branch-id merge-ts)
+                      ;; POST-merge, still inside the tx: reject a merge that
+                      ;; would leave two live entities sharing a per-branch
+                      ;; unique key (fn name / list-item position) on the
+                      ;; target — a collision detect-conflicts can't see
+                      ;; (distinct ids). Throwing rolls the whole merge back.
+                      (assert-merge-preserves-uniqueness! storage source-branch-id
+                                                          target-branch-id)
                       merge-record))]
        (if-let [pool (:pool base-storage)]
          (jdbc/with-transaction [tx pool]

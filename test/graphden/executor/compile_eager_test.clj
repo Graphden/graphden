@@ -403,3 +403,100 @@
       (ce/set-always-fresh-fn-ids! #{id-b})
       (is (= #{id-a id-b} @ce/*always-fresh-fn-ids*)
           "the second prime (another ctx's view) must not drop the first's ids"))))
+
+
+;; ============================================================================
+;; compile-subset reachability — must match reachable-targets (delta path)
+;; ============================================================================
+;;
+;; `compile-subset` (delta-recompile! / load-cell!) recompiles a blast on top
+;; of an existing registry. It filtered the blast only per-fn (has-impl? +
+;; supported-shapes?), so a compilable G that :refs a non-compilable-but-
+;; existing H (no impl) survived the filter and was handed to compile-fn —
+;; whose `:ref` arm hit `(get child-callables H)` -> nil -> `:compile/missing-
+;; child` throw, aborting the whole delta swap and leaving the registry stale
+;; (a full rebuild then "fixes" it by excluding G, so the two paths diverge).
+;; A full compile-all EXCLUDES G via `reachable-targets` property (c); the
+;; delta must degrade the SAME way. These pin that parity.
+
+(defn- lookups-from-storage
+  "Compile lookups over EVERYTHING currently in `storage`, with the
+   global default base-fn registry attached so registered impls resolve."
+  [storage]
+  (assoc (l/build-lookups
+           {:fns (sp/query-entities storage :fn {})
+            :slots (sp/query-entities storage :slot {})
+            :fn-slots (sp/query-entities storage :fn-slot {})
+            :bindings (sp/query-entities storage :binding {})
+            :list-items (sp/query-entities storage :binding-list-item {})})
+         :base-fns (registry-base/get-default-registry)))
+
+
+(deftest compile-subset-drops-fn-refing-non-compilable-child-test
+  (testing "a delta subset over G->H(non-compilable) drops G instead of throwing"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (binding [registry-core/*rich-types-override*
+                  (atom (registry-core/snapshot-for-isolation))]
+          (ce/reset-compile-all-cache!)
+          (exec/register-base-fn! :ce-sub-const (setup/fn-impl [x] x))
+          (let [const (setup/create-base-fn! storage "ce-sub-const")
+                slot (setup/create-slot! storage "x" :any)
+                _ (setup/attach-slot! storage (:id const) (:id slot) 0)
+                ;; H: an existing base-fn ROW with NO registered impl ->
+                ;; has-impl? false -> non-compilable, but reffable.
+                noimpl (setup/create-base-fn! storage "ce-sub-noimpl")
+                ;; G: compilable on its own (root=ce-sub-const has an impl,
+                ;; ref shape supported) but :refs H.
+                g (setup/create-composed-fn! storage "ce-sub-g" (:id const))
+                _ (setup/bind-ref! storage (:id g) (:id slot) (:id noimpl))
+                lookups (lookups-from-storage storage)
+                ;; Baseline: what a FULL compile keeps.
+                full (ce/compile-all lookups)]
+            (is (contains? full (:id const)) "the plain base-fn compiles")
+            (is (not (contains? full (:id g)))
+                "full compile EXCLUDES G — it refs a non-compilable child")
+            (is (not (contains? full (:id noimpl)))
+                "and excludes the implless H itself")
+            ;; The delta: blast = #{G} on top of the full registry.
+            ;; Pre-fix this THREW :compile/missing-child.
+            (let [result (ce/compile-subset lookups full #{(:id g)})]
+              (is (map? result) "compile-subset returned without throwing")
+              (is (not (contains? result (:id g)))
+                  "G dropped from the delta — matches what full compile does")
+              (is (= (set (keys full)) (set (keys result)))
+                  "delta over an uncompilable blast is a no-op on the registry"))))
+        (finally
+          (sp/close storage)
+          (ce/reset-compile-all-cache!))))))
+
+
+(deftest compile-subset-recompiles-all-compilable-subset-test
+  (testing "an all-compilable subset still recompiles normally"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (binding [registry-core/*rich-types-override*
+                  (atom (registry-core/snapshot-for-isolation))]
+          (ce/reset-compile-all-cache!)
+          (exec/register-base-fn! :ce-sub-const2 (setup/fn-impl [x] x))
+          (let [const (setup/create-base-fn! storage "ce-sub-const2")
+                slot (setup/create-slot! storage "x" :any)
+                _ (setup/attach-slot! storage (:id const) (:id slot) 0)
+                ;; G2 refs the compilable const -> fully resolvable.
+                g2 (setup/create-composed-fn! storage "ce-sub-g2" (:id const))
+                _ (setup/bind-ref! storage (:id g2) (:id slot) (:id const))
+                lookups (lookups-from-storage storage)
+                full (ce/compile-all lookups)]
+            (is (contains? full (:id g2))
+                "G2 refs a compilable child -> full compile keeps it")
+            ;; Recompile the blast on top of an existing registry that
+            ;; doesn't yet carry G2 (simulate a fresh binding landing on G2).
+            (let [base (dissoc full (:id g2))
+                  result (ce/compile-subset lookups base #{(:id g2)})]
+              (is (contains? result (:id g2))
+                  "the all-compilable subset recompiled G2 into the registry")
+              (is (contains? result (:id const))
+                  "and preserved the pinned existing entry"))))
+        (finally
+          (sp/close storage)
+          (ce/reset-compile-all-cache!))))))

@@ -301,14 +301,17 @@
            marked `:branch-local? true` is local forever. The resolver's merge
            filter calls this so runtime-config fns — web-server port, vault
            path, cron schedule — never leak across branches on merge."}
-    {:ns graphden.versioning.storage.core :defn check-list-item-position-collisions!
-     :say "The list-item position-collision guard. A cross-branch base index on
-           `(binding-id, position)` would wrongly block divergence, so per-branch
-           uniqueness is enforced here in the resolved view instead — a subtle
-           invariant the write path defends with an advisory lock. Fn names
-           follow the same doctrine: `check-fn-name-collision!` just below
-           replaced the raw `UNIQUE (namespace_id, name)`, whose soft-deleted
-           identities blocked their names forever."}
+    {:ns graphden.versioning.storage.uniqueness :defn check-list-item-position-collisions!
+     :say "The list-item position-collision guard, now in a shared
+           `uniqueness` namespace so BOTH the write path (`core`) and the
+           merge path (`merge`) enforce it without a require cycle. A
+           cross-branch base index on `(binding-id, position)` would wrongly
+           block divergence, so per-branch uniqueness is enforced here in the
+           resolved view instead — a subtle invariant the write path defends
+           with an advisory lock. Fn names follow the same doctrine:
+           `check-fn-name-collision!` just below replaced the raw
+           `UNIQUE (namespace_id, name)`, whose soft-deleted identities blocked
+           their names forever."}
     {:ns graphden.versioning.storage.core :defn purgeable-identity-ids
      :say "Delete has TWO modes, and this guard is the heart of the hard one.
            User-facing deletes tombstone (a version row with `:deleted-at`, so

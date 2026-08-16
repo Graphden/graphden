@@ -78,6 +78,55 @@
 
 
 ;; =============================================================================
+;; Phase #170 — `:is-a?` narrowing is MARKER-PRESERVING
+;; =============================================================================
+;; Regression: the `:is-a?` arm returned the tag's structural type
+;; VERBATIM, discarding any `[:secret …]`/marker wrapper on the
+;; target's static return — so a secret-returning ref narrowed under
+;; `(:is-a? … :map)` lost its taint and a plain sink accepted it.
+
+(deftest is-a-narrowing-preserves-secret-marker
+  ;; Marker peeled, structural applied to the inner, marker re-wrapped.
+  (is (= [:secret :text]
+         (#'nar/narrowed-type-for-predicate :is-a? :taken [:secret :text] :text))
+      ":is-a? :text on [:secret :text] keeps the secret")
+  (is (= [:secret [:map :any :any]]
+         (#'nar/narrowed-type-for-predicate :is-a? :taken [:secret :jsonb] :map))
+      ":is-a? :map on [:secret :jsonb] → secret-wrapped structural map")
+  ;; No marker present → plain structural projection, as before.
+  (is (= [:map :any :any]
+         (#'nar/narrowed-type-for-predicate :is-a? :taken :jsonb :map))
+      "unmarked target still projects to the bare structural type")
+  ;; Unknown tag → decline to narrow (leave target as-is).
+  (is (= [:secret :text]
+         (#'nar/narrowed-type-for-predicate :is-a? :taken [:secret :text] :nope))
+      "unknown tag leaves the marked target untouched")
+  ;; Sanity: the `:some?` arm was already marker-preserving (strip-null).
+  (is (= [:secret [:union :null :text]]
+         (#'nar/narrowed-type-for-predicate :some? :taken [:secret [:union :null :text]] nil))
+      ":some? preserves the marker (strip-null baseline)"))
+
+
+(deftest if-branch-is-a-narrowing-keeps-secret-end-to-end
+  ;; `:my-isa` is an `(:is-a? :sec :map)` guard; `:sec` returns
+  ;; `[:secret :jsonb]`. The taken branch must record the map-narrowed
+  ;; type STILL wrapped in `:secret`; the not-taken branch sees the
+  ;; full (still-secret) static type.
+  (stub-registry
+    {:my-isa {:resolved-bindings {:value {:ref :sec} :type {:value :map}}
+              :return :bool}
+     :sec    {:return [:secret :jsonb]}}
+    {:my-isa :is-a?}
+    (fn []
+      (is (= {:then-fn {:sec [:secret [:map :any :any]]}
+              :else-fn {:sec [:secret :jsonb]}}
+             (#'nar/if-branch-overrides
+              {:name :f :parent :if
+               :args {:test :my-isa :then :then-fn :else :else-fn}}))
+          "taken branch keeps secret+structural; not-taken keeps full secret"))))
+
+
+;; =============================================================================
 ;; Phase α' — build-caller-narrowings
 ;; =============================================================================
 

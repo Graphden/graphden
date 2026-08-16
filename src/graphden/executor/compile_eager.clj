@@ -1106,6 +1106,31 @@
           (recur (conj! sorted fid) in-deg' ready'))))))
 
 
+(defn- prune-unresolvable
+  "Fixed point over `candidates`: keep a fn only while every one of
+   its ref-deps resolves to either an `available` id (something
+   compiled OUTSIDE this set — e.g. a pinned `existing-registry`
+   entry) or a surviving candidate. Drops — transitively — any fn
+   that refs an id resolvable through neither. This is property (c)
+   of `reachable-targets`, factored out so `compile-subset` shares
+   the exact same reachability discipline as the full compile:
+   a delta must never try to compile a fn the full path would
+   refuse (its `:ref` arm would throw `:compile/missing-child`)."
+  [candidates available lookups]
+  (loop [surviving (set candidates)]
+    (let [next-surviving
+          (into #{}
+                (filter (fn [fid]
+                          (every? (fn [dep]
+                                    (or (contains? available dep)
+                                        (contains? surviving dep)))
+                                  (ref-deps fid lookups))))
+                surviving)]
+      (if (= next-surviving surviving)
+        surviving
+        (recur next-surviving)))))
+
+
 (defn- reachable-targets
   "Fixed-point: fn-id is `target` iff (a) its root carries an impl,
    (b) every binding shape it uses is supported by this stage, and
@@ -1118,14 +1143,9 @@
                          (filter #(and (has-impl? % lookups)
                                        (supported-shapes? % lookups))))
                    (vals (:fn-map lookups)))]
-    (loop [targets seed]
-      (let [next-targets (into #{}
-                               (filter (fn [fid]
-                                         (every? targets (ref-deps fid lookups))))
-                               targets)]
-        (if (= next-targets targets)
-          targets
-          (recur next-targets))))))
+    ;; No pinned externals in a full compile — a ref must resolve to
+    ;; another target or it's dropped.
+    (prune-unresolvable seed #{} lookups)))
 
 
 (defn- compile-all*
@@ -1321,12 +1341,27 @@
    the subset pick those up from `existing-registry`.
 
    Skips fn-ids whose root has no registered impl (type-rows,
-   anonymous incomplete rows)."
+   anonymous incomplete rows) AND — same as the full-compile
+   `reachable-targets` — fn-ids whose ref-closure can't be fully
+   satisfied. A subset fn G that refs a non-compilable-but-existing
+   fn H (no impl / unsupported shape) is DROPPED rather than compiled:
+   H never entered `existing-registry`, so compiling G would hit the
+   `:ref` arm's `(get child-callables H)` → nil → `:compile/missing-
+   child` throw, aborting the whole delta and leaving the registry
+   stale. `reachable-targets` already excludes such a G from a full
+   compile; the delta path must degrade the same way, not throw."
   [lookups existing-registry subset-fn-ids]
-  (let [subset (into #{}
-                     (filter #(and (has-impl? % lookups)
-                                   (supported-shapes? % lookups)))
-                     subset-fn-ids)
+  (let [incoming (set subset-fn-ids)
+        candidates (into #{}
+                         (filter #(and (has-impl? % lookups)
+                                       (supported-shapes? % lookups)))
+                         incoming)
+        ;; Ref-deps resolvable from OUTSIDE this recompile: pinned
+        ;; `existing-registry` entries that are NOT themselves being
+        ;; recompiled here (a blast member's stale closure must not
+        ;; count as available — only its fresh survival does).
+        available (into #{} (remove incoming) (keys existing-registry))
+        subset (prune-unresolvable candidates available lookups)
         ;; Restrict deps to subset members for topo-sort — deps
         ;; outside the subset are pinned through `existing-registry`
         ;; and don't constrain order.

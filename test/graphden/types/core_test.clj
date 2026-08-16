@@ -494,7 +494,18 @@
                          [:fn {:request :int :next-handler :any} :int])))
     ;; extra callee args beyond the slot's keys are fine (captured).
     (is (t/subtype? [:fn {:request :int :next-handler :any :extra :int} :int]
-                    [:fn {:request :int :next-handler :any} :int])))
+                    [:fn {:request :int :next-handler :any} :int]))
+    ;; An `:any` map-callable slot arg is a REAL constraint, not "no
+    ;; constraint" — same strictness as the positional arm (see the
+    ;; `{:x :any}` case above): the slot promises `:any` at call time,
+    ;; so a callee narrowing that arg to `:int` would crash on a
+    ;; non-int input. Contravariance must REJECT it.
+    (is (not (t/subtype? [:fn {:x :int :y :int} :bool]
+                         [:fn {:x :any :y :any} :bool])))
+    ;; …but a free type-var slot arg still accepts any callee arg-type
+    ;; (it binds at the call site).
+    (is (t/subtype? [:fn {:x :int :y :int} :bool]
+                    [:fn {:x 'a :y 'b} :bool])))
   (testing "slot-level effect constraint — bound fn must not exceed allowed set"
     ;; sup says \":pred must be PURE\" (#{}). sub says \"I do nothing\" (#{}) → subtype.
     (is (t/subtype? [:fn {:item :int} :bool #{}]

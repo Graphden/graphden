@@ -292,19 +292,50 @@
     acc))
 
 
+(defn- structural-type-preserving-markers
+  "Project `target-static` onto the structural type for `type-tag`,
+   PRESERVING any markers (`[:secret …]`, `[:pii …]`, …) that wrap
+   the target's static return — the `:is-a?` counterpart to
+   `strip-null`'s marker-preservation. Peel the outer marker tags
+   in order, apply `is-a-tag->structural-type`, re-wrap with the same
+   tags so a secret stays a secret (soundness: an `:is-a?`-narrowed
+   branch must not launder taint into a plain sink).
+
+   Falls back to `target-static` unchanged when the tag is unknown."
+  [target-static type-tag]
+  (loop [t     target-static
+         tags  []]
+    (cond
+      (types/marker-type? t)
+      (recur (types/marker-inner t) (conj tags (types/marker-tag t)))
+
+      ;; A marker survived under a non-peelable wrapper (unusual): we
+      ;; can't re-attach it precisely, so decline to narrow rather than
+      ;; launder taint into the branch's recorded return.
+      (and (empty? tags) (types/contains-marker? target-static))
+      target-static
+
+      :else
+      (if-some [structural (get is-a-tag->structural-type type-tag)]
+        (reduce (fn [inner tag] (types/make-marker-type tag inner))
+                structural
+                (rseq tags))
+        target-static))))
+
+
 (defn- narrowed-type-for-predicate
   "Apply predicate-kind to target's static return. Supported predicates:
    - `:some?` taken → strip-null; not-taken → `:null`
    - `:nil?`  taken → `:null`; not-taken → strip-null
    - `:is-a?` taken → structural-type-for-tag (uses `is-a-tag->
-     structural-type`); not-taken → original (no useful subtraction
-     without a row-poly type-system)
+     structural-type`), marker-preserving; not-taken → original (no
+     useful subtraction without a row-poly type-system)
    `polarity` is `:taken` or `:not-taken`."
   [pred-kind polarity target-static & [type-tag]]
   (cond
     (= pred-kind :is-a?)
     (if (= polarity :taken)
-      (or (get is-a-tag->structural-type type-tag) target-static)
+      (structural-type-preserving-markers target-static type-tag)
       target-static)
 
     (or (and (= pred-kind :some?) (= polarity :taken))

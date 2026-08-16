@@ -72,22 +72,27 @@
     ;; this test catches it.
     (let [storage (setup/create-test-storage)]
       (try
-        (let [lookups (build-trivial-lookups storage)
-              ;; The FIRST compile over a graph records its rich-types as
-              ;; a side effect (`record-rich-types!`), which shifts the
-              ;; ambient snapshot that `compile-all-cache-key` hashes. If
-              ;; a prior test left the registry so these types aren't
-              ;; recorded yet, an un-warmed r1 keys off the pre-record
-              ;; snapshot and r2 off the post-record one → a spurious
-              ;; miss. Warm once to settle the (idempotent) record, THEN
-              ;; reset the cache, so the measured pair both key off the
-              ;; stable snapshot and genuinely hit.
-              _warm (ce/compile-all lookups)
-              _ (ce/reset-compile-all-cache!)
-              r1 (ce/compile-all lookups)
-              r2 (ce/compile-all lookups)]
-          (is (= r1 r2) "equal")
-          (is (identical? r1 r2) "identity-equal — cache hit, no recompile"))
+        (let [lookups (build-trivial-lookups storage)]
+          ;; `compile-all-cache-key` hashes the ambient rich-types, and
+          ;; the first compile over a graph records THIS graph's types as
+          ;; a side effect. Over the shared GLOBAL registry that makes the
+          ;; identity assertion fragile: a prior/concurrent test that
+          ;; leaves the registry unsettled (or resets it between the two
+          ;; calls) shifts the key and spuriously misses. Pin a
+          ;; thread-local override snapshot for the measured calls so the
+          ;; ambient rich-types are immune to any other test; warm once to
+          ;; settle the record INTO the override, reset the cache, then
+          ;; r1/r2 both key off the stable local snapshot and genuinely
+          ;; hit. (The NS is also `^:serial` so no concurrent compile-all
+          ;; evicts the 2-entry LRU between the two reads.)
+          (binding [registry-core/*rich-types-override*
+                    (atom (registry-core/snapshot-for-isolation))]
+            (ce/compile-all lookups)
+            (ce/reset-compile-all-cache!)
+            (let [r1 (ce/compile-all lookups)
+                  r2 (ce/compile-all lookups)]
+              (is (= r1 r2) "equal")
+              (is (identical? r1 r2) "identity-equal — cache hit, no recompile"))))
         (finally
           (sp/close storage))))))
 

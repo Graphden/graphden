@@ -279,11 +279,14 @@
 
 
 (defn- client-ip
-  "Best-effort client IP for rate-limiting — the first X-Forwarded-For hop
-   (trusts a front proxy) or the socket remote-addr."
+  "Best-effort client IP for rate-limiting — the LAST X-Forwarded-For hop
+   (the address the trusted front proxy actually saw) or the socket
+   remote-addr. The FIRST hop is client-supplied and spoofable: a
+   rotating `X-Forwarded-For:` header would sail past every limiter, so
+   we take the last, appended by the proxy."
   [request]
   (or (some-> (get-in request [:headers "x-forwarded-for"])
-              (str/split #",") first str/trim not-empty)
+              (str/split #",") last str/trim not-empty)
       (:remote-addr request)
       "unknown"))
 

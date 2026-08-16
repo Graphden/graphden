@@ -44,7 +44,8 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.system.interface :as sys]))
+    [graphden.system.interface :as sys]
+    [integrant.core :as ig]))
 
 
 ;; =============================================================================
@@ -156,10 +157,37 @@
         (log/info (str "nREPL listening on 0.0.0.0:" p))))))
 
 
+(defn ^:dynamic exit!
+  "JVM exit — a var so tests can stub it (a real `System/exit` would
+   kill the test runner)."
+  [code]
+  (System/exit code))
+
+
+(defn boot!
+  "Start the system, or HALT the partial system and exit non-zero on a
+   boot failure. Integrant does NOT auto-halt when an init-key throws —
+   without this, already-started non-daemon threads (the httpkit
+   web-server via the reconciler, the ticker / cleanup / alerter /
+   fleet schedulers) keep the JVM half-alive with NO shutdown hook
+   installed, and `/health` can pass (registry warm) while boot
+   actually failed. The partial system rides in the ex-info's
+   `:system` key."
+  []
+  (try
+    (start! :prod)
+    (catch clojure.lang.ExceptionInfo e
+      (log/error e "boot failed — halting the partial system and exiting")
+      (when-let [partial (:system (ex-data e))]
+        (try (ig/halt! partial)
+             (catch Exception t (log/warn t "partial-system halt failed"))))
+      (exit! 1))))
+
+
 (defn -main
   "Main entry point for the executor runtime."
   [& _args]
-  (start! :prod)
+  (boot!)
   (install-shutdown-hook!)
   (maybe-start-nrepl!)
   (log/info "Server running. Press Ctrl+C to stop.")

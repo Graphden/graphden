@@ -297,7 +297,12 @@
                                           (conj (or (get m fid) []) fs))))
                     (vswap! owners assoc! sid fid)))
                 fn-slots)
-          [(persistent! @own) (persistent! @owners)])
+          ;; Sort each fn's slots by declared :position (F2). `fn-slots`
+          ;; arrives in storage-hash order (resolve-all-entities iterates
+          ;; a hash map), so without this a collapsed level-0 card ordered
+          ;; its args arbitrarily — and expanding the card reordered them.
+          [(update-vals (persistent! @own) #(vec (sort-by :position %)))
+           (persistent! @owners)])
         binding-by (into {} (map (juxt (juxt :fn-id :slot-id) identity)) bindings)
         items-by-binding (->> list-items
                               (sort-by :position)

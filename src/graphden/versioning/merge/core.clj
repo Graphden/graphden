@@ -1,11 +1,22 @@
 (ns graphden.versioning.merge.core
   "Merge protection policies.
 
-   Two independent gates, both surfaced as `:merge-protection-violation`:
+   NOTE (2026-08): only gate 2 (branch policy) is LIVE. Gate 1
+   (trait-based `merge-protected`) is DORMANT — nothing production
+   SETS the trait (`add-merge-protection!` is called from tests only),
+   nothing on the live merge path CALLS `validate-merge!`/
+   `safe-merge-branch!` (the `:merge/*` base-fn runs
+   `validate-branch-policy!` then `vs/merge-branch!` directly), and its
+   stated use case (keep secrets on their branch) is superseded by
+   `:branch-local?` seeding `:secret-leaf` (CLAUDE.md § branch-local),
+   which the RESOLVER enforces on every read. The trait functions below
+   are kept for reference / a future re-wire but are a dead-code
+   removal candidate; VERSIONING.md no longer claims the endpoint 409s
+   on a protected-binding transfer.
 
-   1. Trait-based — bindings marked `merge-protected` should not
-      transfer from source to target. The trait is associated via the
-      `binding-trait` entity (see `graphden.schema.traits.schema`).
+   1. Trait-based (DORMANT) — bindings marked `merge-protected` should
+      not transfer from source to target. The trait is associated via
+      the `binding-trait` entity (see `graphden.schema.traits.schema`).
       Use cases: production credentials stay on the production branch;
       environment-specific secrets don't leak across branches.
 

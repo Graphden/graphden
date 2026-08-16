@@ -173,7 +173,13 @@
                  (remote-sse/start-source!
                    {:hub-url sse-url :token token
                     :on-event (fn [event]
-                                (when (= :fn (:kind event)) (submit-refresh!)))}))]
+                                (when (= :fn (:kind event)) (submit-refresh!)))
+                    ;; Refresh on every (re)connect too (F5): an invalidate
+                    ;; that landed during a disconnect window is lost (no
+                    ;; replay), and BYO has no PG epoch self-heal — SSE is
+                    ;; its only freshness signal. The CAS-coalesced
+                    ;; submit-refresh! makes a redundant resync cheap.
+                    :on-connect submit-refresh!}))]
     (log/info "BYO executor serving" {:org org :handler handler-fn :port port})
     {:server server :source source :ctx ctx :storage storage :refresh-exec refresh-exec}))
 

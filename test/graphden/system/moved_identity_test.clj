@@ -31,6 +31,43 @@
                      :parent-id parent-id}))
 
 
+(deftest reconciles-a-namespace-move-with-production-map-shape
+  ;; P1 regression: write-records! returns a {fn-name → id} MAP, not
+  ;; rows. reconcile must handle that shape — the old body treated it as
+  ;; rows (group-by :name over a map = {}), so EVERY move fell into the
+  ;; removal branch and repoint-refs! never ran.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [pkga (ns-row! storage "pkga" nil)
+            mail (ns-row! storage "pkga.mail" (:id pkga))
+            notify (ns-row! storage "pkga.notify" (:id pkga))
+            ghost-id (records/fn-id "pkga.mail" :send-email)
+            _ (sp/create-entity storage :fn
+                                {:id ghost-id :name "send-email"
+                                 :namespace-id (:id mail) :parent-ids []})
+            new-id (records/fn-id "pkga.notify" :send-email)
+            _ (sp/create-entity storage :fn
+                                {:id new-id :name "send-email"
+                                 :namespace-id (:id notify) :parent-ids []})
+            base (setup/create-base-fn! storage "mip-caller-base")
+            slot (setup/create-slot! storage "f" :int)
+            _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+            caller (setup/create-composed-fn! storage "mip-caller" (:id base))
+            bind (sp/create-entity storage :binding
+                                   {:fn-id (:id caller) :slot-id (:id slot)
+                                    :ref-fn-id ghost-id})
+            ;; PRODUCTION shape: a {fn-name-keyword → id} map from write-records!
+            n (pkg-sync/reconcile-moved-identities!
+                storage
+                {:packages [{:name "pkga"}]}
+                {:send-email new-id})]
+        (testing "the ghost is reconciled (repoint-refs ran) — map shape works"
+          (is (= 1 n))
+          (is (= new-id (:ref-fn-id (sp/read-entity storage :binding (:id bind)))))
+          (is (nil? (sp/read-entity storage :fn ghost-id)))))
+      (finally (sp/close storage)))))
+
+
 (deftest reconciles-a-namespace-move
   (let [storage (setup/create-test-storage)]
     (try

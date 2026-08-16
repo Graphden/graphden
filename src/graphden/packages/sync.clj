@@ -491,6 +491,18 @@
    split out so the seam check stays a one-liner."
   [storage packages synced-fn-rows]
   (let [base (idrepair/base-of storage)
+        ;; `write-records!` (the production caller) returns a
+        ;; `{fn-name-keyword → fn-id}` MAP, not rows. The old body ran
+        ;; `(group-by :name synced-fn-rows)` / `(keep :id …)` over it —
+        ;; `(:name MapEntry)` is nil, so `synced-by-name` was ALWAYS `{}`
+        ;; and EVERY moved identity fell into the removal branch with
+        ;; zero candidates → `repoint-refs!` never ran (a cross-ns fn
+        ;; move left dangling refs; the ROOT FIX was silently dead).
+        ;; Normalise to `{:name :id}` rows so BOTH shapes work (tests
+        ;; pass a vector of rows directly).
+        synced-rows (if (map? synced-fn-rows)
+                      (mapv (fn [[nm id]] {:name (name nm) :id id}) synced-fn-rows)
+                      synced-fn-rows)
         package-roots (into #{} (map :name) (:packages packages))
         ;; The COMPLETE expected package-identity set — not just the
         ;; composed `synced-fn-rows`. `synced-fn-rows` is ONLY the
@@ -504,10 +516,10 @@
         ;; SHOULD exist after this sync". Union the actual synced rows in
         ;; too (post-move-reconcile ids). A deterministic-id row absent
         ;; from THIS set is a real removal.
-        expected-ids (into (into #{} (keep :id) synced-fn-rows)
+        expected-ids (into (into #{} (keep :id) synced-rows)
                            (filter uuid?)
                            (vals (compute-all-fn-name-ids packages)))
-        synced-by-name (group-by :name (filter :name synced-fn-rows))
+        synced-by-name (group-by :name (filter :name synced-rows))
         ns-rows (sp/query-entities base :ns {})
         ns-by-id (into {} (map (juxt :id identity)) ns-rows)
         ns-path (fn ns-path

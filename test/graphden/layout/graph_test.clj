@@ -486,3 +486,27 @@
       (is (= [{:type "int"   :fns ["f1"] :source "binding-override"}
               {:type "jsonb" :fns ["f2"] :source "slot-declared"}]
              (bh/compute-edge-type-chain lookups a1 #{f1 f2}))))))
+
+
+(deftest layout-anonymous-ref-cycle-depth-bounded-test
+  ;; F3 regression: ANONYMOUS fns (name=nil) auto-expand, and process-fn's
+  ;; call-site-scoped cycle key grows each hop so it never repeats — an
+  ;; anonymous A↔B ref cycle recursed to a StackOverflow (a 500 on the
+  ;; editor read path). The depth cap in process-any-fn truncates the
+  ;; pathological subtree instead of crashing.
+  (testing "an anonymous ref cycle does not StackOverflow — layout returns"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "lg-anon-cycle-base")
+              slot (setup/create-slot! storage "x" :int)
+              _    (setup/attach-slot! storage (:id base) (:id slot) 0)
+              ;; Two ANONYMOUS composed fns (name nil) parented on base,
+              ;; each binding the shared slot to the other.
+              a    (sp/create-entity storage :fn {:name nil :parent-ids [(:id base)]})
+              b    (sp/create-entity storage :fn {:name nil :parent-ids [(:id base)]})
+              _    (setup/bind-ref! storage (:id a) (:id slot) (:id b))
+              _    (setup/bind-ref! storage (:id b) (:id slot) (:id a))
+              result (layout storage (:id a))]
+          (is (seq (:nodes result))
+              "the anonymous ref cycle layouts (truncated) rather than crashing"))
+        (finally (sp/close storage))))))

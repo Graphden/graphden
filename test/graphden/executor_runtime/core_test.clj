@@ -428,3 +428,20 @@
         (is (= :prod @profile-used) "-main starts with :prod profile")
         (is @hook-installed? "shutdown hook installed")
         (is @blocked? "block step reached")))))
+
+
+(deftest boot-halts-partial-system-and-exits-on-failure
+  ;; F8 regression: a boot failure must halt the partial system and
+  ;; exit non-zero — not leave a half-alive JVM whose /health passes.
+  (let [halted (atom nil)
+        exit-code (atom nil)
+        partial-sys {:some/key :running}]
+    (with-redefs [rt/start! (fn [& _]
+                              (throw (ex-info "init-key :db/postgres failed"
+                                              {:reason :integrant.core/build-threw-exception
+                                               :system partial-sys})))
+                  ig/halt! (fn [s] (reset! halted s))
+                  rt/exit! (fn [code] (reset! exit-code code))]
+      (rt/boot!)
+      (is (= partial-sys @halted) "the partial system was halted")
+      (is (= 1 @exit-code) "process exits non-zero"))))

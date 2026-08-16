@@ -615,6 +615,17 @@
                        :fn
                        {:name "_normal" :parent-ids [(:id other)]}
                        c)))))
+
+      (testing "F2: the UPDATE path is gated too — a plain fn PUT to
+                re-parent onto a gated base-fn is refused"
+        (let [other (setup/create-base-fn! storage "other-base-2" :text)
+              plain (entities/create-entity
+                      :fn {:name "_plain-to-reparent" :parent-ids [(:id other)]} c)]
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo #"created via POST /api/secrets"
+                (entities/update-entity :fn (:id plain) {:parent-ids [(:id sl)]} c)))
+          (testing "an update that doesn't touch :parent-ids is unaffected"
+            (is (some? (entities/update-entity :fn (:id plain) {:description "note"} c))))))
       (finally (sp/close storage)))))
 
 

@@ -524,33 +524,43 @@
         (sp/close storage)))))
 
 
-(deftest start-failure-is-recorded-as-nil-stopper-test
-  (testing "if the impl throws on start, the service is still tracked"
-    (let [storage (setup/create-branch-versioned-test-storage)
-          base-name "test-failing-svc"
-          composed-name "my-test-failing-svc"
-          impl-fn (fn [_args _ctx]
-                    (throw (ex-info "port in use" {:type :test/bind-err})))]
-      (exec/register-base-fn! (keyword base-name) impl-fn)
-      (let [base (setup/create-base-fn! storage base-name :any)
-            composed (setup/create-composed-fn! storage composed-name (:id base))
-            svc (sp/create-entity storage :service
-                                  {:fn-id (:id composed)
-                                   :enabled? true
-                                   :restart-policy :never})  ; no retries
-            c (setup/default-registry-ctx storage)
-            running (atom {})]
-        (try
+(deftest start-failure-marks-transient-and-reconverges-test
+  ;; S1/S2 regression: a failed start must NOT record a give-up entry
+  ;; that diff-desired treats as running forever (which stalled
+  ;; reconvergence and, for a lock-gated service, held the advisory
+  ;; slot with no sibling failover). It marks the transient
+  ;; `::start-failed`, which the next tick drops and RE-ATTEMPTS.
+  (let [storage (setup/create-branch-versioned-test-storage)
+        base-name "test-failing-svc"
+        composed-name "my-test-failing-svc"
+        attempts (atom 0)
+        fail? (atom true)
+        impl-fn (fn [_args _ctx]
+                  (swap! attempts inc)
+                  (if @fail?
+                    (throw (ex-info "port in use" {:type :test/bind-err}))
+                    (fn [] :stopped)))]
+    (exec/register-base-fn! (keyword base-name) impl-fn)
+    (let [base (setup/create-base-fn! storage base-name :any)
+          composed (setup/create-composed-fn! storage composed-name (:id base))
+          svc (sp/create-entity storage :service
+                                {:fn-id (:id composed)
+                                 :enabled? true
+                                 :restart-policy :never})
+          c (setup/default-registry-ctx storage)
+          running (atom {})]
+      (try
+        (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})
+        (testing "a failed start is a transient ::start-failed placeholder, not a give-up map"
+          (is (= :graphden.services.reconciler/start-failed (get @running (:id svc))))
+          (is (= 1 @attempts)))
+        (testing "the next tick re-attempts (reconvergence) — and succeeds once startable"
+          (reset! fail? false)
           (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})
-          (testing "service is registered in running with nil stopper"
-            (is (= 1 (count @running)))
-            (is (nil? (-> @running (get (:id svc)) :stopper)))
-            (is (some? (-> @running (get (:id svc)) :start-failed-at))
-                ":start-failed-at recorded so admin can see we gave up"))
-          (testing "subsequent stop is a logged no-op (does not throw)"
-            (is (some? (recon/stop-all! running)))
-            (is (zero? (count @running))))
-          (finally (sp/close storage)))))))
+          (is (= 2 @attempts) "the failed service was retried, not left for dead")
+          (is (map? (get @running (:id svc))) "it is now a live running entry")
+          (is (some? (-> @running (get (:id svc)) :stopper))))
+        (finally (sp/close storage))))))
 
 
 ;; ============================================================================
@@ -619,10 +629,8 @@
           (recon/reconcile-once! c running {:max-retries 99 :backoff-ms 0})
           (testing "exactly one call — max-retries ignored for :never"
             (is (= 1 @attempt-counter)))
-          (testing "start-attempts=1, start-failed-at set"
-            (let [entry (get @running (:id svc))]
-              (is (= 1 (:start-attempts entry)))
-              (is (some? (:start-failed-at entry)))))
+          (testing "the failed start is the transient ::start-failed placeholder"
+            (is (= :graphden.services.reconciler/start-failed (get @running (:id svc)))))
           (finally (sp/close storage)))))))
 
 
@@ -646,13 +654,12 @@
             running (atom {})]
         (try
           (recon/reconcile-once! c running {:max-retries 3 :backoff-ms 0})
-          (testing "exactly 1 + max-retries = 4 attempts before giving up"
+          (testing "exactly 1 + max-retries = 4 attempts within one pass before giving up"
             (is (= 4 @attempt-counter)))
-          (testing "entry exists with :start-failed-at + nil stopper"
-            (let [entry (get @running (:id svc))]
-              (is (= 4 (:start-attempts entry)))
-              (is (nil? (:stopper entry)))
-              (is (some? (:start-failed-at entry)))))
+          (testing "the failed start is the transient ::start-failed placeholder
+                    (S1/S2: no held slot, reconverges next tick — not a
+                    give-up map treated as running forever)"
+            (is (= :graphden.services.reconciler/start-failed (get @running (:id svc)))))
           (finally (sp/close storage)))))))
 
 

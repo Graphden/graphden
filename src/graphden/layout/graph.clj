@@ -24,6 +24,7 @@
    type-chain computation) live in `graphden.layout.builder-helpers`."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.executor.compile.renames :as renames]
     [graphden.layout.bindings :as bnd]
     [graphden.layout.builder-helpers :as bh]
@@ -548,114 +549,138 @@
     node-id))
 
 
+(def ^:private max-layout-depth
+  "Hard recursion bound for the walker. Named fns are leaf boundaries so
+   a normal graph nests only a handful; ANONYMOUS fns auto-expand and
+   their `process-fn` cycle-key (`node-id`-`hash bindings`) grows one
+   call-site tag per hop, so an anonymous ref cycle (A↔B, name=nil)
+   never repeats the key and recurses to a StackOverflow — which, on a
+   read path serving every editor render, is a 500. Write-time
+   GraphConstraints make this unreachable via normal authoring, but
+   imported / corrupt data must degrade to a truncated layout, not
+   crash the editor. The cap is far above any legit nesting."
+  512)
+
+
 (defn- process-any-fn
   [ctx fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root source-expanded-fns is-hof]
   ;; Named fns (with name in DB) are "boundaries" — their implementation
   ;; is hidden by default. Only the root fn and anonymous (name=nil) fns
   ;; are expanded automatically.
-  (let [{:keys [state lookups fn-map arg-map args-by-fn
-                inverse-source-map parent-bound-terminals expansions]} ctx
-        fn-entity (get fn-map fn-id)
-        is-named (and fn-entity (:name fn-entity))
-        ;; Compute the node-id this call-site will carry so we
-        ;; can look up its expansion spec under the exact key
-        ;; the frontend sent back.
-        node-id-for-lookup
-        (cond
-          (or is-root (nil? source-arg-id)) (str "fn-" fn-id)
-          :else (let [caller-tag (if (and source-node-id
-                                          (str/starts-with?
-                                            source-node-id "fn-"))
-                                   (subs source-node-id 3)
-                                   (str source-node-id))]
-                  (str "fn-" caller-tag "-" source-arg-id)))
-        spec (bh/get-effective-spec expansions node-id-for-lookup)
-        show-as-leaf (and is-named (not is-root) (bh/spec-trivial? spec))]
-    (if show-as-leaf
-      ;; Named leaf boundary. Show only THIS fn's own args.
-      (let [node-id (bh/add-fn-node state lookups fn-id false source-node-id source-arg-id)]
-        (bh/add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
-        (let [raw-own-args (get args-by-fn fn-id [])
-              seq-anchors (filterv bnd/sequence-anchor? raw-own-args)
-              seq-chain-ids (into #{}
-                                  (mapcat (fn [anchor]
-                                            (map :id (bnd/walk-anchor-chain anchor arg-map))))
-                                  seq-anchors)
-              anchor-ids (into #{} (map :id) seq-anchors)
-              own-args (filterv (fn [a]
-                                  (not (or (contains? anchor-ids (:id a))
-                                           (contains? seq-chain-ids (:id a)))))
-                                raw-own-args)
-              find-migrated
-              (fn [arg-id]
-                (when parent-bindings
-                  (some->> arg-id
-                           (get arg-map)
-                           :slot-id
-                           (get parent-bindings))))
-              ;; Dedup by (terminal-slot, rendered-kind).
-              seen (atom #{})
-              mark-once!
-              (fn [k]
-                (if (contains? @seen k) false (do (swap! seen conj k) true)))]
-          (doseq [arg own-args]
-            (let [has-value (true? (:value-present arg))
-                  has-ref (some? (:ref-id arg))
-                  migrated (when-not (or has-value has-ref)
-                             (find-migrated (:id arg)))
-                  terminal (bh/terminal-source-of arg-map (:id arg))]
-              (cond
-                has-value
-                (when (mark-once! [terminal :value (:value arg)])
-                  (bh/add-arg-value-node state lookups
-                                         {:arg-id (:id arg)
-                                          :arg-name (bnd/resolve-arg-name arg arg-map)
-                                          :value (:value arg)
-                                          :arg-type (:type arg)
-                                          :slot-id (:slot-id arg)
-                                          :binding-id (:binding-id arg)
-                                          :item-id (:item-id arg)
-                                          :fn-id (:fn-id arg)}
-                                         node-id #{fn-id}))
+  ;; Depth-bound the mutual recursion (F3): every recursive step funnels
+  ;; through here, so incrementing per level and stopping past the cap
+  ;; truncates a pathological (cyclic-anon) subtree instead of blowing
+  ;; the stack. `ctx` carries `:depth`; the incremented ctx flows to
+  ;; every child call below.
+  (let [depth (inc (long (:depth ctx 0)))]
+    (if (> depth max-layout-depth)
+      (do (log/warn "layout: recursion depth cap hit — truncating a subtree (cyclic refs?)"
+                    {:fn-id fn-id :depth depth})
+          nil)
+      (let [ctx (assoc ctx :depth depth)
+            {:keys [state lookups fn-map arg-map args-by-fn
+                    inverse-source-map parent-bound-terminals expansions]} ctx
+            fn-entity (get fn-map fn-id)
+            is-named (and fn-entity (:name fn-entity))
+            ;; Compute the node-id this call-site will carry so we
+            ;; can look up its expansion spec under the exact key
+            ;; the frontend sent back.
+            node-id-for-lookup
+            (cond
+              (or is-root (nil? source-arg-id)) (str "fn-" fn-id)
+              :else (let [caller-tag (if (and source-node-id
+                                              (str/starts-with?
+                                                source-node-id "fn-"))
+                                       (subs source-node-id 3)
+                                       (str source-node-id))]
+                      (str "fn-" caller-tag "-" source-arg-id)))
+            spec (bh/get-effective-spec expansions node-id-for-lookup)
+            show-as-leaf (and is-named (not is-root) (bh/spec-trivial? spec))]
+        (if show-as-leaf
+          ;; Named leaf boundary. Show only THIS fn's own args.
+          (let [node-id (bh/add-fn-node state lookups fn-id false source-node-id source-arg-id)]
+            (bh/add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
+            (let [raw-own-args (get args-by-fn fn-id [])
+                  seq-anchors (filterv bnd/sequence-anchor? raw-own-args)
+                  seq-chain-ids (into #{}
+                                      (mapcat (fn [anchor]
+                                                (map :id (bnd/walk-anchor-chain anchor arg-map))))
+                                      seq-anchors)
+                  anchor-ids (into #{} (map :id) seq-anchors)
+                  own-args (filterv (fn [a]
+                                      (not (or (contains? anchor-ids (:id a))
+                                               (contains? seq-chain-ids (:id a)))))
+                                    raw-own-args)
+                  find-migrated
+                  (fn [arg-id]
+                    (when parent-bindings
+                      (some->> arg-id
+                               (get arg-map)
+                               :slot-id
+                               (get parent-bindings))))
+                  ;; Dedup by (terminal-slot, rendered-kind).
+                  seen (atom #{})
+                  mark-once!
+                  (fn [k]
+                    (if (contains? @seen k) false (do (swap! seen conj k) true)))]
+              (doseq [arg own-args]
+                (let [has-value (true? (:value-present arg))
+                      has-ref (some? (:ref-id arg))
+                      migrated (when-not (or has-value has-ref)
+                                 (find-migrated (:id arg)))
+                      terminal (bh/terminal-source-of arg-map (:id arg))]
+                  (cond
+                    has-value
+                    (when (mark-once! [terminal :value (:value arg)])
+                      (bh/add-arg-value-node state lookups
+                                             {:arg-id (:id arg)
+                                              :arg-name (bnd/resolve-arg-name arg arg-map)
+                                              :value (:value arg)
+                                              :arg-type (:type arg)
+                                              :slot-id (:slot-id arg)
+                                              :binding-id (:binding-id arg)
+                                              :item-id (:item-id arg)
+                                              :fn-id (:fn-id arg)}
+                                             node-id #{fn-id}))
 
-                ;; Skip the migration recursion when the migrated binding's
-                ;; ref-id IS the leaf itself (StackOverflow guard — see the
-                ;; original letfn comment for the worked example).
-                (and migrated (:ref-id migrated)
-                     (not= (:ref-id migrated) fn-id))
-                (when (mark-once! [terminal :ref (:ref-id migrated)])
-                  (process-any-fn ctx (:ref-id migrated) node-id
-                                  (or (:arg-name migrated)
-                                      (bnd/resolve-arg-name arg arg-map))
-                                  false parent-bindings (:id arg)
-                                  nil #{fn-id} (bh/child-hof arg-map (:id arg) is-hof)))
+                    ;; Skip the migration recursion when the migrated binding's
+                    ;; ref-id IS the leaf itself (StackOverflow guard — see the
+                    ;; original letfn comment for the worked example).
+                    (and migrated (:ref-id migrated)
+                         (not= (:ref-id migrated) fn-id))
+                    (when (mark-once! [terminal :ref (:ref-id migrated)])
+                      (process-any-fn ctx (:ref-id migrated) node-id
+                                      (or (:arg-name migrated)
+                                          (bnd/resolve-arg-name arg arg-map))
+                                      false parent-bindings (:id arg)
+                                      nil #{fn-id} (bh/child-hof arg-map (:id arg) is-hof)))
 
-                (and migrated (true? (:value-present migrated)))
-                (when (mark-once! [terminal :value (:value migrated)])
-                  (bh/add-arg-value-node state lookups
-                                         (assoc migrated
-                                                :arg-id (:id arg)
-                                                :arg-name (or (:arg-name migrated)
-                                                              (bnd/resolve-arg-name arg arg-map))
-                                                :arg-type (:type arg)
-                                                :fn-id (:fn-id arg))
-                                         node-id #{fn-id}))
+                    (and migrated (true? (:value-present migrated)))
+                    (when (mark-once! [terminal :value (:value migrated)])
+                      (bh/add-arg-value-node state lookups
+                                             (assoc migrated
+                                                    :arg-id (:id arg)
+                                                    :arg-name (or (:arg-name migrated)
+                                                                  (bnd/resolve-arg-name arg arg-map))
+                                                    :arg-type (:type arg)
+                                                    :fn-id (:fn-id arg))
+                                             node-id #{fn-id}))
 
-                (and (not has-ref) (not (bh/arg-determined? arg-map parent-bound-terminals (:id arg))))
-                (when (mark-once! [terminal :unset])
-                  (bh/add-unset-arg-node state lookups inverse-source-map
-                                         (bnd/resolve-arg-name arg arg-map)
-                                         (:type arg) (:id arg) node-id #{fn-id} is-hof))))))
-        node-id)
-      ;; Normal processing
-      (if (bh/spec-trivial? spec)
-        (let [bindings (bnd/build-arg-bindings fn-id lookups)
-              bindings (if parent-bindings
-                         (merge parent-bindings bindings)
-                         bindings)]
-          (process-fn ctx fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns is-hof))
-        ;; Expanded mode - pass parent expansion-root to maintain context
-        (process-expanded-fn ctx fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root source-expanded-fns is-hof)))))
+                    (and (not has-ref) (not (bh/arg-determined? arg-map parent-bound-terminals (:id arg))))
+                    (when (mark-once! [terminal :unset])
+                      (bh/add-unset-arg-node state lookups inverse-source-map
+                                             (bnd/resolve-arg-name arg arg-map)
+                                             (:type arg) (:id arg) node-id #{fn-id} is-hof))))))
+            node-id)
+          ;; Normal processing
+          (if (bh/spec-trivial? spec)
+            (let [bindings (bnd/build-arg-bindings fn-id lookups)
+                  bindings (if parent-bindings
+                             (merge parent-bindings bindings)
+                             bindings)]
+              (process-fn ctx fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns is-hof))
+            ;; Expanded mode - pass parent expansion-root to maintain context
+            (process-expanded-fn ctx fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root source-expanded-fns is-hof)))))))
 
 
 ;; =============================================================================

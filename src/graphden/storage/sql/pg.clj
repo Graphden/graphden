@@ -11,6 +11,7 @@
    HikariCP pool that backs graphden's own storage so we don't open
    a fresh connection per call."
   (:require
+    [graphden.storage.postgres.util :as pg-util]
     [honey.sql :as honey]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
@@ -102,7 +103,11 @@
   [ctx hsql]
   (let [target (pg-target ctx)
         stmt   (format-hsql hsql)]
-    (vec (jdbc/execute! target stmt {:builder-fn rs/as-unqualified-maps}))))
+    ;; JDBC statement timeout (`*query-timeout-ms*` → seconds) so a
+    ;; tenant's raw-SQL `select pg_sleep(3600)` can't pin a pool
+    ;; connection indefinitely and starve the shared pool.
+    (vec (jdbc/execute! target stmt {:builder-fn rs/as-unqualified-maps
+                                     :timeout (pg-util/get-query-timeout-seconds)}))))
 
 
 (defn pg-execute
@@ -115,7 +120,9 @@
   [ctx hsql]
   (let [target (pg-target ctx)
         stmt   (format-hsql hsql)
-        result (jdbc/execute-one! target stmt {:return-keys false})]
+        result (jdbc/execute-one! target stmt
+                                  {:return-keys false
+                                   :timeout (pg-util/get-query-timeout-seconds)})]
     (long (or (:next.jdbc/update-count result) 0))))
 
 
@@ -133,7 +140,13 @@
    Nested `pg-tx` is allowed and uses the SAME connection — JDBC
    doesn't support true nested transactions, so we just reuse the
    outer one (semantically: the inner block's writes commit/abort
-   with the outer)."
+   with the outer).
+
+   NOTE: `pg-tx` pins ONE pool connection for the whole `body-fn`
+   duration. Each `pg-query`/`pg-execute` inside carries the JDBC
+   statement timeout, but a body interleaving slow non-SQL work still
+   holds the connection for that span — raw-SQL is a trusted
+   capability; keep bodies SQL-bound."
   [ctx body-fn]
   (if *tx-connection*
     ;; Already inside a transaction — reuse it. No new BEGIN/COMMIT.

@@ -461,7 +461,7 @@
     ;; its advisory slot (no NOTIFY), and here a sibling re-acquires it. A
     ;; service still fully held by siblings is simply re-marked ::not-our-lock
     ;; below, so the placeholder is transient, recomputed each pass.
-    (swap! running-atom (fn [m] (into {} (remove (fn [[_ v]] (= ::not-our-lock v))) m)))
+    (swap! running-atom (fn [m] (into {} (remove (fn [[_ v]] (contains? #{::not-our-lock ::start-failed} v))) m)))
     (let [storage (:storage ctx)
           lock-conn (lock-conn-from-ctx ctx)
           ;; Shard filter (task #6): drop tenant services whose org this pod
@@ -531,22 +531,40 @@
                                    {:service-id sid :slot slot})))))
 
             acquired?
-            (let [entry (start-service! svc-ctx svc start-opts)
-                  ;; Record the EFFECTIVE :branch-id (row's, or the router's
-                  ;; default for legacy nil-branch rows) so stop time and
-                  ;; `restart-services-on-branch!` can tell which branch this
-                  ;; run belonged to. :cardinality mirrors the row so drift
-                  ;; detection sees an admin flipping it. :locked? = THIS pod
-                  ;; holds a slot; :pool-slot = which one (for release +
-                  ;; reassert).
-                  eff-branch (effective-branch-id svc)
-                  entry' (cond-> (assoc entry
-                                        :cardinality (svc-schema/service-cardinality svc)
-                                        :pool-size pool-size
-                                        :locked? (some? slot)
-                                        :pool-slot slot)
-                           eff-branch (assoc :branch-id eff-branch))]
-              (swap! running-atom assoc sid entry'))
+            (let [entry (start-service! svc-ctx svc start-opts)]
+              (if (:start-failed-at entry)
+                ;; Start FAILED (retries exhausted, e.g. port taken /
+                ;; missing file on THIS pod). Don't HOLD the advisory
+                ;; slot — a healthy sibling must be able to fail over
+                ;; (S1) — and don't record the give-up entry as
+                ;; "running" forever, which stalled reconvergence (S2:
+                ;; diff-desired saw the id as running). Mark it the
+                ;; transient `::start-failed` that the top-of-pass drop
+                ;; clears, so the next tick RE-ATTEMPTS (the tick is
+                ;; retry-free → one cheap attempt). This is the
+                ;; reconvergence SERVICES.md promises.
+                (do (when (some? slot)
+                      (try (pg-lock/release-slot! lock-conn sid slot)
+                           (catch Exception e
+                             (log/warn e "advisory lock release after start-failure failed"
+                                       {:service-id sid :slot slot}))))
+                    (swap! not-our-lock conj sid)
+                    (swap! running-atom assoc sid ::start-failed))
+                ;; Record the EFFECTIVE :branch-id (row's, or the router's
+                ;; default for legacy nil-branch rows) so stop time and
+                ;; `restart-services-on-branch!` can tell which branch this
+                ;; run belonged to. :cardinality mirrors the row so drift
+                ;; detection sees an admin flipping it. :locked? = THIS pod
+                ;; holds a slot; :pool-slot = which one (for release +
+                ;; reassert).
+                (let [eff-branch (effective-branch-id svc)
+                      entry' (cond-> (assoc entry
+                                            :cardinality (svc-schema/service-cardinality svc)
+                                            :pool-size pool-size
+                                            :locked? (some? slot)
+                                            :pool-slot slot)
+                               eff-branch (assoc :branch-id eff-branch))]
+                  (swap! running-atom assoc sid entry'))))
 
             :else
             (do (swap! not-our-lock conj sid)

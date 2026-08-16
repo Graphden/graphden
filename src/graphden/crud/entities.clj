@@ -409,6 +409,17 @@
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
             check-data (assoc data :id id)]
+        ;; Capability gate on the UPDATE path too (F2): the create path
+        ;; already runs secret-leaf-capability-rej, but a tenant could
+        ;; create a plain fn then PUT :parent-ids pointing at an
+        ;; admin-only vault base-fn, landing a secret-shaped fn outside
+        ;; the audited /api/secrets flow. Only checked when the payload
+        ;; actually re-parents (:parent-ids present replaces the value).
+        (when (and (= et :fn) (contains? data :parent-ids))
+          (when-let [rej (secret-leaf-capability-rej storage check-data)]
+            (throw (ex-info (:reason rej)
+                            {:type (:type rej)
+                             :entity-type et :id id :data data}))))
         (when-let [rej (validation/write-rej storage et check-data)]
           (throw (ex-info (:reason rej)
                           {:type (:type rej)

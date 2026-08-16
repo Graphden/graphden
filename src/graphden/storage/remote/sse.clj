@@ -58,27 +58,36 @@
    close it — `Thread/.interrupt` does NOT unblock `BufferedReader.readLine`
    on a plain socket stream, so closing the body underneath the read is the
    only way to break out promptly on stop."
-  [client hub-url token on-event running? body-atom]
+  [client hub-url token on-event on-connect running? body-atom]
   (let [url (str hub-url "/events/stream")
         req (-> (HttpRequest/newBuilder (URI/create url))
                 (HttpRequest$Builder/.header "Authorization" (str "Bearer " token))
                 (HttpRequest$Builder/.GET)
                 (HttpRequest$Builder/.build))
         resp (HttpClient/.send client req (HttpResponse$BodyHandlers/ofInputStream))
-        status (HttpResponse/.statusCode resp)]
+        status (HttpResponse/.statusCode resp)
+        ^InputStream body (HttpResponse/.body resp)]
     (when (not= 200 status)
+      ;; Close the body stream before throwing (B3): the JDK client hands
+      ;; back a live InputStream even on a non-200, and a persistent 401
+      ;; (token revoked) would leak one connection per backoff tick.
+      (try (InputStream/.close body) (catch Exception _ nil))
       (throw (ex-info (str "SSE connect returned " status) {:url url :status status})))
-    (let [^InputStream body (HttpResponse/.body resp)]
-      (reset! body-atom body)
-      (try
-        (with-open [rdr (BufferedReader. (InputStreamReader. body "UTF-8"))]
-          (loop []
-            (when @running?
-              (let [line (BufferedReader/.readLine rdr)]
-                (when (some? line)                   ; nil = stream closed
-                  (handle-line on-event line)
-                  (recur))))))
-        (finally (reset! body-atom nil))))))
+    ;; Fresh (re)connection established — trigger a full resync (F5). A
+    ;; `fn:invalidate` that landed during the disconnect window was lost
+    ;; (no replay / Last-Event-ID), and a BYO executor has no PG epoch
+    ;; self-heal, so without this it stays stale until the NEXT edit.
+    (when on-connect (on-connect))
+    (reset! body-atom body)
+    (try
+      (with-open [rdr (BufferedReader. (InputStreamReader. body "UTF-8"))]
+        (loop []
+          (when @running?
+            (let [line (BufferedReader/.readLine rdr)]
+              (when (some? line)                   ; nil = stream closed
+                (handle-line on-event line)
+                (recur))))))
+      (finally (reset! body-atom nil)))))
 
 
 (defn start-source!
@@ -88,7 +97,7 @@
 
    `on-event` receives the parsed `{:kind :op :id :branch-id}` map — the same
    shape `graphden_events` delivers locally."
-  [{:keys [hub-url token on-event]}]
+  [{:keys [hub-url token on-event on-connect]}]
   (let [running? (atom true)
         ;; ONE HttpClient for the source's whole life — reused across every
         ;; reconnect. Creating it per-attempt (as before) leaked a
@@ -102,15 +111,22 @@
                  (fn []
                    (loop [backoff-ms backoff/initial-ms]
                      (when @running?
-                       (let [ok? (try (stream-once! client hub-url token on-event running? body-atom)
+                       (let [ok? (try (stream-once! client hub-url token on-event
+                                                    on-connect running? body-atom)
                                       true
                                       (catch Exception e
                                         (when @running?
                                           (log/warn e "SSE stream dropped — reconnecting"
                                                     {:hub hub-url}))
                                         false))]
-                         (when (and @running? (not ok?))
-                           (Thread/sleep (long backoff-ms)))
+                         ;; Always back off before reconnecting — even a
+                         ;; CLEAN server close (ok? true, e.g. an
+                         ;; idle-timeout-0 proxy that 200s then closes
+                         ;; immediately) would otherwise tight-loop (B2).
+                         ;; A long-lived connection resets to the initial
+                         ;; delay; an errored one keeps doubling.
+                         (when @running?
+                           (Thread/sleep (long (if ok? backoff/initial-ms backoff-ms))))
                          (recur (if ok? backoff/initial-ms (backoff/next-ms backoff-ms)))))))
                  "remote-sse-source")]
     (Thread/.setDaemon thread true)

@@ -25,16 +25,30 @@
     [org.httpkit.client :as http]))
 
 
-(defn- post-alert!
+(defn post-alert!
+  "POST the alert; returns true iff DELIVERED. httpkit does NOT throw on
+   transport failure — it returns `{:error e}`, and a non-2xx as
+   `{:status n}`. The old body only caught exceptions, so a refused
+   connection / DNS failure / bad webhook URL / Telegram 4xx was dropped
+   with no log AND (see run-once!) still burned the cooldown. Now we
+   inspect `:error`/`:status` and only report success on a 2xx. A
+   channel that produces no request (nothing configured) is a no-op →
+   true (don't wedge the cooldown on a permanent non-delivery)."
   [channel text]
-  (when-let [{:keys [url body]} (alerts/alert-request channel text)]
+  (if-let [{:keys [url body]} (alerts/alert-request channel text)]
     (try
-      @(http/post url
-                  {:headers {"Content-Type" "application/json"}
-                   :timeout 5000
-                   :body (json/generate-string body)})
+      (let [{:keys [status error]} @(http/post url
+                                               {:headers {"Content-Type" "application/json"}
+                                                :timeout 5000
+                                                :body (json/generate-string body)})]
+        (cond
+          error (do (log/warn error "alert POST transport failure") false)
+          (and (integer? status) (<= 200 status 299)) true
+          :else (do (log/warn "alert POST non-2xx" {:status status}) false)))
       (catch Exception e
-        (log/warn e "alert POST failed")))))
+        (log/warn e "alert POST failed")
+        false))
+    true))
 
 
 (defn run-once!
@@ -48,13 +62,24 @@
           err-now (get (counters/snapshot) :http/server-error 0)
           {:keys [error-base]} @state-atom
           err-delta (max 0 (- err-now (or error-base 0)))
+          prev-fired (:fired @state-atom)
           {:keys [fire state]} (alerts/decide
                                  {:org-totals totals :server-error-delta err-delta}
-                                 (:fired @state-atom) cfg now-ms)]
-      (swap! state-atom assoc :fired state :error-base err-now)
-      (when (seq fire)
-        (log/warn "domain alert firing" {:count (count fire)})
-        (post-alert! channel (alerts/summary-text fire)))
+                                 prev-fired cfg now-ms)
+          ;; Deliver BEFORE committing the cooldown. Advancing `:fired`
+          ;; regardless of delivery (the old order) silenced a LOST
+          ;; alert's keys for the whole cooldown — a sustained incident
+          ;; over a broken channel never paged. Keep the old cooldown
+          ;; map when delivery fails so the alert retries next tick.
+          ;; `:error-base` is a counter baseline, not a cooldown — it
+          ;; advances unconditionally.
+          delivered? (if (seq fire)
+                       (do (log/warn "domain alert firing" {:count (count fire)})
+                           (post-alert! channel (alerts/summary-text fire)))
+                       true)]
+      (swap! state-atom assoc
+             :error-base err-now
+             :fired (if delivered? state prev-fired))
       fire)
     (catch Exception e
       (log/warn e "alerter tick failed")

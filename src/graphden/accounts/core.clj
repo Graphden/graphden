@@ -40,6 +40,14 @@
   (BCrypt/hashpw password (BCrypt/gensalt bcrypt-cost)))
 
 
+(def ^:private dummy-hash
+  "A fixed cost-12 bcrypt hash verified against on the unknown-email
+   login path so the response time doesn't reveal whether an email is
+   registered (a hit runs ~250ms of bcrypt; a miss used to return
+   instantly). Never matches any real password."
+  (delay (BCrypt/hashpw "graphden-timing-equalizer" (BCrypt/gensalt bcrypt-cost))))
+
+
 (defn verify-password
   "True iff `password` matches the stored bcrypt hash. Never throws."
   [password stored]
@@ -303,8 +311,14 @@
    `{:account :account-id :totp-required? true}` (NO token — the caller runs the
    TOTP step); otherwise `{:account :account-id :token}` with a live session."
   [storage {:keys [email password]}]
-  (let [email (normalize-email email)]
-    (when-let [ident (and email (find-identity storage "password" email))]
+  (let [email (normalize-email email)
+        ident (and email (find-identity storage "password" email))]
+    (if-not ident
+      ;; Unknown email: run a bcrypt verify against a fixed dummy hash so
+      ;; the response time matches the known-email-wrong-password path
+      ;; (~250ms). Without this the fast no-identity return is a reliable
+      ;; registered-vs-unregistered timing oracle (M3).
+      (do (verify-password (str password) @dummy-hash) nil)
       (when (verify-password password (:secret-data ident))
         (let [account-id (:account-id ident)]
           (when-let [acct (account-of storage account-id)]

@@ -39,9 +39,16 @@
 
 (deftest parse-malformed-json-returns-ok-false
   (testing "an unparseable body produces a clean {:ok false :error} map, not a bubbled Jackson exception"
+    ;; The shared `read-json-body` now catches the Jackson parse failure
+    ;; and re-throws a typed `:validation-error/malformed-json`
+    ;; ExceptionInfo (so the direct API paths answer 400, not a 500 that
+    ;; inflates the server-error pager). The layout `:try` therefore sees
+    ;; an ExceptionInfo, not a raw JsonParseException, and surfaces that
+    ;; error's leak-safe static message — still a clean `{:ok false
+    ;; :error}`, just worded by the shared helper.
     (let [result (run "_parse-layout-request" {:request {:body (stream-of "not json")}})]
       (is (false? (:ok result)))
-      (is (= "Request body is not valid JSON" (:error result))))))
+      (is (= "Malformed JSON in request body." (:error result))))))
 
 
 (deftest parse-missing-root-id-returns-ok-false

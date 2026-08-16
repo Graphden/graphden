@@ -118,10 +118,14 @@
           (str rule " notes constraint non-propagation through arithmetic")))))
 
 
-(deftest return-type-rule-partial-route-is-public
-  ;; The popover projects read-only type structure — it must stay on
-  ;; the public `:get-route` parent (same posture as
-  ;; `/partials/provenance`) and stay registered in the route group.
+(deftest return-type-rule-partial-route-is-auth-gated
+  ;; The popover projects a tenant fn's return-type-rule attribution —
+  ;; tenant-private graph data. It must gate identically to its source
+  ;; `/api/graph/entities` (`:get-auth-required`: closed when auth is
+  ;; active, open when off), NOT the anonymous `:get-route` — a
+  ;; regression fixed in the round-3 audit (same posture as
+  ;; `/partials/provenance`, `/partials/inspector-*`). Stays registered
+  ;; in the route group.
   (let [routes (fn-defs (read-fns-edn "packages/app/routes/fns.edn"))
         route  (fn-def-by-name routes :partial-return-type-rule)
         groups (fn-defs (read-fns-edn "packages/app/route-groups/fns.edn"))
@@ -130,6 +134,6 @@
                         (get-in % [:args :items]))
                      groups)]
     (is (some? route) "route fn-def exists")
-    (is (= :get-route (:parent route)) "route is PUBLIC (:get-route)")
+    (is (= :get-auth-required (:parent route)) "route is auth-gated (:get-auth-required)")
     (is (= "/partials/return-type-rule" (get-in route [:args :path])))
     (is (some? items) "route is registered in the route group")))

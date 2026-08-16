@@ -446,16 +446,24 @@
 
 (defn begin-totp-enrollment!
   "Generate + store a fresh TOTP secret on `account-id` (enabled stays false
-   until confirmed). Returns `{:secret :otpauth-uri}` to show as a QR."
+   until confirmed). Returns `{:secret :otpauth-uri}` to show as a QR.
+
+   REFUSES when 2FA is already enabled: the old body unconditionally wrote
+   `:totp-enabled? false`, so any live session/token could silently strip
+   an account's existing second factor with no proof of the current device.
+   Re-enrolling requires disabling first (which demands a valid code)."
   [storage account-id]
-  (let [acct (account-of storage account-id)
-        secret (totp/generate-secret)]
-    (sp/update-entity storage :account (:id acct)
-                      (assoc acct :totp-secret secret :totp-enabled? false))
-    {:secret secret
-     :otpauth-uri (totp/otpauth-uri "Graphden"
-                                    (or (:primary-email acct) (str account-id))
-                                    secret)}))
+  (let [acct (account-of storage account-id)]
+    (when (totp-enabled? acct)
+      (throw (ex-info "2FA is already enabled — disable it first (requires your current code)"
+                      {:type :accounts/totp-already-enabled})))
+    (let [secret (totp/generate-secret)]
+      (sp/update-entity storage :account (:id acct)
+                        (assoc acct :totp-secret secret :totp-enabled? false))
+      {:secret secret
+       :otpauth-uri (totp/otpauth-uri "Graphden"
+                                      (or (:primary-email acct) (str account-id))
+                                      secret)})))
 
 
 (defn confirm-totp!
@@ -499,13 +507,22 @@
 (defn complete-2fa!
   "Given a pending-2fa token + a TOTP `code`, verify the code, consume the
    pending token, and mint a full session. Returns `{:account-id :token}` or
-   nil (bad/expired pending token or wrong code)."
+   nil (bad/expired pending token or wrong code).
+
+   SINGLE-USE: the pending token is consumed on ANY verification attempt —
+   success OR failure — so a wrong 6-digit code cannot be retried against
+   the held token (the ±1-step window makes 3/10^6 codes valid; the old
+   delete-only-on-success left the token brute-forceable for its full TTL).
+   A mistyped code costs one password re-entry, which the login limiter
+   then gates."
   [storage pending-token code]
   (when-not (str/blank? pending-token)
     (when-let [s (first (sp/query-entities storage :session
                                            {:token-hash (crypto/sha256-hex pending-token)}))]
-      (when (and (= "pending-2fa" (:kind s)) (session-live? s)
-                 (verify-totp storage (:account-id s) code))
+      (when (and (= "pending-2fa" (:kind s)) (session-live? s))
+        ;; Consume the token up front — this attempt is the token's last,
+        ;; pass or fail.
         (sp/delete-entities storage :session [(:id s)])
-        {:account-id (:account-id s)
-         :token (mint-session! storage (:account-id s))}))))
+        (when (verify-totp storage (:account-id s) code)
+          {:account-id (:account-id s)
+           :token (mint-session! storage (:account-id s))})))))

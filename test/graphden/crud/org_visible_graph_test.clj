@@ -14,6 +14,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.entities :as entities]
     [graphden.crud.types-api :as ta]
+    [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tctx]
     [graphden.types.diagnostics :as diag])
@@ -109,3 +110,33 @@
                        (let [{:keys [counts]} (entities/list-all-graph-entities ctx :tree)]
                          (is (= 1 (reduce + 0 (keep :type-error-count counts)))
                              "the owning org still sees its own count")))))))
+
+
+(deftest org-visible-rich-snapshot-filters-foreign-fns
+  ;; F1 regression: the NAME-keyed rich-type registry has no org filter,
+  ;; so a tenant enumerating /api/types would read every other org's
+  ;; composed-fn names + signatures. org-visible-rich-snapshot restricts
+  ;; it to names visible in the org-sliced graph.
+  (binding [registry/*rich-types-override* (atom {})]
+    (registry/record-rich-types-raw! pub-fn-id :public-fn
+                                     {:return :int :args {} :namespace nil})
+    (registry/record-rich-types-raw! a-fn-id :acme-secret-pipeline
+                                     {:return :text :args {:token :text} :namespace nil})
+    (registry/record-rich-types-raw! b-fn-id :bcorp-own-fn
+                                     {:return :bool :args {} :namespace nil})
+    (let [ctx {:graph-cache (atom full-graph)}]
+      (testing "a tenant sees only its own + public fn signatures"
+        (tctx/with-org "bcorp"
+                       (let [snap (ta/org-visible-rich-snapshot ctx)]
+                         (is (contains? snap :public-fn))
+                         (is (contains? snap :bcorp-own-fn))
+                         (is (not (contains? snap :acme-secret-pipeline))
+                             "acme's composed-fn signature must not leak to bcorp"))))
+      (testing "the owning org sees its own"
+        (tctx/with-org "acme"
+                       (let [snap (ta/org-visible-rich-snapshot ctx)]
+                         (is (contains? snap :acme-secret-pipeline))
+                         (is (not (contains? snap :bcorp-own-fn))))))
+      (testing "platform tier is an identity pass-through (single-tenant cache stays)"
+        (is (identical? (registry/rich-types-snapshot)
+                        (ta/org-visible-rich-snapshot ctx)))))))

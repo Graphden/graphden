@@ -92,13 +92,21 @@
             (is (true? (:totp-required (json/parse-string (:body resp) true))))
             (is (nil? (cookie-token resp "gd_session")) "no full session before the code")
             (is (some? pending))
-            (testing "a wrong code is rejected"
+            (testing "a wrong code is rejected AND consumes the pending token (M2:
+                      single-use — no brute-force against a held token)"
               (is (= 401 (:status (router {:request-method :post :uri "/auth/totp"
                                            :headers {"cookie" (str "gd_2fa=" pending)}
-                                           :body (json/generate-string {:code "000000"})})))))
-            (testing "the correct code completes login → full session"
-              (let [ok (router {:request-method :post :uri "/auth/totp"
-                                :headers {"cookie" (str "gd_2fa=" pending)}
+                                           :body (json/generate-string {:code "000000"})}))))
+              (is (= 401 (:status (router {:request-method :post :uri "/auth/totp"
+                                           :headers {"cookie" (str "gd_2fa=" pending)}
+                                           :body (json/generate-string {:code (code-now (:secret body))})})))
+                  "even the CORRECT code fails now — the wrong attempt burned the token"))
+            (testing "a fresh login mints a new pending token; the correct code completes it"
+              (let [resp2 (router {:request-method :post :uri "/auth/login"
+                                   :body (json/generate-string {:email "2fa@example.com" :password "pw-2fa-123"})})
+                    pending2 (cookie-token resp2 "gd_2fa")
+                    ok (router {:request-method :post :uri "/auth/totp"
+                                :headers {"cookie" (str "gd_2fa=" pending2)}
                                 :body (json/generate-string {:code (code-now (:secret body))})})]
                 (is (= 200 (:status ok)))
                 (is (some? (core/authenticate-token (storage) (cookie-token ok "gd_session"))))))))
@@ -109,3 +117,25 @@
           (let [resp (router {:request-method :post :uri "/auth/login"
                               :body (json/generate-string {:email "2fa@example.com" :password "pw-2fa-123"})})]
             (is (some? (cookie-token resp "gd_session")) "single-factor session returns directly")))))))
+
+
+(deftest ^:integration totp-reenroll-refused-when-already-enabled
+  ;; M1 regression: re-enrolling must not silently strip an existing
+  ;; second factor — the old body wrote :totp-enabled? false without
+  ;; proof of the current device.
+  (let [router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
+                                    :app-origin origin})
+        session (cookie-token (router {:request-method :post :uri "/auth/signup"
+                                       :body (json/generate-string {:email "reenroll@example.com" :password "pw-reenroll-1"})})
+                              "gd_session")
+        auth {"cookie" (str "gd_session=" session)}
+        body (json/parse-string (:body (router {:request-method :post :uri "/auth/totp/enroll" :headers auth})) true)]
+    (router {:request-method :post :uri "/auth/totp/confirm"
+             :headers auth :body (json/generate-string {:code (code-now (:secret body))})})
+    (is (true? (core/totp-enabled? (core/authenticate-token (storage) session))))
+    (testing "a second enroll is refused with 409 and 2FA stays enabled"
+      (let [resp (router {:request-method :post :uri "/auth/totp/enroll" :headers auth})]
+        (is (= 409 (:status resp)))
+        (is (= "totp_already_enabled" (:error (json/parse-string (:body resp) true))))
+        (is (true? (core/totp-enabled? (core/authenticate-token (storage) session)))
+            "the existing second factor is intact — not silently disabled")))))

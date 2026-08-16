@@ -68,12 +68,44 @@
 
 
 (defn- resolve-origin
-  "The public origin for redirect URIs + links: the configured value, else
-   derived from the request Host (https assumed — prod is TLS-terminated)."
+  "The public origin for redirect URIs (OAuth): the configured value, else
+   derived from the request Host (https assumed — prod is TLS-terminated).
+   OAuth redirects are safe with a Host-derived origin because the provider
+   allowlists redirect_uri; emailed LINKS are NOT — use `link-origin`."
   [configured request]
   (if (str/blank? (str configured))
     (str "https://" (get-in request [:headers "host"]))
     configured))
+
+
+(defn- dev-local-host?
+  "A loopback / private-network / .local Host — safe to trust without a
+   configured origin (developer machine). Anything else on the public
+   internet is attacker-controllable via the Host header."
+  [host]
+  (let [h (-> (str host) (str/split #":") first str/lower-case)]
+    (boolean
+      (or (= h "localhost") (= h "::1")
+          (str/starts-with? h "127.")
+          (str/starts-with? h "0.0.0.0")
+          (str/ends-with? h ".local")
+          (re-matches #"10\..*|192\.168\..*|172\.(1[6-9]|2\d|3[01])\..*" h)))))
+
+
+(defn- link-origin
+  "Trusted origin for EMAILED links (password reset / email verification).
+   The configured GRAPHDEN_APP_ORIGIN wins; when unset we derive from the
+   request Host ONLY for a dev-local host — a public Host is
+   attacker-controllable (a forged `Host:` header would email the victim a
+   reset link pointing at the attacker → account takeover), so we return
+   blank and the sender refuses. Distinct from `resolve-origin` (OAuth),
+   whose Host fallback is safe behind provider redirect_uri allowlisting."
+  [configured request]
+  (cond
+    (not (str/blank? (str configured))) configured
+    (dev-local-host? (get-in request [:headers "host"]))
+    (str "https://" (get-in request [:headers "host"]))
+    :else ""))
 
 
 (defn- cookie-str
@@ -180,11 +212,13 @@
 
 
 (defn- handle-signup
-  [storage mailer email-renderer origin request]
+  [storage mailer email-renderer origin link-orig request]
   (let [{:keys [email password]} (req/read-json-body request)]
     (try
       (let [{:keys [account-id token]} (core/password-signup! storage {:email email :password password})]
-        (flows/request-verification! storage mailer origin account-id email
+        ;; Verify email uses the TRUSTED link origin (M5); the session
+        ;; cookie's Secure flag still keys off the request origin.
+        (flows/request-verification! storage mailer link-orig account-id email
                                      email-renderer)
         (json-resp 200 {:ok true :verification-sent true} (session-cookie token origin)))
       (catch clojure.lang.ExceptionInfo e
@@ -195,7 +229,7 @@
   "Re-send the verification email for the signed-in account's still-unverified
    password identity. Idempotent-ish (mints a fresh token each call); answers
    200 whether or not there was anything to send (no state leak)."
-  [storage mailer email-renderer origin request]
+  [storage mailer email-renderer link-orig request]
   (if-let [acct (current-account storage request)]
     (do
       (when-let [ident (->> (core/identities-for-account storage (str (:id acct)))
@@ -203,7 +237,7 @@
                                           (not (:email-verified? %))
                                           (:email %)))
                             first)]
-        (flows/request-verification! storage mailer origin (str (:id acct)) (:email ident)
+        (flows/request-verification! storage mailer link-orig (str (:id acct)) (:email ident)
                                      email-renderer))
       (json-resp 200 {:ok true}))
     (json-resp 401 {:ok false :error "unauthenticated"})))
@@ -239,7 +273,12 @@
 (defn- handle-totp-enroll
   [storage request]
   (if-let [acct (current-account storage request)]
-    (json-resp 200 (assoc (core/begin-totp-enrollment! storage (str (:id acct))) :ok true))
+    (try
+      (json-resp 200 (assoc (core/begin-totp-enrollment! storage (str (:id acct))) :ok true))
+      (catch clojure.lang.ExceptionInfo e
+        (if (= :accounts/totp-already-enabled (:type (ex-data e)))
+          (json-resp 409 {:ok false :error "totp_already_enabled"})
+          (throw e))))
     (json-resp 401 {:ok false :error "unauthenticated"})))
 
 
@@ -294,9 +333,9 @@
 (defn- handle-forgot
   "POST /auth/forgot {email} — always 200 with the same body whether or not
    the email exists (no account enumeration); the reset link goes by email."
-  [storage mailer email-renderer origin request]
+  [storage mailer email-renderer link-orig request]
   (let [{:keys [email]} (req/read-json-body request)]
-    (flows/request-password-reset! storage mailer origin email email-renderer)
+    (flows/request-password-reset! storage mailer link-orig email email-renderer)
     (json-resp 200 {:ok true :reset-sent true})))
 
 
@@ -384,7 +423,11 @@
       (let [uri (str (:uri request))
             method (:request-method request)]
         (when (or (str/starts-with? uri "/auth/") (= uri "/login") (= uri "/account") (= uri "/reset"))
-          (let [origin (resolve-origin app-origin request)]
+          (let [origin (resolve-origin app-origin request)
+                ;; Trusted origin for EMAILED links only — never a
+                ;; poisonable public Host (M5). Blank ⇒ the sender
+                ;; refuses rather than email an attacker's URL.
+                link-orig (link-origin app-origin request)]
             (cond
               (and (= method :get) (= uri "/login"))
               (html-resp (graph-page page-renderer :login
@@ -420,7 +463,7 @@
 
               (and (= method :post) (= uri "/auth/signup"))
               (if (signup-limit (client-ip request))
-                (handle-signup storage mailer email-renderer origin request)
+                (handle-signup storage mailer email-renderer origin link-orig request)
                 (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/login"))
@@ -431,7 +474,7 @@
 
               (and (= method :post) (= uri "/auth/forgot"))
               (if (forgot-limit (client-ip request))
-                (handle-forgot storage mailer email-renderer origin request)
+                (handle-forgot storage mailer email-renderer link-orig request)
                 (json-resp 200 {:ok true :reset-sent true}))
 
               (and (= method :post) (= uri "/auth/reset"))
@@ -439,7 +482,7 @@
 
               (and (= method :post) (= uri "/auth/resend-verification"))
               (if (forgot-limit (client-ip request))
-                (handle-resend-verification storage mailer email-renderer origin request)
+                (handle-resend-verification storage mailer email-renderer link-orig request)
                 (json-resp 200 {:ok true}))
 
               (and (= method :post) (= uri "/auth/logout"))

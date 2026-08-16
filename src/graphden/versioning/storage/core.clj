@@ -1124,6 +1124,29 @@
                         {:type :constraint-violation/branch-has-children
                          :branch-id branch-id
                          :child-branch-ids (mapv :id children)}))))
+    ;; Refuse to delete a branch that is a live MERGE SOURCE. Merge is
+    ;; by-reference — no version rows are copied — so the target's
+    ;; merged-in content lives entirely in THIS branch's version rows
+    ;; (read via `merges-by-target`). Deleting them (below) would
+    ;; silently revert every such target to its pre-merge state, leaving
+    ;; versionless ghost identities. Data-integrity beats convenience:
+    ;; the merged branch stays deletable only once its targets are gone.
+    ;; (Targets already deleted don't count — their merge records were
+    ;; removed with them.)
+    (let [source-merges (sp/query-entities base :branch-merge {:source-branch-id branch-id})
+          live-targets (into []
+                             (comp (map :target-branch-id)
+                                   (distinct)
+                                   (filter #(some? (sp/read-entity base :branch %))))
+                             source-merges)]
+      (when (seq live-targets)
+        (throw (ex-info (str "Branch is a merge source for " (count live-targets)
+                             " branch(es) that still exist — deleting it would "
+                             "revert their merged-in content. Delete those "
+                             "branches first, or keep this one.")
+                        {:type :constraint-violation/branch-is-merge-source
+                         :branch-id branch-id
+                         :merged-into-branch-ids live-targets}))))
     ;; Soft-disable services scoped to this branch so the reconciler
     ;; stops them on its next pass — see the docstring's cascade note.
     ;; The `:service` entity is only registered when the services

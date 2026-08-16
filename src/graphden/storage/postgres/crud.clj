@@ -406,29 +406,36 @@
             batch-ids (mapv :id records)
             [columnar-records ref-many-records] (split-ref-many-batch records fields)
             rows (mapv #(entity->row % fields) columnar-records)
-            columns (collect-batch-columns rows)
-            result-rows (into []
-                              (mapcat (fn [chunk]
-                                        (batch-execute!
-                                          ds
-                                          (sql/format {:insert-into table-name
-                                                       :columns columns
-                                                       :values (batch-row-values (vec chunk) columns)
-                                                       :returning [:*]}
-                                                      {:quoted true})
-                                          :create-entities entity-name batch-ids batch-size)))
-                              (chunk-rows rows (count columns)))
-            expected-count batch-size
-            actual-count (count result-rows)]
-        ;; Validate that all records were inserted
-        (when (not= expected-count actual-count)
-          (throw (ex-info "Batch insert returned unexpected number of records"
-                          {:type :batch-insert-mismatch
-                           :entity-name entity-name
-                           :expected-count expected-count
-                           :actual-count actual-count})))
-        (write-junction-rows! ds entity-name batch-ids ref-many-records fields false)
-        (merge-back-ref-many result-rows ref-many-records fields)))))
+            columns (collect-batch-columns rows)]
+        ;; The row batch + junction rows must land atomically — a failed
+        ;; junction insert after the row batch commits would leave orphan
+        ;; rows (single-entity create wraps exactly this, crud.clj do-create).
+        ;; Only pay the transaction when there ARE ref-many fields to write.
+        (letfn [(do-batch
+                  [conn]
+                  (let [result-rows (into []
+                                          (mapcat (fn [chunk]
+                                                    (batch-execute!
+                                                      conn
+                                                      (sql/format {:insert-into table-name
+                                                                   :columns columns
+                                                                   :values (batch-row-values (vec chunk) columns)
+                                                                   :returning [:*]}
+                                                                  {:quoted true})
+                                                      :create-entities entity-name batch-ids batch-size)))
+                                          (chunk-rows rows (count columns)))
+                        actual-count (count result-rows)]
+                    (when (not= batch-size actual-count)
+                      (throw (ex-info "Batch insert returned unexpected number of records"
+                                      {:type :batch-insert-mismatch
+                                       :entity-name entity-name
+                                       :expected-count batch-size
+                                       :actual-count actual-count})))
+                    (write-junction-rows! conn entity-name batch-ids ref-many-records fields false)
+                    (merge-back-ref-many result-rows ref-many-records fields)))]
+          (if (seq ref-many-records)
+            (jdbc/with-transaction [tx ds] (do-batch tx))
+            (do-batch ds)))))))
 
 
 (defn create-entities
@@ -611,28 +618,36 @@
                                  :entity-name entity-name
                                  :missing-ids missing})))
               (map #(get existing (:id %)) records))
-            ;; Normal case: have columns to update
-            (let [result-rows (into []
-                                    (mapcat (fn [chunk]
-                                              (batch-execute!
-                                                ds
-                                                (build-batch-update-sql table-name-str (vec chunk)
-                                                                        columns update-columns fields)
-                                                :update-entities entity-name batch-ids batch-size)))
-                                    (chunk-rows rows (count columns)))
-                  actual-count (count result-rows)]
-              ;; Validate that all records were updated
-              (when (not= batch-size actual-count)
-                (let [updated-ids (set (map :id result-rows))
-                      missing (vec (remove updated-ids batch-ids))]
-                  (throw (ex-info "Entity not found"
-                                  {:type :not-found
-                                   :entity-name entity-name
-                                   :missing-ids missing
-                                   :expected-count batch-size
-                                   :actual-count actual-count}))))
-              (write-junction-rows! ds entity-name batch-ids ref-many-records fields true)
-              (merge-back-ref-many result-rows ref-many-records fields))))))))
+            ;; Normal case: have columns to update. Row batch + junction
+            ;; REPLACE (delete-then-insert) must be atomic — a failed insert
+            ;; on a separate autocommit connection would leave the ref-many
+            ;; relation WIPED for every owner in the batch (for :fn that's
+            ;; parent-ids). Mirrors single-entity update's transaction.
+            (letfn [(do-batch
+                      [conn]
+                      (let [result-rows (into []
+                                              (mapcat (fn [chunk]
+                                                        (batch-execute!
+                                                          conn
+                                                          (build-batch-update-sql table-name-str (vec chunk)
+                                                                                  columns update-columns fields)
+                                                          :update-entities entity-name batch-ids batch-size)))
+                                              (chunk-rows rows (count columns)))
+                            actual-count (count result-rows)]
+                        (when (not= batch-size actual-count)
+                          (let [updated-ids (set (map :id result-rows))
+                                missing (vec (remove updated-ids batch-ids))]
+                            (throw (ex-info "Entity not found"
+                                            {:type :not-found
+                                             :entity-name entity-name
+                                             :missing-ids missing
+                                             :expected-count batch-size
+                                             :actual-count actual-count}))))
+                        (write-junction-rows! conn entity-name batch-ids ref-many-records fields true)
+                        (merge-back-ref-many result-rows ref-many-records fields)))]
+              (if (seq ref-many-records)
+                (jdbc/with-transaction [tx ds] (do-batch tx))
+                (do-batch ds)))))))))
 
 
 (defn upsert-entities
@@ -661,31 +676,35 @@
             columns (collect-batch-columns rows)
             ;; Build ON CONFLICT DO UPDATE SET for all columns except :id
             ;; HoneySQL auto-generates SET col = EXCLUDED.col when given a vector
-            update-columns (vec (remove #{:id} columns))
-            result-rows (into []
-                              (mapcat (fn [chunk]
-                                        (batch-execute!
-                                          ds
-                                          (sql/format {:insert-into table-name
-                                                       :columns columns
-                                                       :values (batch-row-values (vec chunk) columns)
-                                                       :on-conflict [:id]
-                                                       :do-update-set update-columns
-                                                       :returning [:*]}
-                                                      {:quoted true})
-                                          :upsert-entities entity-name batch-ids batch-size)))
-                              (chunk-rows rows (count columns)))
-            expected-count batch-size
-            actual-count (count result-rows)]
-        ;; Validate that all records were upserted
-        (when (not= expected-count actual-count)
-          (throw (ex-info "Batch upsert returned unexpected number of records"
-                          {:type :batch-upsert-mismatch
-                           :entity-name entity-name
-                           :expected-count expected-count
-                           :actual-count actual-count})))
-        (write-junction-rows! ds entity-name batch-ids ref-many-records fields true)
-        (merge-back-ref-many result-rows ref-many-records fields)))))
+            update-columns (vec (remove #{:id} columns))]
+        ;; Row batch + junction REPLACE must be atomic (see update-entities).
+        (letfn [(do-batch
+                  [conn]
+                  (let [result-rows (into []
+                                          (mapcat (fn [chunk]
+                                                    (batch-execute!
+                                                      conn
+                                                      (sql/format {:insert-into table-name
+                                                                   :columns columns
+                                                                   :values (batch-row-values (vec chunk) columns)
+                                                                   :on-conflict [:id]
+                                                                   :do-update-set update-columns
+                                                                   :returning [:*]}
+                                                                  {:quoted true})
+                                                      :upsert-entities entity-name batch-ids batch-size)))
+                                          (chunk-rows rows (count columns)))
+                        actual-count (count result-rows)]
+                    (when (not= batch-size actual-count)
+                      (throw (ex-info "Batch upsert returned unexpected number of records"
+                                      {:type :batch-upsert-mismatch
+                                       :entity-name entity-name
+                                       :expected-count batch-size
+                                       :actual-count actual-count})))
+                    (write-junction-rows! conn entity-name batch-ids ref-many-records fields true)
+                    (merge-back-ref-many result-rows ref-many-records fields)))]
+          (if (seq ref-many-records)
+            (jdbc/with-transaction [tx ds] (do-batch tx))
+            (do-batch ds)))))))
 
 
 (defn delete-entities

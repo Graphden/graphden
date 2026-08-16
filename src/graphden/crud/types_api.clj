@@ -81,6 +81,33 @@
           data))))
 
 
+(defn org-visible-rich-snapshot
+  "The NAME-keyed rich-type snapshot restricted to names the current
+   org may see — the registry equivalent of `org-visible-slice`. The
+   in-memory registry is name-keyed and, unlike the graph cache, has
+   NO org filter (`record-rich-types-raw!` writes every tenant fn to
+   the global index unconditionally), so serving it raw to a tenant
+   enumerates every OTHER org's composed-fn names, arg types, returns
+   and effects through `/api/types` + `/api/types/candidates`. We keep
+   only entries whose (bare) name appears as a fn-row in the org-sliced
+   graph — public base-fns / type-rows (org-id nil) and the org's own
+   fns pass; foreign-org composed fns drop out. Platform-tier viewers
+   (`*current-org*` unbound) get the snapshot object unchanged so the
+   single-tenant cache in `rich-types-with-type-rows` still hits by
+   identity."
+  [ctx]
+  (let [snap (registry/rich-types-snapshot)
+        org (tctx/current-org)]
+    (if (tctx/platform-tier? org)
+      snap
+      (let [visible (into #{}
+                          (comp (map :name) (filter some?) (map keyword))
+                          (:fns (cached-or-load-graph ctx)))]
+        (into {}
+              (filter (fn [[k _]] (contains? visible (keyword (name k)))))
+              snap)))))
+
+
 (defn compute-fn-role
   "Row-role via the shared `records.types/type-row-role`, plus a
    belt-and-braces registry fallback: a fn-name with a non-empty
@@ -175,7 +202,7 @@
    up `:port` → expect `[:refine :int [:and [:>= 1] [:<= 65535]]]`,
    so we expose the structural form alongside the existing entries."
   [ctx]
-  (let [raw-snapshot (registry/rich-types-snapshot)
+  (let [raw-snapshot (org-visible-rich-snapshot ctx)
         graph (cached-or-load-graph ctx)
         ;; The org rides the identity key: `cached-or-load-graph` now
         ;; returns a per-org SLICE (fresh vectors per read for tenants),

@@ -1597,3 +1597,86 @@
         (testing "identity survives — referenced in a child's parent-ids"
           (is (= 1 (count (sp/read-entities base :fn [(:id parent)]))))))
       (finally (sp/close base)))))
+
+
+(deftest delete-merge-source-branch-refused-test
+  ;; V1 regression: merge is by-reference (no version rows copied), so the
+  ;; target's merged-in content lives in the SOURCE branch's version rows.
+  ;; Deleting the source would silently revert the target — refuse it.
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "dms-fn" :parent-ids [] :description "base"})
+            feature (vs/create-branch! v "dms-feat")
+            vf (vs/switch-branch v (:id feature))
+            _ (sp/update-entity vf :fn (:id f) {:description "from-feature"})
+            _ (vs/merge-branch! v (:id feature))]
+        (testing "main sees the merged edit"
+          (is (= "from-feature" (:description (sp/read-entity v :fn (:id f))))))
+        (testing "deleting the merged SOURCE branch is refused"
+          (let [ex (try (vs/delete-branch! v (:id feature))
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :constraint-violation/branch-is-merge-source (:type (ex-data ex))))
+            (is (= [(vs/current-branch-id v)] (:merged-into-branch-ids (ex-data ex)))))
+          (is (= "from-feature" (:description (sp/read-entity v :fn (:id f))))
+              "the merged content is intact — nothing was reverted"))
+        (testing "once the target's own merged version stands alone the source stays refused
+                  (data-integrity semantic: keep the merged branch)"
+          ;; Sanity: the target still resolves the merged value.
+          (is (some? (sp/read-entity v :fn (:id f))))))
+      (finally (sp/close base)))))
+
+
+(deftest conflict-target-over-delete-keeps-deletion-test
+  ;; V2 regression: target deleted the entity post-fork, source edited it →
+  ;; conflict. Choosing :target ("keep my deletion") must write a tombstone
+  ;; on target, not silently skip (which resurrected the entity via the
+  ;; merge-surfaced source).
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [seeded (sp/create-entity v :fn {:name "ctd-fn" :parent-ids [] :description "from-main"})
+            id (:id seeded)
+            ;; target sibling: delete it
+            b-tgt (vs/create-branch! v "ctd-target")
+            vb (vs/switch-branch v (:id b-tgt))
+            _ (binding [vs/*tombstone-delete?* true] (sp/delete-entity vb :fn id))
+            _ (Thread/sleep 5)
+            ;; source sibling: edit it
+            a-src (vs/create-branch! v "ctd-source")
+            va (vs/switch-branch v (:id a-src))
+            _ (sp/update-entity va :fn id {:description "from-source"})]
+        (testing "a conflict is detected (delete vs edit)"
+          (let [{:keys [conflicts]} (vs/detect-conflicts vb (:id a-src))]
+            (is (= 1 (count conflicts)))
+            (is (nil? (:target-version (first conflicts))) "target side is a deletion")
+            (is (some? (:source-version (first conflicts))) "source side is live")))
+        (testing "choosing :target keeps the deletion — the entity stays gone"
+          (vs/merge-branch! vb (:id a-src)
+                            {:conflict-resolutions {[:fn id] :target}})
+          (is (nil? (sp/read-entity vb :fn id))
+              "the entity must NOT resurrect against the user's :target choice")))
+      (finally (sp/close base)))))
+
+
+(deftest conflict-source-over-delete-writes-live-test
+  ;; Mirror of V2: source deleted, target edited, choose :source (keep the
+  ;; deletion) → entity stays deleted on target.
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [seeded (sp/create-entity v :fn {:name "csd-fn" :parent-ids [] :description "from-main"})
+            id (:id seeded)
+            b-tgt (vs/create-branch! v "csd-target")
+            vb (vs/switch-branch v (:id b-tgt))
+            _ (sp/update-entity vb :fn id {:description "from-target"})
+            _ (Thread/sleep 5)
+            a-src (vs/create-branch! v "csd-source")
+            va (vs/switch-branch v (:id a-src))
+            _ (binding [vs/*tombstone-delete?* true] (sp/delete-entity va :fn id))]
+        (testing "choosing :source (the deletion) tombstones on target"
+          (vs/merge-branch! vb (:id a-src)
+                            {:conflict-resolutions {[:fn id] :source}})
+          (is (nil? (sp/read-entity vb :fn id))
+              "the target's edit is overridden by the chosen source deletion")))
+      (finally (sp/close base)))))

@@ -70,10 +70,20 @@
     ;; Cache hits return the cached value identity-equal. If the LRU
     ;; gets refactored to a deep-copy or to invalidate on every read,
     ;; this test catches it.
-    (ce/reset-compile-all-cache!)
     (let [storage (setup/create-test-storage)]
       (try
         (let [lookups (build-trivial-lookups storage)
+              ;; The FIRST compile over a graph records its rich-types as
+              ;; a side effect (`record-rich-types!`), which shifts the
+              ;; ambient snapshot that `compile-all-cache-key` hashes. If
+              ;; a prior test left the registry so these types aren't
+              ;; recorded yet, an un-warmed r1 keys off the pre-record
+              ;; snapshot and r2 off the post-record one → a spurious
+              ;; miss. Warm once to settle the (idempotent) record, THEN
+              ;; reset the cache, so the measured pair both key off the
+              ;; stable snapshot and genuinely hit.
+              _warm (ce/compile-all lookups)
+              _ (ce/reset-compile-all-cache!)
               r1 (ce/compile-all lookups)
               r2 (ce/compile-all lookups)]
           (is (= r1 r2) "equal")

@@ -170,6 +170,40 @@
 
 
 ;; =============================================================================
+;; Marker-def type-rows + binding :terminal / :description annotations
+;; =============================================================================
+
+(deftest roundtrip-marker-def
+  (testing "a `{:marker …}` declaration survives parse → export → parse
+            (was silently exported as a bare `{:name …}`, losing the
+            marker's hide-result flags)"
+    (let [fns [{:name :pii :namespace "ex" :marker {:hide-result? true}}]]
+      (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))
+      (is (= {:marker {:hide-result? true} :name :pii :namespace "ex"}
+             (first (export/records->fn-defs (parse/parse-module fns))))))))
+
+
+(deftest roundtrip-binding-terminal-and-description
+  (testing "binding-level `:terminal` / `:description` survive round-trip
+            (both were dropped by the exporter's binding emission)"
+    (let [fns [{:name :bp :namespace "ex" :args {:x :int :y :int :z :int} :return-type :int}
+               {:name :src :namespace "ex" :args {:v :int} :return-type :int}
+               {:name :child :namespace "ex" :parent :bp
+                :args {;; value + terminal + description together
+                       :x {:value 5 :terminal true :description "sealed"}
+                       ;; terminal-only binding on an inherited slot
+                       :y {:terminal true}
+                       ;; ref + terminal (bare-ref form must promote to a map)
+                       :z {:ref :src :terminal true}}}]]
+      (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))
+      (let [child (first (filter #(= :child (:name %))
+                                 (export/records->fn-defs (parse/parse-module fns))))]
+        (is (= {:value 5 :terminal true :description "sealed"} (get-in child [:args :x])))
+        (is (= {:terminal true} (get-in child [:args :y])))
+        (is (= {:ref :src :terminal true} (get-in child [:args :z])))))))
+
+
+;; =============================================================================
 ;; Secret-path bindings — faithful round-trip + share-time stripping
 ;; =============================================================================
 

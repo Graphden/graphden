@@ -156,7 +156,12 @@
   (create-entities [_ _ _] (read-only! "create-entities"))
 
 
-  (read-entities [_ entity ids] (query-rows @rows entity {:id (vec ids)}))
+  ;; Contract (matches postgres crud/read-entities): return `{id → record}`
+  ;; for found rows, `{}` for none. Callers deref via `(vals …)` — a bare
+  ;; vector here would blow up `vals` in `executor.context`.
+  (read-entities
+    [_ entity ids]
+    (into {} (map (juxt :id identity)) (query-rows @rows entity {:id (vec ids)})))
 
 
   (update-entities [_ _ _] (read-only! "update-entities"))
@@ -180,6 +185,31 @@
     [_ _]
     (throw (ex-info "RemoteStorage does not resolve-execution-graph — the compiled executor reads the tables directly"
                     {:type :remote-storage/unsupported}))))
+
+
+;; =============================================================================
+;; Redacted printing (B4)
+;;
+;; The `token` field is a bearer credential. The default record printer dumps
+;; every field, so a bare `(println storage)` / REPL inspection / structured
+;; log line that includes a RemoteStorage would leak the token verbatim. Print
+;; it redacted, and summarise the `rows` atom (it otherwise dumps the whole
+;; in-memory graph bundle).
+;; =============================================================================
+
+(defn- print-remote-storage
+  [^RemoteStorage rs ^java.io.Writer w]
+  (java.io.Writer/.write w (str "#RemoteStorage"
+                                {:hub-url (:hub-url rs)
+                                 :branch (:branch rs)
+                                 :token (when (:token rs) "[REDACTED]")
+                                 :rows :<graph-atom>})))
+
+
+(defmethod print-method RemoteStorage [rs w] (print-remote-storage rs w))
+
+
+(defmethod print-dup RemoteStorage [rs w] (print-remote-storage rs w))
 
 
 ;; =============================================================================

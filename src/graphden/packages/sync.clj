@@ -216,9 +216,19 @@
    Same-named composed fn-defs in DIFFERENT namespaces are LEGAL —
    ambiguous bare references rewrite to qualified form at parse entry
    (`normalize-qualified-refs`) or fail loud demanding qualification.
-   Anonymous defs (name = nil) are content-hash-deduped and excluded."
+   Anonymous defs (name = nil) are content-hash-deduped and excluded.
+
+   Base-fn pairs come from the loader's UNCOLLAPSED `:base-fn-pairs`
+   when present (`load-packages`). Deriving them from `:base-fn-defs` —
+   a bare-name-keyed MAP — instead made guard 2 DEAD: two same-named
+   base-fns in different namespaces already collapse to one map entry
+   upstream, so `frequencies` never saw a count > 1. Fall back to the
+   map for hand-built `packages` (tests / registry) that carry no
+   `:base-fn-pairs`."
   [packages]
-  (let [base-pairs (map (fn [[n d]] [(:namespace d) n]) (:base-fn-defs packages))
+  (let [base-pairs (if (contains? packages :base-fn-pairs)
+                     (:base-fn-pairs packages)
+                     (map (fn [[n d]] [(:namespace d) n]) (:base-fn-defs packages)))
         def-pairs  (keep (fn [d] (when (:name d) [(:namespace d) (:name d)]))
                          (:fn-defs packages))
         pair-dups (->> (concat base-pairs def-pairs)

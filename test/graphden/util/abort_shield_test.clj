@@ -68,3 +68,20 @@
     (is (= :completed @result) "f ran to completion despite the caller interrupt")
     (is (false? @flag-on-return)
         "the caller's interrupt flag is clear on return — the pool worker is not poisoned")))
+
+
+(deftest run!-abandons-a-hung-task-at-the-join-timeout
+  ;; U1: an unbounded join let a wedged write pin the request thread / block
+  ;; shutdown forever. The join is bounded by *join-timeout-ms*; a task that
+  ;; overruns is abandoned with :abort-shield/timeout instead of hanging.
+  (testing "a task that outlives the budget throws :abort-shield/timeout, promptly"
+    (let [started (System/currentTimeMillis)
+          ed (binding [shield/*join-timeout-ms* 150]
+               (try (shield/run! (fn [] (Thread/sleep 10000) :never)) nil
+                    (catch clojure.lang.ExceptionInfo e (ex-data e))))
+          elapsed (- (System/currentTimeMillis) started)]
+      (is (= :abort-shield/timeout (:type ed)) "hung task surfaces as a timeout, not a hang")
+      (is (< elapsed 5000) "the caller returned near the budget, not after the 10s sleep")))
+  (testing "a task finishing WITHIN the budget still returns its value"
+    (is (= :ok (binding [shield/*join-timeout-ms* 2000]
+                 (shield/run! (fn [] (Thread/sleep 20) :ok)))))))

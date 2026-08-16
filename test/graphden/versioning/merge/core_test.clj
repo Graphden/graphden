@@ -422,6 +422,25 @@
       (sp/close storage))))
 
 
+(deftest merge-into-self-is-rejected-test
+  (testing "vs/merge-branch! refuses source == target (self-merge)"
+    ;; A self-merge degenerates `fork-point` (neither side diverges from
+    ;; the other → every own edit reads as modified-on-both) into phantom
+    ;; self-conflicts, and would plant a self-referential branch-merge the
+    ;; resolver walks on every read. It must be rejected up front.
+    (let [{:keys [storage fn-id slot-id base]} (create-test-storage)
+          _ (create-binding-on-current! storage fn-id slot-id 10)
+          target-id (vs/current-branch-id storage)]
+      (try
+        (vs/merge-branch! storage target-id)
+        (is false "self-merge should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :constraint-violation/self-merge (:type (ex-data e))))))
+      (is (empty? (sp/query-entities base :branch-merge {:source-branch-id target-id}))
+          "no branch-merge record planted for the rejected self-merge")
+      (sp/close storage))))
+
+
 ;; === merge-affected-fn-ids (delta-invalidation seed) ===
 
 (deftest merge-affected-fn-ids-test

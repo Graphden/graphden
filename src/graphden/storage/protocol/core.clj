@@ -177,7 +177,9 @@
 
   (read-entities
     [this entity-name ids]
-    "Reads multiple entity records by IDs.")
+    "Reads multiple entity records by IDs. Returns `{id → record}` for the
+     found rows (empty map when none match) — callers deref via `(vals …)`,
+     so implementations MUST return a map, not a seq of rows.")
 
   (update-entities
     [this entity-name data-seq]
@@ -593,7 +595,8 @@
 
 ;; === Batch size validation re-exports ===
 (def ^:dynamic *max-batch-size*
-  "Maximum entities in a single batch operation. Default: 1000."
+  "Maximum entities in a single batch operation. Default: 10000
+   (see `config/*max-batch-size*`, the value this re-exports)."
   config/*max-batch-size*)
 
 

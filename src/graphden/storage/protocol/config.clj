@@ -93,7 +93,7 @@
 
 (def default-query-timeout-ms
   "Default timeout for storage queries in milliseconds.
-   Used by PostgreSQL (via JDBC setQueryTimeout) and Datomic backends.
+   Used by PostgreSQL via JDBC setQueryTimeout.
    Value: 30000ms (30 seconds) - reasonable default for most queries."
   30000)
 
@@ -102,10 +102,8 @@
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
 
-   Backend-specific notes:
-   - PostgreSQL: Converted to seconds for JDBC setQueryTimeout
-   - Datomic: Enforced via future+deref (no native timeout support)
-   - Memory: Not applicable (in-memory operations are instant)"
+   The only shipped backend, PostgreSQL, converts this to seconds for
+   JDBC `setQueryTimeout`."
   default-query-timeout-ms)
 
 

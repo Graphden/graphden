@@ -63,3 +63,31 @@
         (pg-notify/close-listener! listener)
         (pg-lock/close-holder! holder)
         (sp/close storage)))))
+
+
+(deftest pause-schedulers-halts-ticks-until-resume
+  ;; SYSTEM F12: a background ticker must not fire against the
+  ;; half-frozen system during a checkpoint. `pause-schedulers!` occupies
+  ;; each single-thread scheduler's worker so no periodic tick runs until
+  ;; `resume-schedulers!` releases it on restore.
+  (let [ticks (atom 0)
+        sched (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
+        system {:exec/cleanup-scheduler sched}]
+    (try
+      (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
+        sched ^Runnable (fn [] (swap! ticks inc))
+        0 20 java.util.concurrent.TimeUnit/MILLISECONDS)
+      (testing "the ticker fires while running"
+        (is (wait/wait-for 1000 #(pos? @ticks))))
+      (testing "no ticks fire while paused for checkpoint"
+        (crac/pause-schedulers! system)
+        (Thread/sleep 60)          ; let the latch-block engage the worker
+        (let [n @ticks]
+          (Thread/sleep 120)
+          (is (= n @ticks) "the periodic tick is suspended")))
+      (testing "ticks resume after restore"
+        (let [n @ticks]
+          (crac/resume-schedulers! system)
+          (is (wait/wait-for 1000 #(> @ticks n)))))
+      (finally
+        (java.util.concurrent.ExecutorService/.shutdownNow sched)))))

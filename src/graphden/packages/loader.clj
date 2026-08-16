@@ -60,11 +60,22 @@
 
 (defn- read-resource-edn
   "Reads and parses EDN from a classpath resource. `#graphden/ref`
-   wire refs (records.wire) decode back to their keywords."
+   wire refs (records.wire) decode back to their keywords.
+
+   A malformed-EDN failure is re-thrown carrying the offending resource
+   `path` — the raw reader error names neither the file nor a line, so
+   a stray brace in one of ~40 package files was previously an
+   un-locatable boot crash."
   [path]
   (when-let [resource (io/resource path)]
     (with-open [rdr (java.io.PushbackReader. (io/reader resource))]
-      (edn/read {:readers wire/wire-readers} rdr))))
+      (try
+        (edn/read {:readers wire/wire-readers} rdr)
+        (catch Exception e
+          (throw (ex-info (str "Failed to parse EDN in " path ": " (ex-message e))
+                          {:type :package-error/edn-parse
+                           :path path}
+                          e)))))))
 
 
 (defn- read-resource-edn-with-meta
@@ -82,7 +93,16 @@
   (when-let [resource (io/resource path)]
     (let [rdr (treader-types/source-logging-push-back-reader (slurp resource))]
       (binding [treader/*data-readers* wire/wire-readers]
-        (treader/read {:eof nil} rdr)))))
+        (try
+          (treader/read {:eof nil} rdr)
+          (catch Exception e
+            ;; tools.reader tracks a line/col but not the file — surface
+            ;; the resource `path` so a malformed `fns.edn` is locatable
+            ;; instead of an anonymous boot crash.
+            (throw (ex-info (str "Failed to parse EDN in " path ": " (ex-message e))
+                            {:type :package-error/edn-parse
+                             :path path}
+                            e))))))))
 
 
 (defn- load-package-meta
@@ -207,16 +227,24 @@
 
 (defn- type-row?
   "True iff `fn-def` is a type-row declaration (record / refinement /
-   list / map / union / variant / fn-type). Type-rows have no impl and
-   live in `:fn-defs` alongside composed defs — the records-parser
-   routes them by their role marker. `:fn-type` declarations don't
-   actually produce a fn-row (they're pure type-aliases) but they
-   still flow through this path so they get registered as aliases by
-   system/core's `register-type-aliases!`."
+   list / map / union / variant / fn-type / marker). Type-rows have no
+   impl and live in `:fn-defs` alongside composed defs — the
+   records-parser routes them by their role marker. `:fn-type`
+   declarations don't actually produce a fn-row (they're pure
+   type-aliases) but they still flow through this path so they get
+   registered as aliases by system/core's `register-type-aliases!`.
+
+   `:marker` (`{:name :pii :marker {:hide-result? true}}`) is a
+   marker-type declaration — the records-parser stores it as a
+   `[:marker-def flags]` fn-row and `sync/register-type-aliases!`
+   registers the marker from `:fn-defs`. WITHOUT it here, a marker-def
+   has no role marker AND no `:parent`, so `base-fn?` classified it as
+   a base-fn, `process-module` then dropped it (\"No impl found\"), and
+   the marker was silently never registered."
   [fn-def]
   (boolean (or (:type fn-def) (:refine fn-def) (:list fn-def)
                (:map fn-def) (:tuple fn-def) (:union fn-def)
-               (:variant fn-def) (:fn-type fn-def))))
+               (:variant fn-def) (:fn-type fn-def) (:marker fn-def))))
 
 
 (defn- base-fn?
@@ -369,6 +397,13 @@
 
     {:base-fn-defs base-fn-defs
      :fn-defs fn-defs-with-ns
+     ;; UNCOLLAPSED `[namespace name]` pairs for every base-fn DECLARED
+     ;; in this module — including duplicates. `:base-fn-defs` is a map
+     ;; keyed by bare name, so it silently drops a name declared twice;
+     ;; the collision guard (`sync/validate-no-name-collisions!`) needs
+     ;; the pre-collapse list to see a base-fn name reused across
+     ;; namespaces (which would clobber the name-keyed impls registry).
+     :base-fn-pairs (mapv (fn [b] [ns-path (:name b)]) base-fns)
      :ns-descriptions (if (and ns-path ns-description)
                         {ns-path ns-description}
                         {})}))
@@ -395,14 +430,16 @@
 
     (reduce
       (fn [acc module-name]
-        (let [{:keys [base-fn-defs fn-defs ns-descriptions]}
+        (let [{:keys [base-fn-defs fn-defs base-fn-pairs ns-descriptions]}
               (process-module package-name module-name)]
           (-> acc
               (update :base-fn-defs merge base-fn-defs)
               (update :fn-defs into fn-defs)
+              (update :base-fn-pairs into base-fn-pairs)
               (update :ns-descriptions merge ns-descriptions))))
       {:base-fn-defs {}
        :fn-defs []
+       :base-fn-pairs []
        :ns-descriptions seed-ns-descriptions
        :meta pkg-meta}
       modules)))
@@ -524,6 +561,7 @@
                              (cond-> (-> acc
                                          (update :base-fn-defs merge (:base-fn-defs result))
                                          (update :fn-defs into (:fn-defs result))
+                                         (update :base-fn-pairs into (:base-fn-pairs result))
                                          (update :ns-descriptions merge (:ns-descriptions result))
                                          (update :packages conj (:meta result)))
                                (seq pkg-services)
@@ -531,7 +569,8 @@
                                        (mapv (fn [svc]
                                                (assoc svc :package-name pkg-name))
                                              pkg-services)))))
-                         {:base-fn-defs {} :fn-defs [] :ns-descriptions {}
+                         {:base-fn-defs {} :fn-defs [] :base-fn-pairs []
+                          :ns-descriptions {}
                           :packages [] :seeded-services []}
                          results)
         ;; Collect all namespace paths declared in modules.

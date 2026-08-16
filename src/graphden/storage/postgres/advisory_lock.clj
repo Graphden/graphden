@@ -88,20 +88,11 @@
 ;; =============================================================================
 
 (defn create-lock-conn
-  "Open the dedicated lock connection. Caller is responsible for
-   passing the same `^Connection` to every `try-lock!` /
-   `release-lock!` call on this pod, and for `close-lock-conn!` at
-   shutdown."
+  "Open the dedicated lock connection. The lifecycle is owned by the
+   reconnecting holder (`create-lock-holder` / `close-holder!`), which
+   is how every production caller acquires this connection."
   ^Connection [pg-opts]
   (pg-conn/open-dedicated! pg-opts "service-locks"))
-
-
-(defn close-lock-conn!
-  "Close the lock connection. Postgres releases every session-held
-   advisory lock at this moment — sibling pods can take over within
-   the next reconcile pass."
-  [^Connection conn]
-  (pg-conn/close-dedicated! conn "service-locks"))
 
 
 ;; =============================================================================

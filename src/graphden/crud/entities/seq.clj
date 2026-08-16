@@ -103,7 +103,15 @@
   [storage body]
   (cond
     (contains? body :ref)
-    {:ref-fn-id (java.util.UUID/fromString (:ref body))}
+    ;; `:ref` is UNTRUSTED client JSON — a non-UUID string (or a
+    ;; number / nested object the JSON decoder produced) must not
+    ;; bubble a bare `IllegalArgumentException` up as a 500. Coerce
+    ;; through the soft parser and raise a mapped 400 on failure,
+    ;; matching the `:ref-name`-not-found branch below.
+    {:ref-fn-id (or (request/parse-uuid-or-clear (:ref body))
+                    (throw (ex-info (str "Invalid :ref UUID: " (pr-str (:ref body)))
+                                    {:type :validation-error/invalid-uuid
+                                     :ref (:ref body)})))}
 
     (contains? body :ref-name)
     (if-let [target (first (sp/query-entities storage :fn {:name (:ref-name body)}))]

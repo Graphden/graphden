@@ -251,6 +251,14 @@
   [fnr ctx]
   (let [c (:constraint fnr)]
     (cond
+      ;; marker-type declaration: `[:marker-def flags]` (see
+      ;; parse/parse-fn-def's `:marker` arm). Emit `{:marker flags}` so
+      ;; the marker re-registers on re-parse — without this branch the
+      ;; row fell through to `{}` and the marker was silently lost from
+      ;; every exported bundle.
+      (and (vector? c) (= :marker-def (first c)))
+      {:marker (nth c 1 {})}
+
       ;; refinement: base-fn-id + scalar constraint
       (:base-fn-id fnr)
       {:refine {:base (id->type-ref (:base-fn-id fnr) ctx) :constraint c}}
@@ -294,7 +302,9 @@
       (:ref-fn-id b)
       (:type-override-fn-id b)
       (:list-append b)
-      (some? (:required b))))
+      (some? (:required b))
+      (:terminal b)
+      (some? (:description b))))
 
 
 (defn- item->edn
@@ -353,7 +363,9 @@
       (:list-append b) (assoc :append (binding-items b ctx))
       (and (:list-append b) (:list-closed b)) (assoc :closed true)
       type-ref (assoc :type type-ref)
-      (some? (:required b)) (assoc :required (:required b)))))
+      (some? (:required b)) (assoc :required (:required b))
+      (:terminal b) (assoc :terminal true)
+      (some? (:description b)) (assoc :description (:description b)))))
 
 
 (defn- binding->arg-value
@@ -365,66 +377,84 @@
   [b arg-name ctx]
   (let [items (binding-items b ctx)
         type-ref (when (:type-override-fn-id b)
-                   (id->type-ref (:type-override-fn-id b) ctx))]
-    (cond
-      ;; list-append binding. list-closed nil → bare vector (parse's
-      ;; bare-vector-on-sequence-slot path leaves list-closed nil);
-      ;; false/true → explicit {:append … :closed …} map.
-      (:list-append b)
-      (if (nil? (:list-closed b))
-        items
-        (cond-> {:append items}
-          (:list-closed b) (assoc :closed true)))
+                   (id->type-ref (:type-override-fn-id b) ctx))
+        term? (:terminal b)
+        desc (:description b)
+        core
+        (cond
+          ;; list-append binding. list-closed nil → bare vector (parse's
+          ;; bare-vector-on-sequence-slot path leaves list-closed nil);
+          ;; false/true → explicit {:append … :closed …} map.
+          (:list-append b)
+          (if (nil? (:list-closed b))
+            items
+            (cond-> {:append items}
+              (:list-closed b) (assoc :closed true)))
 
-      ;; Hidden-resolver binding: the stored `:value` is the
-      ;; OpenBao/vault PATH the executor derefs at run time, not a
-      ;; literal. Emit the dedicated `{:secret-path …}` form so the
-      ;; strip/manifest warn-policy sees it and re-parse restores the
-      ;; vault-get resolver — the plain `{:value …}` form would
-      ;; silently turn the secret into a literal string holding the
-      ;; path (broken AND path-disclosing).
-      (hidden-resolver? (:resolver-fn-id b))
-      (cond-> {:secret-path (:value b)}
-        (some? (:required b)) (assoc :required (:required b)))
+          ;; Hidden-resolver binding: the stored `:value` is the
+          ;; OpenBao/vault PATH the executor derefs at run time, not a
+          ;; literal. Emit the dedicated `{:secret-path …}` form so the
+          ;; strip/manifest warn-policy sees it and re-parse restores the
+          ;; vault-get resolver — the plain `{:value …}` form would
+          ;; silently turn the secret into a literal string holding the
+          ;; path (broken AND path-disclosing).
+          (hidden-resolver? (:resolver-fn-id b))
+          (cond-> {:secret-path (:value b)}
+            (some? (:required b)) (assoc :required (:required b)))
 
-      ;; generic (non-hidden) resolver binding: emit
-      ;; `{:resolver <name> :value V}` so re-parse restores
-      ;; `:resolver-fn-id` — the plain `{:value …}` form would degrade
-      ;; the binding to a literal.
-      (:resolver-fn-id b)
-      (cond-> {:resolver (ref-kw (:resolver-fn-id b) ctx)
-               :value (:value b)}
-        (some? (:required b)) (assoc :required (:required b)))
+          ;; generic (non-hidden) resolver binding: emit
+          ;; `{:resolver <name> :value V}` so re-parse restores
+          ;; `:resolver-fn-id` — the plain `{:value …}` form would degrade
+          ;; the binding to a literal.
+          (:resolver-fn-id b)
+          (cond-> {:resolver (ref-kw (:resolver-fn-id b) ctx)
+                   :value (:value b)}
+            (some? (:required b)) (assoc :required (:required b)))
 
-      ;; ref binding (optionally with a type-override / required marker)
-      (:ref-fn-id b)
-      (let [ref-name (ref-kw (:ref-fn-id b) ctx)]
-        (if (or type-ref (some? (:required b)))
-          (cond-> {:ref ref-name}
+          ;; ref binding (optionally with a type-override / required marker)
+          (:ref-fn-id b)
+          (let [ref-name (ref-kw (:ref-fn-id b) ctx)]
+            (if (or type-ref (some? (:required b)))
+              (cond-> {:ref ref-name}
+                type-ref (assoc :type type-ref)
+                (some? (:required b)) (assoc :required (:required b)))
+              ref-name))
+
+          ;; literal value (value-present). Always {:value …} — safe against
+          ;; keyword/fn-name collisions, and re-parses to value-present.
+          (:value-present b)
+          (cond-> {:value (:value b)}
             type-ref (assoc :type type-ref)
             (some? (:required b)) (assoc :required (:required b)))
-          ref-name))
 
-      ;; literal value (value-present). Always {:value …} — safe against
-      ;; keyword/fn-name collisions, and re-parses to value-present.
-      (:value-present b)
-      (cond-> {:value (:value b)}
-        type-ref (assoc :type type-ref)
-        (some? (:required b)) (assoc :required (:required b)))
+          ;; metadata-only binding (type-override and/or required narrowing,
+          ;; no value/ref/append). A bare `{:type T}` would be read by the
+          ;; parser as a PB' OWN-SLOT declaration — it must carry a binding
+          ;; marker to stay a binding on the inherited slot. The no-op
+          ;; `:as <arg-name>` is exactly what authors write for this; it
+          ;; pins the override without minting a rename slot (same name →
+          ;; `collect-exposed-names` ignores it).
+          (or type-ref (some? (:required b)))
+          (cond-> {:as arg-name}
+            type-ref (assoc :type type-ref)
+            (some? (:required b)) (assoc :required (:required b)))
 
-      ;; metadata-only binding (type-override and/or required narrowing,
-      ;; no value/ref/append). A bare `{:type T}` would be read by the
-      ;; parser as a PB' OWN-SLOT declaration — it must carry a binding
-      ;; marker to stay a binding on the inherited slot. The no-op
-      ;; `:as <arg-name>` is exactly what authors write for this; it
-      ;; pins the override without minting a rename slot (same name →
-      ;; `collect-exposed-names` ignores it).
-      (or type-ref (some? (:required b)))
-      (cond-> {:as arg-name}
-        type-ref (assoc :type type-ref)
-        (some? (:required b)) (assoc :required (:required b)))
-
-      :else {})))
+          :else {})]
+    ;; Graft the two annotation columns the branches don't carry.
+    ;; Absent → return `core` unchanged (no round-trip regression for
+    ;; the bare-keyword / bare-vector forms). Present → force the map
+    ;; form so `:terminal` / `:description` have somewhere to live; a
+    ;; bare ref becomes `{:ref …}`, a bare list `{:append …}`.
+    (if (and (not term?) (nil? desc))
+      core
+      (let [m (cond
+                (map? core)     core
+                (keyword? core) {:ref core}
+                (vector? core)  {:append core}
+                :else           {:value core})]
+        (cond-> m
+          term?      (assoc :terminal true)
+          (some? desc) (assoc :description desc))))))
 
 
 (defn- export-composed

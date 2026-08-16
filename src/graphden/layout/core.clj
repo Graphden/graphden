@@ -17,6 +17,7 @@
    `compute-layout-matrix` stays public for the layout tests, which
    feed it hand-built node/edge lists."
   (:require
+    [clojure.string :as str]
     [graphden.crud.request :as request]
     [graphden.layout.graph :as lgraph]))
 
@@ -235,16 +236,41 @@
 
 
 (defn- validate-layout
-  "Check for collisions in the layout."
-  [matrix]
-  (let [positions (vals (:positions matrix))
-        pos-keys (map (fn [{:keys [row col]}] [row col]) positions)
+  "Structural validation of a placed layout. `expected-node-ids` is the
+   full set of input node-ids and `root?` whether a root node was found.
+   Reports three kinds of problem:
+
+   - `no_root` — input nodes exist but no root (zero-in-edge node) was
+     found, so nothing could be placed (empty graph, or a pure cycle).
+   - `orphan`  — an input node has no path from the root, so the DFS
+     placement never gave it a grid position. Only checked when a root
+     exists (with no root the `no_root` issue already covers it).
+   - `collision` — two placed nodes share a cell.
+
+   Any issue makes the layout invalid."
+  [matrix expected-node-ids root?]
+  (let [positions (:positions matrix)
+        placed-ids (set (keys positions))
+        pos-keys (map (fn [{:keys [row col]}] [row col]) (vals positions))
         unique-count (count (set pos-keys))
-        total-count (count pos-keys)]
-    {:valid (= unique-count total-count)
-     :issues (when (not= unique-count total-count)
-               [{:type "collision"
-                 :message (str "Found " (- total-count unique-count) " collisions")}])}))
+        total-count (count pos-keys)
+        orphans (vec (remove placed-ids expected-node-ids))
+        issues (cond-> []
+                 (and (seq expected-node-ids) (not root?))
+                 (conj {:type "no_root"
+                        :message "No root node found"})
+
+                 (and root? (seq orphans))
+                 (conj {:type "orphan"
+                        :message (str (count orphans)
+                                      " node(s) unreachable from root: "
+                                      (str/join ", " orphans))})
+
+                 (not= unique-count total-count)
+                 (conj {:type "collision"
+                        :message (str "Found " (- total-count unique-count) " collisions")}))]
+    {:valid (empty? issues)
+     :issues issues}))
 
 
 ;; =============================================================================
@@ -257,20 +283,19 @@
    Output: {:grid-pos {node-id {:row r :col c}}, :validation {...}}"
   [{:keys [elements]}]
   (let [nodes (mapv (fn [n] {:data n}) (or (:nodes elements) []))
-        edges (mapv (fn [e] {:data e}) (or (:edges elements) []))]
+        edges (mapv (fn [e] {:data e}) (or (:edges elements) []))
+        node-ids (map #(get-in % [:data :id]) nodes)]
     (if (empty? nodes)
       {:grid-pos {}
        :validation {:valid true :issues []}}
       (let [graph-info (build-graph-info nodes edges)
-            root (find-root-node nodes edges)]
-        (if-not root
-          {:grid-pos {}
-           :validation {:valid false
-                        :issues [{:type "no_root" :message "No root node found"}]}}
-          (let [matrix (layout-graph (get-in root [:data :id]) graph-info)
-                validation (validate-layout matrix)]
-            {:grid-pos (:positions matrix)
-             :validation validation}))))))
+            root (find-root-node nodes edges)
+            matrix (if root
+                     (layout-graph (get-in root [:data :id]) graph-info)
+                     (empty-matrix))
+            validation (validate-layout matrix node-ids (some? root))]
+        {:grid-pos (:positions matrix)
+         :validation validation}))))
 
 
 (defn- parse-spec
@@ -355,7 +380,8 @@
         matrix (if root-node
                  (layout-graph (get-in root-node [:data :id]) graph-info)
                  (empty-matrix))
-        validation (validate-layout matrix)]
+        node-ids (map #(get-in % [:data :id]) nodes)
+        validation (validate-layout matrix node-ids (some? root-node))]
     (assoc elements
            :grid-pos (:positions matrix)
            :validation validation)))

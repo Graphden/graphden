@@ -4,6 +4,7 @@
    (`parse-layout-request` → `parse-expansions` → `parse-spec`) and the
    `compute-layout` root-not-found guard."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.layout.core :as lc]))
 
@@ -83,3 +84,39 @@
       (is (= {} (:grid-pos res)))
       (is (false? (:valid (:validation res))))
       (is (= "no_root" (:type (first (:issues (:validation res)))))))))
+
+
+;; ============================================================================
+;; validate-layout — no-root + orphan structural checks
+;; ============================================================================
+
+(deftest validate-layout-no-root-test
+  (testing "input nodes with no zero-in-edge node (pure cycle) → invalid, no_root"
+    (let [a "n-a" b "n-b"
+          {:keys [validation]}
+          (lc/compute-layout-matrix
+            {:elements {:nodes [{:id a} {:id b}]
+                        :edges [{:source a :target b}
+                                {:source b :target a}]}})]
+      (is (false? (:valid validation)))
+      (is (some #(= "no_root" (:type %)) (:issues validation))))))
+
+
+(deftest validate-layout-orphan-test
+  (testing "a node with no path from the root is reported as an orphan"
+    ;; a → b is the reachable tree (a is the root). c is disconnected, so
+    ;; the DFS placement never gives it a grid position.
+    (let [a "n-a" b "n-b" c "n-c"
+          {:keys [grid-pos validation]}
+          (lc/compute-layout-matrix
+            {:elements {:nodes [{:id a} {:id b} {:id c}]
+                        :edges [{:source a :target b}]}})]
+      ;; reachable nodes are placed, the orphan is not
+      (is (contains? grid-pos a))
+      (is (contains? grid-pos b))
+      (is (not (contains? grid-pos c)))
+      (is (false? (:valid validation)))
+      (let [orphan (first (filter #(= "orphan" (:type %)) (:issues validation)))]
+        (is (some? orphan))
+        ;; the message names the unplaced node
+        (is (str/includes? (:message orphan) c))))))

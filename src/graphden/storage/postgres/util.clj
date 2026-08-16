@@ -275,9 +275,13 @@
 
 ;; === JDBC execution seam ===
 ;;
-;; Every direct SQL statement in the postgres storage layer goes
-;; through `exec!` / `exec-one!` instead of calling next.jdbc root
-;; Vars — one choke point, one test seam.
+;; Nearly every direct SQL statement in the postgres storage layer
+;; goes through `exec!` / `exec-one!` instead of calling next.jdbc
+;; root Vars — one choke point, one test seam. The one deliberate
+;; bypass is `jdbc/execute-batch!` (junction.clj's prepared-statement
+;; batch insert), which has no `exec!` wrapper and so is NOT visible
+;; to `*jdbc-override*`; tests that need to intercept it redef the
+;; next.jdbc Var directly.
 
 (def ^:dynamic *jdbc-override*
   "Parallel-test seam: a map `{:execute! f :execute-one! f}` shadowing

@@ -239,12 +239,28 @@
     (let [candidates (filter #(and (:binding-id %) (some? (:position %))) check-seq)]
       (when (seq candidates)
         (let [chain (#'res/collect-branch-chain base-storage branch-id)
-              ;; Every item-version on the touched bindings' chains. The SQL
-              ;; WHERE narrows to those bindings so we don't scan the whole
-              ;; version table.
+              ;; Merge-aware: a collision can be introduced by a MERGE too —
+              ;; a source-branch item that resolves onto this branch at a
+              ;; position an existing item already holds. Those items live
+              ;; only on the merge SOURCE branch (never on the ancestor
+              ;; chain), so a chain-only scan never enumerates them and the
+              ;; collision slips past. Widen the scan to every branch whose
+              ;; rows can surface on the chain — the ancestor chain PLUS the
+              ;; source of every merge landing on it — mirroring the
+              ;; resolver's own reachability. `resolved-map` below already
+              ;; resolves merge-aware, so once an id is enumerated its
+              ;; winning (chain-or-merged) position is compared correctly.
+              merge-source-bids (into []
+                                      (comp (keep :source-branch-id) (distinct))
+                                      (sp/query-entities base-storage :branch-merge
+                                                         {:target-branch-id (vec chain)}))
+              scan-bids (into (vec chain) merge-source-bids)
+              ;; Every item-version on the touched bindings' reachable
+              ;; branches. The SQL WHERE narrows to those bindings so we
+              ;; don't scan the whole version table.
               versions (sp/query-entities base-storage :binding-list-item-version
                                           {:binding-id (vec (distinct (map :binding-id candidates)))
-                                           :branch-id (vec chain)})
+                                           :branch-id scan-bids})
               versions-by-binding (group-by :binding-id versions)
               ;; Resolve every touched item ONCE — the collision rule
               ;; applies to the LIVE branch view, not raw version rows.
@@ -496,9 +512,6 @@
                            :entity-name entity-name
                            :id id})))
         (let [merged (merge current data)
-              _ (check-list-item-position-collision! base-storage branch-id
-                                                     entity-name
-                                                     (assoc merged :id id))
               ;; Only compare version-controlled fields, not :id
               {:keys [version-data-fields]} (get res/entity-config entity-name)
               current-data (select-keys current version-data-fields)
@@ -520,11 +533,28 @@
                                (:name merged)
                                (or (contains? data :name)
                                    (contains? data :namespace-id)))
+              ;; A `:binding-list-item` position / binding move can land on a
+              ;; (binding-id, position) another item already holds — the same
+              ;; live-view rule as create. Only those two keys can introduce a
+              ;; collision (mirrors `name-write?`), so other item updates
+              ;; (`:value`, `:ref-fn-id`, …) skip the check + lock. Its version
+              ;; insert must be serialized w.r.t. concurrent moves to the SAME
+              ;; binding, exactly as the create-append path is — otherwise two
+              ;; concurrent position updates both pass the check and both
+              ;; commit, corrupting the per-branch sequence order.
+              list-item-write? (and (= :binding-list-item entity-name)
+                                    (:binding-id merged)
+                                    (some? (:position merged))
+                                    (or (contains? data :position)
+                                        (contains? data :binding-id)))
               do-update!
               (fn [st]
                 (when name-write?
                   (check-fn-name-collision! st branch-id entity-name
                                             (assoc merged :id id)))
+                (when list-item-write?
+                  (check-list-item-position-collision! st branch-id entity-name
+                                                       (assoc merged :id id)))
                 ;; Skip creating new version if data unchanged. (A
                 ;; versionless identity can't reach here at all — the
                 ;; `resolve-entity` above is version-gated and already threw
@@ -539,13 +569,17 @@
                 (when (seq non-versioned-data)
                   (sp/update-entity st entity-name id non-versioned-data))
                 merged)
-              lock-key (when name-write?
-                         (fn-name-lock-key branch-id entity-name merged))]
+              ;; Serialize on (branch, ns, name) for a rename/move and on the
+              ;; owning binding for a list-item position move — the same
+              ;; per-binding `pg_advisory_xact_lock` the create-append uses.
+              lock-key (cond
+                         name-write? (fn-name-lock-key branch-id entity-name merged)
+                         list-item-write? (str (:binding-id merged)))]
           (if (and lock-key (:pool base-storage))
             ;; `:ignore` — same reason as the create path: a nested
             ;; `with-transaction` inside `do-update!` (crud/update-entity opens
             ;; one to replace `:ref-many` junction rows) must run INLINE, not
-            ;; commit early and drop the fn-name advisory lock mid-update.
+            ;; commit early and drop the advisory lock mid-update.
             (binding [jdbc-tx/*nested-tx* :ignore]
               (jdbc/with-transaction [tx (:pool base-storage)]
                                      (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
@@ -1069,14 +1103,14 @@
 
    Returns the branch-merge record."
   ([versioned-storage source-branch-id]
-   (let [result (mrg/merge-branch! versioned-storage source-branch-id)]
-     ;; A committed merge surfaces source versions on the TARGET —
-     ;; its recorded diagnostics may describe pre-merge state. The
-     ;; store is derived: drop the target's entries; the next check
-     ;; re-records the survivors. (mrg throws on unresolved conflicts,
-     ;; so this only runs on success.)
-     (diag/clear-branch! (:branch-id versioned-storage))
-     result))
+   ;; Delegate to the 2-arity so a no-opts merge ALSO bumps the graph
+   ;; epoch. Merge is a graph-shaped write (it surfaces every source
+   ;; version on the target), so without the bump the branch-router's
+   ;; lazy epoch validation keeps serving the target's pre-merge
+   ;; compiled/resolved view — a stale read after a branch op. The
+   ;; `mrg` 1-arity is itself just the 2-arity with `{}`, so this is
+   ;; behaviour-identical apart from the (previously missing) bump.
+   (merge-branch! versioned-storage source-branch-id {}))
   ([versioned-storage source-branch-id opts]
    ;; The merge record is written via base storage inside the merge
    ;; transaction; bump the graph epoch here (bump-before-write) so a
@@ -1147,36 +1181,57 @@
                         {:type :constraint-violation/branch-is-merge-source
                          :branch-id branch-id
                          :merged-into-branch-ids live-targets}))))
-    ;; Soft-disable services scoped to this branch so the reconciler
-    ;; stops them on its next pass — see the docstring's cascade note.
-    ;; The `:service` entity is only registered when the services
-    ;; schema is loaded (production system + integration tests);
-    ;; storage-only tests use a smaller schema that omits it. Skip
-    ;; the cascade quietly in that case rather than throwing
-    ;; `:table-not-found` on every branch delete.
-    (when (contains? (sp/current-entities base) :service)
-      (let [svcs (sp/query-entities base :service {:branch-id branch-id
-                                                   :enabled? true})]
-        (when (seq svcs)
-          ;; One batched partial-UPDATE instead of a round-trip per service.
-          (sp/update-entities base :service
-                              (mapv (fn [s] {:id (:id s) :enabled? false}) svcs)))))
-    ;; Delete all version records on this branch (batch)
-    (doseq [[_ {:keys [version-entity]}] res/entity-config]
-      (let [version-ids (mapv :id (sp/query-entities base version-entity {:branch-id branch-id}))]
-        (when (seq version-ids)
-          (sp/delete-entities base version-entity version-ids))))
-    ;; Delete branch-merge records referencing this branch
-    ;; Two targeted queries are more efficient than full table scan + memory filter
-    (let [source-merges (sp/query-entities base :branch-merge {:source-branch-id branch-id})
-          target-merges (sp/query-entities base :branch-merge {:target-branch-id branch-id})
-          merge-ids (into [] (comp (map :id) (distinct))
-                          (concat source-merges target-merges))]
-      (when (seq merge-ids)
-        (sp/delete-entities base :branch-merge merge-ids)))
-    ;; Delete the branch record
+    ;; ATOMIC: service soft-disable + version-row deletes + merge-record
+    ;; deletes + the branch-row delete must land together. A mid-op
+    ;; failure between them used to leave a partially-deleted branch —
+    ;; e.g. its version rows gone but the branch row surviving (a
+    ;; versionless ghost branch), or merge records dangling at a deleted
+    ;; endpoint. Wrap the whole write sequence in one transaction so it
+    ;; commits whole or rolls back whole. Bump the graph epoch BEFORE the
+    ;; writes (bump-then-write, same as the merge path): a rolled-back
+    ;; bump is harmless over-invalidation, a committed delete is always
+    ;; preceded by a visible bump. Non-PG storages (no `:pool`) fall back
+    ;; to the prior sequential behaviour.
     (epoch/bump! base :branch)
-    (sp/delete-entity base :branch branch-id)
+    (let [do-delete!
+          (fn [st]
+            ;; Soft-disable services scoped to this branch so the
+            ;; reconciler stops them on its next pass — see the
+            ;; docstring's cascade note. The `:service` entity is only
+            ;; registered when the services schema is loaded (production
+            ;; system + integration tests); storage-only tests use a
+            ;; smaller schema that omits it. Skip the cascade quietly in
+            ;; that case rather than throwing `:table-not-found`.
+            (when (contains? (sp/current-entities st) :service)
+              (let [svcs (sp/query-entities st :service {:branch-id branch-id
+                                                         :enabled? true})]
+                (when (seq svcs)
+                  ;; One batched partial-UPDATE instead of a round-trip per service.
+                  (sp/update-entities st :service
+                                      (mapv (fn [s] {:id (:id s) :enabled? false}) svcs)))))
+            ;; Delete all version records on this branch (batch)
+            (doseq [[_ {:keys [version-entity]}] res/entity-config]
+              (let [version-ids (mapv :id (sp/query-entities st version-entity {:branch-id branch-id}))]
+                (when (seq version-ids)
+                  (sp/delete-entities st version-entity version-ids))))
+            ;; Delete branch-merge records referencing this branch.
+            ;; Two targeted queries are more efficient than full table scan + memory filter
+            (let [source-merges (sp/query-entities st :branch-merge {:source-branch-id branch-id})
+                  target-merges (sp/query-entities st :branch-merge {:target-branch-id branch-id})
+                  merge-ids (into [] (comp (map :id) (distinct))
+                                  (concat source-merges target-merges))]
+              (when (seq merge-ids)
+                (sp/delete-entities st :branch-merge merge-ids)))
+            ;; Delete the branch record
+            (sp/delete-entity st :branch branch-id))]
+      (if-let [pool (:pool base)]
+        ;; `:ignore` so a nested `with-transaction` in an inner write
+        ;; (e.g. a ref-many junction replacement) runs INLINE rather than
+        ;; committing early and breaking the atomic boundary.
+        (binding [jdbc-tx/*nested-tx* :ignore]
+          (jdbc/with-transaction [tx pool]
+                                 (do-delete! (assoc base :pool tx))))
+        (do-delete! base)))
     ;; Drop any cached chain that referenced this branch as an
     ;; ancestor — globals survive across CRUD calls and would
     ;; otherwise still hand back the pre-delete chain.

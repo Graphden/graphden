@@ -8,6 +8,7 @@
    it. That proves the minimal read surface (query-entities / read-entity(s) +
    the ExecutionGraph satisfy-gate) is sufficient."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ectx]
@@ -63,9 +64,31 @@
     (testing "read-entity by id, read-entities by ids"
       (is (= "b" (:name (sp/read-entity rs :fn id2))))
       (is (nil? (sp/read-entity rs :fn (random-uuid))))
-      (is (= #{"a" "c"} (set (map :name (sp/read-entities rs :fn [id1 id3]))))))
+      (testing "read-entities returns {id → record} (postgres-crud contract)"
+        (let [found (sp/read-entities rs :fn [id1 id3])]
+          (is (map? found))
+          (is (= #{id1 id3} (set (keys found))))
+          (is (= #{"a" "c"} (set (map :name (vals found)))))))
+      (testing "read-entities with all-missing ids → {}"
+        (is (= {} (sp/read-entities rs :fn [(random-uuid)]))))
+      (testing "read-entities with empty ids → {}"
+        (is (= {} (sp/read-entities rs :fn [])))))
     (testing ":limit opt truncates"
       (is (= 2 (count (sp/query-entities rs :fn {} {:limit 2})))))))
+
+
+(deftest token-is-redacted-when-printed
+  (testing "the bearer token never appears in a printed RemoteStorage (B4)"
+    (let [rs (remote/from-bundle {:fn []} "https://acme.graphden.app" "super-secret-bearer-token")]
+      ;; No rendering — `pr` (the leak vector the default record printer
+      ;; exposes), `str`, or `print-dup` — may contain the token.
+      (doseq [rendered [(pr-str rs) (str rs) (binding [*print-dup* true] (pr-str rs))]]
+        (is (not (str/includes? rendered "super-secret-bearer-token")) rendered))
+      ;; The pr-based renderings go through our print-method and show the marker.
+      (doseq [rendered [(pr-str rs) (binding [*print-dup* true] (pr-str rs))]]
+        (is (str/includes? rendered "[REDACTED]") rendered))
+      (testing "non-secret fields still visible"
+        (is (str/includes? (pr-str rs) "acme.graphden.app"))))))
 
 
 (deftest writes-throw-read-only

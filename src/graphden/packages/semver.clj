@@ -26,11 +26,16 @@
 
 (defn parse-version
   "`\"1.2.3\"` → `[1 2 3]`. Missing minor/patch default to 0; a
-   `-pre`/`+build` suffix is dropped. Non-numeric components collapse to
-   0. Returns nil for nil input."
+   `-pre`/`+build` suffix is dropped, and a leading `v`/`V`
+   (`\"v1.2.3\"`) is stripped before parsing. Non-numeric components
+   collapse to 0. Returns nil for nil input."
   [v]
   (when (some? v)
-    (let [core  (first (str/split (str v) #"[-+]" 2))
+    (let [;; Strip a conventional leading `v`/`V` (`v1.2.3`) — without
+          ;; this the `v` fuses to the major component, `re-matches
+          ;; #\"\\d+\"` fails, and the major silently collapses to 0.
+          bare  (str/replace (str/trim (str v)) #"^[vV]" "")
+          core  (first (str/split bare #"[-+]" 2))
           parts (str/split core #"\.")
           nums  (map (fn [p] (if (re-matches #"\d+" p) (parse-long p) 0)) parts)]
       (vec (take 3 (concat nums [0 0 0]))))))

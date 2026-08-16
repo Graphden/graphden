@@ -145,6 +145,38 @@
       (finally (reset! egress/platform-db-host? saved)))))
 
 
+(deftest check-sql-target!-rejects-class-loading-connect-params
+  ;; E2: a crafted JDBC url can set params that load an arbitrary class /
+  ;; custom transport into the driver and bypass the SSRF guard. These must be
+  ;; denied BEFORE any connection is opened, even when the host itself is public.
+  (testing "each dangerous param blocks with :unsafe-jdbc-param"
+    (doseq [u ["jdbc:postgresql://8.8.8.8:5432/db?socketFactory=evil.SF"
+               "jdbc:postgresql://8.8.8.8:5432/db?sslfactory=evil.SSL"
+               "jdbc:postgresql://8.8.8.8:5432/db?sslhostnameverifier=evil.V"
+               "jdbc:postgresql://8.8.8.8:5432/db?authenticationPluginClassName=evil.A"
+               "jdbc:postgresql://8.8.8.8:5432/db?loadBalanceHosts=true"
+               "jdbc:postgresql://8.8.8.8:5432/db?ssl=true&socketFactory=evil.SF"]]
+      (let [ed (try (egress/check-sql-target! u) nil
+                    (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= :egress/blocked (:type ed)) (str u " must be blocked"))
+        (is (= :unsafe-jdbc-param (:reason ed)) (str u " must block on the param, not the host")))))
+  (testing "param match is case-insensitive"
+    (is (= :unsafe-jdbc-param
+           (try (egress/check-sql-target! "jdbc:postgresql://8.8.8.8:5432/db?SocketFactory=x") nil
+                (catch clojure.lang.ExceptionInfo e (:reason (ex-data e)))))))
+  (testing "ordinary connect options are NOT blocked (denylist, not allowlist)"
+    (is (nil? (egress/check-sql-target!
+                "jdbc:postgresql://8.8.8.8:5432/db?ssl=true&sslmode=require&connectTimeout=10")))))
+
+
+(deftest reject-unsafe-jdbc-params!-is-usable-standalone
+  ;; The guard is exposed for any other JDBC-url intake seam (e.g. BYO config).
+  (is (nil? (egress/reject-unsafe-jdbc-params! "jdbc:postgresql://h/db?sslmode=require")))
+  (is (= :unsafe-jdbc-param
+         (try (egress/reject-unsafe-jdbc-params! "jdbc:postgresql://h/db?socketFactory=x") nil
+              (catch clojure.lang.ExceptionInfo e (:reason (ex-data e)))))))
+
+
 (deftest check-egress-rate!-honours-the-installed-limiter
   ;; task #5b: the per-org outbound rate cap. The seam holds an org-agnostic
   ;; `(fn [] → bool)`; the addon closes org-keying over it.

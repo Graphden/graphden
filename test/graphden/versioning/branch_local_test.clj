@@ -99,6 +99,53 @@
       (is (= {} @storage-caches) "global cleared"))))
 
 
+(defrecord FakeStorage
+  [pool metadata-cache rw-lock])
+
+
+(deftest storage-key-stability-test
+  ;; V5 regression: the cache MUST key on a value that survives the
+  ;; per-transaction `(assoc base-storage :pool tx)` handle the
+  ;; advisory-lock write paths open — otherwise the base handle's entry
+  ;; is never hit from inside a transaction AND a fresh entry leaks per
+  ;; write (unbounded `storage-caches` growth that `invalidate!` can't
+  ;; reach). Keyed on the storage with `:pool` elided, so the base and
+  ;; all its tx transients collapse to one stable, per-storage key.
+  (let [storage-key @#'bl/storage-key
+        mc (atom {})
+        lock (Object.)
+        base (->FakeStorage :the-pool mc lock)
+        tx-handle (assoc base :pool :a-tx-connection)
+        other (->FakeStorage :the-pool (atom {}) (Object.))]
+    (testing "base handle and its per-tx `(assoc … :pool tx)` transient key equal"
+      (is (= (storage-key base) (storage-key tx-handle))
+          "the tx transient must map to the base handle's cache entry"))
+    (testing "two distinct storages key differently"
+      (is (not= (storage-key base) (storage-key other))))
+    (testing "a non-associative opaque handle falls back to identity, no throw"
+      (let [o (Object.)]
+        (is (= (System/identityHashCode o) (storage-key o))))))
+
+  (testing "invalidate! reaches the entry a tx-transient populated"
+    ;; Seed a cache entry under the base key, prove the tx-transient
+    ;; resolves the SAME atom via cache-for-storage, then invalidate!
+    ;; (called on the base handle, as the CRUD layer does) clears it.
+    (let [cache-for-storage @#'bl/cache-for-storage
+          mc (atom {})
+          base (->FakeStorage :the-pool mc (Object.))
+          tx-handle (assoc base :pool :tx)]
+      (try
+        (let [base-cache (cache-for-storage base)]
+          (swap! base-cache assoc (random-uuid) true)
+          (is (identical? base-cache (cache-for-storage tx-handle))
+              "tx transient must reuse the base handle's cache atom")
+          (bl/invalidate! base)
+          (is (= {} @base-cache) "invalidate! on the base handle clears it")
+          (is (= {} @(cache-for-storage tx-handle))
+              "…and the tx transient sees the cleared entry too"))
+        (finally (bl/invalidate-all!))))))
+
+
 (deftest ^:integration storage-walker-test
   (let [base (base-storage)]
     (try

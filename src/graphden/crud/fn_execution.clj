@@ -426,7 +426,9 @@
       (some->> (:query-string request)
                (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
                second
-               (#(java.net.URLDecoder/decode ^String % "UTF-8")))))
+               ;; Soft-decode: a malformed percent-escape (`%`, `%zz`)
+               ;; in an untrusted query string must not 500 the handler.
+               request/safe-url-decode)))
 
 
 ;; =============================================================================

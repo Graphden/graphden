@@ -1,6 +1,7 @@
 (ns graphden.packages.loader-test
   "Tests for package loader."
   (:require
+    [clojure.java.io :as io]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.packages.loader :as loader]
     [graphden.storage.protocol.core]
@@ -73,7 +74,12 @@
     (is (true? (#'loader/base-fn? {:name :add :args {:a :int} :return-type :int}))))
 
   (testing "returns false for fn with :parent"
-    (is (false? (#'loader/base-fn? {:name :add-10 :parent :add :args {:a 10}})))))
+    (is (false? (#'loader/base-fn? {:name :add-10 :parent :add :args {:a 10}}))))
+
+  (testing "a marker-def is a type-row, NOT a base-fn — otherwise it is
+            misclassified, dropped as impl-less, and never registered"
+    (is (true? (#'loader/type-row? {:name :pii :marker {:hide-result? true}})))
+    (is (false? (#'loader/base-fn? {:name :pii :marker {:hide-result? true}})))))
 
 
 ;; =============================================================================
@@ -117,6 +123,24 @@
 (deftest read-resource-edn-test
   (testing "returns nil for non-existent resource"
     (is (nil? (#'loader/read-resource-edn "nonexistent/path.edn")))))
+
+
+(deftest edn-parse-error-names-the-file-test
+  (testing "a malformed EDN resource surfaces its path in the thrown
+            error — the raw reader message names neither file nor line"
+    (let [bad (java.io.File/createTempFile "bad" ".edn")]
+      (spit bad "{:a 1 :b}")  ; odd number of map entries → parse error
+      (try
+        (with-redefs [io/resource
+                      (fn [_] (java.net.URI/.toURL (java.io.File/.toURI bad)))]
+          (let [ex (try (#'loader/read-resource-edn "packages/x/oops.edn")
+                        nil
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex) "a malformed EDN throws")
+            (is (= :package-error/edn-parse (:type (ex-data ex))))
+            (is (= "packages/x/oops.edn" (:path (ex-data ex))))
+            (is (re-find #"packages/x/oops\.edn" (ex-message ex)))))
+        (finally (java.io.File/.delete bad))))))
 
 
 ;; =============================================================================
@@ -185,8 +209,11 @@
       (is (contains? result :base-fn-defs))
       (is (contains? result :fn-defs))
       (is (contains? result :packages))
+      (is (contains? result :base-fn-pairs)
+          "load-packages always emits the uncollapsed base-fn pair index")
       (is (empty? (:base-fn-defs result)))
       (is (empty? (:fn-defs result)))
+      (is (empty? (:base-fn-pairs result)))
       (is (empty? (:packages result))))))
 
 

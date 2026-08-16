@@ -493,6 +493,17 @@
   ([versioned-storage source-branch-id {:keys [conflict-resolutions]}]
    (let [base-storage (:base-storage versioned-storage)
          target-branch-id (:branch-id versioned-storage)
+         ;; A branch cannot be merged into itself. `fork-point` degenerates
+         ;; on source == target (neither side diverges from the other, so
+         ;; every own-branch edit reads back as "modified on both sides"),
+         ;; producing phantom self-conflicts; committing the merge record
+         ;; would then plant a self-referential `branch-merge` the resolver
+         ;; has to walk on every read. Reject it up front rather than let it
+         ;; corrupt the merge graph.
+         _ (when (= source-branch-id target-branch-id)
+             (throw (ex-info "Cannot merge a branch into itself"
+                             {:type :constraint-violation/self-merge
+                              :branch-id source-branch-id})))
          {:keys [conflicts]} (detect-conflicts base-storage source-branch-id
                                                target-branch-id)]
      (assert-resolutions-cover-conflicts! conflicts conflict-resolutions)

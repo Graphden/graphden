@@ -459,6 +459,18 @@
           (is (= {:ref-fn-id u}
                  (entities/resolve-sequence-payload storage {:ref (str u)})))))
 
+      (testing "a malformed :ref throws a MAPPED 400, not a bare UUID exception"
+        ;; Untrusted client JSON — `UUID/fromString` on a non-UUID used to
+        ;; leak an IllegalArgumentException up as a 500. Now it's a typed
+        ;; :validation-error (family-mapped to 400 in web.errors).
+        (let [ex (try (entities/resolve-sequence-payload storage {:ref "not-a-uuid"})
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (instance? clojure.lang.ExceptionInfo ex))
+          (is (= :validation-error/invalid-uuid (:type (ex-data ex)))))
+        (is (thrown? clojure.lang.ExceptionInfo
+              (entities/resolve-sequence-payload storage {:ref 12345}))
+            "a non-string :ref (JSON number) is rejected too, not NPE/500"))
+
       (testing ":value — plain literal, and the keyword-literal wire form"
         (is (= {:value 7} (entities/resolve-sequence-payload storage {:value 7})))
         (is (= {:value :kw :literal true}

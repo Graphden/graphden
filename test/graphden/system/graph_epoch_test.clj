@@ -226,6 +226,50 @@
       (finally (sp/close base)))))
 
 
+(deftest cross-pod-branch-delete-drops-ctx-and-ref-cache-test
+  ;; SYSTEM F1: a branch DELETE on another pod bumps the shared :branch
+  ;; epoch (foreign, un-noted here) AND removes the branch row. The lazy
+  ;; heal used to blindly REBUILD every cached ctx — resurrecting a
+  ;; phantom ctx for the dead branch and leaving the name→id ref-cache
+  ;; pointing at it (a same-name recreate then routes to a dead
+  ;; registry). The heal must instead DROP a cached branch whose row is
+  ;; gone, exactly like the local delete path.
+  (let [base (storage)
+        v (vs/wrap-with-versioning base)
+        healed (atom 0)]
+    (try
+      (binding [br/*epoch-state-override* (fresh-state)
+                br/*epoch-check-ttl-ms* 0
+                br/*epoch-heal-sync?* true
+                br/*epoch-heal-grace-ms* 0
+                epoch/*request-bump-log* (atom [])
+                cr/*impl-override* {:rebuild-optimistic! (fn [_ _] (swap! healed inc) true)
+                                    :rebuild! (fn [_] (swap! healed inc))}]
+        (let [default-id (vs/current-branch-id v)
+              feat (vs/create-branch! v "featB" {:base-branch-id default-id})
+              feat-id (:id feat)
+              ref-cache (atom {[nil "featB"] feat-id})
+              router (assoc (router-over v {default-id  {:ctx {:x 1} :handler :h}
+                                            feat-id     {:ctx {:x 2} :handler :h}})
+                            :ref-cache ref-cache)]
+          ;; Advance the watermark past the (noted) branch creation.
+          (epoch/note-applied! base)
+          (br/handler-for router nil)
+          (is (zero? @healed) "noted create advances without healing")
+          ;; Simulate the cross-pod delete: row gone + a FOREIGN (un-noted
+          ;; here) :branch epoch bump on a ledger-less handle.
+          (sp/delete-entity base :branch feat-id)
+          (epoch/bump! (dissoc base :graph-epoch-local :graph-epoch-covered) :branch)
+          (br/handler-for router nil)
+          (testing "the deleted branch's cached ctx is DROPPED, not rebuilt"
+            (is (not (contains? @(:handlers router) feat-id)))
+            (is (contains? @(:handlers router) default-id)
+                "the still-live default branch stays cached"))
+          (testing "its name→id ref-cache entry is forgotten"
+            (is (empty? @ref-cache)))))
+      (finally (sp/close base)))))
+
+
 (deftest notify-payload-roundtrips-epochs-test
   (let [ev {:kind :fn :op :invalidate :id "abc"
             :branch-id "b1" :epochs [7 8 9]}]

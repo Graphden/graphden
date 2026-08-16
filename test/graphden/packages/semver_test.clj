@@ -13,7 +13,15 @@
     (is (= [1 2 3] (semver/parse-version "1.2.3-rc1")))
     (is (= [1 2 3] (semver/parse-version "1.2.3+build.7")))
     (is (nil? (semver/parse-version nil)))
-    (is (= [0 0 0] (semver/parse-version "not-a-version")))))
+    (is (= [0 0 0] (semver/parse-version "not-a-version"))))
+  (testing "a conventional leading v/V is stripped, not fused into major
+            (was `[0 2 3]` — the `v` broke the major's digit match)"
+    (is (= [1 2 3] (semver/parse-version "v1.2.3")))
+    (is (= [1 2 3] (semver/parse-version "V1.2.3")))
+    (is (= [1 2 3] (semver/parse-version "v1.2.3-rc1")))
+    (is (= [2 0 0] (semver/parse-version "v2")))
+    (is (true? (semver/satisfies-constraint? "v1.5.0" ">=v1.0.0")))
+    (is (false? (semver/satisfies-constraint? "v2.0.0" "~>v1.0")))))
 
 
 (deftest parse-constraint-test

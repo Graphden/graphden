@@ -20,15 +20,26 @@
    the caller is a pooled worker returning to its pool would poison
    the next request — the caller receives the completed result (or
    `f`'s own exception) and http-kit simply fails to write the
-   response to the gone client."
+   response to the gone client.
+
+   The join is uninterruptible but NOT unbounded: it waits at most
+   `*join-timeout-ms*`. A task that outruns that is presumed HUNG (a
+   wedged socket, a lock never released) — the caller stops waiting,
+   logs, best-effort-cancels the task and throws `:abort-shield/timeout`
+   rather than pinning the request thread and blocking shutdown forever.
+   The bound only ever fires for a genuinely stuck task; a healthy write
+   pipeline finishes in milliseconds."
   (:refer-clojure :exclude [run!])
   (:require
-    [clojure.string :as str])
+    [clojure.string :as str]
+    [clojure.tools.logging :as log])
   (:import
     (java.util.concurrent
       ExecutorService
       Executors
-      Future)))
+      Future
+      TimeUnit
+      TimeoutException)))
 
 
 (defonce ^:private ^ExecutorService pool
@@ -41,11 +52,34 @@
             (Thread/.setDaemon true)))))))
 
 
+(def ^:dynamic *join-timeout-ms*
+  "Upper bound (ms) on the uninterruptible join before a shielded task is
+   presumed hung and abandoned (log + best-effort cancel + throw
+   `:abort-shield/timeout`). Keeps a wedged write from pinning the request
+   thread / blocking shutdown. Env `GRAPHDEN_ABORT_SHIELD_TIMEOUT_MS`
+   (default 30 000). Dynamic so tests can bind a small value."
+  (or (some-> (System/getenv "GRAPHDEN_ABORT_SHIELD_TIMEOUT_MS") parse-long)
+      30000))
+
+
+(defn- abandon-hung!
+  "Log, best-effort-cancel the presumed-hung task (interrupt its shield
+   thread), and throw `:abort-shield/timeout` so the caller stops waiting."
+  [^Future fut timeout-ms]
+  (log/warn "abort-shield: task exceeded" timeout-ms
+            "ms join budget — presumed hung, abandoning (write may be incomplete)")
+  (Future/.cancel fut true)
+  (throw (ex-info (str "abort-shield: task exceeded " timeout-ms "ms join budget")
+                  {:type :abort-shield/timeout :timeout-ms timeout-ms})))
+
+
 (defn run!
   "Run `f` to completion regardless of interrupts on the calling
    thread; return its value or throw its exception. Interrupts
    received while waiting are swallowed (see ns doc — the pooled
-   caller must not carry the flag back to its pool)."
+   caller must not carry the flag back to its pool). The join is bounded
+   by `*join-timeout-ms*`: a task that overruns is abandoned with
+   `:abort-shield/timeout` so a hang can't block the thread indefinitely."
   [f]
   (if (str/starts-with? (Thread/.getName (Thread/currentThread))
                         "abort-shield-")
@@ -55,14 +89,24 @@
     ;; — without it the shield thread saw a nil *request-bump-log*,
     ;; bumps went unlogged, notes drained nothing, and EVERY shielded
     ;; write became a heal (run-9: 41 heals).
-    (let [^Future fut (ExecutorService/.submit pool ^Callable (bound-fn* f))]
+    (let [^Future fut (ExecutorService/.submit pool ^Callable (bound-fn* f))
+          timeout-ms *join-timeout-ms*
+          ;; A single DEADLINE, not a per-attempt timeout: repeated
+          ;; interrupts must not reset the clock, or a steadily-interrupted
+          ;; caller could wait unboundedly and defeat the whole point.
+          deadline (+ (System/currentTimeMillis) timeout-ms)]
       (loop []
-        (let [r (try
-                  {:v (Future/.get fut)}
-                  (catch InterruptedException _ ::interrupted)
-                  (catch java.util.concurrent.ExecutionException e
-                    {:t (or (Throwable/.getCause e) e)}))]
-          (cond
-            (= r ::interrupted) (recur)
-            (:t r) (throw (:t r))
-            :else (:v r)))))))
+        (let [remaining (- deadline (System/currentTimeMillis))]
+          (if-not (pos? remaining)
+            (abandon-hung! fut timeout-ms)
+            (let [r (try
+                      {:v (Future/.get fut remaining TimeUnit/MILLISECONDS)}
+                      (catch InterruptedException _ ::interrupted)
+                      (catch TimeoutException _ ::timed-out)
+                      (catch java.util.concurrent.ExecutionException e
+                        {:t (or (Throwable/.getCause e) e)}))]
+              (cond
+                (= r ::interrupted) (recur)
+                (= r ::timed-out) (abandon-hung! fut timeout-ms)
+                (:t r) (throw (:t r))
+                :else (:v r)))))))))

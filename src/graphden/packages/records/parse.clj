@@ -381,10 +381,11 @@
    (widening forbidden); we still pass it through here so the diagnostic
    fires on the actual binding row, not as a silent drop."
   [arg-value name->id]
-  (let [{:keys [as value append closed required terminal secret-path]
+  (let [{:keys [as value append closed required terminal secret-path description]
          ref-name :ref type-ref :type resolver-name :resolver} arg-value
         has-required? (contains? arg-value :required)
         has-terminal? (contains? arg-value :terminal)
+        has-description? (contains? arg-value :description)
         has-secret-path? (contains? arg-value :secret-path)
         _ (when (and resolver-name (not (contains? name->id resolver-name)))
             (throw (ex-info (str "Unresolved resolver ref: " resolver-name)
@@ -484,9 +485,14 @@
                                            :list-closed (boolean closed))
                  has-required? (assoc :required (boolean required))
                  has-terminal? (assoc :terminal (boolean terminal))
+                 ;; `:description` is a per-binding annotation column
+                 ;; (the round-trip twin of the exporter's emission);
+                 ;; carried through so a whole-graph export→import keeps
+                 ;; editor-authored binding descriptions.
+                 has-description? (assoc :description description)
                  (not (or ref-name (contains? arg-value :value) as type-ref
                           append closed has-required? has-terminal?
-                          has-secret-path? resolver-name))
+                          has-description? has-secret-path? resolver-name))
                  (assoc :value arg-value :value-present true))]
     {:fields fields
      :items (vec (when (vector? append) append))}))

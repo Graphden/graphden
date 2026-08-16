@@ -289,10 +289,6 @@
          {:category :constraint :retryable? true
           :description "Concurrent modification detected (CAS failure)"}
 
-         :datomic-error
-         {:category :unknown :retryable? false
-          :description "Unclassified Datomic error"}
-
          :unknown-error
          {:category :unknown :retryable? false
           :description "Unclassified error"}}]

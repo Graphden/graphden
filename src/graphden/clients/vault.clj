@@ -12,7 +12,32 @@
    All fns take a `client` map `{:address \"http://...\" :token \"...\"}`
    (the same shape produced by the `:vault/client` integrant key) and
    raise `ex-info {:type :vault/lookup-failed}` on non-success
-   responses — the editor's error pane labels them uniformly."
+   responses — the editor's error pane labels them uniformly.
+
+   TOKEN LIFECYCLE (assumptions — read before adding a secret path).
+   This client is a STATELESS request wrapper: it sends the `:token`
+   from its `client` map on every call and NEVER renews, re-auths, or
+   inspects the token's TTL. The token is set ONCE from config at
+   `:vault/client` init (`system.init.exec`) and held in `active-client`
+   for the JVM's life. That is deliberate — token renewal is an ambient,
+   time-driven concern that does not belong inside a per-request codec —
+   and it makes the deployment contract explicit:
+
+   - The supplied token MUST stay valid for the process lifetime. Use a
+     PERIODIC or long-TTL token, OR (recommended for prod) point
+     `:address` at a Vault Agent / OpenBao Agent sidecar that injects and
+     transparently renews the token, so this client always sees a fresh
+     one without ever handling renewal itself.
+   - A token that EXPIRES mid-run is a configuration error, not a bug
+     this client masks: Vault then answers 403, which surfaces as the
+     normal `:vault/lookup-failed` (via `check-status!`) — a loud,
+     labelled failure, not silent bad data. Operators rotate by restarting
+     with a fresh token (or via the Agent sidecar above); there is no
+     in-process re-auth to get subtly wrong.
+
+   If auto-renew is ever wanted in-process, it belongs in a SEPARATE
+   lifecycle component (a scheduled `auth/token/renew-self` against
+   `active-client`), NOT threaded through these read/write fns."
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]

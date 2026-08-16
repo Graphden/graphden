@@ -551,6 +551,13 @@
 (defonce ^:private epoch-heal-monitor (Object.))
 
 
+;; Forward reference — `invalidate!` (drop one branch's ctx + ref-cache)
+;; is defined below but the epoch heal needs it to evict a branch that a
+;; sibling pod DELETED (the delete's `:branch` epoch bump is what wakes
+;; this heal on the other pods).
+(declare invalidate!)
+
+
 (def ^:dynamic *epoch-heal-sync?*
   "Test hook: run the heal's rebuild work inline instead of on the
    background thread, so assertions don't race it."
@@ -577,7 +584,7 @@
    monitor so two heals can't interleave. The watermark advances
    immediately — the heal is now in flight and a re-trigger would
    only duplicate it."
-  [{:keys [handlers default-branch-id]} base global]
+  [{:keys [handlers default-branch-id] :as router} base global]
   (locking epoch-heal-monitor
     (let [state (epoch-state)]
       (when (> global (:w @state))
@@ -587,35 +594,47 @@
         (epoch/prune! base global)
         (swap! state assoc :w global)
         (let [snap @handlers
-              refresh! (fn [entry]
-                         (when-let [c (:ctx entry)]
-                           (try
-                             ;; Two OPTIMISTIC attempts (compile outside
-                             ;; the lock, swap only if the epoch didn't
-                             ;; move mid-compile — a moved epoch means a
-                             ;; delta already patched the live registry
-                             ;; and our snapshot would clobber it), then
-                             ;; a blocking rebuild as the correctness
-                             ;; fallback under continuous writes.
-                             (loop [attempt 1]
-                               (let [e0 (epoch/current base)
-                                     swapped? (cr/rebuild-optimistic!
-                                                c #(= e0 (epoch/current base)))]
-                                 (when-not swapped?
-                                   (if (< attempt 2)
-                                     (recur (inc attempt))
-                                     (cr/rebuild! c)))))
-                             (catch Exception e
-                               (log/warn e "graph-epoch heal: ctx rebuild failed")))))
+              refresh! (fn [bid entry]
+                         (if (and (not= bid default-branch-id)
+                                  (nil? (sp/read-entity base :branch bid)))
+                           ;; The branch was DELETED on another pod (its
+                           ;; `:branch` epoch bump is what woke this heal).
+                           ;; Rebuilding would resurrect a phantom ctx AND
+                           ;; leave the name→id ref-cache pointing at the
+                           ;; dead branch, so a same-name recreate routes
+                           ;; here to a dead registry ("Branch handler
+                           ;; closure missing"). Drop the entry + forget
+                           ;; its ref exactly like the local delete path.
+                           (invalidate! router bid)
+                           (when-let [c (:ctx entry)]
+                             (try
+                               ;; Two OPTIMISTIC attempts (compile outside
+                               ;; the lock, swap only if the epoch didn't
+                               ;; move mid-compile — a moved epoch means a
+                               ;; delta already patched the live registry
+                               ;; and our snapshot would clobber it), then
+                               ;; a blocking rebuild as the correctness
+                               ;; fallback under continuous writes.
+                               (loop [attempt 1]
+                                 (let [e0 (epoch/current base)
+                                       swapped? (cr/rebuild-optimistic!
+                                                  c #(= e0 (epoch/current base)))]
+                                   (when-not swapped?
+                                     (if (< attempt 2)
+                                       (recur (inc attempt))
+                                       (cr/rebuild! c)))))
+                               (catch Exception e
+                                 (log/warn e "graph-epoch heal: ctx rebuild failed"))))))
               work (fn []
-                     (some-> (get snap default-branch-id) refresh!)
+                     (when-let [e (get snap default-branch-id)]
+                       (refresh! default-branch-id e))
                      (doseq [[bid entry] snap]
-                       (when (not= bid default-branch-id) (refresh! entry)))
+                       (when (not= bid default-branch-id) (refresh! bid entry)))
                      ;; Entries installed while the rebuilds ran may have
                      ;; copied the pre-swap base — refresh them too
                      ;; (over-refresh of a fresh one is harmless).
                      (doseq [[bid entry] @handlers]
-                       (when-not (contains? snap bid) (refresh! entry))))
+                       (when-not (contains? snap bid) (refresh! bid entry))))
               t (Thread. ^Runnable work "graph-epoch-heal")]
           (if *epoch-heal-sync?*
             (work)

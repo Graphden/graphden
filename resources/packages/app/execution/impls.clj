@@ -155,6 +155,7 @@
   [days limit]
   ;; Phase C2 error visibility — the current org's recent FAILED executions
   ;; (error text/data already write-side redacted + scrubbed), newest first.
+  (cr/record-effect! :db)
   (exec-errors/recent-failures (:pool (:pg-storage ctx)) (tc/current-org) days limit))
 
 
@@ -166,6 +167,7 @@
   ;; sees the platform's). Nil-defaulting is boundary coercion (nil pool /
   ;; no rows → zeros); the DERIVED :avg-ms and the display envelope are
   ;; graph composition (`:usage-fn-stats` in fns.edn).
+  (cr/record-effect! :db)
   (let [{:keys [runs failed cancelled duration-ms-sum]
          :or {runs 0 failed 0 cancelled 0 duration-ms-sum 0}}
         (exec-stats/fn-stats (:pool (:pg-storage ctx)) (tc/current-org) fn-id days)]
@@ -181,6 +183,7 @@
   ;; the trailing window. Counts + durations ONLY (no args/results/errors),
   ;; so it is privacy-safe and always scoped to the CURRENT org (tenant sees
   ;; their own workspace; public/single-tenant sees the platform). nil pool → zeros.
+  (cr/record-effect! :db)
   (exec-stats/org-summary (:pool (:pg-storage ctx)) (tc/current-org) days))
 
 
@@ -188,6 +191,7 @@
   [days]
   ;; Per-day series for the org over the window — the Stats panel's trend
   ;; bars. Same org-scoping + privacy contract as `usage-org-summary`.
+  (cr/record-effect! :db)
   (exec-stats/org-daily (:pool (:pg-storage ctx)) (tc/current-org) days))
 
 
@@ -195,6 +199,7 @@
   [days limit]
   ;; Busiest fns for the org over the window, fn NAME joined for display.
   ;; Same org-scoping + privacy contract; a since-deleted fn shows its id.
+  (cr/record-effect! :db)
   (exec-stats/org-fn-stats-named (:pool (:pg-storage ctx)) (tc/current-org) days limit))
 
 
@@ -206,6 +211,7 @@
   ;; counts; ANY other tenant context gets [] so the Stats panel's by-org
   ;; section simply never renders for them. The guard lives HERE, impl-side, so
   ;; no graph composition can reach cross-org data from a tenant ctx.
+  (cr/record-effect! :db)
   (if (or (tc/current-platform-tier?) (tc/current-has-platform-cap? :view-all-stats))
     (exec-stats/org-all-stats (:pool (:pg-storage ctx)) days limit)
     []))

@@ -10,7 +10,7 @@
     [clojure.string :as str]))
 
 
-(defn- safe-url-decode
+(defn safe-url-decode
   "URL-decode `s`, failing soft to the raw string on malformed
    percent-encoding. `URLDecoder/decode` throws IllegalArgumentException
    on a lone `%` / `%zz`; this runs on UNTRUSTED query-string + form-body

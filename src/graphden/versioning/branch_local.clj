@@ -13,26 +13,53 @@
    runtime-config functions (web-server with a dev port, vault path,
    etc.) never propagate to sibling branches on merge.
 
-   Cache: per-storage atom, keyed by `System/identityHashCode`. Lazy
-   compute on first access; cleared via `invalidate!` on any write
-   to the `:fn` table (CRUD layer). The cache is intentionally a
-   `defonce` process-wide map rather than an extra field on
-   `VersionedStorage` because the resolution algorithm doesn't carry
-   the versioned wrapper — it operates over `base-storage`."
+   Cache: per-storage atom, keyed by a STABLE content key (see
+   `storage-key`). Lazy compute on first access; cleared via
+   `invalidate!` on any write to the `:fn` table (CRUD layer). The
+   cache is intentionally a `defonce` process-wide map rather than an
+   extra field on `VersionedStorage` because the resolution algorithm
+   doesn't carry the versioned wrapper — it operates over
+   `base-storage`."
   (:require
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]))
 
 
 (defonce ^:private storage-caches
-  ;; {storage-identity-hash → atom of {fn-id → bool}}
+  ;; {storage-key → atom of {fn-id → bool}}
   (atom {}))
+
+
+(defn- storage-key
+  "Stable cache/identity key for a storage handle.
+
+   The advisory-lock write paths in `versioning.storage.core` open a
+   `with-transaction` and run every read on a per-transaction storage
+   handle `(assoc base-storage :pool tx)` — a DISTINCT object whose
+   `System/identityHashCode` differs from the base on every write. The
+   original key-by-identity-hash therefore (a) never hit the base
+   handle's cached entry from inside a transaction, and (b) LEAKED a
+   fresh `storage-caches` entry per write transaction that `invalidate!`
+   (keyed on the base handle) could never clear — unbounded growth on a
+   long-running executor.
+
+   Elide `:pool` so the base handle and all its transaction transients
+   collapse to ONE stable, per-storage-unique entry: the remaining
+   fields (the metadata-cache / rw-lock / slot-row-cache atoms, plus the
+   epoch-ledger atoms) are shared by identity across the `assoc`, so a
+   storage record's value-hash is stable across transactions yet
+   distinct between two real storages. Non-associative handles (opaque
+   test doubles) fall back to identity."
+  [storage]
+  (if (map? storage)
+    (dissoc storage :pool)
+    (System/identityHashCode storage)))
 
 
 (defn- cache-for-storage
   "Returns the per-storage cache atom, creating one on first use."
   [base-storage]
-  (let [k (System/identityHashCode base-storage)]
+  (let [k (storage-key base-storage)]
     (or (get @storage-caches k)
         (let [fresh (atom {})]
           (swap! storage-caches assoc k fresh)
@@ -44,7 +71,7 @@
    Call after any write to the `:fn` table — both `:branch-local?`
    itself and `:parent-ids` writes can shift the effective set."
   [base-storage]
-  (let [k (System/identityHashCode base-storage)]
+  (let [k (storage-key base-storage)]
     (when-let [cache (get @storage-caches k)]
       (reset! cache {}))))
 

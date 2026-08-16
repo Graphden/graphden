@@ -72,12 +72,64 @@
         (Thread/sleep 25)))))
 
 
+;; The background periodic schedulers (reconcile ticker, execution cleanup,
+;; domain alerter, fleet controller) each run on their OWN single worker
+;; thread. Left running during a checkpoint, a tick fires against the
+;; half-quiesced system — reopening the advisory-lock socket we just closed,
+;; or borrowing from the drained pool — exactly what CRIU trips on. We PAUSE
+;; them for the quiesced window without needing to touch their (per-init-key)
+;; construction: submit a latch-blocked task that occupies each executor's
+;; single thread, so any due periodic task queues behind it and cannot run
+;; until `resume-schedulers!` releases the latch on restore.
+(defonce ^:private checkpoint-gate (atom nil))
+
+
+(defn- schedulers-of
+  "Every background `ScheduledExecutorService` reachable off the system map
+   (some absent when the feature is disabled)."
+  [system]
+  (keep identity
+        [(:ticker (:exec/service-reconciler system))
+         (:exec/cleanup-scheduler system)
+         (:exec/alert-scheduler system)
+         (:scheduler (:exec/fleet-controller system))]))
+
+
+(defn pause-schedulers!
+  "Occupy each background scheduler's single worker thread with a latch-blocked
+   task so no periodic tick fires while the system is quiesced. Best-effort."
+  [system]
+  (let [latch (java.util.concurrent.CountDownLatch. 1)]
+    (reset! checkpoint-gate latch)
+    (doseq [^java.util.concurrent.ExecutorService s (schedulers-of system)]
+      (try
+        (java.util.concurrent.Executor/.execute
+          s ^Runnable (fn []
+                        (try (java.util.concurrent.CountDownLatch/.await latch)
+                             (catch InterruptedException _ nil))))
+        (catch Exception e (log/warn e "CRaC: pausing a scheduler failed"))))))
+
+
+(defn resume-schedulers!
+  "Release the checkpoint latch so the paused periodic ticks run again."
+  [_system]
+  (when-let [latch @checkpoint-gate]
+    (java.util.concurrent.CountDownLatch/.countDown latch)
+    (reset! checkpoint-gate nil)))
+
+
 (defn quiesce!
   "Close every live socket CRIU can't snapshot: DRAIN the Hikari pool to zero
    connections, close the LISTEN connection, close the advisory-lock
    connection(s). Best-effort per resource — one failure must not block the
-   checkpoint."
+   checkpoint.
+
+   PAUSES the background periodic schedulers FIRST (before any socket is
+   closed) so no tick can reopen a resource mid-quiesce."
   [system]
+  ;; Freeze the periodic ticks before touching any socket — see
+  ;; `pause-schedulers!`. Paired with `resume-schedulers!` in `resume!`.
+  (pause-schedulers! system)
   ;; Stop managed services FIRST — the http-kit web-server holds an open
   ;; ServerSocketChannel + an EPoll selector on :8080 that CRIU can't snapshot.
   ;; Stopping the services closes them (and frees any pool connection / per-
@@ -136,6 +188,9 @@
     (try
       (recon/reconcile-once! (:context reconciler) (:running reconciler))
       (catch Exception e (log/warn e "CRaC: restarting services failed"))))
+  ;; Sockets + locks healed and services restarted — let the periodic ticks
+  ;; run again (they now find a fully-live system).
+  (resume-schedulers! system)
   (log/info "CRaC: resumed DB resources after restore"))
 
 

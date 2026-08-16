@@ -210,11 +210,15 @@
    :args {:parts [{:value "Function not found: "}
                   :_execute-fn-not-found-anchor]}}
 
+  {:name :_execute-rejection
+   :description "Shared rejection-envelope shape for the /api/execute* guards. Binds the fixed key vector `[:ok :status :http-status :error :error-data]` for `:zipmap`; each guard's `*-rej` fn-def supplies only `:vals` — the `[false :rejected <http-status> <error> <error-data>]` row. DRY parent (PACKAGES.md §1) lifting the key vector out of the six per-guard envelopes."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]}}
+
   {:name :_execute-fn-not-found-rej
    :description "Rejection envelope for the fn-not-found guard. Dynamic — `:error` cites the unresolved anchor."
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
-          :vals [{:value false}
+   :parent :_execute-rejection
+   :args {:vals [{:value false}
                  {:value :rejected}
                  {:value 404}
                  :_execute-fn-not-found-msg
@@ -252,9 +256,8 @@
 
   {:name :_execute-timeout-bad-rej
    :description "Rejection envelope for the timeout-out-of-range guard. Dynamic — `:error-data` cites the bad value."
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
-          :vals [{:value false}
+   :parent :_execute-rejection
+   :args {:vals [{:value false}
                  {:value :rejected}
                  {:value 400}
                  {:value ":timeout-ms must be in [1, 60000]"}
@@ -295,9 +298,8 @@
 
   {:name :_execute-args-too-large-rej
    :description "Rejection envelope for the args-too-large guard."
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
-          :vals [{:value false}
+   :parent :_execute-rejection
+   :args {:vals [{:value false}
                  {:value :rejected}
                  {:value 413}
                  {:value ":args size exceeds 262144 bytes"}
@@ -371,9 +373,8 @@
 
   {:name :_execute-running-as-svc-rej
    :description "Rejection envelope for the already-running-as-service guard."
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
-          :vals [{:value false}
+   :parent :_execute-rejection
+   :args {:vals [{:value false}
                  {:value :rejected}
                  {:value 409}
                  {:value "Function is already running as a managed service. Disable the service in /api/entities/service or restart it via /api/services/reconcile."}
@@ -447,9 +448,8 @@
 
   {:name :_execute-unknown-arg-rej
    :description "Rejection envelope for the unknown-arg guard."
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
-          :vals [{:value false}
+   :parent :_execute-rejection
+   :args {:vals [{:value false}
                  {:value :rejected}
                  {:value 400}
                  :_execute-unknown-arg-msg
@@ -558,9 +558,8 @@
 
   {:name :_execute-malformed-ref-rej
    :description "Rejection envelope for the malformed-ref guard."
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :status} {:value :http-status :literal? true} {:value :error} {:value :error-data}]
-          :vals [{:value false}
+   :parent :_execute-rejection
+   :args {:vals [{:value false}
                  {:value :rejected}
                  {:value 400}
                  :_execute-malformed-msg

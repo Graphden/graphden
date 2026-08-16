@@ -129,12 +129,73 @@
     (try (URI/.getHost (URI. stripped)) (catch Exception _ nil))))
 
 
+(def ^{:private true
+       :doc "JDBC connect params a tenant url must NOT carry. These load an
+             arbitrary class or plug a custom transport into the driver, which
+             would subvert the SSRF guard entirely (a `socketFactory` /
+             `sslfactory` / `sslhostnameverifier` / `authenticationPluginClassName`
+             can dial wherever it likes and ignore our resolved-address check),
+             or turn on multi-host failover that reaches a second, unchecked host
+             (`loadBalanceHosts`). Compared case-insensitively. Denylist, not
+             allowlist, so ordinary connect options (`ssl`, `sslmode`,
+             `connectTimeout`, `ApplicationName`, …) keep working."}
+  unsafe-jdbc-params
+  #{"socketfactory" "socketfactoryarg"
+    "sslfactory" "sslfactoryarg"
+    "sslpasswordcallback" "sslhostnameverifier"
+    "authenticationpluginclassname"
+    "loadbalancehosts"})
+
+
+(defn- jdbc-param-names
+  "Lower-cased set of connect-param KEYS in a JDBC `url`. Driver-agnostic: split
+   on `? ; &` (Postgres/MySQL use `?…&…`, some drivers use `;…`), keep only
+   `k=v` tokens, take the key. The leading `scheme://host/db` token has no `=`
+   and is skipped."
+  [url]
+  (->> (str/split (str url) #"[?;&]")
+       (keep (fn [tok]
+               (when (str/includes? tok "=")
+                 (-> tok (str/split #"=" 2) first str/trim str/lower-case))))
+       set))
+
+
+(defn reject-unsafe-jdbc-params!
+  "Throw `:egress/blocked :reason :unsafe-jdbc-param` if a user-supplied JDBC
+   `url` sets any `unsafe-jdbc-params` connect option (a class-loading /
+   custom-transport gadget that would bypass the SSRF guard). Returns nil when
+   the url carries none. Called by `check-sql-target!`; also usable standalone
+   at any other JDBC-url intake seam (e.g. BYO executor config)."
+  [url]
+  (when-let [bad (first (filter unsafe-jdbc-params (jdbc-param-names url)))]
+    (throw (ex-info (str "egress blocked: jdbc url sets a disallowed connect param `" bad "`")
+                    {:type :egress/blocked :url url :reason :unsafe-jdbc-param
+                     :param bad})))
+  nil)
+
+
 (defn check-sql-target!
   "Gate an outbound JDBC `url` before connecting (RESTRICTED tenant path): parse
    its host, reject the platform's own DB (installed `platform-db-host?` —
-   cross-tenant), then reject a non-public / rebinding target
-   (`resolve-public-ips`, which also covers an internal platform DB). Throws
-   `:egress/blocked`; returns nil when the target is safe."
+   cross-tenant), reject a class-loading / custom-transport connect param
+   (`reject-unsafe-jdbc-params!` — E2), then reject a non-public / rebinding
+   target (`resolve-public-ips`, which also covers an internal platform DB).
+   Throws `:egress/blocked`; returns nil when the target is safe.
+
+   SECURITY NOTE (E1 — residual JDBC SSRF TOCTOU): this resolves+validates the
+   host, but next.jdbc/pgjdbc opens the socket with its OWN, SECOND DNS
+   resolution — unlike the HTTP path, which pins OkHttp to our validated
+   addresses via `validating-dns`. So a name that resolves public HERE but
+   internal a few ms later (DNS rebinding) could still land on an internal IP
+   at connect time. This gap is ACCEPTED, not closed, because pgjdbc exposes no
+   per-connection validating resolver — its only address-pinning hook is
+   `socketFactory`, which is itself the E2 gadget we deny above (so we cannot
+   safely pin without re-opening a worse hole). Mitigations that DO hold at
+   connect time: the deny-list re-checks the FIRST resolution (private ranges +
+   platform-DB) and rejects fast; the rebind window is sub-second; and even a
+   won race only reaches a host reachable from the executor, never arbitrary
+   in-process capability. If pgjdbc later ships a resolver/validating-socket
+   hook, wire it here the way `validating-dns` pins OkHttp and delete this note."
   [url]
   (let [host (jdbc-host url)]
     (when (str/blank? host)
@@ -144,6 +205,7 @@
       (when (pred host)
         (throw (ex-info "egress blocked: the platform database is not a valid tenant target"
                         {:type :egress/blocked :host host :reason :platform-db}))))
+    (reject-unsafe-jdbc-params! url)
     (resolve-public-ips host)
     nil))
 

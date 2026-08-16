@@ -202,6 +202,30 @@
 
 
 ;; ============================================================================
+;; query-param — raw-fallback URL decode must not throw on bad input
+;; ============================================================================
+
+(deftest query-param-test
+  (testing "enriched :query-params (string + keyword key) win"
+    (is (= "v" (fn-exec/query-param {:query-params {"p" "v"}} "p")))
+    (is (= "v" (fn-exec/query-param {:query-params {:p "v"}} "p"))))
+
+  (testing "raw :query-string fallback is URL-decoded"
+    (is (= "hello world"
+           (fn-exec/query-param {:query-string "p=hello%20world"} "p"))))
+
+  (testing "malformed percent-escape in the raw fallback fails soft (no 500)"
+    ;; A lone `%` / bad hex used to bubble IllegalArgumentException up as a
+    ;; 500. `safe-url-decode` now returns the raw match instead.
+    (is (= "a%" (fn-exec/query-param {:query-string "p=a%"} "p")))
+    (is (= "%zz" (fn-exec/query-param {:query-string "p=%zz"} "p"))))
+
+  (testing "absent param → nil"
+    (is (nil? (fn-exec/query-param {:query-string "other=1"} "p")))
+    (is (nil? (fn-exec/query-param {} "p")))))
+
+
+;; ============================================================================
 ;; apply-execute — end-to-end via the executor
 ;; ============================================================================
 

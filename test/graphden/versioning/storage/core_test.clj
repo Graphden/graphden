@@ -224,6 +224,64 @@
       (finally (sp/close base)))))
 
 
+(deftest delete-branch-merge-source-guard-runs-under-tx-lock-test
+  ;; L5: the "branch is a live merge SOURCE" guard now runs INSIDE the
+  ;; delete transaction, under the per-branch advisory lock — a merge that
+  ;; names the branch as source and commits concurrently can no longer slip
+  ;; past an out-of-tx guard read and get its target silently reverted.
+  ;; Semantics are unchanged: a live-target source is undeletable; once the
+  ;; target is gone it deletes.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [src  (vs/create-branch! v "guard-src")
+            tgt  (vs/create-branch! v "guard-tgt")
+            vtgt (vs/switch-branch v (:id tgt))
+            _    (vs/merge-branch! vtgt (:id src))]
+        (testing "deleting a branch that is a live merge source is refused"
+          (let [ex (try (vs/delete-branch! v (:id src))
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :constraint-violation/branch-is-merge-source
+                   (:type (ex-data ex))))
+            (is (= [(:id tgt)] (:merged-into-branch-ids (ex-data ex)))
+                "guard carries the still-live target it protects")))
+        (testing "once the target is deleted the source becomes deletable"
+          (is (true? (vs/delete-branch! v (:id tgt))))
+          (is (true? (vs/delete-branch! v (:id src))))))
+      (finally (sp/close base)))))
+
+
+(deftest merge-and-delete-take-per-branch-advisory-lock-test
+  ;; L5: assert the serialization point is actually reached — merge locks
+  ;; BOTH endpoints, delete locks the single branch it removes — via a spy
+  ;; over the shared `lock-branches!` helper. (A true concurrent repro needs
+  ;; two live connections racing; here we pin that the lock CALL happens on
+  ;; each path, and that a normal merge + delete still succeed unchanged.)
+  (let [base  (base-storage)
+        v     (vs/wrap-with-versioning base)
+        calls (atom [])]
+    (try
+      (with-redefs [mrg/lock-branches! (fn [_storage & bids]
+                                         (swap! calls conj (vec bids))
+                                         nil)]
+        (testing "merge-branch! locks source + target inside the tx"
+          (let [feature (vs/create-branch! v "lock-merge-feat")
+                target  (vs/current-branch-id v)]
+            (reset! calls [])
+            (is (map? (vs/merge-branch! v (:id feature)))
+                "merge still succeeds with the lock helper spied")
+            (is (some #(= (set %) #{(:id feature) target}) @calls)
+                "lock-branches! was called with both endpoints")))
+        (testing "delete-branch! locks the branch it removes"
+          (let [leaf (vs/create-branch! v "lock-del-leaf")]
+            (reset! calls [])
+            (is (true? (vs/delete-branch! v (:id leaf)))
+                "delete still succeeds with the lock helper spied")
+            (is (some #(= (vec %) [(:id leaf)]) @calls)
+                "lock-branches! was called with the deleted branch id"))))
+      (finally (sp/close base)))))
+
+
 ;; ============================================================================
 ;; detect-conflicts / merge-branch!
 ;; ============================================================================

@@ -329,6 +329,55 @@
 
 
 ;; =============================================================================
+;; Concurrency/lifecycle hardening (L1 generation guard, L4 monitor reap).
+;; =============================================================================
+
+(deftest build-during-concurrent-delete-does-not-resurrect
+  ;; L1: a branch deleted (invalidate!) WHILE its cold build runs must NOT be
+  ;; resurrected by the build's install. build-and-cache! captures the branch's
+  ;; build generation before compiling; invalidate! bumps it mid-build (via the
+  ;; holder's AtomicLong, whose reference the builder captured); install sees
+  ;; the mismatch and discards instead of caching a ctx for a gone branch.
+  (let [gone-id (random-uuid)
+        handlers (atom {})
+        router (-> (br/->BranchRouter nil default-id handlers :stub-fn-id)
+                   (assoc :build-monitors (java.util.concurrent.ConcurrentHashMap.)))]
+    (with-redefs [br/build-actual-entry!
+                  (fn [r bid]
+                    ;; simulate a concurrent delete landing mid-build
+                    (br/invalidate! r bid)
+                    {:handler :stub-h :last-used 1})]
+      (let [entry (#'br/build-and-cache! router gone-id)]
+        (is (= :stub-h (:handler entry))
+            "the in-flight request is still served from the built entry")
+        (is (not (contains? @handlers gone-id))
+            "but the deleted branch is NOT installed into the cache")))))
+
+
+(deftest lru-eviction-reaps-the-build-monitor-holder
+  ;; L4: LRU eviction drops the handlers entry AND the evicted branch's
+  ;; build-monitors holder — otherwise the per-branch lock+gen holder leaks,
+  ;; growing unbounded over long churn of many branches.
+  (let [victim-id (random-uuid)
+        new-id (random-uuid)
+        monitors (java.util.concurrent.ConcurrentHashMap.)
+        handlers (atom {default-id (entry 0)
+                        victim-id (entry 1)})   ; oldest non-default → evicted
+        router (-> (br/->BranchRouter nil default-id handlers :stub-fn-id)
+                   (assoc :build-monitors monitors :max-size 2))]
+    ;; Seed holders for both the victim and (as computeIfAbsent would) new-id.
+    (#'br/build-holder router victim-id)
+    (is (java.util.concurrent.ConcurrentHashMap/.containsKey monitors victim-id))
+    (with-redefs [br/build-actual-entry!
+                  (fn [_ _] {:handler :new-h :last-used 9})]
+      (#'br/build-and-cache! router new-id))
+    (is (contains? @handlers new-id) "new branch installed")
+    (is (not (contains? @handlers victim-id)) "victim evicted from handlers")
+    (is (not (java.util.concurrent.ConcurrentHashMap/.containsKey monitors victim-id))
+        "victim's build-monitor holder reaped, not leaked")))
+
+
+;; =============================================================================
 ;; ref-cache + invalidate! semantics. Stubs the UNCACHED read via the
 ;; per-thread `br/*resolve-uncached-override*` seam to count calls,
 ;; then verifies the cache cuts subsequent reads.

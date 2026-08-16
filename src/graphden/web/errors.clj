@@ -137,7 +137,12 @@
   [^Throwable t]
   (let [data (ex-data t)
         type-kw (:type data)
-        status (status-for type-kw)
+        ;; `status-for-ex-data`, not `status-for`: an otherwise-unmapped
+        ;; storage error with a `42xxx` sql-state (the DB rejecting
+        ;; USER-SHAPED input) is a 400 at the TOP boundary too, matching
+        ;; the local rule crud/entities already applies. A genuine 5xx
+        ;; (no 42xxx sql-state) keeps its 500/503.
+        status (status-for-ex-data data)
         body (safe-error-body type-kw (Throwable/.getMessage t))]
     ;; Operational signal for /metrics (Prometheus alerting, C3): a 5xx is a
     ;; server fault worth paging on; 4xx are client errors, not counted.

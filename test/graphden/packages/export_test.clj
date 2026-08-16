@@ -484,3 +484,36 @@
       (is (= form back)))
     (testing "plain EDN read of the text does NOT throw (tag is the only carrier)"
       (is (some? (edn/read-string {:readers wire/wire-readers} text))))))
+
+
+;; --------------------------------------------------------------------------
+;; constraint-type-ns — namespace-aware resolution of a constraint type-name.
+;; Guards the dependency scan against last-write-wins misclassification of a
+;; type-name that is DUPLICATED across namespaces (ADR-identity-model stage 5:
+;; names are per-namespace). A plain `{name → ns}` index would pick whichever
+;; ns happened to be indexed last; this resolver mirrors sync (own-ns wins,
+;; else the sole ns, else prefer an external one so a dep is never dropped).
+;; --------------------------------------------------------------------------
+
+(deftest constraint-type-ns-is-namespace-aware
+  (let [resolve* #'export/constraint-type-ns
+        root "dup.pkg"
+        ;; :widget defined in the owner's OWN ns AND externally; :mixed in an
+        ;; internal sub-ns AND externally; :gadget only externally; :inside
+        ;; only in a sub-ns; :solo only in the owner ns.
+        name->nss {:widget #{"dup.pkg" "ext.lib"}
+                   :mixed  #{"dup.pkg.sub" "ext.lib"}
+                   :gadget #{"ext.lib"}
+                   :inside #{"dup.pkg.sub"}
+                   :solo   #{"dup.pkg"}}]
+    (testing "the fn's OWN namespace wins over a same-named external sibling"
+      ;; deterministic — a last-write-wins map could return \"ext.lib\" instead
+      (is (= "dup.pkg" (resolve* name->nss root :widget "dup.pkg"))))
+    (testing "a sole external definition resolves external (a real dep)"
+      (is (= "ext.lib" (resolve* name->nss root :gadget "dup.pkg"))))
+    (testing "a sole internal sub-ns definition resolves internal (not a dep)"
+      (is (= "dup.pkg.sub" (resolve* name->nss root :inside "dup.pkg"))))
+    (testing "duplicated across the subtree boundary, owner elsewhere → the EXTERNAL ns is preferred so the dep is never silently dropped"
+      (is (= "ext.lib" (resolve* name->nss root :mixed "other.pkg"))))
+    (testing "unknown / qualified names resolve to nil (classified non-external, as before)"
+      (is (nil? (resolve* name->nss root :absent "dup.pkg"))))))

@@ -58,12 +58,23 @@
    :parent :query-param
    :args {:request {:as :request} :param-name {:value "expected"}}}
 
-  {:name :_cto-expected
-   :description "Expected slot type — URL-encoded JSON wire shape decoded to the type AST (same contract as `/partials/fn-picker-incompat`). Missing param is a programmer error worth a 500."
+  {:name :_cto-expected-str
+   :description "The `expected` param, narrowed to non-nil for `:parse-json`. A MISSING param is a programmer error worth a 500 — the picker JS always supplies it; only present-but-malformed VALUES degrade (see `:_cto-expected`)."
+   :parent :assert-some
+   :args {:value :_cto-expected-raw}}
+
+  {:name :_cto-expected-decode
+   :description "Decode the URL-encoded JSON wire shape to the type AST (same contract as `/partials/fn-picker-incompat`). Throws on malformed JSON (`:parse-json` → typed `:validation-error/malformed-json`) or an undecodable wire-shape. `:keywordize` is pinned true (its default; `:json-to-type` is key-form agnostic) so it is not a free arg captured into the `:try` body below."
    :parent :json-to-type
    :args {:json {:parent :parse-json
-                 :args {:string {:parent :assert-some
-                                 :args {:value :_cto-expected-raw}}}}}}
+                 :args {:string :_cto-expected-str
+                        :keywordize {:value true}}}}}
+
+  {:name :_cto-expected
+   :description "Expected slot type, or nil when `expected` is PRESENT but malformed (bad JSON / undecodable wire-shape). A graph `:try` turns that throw into nil so the handler renders the empty-select fallback instead of a 500 — mirrors `app/layout`'s `:_parse-layout-request`. A truly missing param still 500s via `:_cto-expected-str`'s `:assert-some`."
+   :parent :try
+   :args {:body :_cto-expected-decode
+          :on-throw {:parent :const :args {:value nil}}}}
 
   {:name :_cto-current
    :parent :query-param
@@ -75,9 +86,16 @@
               :args {:request {:as :request} :param-name {:value "primitives"}}}
           :b {:value "true"}}}
 
+  {:name :_cto-expected-ok?
+   :parent :some?
+   :args {:value :_cto-expected}}
+
   {:name :_cto-rows
-   :parent :compatible-type-names
-   :args {:expected :_cto-expected}}
+   :description "Compatible type-rows for `expected`. When `expected` was malformed (`:_cto-expected` = nil) the sweep is skipped and rows are empty — the fragment degrades to the empty-select placeholder rather than passing nil into `subtype?`."
+   :parent :if
+   :args {:test :_cto-expected-ok?
+          :then {:parent :compatible-type-names :args {:expected :_cto-expected}}
+          :else {:value []}}}
 
   {:name :_cto-not-prim?
    :parent :not
@@ -143,8 +161,8 @@
    :args {:hiccup :_cto-fragment}}
 
   {:name :_partial-cto-handler
-   :lambda-params [:request :keywordize]
-   :description "Ring handler for `GET /partials/compatible-type-options` — the compatible-type <option> list as `text/html`."
+   :lambda-params [:request]
+   :description "Ring handler for `GET /partials/compatible-type-options` — the compatible-type <option> list as `text/html`. `:keywordize` is no longer a free arg (pinned at `:_cto-expected-decode`, since its `:parse-json` is now inside a `:try` body)."
    :parent :html-ok-response
    :args {:body :_cto-html}}
 

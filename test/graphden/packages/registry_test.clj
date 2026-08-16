@@ -93,6 +93,56 @@
           (is (= "not-found" (:reason r))))))))
 
 
+(deftest version-qualified-ns-respects-dot-boundaries
+  ;; Guards against a sibling ns sharing a non-dotted prefix being mangled:
+  ;; a bare `starts-with?` turned `app.foobar` under root `app.foo` into
+  ;; `app.foo@1-0-0bar`. The rewrite must fire only for the root ns itself or
+  ;; a TRUE descendant (`<root>.`). `version-qualified-ns` is a private helper,
+  ;; reached through the registry impls ns the golden bootstrap loaded.
+  (let [vqns @(ns-resolve 'graphden.packages.app.registry.impls 'version-qualified-ns)]
+    (testing "the root ns and true descendants are rewritten"
+      (is (= "app.foo@1-0-0" (vqns "app.foo" "1.0.0" "app.foo")))
+      (is (= "app.foo@1-0-0.bar" (vqns "app.foo" "1.0.0" "app.foo.bar"))))
+    (testing "a sibling sharing a non-dotted prefix is NOT mangled"
+      (is (= "app.foobar.x" (vqns "app.foo" "1.0.0" "app.foobar.x")))
+      (is (= "app.foobar" (vqns "app.foo" "1.0.0" "app.foobar"))))
+    (testing "an unrelated ns is left as-is; a nil ns passes through"
+      (is (= "other.ns" (vqns "app.foo" "1.0.0" "other.ns")))
+      (is (nil? (vqns "app.foo" "1.0.0" nil))))))
+
+
+(deftest already-materialized?-checks-completeness-not-just-identity
+  ;; A prior materialize that died mid-way leaves an orphaned :fn identity with
+  ;; no body (write-records! commits the :fn batch before the :binding batch,
+  ;; non-transactionally). Probing only the identity would report TRUE and make
+  ;; install SKIP the (idempotent) re-materialize, freezing the half-written
+  ;; version. The guard must verify bodies too. Both helpers are private —
+  ;; reached through the registry impls ns the golden bootstrap loaded.
+  (let [st (storage)
+        impls-ns 'graphden.packages.app.registry.impls
+        already-materialized? @(ns-resolve impls-ns 'already-materialized?)
+        materialize-fns! @(ns-resolve impls-ns 'materialize-fns!)
+        version-qualified-ns @(ns-resolve impls-ns 'version-qualified-ns)
+        ns-root "amat.demo"
+        version "3.1.0"
+        ;; :const carries a :value binding — the body row a mid-way write drops.
+        bundle [{:namespace ns-root :name :amat-leaf :parent :const :args {:value 42}}]
+        fid (ids/fn-id (version-qualified-ns ns-root version ns-root) :amat-leaf)]
+    (testing "before any write → not materialized"
+      (is (false? (already-materialized? st ns-root version bundle))))
+    (materialize-fns! st ns-root version bundle)
+    (testing "after a complete materialize → materialized"
+      (is (true? (already-materialized? st ns-root version bundle)))
+      (is (seq (sp/query-entities st :binding {:fn-id fid})) "binding body present"))
+    (testing "identity kept but bindings dropped (mid-way write) → NOT materialized"
+      (doseq [b (sp/query-entities st :binding {:fn-id fid})]
+        (sp/delete-entity st :binding (:id b)))
+      (is (seq (sp/query-entities st :fn {:id fid})) "identity row still present")
+      (is (empty? (sp/query-entities st :binding {:fn-id fid})) "bindings gone")
+      (is (false? (already-materialized? st ns-root version bundle))
+          "missing body → not complete, so install re-materializes"))))
+
+
 (deftest package-install-entity-roundtrips
   (testing "a :package-install pin stores + restores its fields"
     (let [branch-id (random-uuid)

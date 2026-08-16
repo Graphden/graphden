@@ -600,6 +600,9 @@
    (get-in (rich-type-of-id fn-id) [:args arg-name])))
 
 
+(declare rich-type-of-id-or-stale-name)
+
+
 (defn touches-secret?
   "True iff the fn's rich-type carries a hide-result marker (the seeded
    `:secret`, or a graph-declared one) on its return OR on any of its
@@ -608,7 +611,16 @@
    but whose return is plain `:int`).
 
    Keyed by fn IDENTITY: per-namespace names may repeat, and a secret
-   decision read off a same-named neighbour would mis-classify.
+   decision read off a same-named neighbour would mis-classify. The
+   2-arity threads the fn's authored `row-name` so a STALE/abandoned
+   identity id (whose current rich-type lives under its name) is still
+   recognised — same rescue every other id consumer uses
+   (`rich-type-of-id-or-stale-name`). Without it a historical secret
+   fn read as non-secret, and compile-eager's Debug-P3 value-capture
+   path would render+store its return instead of `{:hidden :secret}`
+   (a narrow trace leak). The 1-arity keeps callers that hold no name
+   (the crud-side `stamp-touched-secret` alias) working; they get the
+   id-only lookup, unchanged.
 
    Lives HERE (not in `crud.fn-execution.persist`, its original home)
    so both consumers can reach it cycle-free: persist's audit trail
@@ -616,15 +628,16 @@
    `compile-eager`'s path-trace capture-time secret skip reaches it via
    a `requiring-resolve` delay (a direct require would cycle through
    interface → compile-runtime → compile-eager)."
-  [fn-id]
-  (when fn-id
-    (when-let [rt (rich-type-of-id fn-id)]
-      (boolean
-        (or (types/contains-hide-result-marker? (or (:return rt) :any))
-            (some (fn [[_ arg-entry]]
-                    (types/contains-hide-result-marker?
-                      (or (some-> arg-entry :type) arg-entry)))
-                  (:args rt)))))))
+  ([fn-id] (touches-secret? fn-id nil))
+  ([fn-id row-name]
+   (when fn-id
+     (when-let [rt (rich-type-of-id-or-stale-name fn-id row-name)]
+       (boolean
+         (or (types/contains-hide-result-marker? (or (:return rt) :any))
+             (some (fn [[_ arg-entry]]
+                     (types/contains-hide-result-marker?
+                       (or (some-> arg-entry :type) arg-entry)))
+                   (:args rt))))))))
 
 
 (defn rich-type-of

@@ -794,6 +794,30 @@
 ;; primitives here. What stays below is the one cohesive analysis pass
 ;; the graph binds as a single primitive.
 
+(defn- constraint-type-ns
+  "Resolve a bare constraint type-name keyword `nm` (referenced from a fn
+   whose own namespace is `owner-ns`) to the namespace that DEFINES it,
+   given `name->nss` — `{name-kw → #{defining-ns …}}`. Namespace-aware,
+   mirroring sync's resolution so a duplicated type-name (ADR-identity-model
+   stage 5: names are per-namespace) isn't misclassified:
+
+   - the fn's OWN namespace wins (a same-named sibling never shadows it),
+   - else the sole defining namespace,
+   - else (defined outside the owner in several namespaces — a bare ref sync
+     would reject as `:packages/ambiguous-ref`, so unreachable on a synced
+     graph) prefer an EXTERNAL one so the dependency is never silently
+     dropped.
+
+   nil when `nm` is unknown to the map (a qualified `:other.ns/x` ref, or a
+   primitive) — the caller then classifies it as non-external, as before."
+  [name->nss root nm owner-ns]
+  (when-let [nss (get name->nss nm)]
+    (cond
+      (contains? nss owner-ns) owner-ns
+      (= 1 (count nss)) (first nss)
+      :else (or (first (remove #(under-ns? % root) nss)) (first nss)))))
+
+
 (defn external-deps
   "Dependency analysis for the namespace subtree rooted at `root`:
 
@@ -817,12 +841,17 @@
                            (comp (filter #(under-ns? (:namespace-id %) root))
                                  (map :id))
                            (vals (:fns ctx)))
-        ;; name index for resolving constraint type-name keywords → ns.
-        name->ns (into {}
-                       (keep (fn [f]
-                               (when (:name f)
-                                 [(keyword (:name f)) (:namespace-id f)])))
-                       (vals (:fns ctx)))
+        ;; name index for resolving constraint type-name keywords → ns(s).
+        ;; A name can be defined in SEVERAL namespaces (ADR-identity-model
+        ;; stage 5: names are per-namespace), so key to the SET of defining
+        ;; namespaces — a plain `{name → ns}` map is last-write-wins and would
+        ;; misclassify a duplicated type-name by whichever ns happened to win.
+        name->nss (reduce (fn [m f]
+                            (if (:name f)
+                              (update m (keyword (:name f)) (fnil conj #{}) (:namespace-id f))
+                              m))
+                          {}
+                          (vals (:fns ctx)))
         ;; External structural fn-id refs reachable from every owned fn —
         ;; named, defined OUTSIDE the subtree, not a primitive. Collected once
         ;; so we can derive both the fn-NAME deps and the package deps.
@@ -844,12 +873,16 @@
                              external-ref-fn-ids)
         ;; constraint type-name keywords (union / variant / map / tuple /
         ;; fn-type) on owned fn rows whose target is defined outside.
+        ;; Resolve each name against its OWNING fn's namespace (kept alongside
+        ;; via the per-fn scan) so a duplicated type-name isn't misclassified.
         constraint-deps (into #{}
-                              (comp (map #(get-in ctx [:fns %]))
-                                    (mapcat #(constraint-type-names (:constraint %)))
-                                    (filter (fn [nm]
-                                              (when-let [ns (name->ns nm)]
-                                                (not (under-ns? ns root))))))
+                              (mapcat (fn [id]
+                                        (let [f (get-in ctx [:fns id])
+                                              owner-ns (:namespace-id f)]
+                                          (for [nm (constraint-type-names (:constraint f))
+                                                :let [rns (constraint-type-ns name->nss root nm owner-ns)]
+                                                :when (and rns (not (under-ns? rns root)))]
+                                            nm))))
                               owned-fn-ids)]
     {:dependencies (vec (sort (into ref-deps constraint-deps)))
      :package-dependencies (package-deps-from-namespaces storage dep-namespaces)}))

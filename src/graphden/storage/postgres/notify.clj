@@ -181,13 +181,31 @@
   (loop [backoff-ms backoff/initial-ms]
     (when @running?
       (Thread/sleep (long backoff-ms))
-      (when-not (try (reconnect! conn-atom pg-opts)
-                     (log/info "NOTIFY listener reconnected")
-                     true
-                     (catch Exception re
-                       (log/warn re "NOTIFY reconnect attempt failed — retrying")
-                       false))
-        (recur (backoff/next-ms backoff-ms))))))
+      ;; Re-check AFTER the sleep and BEFORE reconnect! — a `close-listener!`
+      ;; during the (up to 30s) backoff sleep flips `running?` false and
+      ;; closes the OLD conn. Without this guard the woken reconnect! would
+      ;; open a FRESH dedicated conn and `reset!` it into conn-atom PAST the
+      ;; close's sweep — a leak nothing reaps.
+      (when @running?
+        (let [reconnected? (try (reconnect! conn-atom pg-opts)
+                                (log/info "NOTIFY listener reconnected")
+                                true
+                                (catch Exception re
+                                  (log/warn re "NOTIFY reconnect attempt failed — retrying")
+                                  false))]
+          (cond
+            (not reconnected?)
+            (recur (backoff/next-ms backoff-ms))
+
+            ;; Belt-and-suspenders for the narrow window where the close raced
+            ;; in DURING the open (running? flipped false after the re-check
+            ;; but before reconnect!'s reset!): close-listener! may have
+            ;; already read+closed the OLD conn-atom, so reap the conn we just
+            ;; installed. Double-closing is harmless (close-dedicated! is
+            ;; best-effort).
+            (not @running?)
+            (try (pg-conn/close-dedicated! @conn-atom "notify-listener")
+                 (catch Exception _))))))))
 
 
 (defn- listen-loop

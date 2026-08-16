@@ -19,6 +19,26 @@ function gdAcctEsc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Attach a delegated click handler to `host` exactly once (guarded via a
+// dataset flag so repeated list re-renders don't stack listeners). Reading
+// the datum from `dataset` keeps dynamic values out of inline onclick
+// JS-strings — gdAcctEsc escapes for HTML attributes, not JS-string context.
+function gdAcctDelegate(host, selector, handler) {
+  if (!host || host.dataset.gdDelegated) return;
+  host.dataset.gdDelegated = '1';
+  host.addEventListener('click', (e) => {
+    const el = e.target.closest(selector);
+    if (el && host.contains(el)) handler(el, e);
+  });
+}
+
+// YYYY-MM-DD for a date string, or 'unknown' for an unparseable one — a bad
+// row must not throw out of the whole `.map(...)` and freeze the panel.
+function gdAcctFmtDate(s) {
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? 'unknown' : d.toISOString().slice(0, 10);
+}
+
 function gdAcctSay(text, ok) {
   const m = document.getElementById('gd-acct-msg');
   if (!m) return;
@@ -63,9 +83,10 @@ async function gdAcctLoadIdents() {
     + "<div class='gd-set-hint'>" + gdAcctEsc(i.email || '')
     + (i.provider === 'password' && !i['email-verified?'] ? ' · unverified' : '') + '</div></div>'
     + (n > 1
-      ? "<button type='button' class='gd-set-btn' onclick=\"gdAcctUnlink('" + gdAcctEsc(i.provider) + "')\">Unlink</button>"
+      ? "<button type='button' class='gd-set-btn' data-unlink-provider='" + gdAcctEsc(i.provider) + "'>Unlink</button>"
       : '')
     + '</div>').join('');
+  gdAcctDelegate(host, '[data-unlink-provider]', (el) => gdAcctUnlink(el.dataset.unlinkProvider));
 }
 
 async function gdAcctUnlink(provider) {
@@ -140,10 +161,11 @@ async function gdAcctLoadTokens() {
       "<div class='gd-acct-row'><div class='gd-set-copy'>"
       + "<div class='gd-set-label'>" + (gdAcctEsc(t.label) || '(unlabeled)') + '</div>'
       + "<div class='gd-set-hint'>" + gdAcctEsc(t.scopes || 'unscoped') + ' · '
-      + (t['expires-at'] ? 'expires ' + new Date(t['expires-at']).toISOString().slice(0, 10) : 'no expiry')
+      + (t['expires-at'] ? 'expires ' + gdAcctFmtDate(t['expires-at']) : 'no expiry')
       + '</div></div>'
-      + "<button type='button' class='gd-set-btn' onclick=\"gdAcctRevokeToken('" + gdAcctEsc(t.id) + "')\">Revoke</button></div>").join('')
+      + "<button type='button' class='gd-set-btn' data-revoke-token='" + gdAcctEsc(t.id) + "'>Revoke</button></div>").join('')
     : "<div class='gd-set-hint'>No API tokens yet.</div>";
+  gdAcctDelegate(host, '[data-revoke-token]', (el) => gdAcctRevokeToken(el.dataset.revokeToken));
 }
 
 async function gdAcctMintToken() {

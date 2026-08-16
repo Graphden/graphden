@@ -47,12 +47,28 @@
   ;; Page shell — head/brand chrome shared by all three pages. Free args
   ;; :title + :body; the λ mark is the SAME graph-λ as the editor rail.
   ;; =====================================================================
+  ;; `:title` is rendered through `render-hiccup` (which HTML-escapes text
+  ;; content) so the shell is safe BY CONSTRUCTION — a future request-bound
+  ;; title can't break out of `<title>` into reflected markup. `:body` stays
+  ;; raw on purpose: it is TRUSTED HTML composed from graph fn-defs
+  ;; (`:_auth-login-body` …), never request data, and escaping it would
+  ;; double-escape the whole page. Byte-identical to the old raw concat for
+  ;; the current literal titles (no special chars) — the parity test pins it.
+  {:name :_auth-title-el
+   :description "The `<title>…— Graphden</title>` element, built via `render-hiccup` so `:title` is HTML-escaped by construction rather than str-concatenated raw."
+   :parent :render-hiccup
+   :args {:hiccup {:parent :hiccup
+                   :args {:tag {:value "title"}
+                          :attrs {:value {}}
+                          :children [{:parent :str
+                                      :args {:parts [{:as :title} {:value " — Graphden"}]}}]}}}}
+
   {:name :_auth-page-shell
-   :description "Branded HTML document shell for the auth pages — doctype/head/inline CSS + the λ brand row around `:body`."
+   :description "Branded HTML document shell for the auth pages — doctype/head/inline CSS + the λ brand row around `:body`. `:title` is escaped via `:_auth-title-el`; `:body` is trusted graph-composed HTML, spliced raw."
    :parent :str
-   :args {:parts [{:value "<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>"}
-                  {:as :title}
-                  {:value " — Graphden</title><style>"}
+   :args {:parts [{:value "<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"}
+                  :_auth-title-el
+                  {:value "<style>"}
                   :_auth-css
                   {:value "</style></head><body><div class='wrap'><div class='brand'>"}
                   {:value "<svg viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'><g stroke='currentColor' stroke-width='3' stroke-linecap='round'><line x1='9' y1='6' x2='25' y2='26'/><line x1='17' y1='16' x2='8' y2='26'/></g><g fill='currentColor'><circle cx='9' cy='6' r='3'/><circle cx='25' cy='26' r='3'/><circle cx='8' cy='26' r='3'/></g></svg>"}

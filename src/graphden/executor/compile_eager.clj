@@ -272,9 +272,68 @@
      heap with room for the rest of the live working set; keeps
      enough hit-rate that no test trips its perf budget.
 
-   When the cap is hit we clear the whole cache — simple, single-
-   threaded, no LRU machinery; the next miss repopulates lazily."
+   When the cap is hit we drop the PURE entries but keep the single-
+   fire effectful ones (`evict-preserving-effectful!`) — a plain
+   `.clear` could drop an already-computed side-effecting entry and
+   let its effect re-fire on the next pull within the same execute
+   (see that fn's doc). Single-threaded, no LRU machinery; the next
+   miss repopulates the pure working set lazily."
   5000)
+
+
+(def ^:private single-fire-effect-cats
+  "Side-effecting effect categories whose within-execute single-fire
+   RELIES on the call-cache. A fn-def that pulls a side-effecting ref
+   twice (validation + success branch) fires it once ONLY because the
+   second pull hits the cache (docstring at the top of this ns cites
+   `:create-entity`'s double-insert → unique-violation). Unlike
+   `:time`/`:random` — which bypass the cache entirely via
+   `*always-fresh-fn-ids*` and re-fire by design — these ARE cached
+   within one execute, so an eviction that drops such an entry re-fires
+   the effect. `:env` is excluded: it is an idempotent read, not a
+   mutation, so a re-fire is harmless. The set can grow if a new
+   externally-observable effect category is added."
+  #{:db :network :io :process :state :raw-sql})
+
+
+(def ^:private rich-type-of-id-fn
+  "Var handle to `registry.core/rich-type-of-id` — resolved lazily to
+   break the same load cycle the other delays in this ns dodge. Read
+   only on the rare cap-eviction path, so its cost is off the hot
+   path. Honours `*rich-types-override*` (parallel-test isolation) via
+   the registry's own view."
+  (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of-id)))
+
+
+(defn- effectful-ref?
+  "True iff `ref-id`'s registry rich-type declares a single-fire
+   side-effect (`single-fire-effect-cats`) — the entries cap-eviction
+   must preserve. Keyed by IDENTITY (id-only), matching
+   `compile-runtime/prime-always-fresh!`'s effect scan; a stale
+   identity id with no registry entry reads as non-effectful (the same
+   narrow edge the stale-name rescue closes on the trace path — it
+   only bites a side-effecting fn re-pulled AFTER >cap distinct keys in
+   one execute, which no real graph reaches)."
+  [ref-id]
+  (boolean (some single-fire-effect-cats (:effects (@rich-type-of-id-fn ref-id)))))
+
+
+(defn- evict-preserving-effectful!
+  "Cap-eviction that DROPS pure entries but KEEPS single-fire effectful
+   ones (`effectful?` — a `ref-id → bool` predicate). A plain `.clear`
+   would drop an already-computed side-effecting entry and let its
+   effect re-fire on the next pull within the SAME execute; the
+   per-execute cache exists precisely to make such a ref single-fire.
+   Walks the key set once, removing each key (a `[ref-id projected-fa]`
+   vector) whose `ref-id` head is not effectful. Effectful refs per
+   execute are few, so what survives stays bounded in practice; in the
+   pathological all-effectful case the cache exceeds the cap rather
+   than sacrifice single-fire (correctness over the size bound)."
+  [^java.util.HashMap cache effectful?]
+  (let [it (java.util.Set/.iterator (java.util.HashMap/.keySet cache))]
+    (while (java.util.Iterator/.hasNext it)
+      (when-not (effectful? (nth (java.util.Iterator/.next it) 0))
+        (java.util.Iterator/.remove it)))))
 
 
 ;; =============================================================================
@@ -420,10 +479,13 @@
   "Record a cache-hit entry: `{:fn-id … :cache-hit? true}` — NO
    `:duration-ms` (none was spent; absence, not 0, so a reader can
    distinguish 'free' from 'sub-millisecond'). Secret-touching fns
-   record `{:fn-id … :hidden :secret}` with no cache info at all."
-  [trace ref-id]
+   record `{:fn-id … :hidden :secret}` with no cache info at all.
+   `ref-name` (the ref's authored row name) lets `touches-secret?`
+   rescue a stale/abandoned identity id whose secret rich-type lives
+   under its current name."
+  [trace ref-id ref-name]
   (record-path-entry! trace
-                      (if (@touches-secret?-fn ref-id)
+                      (if (@touches-secret?-fn ref-id ref-name)
                         {:fn-id ref-id :hidden :secret}
                         {:fn-id ref-id :cache-hit? true})))
 
@@ -448,9 +510,13 @@
    4): a fn whose rich-type touches `:secret` records `{:fn-id …
    :hidden :secret}` — no duration, no cache info, and the return
    value is NEVER read into the capture buffer (the renderer is not
-   invoked on this branch, in either mode)."
-  [trace ref-id child fa ctx]
-  (if (@touches-secret?-fn ref-id)
+   invoked on this branch, in either mode). `ref-name` (the ref's
+   authored row name) lets the secret check rescue a stale/abandoned
+   identity id — without it a historical id whose secret rich-type
+   lives under its current name reads as non-secret and its return
+   would be captured (a narrow trace leak)."
+  [trace ref-id ref-name child fa ctx]
+  (if (@touches-secret?-fn ref-id ref-name)
     (do (record-path-entry! trace {:fn-id ref-id :hidden :secret})
         (child fa ctx))
     (let [capture? (:capture-values? @trace)
@@ -475,10 +541,12 @@
 
 (defn- fresh-call
   "One fresh `(child fa ctx)` invocation — through the path-trace seam
-   when capture applies to `ref-id`, bare otherwise."
-  [ref-id child fa ctx]
+   when capture applies to `ref-id`, bare otherwise. `ref-name` (the
+   ref's authored row name) is threaded to the seam for the stale-id
+   secret rescue."
+  [ref-id ref-name child fa ctx]
   (if-some [trace (active-path-trace ref-id)]
-    (path-traced-fresh-call trace ref-id child fa ctx)
+    (path-traced-fresh-call trace ref-id ref-name child fa ctx)
     (child fa ctx)))
 
 
@@ -489,30 +557,39 @@
    always-fresh fn-id all fall through to a fresh call. `::nil`
    sentinel distinguishes a cached `nil` from miss.
 
-   The cache clears itself when it reaches `call-cache-max-size` —
-   prevents pathological per-request growth (see the size constant's
-   doc for the empirical motivation).
+   On reaching `call-cache-max-size` the cache evicts its PURE entries
+   but keeps single-fire effectful ones (`evict-preserving-effectful!`)
+   — bounding pathological per-request growth without re-firing a
+   side-effecting ref pulled twice in one execute (see the size
+   constant's doc).
+
+   `ref-name` (the ref's authored row name, a compile-time constant)
+   is threaded to the path-trace seam so its stale-id secret rescue
+   works. The 5-arity form (no name) delegates with `nil` — used by
+   focused tests and any caller without a name in hand.
 
    Debug P1: every arm passes the path-trace seam (`fresh-call` /
    `record-path-hit!`) — zero work beyond one nil-check unless the
    execution bound `*path-trace*` AND `ref-id` is in `*traced-fn-ids*`.
    Entries land in COMPLETION order (a callee's entry precedes its
    caller's)."
-  [ref-id ref-frees child fa ctx]
-  (let [^java.util.HashMap cache (::call-cache ctx)]
-    (if (or (nil? cache) (contains? @*always-fresh-fn-ids* ref-id))
-      (fresh-call ref-id child fa ctx)
-      (let [k [ref-id (fa-key-for-cache ref-frees fa)]
-            cached (java.util.HashMap/.get cache k)]
-        (if (some? cached)
-          (do (when-some [trace (active-path-trace ref-id)]
-                (record-path-hit! trace ref-id))
-              (when-not (identical? cached ::nil) cached))
-          (let [v (fresh-call ref-id child fa ctx)]
-            (when (>= (java.util.HashMap/.size cache) call-cache-max-size)
-              (java.util.HashMap/.clear cache))
-            (java.util.HashMap/.put cache k (if (nil? v) ::nil v))
-            v))))))
+  ([ref-id ref-frees child fa ctx]
+   (call-with-cache ref-id ref-frees nil child fa ctx))
+  ([ref-id ref-frees ref-name child fa ctx]
+   (let [^java.util.HashMap cache (::call-cache ctx)]
+     (if (or (nil? cache) (contains? @*always-fresh-fn-ids* ref-id))
+       (fresh-call ref-id ref-name child fa ctx)
+       (let [k [ref-id (fa-key-for-cache ref-frees fa)]
+             cached (java.util.HashMap/.get cache k)]
+         (if (some? cached)
+           (do (when-some [trace (active-path-trace ref-id)]
+                 (record-path-hit! trace ref-id ref-name))
+               (when-not (identical? cached ::nil) cached))
+           (let [v (fresh-call ref-id ref-name child fa ctx)]
+             (when (>= (java.util.HashMap/.size cache) call-cache-max-size)
+               (evict-preserving-effectful! cache effectful-ref?))
+             (java.util.HashMap/.put cache k (if (nil? v) ::nil v))
+             v)))))))
 
 
 (defn- has-impl?
@@ -624,8 +701,9 @@
           child (or (get child-callables ref-id)
                     (throw (ex-info "compile-eager: seq-item ref-target not compiled"
                                     {:type :compile/missing-child :item item})))
-          ref-frees (set (r/cache-projection-frees ref-id lookups))]
-      (fn [fa ctx] (call-with-cache ref-id ref-frees child fa ctx)))
+          ref-frees (set (r/cache-projection-frees ref-id lookups))
+          ref-name (get-in lookups [:fn-map ref-id :name])]
+      (fn [fa ctx] (call-with-cache ref-id ref-frees ref-name child fa ctx)))
 
     :else (constantly nil)))
 
@@ -854,7 +932,8 @@
                                     {:type :compile/missing-child
                                      :binding bnd :ref-id ref-id
                                      :fn-id fn-id})))
-          ref-frees (set (r/cache-projection-frees ref-id lookups))]
+          ref-frees (set (r/cache-projection-frees ref-id lookups))
+          ref-name (get-in lookups [:fn-map ref-id :name])]
       (cond
         ;; HOF binding where the slot's structural shape is
         ;; `[:fn {…} …]` and the target is NOT itself a callable-
@@ -882,13 +961,13 @@
         ;; can still invoke the value as a 0-arg fn.
         (or produces-callable? (empty? ref-renames))
         (fn [fa ctx]
-          (rt/thunk (fn [] (call-with-cache ref-id ref-frees child fa ctx))))
+          (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child fa ctx))))
 
         :else
         (fn [fa ctx]
           (rt/thunk (fn []
                       (call-with-cache
-                        ref-id ref-frees child
+                        ref-id ref-frees ref-name child
                         (reduce-kv (fn [acc callee-name caller-name]
                                      (assoc acc callee-name (get fa caller-name)))
                                    fa ref-renames)
@@ -927,7 +1006,8 @@
                     (throw (ex-info "compile-eager: env-binding ref not yet compiled"
                                     {:type :compile/missing-child
                                      :env-binding env-bnd :fn-id fn-id})))
-          ref-frees (set (r/cache-projection-frees ref-id lookups))]
+          ref-frees (set (r/cache-projection-frees ref-id lookups))
+          ref-name (get-in lookups [:fn-map ref-id :name])]
       (cond
         ;; HOF env-binding whose target ISN'T itself a callable-
         ;; producer: build the closure-captured Clojure callable.
@@ -949,17 +1029,17 @@
         ;; path: don't hof-wrap a positional callable.
         produces-callable?
         (fn [fa-ref ctx]
-          (rt/thunk (fn [] (call-with-cache ref-id ref-frees child @fa-ref ctx))))
+          (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child @fa-ref ctx))))
 
         :else
         (let [renames (r/build-ref-renames ref-id fn-id lookups)]
           (if (empty? renames)
             (fn [fa-ref ctx]
-              (rt/thunk (fn [] (call-with-cache ref-id ref-frees child @fa-ref ctx))))
+              (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child @fa-ref ctx))))
             (fn [fa-ref ctx]
               (rt/thunk (fn []
                           (call-with-cache
-                            ref-id ref-frees child
+                            ref-id ref-frees ref-name child
                             (reduce-kv
                               (fn [acc cn cln] (assoc acc cn (get @fa-ref cln)))
                               @fa-ref

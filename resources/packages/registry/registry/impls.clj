@@ -190,7 +190,13 @@
 ;; string-shaping. A ns not under NS-ROOT is left as-is.
 (defn- version-qualified-ns
   [ns-root version fn-ns]
-  (if (and fn-ns (str/starts-with? fn-ns ns-root))
+  ;; Dot-boundary guard (mirrors `export/under-ns?`): only the root ns
+  ;; itself or a true descendant (`<ns-root>.`) is rewritten. A sibling
+  ;; sharing a non-dotted prefix (`app.foobar` under root `app.foo`) is
+  ;; left as-is — a bare `starts-with?` would mangle it into
+  ;; `app.foo@1-0-0bar`. Latent for the pre-filtered callers, real for
+  ;; the graph-exposed `version-qualified-ns-fn`.
+  (if (and fn-ns (or (= fn-ns ns-root) (str/starts-with? fn-ns (str ns-root "."))))
     (str ns-root "@" (str/replace (str version) "." "-") (subs fn-ns (count ns-root)))
     fn-ns))
 
@@ -213,18 +219,35 @@
     (pkg-sync/sync-bundle! storage materialized)))
 
 
-;; True if the version's first fn already exists under its version-qualified
+;; True if `version` is COMPLETELY materialized under its version-qualified
 ;; namespace — idempotency guard + cloud public-org skip: OrgScoped read
 ;; returns own+public, so a tenant sees a platform-materialized version and
 ;; does NOT re-materialize it into its own org. Shared by the
 ;; `:package-version-materialized?` base-fn and the update core.
+;;
+;; Completeness, not mere existence: `write-records!` commits the `:fn`
+;; identity batch BEFORE the `:binding` batch, non-transactionally, so a
+;; materialize that died mid-way leaves orphaned identity rows with no
+;; bodies. Probing only `(first fns)`'s identity would then report TRUE and
+;; make install SKIP the (idempotent) re-materialize, freezing the
+;; half-written version. So verify BOTH: every bundle identity present AND
+;; at least one materialized binding for the fns that carry one (non-empty
+;; `:args`). A false negative only costs a redundant, safe re-sync.
 (defn- already-materialized?
   [storage ns-root version fns]
-  (boolean
-    (when-let [f (first fns)]
-      (sp/read-entity storage :fn
-                      (ids/fn-id (version-qualified-ns ns-root version (:namespace f))
-                                 (:name f))))))
+  (let [fid (fn [f]
+              (ids/fn-id (version-qualified-ns ns-root version (:namespace f))
+                         (:name f)))
+        expected-ids (mapv fid fns)
+        ;; fns that customize a slot (non-empty :args) MUST have ≥1 binding —
+        ;; exactly the body the mid-way write drops after committing identities.
+        body-fn-ids (into [] (comp (filter #(seq (:args %))) (map fid)) fns)]
+    (boolean
+      (and (seq expected-ids)
+           (= (count expected-ids)
+              (count (sp/query-entities storage :fn {:id expected-ids})))
+           (or (empty? body-fn-ids)
+               (seq (sp/query-entities storage :binding {:fn-id body-fn-ids})))))))
 
 
 (defbase package-version-materialized?
@@ -234,8 +257,10 @@
    skip the materialize step (and its invalidation) when the version
    is already there. Under a cloud OrgScoped read a platform-
    materialized version is visible to the tenant, so the tenant does
-   NOT re-materialize it into its own org. §3.1 single storage read
-   (probes the first fn's deterministic id)."
+   NOT re-materialize it into its own org. Probes COMPLETENESS
+   (every bundle identity + a representative body row), not the
+   mere existence of one identity — a half-written version reports
+   false so install re-materializes it (re-sync is idempotent)."
   [ns-root version fns]
   (cr/record-effect! :db)
   (already-materialized? (request/require-storage ctx) ns-root version fns))

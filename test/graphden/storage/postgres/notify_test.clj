@@ -12,6 +12,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.test-infra.wait :as wait]
+    [graphden.util.backoff :as backoff]
     [next.jdbc :as jdbc])
   (:import
     (com.zaxxer.hikari
@@ -97,6 +98,23 @@
         emit (pg-notify/make-emitter bad-ds)]
     (is (nil? (emit {:kind :fn :op :invalidate :id "x"}))
         "the SQLException is swallowed, emit returns nil")))
+
+
+(deftest reconnect-with-backoff-bails-when-stopped-during-sleep
+  ;; L2: a `close-listener!` during the backoff sleep flips running? false
+  ;; and closes the OLD conn. The reconnect loop must re-check running? AFTER
+  ;; the sleep, before reconnect! — otherwise it opens a FRESH dedicated conn
+  ;; and reset!s it past the close's sweep, leaking a connection nothing reaps.
+  (let [running? (atom true)
+        reconnect-calls (atom 0)]
+    (with-redefs [pg-notify/reconnect! (fn [_ _] (swap! reconnect-calls inc))
+                  backoff/initial-ms 200]
+      ;; flip running? false DURING the first (200 ms) sleep
+      (future (Thread/sleep 50) (reset! running? false))
+      (#'pg-notify/reconnect-with-backoff!
+       (atom :old-conn) {} running? (Exception. "conn dropped"))
+      (is (zero? @reconnect-calls)
+          "reconnect! must not run once running? flipped false during the sleep"))))
 
 
 ;; ============================================================================

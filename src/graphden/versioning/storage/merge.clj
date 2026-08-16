@@ -18,7 +18,8 @@
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.uniqueness :as uniq]
-    [next.jdbc :as jdbc])
+    [next.jdbc :as jdbc]
+    [next.jdbc.transaction :as jdbc-tx])
   (:import
     (java.time
       Instant)))
@@ -512,6 +513,35 @@
                                                  :binding-list-item (vec resolved)))))
 
 
+(defn branch-lock-key
+  "Advisory-lock key serializing branch-level MERGE and DELETE writes that
+   touch a single branch id. A merge locks BOTH its endpoints; a
+   `delete-branch!` locks the branch it removes — so a merge-into-X and a
+   delete-of-X-as-source contend on the shared key for X and cannot
+   interleave between one op's check-read and the other's commit."
+  [branch-id]
+  (str "branch|" branch-id))
+
+
+(defn lock-branches!
+  "Take a per-branch `pg_advisory_xact_lock` (auto-released at commit/
+   rollback) on each given branch id, from INSIDE the caller's write tx, so
+   the check-then-write of a merge/delete is atomic w.r.t. a concurrent
+   merge/delete on the same branch.
+
+   Deadlock-free ordering: distinct ids, `nil`s dropped, acquired sorted by
+   UUID string. A merge passes both endpoints (source+target); a delete
+   passes its single branch. Single-lock callers never wait while holding
+   another lock, and every multi-lock caller acquires in the same sorted
+   order, so no wait cycle can form. No-op off a pooled backend (`:pool`
+   nil) — matches the create/update advisory-lock path in `.core`."
+  [storage & branch-ids]
+  (when-let [tx (:pool storage)]
+    (doseq [bid (->> branch-ids (remove nil?) distinct (sort-by str))]
+      (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
+                         (branch-lock-key bid)]))))
+
+
 (defn merge-branch!
   "Merges source branch into the current (target) branch.
 
@@ -547,38 +577,65 @@
              (throw (ex-info "Cannot merge a branch into itself"
                              {:type :constraint-violation/self-merge
                               :branch-id source-branch-id})))
-         {:keys [conflicts]} (detect-conflicts base-storage source-branch-id
-                                               target-branch-id)]
-     (assert-resolutions-cover-conflicts! conflicts conflict-resolutions)
-     ;; ATOMIC: the merge record (which surfaces every source version on
-     ;; target) and the conflict-resolution overrides (which beat that
-     ;; surfacing for entities the user resolved as `:target`) must land
-     ;; together. Committing the merge record but losing the resolutions
-     ;; would silently discard the user's decisions — the source value
-     ;; would surface where they chose to keep target. `PostgresStorage`
-     ;; exposes its `:pool` as the Connectable `sp/create-entity` runs on,
-     ;; so binding the storage to a `with-transaction` connection makes
-     ;; both writes share one commit. Non-PG storages (no `:pool`) fall
-     ;; back to the prior sequential behaviour. Single `merge-ts` so the
-     ;; resolution-wins ordering is structural, not clock-dependent.
-     (let [merge-ts (now)
-           write! (fn [storage]
-                    (let [merge-record (create-merge-record! storage source-branch-id
-                                                             target-branch-id merge-ts)]
-                      (apply-resolutions! storage conflicts conflict-resolutions
-                                          target-branch-id merge-ts)
-                      ;; POST-merge, still inside the tx: reject a merge that
-                      ;; would leave two live entities sharing a per-branch
-                      ;; unique key (fn name / list-item position) on the
-                      ;; target — a collision detect-conflicts can't see
-                      ;; (distinct ids). Throwing rolls the whole merge back.
-                      (assert-merge-preserves-uniqueness! storage source-branch-id
-                                                          target-branch-id)
-                      merge-record))]
-       (if-let [pool (:pool base-storage)]
+         ;; ATOMIC: the merge record (which surfaces every source version on
+         ;; target) and the conflict-resolution overrides (which beat that
+         ;; surfacing for entities the user resolved as `:target`) must land
+         ;; together. Committing the merge record but losing the resolutions
+         ;; would silently discard the user's decisions — the source value
+         ;; would surface where they chose to keep target. `PostgresStorage`
+         ;; exposes its `:pool` as the Connectable `sp/create-entity` runs on,
+         ;; so binding the storage to a `with-transaction` connection makes
+         ;; both writes share one commit. Non-PG storages (no `:pool`) fall
+         ;; back to the prior sequential behaviour. Single `merge-ts` so the
+         ;; resolution-wins ordering is structural, not clock-dependent.
+         merge-ts (now)
+         write!
+         (fn [storage]
+           ;; L5: serialize concurrent merges into the SAME target (and a
+           ;; racing delete of either endpoint) on per-branch advisory
+           ;; locks taken FIRST, inside this tx. Without them
+           ;; `detect-conflicts` reads a snapshot outside any write lock,
+           ;; so a second merge committing between this merge's read and
+           ;; its commit isn't observed. Locking both endpoints (sorted,
+           ;; deadlock-free) makes the read-then-write below one
+           ;; serialized critical section per branch pair.
+           (lock-branches! storage source-branch-id target-branch-id)
+           ;; Under the lock, re-confirm both endpoints still exist — a
+           ;; delete of source/target that committed just before we won
+           ;; the lock must abort this merge rather than plant a
+           ;; branch-merge dangling at a removed branch.
+           (when-not (sp/read-entity storage :branch source-branch-id)
+             (throw (ex-info "Merge source branch not found"
+                             {:type :not-found :branch-id source-branch-id})))
+           (when-not (sp/read-entity storage :branch target-branch-id)
+             (throw (ex-info "Merge target branch not found"
+                             {:type :not-found :branch-id target-branch-id})))
+           ;; Conflict detection now reads a lock-stable view (inside the
+           ;; tx, after the lock) instead of the pre-tx snapshot.
+           (let [{:keys [conflicts]} (detect-conflicts storage source-branch-id
+                                                       target-branch-id)]
+             (assert-resolutions-cover-conflicts! conflicts conflict-resolutions)
+             (let [merge-record (create-merge-record! storage source-branch-id
+                                                      target-branch-id merge-ts)]
+               (apply-resolutions! storage conflicts conflict-resolutions
+                                   target-branch-id merge-ts)
+               ;; POST-merge, still inside the tx: reject a merge that
+               ;; would leave two live entities sharing a per-branch
+               ;; unique key (fn name / list-item position) on the
+               ;; target — a collision detect-conflicts can't see
+               ;; (distinct ids). Throwing rolls the whole merge back.
+               (assert-merge-preserves-uniqueness! storage source-branch-id
+                                                   target-branch-id)
+               merge-record)))]
+     (if-let [pool (:pool base-storage)]
+       ;; `:ignore` so a nested `with-transaction` in an inner write
+       ;; can't commit early and release the advisory locks before the
+       ;; check-then-write finishes — same reason as the `.core` create
+       ;; path and `delete-branch!`.
+       (binding [jdbc-tx/*nested-tx* :ignore]
          (jdbc/with-transaction [tx pool]
-                                (write! (assoc base-storage :pool tx)))
-         (write! base-storage))))))
+                                (write! (assoc base-storage :pool tx))))
+       (write! base-storage)))))
 
 
 (defn skipped-as-branch-local

@@ -696,9 +696,19 @@
    `not-our-lock` placeholder entries are skipped (no stopper to
    call). Advisory locks held by THIS pod are released by closing
    the lock connection at the `:db/service-locks` halt-key, so we
-   don't need to release per-service here."
+   don't need to release per-service here.
+
+   Holds `reconcile-monitor` across the drain + reset (L3): halt's
+   `awaitTermination` caps the ticker wait at 5s, so a reconcile pass can
+   still be in flight here. Every OTHER running-mutating path takes this
+   monitor, so without it a straggler `reconcile-once!` could
+   `swap! running-atom assoc` a just-started service back in AFTER our
+   `reset!` — a leaked running service nothing would ever stop. Taking the
+   monitor makes us observe a quiesced running map. Reentrant +
+   process-local, so no deadlock with a caller that already holds it."
   [running-atom]
-  (doseq [[sid entry] @running-atom]
-    (when (not= ::not-our-lock entry)
-      (stop-service! sid entry)))
-  (reset! running-atom {}))
+  (locking reconcile-monitor
+    (doseq [[sid entry] @running-atom]
+      (when (not= ::not-our-lock entry)
+        (stop-service! sid entry)))
+    (reset! running-atom {})))

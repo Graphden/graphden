@@ -292,6 +292,30 @@
         (finally (sp/close storage))))))
 
 
+(deftest stop-all-serializes-with-reconcile-monitor-test
+  ;; L3: stop-all! must hold reconcile-monitor across its drain + reset so a
+  ;; reconcile pass still in flight past halt's 5s awaitTermination cap can't
+  ;; `swap! running assoc` a just-started service back in AFTER the reset! —
+  ;; a leaked running service nothing would stop. Prove the serialization:
+  ;; while THIS thread holds reconcile-monitor, a stop-all! on another thread
+  ;; blocks, and completes only once we release.
+  (let [running (atom {(random-uuid) {:stopper (fn [])}})
+        done (promise)
+        ;; The real monitor `stop-all!` and every reconcile pass serialize on.
+        ;; Bound to a local so splint doesn't trace it back to its `(Object.)`
+        ;; def and mis-fire `lint/locking-object` — locking the shared monitor
+        ;; is exactly the point of this test.
+        monitor @#'recon/reconcile-monitor]
+    (locking monitor
+      (future (recon/stop-all! running) (deliver done :done))
+      (is (= :still-blocked (deref done 300 :still-blocked))
+          "stop-all! blocks while reconcile-monitor is held elsewhere")
+      (is (seq @running) "running not yet drained"))
+    (is (= :done (deref done 2000 :timeout))
+        "stop-all! completes after the monitor is released")
+    (is (empty? @running) "running drained")))
+
+
 ;; ============================================================================
 ;; Generic CRUD smoke — :service is a regular entity, the standard
 ;; storage protocol should handle it without per-type machinery. If

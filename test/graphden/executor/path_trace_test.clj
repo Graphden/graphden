@@ -124,7 +124,7 @@
   (let [fn-id (random-uuid)
         trace (ce/new-path-trace)
         ctx (fresh-ctx)]
-    (with-redefs [registry/touches-secret? (fn [id] (= id fn-id))]
+    (with-redefs [registry/touches-secret? (fn [id & _] (= id fn-id))]
       (binding [cr/*path-trace* trace
                 ce/*traced-fn-ids* (atom #{fn-id})]
         (call-with-cache fn-id #{} (fn [_fa _ctx] :s) {} ctx)
@@ -135,6 +135,40 @@
         (is (= {:fn-id fn-id :hidden :secret} entry))
         (is (not (contains? entry :duration-ms)))
         (is (not (contains? entry :cache-hit?)))))))
+
+
+(deftest stale-identity-secret-fn-still-recognized-test
+  ;; L3: a fn carrying a historical/abandoned identity id has NO
+  ;; `:by-id` rich-type entry — only its NAME resolves to the current
+  ;; secret rich-type. `touches-secret?` must route through the
+  ;; stale-name rescue (given the row name) so the Debug-P3 capture
+  ;; path still hides the return instead of rendering+storing it.
+  (binding [registry/*rich-types-override*
+            (atom (registry/snapshot-for-isolation))]
+    (let [live-id (random-uuid)
+          stale-id (random-uuid)         ; abandoned identity — no :by-id entry
+          ;; by-name keys on keyword names in production (sync uses
+          ;; `(:name fn-def)`); the rescue does `(keyword row-name)`, so
+          ;; a string row name resolves against the keyword key.
+          row-name "leaky-secret-fn"]
+      ;; Current identity's rich-type: a secret return, keyed by name.
+      (registry/record-rich-types-raw! live-id (keyword row-name)
+                                       {:return [:secret :text] :effects #{}})
+      (testing "id-only lookup misses the stale id (the pre-fix behaviour)"
+        (is (not (registry/touches-secret? stale-id))))
+      (testing "name-rescued lookup recognises the stale-id secret fn"
+        (is (true? (registry/touches-secret? stale-id row-name))))
+      (testing "the trace seam hides the value when the ref-name is threaded"
+        (let [trace (ce/new-path-trace {:capture-values? true})
+              probe (atom 0)]
+          (with-redefs [ce/render-captured-value (fn [_v] (swap! probe inc) {})]
+            (binding [cr/*path-trace* trace
+                      ce/*traced-fn-ids* (atom ce/trace-all)]
+              (is (= :s3cret (call-with-cache stale-id #{} row-name
+                                              (fn [_fa _ctx] :s3cret)
+                                              {} (fresh-ctx))))))
+          (is (zero? @probe) "renderer never saw the stale-id secret value")
+          (is (= [{:fn-id stale-id :hidden :secret}] (entries trace))))))))
 
 
 (deftest capture-cap-stops-recording-test
@@ -212,7 +246,7 @@
   (let [fn-id (random-uuid)
         probe (atom 0)
         trace (ce/new-path-trace {:capture-values? true})]
-    (with-redefs [registry/touches-secret? (fn [id] (= id fn-id))
+    (with-redefs [registry/touches-secret? (fn [id & _] (= id fn-id))
                   ce/render-captured-value (fn [_v] (swap! probe inc) {})]
       (binding [cr/*path-trace* trace
                 ce/*traced-fn-ids* (atom ce/trace-all)]

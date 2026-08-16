@@ -4,6 +4,7 @@
    docs/ERROR_CODES.md's status section, and the mapper's family
    fallbacks + safe-body behavior stay pinned."
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.web.errors :as errors]))
@@ -66,3 +67,26 @@
     (is (= 500 (errors/status-for-ex-data {}))))
   (testing "an explicitly-typed error keeps its mapping even with a 42xxx sql-state"
     (is (= 404 (errors/status-for-ex-data {:type :not-found :sql-state "42703"})))))
+
+
+(deftest boundary-downgrades-user-shaped-sql-errors-to-400
+  ;; The TOP boundary (`response-for-throwable`, used by `wrap-error-boundary`)
+  ;; must apply the same 42xxx→400 downgrade as the local crud path — a raw
+  ;; SQL error from user-shaped input that escapes to the boundary answers
+  ;; 400, not 500, WITHOUT leaking the SQL text.
+  (testing "a 42xxx storage error at the boundary → 400, opaque message"
+    (let [r (errors/response-for-throwable
+              (ex-info "ERROR: column \"boom\" does not exist"
+                       {:sql-state "42703"}))
+          body (json/parse-string (:body r) true)]
+      (is (= 400 (:status r)))
+      (is (some? (:ref body)) "message withheld behind an opaque ref")
+      (is (not (str/includes? (:body r) "boom"))
+          "raw SQL text never reaches the client body")))
+  (testing "a genuine server fault (no 42xxx) stays 500"
+    (let [r (errors/response-for-throwable
+              (ex-info "connection reset" {:sql-state "08006"}))]
+      (is (= 500 (:status r)))))
+  (testing "an explicitly-typed error keeps its status through the boundary"
+    (is (= 404 (:status (errors/response-for-throwable
+                          (ex-info "gone" {:type :not-found :sql-state "42703"})))))))

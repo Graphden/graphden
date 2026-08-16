@@ -136,6 +136,12 @@
       (is (str/includes? body "value=\"port\""))))
   (testing "no compatible types and no current → placeholder"
     (let [body (body-of :_partial-cto-handler {"expected" "\"never\""})]
+      (is (str/includes? body "no compatible types"))))
+  (testing "PRESENT-but-malformed `expected` JSON degrades to the empty-select placeholder, not a 500"
+    ;; `%7B` / a bare `{` is present but not valid JSON — `:parse-json`
+    ;; throws, the `:try` in `:_cto-expected` swallows it to nil, and the
+    ;; fragment renders the placeholder. `body-of` asserts status 200.
+    (let [body (body-of :_partial-cto-handler {"expected" "{"})]
       (is (str/includes? body "no compatible types")))))
 
 

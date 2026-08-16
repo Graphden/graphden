@@ -241,25 +241,37 @@
       m)))
 
 
-(defn- branch-monitor
-  "Per-branch reentrant lock used to dedupe concurrent build-and-
-   cache! callers for the same cold branch. Stored on the router as a
-   ConcurrentHashMap so distinct branch-ids never block each other —
-   only same-branch contenders serialize. The first arrival builds,
-   the rest acquire the lock, double-check, and find the entry the
-   first arrival wrote.
+(defn- build-holder
+  "Per-branch build-coordination holder: `{:lock ReentrantLock :gen
+   AtomicLong}`, stored on the router as a ConcurrentHashMap so distinct
+   branch-ids never contend — only same-branch contenders serialize.
 
-   A `ReentrantLock`, NOT `locking`/`synchronized`: the guarded body
-   runs `cr/rebuild!` (a full compile, seconds) on a cold-branch miss,
-   and a virtual thread blocked on a monitor pins its carrier (JDK 21)
-   — same reason as `compile-runtime/call-with-invalidation-lock`."
+   `:lock` dedupes concurrent `build-and-cache!` callers for the same
+   cold branch: the first arrival builds under the lock, the rest acquire
+   it, double-check, and find the entry the first arrival wrote.
+   A `ReentrantLock`, NOT `locking`/`synchronized`: the guarded body runs
+   `cr/rebuild!` (a full compile, seconds) on a cold-branch miss, and a
+   virtual thread blocked on a monitor pins its carrier (JDK 21) — same
+   reason as `compile-runtime/call-with-invalidation-lock`.
+
+   `:gen` is the branch's build generation. `invalidate!` bumps it before
+   dropping the holder; a build that captured the generation BEFORE its
+   (multi-second) compile compares it at install time and DISCARDS its
+   result on a mismatch — a concurrent delete during the build advanced
+   the generation, so installing would resurrect a ctx for a branch that
+   no longer exists (the epoch-heal backstop can't catch it: the delete's
+   epoch bump advances this pod's watermark past the delete WHILE the
+   build runs). See `build-and-cache!` / `invalidate!`."
   [router branch-id]
   (when-let [monitors (:build-monitors router)]
     (java.util.concurrent.ConcurrentHashMap/.computeIfAbsent
       monitors
       branch-id
       (reify java.util.function.Function
-        (apply [_ _] (java.util.concurrent.locks.ReentrantLock.))))))
+        (apply
+          [_ _]
+          {:lock (java.util.concurrent.locks.ReentrantLock.)
+           :gen (java.util.concurrent.atomic.AtomicLong. 0)})))))
 
 
 (defn- branch-is-merge-target?
@@ -458,36 +470,71 @@
      :last-used (now-ms)}))
 
 
+(defn- install-built-entry!
+  "Commit a freshly-built `entry` for `branch-id` into `handlers`,
+   applying the LRU. Two hardening steps beyond the bare `assoc`:
+
+   1. Generation guard (L1): install ONLY if `gen-holder`'s generation
+      still equals `gen0` (captured before the build). A concurrent
+      `invalidate!` (branch delete) bumps the generation mid-build, so a
+      mismatch means the branch is gone — drop the result rather than
+      resurrect its ctx. The check rides inside the `handlers` swap so it
+      is atomic w.r.t. the install.
+   2. Evicted-holder reap (L4): whatever branch the LRU dropped also loses
+      its `build-monitors` holder here. `evict-lru-if-full` only touches
+      `handlers`, so without this the per-branch lock+gen holder would leak,
+      growing unbounded over long churn of many branches. Mirrors
+      `invalidate!`'s removal; a holder a concurrent build still holds is at
+      worst re-created by `computeIfAbsent` (dedup lost for that one build,
+      never a correctness issue) — the same tiny race `invalidate!` accepts.
+
+   Returns `entry` regardless (the request in flight is still served from
+   it even when the cache install is discarded)."
+  [{:keys [handlers build-monitors]} branch-id entry max-size default-branch-id gen-holder gen0]
+  (let [[old new] (swap-vals!
+                    handlers
+                    (fn [m]
+                      (if (and gen-holder
+                               (not= gen0 (java.util.concurrent.atomic.AtomicLong/.get gen-holder)))
+                        m
+                        (-> m
+                            (evict-lru-if-full max-size default-branch-id branch-id)
+                            (assoc branch-id entry)))))]
+    (when build-monitors
+      (doseq [gone (keys old)
+              :when (and (not= gone branch-id) (not (contains? new gone)))]
+        (java.util.concurrent.ConcurrentHashMap/.remove build-monitors gone)))
+    entry))
+
+
 (defn- build-and-cache!
   "Build the per-branch ctx + Ring callable and cache it. Cold-branch
    thundering-herd safe — concurrent callers for the same branch-id
-   serialize on `branch-monitor`, double-check inside the lock, and
+   serialize on the `build-holder` lock, double-check inside it, and
    share the single rebuild!. LRU evicts the oldest non-default
-   entry if the cache is at `:max-size`."
+   entry if the cache is at `:max-size`.
+
+   The build generation is captured BEFORE the (multi-second) build and
+   re-checked at install (`install-built-entry!`) so a branch deleted
+   mid-build is not resurrected — see `build-holder`."
   [{:keys [handlers default-branch-id] :as router} branch-id]
   (let [max-size (or (:max-size router) default-max-cached-branches)]
-    (if-let [monitor (branch-monitor router branch-id)]
-      (do
-        (java.util.concurrent.locks.ReentrantLock/.lock monitor)
+    (if-let [holder (build-holder router branch-id)]
+      (let [lock (:lock holder)
+            gen-holder (:gen holder)]
+        (java.util.concurrent.locks.ReentrantLock/.lock lock)
         (try
           (or (get @handlers branch-id)
-              (let [entry (build-actual-entry! router branch-id)]
-                (swap! handlers
-                       (fn [m]
-                         (-> m
-                             (evict-lru-if-full max-size default-branch-id branch-id)
-                             (assoc branch-id entry))))
-                entry))
-          (finally (java.util.concurrent.locks.ReentrantLock/.unlock monitor))))
+              (let [gen0 (java.util.concurrent.atomic.AtomicLong/.get gen-holder)
+                    entry (build-actual-entry! router branch-id)]
+                (install-built-entry! router branch-id entry max-size
+                                      default-branch-id gen-holder gen0)))
+          (finally (java.util.concurrent.locks.ReentrantLock/.unlock lock))))
       ;; No monitor map → test path with a hand-constructed router.
       ;; Best-effort: just swap, accepting the rare duplicate build.
       (let [entry (build-actual-entry! router branch-id)]
-        (swap! handlers
-               (fn [m]
-                 (-> m
-                     (evict-lru-if-full max-size default-branch-id branch-id)
-                     (assoc branch-id entry))))
-        entry))))
+        (install-built-entry! router branch-id entry max-size
+                              default-branch-id nil 0)))))
 
 
 ;; === Graph-epoch lazy validation (audit-6) ==================================
@@ -785,6 +832,21 @@
    Mainly used after `delete-branch!` so the ctx doesn't outlive its
    branch row."
   [{:keys [handlers build-monitors] :as router} branch-id]
+  ;; Bump the branch's build generation BEFORE dropping anything (L1): a
+  ;; cold build for this branch may be mid-flight — holding the lock, its
+  ;; result not yet installed. It captured the generation before its
+  ;; multi-second compile and re-checks it at install (`install-built-
+  ;; entry!`) via its captured holder reference, so the bump makes it
+  ;; DISCARD a now-stale result instead of resurrecting a ctx for a
+  ;; just-deleted branch. invalidate! deliberately does NOT take the
+  ;; per-branch lock (held across the rebuild; a delete must not block on
+  ;; it). Residual: the vanishingly-narrow window where invalidate!'s
+  ;; holder read runs before the builder's `computeIfAbsent` creates the
+  ;; holder — unreachable on the request path, since a build only starts
+  ;; after `resolve-branch-id` saw the (not-yet-deleted) branch row.
+  (when build-monitors
+    (when-let [holder (java.util.concurrent.ConcurrentHashMap/.get build-monitors branch-id)]
+      (java.util.concurrent.atomic.AtomicLong/.incrementAndGet ^java.util.concurrent.atomic.AtomicLong (:gen holder))))
   (swap! handlers dissoc branch-id)
   (forget-ref-cache-for-branch! router branch-id)
   (when build-monitors

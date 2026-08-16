@@ -249,28 +249,56 @@
 (defn- apply-resolutions!
   "For each conflict whose resolution is `:source` or `:target`, create
    a fresh version record on target branch with the chosen data.
-   `nil` resolutions silently skip. Records are grouped by version
-   entity and inserted in one batch per type. Stamped at `merge-ts` + 1ms
-   so resolutions are DETERMINISTICALLY strictly-later than the merge
-   record (target-timestamp = `merge-ts`) → `pick-latest-candidate`
-   prefers the resolution over the merge-surfaced source — a second
-   `(now)` read here would make 'resolution wins' depend on wall-clock
-   monotonicity between the two writes. The +1ms epsilon survives
-   Postgres timestamptz microsecond truncation."
+   `nil` resolutions (no key) silently skip. Records are grouped by
+   version entity and inserted in one batch per type. Stamped at
+   `merge-ts` + 1ms so resolutions are DETERMINISTICALLY strictly-later
+   than the merge record (target-timestamp = `merge-ts`) →
+   `pick-latest-candidate` prefers the resolution over the
+   merge-surfaced source — a second `(now)` read here would make
+   'resolution wins' depend on wall-clock monotonicity between the two
+   writes. The +1ms epsilon survives Postgres timestamptz microsecond
+   truncation.
+
+   A chosen side that DELETED the entity resolves to nil (tombstone
+   winner omitted by `resolve-entities-batch`). Explicitly choosing
+   that side means 'keep the deletion': we must write a TOMBSTONE
+   version on target, not skip — otherwise the merge surfaces the
+   OTHER (live) side and the entity resurrects against the user's
+   choice. Non-null version columns are filled from the sibling live
+   side. If both sides are nil (both deleted) target already resolves
+   absent → nothing to write."
   [base-storage conflicts conflict-resolutions target-branch-id merge-ts]
   (let [ts (Instant/.plusMillis merge-ts 1)
         by-version-entity
         (reduce
           (fn [acc {:keys [entity-name entity-id source-version target-version]}]
-            (if-let [chosen (case (get conflict-resolutions [entity-name entity-id])
-                              :source source-version
-                              :target target-version
-                              nil)]
-              (let [{:keys [version-entity]} (get res/entity-config entity-name)
-                    record (conflict-resolution->version-record
-                             entity-name entity-id chosen target-branch-id ts)]
-                (update acc version-entity (fnil conj []) record))
-              acc))
+            (let [resolution (get conflict-resolutions [entity-name entity-id])
+                  chosen (case resolution
+                           :source source-version
+                           :target target-version
+                           nil)
+                  {:keys [version-entity]} (get res/entity-config entity-name)]
+              (cond
+                ;; Live chosen side → normal resolution version.
+                (some? chosen)
+                (update acc version-entity (fnil conj [])
+                        (conflict-resolution->version-record
+                          entity-name entity-id chosen target-branch-id ts))
+
+                ;; Explicit :source/:target but chosen is nil ⇒ that side
+                ;; deleted. Write a tombstone (data from the live sibling
+                ;; to satisfy non-null columns); no-op if both nil.
+                (and (#{:source :target} resolution)
+                     (some? (or source-version target-version)))
+                (update acc version-entity (fnil conj [])
+                        (-> (conflict-resolution->version-record
+                              entity-name entity-id
+                              (or source-version target-version)
+                              target-branch-id ts)
+                            (assoc :deleted-at ts)))
+
+                ;; No resolution key, or both-deleted → skip.
+                :else acc)))
           {}
           conflicts)]
     (doseq [[version-entity records] by-version-entity]

@@ -1,8 +1,17 @@
-(ns graphden.executor.compile-eager-test
+(ns ^:serial graphden.executor.compile-eager-test
   "Tests for compile-eager's caching machinery — both the process-wide
    `compile-all` LRU (so sister callers reuse the same compiled
    closure map) and the per-execute DRY memo (so a fn-def that ref's
    the same child twice fires it once).
+
+   `^:serial`: `compile-all-cache-hit-returns-identical-map-test`
+   asserts `identical?` across two `compile-all` calls over the SAME
+   process-wide LRU. A concurrent NS whose graph edit lands a
+   compile-cache invalidation between the two calls evicts the entry,
+   so the second call recompiles — a false failure. Same reason its
+   sibling `compile-runtime-test` is pinned serial; running this NS
+   before the parallel pool starts keeps another thread from mutating
+   the shared cache mid-test.
 
    The DRY-memo wire test in `integration_test/full-execution-with-
    fn-usages-test` asserts the high-level promise (`call-count == 1`

@@ -349,17 +349,18 @@ grid positions and a validation record, returning the response shape:
 {:nodes [...]
  :edges [...]
  :grid-pos {node-id {:row r :col c} ...}
- :validation {:valid true/false :issues [...]}}
+ :validation {:valid true/false :issues [...] :warnings [...]}}
 ```
 
-`validate-layout` (`core.clj`) flags three structural problems; any one
-makes `:valid` false:
+`validate-layout` (`core.clj`) separates **fatal** structural problems
+(any one makes `:valid` false, reported in `:issues`) from **advisory**
+signals (reported in `:warnings`, `:valid` stays true):
 
-| Issue `:type` | Condition |
-|---------------|-----------|
-| `no_root` | Input nodes exist but no zero-in-edge root was found (empty graph or a pure cycle), so nothing could be placed. |
-| `orphan` | A root exists but some input node has no path from it, so the DFS never gave it a position. The message lists the unplaced node-ids. |
-| `collision` | Two placed nodes share a `(row, col)` cell. |
+| `:type` | Severity | Condition |
+|---------|----------|-----------|
+| `no_root` | fatal | Input nodes exist but no zero-in-edge root was found (empty graph or a pure cycle), so nothing could be placed. |
+| `collision` | fatal | Two placed nodes share a `(row, col)` cell. |
+| `orphan` | advisory | A root exists but some input node has no path from it, so the DFS never gave it a position. Dropping a node unreachable from the selected root is intended behaviour (a fn graph often has sibling nodes off the root's subtree), so this is surfaced for observability without invalidating the layout. The message lists the unplaced node-ids. |
 
 ## Frontend: Anchor Node Mechanism
 

@@ -103,7 +103,7 @@
 
 
 (deftest validate-layout-orphan-test
-  (testing "a node with no path from the root is reported as an orphan"
+  (testing "a node with no path from the root is reported as an advisory orphan warning, not a fatal issue"
     ;; a → b is the reachable tree (a is the root). c is disconnected, so
     ;; the DFS placement never gives it a grid position.
     (let [a "n-a" b "n-b" c "n-c"
@@ -115,8 +115,11 @@
       (is (contains? grid-pos a))
       (is (contains? grid-pos b))
       (is (not (contains? grid-pos c)))
-      (is (false? (:valid validation)))
-      (let [orphan (first (filter #(= "orphan" (:type %)) (:issues validation)))]
+      ;; dropping an unreachable node is intended behaviour — the layout
+      ;; stays valid, and the orphan surfaces as a warning for observability
+      (is (true? (:valid validation)))
+      (is (empty? (:issues validation)))
+      (let [orphan (first (filter #(= "orphan" (:type %)) (:warnings validation)))]
         (is (some? orphan))
         ;; the message names the unplaced node
         (is (str/includes? (:message orphan) c))))))

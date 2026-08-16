@@ -240,14 +240,21 @@
    full set of input node-ids and `root?` whether a root node was found.
    Reports three kinds of problem:
 
+   Fatal issues (flip `:valid` to false):
+
    - `no_root` — input nodes exist but no root (zero-in-edge node) was
      found, so nothing could be placed (empty graph, or a pure cycle).
-   - `orphan`  — an input node has no path from the root, so the DFS
-     placement never gave it a grid position. Only checked when a root
-     exists (with no root the `no_root` issue already covers it).
    - `collision` — two placed nodes share a cell.
 
-   Any issue makes the layout invalid."
+   Advisory (reported in `:warnings`, does NOT invalidate):
+
+   - `orphan`  — an input node has no path from the root, so the DFS
+     placement never gave it a grid position. Dropping a node that is
+     unreachable from the selected root is intended, documented layout
+     behaviour (see `disconnected-nodes-test`) — a real fn graph often
+     has sibling nodes off the root's subtree — so an orphan is surfaced
+     for observability but is not a structural error. Only detected when
+     a root exists (with no root the `no_root` issue already covers it)."
   [matrix expected-node-ids root?]
   (let [positions (:positions matrix)
         placed-ids (set (keys positions))
@@ -260,17 +267,18 @@
                  (conj {:type "no_root"
                         :message "No root node found"})
 
-                 (and root? (seq orphans))
-                 (conj {:type "orphan"
-                        :message (str (count orphans)
-                                      " node(s) unreachable from root: "
-                                      (str/join ", " orphans))})
-
                  (not= unique-count total-count)
                  (conj {:type "collision"
-                        :message (str "Found " (- total-count unique-count) " collisions")}))]
+                        :message (str "Found " (- total-count unique-count) " collisions")}))
+        warnings (cond-> []
+                   (and root? (seq orphans))
+                   (conj {:type "orphan"
+                          :message (str (count orphans)
+                                        " node(s) unreachable from root: "
+                                        (str/join ", " orphans))}))]
     {:valid (empty? issues)
-     :issues issues}))
+     :issues issues
+     :warnings warnings}))
 
 
 ;; =============================================================================
@@ -287,7 +295,7 @@
         node-ids (map #(get-in % [:data :id]) nodes)]
     (if (empty? nodes)
       {:grid-pos {}
-       :validation {:valid true :issues []}}
+       :validation {:valid true :issues [] :warnings []}}
       (let [graph-info (build-graph-info nodes edges)
             root (find-root-node nodes edges)
             matrix (if root

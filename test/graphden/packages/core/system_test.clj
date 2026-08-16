@@ -95,6 +95,30 @@
             (digest {:algorithm "NOPE-9000" :s "abc"} nil))))))
 
 
+;; ============================================================================
+;; :parse-json — malformed input must surface a TYPED error (→400), never a
+;; bare JsonParseException that the error boundary maps to 500 + pages on
+;; :http/server-error.
+;; ============================================================================
+
+(deftest parse-json-well-formed-test
+  (let [parse (impls/impl-of :parse-json)]
+    (testing "valid JSON parses; keywordize flag honoured"
+      (is (= {:a 1} (parse {:string "{\"a\":1}" :keywordize true} nil)))
+      (is (= {"a" 1} (parse {:string "{\"a\":1}" :keywordize false} nil))))))
+
+
+(deftest parse-json-malformed-is-typed-test
+  (let [parse (impls/impl-of :parse-json)
+        ex (try (parse {:string "{" :keywordize true} nil)
+                :no-throw
+                (catch clojure.lang.ExceptionInfo e e))]
+    (testing "malformed input → ExceptionInfo with :validation-error/malformed-json"
+      (is (instance? clojure.lang.ExceptionInfo ex)
+          "not the raw com.fasterxml.jackson JsonParseException")
+      (is (= :validation-error/malformed-json (:type (ex-data ex)))))))
+
+
 (deftest sha256-hex-is-a-graph-preset-test
   ;; The old base-fn name survives as a fn-def pinning the algorithm —
   ;; the ladder must not silently flatten back into a hardcoded impl.

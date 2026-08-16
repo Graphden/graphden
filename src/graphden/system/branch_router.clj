@@ -272,6 +272,30 @@
                                    {:target-branch-id branch-id} {:limit 1}))))
 
 
+(defn- chain-divergent-fn-ids
+  "The `:fn` ids whose resolved definition on `branch-id` differs from the
+   router's base (`default-branch-id` — the root/default branch, main): the
+   UNION of `merge-affected-fn-ids` over EVERY branch in `branch-id`'s
+   ancestor chain EXCEPT the default itself.
+
+   Why the whole chain, not just `branch-id`'s own rows: a branch C forked
+   off a NON-root branch B inherits B's edits through resolution (C's
+   VersionedStorage resolves along C→B→…→main). `merge-affected-fn-ids`
+   queries version rows for ONE branch, so `(… base C)` on a C with no own
+   edits is empty — which would send C down the graph-identical fast path
+   and make it execute MAIN's pre-B closures verbatim (wrong result from the
+   first request). Unioning across the chain makes the divergence set
+   relative to main: empty ⇒ genuinely identical to main (fast path);
+   non-empty ⇒ delta-recompile that FULL set (C's own overrides AND every
+   ancestor edit C inherits). The default branch's chain is just `[default]`,
+   so it yields the empty set and never deltas against itself."
+  [base-storage default-branch-id branch-id]
+  (into #{}
+        (comp (remove #(= % default-branch-id))
+              (mapcat #(vmerge/merge-affected-fn-ids base-storage %)))
+        (vres/collect-branch-chain base-storage branch-id)))
+
+
 ;; === Ctx-build diagnostics recompute (error-tolerance, ROADMAP § Error
 ;; Tolerance) ==================================================================
 ;;
@@ -384,20 +408,26 @@
    Slow path: full `rebuild!` for the branch.
 
    No atom writes; caller installs the result."
-  [{:keys [base-ctx handler-fn-id optional-handler-fn-ids]} branch-id]
+  [{:keys [base-ctx default-branch-id handler-fn-id optional-handler-fn-ids]} branch-id]
   (let [branch-ctx (build-branch-ctx base-ctx branch-id)
         base-storage (vs/unwrap (:storage base-ctx))
         merge-target? (branch-is-merge-target? base-storage branch-id)
+        ;; Divergence RELATIVE TO MAIN across the whole ancestor chain, not
+        ;; just this branch's own rows — otherwise a branch forked off a
+        ;; non-root branch (which inherits that branch's edits through
+        ;; resolution) would take the graph-identical fast path and execute
+        ;; main's pre-fork closures. See `chain-divergent-fn-ids`.
         own-fn-ids (when-not merge-target?
-                     (vmerge/merge-affected-fn-ids base-storage branch-id))
+                     (chain-divergent-fn-ids base-storage default-branch-id branch-id))
         base-registry (some-> (:compiled-registry base-ctx) deref)]
     (cond
       ;; 1. Identical to base → reuse the base registry directly.
       (and base-registry (not merge-target?) (empty? own-fn-ids))
       (cr/instantiate-from-templates! base-ctx branch-ctx)
 
-      ;; 2. Divergent only by own version rows → delta-compile on top of base.
-      ;;    A branch differs from its base by a handful of fns; a full rebuild of
+      ;; 2. Divergent from main by own OR inherited version rows → delta-compile
+      ;;    on top of base.
+      ;;    A branch differs from main by a handful of fns; a full rebuild of
       ;;    the whole ~3700-fn graph for that was measured at ~57s and BLOCKS the
       ;;    executor (a divergent branch whose ctx was evicted from the LRU pays it
       ;;    on next access — the `compile-all` cache is keyed by graph shape, so a

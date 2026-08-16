@@ -135,8 +135,12 @@
     ;; blue button we can't restyle), load telegram-widget.js only for its
     ;; `Telegram.Login.auth` fn and render OUR OWN `.btn-social` button so all
     ;; three providers share one design. The auth callback returns the SAME
-    ;; signed fields the widget's redirect would, so we just forward them to the
-    ;; unchanged `/auth/telegram/callback` (server-side HMAC verify is identical).
+    ;; signed fields the widget's redirect would; we forward them to
+    ;; `/auth/telegram/callback`. First we `GET /auth/telegram/start` to plant
+    ;; the HttpOnly `gd_link_intent` nonce (same-origin fetch honors Set-Cookie)
+    ;; and echo it back as the callback's `state` — the per-request intent proof
+    ;; the server now requires before it will LINK the identity to a signed-in
+    ;; account (an attacker's captured payload can't forge this cookie).
     ;; `Telegram.Login.auth` needs the NUMERIC bot id — the token's prefix.
     (when-let [token (:bot-token telegram)]
       (let [ci (String/.indexOf token ":")
@@ -147,10 +151,11 @@
              "Continue with Telegram</button></div>"
              "<script>document.getElementById('tg-login').addEventListener('click',function(){"
              "if(!window.Telegram||!window.Telegram.Login){return;}"
+             "fetch('/auth/telegram/start').then(function(r){return r.json();}).then(function(s){"
              "window.Telegram.Login.auth({bot_id:'" bot-id "',request_access:'write'},function(u){"
              "if(!u){return;}var q=Object.keys(u).map(function(k){"
              "return encodeURIComponent(k)+'='+encodeURIComponent(u[k]);}).join('&');"
-             "window.location='/auth/telegram/callback?'+q;});});</script>")))))
+             "window.location='/auth/telegram/callback?'+q+'&state='+encodeURIComponent(s.state);});});});</script>")))))
 
 
 (defn login-page

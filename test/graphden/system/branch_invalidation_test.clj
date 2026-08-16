@@ -109,3 +109,35 @@
       (testing "and the branch still builds correctly on first demand"
         (is (= 3 (cr/execute (br/ctx-for router (:id feature)) fn-id {}))))
       (finally (sp/close raw)))))
+
+
+(deftest branch-forked-off-nonroot-inherits-middle-edit-test
+  ;; Regression: the lazy per-branch build decided fast-path vs delta from
+  ;; `merge-affected-fn-ids` on the branch's OWN rows only. A branch C forked
+  ;; off a NON-root branch B (which has edits) has no own rows, so it took the
+  ;; graph-identical fast path and executed MAIN's pre-B closures verbatim —
+  ;; even though C's storage resolves B's edits along C→B→main. The divergence
+  ;; set is now unioned across the whole ancestor chain except the default.
+  (let [{:keys [raw storage base-ctx router fn-id] :as f} (fixture!)
+        b (vs/create-branch! storage "middle-b")
+        b-storage (vs/->VersionedStorage (vs/unwrap storage) (:id b))
+        b-ctx (br/ctx-for router (:id b))]
+    (try
+      ;; Edit F → 2 on the MIDDLE branch B — B now owns a binding-version row.
+      (set-value! f b-storage b-ctx 2)
+      (testing "precondition: B sees its own edit, main is untouched"
+        (is (= 2 (cr/execute b-ctx fn-id {})))
+        (is (= 1 (cr/execute base-ctx fn-id {}))))
+
+      ;; C forks off B (base = B), with NO own edits.
+      (let [c (vs/create-branch! storage "child-c" {:base-branch-id (:id b)})
+            ;; Sibling forked off ROOT (main), also no edits — the preserved
+            ;; fast path: it must still see main's original value.
+            sib (vs/create-branch! storage "root-sib")
+            c-ctx (br/ctx-for router (:id c))
+            sib-ctx (br/ctx-for router (:id sib))]
+        (testing "C inherits B's edit through the chain (C→B→main), not main's stale closure"
+          (is (= 2 (cr/execute c-ctx fn-id {}))))
+        (testing "a root-forked sibling with no edits stays on the fast path — sees main's value"
+          (is (= 1 (cr/execute sib-ctx fn-id {})))))
+      (finally (sp/close raw)))))

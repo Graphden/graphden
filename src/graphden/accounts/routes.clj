@@ -22,7 +22,8 @@
      POST /auth/unlink             unlink a method (last one is refused)
      GET  /auth/:provider/start    (github|google) 302 to the provider + state cookie
      GET  /auth/:provider/callback (github|google) exchange → session → redirect
-     GET  /auth/telegram/callback  verify widget HMAC → session → redirect
+     GET  /auth/telegram/start     plant gd_link_intent nonce → {state} (link CSRF guard)
+     GET  /auth/telegram/callback  verify widget HMAC → session; LINK only on nonce match
 
    Sessions are delivered as an HttpOnly `gd_session` cookie. There is no ring
    cookie middleware in the chain, so cookies are set as `Set-Cookie` headers
@@ -60,6 +61,16 @@
 (def ^:private session-max-age-secs (* 24 60 60))
 (def ^:private oauth-state-max-age-secs 600)
 (def ^:private pending-2fa-max-age-secs 300)
+
+
+;; The Telegram-link intent nonce. The widget's signed payload authenticates
+;; its ORIGIN at Telegram but NOT the victim's intent, and there is no provider
+;; redirect to bounce a `state` through (as OAuth has), so linking gets its own
+;; per-request nonce: `/auth/telegram/start` plants this HttpOnly cookie and
+;; hands the value back for the client to append as the callback's `state`;
+;; the LINK arm fires only when the two match — the same intent proof `gd_oauth`
+;; gives the OAuth pair.
+(def ^:private link-intent-cookie "gd_link_intent")
 
 
 (defn- https-origin?
@@ -157,16 +168,29 @@
 
 (defn- finish-social
   "Common tail for an OAuth/Telegram callback that produced a normalized
-   identity `info`: if the request already carries a session, LINK the identity
-   to that account (or report a conflict) and stay signed in; otherwise log in /
-   create and set a fresh session."
-  [storage origin request info provider-key]
+   identity `info`.
+
+   When the request already carries a session this is an identity-LINK — but
+   linking is an authenticated, intent-bearing action, so we perform it ONLY
+   when `link-ok?` proves per-request intent (OAuth: the `state`==`gd_oauth`
+   check already ran in `handle-oauth-callback`; Telegram: `state`==the
+   `gd_link_intent` cookie planted by `/auth/telegram/start`). Without that
+   proof we refuse to link: a bare callback GET carrying the victim's
+   SameSite=Lax `gd_session` must never silently attach an attacker's identity
+   to the victim's account (CSRF account-takeover). The session's owner did not
+   ask to swap identities either, so we leave them signed in as themselves and
+   do nothing.
+
+   With no session we log in / create and set a fresh session."
+  [storage origin request info provider-key link-ok?]
   (if-let [acct (current-account storage request)]
-    (try
-      (core/link-identity! storage (str (:id acct)) info)
-      (redirect (str origin "/settings?linked=" provider-key))
-      (catch clojure.lang.ExceptionInfo _
-        (redirect (str origin "/settings?error=identity_conflict"))))
+    (if link-ok?
+      (try
+        (core/link-identity! storage (str (:id acct)) info)
+        (redirect (str origin "/settings?linked=" provider-key))
+        (catch clojure.lang.ExceptionInfo _
+          (redirect (str origin "/settings?error=identity_conflict"))))
+      (redirect (str origin "/settings?error=link_intent")))
     (let [{:keys [account-id]} (core/resolve-social-identity! storage info)]
       (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin)))))
 
@@ -380,19 +404,44 @@
       (or (str/blank? code) (str/blank? state) (not= state cookie-state))
       (redirect (str origin "/login?error=oauth_state"))
       :else
+      ;; `link-ok? true`: the URL `state`==`gd_oauth` check above IS the
+      ;; per-request link intent for OAuth, so a signed-in callback may link.
       (if-let [info (oauth/exchange-code! provider-key cfg code (str origin "/auth/" provider-key "/callback"))]
-        (finish-social storage origin request info provider-key)
+        (finish-social storage origin request info provider-key true)
         (redirect (str origin "/login?error=oauth_failed"))))))
+
+
+(defn- handle-telegram-start
+  "Plant a short-lived `gd_link_intent` state nonce for a Telegram widget flow
+   and hand it back so the client appends it to the callback URL as `state`.
+   Auth-agnostic, like the OAuth `/start`: the LINK-vs-LOGIN decision stays at
+   the callback — this only proves the callback was initiated from our origin
+   in this browser, which is what stops the link-CSRF."
+  [origin]
+  (let [state (crypto/random-token)]
+    (json-resp 200 {:ok true :state state}
+               (cookie-str link-intent-cookie state
+                           {:max-age oauth-state-max-age-secs :secure? (https-origin? origin)}))))
 
 
 (defn- handle-telegram
   [storage telegram-cfg origin request]
   (let [q (req/parse-query-string (:query-string request))
+        ;; `state` is OUR intent nonce, not part of Telegram's signed payload —
+        ;; strip it before the HMAC check (verify-login signs every field but
+        ;; `hash`, so leaving it in would break a legitimate signature).
         info (when telegram-cfg
-               (telegram/verify-login (:bot-token telegram-cfg) q
-                                      (quot (System/currentTimeMillis) 1000)))]
+               (telegram/verify-login (:bot-token telegram-cfg) (dissoc q "state")
+                                      (quot (System/currentTimeMillis) 1000)))
+        ;; LINK only on a matching intent nonce (see `link-intent-cookie`): the
+        ;; widget's HMAC proves origin-at-Telegram, not that THIS signed-in user
+        ;; asked to attach it. A bare callback carrying the victim's Lax
+        ;; `gd_session` fails this check → `finish-social` refuses to link.
+        url-state (get q "state")
+        cookie-state (provider/cookie-value request link-intent-cookie)
+        link-ok? (and (not (str/blank? url-state)) (= url-state cookie-state))]
     (if info
-      (finish-social storage origin request info "telegram")
+      (finish-social storage origin request info "telegram" link-ok?)
       (redirect (str origin "/login?error=telegram")))))
 
 
@@ -508,6 +557,11 @@
 
               (and (= method :post) (= uri "/auth/totp/disable"))
               (handle-totp-disable storage request)
+
+              (and (= method :get) (= uri "/auth/telegram/start"))
+              (if telegram
+                (handle-telegram-start origin)
+                (json-resp 404 {:ok false :error "telegram_disabled"}))
 
               (and (= method :get) (= uri "/auth/telegram/callback"))
               (handle-telegram storage telegram origin request)

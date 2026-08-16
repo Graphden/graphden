@@ -529,14 +529,22 @@ function openBranchPolicyMenu(btn) {
   const pop = document.createElement('div');
   pop.id = 'gd-branch-policy-pop';
   pop.className = 'gd-pop';
-  let html = '<h5>Who can write ' + branchName + '</h5>';
+  // Branch name is user-controlled and getAttribute returns it DECODED, so it
+  // must go in via textContent — never string-concatenated into innerHTML
+  // (would re-inject `<img onerror=…>` live; there is no CSP). The option
+  // rows below are built from the static BRANCH_POLICY_OPTIONS constant only,
+  // so their markup stays a trusted template.
+  const heading = document.createElement('h5');
+  heading.textContent = 'Who can write ' + branchName;
+  pop.appendChild(heading);
+  let html = '';
   BRANCH_POLICY_OPTIONS.forEach(([value, label]) => {
     const on = value === (current || 'open');
     html += '<button type="button" class="gd-pop-item' + (on ? ' sel' : '') + '"'
       + ' data-policy-value="' + value + '">'
       + '<span class="gd-pi">' + (on ? '●' : '○') + '</span>' + label + '</button>';
   });
-  pop.innerHTML = html;
+  pop.insertAdjacentHTML('beforeend', html);
   pop.querySelectorAll('[data-policy-value]').forEach((item) => {
     item.addEventListener('click', async () => {
       closeBranchPolicyMenu();

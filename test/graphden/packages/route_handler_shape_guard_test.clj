@@ -58,6 +58,40 @@
              (pr-str offenders)))))
 
 
+;; Auth-gating anti-drift: the `/partials/*` fragments that PROJECT
+;; tenant-private graph / binding / type structure must gate exactly like
+;; the source APIs they mirror. `/api/graph/entities` (`:api-entities`)
+;; and `/api/types` (`:api-types`) are `:get-auth-required` — closed to
+;; anonymous callers when auth is active, open when auth is off. These
+;; four partials used to be bare `:get-route`, leaking the private graph
+;; (incl. non-secret literal binding values, keyed by enumerable
+;; uuid-v5 fn-ids) to unauthenticated callers on any auth-active
+;; deployment. Anchor on the SOURCE api's parent so a future re-parent of
+;; `/api/graph/entities` drags these along instead of silently diverging.
+
+(deftest tenant-private-graph-partials-gate-like-source-apis
+  (let [fn-defs (:fn-defs (loader/load-packages package-set))
+        by-name (into {} (map (juxt :name identity)) fn-defs)
+        source-parent (:parent (by-name :api-entities))
+        ;; partials that project graph/binding/type structure the source
+        ;; APIs (/api/graph/entities, /api/types) auth-gate.
+        sensitive #{:partial-provenance
+                    :partial-return-type-rule
+                    :partial-inspector-detail
+                    :partial-inspector-overview}]
+    (is (= :get-auth-required source-parent)
+        "anchor: /api/graph/entities (:api-entities) is auth-gated")
+    (is (= :get-auth-required (:parent (by-name :api-types)))
+        "sibling source /api/types is auth-gated too")
+    (doseq [nm sensitive
+            :let [r (by-name nm)]]
+      (is (some? r) (str nm " is present in the loaded app package"))
+      (is (= source-parent (:parent r))
+          (str nm " projects tenant-private graph/binding/type data — it MUST"
+               " gate identically to /api/graph/entities (:get-auth-required),"
+               " not bare :get-route (which re-opens the anonymous graph read)")))))
+
+
 ;; The sync-time mirror of the same contract — what an EXTERNAL package
 ;; hits at `register-base-fns-from-packages!` before any DB write.
 

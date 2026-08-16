@@ -2,8 +2,9 @@
   "Integration tests for the /auth/* Ring router against a real Postgres:
    password signup/login/logout with the gd_session cookie, the email-verify
    redirect, OAuth start (redirect + state cookie) and callback (state check +
-   with-redefed exchange → session), and the Telegram widget callback. Tagged
-   `:integration`."
+   with-redefed exchange → session), the Telegram widget callback, and the
+   Telegram link-intent gate (`/auth/telegram/start` nonce → callback links
+   only on a match — the link-CSRF fix). Tagged `:integration`."
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
@@ -173,6 +174,55 @@
       (let [bad (str/replace qs #"first_name=Tess" "first_name=Eve")
             resp (router {:request-method :get :uri "/auth/telegram/callback" :query-string bad})]
         (is (str/includes? (get-in resp [:headers "Location"]) "error=telegram"))))))
+
+
+(deftest ^:integration telegram-link-requires-intent
+  ;; The link-CSRF fix: a Telegram callback carrying the victim's (SameSite=Lax)
+  ;; gd_session must NOT silently attach the presented identity — linking needs
+  ;; the per-request gd_link_intent nonce that /auth/telegram/start plants,
+  ;; mirroring the OAuth state check. Without it: no link, no session swap.
+  (let [bot "123:TG-LINKTOKEN"
+        router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
+                                    :app-origin origin :telegram {:bot-token bot}})
+        session (set-cookie-token (router {:request-method :post :uri "/auth/signup"
+                                           :body (json/generate-string {:email "tg-link@example.com"
+                                                                        :password "pw-tg-link-123"})}))
+        acct-id (str (:id (core/authenticate-token (storage) session)))
+        auth-date (str (quot (System/currentTimeMillis) 1000))
+        base {"id" "909" "first_name" "Nine" "username" "nine" "auth_date" auth-date}
+        check (->> base (sort-by key) (map (fn [[k v]] (str k "=" v))) (str/join "\n"))
+        h (crypto/hmac-sha256-hex (crypto/sha256-bytes bot) check)
+        payload-qs (str/join "&" (map (fn [[k v]] (str k "=" v)) (assoc base "hash" h)))]
+    (testing "signed-in callback WITHOUT a gd_link_intent nonce refuses to link"
+      (let [resp (router {:request-method :get :uri "/auth/telegram/callback"
+                          :query-string payload-qs
+                          :headers {"cookie" (str "gd_session=" session)}})]
+        (is (= 302 (:status resp)))
+        (is (str/includes? (get-in resp [:headers "Location"]) "error=link_intent"))
+        (is (nil? (core/find-identity (storage) "telegram" "909"))
+            "no telegram identity attached without proof of intent (no takeover)")
+        (is (nil? (set-cookie-token resp)) "the victim's session is not swapped")))
+    (testing "a mismatched state (attacker-guessed nonce) still refuses to link"
+      (let [resp (router {:request-method :get :uri "/auth/telegram/callback"
+                          :query-string (str payload-qs "&state=WRONG")
+                          :headers {"cookie" (str "gd_session=" session "; gd_link_intent=RIGHT")}})]
+        (is (str/includes? (get-in resp [:headers "Location"]) "error=link_intent"))
+        (is (nil? (core/find-identity (storage) "telegram" "909")))))
+    (testing "signed-in callback WITH a matching gd_link_intent nonce links"
+      (let [start (router {:request-method :get :uri "/auth/telegram/start"})
+            sc (get-in start [:headers "Set-Cookie"])
+            state (second (re-find #"gd_link_intent=([^;]+)" sc))]
+        (is (= 200 (:status start)))
+        (is (str/includes? sc "HttpOnly") "the intent cookie is HttpOnly")
+        (is (= state (:state (json/parse-string (:body start) true)))
+            "start hands back the same nonce it planted")
+        (let [resp (router {:request-method :get :uri "/auth/telegram/callback"
+                            :query-string (str payload-qs "&state=" state)
+                            :headers {"cookie" (str "gd_session=" session "; gd_link_intent=" state)}})]
+          (is (= 302 (:status resp)))
+          (is (str/includes? (get-in resp [:headers "Location"]) "/settings?linked=telegram"))
+          (is (= acct-id (:account-id (core/find-identity (storage) "telegram" "909")))
+              "telegram attached to the signed-in account only after intent"))))))
 
 
 (deftest ^:integration linking-identities-through-http

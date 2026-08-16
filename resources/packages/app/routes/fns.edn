@@ -172,23 +172,23 @@
    :args {:path "/partials/mismatch-explainer" :handler :_partial-mismatch-handler}}
 
   {:name :partial-provenance
-   :description "GET /partials/provenance?binding-id=X[&item-id=Y] — type-narrowing provenance popover (the `↳` badge target on arg-overlay type-chips). Shares the `_provenance-section` renderer with `/partials/mismatch-explainer`. STEP 1 — header + Resolved-via section; Allowed-values + Slot-effect-bound sections are steps 2-3. PUBLIC (`:get-route`): it only projects type structure already readable via the public `/api/graph/entities`, so gating it added nothing but a login wall on a read-only badge."
-   :parent :get-route
+   :description "GET /partials/provenance?binding-id=X[&item-id=Y] — type-narrowing provenance popover (the `↳` badge target on arg-overlay type-chips). Shares the `_provenance-section` renderer with `/partials/mismatch-explainer`. STEP 1 — header + Resolved-via section; Allowed-values + Slot-effect-bound sections are steps 2-3. Auth-required (`:get-auth-required`): it projects tenant-private binding/type structure, so it gates identically to `/api/graph/entities` — closed to anonymous callers when auth is active, open when auth is off."
+   :parent :get-auth-required
    :args {:path "/partials/provenance" :handler :_partial-provenance-handler}}
 
   {:name :partial-return-type-rule
-   :description "GET /partials/return-type-rule?fn=<name> — the \"Type rule\" popover (the `↳` badge on a fn-card's return-type strip): rule-owner attribution + per-rule narrative + Inputs table, all computed server-side off the rich-types registry. PUBLIC (`:get-route`) for the same reason as `/partials/provenance` — read-only projection of type structure."
-   :parent :get-route
+   :description "GET /partials/return-type-rule?fn=<name> — the \"Type rule\" popover (the `↳` badge on a fn-card's return-type strip): rule-owner attribution + per-rule narrative + Inputs table, all computed server-side off the rich-types registry. Auth-required (`:get-auth-required`) for the same reason as `/partials/provenance` — it projects tenant-private type structure and so gates identically to `/api/graph/entities` and `/api/types` (closed to anonymous when auth is active, open when auth is off)."
+   :parent :get-auth-required
    :args {:path "/partials/return-type-rule" :handler :_partial-rtr-handler}}
 
   {:name :partial-inspector-detail
-   :description "GET /partials/inspector-detail?fn-id={uuid} — the redesign inspector's Bindings (3-way literal/ref/free) + Provenance sections, computed server-side off the fn row + rich-types registry. PUBLIC (`:get-route`) for the same reason as `/partials/provenance`: it only projects binding/type structure already readable via the public `/api/graph/entities`. editor-shell.js swaps it into #gd-insp-detail on node select."
-   :parent :get-route
+   :description "GET /partials/inspector-detail?fn-id={uuid} — the redesign inspector's Bindings (3-way literal/ref/free) + Provenance sections, computed server-side off the fn row + rich-types registry. Auth-required (`:get-auth-required`) for the same reason as `/partials/provenance`: it projects tenant-private binding/type structure (incl. literal binding values) and so gates identically to `/api/graph/entities` — closed to anonymous when auth is active, open when auth is off. editor-shell.js swaps it into #gd-insp-detail on node select."
+   :parent :get-auth-required
    :args {:path "/partials/inspector-detail" :handler :_partial-inspector-detail-handler}}
 
   {:name :partial-inspector-overview
-   :description "GET /partials/inspector-overview?fn-id={uuid} — the inspector's Overview tab (parent chips with named-ancestor resolution, return type, effects chips), computed server-side off the fn row + rich-types registry. PUBLIC for the same reason as `/partials/inspector-detail`. editor-shell.js swaps it into #gd-insp-overview and post-formats `.gd-prov-mono` type texts."
-   :parent :get-route
+   :description "GET /partials/inspector-overview?fn-id={uuid} — the inspector's Overview tab (parent chips with named-ancestor resolution, return type, effects chips), computed server-side off the fn row + rich-types registry. Auth-required (`:get-auth-required`) for the same reason as `/partials/inspector-detail`: it projects tenant-private graph structure and so gates identically to `/api/graph/entities` — closed to anonymous when auth is active, open when auth is off. editor-shell.js swaps it into #gd-insp-overview and post-formats `.gd-prov-mono` type texts."
+   :parent :get-auth-required
    :args {:path "/partials/inspector-overview" :handler :_partial-inspector-overview-handler}}
 
   {:name :partial-settings-build

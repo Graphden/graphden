@@ -163,7 +163,18 @@
       (is (= {:x 2} (req/read-json-body {:body stream})))))
 
   (testing "non-string/stream/map body → nil"
-    (is (nil? (req/read-json-body {:body 42})))))
+    (is (nil? (req/read-json-body {:body 42}))))
+
+  (testing "malformed JSON string → typed :validation-error/malformed-json (→400, not 500)"
+    (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                   (req/read-json-body {:body "{"})))]
+      (is (= :validation-error/malformed-json (:type (ex-data ex))))))
+
+  (testing "malformed JSON InputStream → typed error, not raw JsonParseException"
+    (let [stream (ByteArrayInputStream. (String/.getBytes "{not json" "UTF-8"))
+          ex (is (thrown? clojure.lang.ExceptionInfo
+                   (req/read-json-body {:body stream})))]
+      (is (= :validation-error/malformed-json (:type (ex-data ex)))))))
 
 
 ;; ============================================================================

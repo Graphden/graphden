@@ -113,15 +113,24 @@
    types API doesn't depend on app.layout (cross-package)."
   [request]
   (let [raw (:body request)]
-    (cond
-      (nil? raw)                            nil
-      (map? raw)                            raw
-      (instance? java.io.InputStream raw)
-      (json/parse-stream
-        (java.io.InputStreamReader. ^java.io.InputStream raw "UTF-8") true)
-      (and (string? raw) (not (str/blank? raw)))
-      (json/parse-string raw true)
-      :else                                 nil)))
+    ;; A malformed body is UNTRUSTED, unauthenticated-reachable input
+    ;; (every /auth/* handler and every graph JSON endpoint reads here).
+    ;; A bare `JsonParseException` carries no ex-data `:type`, so the
+    ;; error boundary would map it to 500 AND page on `:http/server-error`.
+    ;; Re-raise as a typed `:validation-error/*` → 400, no server-error.
+    (try
+      (cond
+        (nil? raw)                            nil
+        (map? raw)                            raw
+        (instance? java.io.InputStream raw)
+        (json/parse-stream
+          (java.io.InputStreamReader. ^java.io.InputStream raw "UTF-8") true)
+        (and (string? raw) (not (str/blank? raw)))
+        (json/parse-string raw true)
+        :else                                 nil)
+      (catch com.fasterxml.jackson.core.JsonProcessingException _
+        (throw (ex-info "Malformed JSON in request body."
+                        {:type :validation-error/malformed-json}))))))
 
 
 (defn parse-uuid-or-clear

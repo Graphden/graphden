@@ -36,9 +36,16 @@
 
 
 (defbase parse-json
-  "Parse a JSON string into a data structure."
+  "Parse a JSON string into a data structure. Malformed input surfaces
+   as a typed `:validation-error/malformed-json` (→ 400) rather than a
+   bare `JsonParseException` — the caller's input is untrusted and an
+   untyped throw would map to 500 and page on `:http/server-error`."
   [string keywordize]
-  (json/parse-string string keywordize))
+  (try
+    (json/parse-string string keywordize)
+    (catch com.fasterxml.jackson.core.JsonProcessingException _
+      (throw (ex-info "Malformed JSON."
+                      {:type :validation-error/malformed-json})))))
 
 
 ;; === System Information ===

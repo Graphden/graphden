@@ -100,3 +100,26 @@
       (is (some? token) "the email carries a verify token")
       (is (= "yara@example.com" (:primary-email (accounts/verify-email! (storage) token)))
           "the emailed link actually verifies the account"))))
+
+
+(deftest ^:integration request-verification-refuses-blank-origin
+  ;; M5 regression: with no trusted origin (routes/link-origin returns
+  ;; "" for a poisonable public Host) the sender must NOT mint a token
+  ;; or send mail — otherwise a forged Host header emails the victim a
+  ;; reset/verify link pointing at the attacker.
+  (let [sink (atom [])
+        mailer (email/->CapturingMailer sink)
+        {:keys [account-id]} (accounts/password-signup! (storage)
+                                                        {:email "blank@example.com" :password "pw-blank-123"})
+        result (flows/request-verification! (storage) mailer "" account-id "blank@example.com")]
+    (is (:no-op result) "no-op when no trusted origin")
+    (is (empty? @sink) "no email sent")))
+
+
+(deftest ^:integration request-password-reset-refuses-blank-origin
+  (let [sink (atom [])
+        mailer (email/->CapturingMailer sink)]
+    (accounts/password-signup! (storage) {:email "blankreset@example.com" :password "pw-blankreset-1"})
+    (let [result (flows/request-password-reset! (storage) mailer "" "blankreset@example.com" nil)]
+      (is (:no-op result))
+      (is (empty? @sink) "no reset email built from an untrusted origin"))))

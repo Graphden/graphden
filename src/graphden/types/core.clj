@@ -696,17 +696,23 @@
      (swap! (aliases-atom) dissoc alias-name)
      (let [owners (get @alias-qualified alias-name)
            own-q  (get owners owner-fn-id)
-           rest-owners (dissoc owners owner-fn-id)]
-       ;; No bookkeeping entry for THIS owner (e.g. everything came
-       ;; through the DB batch path, which records no qualified
-       ;; ownership) → we cannot prove the caller owns the bare name;
-       ;; deleting it would violate the "drops ONLY that owner's"
-       ;; contract. No-op instead.
+           rest-owners (dissoc owners owner-fn-id)
+           ;; Ownership is provable via EITHER bookkeeping table:
+           ;; qualified registrations write `alias-qualified`; the DB
+           ;; batch path records only `alias-owners` (last-write-wins
+           ;; single owner). Without the second check, EVERY
+           ;; batch-registered alias fell through to the full-clear
+           ;; :else — the exact case the no-op exists for.
+           owner? (or (some? own-q)
+                      (= owner-fn-id (get @alias-owners alias-name)))]
+       ;; When the caller's ownership is not provable through either
+       ;; table, deleting the bare name would violate the
+       ;; "drops ONLY that owner's" contract. No-op instead.
        (when (and own-q (not= own-q alias-name))
          (swap! (aliases-atom) dissoc own-q))
        (cond
          ;; unknown owner — leave everything in place
-         (and (seq owners) (nil? own-q)) nil
+         (not owner?) nil
 
          (seq rest-owners)
          (do (swap! alias-qualified assoc alias-name rest-owners)

@@ -1166,3 +1166,27 @@
                             (:failed (t/register-type-aliases-batch
                                        [[:empty-map {:hijacked :int} nil]])))})
                    :empty-map))))
+
+
+(deftest unregister-owner-scoped-batch-path-test
+  ;; Spot-check residue: the unknown-owner no-op guard only looked at
+  ;; alias-qualified, which the DB batch path never writes — every
+  ;; batch-registered alias fell through to the full-clear :else.
+  ;; Ownership is now provable via EITHER bookkeeping table.
+  (binding [t/*type-aliases-override* nil]
+    (let [snap (t/global-aliases-snapshot)]
+      (try
+        (testing "batch-registered alias without an owner survives a stranger's 2-arity drop"
+          (t/register-type-aliases-batch [[:usb-batch {:x :int} nil]])
+          (t/unregister-type-alias! :usb-batch (random-uuid))
+          (is (= {:x :int} (t/resolve-alias :usb-batch))))
+        (testing "batch-registered alias WITH an owner: stranger no-ops, owner deletes"
+          (let [o (random-uuid)]
+            (t/register-type-aliases-batch [[:usb-owned {:y :int} o]])
+            (t/unregister-type-alias! :usb-owned (random-uuid))
+            (is (= {:y :int} (t/resolve-alias :usb-owned))
+                "stranger cannot delete")
+            (t/unregister-type-alias! :usb-owned o)
+            (is (= :usb-owned (t/resolve-alias :usb-owned))
+                "the recorded owner can")))
+        (finally (t/restore-global-aliases! snap))))))

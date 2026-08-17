@@ -213,14 +213,6 @@ function fnKindSet(fn) {
   return kinds;
 }
 
-// Primary bucket, kept for single-kind call sites (priority order above).
-function classifyFnKind(fn) {
-  const kinds = fnKindSet(fn);
-  for (const k of ['secrets', 'types', 'apps', 'services']) {
-    if (kinds.has(k)) return k;
-  }
-  return 'fn';
-}
 // The lens hides a fn's ROW — but NEVER the fn the user is currently looking
 // at. The selected fn always shows, so opening it by link can't leave its
 // namespace empty-and-collapsed (the "openable ⟺ in the menu" invariant).

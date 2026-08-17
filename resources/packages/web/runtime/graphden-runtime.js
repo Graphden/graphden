@@ -123,6 +123,16 @@ function bindActionDispatch(host) {
 async function loadPartial(host, url, opts) {
   opts = opts || {};
   if (!host || !url) return;
+  // Supersession guard: two concurrent loadPartial calls into the SAME host
+  // must not let the slower response win. Without a token, whichever fetch
+  // RESOLVES last writes host.innerHTML — not whichever was CALLED last — so a
+  // stale fragment can clobber the fresh one (e.g. fast re-open of a shared
+  // popover host). Each call bumps a per-host generation token; after every
+  // await we bail if this call is no longer the current generation, leaving the
+  // newer call's content untouched. Mirrors the fn-versions supersession check.
+  const gen = (Number(host.dataset.gdPartialGen) || 0) + 1;
+  host.dataset.gdPartialGen = String(gen);
+  const superseded = () => String(host.dataset.gdPartialGen) !== String(gen);
   host.textContent = '';
   const loading = document.createElement('span');
   loading.className = opts.loadingClass || 'partial-loading';
@@ -132,14 +142,18 @@ async function loadPartial(host, url, opts) {
   host.appendChild(loading);
   try {
     const r = await fetch(url, opts.fetchOpts || {});
+    if (superseded()) return;
     if (!r.ok) {
       _renderPartialError(host, opts, 'Failed');
       return;
     }
-    host.innerHTML = await r.text();
+    const text = await r.text();
+    if (superseded()) return;
+    host.innerHTML = text;
     if (typeof opts.onSwap === 'function') opts.onSwap(host);
     bindActionDispatch(host);
   } catch (_) {
+    if (superseded()) return;
     _renderPartialError(host, opts, 'Network');
   }
 }

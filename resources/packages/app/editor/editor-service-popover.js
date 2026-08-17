@@ -11,6 +11,12 @@
 
 let servicePopoverEl = null;
 let servicePopoverAnchor = null;
+// The fn whose popover is CURRENTLY being opened. Set at the top of every
+// open; after an await we compare against it and bail if the user has since
+// opened another fn's popover — a slow response must not clobber the newer
+// one with the wrong fn's service form. (Supersession guard, mirrors
+// editor-fn-versions.js.)
+let servicePopoverFnId = null;
 
 // Cached snapshot of /api/services. Refreshed on every open; the
 // row-actions popover hasn't been pinned long enough for staleness
@@ -45,6 +51,7 @@ function hideServicePopover() {
     catch (_) {}
   }
   servicePopoverAnchor = null;
+  servicePopoverFnId = null; // an in-flight open now sees a mismatch and bails
 }
 
 
@@ -340,6 +347,7 @@ async function showTenantServicePopover(el, fnEntity, anchorEl) {
   let svc = null;
   try { await refreshServicesCache(); svc = getServiceForFnId(fnEntity.id); }
   catch (_) { /* fall through — render the create form */ }
+  if (servicePopoverFnId !== fnEntity.id) return; // superseded by a newer open
   el.innerHTML = tenantServicePopoverHtml(fnEntity, svc);
   wireServicePopoverHandlers(el, fnEntity);
   if (servicePopoverAnchor && servicePopoverAnchor !== anchorEl) {
@@ -369,6 +377,7 @@ function showTenantPopoverBody(el, anchorEl, bodyHtml) {
 async function showServicePopover(fnEntity, anchorEl) {
   if (!fnEntity || !anchorEl) return;
   const el = ensureServicePopoverEl();
+  servicePopoverFnId = fnEntity.id; // supersession token for the awaits below
   el.textContent = '';
   if (isRealTenant()) {
     // A tenant never reaches the platform server partial (it reads the
@@ -393,6 +402,7 @@ async function showServicePopover(fnEntity, anchorEl) {
       resp = await authFetch(
         '/partials/service-popover?fn-id=' + encodeURIComponent(fnEntity.id));
     } catch (err) {
+      if (servicePopoverFnId !== fnEntity.id) return; // superseded
       el.innerHTML = '<div class="service-popover-error">'
         + 'Failed to load service settings: ' + (err?.message || 'network error')
         + '</div>';
@@ -401,6 +411,7 @@ async function showServicePopover(fnEntity, anchorEl) {
       servicePopoverAnchor = anchorEl;
       return;
     }
+    if (servicePopoverFnId !== fnEntity.id) return; // superseded
     if (!resp.ok) {
       el.innerHTML = '<div class="service-popover-error">'
         + 'Failed to load service settings (HTTP ' + resp.status + ')'
@@ -413,6 +424,7 @@ async function showServicePopover(fnEntity, anchorEl) {
     html = await resp.text();
     _servicePopoverCache.set(fnEntity.id, html);
   }
+  if (servicePopoverFnId !== fnEntity.id) return; // superseded
   el.innerHTML = html;
   wireServicePopoverHandlers(el, fnEntity);
 

@@ -184,9 +184,12 @@ async function extractResponseError(response, opts) {
   let raw = '';
   try { raw = await response.text(); } catch (_) {}
   if (raw) {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = raw;
-    const text = (tmp.textContent || '').trim();
+    // Parse in an INERT document (DOMParser), not `div.innerHTML`: the latter
+    // builds live nodes on a detached element, so a `<img src=x onerror=…>` in
+    // an error body would fire its handler. parseFromString never loads
+    // resources or runs handlers — we only want the decoded text anyway.
+    const doc = new DOMParser().parseFromString(raw, 'text/html');
+    const text = (doc.body.textContent || '').trim();
     if (text) return text;
   }
   return o.fallback || ('HTTP ' + (response ? response.status : '?'));

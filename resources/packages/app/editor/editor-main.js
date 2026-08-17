@@ -26,7 +26,12 @@
 let _knownFns = new Map();            // fn-id -> fn row (light or full), merged
 let _loadedNamespaceIds = new Set();  // namespaces whose fn leaves are loaded
 let _subtreeRootId = null;
-let _subtreeFetchPromise = null;
+// In-flight subtree fetches, keyed by fn-id. Keyed (not a single shared
+// promise) because two quick selectFn calls for DIFFERENT fns must not share
+// one promise: the old single-slot guard returned fn A's in-flight promise to
+// fn B's call, so B awaited A's subtree and rendered A's bindings for B. Mirror
+// of `_nsFetchInFlight` below.
+const _subtreeFetchInFlight = new Map();
 
 // Merge freshly-fetched fn rows into the accumulating cache. Full (subtree)
 // rows and light (tree/namespace/search) rows coexist: a later light row
@@ -174,31 +179,26 @@ window.resolveFnByName = resolveFnByName;
 async function ensureSubtreeFor(fnId) {
   if (!fnId) return;
   if (_subtreeRootId === fnId && Array.isArray(graphData?.bindings)) return;
-  if (_subtreeFetchPromise) return _subtreeFetchPromise;
-  _subtreeFetchPromise = (async () => {
-    try {
-      const r = await fetch(
-        API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId));
-      if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
-      const sub = await r.json();
-      // Merge the subtree's fns (the selected fn + its full transitive
-      // closure) into the cache, and overlay its heavy relational rows.
-      // Namespaces / counts stay from the :tree load.
-      mergeKnownFns(sub.fns);
-      graphData.slots = sub.slots;
-      graphData['fn-slots'] = sub['fn-slots'];
-      graphData.bindings = sub.bindings;
-      graphData['list-items'] = sub['list-items'];
-      _subtreeRootId = fnId;
-      syncKnownFnsIntoGraph();
-    } catch (err) {
-      _subtreeFetchPromise = null;
-      throw err;
-    } finally {
-      _subtreeFetchPromise = null;
-    }
+  if (_subtreeFetchInFlight.has(fnId)) return _subtreeFetchInFlight.get(fnId);
+  const p = (async () => {
+    const r = await fetch(
+      API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId));
+    if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
+    const sub = await r.json();
+    // Merge the subtree's fns (the selected fn + its full transitive
+    // closure) into the cache, and overlay its heavy relational rows.
+    // Namespaces / counts stay from the :tree load.
+    mergeKnownFns(sub.fns);
+    graphData.slots = sub.slots;
+    graphData['fn-slots'] = sub['fn-slots'];
+    graphData.bindings = sub.bindings;
+    graphData['list-items'] = sub['list-items'];
+    _subtreeRootId = fnId;
+    syncKnownFnsIntoGraph();
   })();
-  return _subtreeFetchPromise;
+  _subtreeFetchInFlight.set(fnId, p);
+  try { await p; } finally { _subtreeFetchInFlight.delete(fnId); }
+  return p;
 }
 window.ensureSubtreeFor = ensureSubtreeFor;
 
@@ -232,7 +232,7 @@ async function initGraph() {
   // `?scope=tree` — namespaces + counts only. Fn leaves load lazily per
   // expanded namespace; per-fn slots/bindings load via ensureSubtreeFor().
   _subtreeRootId = null;
-  _subtreeFetchPromise = null;
+  _subtreeFetchInFlight.clear();
   _knownFns = new Map();
   _loadedNamespaceIds = new Set();
   // Tree first, alone: on an auth-gated deployment an anonymous boot
@@ -328,7 +328,7 @@ async function loadGraphData() {
   // selected fn below.
   const prevRoot = _subtreeRootId;
   _subtreeRootId = null;
-  _subtreeFetchPromise = null;
+  _subtreeFetchInFlight.clear();
   _knownFns = new Map();
   _loadedNamespaceIds = new Set();
   let treeResp;

@@ -34,8 +34,19 @@ function readStoredBranch() {
   catch (_) { return null; }
 }
 
+// Resolve the active branch ONCE, at boot, into a module-level constant —
+// never per request. `getCurrentBranchName()` is called from the fetch wrapper
+// (and the htmx:configRequest bridge) on EVERY /api/* + /partials/* call; if it
+// re-read localStorage each time, a second tab switching branches would silently
+// re-target this tab's in-flight PUT/POST writes onto the other tab's branch
+// (cross-tab branch-drift — MED-HIGH data-loss). The branch a tab operates on is
+// fixed for the life of the page: the only way to change it, `switchToBranch`,
+// writes localStorage/URL and RELOADS, so the new value is picked up here on the
+// next boot. URL `?branch=` still wins over localStorage — evaluated once, at load.
+const BOOT_BRANCH = readUrlBranch() || readStoredBranch() || DEFAULT_BRANCH;
+
 function getCurrentBranchName() {
-  return readUrlBranch() || readStoredBranch() || DEFAULT_BRANCH;
+  return BOOT_BRANCH;
 }
 
 function isOnDefaultBranch() {

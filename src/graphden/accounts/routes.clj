@@ -341,17 +341,54 @@
     (json-resp 401 {:ok false :error "unauthenticated"})))
 
 
+(def ^:private trusted-proxy-count
+  "How many trusted reverse proxies sit in front of the app, from
+   `GRAPHDEN_TRUSTED_PROXIES` (default 0).
+
+   `X-Forwarded-For` is `client, proxyA, proxyB` where each proxy
+   APPENDS the peer it saw, so the N rightmost hops are added by the N
+   proxies we control and everything to their left is client-supplied.
+   With N trusted proxies the real client is the entry N positions from
+   the end. **N=0 means the app is directly reachable: the entire
+   header is attacker-controlled** and must be ignored — otherwise a
+   rotating `X-Forwarded-For:` sails past every per-IP limiter. Cloud
+   (behind Caddy) sets `GRAPHDEN_TRUSTED_PROXIES=1`."
+  (or (some-> (System/getenv "GRAPHDEN_TRUSTED_PROXIES") parse-long) 0))
+
+
 (defn- client-ip
-  "Best-effort client IP for rate-limiting — the LAST X-Forwarded-For hop
-   (the address the trusted front proxy actually saw) or the socket
-   remote-addr. The FIRST hop is client-supplied and spoofable: a
-   rotating `X-Forwarded-For:` header would sail past every limiter, so
-   we take the last, appended by the proxy."
+  "Best-effort client IP for rate-limiting. Trusts exactly
+   `trusted-proxy-count` rightmost `X-Forwarded-For` hops; with 0
+   trusted proxies the header is ignored entirely and the socket
+   `remote-addr` is used, so a forged header can't defeat the limiter
+   on a direct-reachable deploy."
   [request]
-  (or (some-> (get-in request [:headers "x-forwarded-for"])
-              (str/split #",") last str/trim not-empty)
+  (or (when (pos? trusted-proxy-count)
+        (let [hops (some->> (get-in request [:headers "x-forwarded-for"])
+                            (#(str/split % #","))
+                            (mapv str/trim)
+                            (filterv not-empty))]
+          (when (>= (count hops) trusted-proxy-count)
+            (nth hops (- (count hops) trusted-proxy-count)))))
       (:remote-addr request)
       "unknown"))
+
+
+(defn- cross-site-origin?
+  "CSRF guard for state-changing `/auth/*` POSTs. True when the browser
+   sent an `Origin` that does NOT match the request's own host — a
+   cross-site form/fetch. A MISSING Origin is NOT a mismatch: non-browser
+   clients (API tokens, curl) and some same-site navigations omit it, and
+   a CSRF attack cannot forge a cross-origin request WITHOUT the browser
+   attaching the attacker's Origin — so absent-Origin is allowed and only
+   a present-and-mismatched Origin is rejected. Complements the session
+   cookie's `SameSite=Lax`."
+  [request]
+  (when-let [o (get-in request [:headers "origin"])]
+    (let [host (get-in request [:headers "host"])]
+      (not (or (str/blank? o)
+               (= o (str "https://" host))
+               (= o (str "http://" host)))))))
 
 
 (defn- handle-forgot
@@ -467,7 +504,11 @@
         ;; existence isn't probeable.
         login-limit (crypto/fixed-window-limiter 10 60000)
         signup-limit (crypto/fixed-window-limiter 20 60000)
-        forgot-limit (crypto/fixed-window-limiter 5 60000)]
+        forgot-limit (crypto/fixed-window-limiter 5 60000)
+        ;; TOTP code verification — a 6-digit code is guessable within a
+        ;; window without a per-IP cap. 10/min blunts brute-force across
+        ;; /auth/totp (login 2nd step), /confirm and /disable.
+        totp-limit (crypto/fixed-window-limiter 10 60000)]
     (fn [request]
       (let [uri (str (:uri request))
             method (:request-method request)]
@@ -478,6 +519,13 @@
                 ;; refuses rather than email an attacker's URL.
                 link-orig (link-origin app-origin request)]
             (cond
+              ;; CSRF: reject a state-changing POST carrying a cross-site
+              ;; Origin before it can act on the victim's session cookie
+              ;; (disable-2FA / unlink / mint-token / logout-all …). GETs
+              ;; and OAuth callbacks are unaffected; absent Origin passes.
+              (and (= method :post) (cross-site-origin? request))
+              (json-resp 403 {:ok false :error "bad_origin"})
+
               (and (= method :get) (= uri "/login"))
               (html-resp (graph-page page-renderer :login
                                      {:providers provider-map :telegram telegram}
@@ -547,16 +595,22 @@
               (handle-unlink storage request)
 
               (and (= method :post) (= uri "/auth/totp"))
-              (handle-totp storage origin request)
+              (if (totp-limit (client-ip request))
+                (handle-totp storage origin request)
+                (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/totp/enroll"))
               (handle-totp-enroll storage request)
 
               (and (= method :post) (= uri "/auth/totp/confirm"))
-              (handle-totp-confirm storage request)
+              (if (totp-limit (client-ip request))
+                (handle-totp-confirm storage request)
+                (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/totp/disable"))
-              (handle-totp-disable storage request)
+              (if (totp-limit (client-ip request))
+                (handle-totp-disable storage request)
+                (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :get) (= uri "/auth/telegram/start"))
               (if telegram

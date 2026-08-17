@@ -112,6 +112,40 @@ function mountAdminSection(pane, nav, key, build) {
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
 }
 
+// The LIVE-diagnostics ops panels — type-errors + runtime errors — show state
+// that changes as the user edits, but their mounted node is cached (built once,
+// re-attached; htmx does NOT re-fire `hx-trigger="load"` on an already-processed
+// node). So a diagnostic recorded AFTER the panel's first load never appeared:
+// the type-errors panel sat empty while the fn card carried the ⚠ badge (the
+// badge is re-fetched per navigation, the cached panel was not). Re-fetch these
+// panels each time Operate is SHOWN — that is exactly when the user is looking
+// at them and wants current data. Rebuild the lazy-load child from the section's
+// builder (fresh, UNPROCESSED) and htmx.process it so the hx-get re-fires. The
+// static admin panels (grants / users / …) are untouched — their data doesn't
+// drift within a session. Exposed for editor-shell.js's gdRenderOperate.
+function reloadDynamicOpsSections() {
+  const host = document.getElementById('gd-operate-panels');
+  if (!host || !window.htmx || typeof window.htmx.process !== 'function') return;
+  const builders = {
+    'type-errors': typeof buildTypeErrorsSection === 'function' ? buildTypeErrorsSection : null,
+    errors: typeof buildErrorsSection === 'function' ? buildErrorsSection : null,
+  };
+  Object.keys(builders).forEach((key) => {
+    const build = builders[key];
+    if (!build) return;
+    const section = host.querySelector(':scope > section[data-section="' + key + '"]');
+    if (!section) return;
+    const built = build();          // fresh shell carrying an unprocessed hx-get child
+    if (!built) return;
+    const fresh = built.querySelector('.ns-children') || built;
+    const old = section.querySelector('.ns-children');
+    if (old) old.replaceWith(fresh);
+    else section.appendChild(fresh);
+    window.htmx.process(fresh);      // fires hx-trigger="load" → current diagnostics
+  });
+}
+window.reloadDynamicOpsSections = reloadDynamicOpsSections;
+
 // Packages GOVERNANCE (packages spec §4) — the Organization surface's
 // read-mostly view: who may publish (a static capability note; the holders
 // are managed in Roles/Grants), the org's published catalog and an install

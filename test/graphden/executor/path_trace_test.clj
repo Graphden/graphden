@@ -1,4 +1,4 @@
-(ns graphden.executor.path-trace-test
+(ns ^:serial graphden.executor.path-trace-test
   "Unit tests for the Debug-P1/P3 execution-path capture seam in
    `compile-eager/call-with-cache` (driven through the private var —
    the seam is the single choke point every `:ref` invocation passes,

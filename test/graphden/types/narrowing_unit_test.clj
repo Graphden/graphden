@@ -1,4 +1,4 @@
-(ns graphden.types.narrowing-unit-test
+(ns ^:serial graphden.types.narrowing-unit-test
   "Unit tests for `types.check.narrowing`'s two passes, driven with a
    stubbed registry (`with-redefs` over `rich-type-of` /
    `root-base-fn-name`) so no DB / package corpus is needed.

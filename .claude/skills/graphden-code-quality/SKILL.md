@@ -135,7 +135,7 @@ entities.clj` + `crud/request.clj` + `crud/validation.clj` + …
 **Don't cut the file if:**
 
 - All functions are one logical responsibility (`types/check.clj` —
-  type-checker, 2858 LOC, but it's ONE algorithm).
+  type-checker, ~2540 LOC, but it's ONE algorithm).
 - Decomposition would leave many cross-references — a bad knife.
 
 ## 3. DRY — finding duplicates
@@ -849,7 +849,7 @@ grep -L 'bootstrap-crud-graph-from-golden' test/graphden/integration/*_test.clj 
 
 ## 16. Browser tests — `tools/browser-test/*.test.js`
 
-The browser suite — 56 Playwright e2e tests in `tools/browser-test/`
+The browser suite — 66 Playwright e2e tests in `tools/browser-test/`
 
 - the visual-snapshot suite in `tools/visual-tests/`. ~9000 LOC JS,
 covering the editor UI flow.
@@ -875,7 +875,7 @@ Editor `editor-*.js` modules and their e2e coverage:
 | Service popover | ✅ | `edit-service` (2 tests) |
 | Description / tooltip / mismatch | ✅ | `edit-description`, `edit-mismatch` |
 | **Build hash verify** | **❌ gap** | no browser test on `window.BUILD_HASH` after deploy |
-| **Layout edge labels click → expand** | **❌ gap** | a complex flow without e2e cover |
+| **Layout edge labels (SVG render / drag-anchor / inline rename)** | ✅ | `edit-edges-svg`, `edit-edge-label-drag`, `edit-edge-rename` |
 | **Visual regression** | ✅ | `tools/visual-tests/*` (separate suite) |
 
 ### 16.2 Duplication audit between browser tests

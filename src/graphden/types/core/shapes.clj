@@ -477,8 +477,16 @@
    static return verbatim.
 
    `bindings-info` is the shape `compute-return-type` passes to a
-   rule: `{slot-name {:type T :value V? :ref R? …}}`. We look at
-   `:type` only.
+   rule: `{slot-name {:type T :value V? :ref R? :elem-types [T …]?}}`.
+   We scan BOTH `:type` AND `:elem-types`. `:elem-types` is
+   load-bearing: a list binding's `:type` is `[:list (coarse-lub …)]`
+   and the coarse lub of a heterogeneous list widens to `:any` — so a
+   `[\"Bearer \" secret-ref]` list argument would drop its `[:secret …]`
+   marker if we looked at `:type` alone. A content-passing base-fn
+   (`:str` concat, `:add`, …) that consumes such a list DOES fold the
+   secret element into its result, so the per-element types must be
+   scanned or the taint leaks (pre-2026-08-17 bug: mixed-list secret
+   silently declassified).
 
    Base-fns with no other return-type-rule opt into propagation by
    registering this fn directly. Base-fns that ALREADY have a
@@ -487,7 +495,11 @@
    first AND the taint propagates if applicable."
   [bindings-info default-ret]
   (let [tags (reduce (fn [acc [_slot info]]
-                       (into acc (marker-tags-in (:type info))))
+                       (as-> acc a
+                             (into a (marker-tags-in (:type info)))
+                             (reduce (fn [a2 et] (into a2 (marker-tags-in et)))
+                                     a
+                                     (:elem-types info))))
                      #{}
                      bindings-info)]
     (if (seq tags)

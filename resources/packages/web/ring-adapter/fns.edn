@@ -51,11 +51,13 @@
           :body           [:union :null :input-stream :text :jsonb]}}
 
   {:name :security-headers-shape
-   :description "Default security response headers — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`. Keyword-keyed throughout the fn-graph (record-types in graphden are keyword-keyed); the `:http-server` adapter stringifies header keys once on the way to http-kit."
-   :type {:X-Content-Type-Options :text
-          :X-Frame-Options        :text
-          :X-XSS-Protection       :text
-          :Referrer-Policy        :text}}
+   :description "Default security response headers — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Content-Security-Policy`, `Strict-Transport-Security`. Keyword-keyed throughout the fn-graph (record-types in graphden are keyword-keyed); the `:http-server` adapter stringifies header keys once on the way to http-kit."
+   :type {:X-Content-Type-Options    :text
+          :X-Frame-Options           :text
+          :X-XSS-Protection          :text
+          :Referrer-Policy           :text
+          :Content-Security-Policy    :text
+          :Strict-Transport-Security  :text}}
 
   ;; =============================================================================
   ;; RING REQUEST EXTRACTION
@@ -226,14 +228,27 @@
   ;; and friends already rely on. Keeping the record-shape end-to-end
   ;; lets `:security-headers-shape` flow through the merge-in into
   ;; consumers without a type-erasing stringification step.
+  ;; `Content-Security-Policy` deliberately omits `default-src` /
+  ;; `script-src`: the editor and user-composed pages rely on inline
+  ;; scripts/styles, so a source-restricting CSP would break them.
+  ;; These three directives are the safe, high-value subset — they add
+  ;; clickjacking defence (superseding the legacy `X-Frame-Options`),
+  ;; block plugin/`<object>` embedding, and stop `<base>`-tag injection
+  ;; — without constraining where scripts load from. `X-XSS-Protection`
+  ;; is set to `0`: the legacy auditor it toggled is removed from modern
+  ;; browsers and `1; mode=block` can introduce its own side-channels.
+  ;; `Strict-Transport-Security` is inert over plain HTTP (browsers
+  ;; ignore it) so it is safe to send unconditionally.
   {:name :default-security-headers
-   :description "Default security-header map merged into every response — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`."
+   :description "Default security-header map merged into every response — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Content-Security-Policy`, `Strict-Transport-Security`."
    :parent :const
    :return-type :security-headers-shape
-   :args {:value {:X-Content-Type-Options "nosniff"
-                  :X-Frame-Options        "DENY"
-                  :X-XSS-Protection       "1; mode=block"
-                  :Referrer-Policy        "strict-origin-when-cross-origin"}}}
+   :args {:value {:X-Content-Type-Options    "nosniff"
+                  :X-Frame-Options           "DENY"
+                  :X-XSS-Protection          "0"
+                  :Referrer-Policy           "strict-origin-when-cross-origin"
+                  :Content-Security-Policy    "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+                  :Strict-Transport-Security  "max-age=31536000; includeSubDomains"}}}
 
   ;; Take the router-result (a Ring response map) and merge default
   ;; security headers into its `:headers`. One node, no re-assembly:

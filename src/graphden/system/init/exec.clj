@@ -76,7 +76,12 @@
   ;; fail-CLOSED-by-omission-safe default: an unconfigured token doesn't lock you
   ;; out AND doesn't half-authenticate — it's simply off until you opt in.
   (if (str/blank? token)
-    (do (log/info "Auth provider OFF (no AUTH_TOKEN) — running open, no login")
+    (do (log/warn
+          (str "SECURITY: auth is OFF (no AUTH_TOKEN and no tenancy addon) — "
+               "this instance accepts UNAUTHENTICATED graph authoring AND "
+               "execution with io/network/process effects. Safe only on a "
+               "trusted local network. Set AUTH_TOKEN (or load the tenancy "
+               "addon) before exposing this port. See docs/DEPLOYMENT.md."))
         nil)
     (do (log/info "Wiring auth provider {:provider :single-token}")
         (auth/single-token-provider token))))

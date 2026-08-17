@@ -69,9 +69,15 @@
 
   (send-mail!
     [_ {:keys [to subject text html]}]
-    (log/info (str "[accounts] email NOT sent (no RESEND_API_KEY) — logging it so "
-                   "verification still works.\n  to: " to "\n  subject: " subject
-                   "\n  body:\n" (or text html)))
+    ;; DEV fallback: prints the body — which carries the one-time
+    ;; verify/reset LINK — so a self-hosted instance with no mailer can
+    ;; still complete those flows. WARN (not INFO) because that link is
+    ;; a bearer credential: never run this default where logs are shipped
+    ;; or aggregated. Configure RESEND_API_KEY in any real deployment.
+    (log/warn (str "[accounts] DEV-ONLY: no RESEND_API_KEY, so the email below "
+                   "(with its one-time link/token) is being LOGGED instead of "
+                   "sent. Do not use this default in production.\n  to: " to
+                   "\n  subject: " subject "\n  body:\n" (or text html)))
     {:ok? true :logged? true}))
 
 

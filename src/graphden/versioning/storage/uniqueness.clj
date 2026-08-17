@@ -74,14 +74,27 @@
                                         (vals (sp/read-entities base-storage :binding-list-item
                                                                 (vec all-touched-ids)))
                                         branch-id))
-                             {})]
+                             {})
+              ;; The batch's OWN writes overlay the resolved view: an
+              ;; item this same batch moves elsewhere no longer holds
+              ;; its old position, so a batched permutation (declarative
+              ;; re-sync of reordered items, merge surfacing a reorder)
+              ;; checks against the POST-batch view. Without this, any
+              ;; position swap between two syncs deadlocked the sync
+              ;; forever — each item's new position "collided" with a
+              ;; sibling that was itself moving away in the same batch.
+              pending (into {} (map (juxt :id :position)) candidates)]
           (doseq [{:keys [binding-id position id]} candidates]
-            (let [touched-ids (map :item-id (get versions-by-binding binding-id))
+            (let [touched-ids (distinct
+                                (map :item-id (get versions-by-binding binding-id)))
                   collisions (for [eid touched-ids
-                                   :let [row (get resolved-map eid)]
+                                   :let [row (get resolved-map eid)
+                                         eff-pos (if (contains? pending eid)
+                                                   (get pending eid)
+                                                   (:position row))]
                                    :when (and (some? row)
                                               (not= eid id)
-                                              (= position (:position row)))]
+                                              (= position eff-pos))]
                                eid)]
               (when (seq collisions)
                 ;; Message is USER-facing: no internal branch uuid;

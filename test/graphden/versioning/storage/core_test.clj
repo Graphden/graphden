@@ -973,6 +973,63 @@
       (finally (sp/close base)))))
 
 
+(deftest list-item-batch-permutation-does-not-self-collide-test
+  ;; Regression: a BATCH update that permutes the positions of a
+  ;; binding's items (declarative re-sync of a reordered list, merge
+  ;; surfacing a reorder) must check against the POST-batch view. The
+  ;; pre-fix check compared each candidate against the siblings'
+  ;; CURRENT positions, so a plain swap "collided" with an item that
+  ;; was itself moving away in the same batch — and a re-sync over a
+  ;; reordered DB deadlocked the boot forever.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b  (make-list-binding! v "perm")
+            i0 (sp/create-entity v :binding-list-item
+                                 {:binding-id (:id b) :position 0 :value "a"})
+            i1 (sp/create-entity v :binding-list-item
+                                 {:binding-id (:id b) :position 1 :value "b"})
+            i2 (sp/create-entity v :binding-list-item
+                                 {:binding-id (:id b) :position 2 :value "c"})]
+        (testing "a batched swap of two positions passes the collision check"
+          (sp/update-entities v :binding-list-item
+                              [{:id (:id i0) :position 1}
+                               {:id (:id i1) :position 0}])
+          (is (= [(:id i1) (:id i0) (:id i2)]
+                 (->> (sp/query-entities v :binding-list-item
+                                         {:binding-id (:id b)})
+                      (sort-by :position)
+                      (mapv :id)))))
+        (testing "a batched rotation of all three passes too"
+          (sp/update-entities v :binding-list-item
+                              [{:id (:id i1) :position 2}
+                               {:id (:id i0) :position 0}
+                               {:id (:id i2) :position 1}])
+          (is (= [(:id i0) (:id i2) (:id i1)]
+                 (->> (sp/query-entities v :binding-list-item
+                                         {:binding-id (:id b)})
+                      (sort-by :position)
+                      (mapv :id)))))
+        (testing "a batch that REALLY collides (two items to one position) still rejects"
+          (let [ex (try (sp/update-entities v :binding-list-item
+                                            [{:id (:id i0) :position 2}
+                                             {:id (:id i2) :position 2}])
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex))
+            (is (= :constraint-violation/position-collision
+                   (:type (ex-data ex))))))
+        (testing "a single-row update onto an occupied position still rejects"
+          (let [ex (try (sp/update-entity v :binding-list-item (:id i0)
+                                          {:position (:position
+                                                       (sp/read-entity
+                                                         v :binding-list-item (:id i2)))})
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex))
+            (is (= :constraint-violation/position-collision
+                   (:type (ex-data ex)))))))
+      (finally (sp/close base)))))
+
+
 (deftest list-item-same-branch-position-collision-test
   (let [base (base-storage)
         v    (vs/wrap-with-versioning base)]

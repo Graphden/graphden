@@ -57,6 +57,35 @@
 (def ^:dynamic *always-fresh-fn-ids* (atom #{}))
 
 
+(def ^:dynamic *request-call-cache*
+  "Per-EXECUTION-SCOPE call-cache override, or nil. When bound to a
+   `java.util.HashMap`, `run` installs IT as the ctx's `::call-cache`
+   for the current thread, overriding any cache captured in the ctx.
+
+   Why it exists — the CME + cross-request leak it closes. A long-lived
+   handler (`:http-server`'s `:handler` `:fn`, a `:future` body) is
+   `hof-wrap`ped at BUILD time and captures the ctx of the execute that
+   built it — including that execute's `::call-cache` HashMap. Without an
+   override, EVERY later invocation of that handler reuses the ONE
+   build-time HashMap: concurrent HTTP requests then read/evict/put the
+   same non-thread-safe map, and once it fills past `call-cache-max-size`
+   the eviction walk races a concurrent put into a
+   `ConcurrentModificationException` (observed under e2e load, /health
+   500s). It is ALSO a correctness leak — a no-free-arg subtree memoises
+   on request 1 and serves that frozen result to every later caller (the
+   `/api/my-tokens` cross-principal class the route-collection
+   `defer-handler-call-cache` closes for its routes only).
+
+   The fix: each NEW execution scope entering on a fresh thread binds a
+   fresh HashMap here — the `:http-server` adapter per REQUEST, `:future`
+   per WORKER. `run` then installs the per-scope map, so each request/
+   worker memoises in isolation (within-scope memo preserved, no shared
+   mutation, no CME). DELIBERATELY not conveyed to `:future` threads
+   (`capture-conveyed-bindings`) — like `*path-trace*`, it is per-scope
+   state, and `future-fn` binds its own fresh one anyway."
+  nil)
+
+
 (defn set-always-fresh-fn-ids!
   "Merge `ids` into the always-fresh (cache-bypass) set — anything
    whose registered `:effects` intersects `#{:time :random}`. Called
@@ -1116,9 +1145,24 @@
                  ;;    through such a handler also runs cache-less (every `:ref`
                  ;;    a fresh call) — correct + per-principal, trading away
                  ;;    within-request memo for these low-traffic admin routes.
-                 ctx (if (or (::call-cache ctx) (skip-cache-priming-key ctx))
-                       ctx
-                       (assoc ctx ::call-cache (java.util.HashMap.)))
+                 ctx (let [rc *request-call-cache*]
+                       (cond
+                         ;; Per-scope override active (an `:http-server`
+                         ;; request or `:future` worker bound a fresh cache):
+                         ;; install ITS map, overriding any build-time cache
+                         ;; this ctx captured — that captured map is shared by
+                         ;; every invocation of a build-time handler and races
+                         ;; a CME under concurrency. Idempotent for nested runs
+                         ;; (ctx already carries `rc` → the next clause returns
+                         ;; it unchanged).
+                         (and rc (not (identical? (::call-cache ctx) rc)))
+                         (assoc ctx ::call-cache rc)
+
+                         (or (::call-cache ctx) (skip-cache-priming-key ctx))
+                         ctx
+
+                         :else
+                         (assoc ctx ::call-cache (java.util.HashMap.))))
                  fa (r/apply-rename-aliases fa rename-aliases)
                  ;; The `fa-ref` volatile ONLY exists so env-binding delays can
                  ;; read the post-merge map at force time (forward references

@@ -15,6 +15,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile-eager :as ce]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry-core]))
 
 
@@ -94,5 +95,75 @@
                                     {} ctx)))
         (testing "the side-effecting child fired exactly once"
           (is (= 1 @effect-calls)))
+        (finally
+          (alter-var-root max-size-var (constantly orig-max)))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Per-scope call-cache isolation — the CME + cross-request-leak fix.
+;;
+;; A build-captured handler (`:http-server` `:handler`, a `:future` body)
+;; reuses the ONE `::call-cache` HashMap it captured at build time on every
+;; invocation. Concurrent invocations then read/evict/put the same
+;; non-thread-safe map — the eviction walk races a concurrent put into a
+;; ConcurrentModificationException. The fix: each new execution scope binds a
+;; fresh `*request-call-cache*` (via `with-fresh-call-cache`), so `run`
+;; installs a per-scope map and concurrent scopes never touch one HashMap.
+;; ---------------------------------------------------------------------------
+
+(deftest request-call-cache-unbound-by-default-test
+  (is (nil? ce/*request-call-cache*)
+      "unbound by default: a plain top-level execute keeps priming its own
+       per-execute cache in ctx"))
+
+
+(deftest with-fresh-call-cache-binds-a-fresh-distinct-map-test
+  (let [a (cr/with-fresh-call-cache (fn [] ce/*request-call-cache*))
+        b (cr/with-fresh-call-cache (fn [] ce/*request-call-cache*))]
+    (testing "each scope sees a HashMap"
+      (is (instance? java.util.HashMap a))
+      (is (instance? java.util.HashMap b)))
+    (testing "and a DISTINCT one per invocation — no shared map across scopes"
+      (is (not (identical? a b))))
+    (testing "the binding unwinds"
+      (is (nil? ce/*request-call-cache*)))))
+
+
+(deftest concurrent-scopes-with-own-caches-survive-eviction-test
+  ;; The safety property the fix guarantees: many threads each driving
+  ;; `call-with-cache` past the eviction cap CONCURRENTLY complete cleanly and
+  ;; correctly, PROVIDED each uses its own cache (its own execution scope) —
+  ;; which is exactly what `run` installs from a per-thread
+  ;; `*request-call-cache*`. A shared HashMap here would race the eviction walk
+  ;; into a ConcurrentModificationException.
+  (binding [registry-core/*rich-types-override*
+            (atom (registry-core/snapshot-for-isolation))
+            ce/*always-fresh-fn-ids* (atom #{})]
+    (let [pure-id (random-uuid)
+          orig-max @max-size-var
+          threads 8
+          per-thread 400]
+      (registry-core/record-rich-types-raw! pure-id "pure-fn"
+                                            {:return :int :effects #{}})
+      (alter-var-root max-size-var (constantly 16))
+      (try
+        (let [results
+              ;; deref rethrows any thread's exception — so if a scope had
+              ;; raced the eviction walk into a CME, this vector build throws
+              ;; and the test fails. Clean completion of all N is the proof.
+              (mapv deref
+                    (mapv
+                      (fn [_]
+                        (future
+                          ;; Own cache per thread — the per-scope isolation.
+                          (let [ctx {cache-key (java.util.HashMap.)}]
+                            (dotimes [i per-thread]
+                              (call-with-cache pure-id #{:x}
+                                               (fn [_fa _ctx] (* i 2))
+                                               {:x i} ctx)))
+                          :done))
+                      (range threads)))]
+          (testing "no ConcurrentModificationException, every scope completed"
+            (is (= (repeat threads :done) results))))
         (finally
           (alter-var-root max-size-var (constantly orig-max)))))))

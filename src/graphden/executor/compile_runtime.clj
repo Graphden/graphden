@@ -1402,6 +1402,20 @@
   ce/defer-handler-call-cache)
 
 
+(defn with-fresh-call-cache
+  "Run `thunk` under a FRESH per-execution-scope call-cache
+   (`compile-eager/*request-call-cache*`). Every thread that begins a new
+   logical execution of a BUILD-TIME-captured handler must call this — the
+   `:http-server` adapter per request, `future-fn` per worker — so the
+   handler memoises in an isolated map instead of sharing the one HashMap
+   it captured at build time (a `ConcurrentModificationException` under
+   concurrent requests + a cross-request memo leak). See
+   `*request-call-cache*` for the full rationale."
+  [thunk]
+  (binding [ce/*request-call-cache* (java.util.HashMap.)]
+    (thunk)))
+
+
 ;; =============================================================================
 ;; HOF callable helpers
 ;; =============================================================================

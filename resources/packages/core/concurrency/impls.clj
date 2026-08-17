@@ -81,7 +81,14 @@
                  ^Runnable
                  (fn []
                    (try
-                     (with-bindings conveyed (body))
+                     ;; A future is a NEW logical execution on a fresh thread:
+                     ;; give it its OWN call-cache instead of sharing the map
+                     ;; the body captured from the spawning execute's ctx (a
+                     ;; cross-thread share → ConcurrentModificationException
+                     ;; under concurrent eviction). `*request-call-cache*` is
+                     ;; not conveyed, so bind a fresh one here.
+                     (with-bindings conveyed
+                       (cr/with-fresh-call-cache body))
                      (catch InterruptedException _ nil)
                      (catch Exception e
                        (log/warn e "future body threw"))))

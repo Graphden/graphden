@@ -250,8 +250,16 @@
   ;; can never note a dead request's bumps.
   (http-kit/run-server
     (fn [req]
-      (binding [epoch/*request-bump-log* (atom [])]
-        (handler req)))
+      ;; Each request is a NEW logical execution: run the build-captured
+      ;; handler under a fresh per-request call-cache. Without this every
+      ;; concurrent request reuses the ONE HashMap the handler captured at
+      ;; build time — a ConcurrentModificationException under load (eviction
+      ;; racing a concurrent put) plus a cross-request memo leak. See
+      ;; compile-eager/*request-call-cache*.
+      (cr/with-fresh-call-cache
+        (fn []
+          (binding [epoch/*request-bump-log* (atom [])]
+            (handler req)))))
     (assoc (http-server-tuning) :port port)))
 
 

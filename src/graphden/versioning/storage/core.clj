@@ -223,6 +223,112 @@
     (into [] (remove (or retained #{})) candidates)))
 
 
+;; =============================================================================
+;; Tombstone GC — storage reclamation for provably-DEAD entities
+;; =============================================================================
+;;
+;; A user-facing delete writes a TOMBSTONE version (`:deleted-at`) and KEEPS
+;; the identity row + all version rows (so inheriting branches see the delete).
+;; The storage quota counts identity rows, so a tenant that churns
+;; create/delete monotonically fills its cap with dead rows it can't reclaim.
+;; This GC hard-purges entities that are dead EVERYWHERE, freeing that storage
+;; without any per-write cost.
+;;
+;; SAFETY (why "resolve on every branch" and not "delete old tombstones"):
+;; deleting a tombstone version RESURRECTS the entity on any branch that
+;; inherits an OLDER live version (a fork taken between the create and the
+;; delete). So we never delete a tombstone in isolation — we purge an entity
+;; (all versions + identity) ONLY when `res/resolve-version` returns nil for it
+;; on EVERY branch (main + every feature branch + the base view). If it
+;; resolves to nil everywhere, no reader can see it and no fork can inherit a
+;; live version, so the purge changes no resolved view. A live fn still naming
+;; it as a parent also blocks the purge (dangling-ref guard).
+
+(defn- ts-ms
+  "Milliseconds-since-epoch of a timestamptz column, tolerant of the shapes
+   the codec/driver return (Instant / java.sql.Timestamp / java.util.Date /
+   ISO string). nil / unparseable → nil, treated as 'no timestamp'."
+  [x]
+  (cond
+    (nil? x) nil
+    (instance? java.time.Instant x) (java.time.Instant/.toEpochMilli x)
+    (instance? java.util.Date x) (java.util.Date/.getTime x)
+    :else (try (java.time.Instant/.toEpochMilli (java.time.Instant/parse (str x)))
+               (catch Exception _ nil))))
+
+
+(defn- branch-ids-for-gc
+  "Every branch id whose resolved view the GC must prove empty. A fork is a
+   reference to its parent (not a snapshot), so it always resolves the
+   parent's LATEST version — there is no un-listed 'base' view to check
+   beyond the `:branch` rows themselves (main included)."
+  [base-storage]
+  (mapv :id (sp/query-entities base-storage :branch {})))
+
+
+(defn- dead-on-every-branch?
+  "True iff `id` resolves to nil (deleted/absent) on every branch — the
+   safety precondition for purging it."
+  [base-storage entity-name id branch-ids]
+  (every? (fn [b] (nil? (res/resolve-version base-storage entity-name id b)))
+          branch-ids))
+
+
+(defn- gc-candidate-ids
+  "Entity ids whose NEWEST version (max `:created-at` across all branches)
+   is a tombstone older than `cutoff` — the cheap pre-filter before the
+   authoritative per-branch resolve check. Grouping by the version-id-field,
+   newest-wins."
+  [base-storage version-entity version-id-field cutoff]
+  (->> (sp/query-entities base-storage version-entity {})
+       (group-by version-id-field)
+       (keep (fn [[eid versions]]
+               (let [newest (apply max-key (fn [v] (or (ts-ms (:created-at v)) 0)) versions)
+                     newest-ms (ts-ms (:created-at newest))]
+                 (when (and (:deleted-at newest)
+                            newest-ms
+                            (< newest-ms (java.time.Instant/.toEpochMilli cutoff)))
+                   eid))))))
+
+
+(defn tombstone-gc-sweep!
+  "Reclaim storage from versioned entities that are DELETED on every branch
+   and whose newest tombstone is older than `retention-ms`. Purges each such
+   entity's version rows (all branches) + its identity row. Idempotent and
+   safe to run periodically — see the safety note above. Returns a map
+   `{entity-name purged-count}`.
+
+   `base-storage` is the UNWRAPPED storage (a `VersionedStorage`'s
+   `base-storage`), the same handle the delete path holds."
+  [base-storage retention-ms]
+  (let [cutoff (java.time.Instant/.minusMillis (java.time.Instant/now) (long retention-ms))
+        branch-ids (branch-ids-for-gc base-storage)]
+    (into {}
+          (map (fn [[entity-name {:keys [version-entity version-id-field]}]]
+                 (let [candidates (gc-candidate-ids base-storage
+                                                    version-entity version-id-field cutoff)
+                       purgeable (filter
+                                   (fn [id]
+                                     (and (dead-on-every-branch? base-storage entity-name id branch-ids)
+                                          ;; not still named as a live fn's parent
+                                          (not (and (= :fn entity-name)
+                                                    (seq (sp/query-ref-many-owners
+                                                           base-storage :fn :parent-ids id))))))
+                                   candidates)
+                       n (reduce
+                           (fn [acc id]
+                             (let [vs (sp/query-entities base-storage version-entity
+                                                         {version-id-field id})]
+                               (when (seq vs)
+                                 (sp/delete-entities base-storage version-entity (mapv :id vs)))
+                               (sp/delete-entity base-storage entity-name id)
+                               (inc acc)))
+                           0
+                           purgeable)]
+                   [entity-name n])))
+          res/entity-config)))
+
+
 ;; === VersionedStorage Record ===
 
 (defrecord VersionedStorage

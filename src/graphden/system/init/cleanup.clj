@@ -9,6 +9,7 @@
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.stats :as stats]
     [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vcore]
     [integrant.core :as ig]))
 
 
@@ -102,10 +103,38 @@
            (sp/delete-entity storage :fn-execution (:id row))))))))
 
 
+(defn- tombstone-gc-retention-ms
+  "Retention window for the tombstone GC, or nil (GC DISABLED — the safe
+   default). OPT-IN via `GRAPHDEN_TOMBSTONE_GC_RETENTION_DAYS`: a
+   self-hosted operator who relies on tombstones for audit must not have
+   deleted rows silently reclaimed, so the GC only runs when a retention
+   is explicitly configured. Cloud sets it (it bills on live storage)."
+  []
+  (some-> (System/getenv "GRAPHDEN_TOMBSTONE_GC_RETENTION_DAYS")
+          not-empty parse-long (* 24 60 60 1000)))
+
+
+(defn maybe-sweep-tombstones!
+  "Run the tombstone GC when it's enabled AND at most once per `min-gap-ms`
+   (the version-table scan is far heavier than the hourly execution sweep,
+   so it runs on a daily-ish cadence off the same thread). `last-run` is an
+   atom of the last-run epoch-ms. `storage` is the versioned storage;
+   unwrapped to the base handle the GC needs."
+  [storage last-run min-gap-ms now-ms]
+  (when-let [retention (tombstone-gc-retention-ms)]
+    (when (>= (- now-ms @last-run) min-gap-ms)
+      (reset! last-run now-ms)
+      (let [purged (vcore/tombstone-gc-sweep! (vcore/unwrap storage) retention)]
+        (when (pos? (reduce + 0 (vals purged)))
+          (log/info "tombstone-gc: reclaimed dead entities" purged))))))
+
+
 (defmethod ig/init-key :exec/cleanup-scheduler
   [_ {:keys [context period-ms]}]
   (let [storage (:storage context)
         period (or period-ms (one-hour))
+        gc-last-run (atom 0)
+        gc-min-gap (* 24 (one-hour))
         scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
     (log/info "Starting execution cleanup scheduler — period" period "ms")
     (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
@@ -123,7 +152,14 @@
                   ;; ctx) → no-op inside.
                   (try (stats/sweep-stats! (:pool (:pg-storage context)) 90)
                        (catch Exception e
-                         (log/warn e "usage-stat retention sweep failed"))))
+                         (log/warn e "usage-stat retention sweep failed")))
+                  ;; Storage reclamation (opt-in) — hard-purge entities dead
+                  ;; on every branch, older than the configured retention.
+                  ;; Daily cadence; disabled unless a retention env is set.
+                  (try (maybe-sweep-tombstones! storage gc-last-run gc-min-gap
+                                                (System/currentTimeMillis))
+                       (catch Exception e
+                         (log/warn e "tombstone-gc sweep failed"))))
       period period
       java.util.concurrent.TimeUnit/MILLISECONDS)
     scheduler))

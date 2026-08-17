@@ -116,7 +116,14 @@
 
 
 (deftest no-dispatch-on-name-of-an-id-resolved-entity
-  (let [violations (mapcat violations-in (src-files))]
+  (let [files (src-files)
+        violations (mapcat violations-in files)]
+    ;; Sanity: `src-files` walks the relative "src" dir, so a wrong cwd
+    ;; yields an EMPTY file list → zero violations → a green no-op that
+    ;; stops enforcing the id-not-name rule. Assert the tree loaded.
+    (is (< 100 (count files))
+        (str "src corpus looks empty (" (count files) " files) — this "
+             "guard is a no-op. Check the cwd."))
     (is (empty? violations)
         (str "Dispatching on the NAME of a value held by id violates the "
              "id-not-name rule — branch on the id instead (see "

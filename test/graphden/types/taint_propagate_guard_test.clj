@@ -120,7 +120,7 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:abs :add :and :assert-some :assoc :assoc-in :blank? :byte-len :call
-    :call-noargs :case :coalesce :concat :cond :conj :cons :const
+    :call-noargs :case :coalesce :concat :cond :conj :cons :const :do
     :constant-time-equal? :contains? :count :dissoc :distinct :div :drop
     :empty? :eq :equal? :ex-data :ex-info :first :flatten :get :get-in :gt
     :gte :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte

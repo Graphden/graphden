@@ -409,6 +409,7 @@ async function loadRowActionsContent(host, fnId, context, opts) {
             + (useSiteBindingId
                 ? '&binding-id=' + encodeURIComponent(useSiteBindingId)
                 : '')
+            + (opts.useSiteArg?.['item-id'] ? '&seq-item=true' : '')
             + (opts.editBlockReason
                 ? '&edit-block-reason='
                   + encodeURIComponent(opts.editBlockReason)
@@ -600,6 +601,46 @@ registerActionHandler('change-use-site-value', (btn, e, host) => {
   const arg = _rowActionsUseSiteArgs.get(bindingId);
   if (arg && typeof enterFreeArgBindEditMode === 'function') {
     enterFreeArgBindEditMode(arg, btn);
+  }
+});
+
+
+// --- sequence-item ordering (↑ / ↓ / + Insert-before) ---
+// Same binding-id-keyed registry lookup as × / ✎; the rich arg
+// carries the `item-id` and `position` the endpoints need.
+
+registerActionHandler('seq-move-item-up', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
+  const arg = _rowActionsUseSiteArgs.get(bindingId);
+  if (arg?.['item-id'] && typeof moveSequenceItem === 'function') {
+    moveSequenceItem(arg['item-id'], 'up');
+  }
+});
+
+
+registerActionHandler('seq-move-item-down', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
+  const arg = _rowActionsUseSiteArgs.get(bindingId);
+  if (arg?.['item-id'] && typeof moveSequenceItem === 'function') {
+    moveSequenceItem(arg['item-id'], 'down');
+  }
+});
+
+
+registerActionHandler('seq-insert-before', (btn, e, host) => {
+  // Reuses the append chooser (literal vs fn-ref) with the anchor
+  // item's position — the backend shifts later items +1.
+  e.preventDefault();
+  e.stopPropagation();
+  const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
+  const arg = _rowActionsUseSiteArgs.get(bindingId);
+  if (arg?.['fn-id'] && typeof arg.position === 'number'
+      && typeof appendSequenceItem === 'function') {
+    appendSequenceItem(arg['fn-id'], btn, undefined, { position: arg.position });
   }
 });
 

@@ -332,6 +332,14 @@
    :return-type :keyword-map
    :effects #{:db}}
 
+  {:name :try-apply-seq-move
+   :description "§3.3 core of sequence-move. Swaps the item with its up/down neighbour through a free temp position (edge moves are no-op successes). Returns `{:moved <item-id> :position <int>}` (plus `:type-warnings` — Phase-3 record-or-clear) or `{:error <reason>}`."
+   :args {:parsed {:type :_seq-update-parsed-shape
+                   :description "Parsed POST /api/sequence/move/:item-id payload (`{:item-id :body}` — the body carries `{:direction \"up\"|\"down\"}`)."}
+          :item {:type :nullable-keyword-map :description "Pre-read binding-list-item row."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   {:name :fn-names-with-tag
    :description "Vec of fn-NAMES (as strings) declared with `tag` in their `:tags` set. Used to discover tagged base-fns declaratively — e.g. `(:secret-shape)` resolves to the secret-leaf row's name without hardcoding `\"secret-leaf\"` anywhere. Pure: derefs the in-memory `rich-types-registry` atom, no storage round-trip."
    :args {:tag {:type :text :description "Tag keyword as text, e.g. \"secret-shape\" / \"admin-only-vault\"."}}
@@ -3216,6 +3224,137 @@
           :parsed :_seq-update-parsed
           :item :_seq-update-load-item}}
 
+  ;; --- sequence-move primitives. The handler itself is the
+  ;; `:process-sequence-move` `:cond` graph fn-def below; these are
+  ;; its atoms. URL = POST /api/sequence/move/:item-id — the item-id
+  ;; from `:path-params` or the URI segment after "move". Body is
+  ;; `{"direction": "up"|"down"}`; the swap itself is the §3.3 atomic
+  ;; unit `:try-apply-seq-move` (three writes through a free temp
+  ;; position share invariants that can't split across graph nodes).
+  {:name :_seq-move-item-id-from-path
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :path-params} {:value :item-id}]
+          :default nil}}
+
+  {:name :_seq-move-item-id-from-uri
+   :parent :uri-segment-after
+   :args {:marker {:value "move"}}}
+
+  {:name :_seq-move-item-id-raw
+   :parent :coalesce
+   :args {:value :_seq-move-item-id-from-path
+          :default :_seq-move-item-id-from-uri}}
+
+  {:name :_seq-move-body
+   :parent :parse-json-body}
+
+  {:name :_seq-move-parsed
+   :description "Parse `POST /api/sequence/move/:item-id` into `{:item-id <uuid|nil> :body <map|nil>}`."
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :body}]
+          :vals [{:parent :parse-uuid :args {:string :_seq-move-item-id-raw}}
+                 :_seq-move-body]}}
+
+  {:name :_seq-move-item-id-invalid?
+   :description "Guard #1 — bad UUID in the path-segment."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
+
+  {:name :_seq-move-body-invalid?
+   :description "Guard #2 — the request body didn't parse as JSON."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :body} :default nil}}}}
+
+  {:name :_seq-move-load-item
+   :description "Read the binding-list-item row for the parsed id (shares the update-flow loader impl — same parsed shape)."
+   :args {:parsed {:type :_seq-update-parsed-shape}}
+   :return-type [:union :null :binding-list-item-row-shape]
+   :effects #{:db}}
+
+  {:name :_seq-move-item-not-found?
+   :description "Guard #3 — no binding-list-item matches the parsed id."
+   :parent :nil?
+   :args {:value {:as :item}}}
+
+  ;; Same shape-dispatch pattern as seq-append / seq-update.
+  {:name :_seq-move-apply
+   :description "Success branch — swap the item with its neighbour, invalidate, return 200 JSON `{item-id, position}` (or 400 with the reject reason)."
+   :parent :if
+   :args {:test :_seq-move-apply-error?
+          :then :_seq-move-apply-err-response
+          :else :_seq-move-apply-success
+          :result :_seq-move-apply-result}}
+
+  {:name :_seq-move-apply-result
+   :parent :try-apply-seq-move
+   :args {:parsed {:as :parsed}
+          :item {:as :item}}}
+
+  {:name :_seq-move-apply-error?
+   :parent :some?
+   :args {:value :_apply-error-msg}}
+
+  {:name :_seq-move-apply-err-response
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason :_apply-error-msg}}
+
+  {:name :_seq-move-apply-success
+   :parent :do
+   :args {:steps [:_seq-move-apply-do-invalidate
+                  :_seq-move-apply-ok-response]}}
+
+  {:name :_seq-move-apply-do-invalidate
+   :parent :invalidate-after-write
+   :args {:entity-type {:value "binding-list-item"}
+          :entity-data {:as :item}}}
+
+  {:name :_seq-move-apply-ok-response
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 :_seq-move-apply-ok-body]}}
+
+  {:name :_seq-move-apply-ok-body
+   :description "JSON body `{:item-id :position}` — plus `:type-warnings` additively when the move landed but the owning fn now fails the aggregate type-check (order can matter, e.g. a nav-typed path)."
+   :parent :to-json-string
+   :args {:data :_seq-move-apply-ok-body-chosen}}
+
+  {:name :_seq-move-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_seq-move-apply-ok-body-chosen
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_seq-move-apply-type-warnings}}
+          :then :_seq-move-apply-ok-body-warn
+          :else :_seq-move-apply-ok-body-data}}
+
+  {:name :_seq-move-apply-ok-body-data
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :moved} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}]}}
+
+  {:name :_seq-move-apply-ok-body-warn
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position} {:value :type-warnings}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :moved} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}
+                 :_seq-move-apply-type-warnings]}}
+
+  {:name :process-sequence-move
+   :description "POST /api/sequence/move/:item-id — swap one binding-list-item with its up/down neighbour. Validation guards + success path are a flat `:cond` — `[invalid-id? → 400, invalid-body? → 400, item-not-found? → 404, true → apply]`. `:cond` is lazy, so the swap writes only run when every guard passes."
+   :parent :cond
+   :args {:clauses [:_seq-move-item-id-invalid?  :_html-err-invalid-item-id
+                    :_seq-move-body-invalid?     :_html-err-invalid-body
+                    :_seq-move-item-not-found?   :_html-err-item-not-found
+                    {:value true}                :_seq-move-apply]
+          :parsed :_seq-move-parsed
+          :item :_seq-move-load-item}}
+
   ;; --- tighten-fn-effects primitives. The handler itself is a
   ;; `:cond` graph fn-def (`:process-tighten-binding-effects` below);
   ;; these are its parse / guard-predicate / apply primitives. ---
@@ -4484,6 +4623,12 @@
    :description "Ring handler for `PUT /api/sequence/item/:item-id` — replaces an item's value/ref."
    :parent :html-action-response
    :args {:result :process-sequence-update}}
+
+  {:name :sequence-move-handler
+   :lambda-params [:request :default :limit]
+   :description "Ring handler for `POST /api/sequence/move/:item-id` — swaps an item with its up/down neighbour."
+   :parent :html-action-response
+   :args {:result :process-sequence-move}}
 
   ;; =============================================================================
   ;; FN-DEFS: tighten-fn-effects — validation chain as a :cond graph

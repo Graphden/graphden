@@ -666,6 +666,21 @@
   (entities/apply-seq-update-core parsed item ctx))
 
 
+(defbase _seq-move-load-item
+  [parsed]
+  (cr/record-effect! :db)
+  (entities/load-seq-update-item parsed ctx))
+
+
+(defbase try-apply-seq-move
+  "§3.3 core of sequence-move: swap the item with its up/down
+   neighbour through a free temp position. Returns
+   `{:moved <item-id> :position <int>}` or `{:error <reason>}`."
+  [parsed item]
+  (cr/record-effect! :db)
+  (entities/apply-seq-move-core parsed item ctx))
+
+
 ;; === Tighten fn-typed binding effects ===
 ;; The validation chain + success path is a `:cond` graph fn-def
 ;; (`:process-tighten-binding-effects` in fns.edn). These base-fns are
@@ -748,5 +763,7 @@
    :_seq-remove-load-item _seq-remove-load-item
    :_seq-update-load-item _seq-update-load-item
    :try-apply-seq-update try-apply-seq-update
+   :_seq-move-load-item _seq-move-load-item
+   :try-apply-seq-move try-apply-seq-move
    :try-apply-tighten try-apply-tighten
    :str-to-uuid str-to-uuid})

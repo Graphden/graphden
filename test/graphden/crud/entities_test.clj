@@ -977,6 +977,84 @@
         (finally (sp/close storage))))))
 
 
+(deftest seq-insert-at-position-and-move-test
+  ;; The optional `:position` body field turns append into INSERT
+  ;; (later items shift +1); the move core swaps an item with its
+  ;; up/down neighbour through a free temp position. Order is read
+  ;; back positionally after every step.
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "seqmv-base")
+              slot  (setup/create-slot! storage "items" :any)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              child (setup/create-composed-fn! storage "seqmv-child" (:id base))
+              synth {:fn-id (:id child) :slot-id (:id slot) :synthetic true}
+              ;; The slot is `:any`-typed (not the `:sequence` type-fn),
+              ;; so `find-sequence-binding` doesn't apply — resolve the
+              ;; materialised binding row directly.
+              seq-binding (fn []
+                            (or (first (sp/query-entities storage :binding
+                                                          {:fn-id (:id child)}))
+                                synth))
+              append! (fn [body]
+                        (entities/apply-seq-append-core
+                          {:fn-id (:id child) :body body}
+                          (seq-binding)
+                          c))
+              order (fn []
+                      (->> (sp/query-entities storage :binding-list-item
+                                              {:binding-id (:id (seq-binding))})
+                           (sort-by :position)
+                           (mapv :value)))
+              _  (append! {:value "a"})
+              rb (append! {:value "b"})
+              _  (append! {:value "c"})]
+          (testing "baseline appends land in order"
+            (is (= ["a" "b" "c"] (order))))
+
+          (testing "insert at b's position shifts b and c right"
+            (let [r (append! {:value "x" :position 1})]
+              (is (nil? (:error r)))
+              (is (= 1 (:position r)))
+              (is (= ["a" "x" "b" "c"] (order)))))
+
+          (testing "a position past the end clamps to a plain append"
+            (let [r (append! {:value "z" :position 99})]
+              (is (= 4 (:position r)))
+              (is (= ["a" "x" "b" "c" "z"] (order)))))
+
+          (testing "a malformed position is rejected before any write"
+            (is (some? (:error (append! {:value "w" :position -1}))))
+            (is (some? (:error (append! {:value "w" :position 1.5}))))
+            (is (= ["a" "x" "b" "c" "z"] (order))))
+
+          (let [b-id (:created rb)
+                b-item #(sp/read-entity storage :binding-list-item b-id)
+                move! (fn [dir]
+                        (entities/apply-seq-move-core
+                          {:item-id b-id :body {:direction dir}}
+                          (b-item) c))]
+            (testing "move up swaps with the left neighbour"
+              (let [r (move! "up")]
+                (is (nil? (:error r)))
+                (is (= ["a" "b" "x" "c" "z"] (order)))))
+            (testing "move down swaps back"
+              (move! "down")
+              (is (= ["a" "x" "b" "c" "z"] (order))))
+            (testing "a move at the edge is a no-op success"
+              (move! "up")
+              (move! "up")
+              (let [r (move! "up")]
+                (is (nil? (:error r)))
+                (is (= ["b" "a" "x" "c" "z"] (order))
+                    "two ups reached the head; the third changed nothing")))
+            (testing "a malformed direction is rejected"
+              (is (some? (:error (move! "sideways")))))))
+        (finally (sp/close storage))))))
+
+
 (deftest delete-binding-clears-stored-diagnostic-test
   ;; Phase 3, Gap B — deleting the offending binding row re-runs the
   ;; owner's aggregate check, which clears the stored diagnostic (the

@@ -11,6 +11,7 @@
    primitive dispatches on the returned shape and runs invalidate +
    response."
   (:require
+    [clojure.math :as math]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
@@ -141,16 +142,47 @@
     (find-sequence-binding ctx fn-id)))
 
 
+(defn- shift-items!
+  "Shift the `:position` of every row in `items` by `delta`, writing
+   in an order that can never collide with a not-yet-moved sibling
+   (descending positions for a +1 shift, ascending for -1)."
+  [storage items delta]
+  (doseq [it (sort-by :position (if (pos? delta) #(compare %2 %1) compare)
+                      items)]
+    (sp/update-entity storage :binding-list-item (:id it)
+                      {:position (+ (:position it) delta)})))
+
+
+(defn- requested-insert-pos
+  "The validated optional `:position` of an append body — a
+   non-negative int, or nil for a plain append-at-end. Returns
+   `{:error …}` for a present-but-malformed value."
+  [body]
+  (let [p (:position body)]
+    (cond
+      (nil? p) nil
+      ;; JSON numbers may decode as Double — accept a whole one.
+      (and (number? p)
+           (== p (math/floor (double p)))
+           (>= p 0))
+      {:pos (long p)}
+      :else {:error "Optional :position must be a non-negative integer"})))
+
+
 (defn apply-seq-append-core
   "§3.3 atomic core of sequence-append: materialise synthetic binding
-   if needed, compute next position, run pre-write validation, write
-   the binding-list-item row. Returns `{:created <item-id> :position
+   if needed, compute the position, run pre-write validation, write
+   the binding-list-item row. An optional body `:position` turns the
+   append into an INSERT — every existing item at that position or
+   later shifts +1 first (descending write order, so the per-write
+   position-uniqueness check can't collide), then the new row takes
+   the freed position. Returns `{:created <item-id> :position
    <int> :fn-id <fn-id>}` on success (plus `:type-warnings
    [<diagnostic> …]` when the item landed but the owning fn now fails
    the aggregate type-check — error-tolerance Phase 3) or `{:error
    <reason>}` on pre-write validation rejection OR on a secret-flow
-   type failure (hard reject: item + synthetic binding rolled back —
-   the security carve-out). The graph composition
+   type failure (hard reject: item + shifts + synthetic binding rolled
+   back — the security carve-out). The graph composition
    around this primitive dispatches on the returned shape and runs
    invalidate + response.
 
@@ -161,6 +193,7 @@
   (let [storage (request/require-storage ctx)
         fn-id (:fn-id parsed)
         body  (:body parsed)
+        req-pos (requested-insert-pos body)
         synthetic? (:synthetic seq-binding)
         synth-data (when synthetic?
                      {:fn-id (:fn-id seq-binding)
@@ -171,21 +204,29 @@
         ;; terminal guards). Validate it FIRST so an append onto a sealed
         ;; slot is rejected before anything is written.
         synth-rej (when synthetic? (validation/write-rej storage :binding synth-data))]
-    (if synth-rej
-      {:error (:reason synth-rej)}
+    (cond
+      (:error req-pos) req-pos
+      synth-rej {:error (:reason synth-rej)}
+      :else
       (let [seq-binding (if synthetic?
                           (sp/create-entity storage :binding synth-data)
                           seq-binding)
             binding-id (:id seq-binding)
-            used-pos (map :position
-                          (sp/query-entities storage :binding-list-item
-                                             {:binding-id binding-id}))
-            new-pos (inc (apply max -1 used-pos))
+            existing (sp/query-entities storage :binding-list-item
+                                        {:binding-id binding-id})
+            used-pos (map :position existing)
+            end-pos (inc (apply max -1 used-pos))
+            new-pos (if req-pos (min (:pos req-pos) end-pos) end-pos)
+            ;; Items the insert displaces — empty for a plain append.
+            displaced (filterv #(>= (:position %) new-pos) existing)
             payload (resolve-sequence-payload storage body)
             new-item (merge {:id (random-uuid)
                              :binding-id binding-id
                              :position new-pos}
                             payload)
+            ;; Pre-rej is position-independent (list-closed + ref-cycle)
+            ;; — run it BEFORE shifting so a rejected insert writes
+            ;; nothing at all.
             pre-rej (validation/write-rej storage :binding-list-item new-item)]
         (if pre-rej
           (do
@@ -198,7 +239,8 @@
                      (log/warn e "seq-append: synthetic-binding rollback failed"
                                {:binding-id binding-id}))))
             {:error (:reason pre-rej)})
-          (do (sp/create-entity storage :binding-list-item new-item)
+          (do (shift-items! storage displaced 1)
+              (sp/create-entity storage :binding-list-item new-item)
               ;; Post-write whole-fn type-check (Phase 3, Gap A) — the
               ;; item is KEPT on an ordinary failure (recorded in the
               ;; per-branch diagnostics store, surfaced additively).
@@ -213,6 +255,15 @@
                            (catch Exception e
                              (log/warn e "seq-append: item rollback failed after secret-flow rejection"
                                        {:item-id (:id new-item)})))
+                      ;; Un-shift the displaced items (they sit at old+1
+                      ;; now — hand shift-items! their CURRENT positions).
+                      (try (shift-items! storage
+                                         (map #(update % :position inc)
+                                              displaced)
+                                         -1)
+                           (catch Exception e
+                             (log/warn e "seq-append: shift rollback failed after secret-flow rejection"
+                                       {:binding-id binding-id})))
                       (when synthetic?
                         (try (sp/delete-entity storage :binding binding-id)
                              (catch Exception e
@@ -240,10 +291,69 @@
   "Read the binding-list-item row for a parsed sequence-update
    request. Returns nil when the id is invalid (guard #1 catches it
    first) OR when no row matches (`:_seq-update-item-not-found?`
-   catches that)."
+   catches that). Shared verbatim by the sequence-move flow (same
+   `{:item-id …}` parsed shape)."
   [parsed ctx]
   (when-let [item-id (:item-id parsed)]
     (sp/read-entity (request/require-storage ctx) :binding-list-item item-id)))
+
+
+(defn- swap-positions!
+  "Swap the `:position` of two binding-list-item rows through a free
+   temp position (`max + 1`) so each individual write passes the
+   per-write position-uniqueness check."
+  [storage a b temp-pos]
+  (sp/update-entity storage :binding-list-item (:id a) {:position temp-pos})
+  (sp/update-entity storage :binding-list-item (:id b) {:position (:position a)})
+  (sp/update-entity storage :binding-list-item (:id a) {:position (:position b)}))
+
+
+(defn apply-seq-move-core
+  "§3.3 atomic core of sequence-move: swap `item` with its up/down
+   neighbour in position order (three writes through a free temp
+   position — each individual write passes the position-uniqueness
+   check). A move at the chain's edge is a no-op success. Returns
+   `{:moved <item-id> :position <int>}` (plus `:type-warnings` — the
+   Phase-3 post-write check, record-or-clear: item order can matter,
+   e.g. a nav-typed `:path`) or `{:error <reason>}` on a malformed
+   direction OR a secret-flow type failure (hard reject: the swap is
+   reversed — the security carve-out)."
+  [parsed item ctx]
+  (let [storage (request/require-storage ctx)
+        direction (get-in parsed [:body :direction])]
+    (if-not (contains? #{"up" "down"} direction)
+      {:error "Body requires {\"direction\": \"up\"} or {\"direction\": \"down\"}"}
+      (let [items (->> (sp/query-entities storage :binding-list-item
+                                          {:binding-id (:binding-id item)})
+                       (sort-by :position)
+                       vec)
+            idx   (first (keep-indexed
+                           (fn [i it] (when (= (:id it) (:id item)) i))
+                           items))
+            j     (when idx (if (= "up" direction) (dec idx) (inc idx)))]
+        (if (or (nil? idx) (neg? j) (>= j (count items)))
+          ;; Edge of the chain (or a raced-away row) — nothing to do.
+          {:moved (:id item) :position (:position item)}
+          (let [cur      (nth items idx)
+                neighbor (nth items j)
+                temp-pos (inc (:position (peek items)))]
+            (swap-positions! storage cur neighbor temp-pos)
+            (let [owner-fn-id (some->> (:binding-id item)
+                                       (sp/read-entity storage :binding)
+                                       :fn-id)
+                  rej (post-write-rej storage owner-fn-id)]
+              (if (:secret? rej)
+                (do (try (swap-positions!
+                           storage
+                           (assoc cur :position (:position neighbor))
+                           (assoc neighbor :position (:position cur))
+                           temp-pos)
+                         (catch Exception e
+                           (log/warn e "seq-move: swap rollback failed after secret-flow rejection"
+                                     {:item-id (:id item)})))
+                    {:error (:reason rej)})
+                (cond-> {:moved (:id item) :position (:position neighbor)}
+                  rej (assoc :type-warnings [(:diagnostic rej)]))))))))))
 
 
 (defn apply-seq-update-core

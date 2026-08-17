@@ -1680,6 +1680,12 @@
    parsed item ctx))
 
 
+(defn apply-seq-move-core
+  [parsed item ctx]
+  ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-move-core)
+   parsed item ctx))
+
+
 (defn commit-tighten!
   [storage binding-id b new-c effects-vec]
   ((requiring-resolve 'graphden.crud.entities.tighten/commit-tighten!)

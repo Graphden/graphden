@@ -339,10 +339,15 @@
    :parent :list
    :args {:items ["/item/:item-id" :_sequence-item-methods]}}
 
+  {:name :sequence-move
+   :description "POST /api/sequence/move/:item-id — swaps an item with its up/down neighbour (body `{\"direction\": \"up\"|\"down\"}`). Auth-required."
+   :parent :post
+   :args {:path "/move/:item-id" :handler :sequence-move-handler}}
+
   {:name :sequence-routes
-   :description "/api/sequence/* sub-group — POST `/append/:fn-id` plus PUT/DELETE `/item/:item-id`. New methods on /item/:item-id go into `:_sequence-item-methods`."
+   :description "/api/sequence/* sub-group — POST `/append/:fn-id`, POST `/move/:item-id`, plus PUT/DELETE `/item/:item-id`. New methods on /item/:item-id go into `:_sequence-item-methods`."
    :parent :list
-   :args {:items ["/sequence" :sequence-append :sequence-item]}}
+   :args {:items ["/sequence" :sequence-append :sequence-move :sequence-item]}}
 
   ;; --- /api/bindings — binding-specific narrowing operations ---
 

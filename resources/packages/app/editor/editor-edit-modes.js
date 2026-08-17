@@ -531,31 +531,40 @@ function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel, onLi
 // as resolved by `appendNavType` for a nav-typed sequence (e.g. an
 // `:update-in` `:path`). When it's a closed enum the literal prompt
 // renders a <select>; undefined means an unconstrained append.
-async function appendSequenceItem(fnId, anchorEl, expectedType) {
+// `opts.position` (optional) turns the append into an INSERT — the
+// new item takes that position, later items shift +1 (the backend's
+// optional `:position` body field).
+async function appendSequenceItem(fnId, anchorEl, expectedType, opts) {
   if (!fnId) return;
+  const position = (opts && typeof opts.position === 'number') ? opts.position : null;
+  const verb = position === null ? 'Append' : 'Insert';
   closeInlineEdit();
   // Two-step UX mirroring free-arg binding: pick "Literal" or "Fn-ref",
   // then enter the value / pick the fn. The endpoint accepts the
   // chosen body in the same request, so we wait for the user's pick.
   openLiteralVsRefChooser({
     anchorEl: anchorEl || document.getElementById('graph-surface') || document.body,
-    ariaLabel: 'Append sequence item',
-    litLabel: 'Append literal',
-    refLabel: 'Append fn-ref',
-    onLiteral: () => promptLiteralForAppend(fnId, anchorEl, expectedType),
+    ariaLabel: verb + ' sequence item',
+    litLabel: verb + ' literal',
+    refLabel: verb + ' fn-ref',
+    onLiteral: () => promptLiteralForAppend(fnId, anchorEl, expectedType, position),
     onRef: () => {
       if (typeof openFnPicker === 'function') {
         openFnPicker({
           anchorEl: anchorEl || document.body,
           excludeIds: [fnId],
-          onPick: async (fn) => { await postSequenceAppend(fnId, { ref: fn.id }); }
+          onPick: async (fn) => {
+            const body = { ref: fn.id };
+            if (position !== null) body.position = position;
+            await postSequenceAppend(fnId, body);
+          }
         });
       }
     }
   });
 }
 
-function promptLiteralForAppend(fnId, anchorEl, expectedType) {
+function promptLiteralForAppend(fnId, anchorEl, expectedType, position) {
   // Closed-enum target → <select> of valid values; otherwise free text.
   const enumInfo = (expectedType != null && typeof closedEnumOf === 'function')
                    ? closedEnumOf(expectedType) : null;
@@ -604,7 +613,9 @@ function promptLiteralForAppend(fnId, anchorEl, expectedType) {
         try { value = JSON.parse(trimmed); }
         catch (_) { value = control.value; }
       }
-      return postSequenceAppend(fnId, { value: value });
+      const body = { value: value };
+      if (typeof position === 'number') body.position = position;
+      return postSequenceAppend(fnId, body);
     }
     // No `onSaved` refresh — `postSequenceAppend` already fires the
     // lighter `loadGraphData` (index + subtree + rich-types) on success.
@@ -625,6 +636,24 @@ async function postSequenceAppend(fnId, body) {
       // Sequence edits change binding-list-item rows, not fn structure/
       // value-kinds — the lighter `loadGraphData` (index + subtree +
       // rich-types) reflects them without the `initGraph` graph re-render.
+      if (typeof loadGraphData === 'function') loadGraphData();
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+// POST /api/sequence/move/:item-id with `{direction: "up"|"down"}` —
+// swaps the item with its neighbour; an edge move is a server no-op.
+async function moveSequenceItem(itemId, direction) {
+  if (!itemId) return false;
+  try {
+    const r = await authFetch(API.api_sequence_move_item_id(itemId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction: direction })
+    });
+    if (r?.ok) {
       if (typeof loadGraphData === 'function') loadGraphData();
       return true;
     }

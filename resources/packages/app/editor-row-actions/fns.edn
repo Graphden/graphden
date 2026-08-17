@@ -78,6 +78,14 @@
    :args {:request {:as :request}
           :param-name {:value "binding-id"}}}
 
+  {:name :_partial-row-actions-seq-item?
+   :description "True when the caller flagged the use-site row as a SEQUENCE ITEM (`seq-item=true` query param) — gates the ↑ / ↓ / + item buttons. The flag also keys the client's HTML cache so item toolbars never share an entry with the plain-binding variant."
+   :parent :equal?
+   :args {:a {:parent :query-param
+              :args {:request {:as :request}
+                     :param-name {:value "seq-item"}}}
+          :b {:value "true"}}}
+
   ;; --- Phase A4 query params ---
 
   {:name :_partial-row-actions-edit-block-reason-str
@@ -349,12 +357,76 @@
           :then :_partial-row-actions-change-use-site-button
           :else {:value nil}}}
 
+  ;; --- sequence-item ordering buttons (↑ / ↓ / +) ---
+  ;; Rendered only for a sequence-item row (`seq-item=true`) when
+  ;; editable. The dispatcher recovers the rich arg (item-id,
+  ;; position) by `data-binding-id` — same registry as × / ✎.
+
+  {:name :_partial-row-actions-seq-up-button
+   :description "`↑` — move this sequence item one position up (`seq-move-item-up` action → POST /api/sequence/move/:item-id)."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "seq-move-item-up"
+                          :title "Move item up"
+                          :aria-label "Move item up"}}
+          :children [{:value "↑"}]}}
+
+  {:name :_partial-row-actions-seq-down-button
+   :description "`↓` — move this sequence item one position down (`seq-move-item-down` action)."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "seq-move-item-down"
+                          :title "Move item down"
+                          :aria-label "Move item down"}}
+          :children [{:value "↓"}]}}
+
+  {:name :_partial-row-actions-seq-insert-button
+   :description "`+` — insert a new item BEFORE this one (`seq-insert-before` action → the append chooser with a `:position` body)."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "seq-insert-before"
+                          :title "Insert a new item before this one"
+                          :aria-label "Insert item before"}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-seq-item-editable?
+   :parent :and
+   :args {:values [:_partial-row-actions-editable?
+                   :_partial-row-actions-seq-item?]}}
+
+  {:name :_partial-row-actions-seq-up-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-seq-item-editable?
+          :then :_partial-row-actions-seq-up-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-seq-down-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-seq-item-editable?
+          :then :_partial-row-actions-seq-down-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-seq-insert-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-seq-item-editable?
+          :then :_partial-row-actions-seq-insert-button
+          :else {:value nil}}}
+
   {:name :_partial-row-actions-use-site-children-raw
-   :description "Raw button list for the use-site-arg context: ns / i / ↗ (always) + (when editable) × Remove-binding + ✎ Change-value. Matches the legacy `useSiteArg` branch of `buildPopoverContent` in editor-overlay-fn.js, plus the always-on shared head from the line context."
+   :description "Raw button list for the use-site-arg context: ns / i / ↗ (always) + (when editable) × Remove-binding + ✎ Change-value + (sequence items only) ↑ / ↓ / + Insert-before. Matches the legacy `useSiteArg` branch of `buildPopoverContent` in editor-overlay-fn.js, plus the always-on shared head from the line context."
    :parent :list
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
                   :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-seq-up-button-or-nil
+                  :_partial-row-actions-seq-down-button-or-nil
+                  :_partial-row-actions-seq-insert-button-or-nil
                   :_partial-row-actions-remove-use-site-button-or-nil
                   :_partial-row-actions-change-use-site-button-or-nil]}}
 

@@ -8,7 +8,46 @@
    `cached-build-lookups` wraps `build-lookups` with a process-wide
    reference-identity cache (bounded LRU, ~8 entries). Hits when the
    SAME graph map is passed — stable across calls in one ctx between
-   mutations. Different per-branch ctxs each get their own entry.")
+   mutations. Different per-branch ctxs each get their own entry."
+  (:require
+    [graphden.packages.records.ids :as ids]))
+
+
+(defn compute-fn-typed-fn-ids
+  "Set of fn-ids whose row identifies a HOF-callable slot. Two flavours:
+
+   1. The primitive `:fn` row — matched by its DETERMINISTIC id
+      (`ids/primitive-fn-id :fn`, the exact id `boot-primitive-records`
+      upserts), never by name: fn names are per-namespace
+      (ADR-identity-model stage 5), so a user/tenant fn merely NAMED
+      `fn` must not become a HOF marker. The previous
+      `(#{\"fn\" :fn} (:name f))` name-match had exactly that hole —
+      and being a set-predicate over rows it slipped past the
+      `id_resolution_guard_test` `=`/`case` patterns.
+   2. Structural fn-type rows that came from EDN's `[:fn args ret]`
+      declarations. Their `:constraint` is `[:fn …]`. Named ones
+      (`:fn-type`) plus anonymous-by-shape rows both qualify — the
+      executor treats either as a HOF marker.
+
+   Pure function of the immutable fn-map, so `build-lookups` computes it
+   ONCE and stores it under `:fn-typed-fn-ids`; the compile helpers read
+   that cached set (with a recompute fallback for hand-built lookups).
+
+   Pre-fix the only path was (1), so `[:fn args ret]` slots silently
+   fell back to plain value-binding semantics — bindings to them
+   weren't hof-wrapped, and the bound fn-graph was eagerly executed
+   as a value. The compiled closure then tripped over the resulting
+   Clojure value (e.g. a Ring response map) when it expected a
+   callable."
+  [{:keys [fn-map]}]
+  (let [fn-primitive-id (ids/primitive-fn-id :fn)]
+    (into #{}
+          (keep (fn [[id f]]
+                  (when (or (= id fn-primitive-id)
+                            (and (vector? (:constraint f))
+                                 (= :fn (first (:constraint f)))))
+                    id)))
+          fn-map)))
 
 
 (defn build-lookups
@@ -87,6 +126,14 @@
      :binding-by-fn-slot binding-by-fn-slot
      :items-by-binding   items-by-binding
      :chain-cache        (atom {})
+     ;; Graph-global HOF-marker set — a pure function of `fn-map`, so
+     ;; computed ONCE here instead of rescanned per-fn in
+     ;; `collect-bindings*` / `collect-env-bindings`. The free-arg
+     ;; walkers call `collect-env-bindings` per visited node, which
+     ;; made this an O(n²) hotspot (~190M fn-row visits on the
+     ;; [core web app] graph). `bindings.clj` reads this key with an
+     ;; on-the-fly recompute fallback for hand-built lookups.
+     :fn-typed-fn-ids    (compute-fn-typed-fn-ids {:fn-map fn-map})
      ;; Hot per-(fn-id) caches used by the compile pipeline. Same
      ;; lifetime as `:chain-cache` — populated lazily by the
      ;; compile fns and shared across the compile-all pass so a
@@ -95,7 +142,8 @@
      :deep-frees-cache   (atom {})
      :deep-free-ext-entries-cache (atom {})
      :cache-projection-frees-cache (atom {})
-     :bindings-cache     (atom {})}))
+     :bindings-cache     (atom {})
+     :env-bindings-cache (atom {})}))
 
 
 (def ^:private cached-build-lookups-max-size

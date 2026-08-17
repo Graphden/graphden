@@ -14,7 +14,6 @@
      under the new name."
   (:require
     [graphden.executor.compile.lookups :as l]
-    [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
 
 
@@ -254,43 +253,22 @@
        :is-fn (fn-typed-slot? slot b fn-typed-fn-ids fn-id lookups)})))
 
 
-(defn- compute-fn-typed-fn-ids
-  "Set of fn-ids whose row identifies a HOF-callable slot. Two flavours:
-
-   1. The primitive `:fn` row — matched by its DETERMINISTIC id
-      (`ids/primitive-fn-id :fn`, the exact id `boot-primitive-records`
-      upserts), never by name: fn names are per-namespace
-      (ADR-identity-model stage 5), so a user/tenant fn merely NAMED
-      `fn` must not become a HOF marker. The previous
-      `(#{\"fn\" :fn} (:name f))` name-match had exactly that hole —
-      and being a set-predicate over rows it slipped past the
-      `id_resolution_guard_test` `=`/`case` patterns.
-   2. Structural fn-type rows that came from EDN's `[:fn args ret]`
-      declarations. Their `:constraint` is `[:fn …]`. Named ones
-      (`:fn-type`) plus anonymous-by-shape rows both qualify — the
-      executor treats either as a HOF marker.
-
-   Pre-fix the only path was (1), so `[:fn args ret]` slots silently
-   fell back to plain value-binding semantics — bindings to them
-   weren't hof-wrapped, and the bound fn-graph was eagerly executed
-   as a value. The compiled closure then tripped over the resulting
-   Clojure value (e.g. a Ring response map) when it expected a
-   callable."
-  [{:keys [fn-map]}]
-  (let [fn-primitive-id (ids/primitive-fn-id :fn)]
-    (into #{}
-          (keep (fn [[id f]]
-                  (when (or (= id fn-primitive-id)
-                            (and (vector? (:constraint f))
-                                 (= :fn (first (:constraint f)))))
-                    id)))
-          fn-map)))
+;; `compute-fn-typed-fn-ids` moved to `lookups.clj` — it is a pure
+;; function of the immutable fn-map, so `build-lookups` computes it once
+;; and stores it under `:fn-typed-fn-ids`. Read that cached set here,
+;; falling back to an on-the-fly recompute when the key is absent
+;; (hand-built test lookups that don't go through `build-lookups`),
+;; mirroring the `:chain-cache` / `:bindings-cache` fallback style.
+(defn- fn-typed-fn-ids-of
+  [lookups]
+  (or (:fn-typed-fn-ids lookups)
+      (l/compute-fn-typed-fn-ids lookups)))
 
 
 (defn- collect-bindings*
   [fn-id lookups]
   (let [slots (l/root-slots fn-id lookups)
-        fn-typed-fn-ids (compute-fn-typed-fn-ids lookups)
+        fn-typed-fn-ids (fn-typed-fn-ids-of lookups)
         lazy-seq-args (lazy-seq-arg-names fn-id lookups)]
     (mapv #(classify-slot % fn-id lookups fn-typed-fn-ids lazy-seq-args)
           slots)))
@@ -320,29 +298,13 @@
         fn-slots-by-fn))
 
 
-(defn collect-env-bindings
-  "Bindings on F or its ancestors that target a slot which ISN'T one
-   of the root's direct slots — at runtime the executor merges these
-   into the free-args map so the ref tree sees the override.
-
-   This covers two distinct patterns:
-   1. Bindings on slots owned by fns outside F's inheritance chain
-      (slots living on ref-targets, accessed via the data-flow tree).
-   2. Bindings on RENAME slots owned by ancestors that ARE in F's
-      inheritance chain — the rename slot exposes a free-arg name
-      that propagates to inner sequence-items (`{:as :path}`), HOF
-      lambda-params, etc. These never appear as root slots, so
-      `collect-bindings` doesn't see them, but the runtime needs them
-      in free-args.
-
-   `:is-fn` for ref-bindings is derived by walking the slot-owner's
-   chain for type-overrides."
+(defn- collect-env-bindings*
   [fn-id {:keys [slot-map bindings-by-fn binding-by-fn-slot] :as lookups}]
   (let [chain (l/inheritance-chain* fn-id lookups)
         root-slot-ids (into #{}
                             (map :id)
                             (or (l/root-slots fn-id lookups) []))
-        fn-typed-fn-ids (compute-fn-typed-fn-ids lookups)
+        fn-typed-fn-ids (fn-typed-fn-ids-of lookups)
         is-fn-for-slot
         (fn [slot-id slot b-row]
           (let [owner (own-fn-of-slot slot-id lookups)
@@ -394,3 +356,35 @@
                      {:seen (conj seen env-name) :out (conj out entry)}))
                  {:seen #{} :out []})
          :out)))
+
+
+(defn collect-env-bindings
+  "Bindings on F or its ancestors that target a slot which ISN'T one
+   of the root's direct slots — at runtime the executor merges these
+   into the free-args map so the ref tree sees the override.
+
+   This covers two distinct patterns:
+   1. Bindings on slots owned by fns outside F's inheritance chain
+      (slots living on ref-targets, accessed via the data-flow tree).
+   2. Bindings on RENAME slots owned by ancestors that ARE in F's
+      inheritance chain — the rename slot exposes a free-arg name
+      that propagates to inner sequence-items (`{:as :path}`), HOF
+      lambda-params, etc. These never appear as root slots, so
+      `collect-bindings` doesn't see them, but the runtime needs them
+      in free-args.
+
+   `:is-fn` for ref-bindings is derived by walking the slot-owner's
+   chain for type-overrides.
+
+   Memoised on `lookups`'s `:env-bindings-cache` — the free-arg
+   walkers (`renames.clj`) call this per visited node, hitting the
+   same fn-id thousands of times in one compile-all pass. Same atom /
+   key / absent-key-fallback pattern as `collect-bindings` over
+   `:bindings-cache`."
+  [fn-id {:keys [env-bindings-cache] :as lookups}]
+  (if-let [cache env-bindings-cache]
+    (or (get @cache fn-id)
+        (let [r (collect-env-bindings* fn-id lookups)]
+          (swap! cache assoc fn-id r)
+          r))
+    (collect-env-bindings* fn-id lookups)))

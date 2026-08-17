@@ -9,6 +9,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile.bindings :as b]
+    [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.test-support :as support]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
@@ -190,4 +191,68 @@
               (is (= 1 (count env)))
               (is (= :extra (:env-name (first env))))
               (is (= 99 (:value (first env))))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; compile-perf memoisation — cached read == on-the-fly recompute
+;; ============================================================================
+
+(deftest fn-typed-fn-ids-and-env-bindings-cache-equivalence-test
+  ;; `compute-fn-typed-fn-ids` (now in lookups.clj) and
+  ;; `collect-env-bindings` are pure functions of the immutable
+  ;; fn-map/graph. `build-lookups` memoises the first under
+  ;; `:fn-typed-fn-ids` and wraps the second in an `:env-bindings-cache`
+  ;; atom (mirroring `:bindings-cache`). Both keep an on-the-fly
+  ;; recompute FALLBACK for hand-built lookups that lack the key. This
+  ;; pins the contract that reading-from-cache is byte-identical to
+  ;; recomputing — the equality proof for the O(n²) compile-perf fix.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base   (setup/create-base-fn! storage "cache-base")
+            sf     (setup/create-slot! storage "f" :fn)      ; fn-typed slot
+            sn     (setup/create-slot! storage "n" :int)     ; NOT fn-typed
+            _      (setup/attach-slot! storage (:id base) (:id sf) 0)
+            _      (setup/attach-slot! storage (:id base) (:id sn) 1)
+            target (setup/create-base-fn! storage "cache-target")
+            cfn    (setup/create-composed-fn! storage "cache-fn" (:id base))
+            _      (setup/bind-ref! storage (:id cfn) (:id sf) (:id target))
+            ;; A binding on a NON-root slot → surfaces via
+            ;; collect-env-bindings (exercises that path, not just
+            ;; collect-bindings).
+            extra  (setup/create-slot! storage "extra" :int)
+            _      (sp/create-entity storage :binding
+                                     {:fn-id (:id cfn) :slot-id (:id extra)
+                                      :value 7 :value-present true})
+            lookups (support/lookups-for storage)]
+
+        (testing "build-lookups precomputed :fn-typed-fn-ids"
+          (is (contains? lookups :fn-typed-fn-ids))
+          (is (contains? lookups :env-bindings-cache)))
+
+        (testing "compute-fn-typed-fn-ids: cached == recomputed, and is a mixed set"
+          (let [cached (:fn-typed-fn-ids lookups)
+                fresh  (l/compute-fn-typed-fn-ids lookups)]
+            (is (= cached fresh))
+            ;; The :fn primitive row qualifies — set is non-empty — but
+            ;; not every fn-row does (base/target/cfn/:int don't), so
+            ;; the set is strictly smaller than the fn-map: a real mixed
+            ;; classification, not everything/nothing.
+            (is (seq cached))
+            (is (contains? cached (get setup/primitive-fn-ids :fn)))
+            (is (< (count cached) (count (:fn-map lookups))))))
+
+        (testing "collect-env-bindings: cache read == recompute fallback"
+          (let [via-cache (b/collect-env-bindings (:id cfn) lookups)
+                ;; Force the recompute fallback by dropping BOTH the
+                ;; env cache and the precomputed fn-typed set.
+                recomputed (b/collect-env-bindings
+                             (:id cfn)
+                             (dissoc lookups :env-bindings-cache :fn-typed-fn-ids))
+                ;; Second call must hit the populated cache and match.
+                second-hit (b/collect-env-bindings (:id cfn) lookups)]
+            (is (= via-cache recomputed))
+            (is (= via-cache second-hit))
+            (is (= 1 (count via-cache)))
+            (is (= :extra (:env-name (first via-cache)))))))
       (finally (sp/close storage)))))

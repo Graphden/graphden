@@ -1,6 +1,6 @@
 # Accounts — the open identity module
 
-Last verified against code: 2026-08-13.
+Last verified against code: 2026-08-17.
 
 `accounts` is the **open-core**, **opt-in** identity layer: it gives a
 self-hosted Graphden real users, passwords, sessions and — the point of the
@@ -87,6 +87,7 @@ HttpOnly `gd_session` cookie (Max-Age 24 h); cookies are written as raw
 | `POST /auth/totp/disable` | `{code}` → turn TOTP off |
 | `GET /auth/{github,google}/start` | 302 to the provider + `gd_oauth` state cookie |
 | `GET /auth/{github,google}/callback` | State check + code exchange → session (or LINK when already signed in) |
+| `GET /auth/telegram/start` | Telegram login-widget page (404 `telegram_disabled` when the provider is off) |
 | `GET /auth/telegram/callback` | Verify the login-widget HMAC → session (or LINK) |
 
 A social callback on an **already signed-in** request LINKs the identity to
@@ -102,8 +103,9 @@ email exists (no account enumeration), and a successful
 revoked) so a stolen session doesn't survive a recovery.
 
 Three **per-IP fixed-window limiters** (`crypto/fixed-window-limiter`;
-client IP = first `X-Forwarded-For` hop, else socket addr) guard the
-abuse-prone endpoints:
+client IP = **last** `X-Forwarded-For` hop — the address the trusted
+front proxy appended; the first hop is client-supplied and spoofable —
+else socket addr) guard the abuse-prone endpoints:
 
 | Endpoint | Limit | Over-quota response |
 |----------|-------|---------------------|

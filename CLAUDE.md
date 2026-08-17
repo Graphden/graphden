@@ -291,7 +291,7 @@ string `"__BUILD_HASH__"`.
 
 ### Frontend Module Structure
 
-The editor frontend is split into ~60 modules. The per-module map (what each
+The editor frontend is split into ~70 modules. The per-module map (what each
 `editor-*.js` / `web/runtime/*.js` file owns) and the load order live in
 [docs/EDITOR_MODULES.md](docs/EDITOR_MODULES.md) — read it before touching
 editor JS. Platform-shared runtime files (`web/runtime/graphden-*.js`) are
@@ -339,7 +339,7 @@ node type-system-ui-resolution.test.js
 ```
 
 (The return-type-rule popover's prose table lives in the graph now —
-`:_rtr-narratives` in `app/editor/fns.edn`, covered by the Clojure
+`:_rtr-narratives` in `app/editor-provenance/fns.edn`, covered by the Clojure
 test `graphden.packages.app.rule-narratives-test`.)
 
 Each `*.test.js` file is a standalone Node script — exit code 0 = PASS,
@@ -463,7 +463,8 @@ A base-fn impl should ideally be **1-2 lines** of actual logic: call the library
 - Hardcoded defaults → use arg `:value` in fns.edn
 - Calling another base-fn → hidden composition, must be fn-def
 - Multi-step processing (parse → transform → format) → decompose into separate base-fns composed via fn-defs
-- More than ~5 lines of actual logic (excluding validation)
+- More than ~20 LOC of actual logic (excluding validation) — the hard
+  ceiling; the **1-2 line ideal** above is the target, not the limit
 
 **Key rule: base-fn MUST NOT call another base-fn.** If impl A calls impl B, and both are registered base-fns, the composition A→B is hidden in code instead of being visible in the graph. Fix: either compose via fn-def, or make the shared logic a private helper (not a base-fn).
 
@@ -514,7 +515,7 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 
 ## Code Conventions
 
-- Public API through `interface.clj` **where a module has one** (today ~5 of the
+- Public API through `interface.clj` **where a module has one** (today 3 of the
   modules — `executor/`, `system/`, `executor_runtime/`); the rest expose no
   façade and are reached through `core.clj` directly. Not lint-enforced.
 - Internal namespaces: `core.clj`, `util.clj`, `constraints.clj`, etc.

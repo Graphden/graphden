@@ -33,9 +33,16 @@ rewritten.
                                            + :result/:error/:finished-at
 ```
 
-**Nothing custom for "long-running" or "worker pool" — it's a plain
-`(future …)`** that the HTTP handler waits on with a timeout. Long
-fns gracefully degrade to polling.
+Every run is submitted to a **bounded `ThreadPoolExecutor`**
+(`make-execution-pool` in `crud/fn_execution/persist.clj`): `core == max`
+workers (`GRAPHDEN_MAX_CONCURRENT_EXECUTIONS`, default 128) plus a bounded
+`LinkedBlockingQueue`. Runs beyond the worker count **park in the queue**;
+only when the queue is ALSO full does submit throw
+`RejectedExecutionException`, which the handler turns into `503` +
+`Retry-After` (`:error-data {:reason :queue-full}`) — never an unbounded
+queue, never a silent drop. A watchdog (`*max-execution-wall-ms*`)
+hard-kills a runaway. The HTTP handler waits on the submitted future with a
+timeout; long fns gracefully degrade to polling.
 
 ## Storage schema
 
@@ -180,28 +187,35 @@ Sets `:cancel-requested? true` + `future-cancel`. **Best-effort**:
   `*cancel-check*` reads the in-process atom, not the row. See
   [SCALING.md](SCALING.md).
 
-### `GET /api/executions?fn-id=X`
+### `GET /api/executions?fn-id=X` (or `?fn-version-id=V`)
 
 ```jsonc
-{"ok": true, "executions": [/* up to 20 most-recent rows for fn-X */]}
+{"ok": true, "executions": [/* most-recent rows, latest first */]}
 ```
 
-Lists rows across all versions of base `:fn-id`, ordered
-`:started-at` desc, hard-limited at 20. Summary shape (no nested
-args). Editor's History panel calls this.
+Pass **`?fn-id=X`** to list runs of the version that resolves on the
+**current branch** (the one ▶ would execute now — not every historical
+version), or **`?fn-version-id=V`** to list runs of one specific version
+(the `⌛` history panel's per-version expand uses this; it wins when both
+params are present). Ordered `:started-at` desc. **`?limit`** is clamped
+to `1–100`, defaulting to `20` when absent or non-numeric. Summary shape
+(no nested args). Editor's History panel calls this.
 
 ## Concurrency caps
 
 Two caps gate how many executions run at once, with different scopes
-(see `crud.fn-execution.persist/acquire-execution-slot!`):
+**and different overflow behaviour** (see
+`crud.fn-execution.persist/acquire-execution-slot!` and
+`make-execution-pool`):
 
-| Cap | Env | Default | Scope |
-|-----|-----|---------|-------|
-| Global | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS` | 128 | Per-POD. Protects the JVM's unbounded soloExecutor from thread exhaustion. |
-| Per-org | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | 32 | **Fleet-wide for tenants** (counts pending `:fn-execution` rows in shared storage, so N pods share one budget); per-pod atom for the public/platform org. |
+| Cap | Env | Default | Scope | Overflow |
+|-----|-----|---------|-------|----------|
+| Global | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS` | 128 | Per-POD. Sizes the bounded execution pool's worker count. | **Parks in the pool queue** (bounded `LinkedBlockingQueue`); it no longer rejects at admission. Only when workers AND queue are both full does submit throw → `503` + `Retry-After` `{:reason :queue-full}`. |
+| Per-org | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | 32 | **Fleet-wide for tenants** (counts pending `:fn-execution` rows in shared storage, so N pods share one budget); per-pod atom for the public/platform org. | **Rejects at admission**, no row or future created: `{:ok false :status :rejected :error-data {:reason :over-capacity}}`. |
 
-Hitting either cap rejects the request without creating a row or future:
-`{:ok false :status :rejected :error-data {:reason :over-capacity}}`. See
+The per-org cap is the admission gate. The global cap moved to the bounded
+pool: it queues work (`park-then-503`) rather than dropping it, and the
+per-pod bound remains the exact thread-exhaustion safety net. See
 [SCALING.md § Fleet-wide per-org quota](SCALING.md).
 
 A second submit-time refusal precedes even the cap check (error-tolerance
@@ -374,7 +388,7 @@ impls can call it unconditionally.
 
 | File                                                      | Coverage                                      |
 |-----------------------------------------------------------|-----------------------------------------------|
-| `test/graphden/crud/fn_execution_test.clj`                | parse / validate (5 rejection reasons) / apply (inline + persisted + args rows) / get / cancel (flag + real interrupt) / list (4 deftests) / TTL sweep (3 deftests, includes regression for `as-instant` Date handling) / failed-path / args-too-large / result-truncation |
+| `test/graphden/crud/fn_execution_test.clj`                | parse / validate (rejection reasons) / apply (inline + persisted + args rows) / get / cancel (flag + real interrupt) / list (branch-scoped + per-version + `?limit` clamp) / bounded-pool queue-full → 503 / per-org over-capacity / TTL sweep (incl. `as-instant` Date regression) / failed-path / args-too-large / result-truncation / exec-stats rollups |
 | `tools/browser-test/edit-execute.test.js`                 | E2E: ▶ popover, fill args, Run, inline result, History panel reveal |
 
-Total: ~25 deftests / ~90 assertions backend, 8 assertions browser.
+Total: ~59 deftests / ~267 assertions backend, 8 assertions browser.

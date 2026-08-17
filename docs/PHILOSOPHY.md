@@ -344,7 +344,7 @@ Five entity types, with deliberate roles:
 | `fn` | Function entity OR type-row. Inheritance via `parent-ids` (M:N). |
 | `slot` | Atomic `(name, type-fn-id)` pair. Immutable post-create; shared across fns. |
 | `fn-slot` | Junction: which slots a fn exposes, with `position`. |
-| `binding` | Per-`(fn, slot)` overlay (value, ref, rename, type-override, terminal, list flags). |
+| `binding` | Per-`(fn, slot)` overlay (value, ref, type-override, terminal, list flags). Renames are rename-view slots via `slot.source-slot-id`, not a binding column. |
 | `binding-list-item` | Sequence content under a list-typed binding. |
 
 Slots are first-class because two fns can carry the **same slot

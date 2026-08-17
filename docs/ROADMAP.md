@@ -156,10 +156,11 @@ singleton and only one pod ever served HTTP.)
 
 Sub-block B — **Cross-process invalidation via Postgres
 LISTEN / NOTIFY** — DONE. Channel `graphden_events`, payload
-`fn:invalidate:<fn-id>|<branch-id>`, delta-recompiled through the
-reverse-deps index. The branch-id is load-bearing: a cached branch
-that inherits from the written branch must recompile, and one that
-doesn't must not.
+`fn:invalidate:<id>|<branch>|<org>` (a positional tail — blank
+trailing segments dropped; an optional epochs slot follows), delta-
+recompiled through the reverse-deps index. The branch-id is
+load-bearing: a cached branch that inherits from the written branch
+must recompile, and one that doesn't must not.
 
 Also shipped alongside: per-service `:cardinality`, advisory-lock
 ownership for `:singleton` services, cross-pod `execution:cancel`
@@ -219,20 +220,21 @@ than text-diffs.
    of your choice, review without text-diff noise" is part of the
    first-launch story for both users and investors.
 3. **Hypothesis under test.** The small vocabulary (5 entity types,
-   ~150 base-fns) should give an AI a tighter problem surface than
+   ~300 base-fns) should give an AI a tighter problem surface than
    an arbitrary 50 kLOC text codebase. Unproven — the MCP server +
    AI-context resource is the experiment that tests it.
 
 #### Launch piece (~4 weeks, critical path)
 
-1. **MCP server.** Graphden exposes its primitives (list / read /
-   create / update / delete fn-def, execute, run tests, query
+1. **MCP server — SHIPPED.** Graphden exposes its primitives (list /
+   read / create / update / delete fn-def, execute, run tests, query
    branches, read history, get AI context) over the Model Context
-   Protocol. Any MCP-capable client (Claude Code, Cursor, Claude
-   Desktop, future clients) can drive graphden against the user's
-   own model + API key. Open-source, ships as a base-fn-graph
-   (`:mcp-server`) wired into the editor process. Per-user auth on
-   every tool call. **~1.5 weeks.**
+   Protocol at `/mcp` (JSON-RPC). Any MCP-capable client (Claude Code,
+   Cursor, Claude Desktop, future clients) can drive graphden against
+   the user's own model + API key. Open-source, ships as the optional
+   `mcp` graph-package (`resources/packages/mcp/`), served per-branch
+   via the branch-router; org-scoped with per-user auth on every tool
+   call. Drop it from `:package-names` to omit.
 2. **Editor "Ask AI" flow.** Button in the editor that prompts for
    instructions + a target branch (defaults to a fresh `ai/<slug>`
    branch), spins up an AI session against the user-configured

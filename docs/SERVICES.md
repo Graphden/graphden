@@ -92,9 +92,9 @@ existing concurrency primitives, return a stopper, declare `:process`.
 
 ## Storage schema
 
-One non-versioned entity + one enum (admin mutates in place; the
-audit trail for what actually ran lives in `:fn-execution` rows the
-services spawn).
+One non-versioned entity + two enums (`:restart-policy`, `:cardinality`;
+admin mutates in place; the audit trail for what actually ran lives in
+`:fn-execution` rows the services spawn).
 
 ### `:service`
 
@@ -107,6 +107,7 @@ services spawn).
 | `:cardinality`    | `:cardinality`    | `:singleton` / `:per-pod` / `:pool` — how many pods run it at once; see § Cardinality. Nullable; nil ≡ `:singleton` (rows that pre-date the field). |
 | `:pool-size`      | `:int`            | Pod count for `:cardinality :pool` (ignored otherwise). Nullable — a `:pool` row with nil/non-positive size degrades to a singleton. |
 | `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil is normalized to the router's default branch at reconcile time (`effective-branch-id`), so a legacy nil-branch row behaves exactly like an explicit default-branch row, including the post-merge `restart-services-on-branch!` pass. Without a router (tests) nil falls back to the reconciler's base ctx. The editor's ⚙ popover picker defaults to the editor's current branch on create. |
+| `:org-id`         | `:text` (null)    | **Tenant owner; NULL ≡ platform.** Load-bearing for fleet sharding: the reconciler drops services whose org this pod doesn't serve (`service-in-shard?`), so a dedicated tenant's services run only on its own pod. Stamped by the tenant service-create endpoint (NOT `OrgScopedStorage` — `:service` is tenant-forbidden write-through). |
 
 ### `:restart-policy` enum
 
@@ -242,10 +243,17 @@ exponential-backoff retry loop per `:restart-policy`:
 | `:on-failure` | Same as `:always` today. A future phase distinguishes "clean exit" vs "crash" once we have a runtime watcher. |
 | `:never`      | Single attempt. On failure, record `:start-failed-at`, leave `:stopper` nil. |
 
-After give-up, the entry stays in `running` so the next reconcile
-pass doesn't busy-loop retrying. Admin can poll for `:start-failed-at`
-to see which services need attention. Manual recovery: disable the
-row, reconcile, fix the underlying issue, enable, reconcile again.
+After the retries within a single pass are exhausted, the reconciler
+does **not** hold the entry as "running" forever. It records the
+**transient `::start-failed`** sentinel and RELEASES the advisory slot,
+so (a) a healthy sibling can immediately fail over and take the service,
+and (b) the top of the *next* reconcile pass drops the sentinel and
+**RE-ATTEMPTS** the start (one cheap retry-free attempt per tick). So a
+transient cause — a port briefly taken, a file not yet present — self-heals
+on the next pass with no operator action. Admin can still poll for
+`:start-failed-at` to see which services are currently failing to start;
+a persistent failure (bad `:fn-id`, permanently-taken port) is re-probed
+each pass until the underlying issue is fixed.
 
 Tests can override the retry behaviour via the optional `start-opts`
 arg on `reconcile-once!`: `{:max-retries 0 :backoff-ms 0}` for
@@ -387,7 +395,7 @@ all loaded packages.
 - Reconciler: `src/graphden/services/reconciler.clj`
 - Integrant: `src/graphden/system/core.clj` → `:exec/service-reconciler`
 - Form parser: graph-native — `resources/packages/app/execution/fns.edn`
-- Free-args rejection (`:service` needs the `:process` effect): `resources/packages/web/crud/fns.edn` → `:_create-service-no-process-rej`
+- Create-service guards: `resources/packages/web/crud/fns.edn` → `:_create-service-free-args-rej` (fn has start-blocking free args) and `:_create-service-no-process-rej` (fn doesn't declare the `:process` effect)
 - Already-running / displacement check: graph-native — `resources/packages/app/execution/fns.edn`
 - HTTP endpoint: `resources/packages/app/execution/{fns.edn,impls.clj}` → `:_reconcile-services`
 - Route: `resources/packages/app/routes/fns.edn` → `:api-services-reconcile`

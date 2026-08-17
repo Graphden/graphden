@@ -30,6 +30,13 @@ Pre-seeded secrets in OpenBao (set up by `docker-compose`'s
 | `api/token` | `fake-token-abc123` |
 | `history-port` | `"8081"` |
 
+Only two of these are real credentials — `user-db/password` and
+`api/token` — and only those two become `:secret-leaf` fn-defs in
+Step 2. The URL, user and port are not secret; the tutorial uses
+them as plain literals (a `[:secret :text]` value can't flow into a
+plain `:text`/`:port` slot). The seeder writes all five so you can
+experiment; the extra three simply go unused.
+
 ## Prerequisites
 
 Run once:
@@ -63,70 +70,65 @@ namespace; the tree shows them without the `_` prefix, folded under
 the namespace's collapsed "internal N" row (click it to reveal
 them).
 
-## Step 2 — Credential lookups (5 fn-defs)
+## Step 2 — Credential lookups (2 secret fn-defs)
 
-There are two ways to make a secret available to a fn-graph; both
-result in a fn-def the rest of the tutorial can `:ref` to. Pick
-one — they're interchangeable for everything below.
+Secrets are created through **one** UI path: the Secrets panel. If
+you're signed in, focus the **secrets** lens chip under the sidebar
+search — the tree narrows to 🔒 rows and a **+ New secret** button
+appears. It asks for `{name, path, value}`: it writes `value` to
+OpenBao at `secret/<path>`, and creates a fn-def whose `parent` is
+the `:secret-leaf` base-fn. `:secret-leaf` is a pure passthrough —
+its single slot `:in` (type `[:secret :text]`) is bound with a
+`:vault-get` **resolver** whose value is the vault path, so the
+executor dereferences the path at arg-resolution time and the impl
+just returns the value. The created fn-def's return-type is
+`[:secret :text]` and the row shows a 🔒 in the sidebar. (There is
+no manual `:path` slot to bind — the panel writes the resolver
+binding for you.)
 
-If you're signed in, focus the **secrets** lens chip under the
-sidebar search — the tree narrows to 🔒 rows and a **+ New
-secret** button appears. It asks for `{name, path, value}`, writes
-the value to OpenBao, and creates a fn-def in graphden whose
-`parent` is the `:secret-leaf` base-fn (a pure passthrough — the
-executor dereferences the vault path at arg-resolution time so the
-impl just returns the value). The created fn-def's return-type is
-`[:secret :text]` and the row shows up with a 🔒 in the sidebar.
+Only two of the seeded values are actually secret — the DB
+**password** and the API **token**. The JDBC URL, DB user and port
+are not credentials; you'll pass those as plain literals in the next
+steps. So create exactly two secrets via **+ New secret**:
 
-Create one secret-leaf-shaped fn-def per path:
-
-| Name | parent | Bind |
+| name | path | value |
 |---|---|---|
-| `_db-url` | `:secret-leaf` | `:path` = `"user-db/url"` |
-| `_db-user` | `:secret-leaf` | `:path` = `"user-db/user"` |
-| `_db-password` | `:secret-leaf` | `:path` = `"user-db/password"` |
-| `_api-token` | `:secret-leaf` | `:path` = `"api/token"` |
-| `_history-port-text` | `:secret-leaf` | `:path` = `"history-port"` |
+| `_db-password` | `user-db/password` | `userpass` |
+| `_api-token` | `api/token` | `fake-token-abc123` |
 
-`_history-port-text` returns a string. Wrap it once to get an int:
-
-| Name | parent | Bind |
-|---|---|---|
-| `_history-port` | `:parse-int` | `:s` = ref `:_history-port-text` |
-
-Click `▶ Run` on each to confirm it returns the seeded value. If
-`_db-url` returns the JDBC URL string, vault is working — but the
-inline Run result panel will say **🔒 Result hidden** for any of the
-`_db-*` / `_api-token` rows. That's not a bug. Those fn-defs inherit
-from `:vault-get`, whose return type is `[:secret :text]`; the
-executor refuses to surface the actual value to the browser. The
-"hidden" status itself confirms vault is reachable — you'll see the
-🔒 chip in the History panel for every successful run.
+Click `▶ Run` on each. The inline Run result panel shows **no
+value** — the executor redacts a `[:secret :text]` result at the
+sink, returning `{:result nil, :tainted? true}`, and the panel
+renders that as an empty/hidden result. That's not a bug: the run
+succeeding at all confirms vault is reachable, and the History
+panel marks every such run as secret-typed.
 
 If you need to **see** a value while debugging (e.g. "is the seeded
-URL the format I expect?"), temporarily swap the fn-def's parent to
-`:const` and re-Run with the same literal you would have stored.
-That's the auto-promote direction: plain literals can flow into the
-SAME slots secrets do, but the OUTPUT type stays plain so the result
-isn't hidden. Swap back to `:vault-get` once you're done.
+URL the format I expect?"), create a throwaway `:const` fn-def with
+the literal you expect and Run that — a plain literal's OUTPUT type
+stays plain, so its result isn't hidden. Delete it when you're done.
 
 To compose: any string-op fn-def whose ROOT base-fn carries the
-`:secret-if-tainted` propagator (`:str-upper`, `:str-replace`,
-`:substring`, …) preserves the secret marker through the result.
-`▶ Run` on the composed fn-def is also hidden. That's how the type
-system protects you against accidental leaks — `(upper (vault-get …))`
-returns a `[:secret :text]`, refusing to flow into anything that
-declares its slot as plain `:text` downstream.
+`:secret-if-tainted` propagator (`:str`, `:str-upper`, `:str-lower`,
+…) preserves the secret marker through the result. `▶ Run` on the
+composed fn-def is hidden too. That's how the type system protects
+you against accidental leaks — `(upper (secret-leaf …))` returns a
+`[:secret :text]`, refusing to flow into any slot declared plain
+`:text` downstream.
 
 ## Step 3 — Shared "always pass these creds" helpers
 
-Every SQL call needs `:url`, `:user`, `:password`. Wrap each base
-fn once so the rest of the graph can bind only what differs:
+Every SQL call needs `:url`, `:user`, `:password`. On `:sql-exec`
+and `:sql-query` only the **`:password`** slot is secret-aware
+(`[:secret :text]`) — `:url` and `:user` are plain `:text`, so you
+bind them as literals (a `[:secret :text]` value would be *rejected*
+from a plain slot). Wrap each base fn once so the rest of the graph
+binds only what differs:
 
 | Name | parent | Bind |
 |---|---|---|
-| `_db-exec` | `:sql-exec` | `:url` = ref `:_db-url`, `:user` = ref `:_db-user`, `:password` = ref `:_db-password` |
-| `_db-query` | `:sql-query` | same three refs |
+| `_db-exec` | `:sql-exec` | `:url` = `"jdbc:postgresql://user-postgres:5432/userdb"`, `:user` = `"userapp"`, `:password` = ref `:_db-password` |
+| `_db-query` | `:sql-query` | same three binds |
 
 After this, anything that runs SQL inherits the creds for free.
 The only free args left on `_db-exec` are `:sql` and `:params` —
@@ -235,13 +237,20 @@ A second HTTP server, on port 8081, with one route.
 
 ### 7c. The second HTTP server
 
+Bind the port as a **literal** `8081`. `:http-server`'s `:port` slot
+is a refinement type (`[:refine :int [:and [:>= 1] [:<= 65535]]]`),
+and the checker can only prove a *literal* int satisfies that range —
+a value arriving through a plain `:int` ref (e.g. a parsed secret)
+would fail the type check, so the port is not a good fit for a vault
+lookup.
+
 | Name | parent | Bind |
 |---|---|---|
-| `history-server` | `:http-server` | `:handler` = ref `:history-router`, `:port` = ref `:_history-port` |
+| `history-server` | `:http-server` | `:handler` = ref `:history-router`, `:port` = `8081` |
 
 `history-server` is also 0-free-args, so `⚙` lights up here too.
 
-## Step 8 — Declare both as services and restart
+## Step 8 — Declare both as services
 
 For **both** `poll-cron` and `history-server`:
 
@@ -251,18 +260,14 @@ For **both** `poll-cron` and `history-server`:
 3. You'll see a confirmation; a small `●` service-badge appears on
    the fn's root row.
 
-Now the `:service` rows exist in graphden's DB but they're not
-running yet. One restart picks them up:
+**No pod restart is needed.** Saving the service settings fires two
+calls: it writes the `:service` row, then immediately POSTs
+`/api/services/reconcile`, which drives the reconciler to start the
+newly-enabled services in-process. (A restart would also pick them
+up on boot — the reconciler reads enabled rows on startup — but the
+Save already did it.)
 
-```bash
-bb rebuild
-```
-
-(Or just `docker compose restart executor` — faster if you haven't
-edited any Clojure code.)
-
-The reconciler's init-key reads enabled service rows on startup
-and launches each. Tail the logs:
+Tail the logs to watch them come up:
 
 ```bash
 docker logs -f graphden-executor 2>&1 | grep -iE "service|reconc|poll-cron|history-server"
@@ -321,8 +326,9 @@ You're querying the **tenant** DB, not graphden's.
 
 ## Cleanup
 
-Disable the two services (uncheck **Enabled** in the `⚙` popover)
-and `bb rebuild` — the reconciler stops them. To wipe the table:
+Disable the two services (uncheck **Enabled** in the `⚙` popover and
+**Save**) — the Save's reconcile call stops them, no restart needed.
+To wipe the table:
 
 | Name | parent | Bind |
 |---|---|---|

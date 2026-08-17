@@ -92,10 +92,11 @@ branch pays a rebuild on the next read.
   current package set).
 - Subsequent requests: O(1) lookup in the atom.
 - Write on branch X: invalidates X only.
-- Memory: one ExecutionContext per active branch. For a workflow
-  with a handful of branches this is fine; multi-tenant prod will
-  want LRU eviction (`invalidate!` exists, the caller side is
-  missing).
+- Memory: one ExecutionContext per active branch, bounded by an **LRU
+  cap** (`default-max-cached-branches`, default 16; tune per deployment
+  via `GRAPHDEN_MAX_CACHED_BRANCHES`). Adding a branch beyond the cap
+  evicts the least-recently-used non-default entry, so a multi-tenant pod
+  churning through many branches keeps a bounded working set.
 
 ### Why singleton atom, not on ctx
 
@@ -145,7 +146,7 @@ read endpoints sit behind it too (matches `/api/services`).
 | GET    | `/api/branches/:ref`                     |                                       | `{ok, branch}` or `{ok: false, error}` |
 | POST   | `/api/branches`                          | `{name, base-branch-id?, forbid-invalid??, write-policy?}` | `{ok, branch}` — the creating principal's stable id is stamped as `owner-id` |
 | POST   | `/api/branches/:ref/policy`              | `{write-policy}` ∈ `open`/`owner`/`admins` | `{ok, write-policy}` (`open` clears to null) — WHO may flip is the tenancy authorize-writer's call |
-| DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}` |
+| DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}`. Rejected when the branch has children (`:reason :branch-has-children`) or is a live **merge SOURCE** (`:constraint-violation/branch-is-merge-source` — deleting it would revert every target it merged into, since merge is by-reference; delete those targets first) |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
 | GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
 | POST   | `/api/branches/:ref/merge`               | `{source, conflict-resolutions?}`     | `{ok, merge}`, `{ok: false, reason: :merge-conflict, conflicts}`, or `{ok: false, reason: :merge-protection-violation, error, invalid-fns}` (409 — target's `forbid-invalid?` policy over recorded type diagnostics) |

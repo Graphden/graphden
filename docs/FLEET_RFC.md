@@ -584,12 +584,17 @@ is the foundation this RFC reuses — not new work.**
 
 ## 11. Open questions / risks
 
-- **Cold-start number** — RE-MEASURED cleanly (2026-07-12): ~141 s to serving,
-  decomposed as fn-entities + type-check sweep ~55 s and eager-compile of 4085
-  fns ~81 s. It is **compute-bound**, not dependency-reconnect or class-loading —
-  so AppCDS (which only speeds class-load) barely helps, and CRaC (which captures
-  the whole compiled registry) is the lever. The earlier ~35 s figure predates
-  the graph's growth to 4085 fns.
+- **Cold-start number** — now **~30–40 s to serving** (canonical figure — see
+  [OPERATIONS.md § Health & readiness](OPERATIONS.md)). The 2026-08-17
+  memoization collapsed both dominant costs — `compile-all` ~60 s → ~1.2 s
+  (memoize `fn-typed-fn-ids` + env-bindings) and the type-check sweep
+  ~141 s → ~24 s (memoize `effective-ref-return` across passes) — so the earlier
+  clean measurement (2026-07-12: ~141 s, decomposed as sweep + eager-compile) no
+  longer holds; the **sweep now dominates** what little remains. It is still
+  **compute-bound**, not dependency-reconnect or class-loading, so AppCDS barely
+  helps; CRaC (which captures the whole compiled registry) is still the lever for
+  eliminating the residual boot cost, though the memoization sharply narrowed the
+  gap it closes.
 - **CRaC feasibility** — substrate CONFIRMED (CRIU v3.16.1 + Zulu 21 CRaC JDK
   both work here, §5.1). Remaining risk is the integration: open resources (Hikari
   pool, http-kit listener, vault client, notify/advisory-lock connections, SSE)

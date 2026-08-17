@@ -166,7 +166,7 @@ Goal: "an order total = sum of line items, plus 20% tax".
   :namespace "app.orders"
   :parent :with-tax
   :args {:amount :subtotal}
-  :description "Line-item subtotal, taxed."}]}
+  :description "Line-item subtotal, taxed."}]
 ```
 
 Then `execute-fn "order-total" {:nums [10 20 30]}` → `72.0`

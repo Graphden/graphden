@@ -396,8 +396,10 @@ JVM automatically.
 ### Slow Startup
 
 Initial startup loads packages, runs the type-check sweep, and
-compiles all fn-defs into closures. This is normal and takes ~35s
-(hence the 90s Docker start-period).
+compiles all fn-defs into closures. This is normal and takes
+**~30–40 s** (the canonical cold-boot figure — see
+[OPERATIONS.md § Health & readiness](OPERATIONS.md); hence the 90 s
+Docker start-period).
 
 ## Scaling
 

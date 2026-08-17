@@ -5,7 +5,8 @@ that make up graphden's slot/binding model and explain why
 they're separate.
 
 **Concepts introduced**: `slot`, `fn-slot`, `binding`,
-`binding-list-item`, `slot identity`, `rename-to`, `type-override`.
+`binding-list-item`, `slot identity`, rename-view slots
+(`slot.source-slot-id`), `type-override`.
 
 ## Why three entities instead of one
 

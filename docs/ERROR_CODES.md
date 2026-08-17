@@ -42,6 +42,10 @@ SUBMIT-time rejections carry 4xx; the 5 MB result cap is a 200 with
 
 Previously-undocumented types now covered by the table:
 `:constraint-violation/reparent-cross-branch` (400),
+`:constraint-violation/branch-is-merge-source` (400 via the
+`constraint-violation/*` family — a `DELETE /api/branches/:ref` guard;
+the branch is a live merge SOURCE and deleting it would revert every
+target it merged into, see [VERSIONING.md](VERSIONING.md)),
 `:constraint-violation/route-handler-shape` (400 — a bare-route
 handler's declared `:lambda-params` outside `[]`/`[:request]`),
 `:packages/route-handler-shape` (400 — the same contract at package

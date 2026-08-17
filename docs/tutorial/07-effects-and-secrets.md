@@ -10,7 +10,7 @@ leaking into non-secret sinks.
 marker, `taint propagation`, `return-type-rule`, `executor hide
 on :secret`.
 
-## The nine effect categories
+## The ten effect categories
 
 ```
 :db        Reads or writes graphden's storage
@@ -22,7 +22,15 @@ on :secret`.
 :process   Spawns supervised background work (service-eligibility marker)
 :state     Mutates in-graph state (`:swap` / `:reset` on a `:cell` / `:atom`)
 :raw-sql   Arbitrary SQL bypassing org-scoped storage (cloud-blocked)
+:cross-org Runs a fn in another org's context (platform-only)
 ```
+
+`:cross-org` is a **platform-only** category: it's declarable (so the
+checker admits and propagates it), but every tenant `:allowed-effects`
+set forbids it — a tenant graph that references it gets
+`:execution/forbidden-effect`. On a self-hosted single-tenant install
+it's inert. So for tenant authoring you work with the first nine; the
+tenth exists for the cloud platform router.
 
 Each category is a single keyword. Effects are EXPLICIT — there's
 no "effectful? true" generic flag. If you write
@@ -119,8 +127,8 @@ selected fn). Clicking it opens a small server-rendered form:
   this fn") and **explicit contract** ("Drift checker compares
   computed effects against the ticked set").
 - Under them, one checkbox per declarable category — the full
-  canonical set of nine, including `:process`, `:state`, and
-  `:raw-sql`.
+  canonical set of ten, including `:process`, `:state`, `:raw-sql`,
+  and the platform-only `:cross-org` (inert for tenant graphs).
   The checkboxes stay disabled until you pick *explicit
   contract*.
 - **Pinned purity**: pick *explicit contract* and tick NOTHING.
@@ -220,20 +228,24 @@ know "this value is now tainted."
 
 ## The executor hides secret returns
 
-When a fn's return type is `[:secret T]`, `/api/execute` does
-NOT include the result in the response. Instead:
+When a fn's return type is `[:secret T]`, `/api/execute` redacts
+the result at the sink (`redact-outcome`): the value is replaced
+with `nil` and a `tainted?` flag is set. The succeeded response is:
 
 ```json
 {
   "status": "succeeded",
-  "result-hidden": true,
-  "result-type": ["secret", "text"]
+  "result": null,
+  "tainted?": true
 }
 ```
 
-The editor's execute-result pane shows "Result hidden — value
-is secret-typed" instead of the actual value. History rows show
-a 🔒 badge instead of a truncated value preview.
+(A persisted row stores `:result null` and an `:error-data {:reason
+:tainted}` sidecar.) There is no `result-hidden` / `result-type`
+key — the value simply never leaves the server. The editor's
+execute-result pane renders the redacted body as an empty/hidden
+result; History rows mark the run as secret-typed rather than
+showing a value preview.
 
 This applies AT THE BOUNDARY (HTTP response). Inside the
 graph, secret values flow freely between fn-defs — they're

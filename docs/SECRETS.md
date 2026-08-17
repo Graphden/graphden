@@ -141,7 +141,7 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/strings` | All 22 fns propagate (content-passing). |
 | `core/collections` | All 35 fns wrap existing structural rules. |
 | `core/logic` | All 15 fns propagate (passthrough / conditional). |
-| `core/arithmetic` | All 13 fns propagate. `(eq secret 42)` leaks; `:lt` / `:gt` / `:eq` / `:neq` included. |
+| `core/arithmetic` | All 14 fns propagate (`:add` `:sub` `:mul` `:div` `:mod` `:quot` `:neg` `:abs` `:eq` `:neq` `:lt` `:lte` `:gt` `:gte`). `(eq secret 42)` leaks; `:lt` / `:gt` / `:eq` / `:neq` included. |
 | `core/system` | 15 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |
 | `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
@@ -170,22 +170,23 @@ Both the synchronous inline path (`apply-execute`) and the
 asynchronous tail-future path (`record-completion!`) call
 `redact-outcome` before writing the row.
 
-## Editor-side rendering (T5)
+## Result rendering (T5)
 
-`editor-execute-result.js`:
+The tainted-vs-plain decision is made at the SINK (T4 `redact-outcome`),
+not in the browser — by the time a body reaches any renderer the secret
+value is already gone (`:result nil`, `:error-data {:reason :tainted}`),
+so there is no client-side "is this tainted?" branch to get wrong. The
+former editor-side path (`isTaintedExecuteResponse` / `renderTaintedPane`
+in `editor-execute-result.js`) was **removed 2026-06-18**.
 
-- `isTaintedExecuteResponse(body)` — detects both the inline shape
-  (`{tainted?: true}`) and the persisted shape
-  (`{error-data: {reason: "tainted"}}`).
-- `renderTaintedPane()` — a 🔒 card with "Result hidden" + a one-line
-  hint pointing at the debug-with-plain-text workflow.
-
-`editor-execute.js` checks `isTaintedExecuteResponse` BEFORE the
-normal result render in both the inline-success path and the
-polling-finalisation path.
-
-`editor-execute-history.js` shows a 🔒 badge in the row head and
-the preview text "hidden — secret-typed".
+Rendering is now a **server-rendered graph partial**: `/partials/execute-result`
+(GET by `id`) and `/partials/execute-result-inline` (POST the non-persisted
+inline body) share one `:render-execute-result-hiccup` walker
+(`resources/packages/app/editor-execute/fns.edn`). It renders the
+already-redacted body — a hidden/nil result simply shows no value — and
+`editor-execute.js` swaps that HTML into the result host. The remaining JS
+(`editor-execute-result.js`) is render-only spinner/pending/error helpers
+with no taint logic.
 
 ## Admin UX — Secrets panel (B2 / C1 / C2)
 

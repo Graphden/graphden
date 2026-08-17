@@ -39,7 +39,7 @@ Two places:
    form. See [PACKAGES.md](../PACKAGES.md).
 2. **Inside the running editor** — when you click `+` in a
    namespace, the editor creates a fn entity directly via
-   `/api/fns`. Same shape, different entry point.
+   `POST /api/entities/fn`. Same shape, different entry point.
 
 For this lesson assume you're typing into the editor. The
 `fns.edn` form is what you'd write for code review.

@@ -47,4 +47,13 @@
         (is (= "DENY" (get-in resp [:headers :X-Frame-Options])))
         (is (= "nosniff" (get-in resp [:headers :X-Content-Type-Options])))
         (is (= "strict-origin-when-cross-origin"
-               (get-in resp [:headers :Referrer-Policy])))))))
+               (get-in resp [:headers :Referrer-Policy])))
+        ;; CSP + HSTS added 2026-08-17 (pre-release hardening). CSP is
+        ;; script-source-agnostic on purpose (inline editor scripts) —
+        ;; assert the clickjacking/embedding directives are present.
+        (is (= "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+               (get-in resp [:headers :Content-Security-Policy])))
+        (is (= "max-age=31536000; includeSubDomains"
+               (get-in resp [:headers :Strict-Transport-Security])))
+        (is (= "0" (get-in resp [:headers :X-XSS-Protection]))
+            "legacy XSS auditor disabled (modern-browser recommendation)")))))

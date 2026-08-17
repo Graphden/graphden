@@ -78,7 +78,7 @@ The predicate vocabulary is `[:= v]`, `[:not= v]`, `[:< v]`,
 `[:> v]`, `[:<= v]`, `[:>= v]`, `[:and p1 p2 …]`,
 `[:or p1 p2 …]`, `[:in [a b c]]` (membership in a finite vector),
 `[:matches re]` (regex), plus a couple of others (see
-`types.core/refinement-applies?`).
+`types.check.literals/literal-satisfies-refinement?`).
 
 Refinements chain. `:non-empty-text` is `[:refine :text [:not= ""]]`
 (and `:non-blank-text` is `[:refine :text [:matches "\\S"]]`).
@@ -338,7 +338,7 @@ save itself.
   form without writing a fn-row. Used by the system bootstrap
   to expose `:port`, `:positive-int`, etc.
 - **Refinement constraint dialect** — the full predicate
-  vocabulary is in `types.core/refinement-applies?`. New
+  vocabulary is in `types.check.literals/literal-satisfies-refinement?`. New
   predicates are easy to add as long as their evaluator is
   deterministic.
 - **Subtype/unify** — how the type-checker DECIDES that

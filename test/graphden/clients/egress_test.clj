@@ -155,6 +155,12 @@
                "jdbc:postgresql://8.8.8.8:5432/db?sslhostnameverifier=evil.V"
                "jdbc:postgresql://8.8.8.8:5432/db?authenticationPluginClassName=evil.A"
                "jdbc:postgresql://8.8.8.8:5432/db?loadBalanceHosts=true"
+               ;; local-file-path readers (pgjdbc + MySQL) — file-probe / disclosure oracle
+               "jdbc:postgresql://8.8.8.8:5432/db?sslrootcert=/etc/passwd"
+               "jdbc:postgresql://8.8.8.8:5432/db?sslkey=/etc/shadow"
+               "jdbc:postgresql://8.8.8.8:5432/db?sslcert=/root/.ssh/id_rsa"
+               "jdbc:postgresql://8.8.8.8:5432/db?loggerFile=/tmp/x"
+               "jdbc:mysql://8.8.8.8:3306/db?serverRSAPublicKeyFile=/etc/passwd"
                "jdbc:postgresql://8.8.8.8:5432/db?ssl=true&socketFactory=evil.SF"]]
       (let [ed (try (egress/check-sql-target! u) nil
                     (catch clojure.lang.ExceptionInfo e (ex-data e)))]

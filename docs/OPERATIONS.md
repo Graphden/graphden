@@ -86,6 +86,15 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
 
 ## Health & readiness
 
+> **Cold-boot cost (canonical figure).** A cold start — package load, the
+> type-check sweep, then eager-compile of every fn-def — takes **~30–40 s to
+> serving** (measured 2026-08-17, after the compile/sweep memoization that cut
+> `compile-all` from ~60 s to ~1.2 s; the sweep now dominates). Size the
+> Dockerfile healthcheck `start-period` and any k8s startup probe against this.
+> Other docs reference THIS number rather than restating it. A *runtime*
+> full recompile (no sweep — just `compile-all`) is now a few seconds, not the
+> tens of seconds it once was.
+
 - `GET /health` — **readiness** signal (and startup). It is a graph fn behind
   the compiled registry, so it stays 200 only while the registry is warm: a pod
   mid-cold-boot reads not-ready and is correctly de-rotated. Give the startup
@@ -94,7 +103,8 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
   migration) no longer de-rotates the pod: it is **stale-while-revalidate** —
   the ctx keeps serving its existing (stale) registry while a background
   `rebuild-optimistic!` refreshes it, so `/health` stays 200 and no request
-  blocks behind the ~50 s recompile. Staleness is bounded by one rebuild; the
+  blocks behind the recompile (a few seconds since the `compile-all`
+  memoization — see the cold-boot note above). Staleness is bounded by one rebuild; the
   window is served, never hung. (Only a genuinely cold holder — boot, or a
   divergent cold branch's first access — still compiles on the request path,
   and that is per-ctx, so it never hangs the whole pod.)
@@ -102,8 +112,9 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
   short-circuits in `branch-router/dispatch` before any registry access). Point
   the k8s livenessProbe / any restart-on-unhealthy check HERE, never at
   `/health`: a liveness probe on `/health` kills a busy-but-alive pod during a
-  runtime recompile → discards the in-flight compile → cold boot (~115 s)
-  cascade. `/livez` keeps the pod alive; `/health` (readiness) de-rotates it
+  runtime recompile → discards the in-flight compile → a cold-boot cascade
+  (the full ~30–40 s cold start above, paid over and over). `/livez` keeps the
+  pod alive; `/health` (readiness) de-rotates it
   until the compile lands. (Helm chart: `startup + readiness → /health`,
   `liveness → /livez`.)
 - `GET /version` — the three build-section hashes (`bb verify` consumes these).

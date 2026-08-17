@@ -105,23 +105,41 @@ of the table.
 
 ## Who may manage grants
 
-Same rule as lesson 16: `:grant` is a tenant-forbidden entity,
-so listing and mutating grants is an **operator** (platform-org)
-activity, whatever the panel's mount-gating suggests. Tenants
-are the *subjects* of grants, not their administrators.
+Grants are **org-scoped RBAC**, administered from WITHIN the org —
+not by the platform operator. The **Grants** panel mounts, and its
+create / revoke endpoints authorize, only for a user who may hand
+out grants in their own org: the org **owner**, or a holder of the
+`manage-grants` org-management capability. Every other member sees
+no panel. (The operator, on the public platform org, holds no
+`manage-grants` and does not administer a tenant's grants.) Tenants
+are both the *subjects* AND the *administrators* of grants within
+their org.
+
+### Roles — bundling capabilities
+
+A **role** is a named bundle of grants an org owner (or a
+`manage-roles` holder) defines once and assigns to members, so you
+don't re-issue the same capability set per person. It has its own
+**Roles** sidebar panel (`GET /partials/roles-admin`, gated on
+`manage-roles`), parallel to Grants. Lesson 16's "delegate a
+capability via a role" points here. (A full roles walk-through is
+still a planned lesson; for now, know the panel exists and is
+org-scoped like Grants.)
 
 ## Try it
 
-(Operator account on a tenancy-addon instance.)
+(An org owner — or a `manage-grants` holder — on a tenancy-addon
+instance.)
 
-1. Create `carol` in org `acme` (lesson 16).
-2. Grant `carol` / `bind-args` / `acme.settings`. As carol:
-   editing a binding VALUE under `acme.settings` works; renaming
-   the fn or changing its parent is denied — that needs `write`.
+1. Add `carol` to your org `acme` (lesson 16).
+2. In **Grants**, grant `carol` / `bind-args` / `acme.settings`. As
+   carol: editing a binding VALUE under `acme.settings` works;
+   renaming the fn or changing its parent is denied — that needs
+   `write`.
 3. Replace it with `write` on `acme` — now structural edits pass
    anywhere under `acme`, including `acme.settings` (parent-path
    coverage).
-4. Delete carol (lesson 16) and watch her grant rows vanish with
+4. Remove carol (lesson 16) and watch her grant rows vanish with
    her — the cascade from the other side.
 
 ## What we glossed over

@@ -30,10 +30,12 @@ already bootstraps onto the substrate.
   the AI slop you warn about?"
 - The compensating discipline is what answers that: a layered
   storage-protocol architecture, a mutually-recursive type checker that
-  survives **2,000+ tests** (`test/` holds ~2.2k `deftest`), an ADR for every
+  survives **2,000+ tests** (`test/` holds ~2.5k `deftest`), an ADR for every
   load-bearing decision, 0 `TODO`/`FIXME` and 0 stray `println` left in
-  `src`, public API funneled through `interface.clj`, and a rebase (not
-  merge-soup) history — ~10 merge commits out of ~1.5k. AI supplies
+  `src`, an `interface.clj` public façade **where a module has one** (a
+  convention, not a rule — today 3 of ~20 modules; the rest are reached
+  through `core.clj` directly), and a rebase-first (not merge-soup)
+  history — ~64 merge commits out of ~2.3k. AI supplies
   throughput; it does **not** supply a correct build-vs-buy ADR rejecting
   Dolt. The tax text imposes on machine-authored code was paid once, under
   review, to build the substrate that removes it for everyone above.

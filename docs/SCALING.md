@@ -11,6 +11,14 @@ cell load/evict, a leader-locked rebalancing controller, and forward-hop routing
 to a cell's holder instead of `421`) is [FLEET_RFC.md](FLEET_RFC.md), with the
 ops guide in [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
 
+> **Where the tenancy code lives.** This repo (the open core) ships only the
+> core-side seam `tenancy/context.clj`. The *policy* pieces this doc names —
+> `tenancy/addon.clj`, `tenancy/app_router.clj`, `tenancy/storage.clj`
+> (`OrgScopedStorage`, `visible?`), `reject-cross-org-refs!`, and the `421`
+> misdirected-request enforcement — live in the **private `graphden-tenancy`
+> repo** and plug into core via config (see [TENANCY_SEAM.md](TENANCY_SEAM.md)).
+> Without the addon the system is single-tenant and none of them are present.
+
 ## The one idea
 
 Four separate-looking problems — "don't compile every tenant's fns",
@@ -185,11 +193,14 @@ source of truth, so a crashed pod leaks no counter (the zombie/TTL sweeper
 reaps its rows), unlike a durable counter table would.
 
 The **global** cap (`*max-concurrent-executions*`, default 128) stays
-per-pod: it protects each JVM's unbounded soloExecutor from thread
-exhaustion, which is a per-process safety property, and it remains the exact
-bound. The per-org fleet count has a bounded TOCTOU slack (two pods can both
-admit before either row exists), which is fine for a fairness limit — the
-global per-pod cap is the hard safety net.
+per-pod: it sizes the worker count of each JVM's **bounded execution pool**
+(`make-execution-pool` — `ThreadPoolExecutor` + bounded queue), which is a
+per-process thread-exhaustion safety property. It no longer rejects at
+admission: overflow PARKS in the pool queue, and only a full worker set AND
+full queue turns a submit into `503` + `Retry-After` (`:queue-full`). The
+per-org fleet count has a bounded TOCTOU slack (two pods can both admit
+before either row exists), which is fine for a fairness limit — the global
+per-pod bound is the hard safety net.
 
 The **public** org (platform / single-tenant) keeps the per-pod atom for its
 per-org cap: it isn't a metered tenant, and its executions are the hot editor

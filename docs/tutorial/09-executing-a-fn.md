@@ -131,7 +131,8 @@ and expands a panel listing this fn's PERSISTED runs (in-memory
 non-persisted runs never appear there). Each row shows:
 
 - The args used
-- The status (`succeeded` / `failed` / `cancelled` / `running`)
+- The status (`succeeded` / `failed` / `cancelled` / `pending` —
+  a still-running persisted row is `pending` until it resolves)
 - The result (truncated to a one-liner)
 - A `Repeat` button — re-fills the form with the same args so
   you can re-run
@@ -160,26 +161,26 @@ impl-specific.
 ## Programmatic execute
 
 ```bash
-curl -X POST http://localhost:8080/api/execute \
+curl -X POST http://localhost:9002/api/execute \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -d '{"fn-name": "str-len", "args": {"string": "hello"}}'
 ```
 
-Returns immediately with `{:execution-id "..." :status "running"}`
+Returns immediately with `{:execution-id "..." :status "pending"}`
 when the fn is long-running; for fast fns the response carries
 the result directly.
 
 Poll status:
 
 ```bash
-curl http://localhost:8080/api/execute/<id> ...
+curl http://localhost:9002/api/execute/<id> ...
 ```
 
 Cancel:
 
 ```bash
-curl -X POST http://localhost:8080/api/execute/<id>/cancel ...
+curl -X POST http://localhost:9002/api/execute/<id>/cancel ...
 ```
 
 The shape of `:result` mirrors the in-memory return value —

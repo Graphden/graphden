@@ -6,8 +6,9 @@ the caller's interface, and how to write reusable templates by
 leaving slots intentionally unbound.
 
 **Concepts introduced**: `free argument`, `bound vs free slot`,
-`free-arg propagation`, `template fn-def`, `:as` rename, `free-arg
-strip`.
+`free-arg propagation`, `template fn-def`, `:as` rename, free-arg
+**placeholder nodes** on the canvas + the optional / HOF-captured /
+deep-free bottom-of-card strips.
 
 ## What "free" means
 
@@ -76,8 +77,8 @@ so this reads "length is greater than threshold". What are
   surfaced as a free arg via `:as`.
 
 So `:longer-than`'s public interface is `{:string ... :threshold
-...}`. Two free args. The editor's free-arg strip at the bottom
-of the card lists exactly those.
+...}`. Two free args. The editor draws each of them as a
+**placeholder node** on the canvas (see the next section).
 
 ## `{:as :name}` — declare a free arg explicitly
 
@@ -106,24 +107,31 @@ public name:
 `:get-users-route` binds both free args. It has zero free args
 of its own.
 
-## The free-arg strip
+## Seeing free args in the editor
 
-Open any composed fn-card. At the BOTTOM of the card is a
-strip showing the free args:
+Open any composed fn-card and look at the CANVAS, not a text
+strip. Each **required free arg** renders as its own **placeholder
+node** hanging off the fn — a small empty node with a binder button
+(`+`) you click to bind it (a value, a ref, or a rename). That's the
+visual "this slot is still open" signal, and it's where you fill a
+slot in without leaving the graph.
 
-```
-free args: ?path  ?handler
-```
+The run form mirrors them: open the row's `⋯` popover and click
+▶ Run → the execute popover has exactly one field per free arg. A
+fn with **no** free args (every slot bound) shows *"No free
+arguments — click Run to invoke"* instead of a form.
 
-Each `?name` is one free arg. Open the row's `⋯` popover and
-click ▶ Run → the execute popover form has exactly these
-fields. The strip is
-read-only; it's surfaced from the storage chain, not
-configurable per-card.
+Three thinner, informational **strips** sit at the BOTTOM of the
+card for the args that AREN'T required-and-unbound — they're read-only,
+surfaced from the storage chain:
 
-If you see `(none)` instead — every slot is bound, the fn is
-"complete"; the run popover shows *"No free arguments — click
-Run to invoke"* instead of a form.
+- **`?name`** — *optional* args left unset (they carry a default, so
+  they're a nicety, not part of the interface). Hover shows the
+  declared type and which ancestor introduced the slot.
+- **`λname`** — args *captured through a HOF* subtree (e.g. `:request`
+  on a Ring-handler subtree — see lesson 06).
+- **`⇣name`** — *deep-free* args this fn accepts on the caller's
+  behalf whose actual use-sites live deeper in the chain.
 
 ## Free args + HOF
 
@@ -196,8 +204,8 @@ out.
             :headers {:value {"Content-Type" "text/plain"}}}}
    ```
 
-   Free args strip should show `?status  ?body`. `Content-Type`
-   is baked in.
+   The canvas should show two placeholder nodes — `status` and
+   `body` — and the Run form two fields. `Content-Type` is baked in.
 
 2. Specialize:
 
@@ -208,9 +216,9 @@ out.
             :body {:as :message}}}
    ```
 
-   Free args strip now shows just `?message`. `:status` is
-   pinned to 200; `:body` is renamed from internal `:body` to
-   the public `:message`.
+   Now there's just one placeholder node — `message` — and one Run
+   field. `:status` is pinned to 200; `:body` is renamed from
+   internal `:body` to the public `:message`.
 
 3. Run `:tutorial-200-ok` with `:message = "OK"`. Result is a
    Ring response map.

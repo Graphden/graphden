@@ -120,7 +120,7 @@ This is the tricky part. Consider a Ring handler:
 ```edn
 {:name :get-user
  :parent :json-handler
- :args  {:body :build-user-doc}}
+ :args  {:data :build-user-doc}}
 
 {:name :build-user-doc
  :parent :assoc
@@ -161,7 +161,7 @@ Two HOF flavours interact with closure-capture differently:
 
 | Flavour | Examples | Per-call input shape |
 |---|---|---|
-| **Iterating** | `:map`, `:filter`, `:update-vals` | The structural slot is named `:item` (or `:k`, `:v` for maps); the callable's own same-named arg (or its single unambiguous free) receives the element |
+| **Iterating** | `:map`, `:filter`, `:update-vals` | The structural slot is named `:item` for sequences (`:map`, `:filter`), `:value` for the map key/value HOFs (`:update-vals`, `:update-keys`), and `:pair` for `:reduce` (the `[acc item]` vector); the callable's own same-named arg (or its single unambiguous free) receives the element |
 | **One-shot** | `:future`, `:assoc-fn`, `:invoke` | The structural slot is named `:arg` (a generic placeholder); the callable **declares** its call-site parameters via `:lambda-params` (`[]` = everything captured) |
 
 When the callable has several candidate free args and no

@@ -102,10 +102,16 @@ email exists (no account enumeration), and a successful
 `POST /auth/reset` **signs the account out everywhere** (every session
 revoked) so a stolen session doesn't survive a recovery.
 
-Three **per-IP fixed-window limiters** (`crypto/fixed-window-limiter`;
-client IP = **last** `X-Forwarded-For` hop — the address the trusted
-front proxy appended; the first hop is client-supplied and spoofable —
-else socket addr) guard the abuse-prone endpoints:
+Three **per-IP fixed-window limiters** (`crypto/fixed-window-limiter`)
+guard the abuse-prone endpoints. The client IP is the entry **N
+positions from the END** of `X-Forwarded-For`, where
+`N = GRAPHDEN_TRUSTED_PROXIES` (default `0`): only the rightmost N hops
+(the ones your own trusted proxies appended) are trusted, and any hops
+a client injected to its left are ignored. With **0 trusted proxies the
+header is ignored entirely** and the socket `remote-addr` is used — so a
+spoofed `X-Forwarded-For:` never bypasses the limiter on a
+directly-reachable deployment. The cloud runs behind Caddy with
+`GRAPHDEN_TRUSTED_PROXIES=1`. The limited endpoints:
 
 | Endpoint | Limit | Over-quota response |
 |----------|-------|---------------------|

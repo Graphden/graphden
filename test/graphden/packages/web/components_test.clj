@@ -219,3 +219,83 @@
     (is (= [:button {:data-action "custom" :data-custom-handler "alert('hi')"} "Greet"]
            (gh/exec-name :custom-button
                          {:label "Greet" :body "alert('hi')" :extras {}})))))
+
+
+;; =============================================================================
+;; Text + layout set — :heading / :paragraph / :stack / :row / :nav-bar /
+;; lists / tables / :field-label
+;; =============================================================================
+
+(deftest heading-level-picks-tag-test
+  (testing "the :level slot computes the h1..h6 tag"
+    (is (= [:h1 "Title"] (gh/exec-name :heading {:level 1 :content "Title"})))
+    (is (= [:h3 "Sub"] (gh/exec-name :heading {:level 3 :content "Sub"})))))
+
+
+(deftest paragraph-renders-children-test
+  (testing "<p> with mixed string + inline-element children"
+    (let [a (gh/exec-name :link {:href "/x" :label "x"})]
+      (is (= [:p "before " a " after"]
+             (gh/exec-name :paragraph {:children ["before " a " after"]}))))))
+
+
+(deftest stack-and-row-premerge-their-class-test
+  (testing ".stack default class, caller attrs win on conflict"
+    (is (= [:div {:class "stack"} "a" "b"]
+           (gh/exec-name :stack {:children ["a" "b"]})))
+    (is (= [:div {:class "stack wide"} "a"]
+           (gh/exec-name :stack {:children ["a"] :attrs {:class "stack wide"}}))))
+  (testing ".row default class"
+    (is (= [:div {:class "row"} "a" "b"]
+           (gh/exec-name :row {:children ["a" "b"]})))))
+
+
+(deftest nav-bar-and-lists-render-test
+  (is (= [:nav "l1" "l2"] (gh/exec-name :nav-bar {:children ["l1" "l2"]})))
+  (let [li (gh/exec-name :list-item {:children ["one"]})]
+    (is (= [:li "one"] li))
+    (is (= [:ul li li] (gh/exec-name :unordered-list {:children [li li]})))))
+
+
+(deftest table-composes-from-rows-and-cells-test
+  (let [th (gh/exec-name :table-header-cell {:children ["Name"]})
+        td (gh/exec-name :table-cell {:children ["Ada"]})
+        hr (gh/exec-name :table-row {:children [th]})
+        dr (gh/exec-name :table-row {:children [td]})]
+    (is (= [:th "Name"] th))
+    (is (= [:td "Ada"] td))
+    (is (= [:table [:tr th] [:tr td]]
+           (gh/exec-name :table {:children [hr dr]})))))
+
+
+(deftest field-label-renders-with-for-attr-test
+  (is (= [:label {:for "email"} "Email"]
+         (gh/exec-name :field-label {:children ["Email"]
+                                     :attrs {:for "email"}}))))
+
+
+;; =============================================================================
+;; CSS escape hatch — :custom-stylesheet / :wrap-custom-style +
+;; the app.page :stylesheet-handler serving it as text/css
+;; =============================================================================
+
+(deftest custom-stylesheet-and-wrap-style-test
+  (testing "the const holder returns the CSS body verbatim"
+    (is (= "body { margin: 0; }"
+           (gh/exec-name :custom-stylesheet {:body "body { margin: 0; }"}))))
+  (testing "wrap-custom-style renders an inline <style> hiccup"
+    (let [styled (gh/exec-name :wrap-custom-style {:body ".x { color: red; }"})]
+      (is (= :style (first styled)))
+      (is (some #(= ".x { color: red; }" (str %)) (flatten [styled]))))))
+
+
+(deftest stylesheet-handler-serves-text-css-test
+  (testing "app.page :stylesheet-handler → 200 text/css Ring response, no cache directives"
+    (let [r (gh/exec-name :stylesheet-handler {:css "body { margin: 0; }"})
+          ;; header keys keywordize on the JSONB round trip — accept
+          ;; either form (http-kit stringifies at the boundary).
+          header (fn [k kw] (or (get-in r [:headers k]) (get-in r [:headers kw])))]
+      (is (= 200 (:status r)))
+      (is (= "text/css; charset=utf-8" (header "Content-Type" :Content-Type)))
+      (is (nil? (header "Cache-Control" :Cache-Control)))
+      (is (= "body { margin: 0; }" (:body r))))))

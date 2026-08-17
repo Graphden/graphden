@@ -81,6 +81,18 @@
                               "data-form-field" ""
                               "data-field-kind" "text"}]}}
 
+  ;; CSS source textarea — same shape as :_form-js-source (plain
+  ;; string, no JSON parsing), for `:css-source` slots
+  ;; (`:custom-stylesheet` / `:stylesheet-route` bodies).
+  {:name :_form-css-source
+   :description "Multi-line textarea — the form for `:css-source` slots (stylesheet bodies). Plain string, no JSON parsing."
+   :parent :const
+   :args {:value ["textarea" {"class" "arg-value-edit-input value-form-hiccup"
+                              "rows" 12
+                              "spellcheck" "false"
+                              "data-form-field" ""
+                              "data-field-kind" "text"}]}}
+
   ;; Hiccup source textarea — EDN, not JSON. Dispatched through the
   ;; registry's EXACT-type tier (`hiccup-node` row below): the whole
   ;; union type gets ONE editor instead of decomposing into a 6-branch
@@ -266,6 +278,7 @@
                   ["jsonb" "_form-json"]
                   ["any" "_form-json"]
                   ["js-source" "_form-js-source"]
+                  ["css-source" "_form-css-source"]
                   ["hiccup-node" "_form-hiccup"]
                   ["vf-rating" "_form-rating"]
                   [["secret" "any"] "_form-secret-binding"]]}}

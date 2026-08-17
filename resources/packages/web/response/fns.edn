@@ -98,6 +98,15 @@
   ;; changes the URL changes, so the browser fetches the new bundle.
   ;; With the URL stable, `immutable` lets the browser skip even the
   ;; conditional request — much cheaper than re-validating ETag.
+  ;; Plain (non-immutable) CSS — for USER-editable stylesheets served
+  ;; from the graph (`:stylesheet-route`): an edit must show on the
+  ;; next reload, so no long-lived cache; the hash-busted immutable
+  ;; variant below stays for build artefacts.
+  {:name :css-content-type
+   :description "Content-type axis: `text/css; charset=utf-8`, no cache directives — for user-editable stylesheets served from the graph."
+   :parent :ring-response
+   :args {:headers {"Content-Type" "text/css; charset=utf-8"}}}
+
   {:name :immutable-js-content-type
    :description "Content-type axis: `application/javascript; charset=utf-8` + `Cache-Control: public, max-age=31536000, immutable`. Pair with a status axis for a hash-busted JS bundle response."
    :parent :ring-response
@@ -126,6 +135,9 @@
   {:name :text-ok-response
    :description "200 OK with `text/plain` content-type. Free arg: `:body`."
    :parents [:text-content-type :ok-response]}
+  {:name :css-ok-response
+   :description "200 OK with `text/css` content-type and no cache directives — for user-editable stylesheets. Free arg: `:body` (a CSS string)."
+   :parents [:css-content-type :ok-response]}
   {:name :text-unauthorized-response
    :description "401 Unauthorized with `text/plain` content-type. Free arg: `:body`."
    :parents [:text-content-type :unauthorized-response]}

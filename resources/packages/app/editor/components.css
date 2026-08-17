@@ -153,3 +153,49 @@ h1, h2, h3 { line-height: 1.2; margin: 0.6em 0 0.3em; }
 h1 { font-size: 1.75rem; }
 h2 { font-size: 1.4rem; }
 h3 { font-size: 1.2rem; }
+
+/* === Layout containers — :stack / :row flex defaults === */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* === Navigation — :nav-bar renders <nav> of :link children === */
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+/* === Tables — :table / :table-row / :table-cell defaults === */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--gd-card-border);
+}
+
+th { font-weight: 600; }
+
+/* === Lists === */
+
+ul { margin: 0.3em 0; padding-left: 1.4em; }
+li { margin: 0.15em 0; }

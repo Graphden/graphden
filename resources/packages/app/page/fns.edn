@@ -57,4 +57,23 @@
    :parent :get-route
    :args {:path {:as :path :type :text
                  :description "URL path the route is mounted at (e.g. `\"/about\"`)."}
-          :handler :html-page-handler}}]}
+          :handler :html-page-handler}}
+
+  ;; Stylesheet twins — serve a graph-authored CSS body as text/css.
+  ;; The CSS lives in the graph (a `:custom-stylesheet` const or a
+  ;; literal), so an edit shows on the next reload (`:css-ok-response`
+  ;; sets no cache directives). Pages reference it with a plain
+  ;; `<link>` in `:head`.
+  {:name :stylesheet-handler
+   :lambda-params []
+   :description "Ring handler serving a CSS stylesheet — `:css-ok-response` over the `:css` free arg. Use as the `:handler` of a route, or take `:stylesheet-route` for the one-liner."
+   :parent :css-ok-response
+   :args {:body {:as :css :type :css-source
+                 :description "The stylesheet body — typically a `:custom-stylesheet` ref."}}}
+
+  {:name :stylesheet-route
+   :description "GET-route template serving a graph-authored stylesheet as `text/css`. Free args: `:path` (e.g. `\"/styles.css\"`), `:css` (the stylesheet body). Reference it from a page with `[:link {:rel \"stylesheet\" :href <path>}]` in `:head`."
+   :parent :get-route
+   :args {:path {:as :path :type :text
+                 :description "URL path the stylesheet is mounted at (e.g. `\"/styles.css\"`)."}
+          :handler :stylesheet-handler}}]}

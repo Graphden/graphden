@@ -50,6 +50,11 @@
   {:name :js-source
    :refine {:base :text}}
 
+  ;; Stylesheet twin of :js-source — dispatches the editor's CSS
+  ;; textarea form and marks stylesheet bodies for future linting.
+  {:name :css-source
+   :refine {:base :text}}
+
   {:name :positive-numeric
    :refine {:base :numeric :constraint [:> 0]}}
 

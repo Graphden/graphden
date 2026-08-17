@@ -11,8 +11,12 @@
 ;;     `:dispatch-action`, but any keyword-map works)
 ;;
 ;; Shipped: `:button`, `:input`, `:textarea`, `:option`, `:select`,
-;; `:checkbox`, `:form`, `:link`, `:image`, `:card`, plus the
-;; `:custom-script` / `:wrap-custom-script` escape hatch.
+;; `:checkbox`, `:form`, `:link`, `:image`, `:card`, the text/layout
+;; set (`:heading`, `:paragraph`, `:stack`, `:row`, `:nav-bar`,
+;; `:unordered-list`, `:list-item`, `:table`, `:table-row`,
+;; `:table-cell`, `:table-header-cell`, `:field-label`), plus the
+;; `:custom-script` / `:wrap-custom-script` / `:custom-stylesheet`
+;; escape hatches.
 ;; Modal is deferred (needs JS lifecycle).
 
 
@@ -213,6 +217,142 @@
                      :description "Card body hiccup nodes."}}}
 
   ;; ---------------------------------------------------------------------------
+  ;; TEXT + LAYOUT SET
+  ;; ---------------------------------------------------------------------------
+  ;;
+  ;; The pieces every real page needs beyond form controls: headings,
+  ;; paragraphs, flex containers, navigation, lists, tables. All thin
+  ;; fn-defs over `:hiccup`; `.stack` / `.row` get their flex defaults
+  ;; from graphden-components.css.
+
+  ;; `<h1>`..`<h6>` — the level is a closed-enum slot so the editor
+  ;; renders a select, and the tag is computed as "h" + level.
+  {:name :heading-level
+   :description "Heading depth 1-6 — closed enum so the editor offers a `<select>`."
+   :refine {:base :int :constraint [:in [1 2 3 4 5 6]]}}
+
+  {:name :_heading-tag
+   :description "Internal — computes the `h1`..`h6` tag string from the `:level` slot."
+   :parent :str
+   :args {:parts [{:value "h"}
+                  {:parent :to-str
+                   :args {:value {:as :level :type :heading-level
+                                  :description "Heading depth — 1 (largest) to 6 (smallest)."}}}]}}
+
+  {:name :heading
+   :description "HTML `<h1>`..`<h6>` — slot `:level` (1-6) picks the tag, `:content` is the heading text, `:attrs` (optional) extends the element."
+   :parent :hiccup
+   :args {:tag :_heading-tag
+          :children [{:as :content :type :text
+                      :description "Heading text."}]}}
+
+  ;; `<p attrs>children...</p>` — children (not a single text slot) so
+  ;; inline markup (`:link`, `<code>` spans, …) composes in.
+  {:name :paragraph
+   :description "HTML `<p [attrs]>children...</p>`. Slot `:children` is a list of hiccup nodes (plain strings or inline elements like `:link`)."
+   :parent :hiccup
+   :args {:tag {:value "p"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Paragraph content — strings and inline hiccup nodes."}}}
+
+  ;; Flex containers. `.stack` = vertical column, `.row` = horizontal
+  ;; wrap-enabled row — the two 90%-case layouts. Class pre-merged like
+  ;; `:card` so the default styling applies; caller attrs win.
+  {:name :_stack-attrs
+   :description "Internal — pre-merges `{:class " stack "}` onto the caller's optional `:attrs` map."
+   :parent :merge
+   :args {:maps [{:value {:class "stack"}}
+                 {:as :attrs :required false
+                  :description "Extra attrs (`:id` / extra `:class` / …)."}]}}
+
+  {:name :stack
+   :description "Vertical flex container — `<div class=" stack " [attrs]>children...</div>` (column, gap from graphden-components.css). Slot `:children` is the stacked content."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_stack-attrs
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Stacked hiccup nodes, top to bottom."}}}
+
+  {:name :_row-attrs
+   :description "Internal — pre-merges `{:class " row "}` onto the caller's optional `:attrs` map."
+   :parent :merge
+   :args {:maps [{:value {:class "row"}}
+                 {:as :attrs :required false
+                  :description "Extra attrs (`:id` / extra `:class` / …)."}]}}
+
+  {:name :row
+   :description "Horizontal flex container — `<div class=" row " [attrs]>children...</div>` (wrap-enabled row, gap from graphden-components.css). Slot `:children` is the row content."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_row-attrs
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Row hiccup nodes, left to right."}}}
+
+  ;; `<nav attrs>children...</nav>` — named `:nav-bar` because `nav`
+  ;; is taken as an editor concept; children are typically `:link`s.
+  {:name :nav-bar
+   :description "HTML `<nav [attrs]>children...</nav>` — site navigation container; `:children` is typically a list of `:link`s."
+   :parent :hiccup
+   :args {:tag {:value "nav"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Navigation content — typically `:link` nodes."}}}
+
+  ;; Lists.
+  {:name :unordered-list
+   :description "HTML `<ul [attrs]>children...</ul>`. Slot `:children` is a list of `:list-item` nodes."
+   :parent :hiccup
+   :args {:tag {:value "ul"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "List items — typically built via `:list-item`."}}}
+
+  {:name :list-item
+   :description "HTML `<li [attrs]>children...</li>` — one entry of an `:unordered-list`."
+   :parent :hiccup
+   :args {:tag {:value "li"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Item content — strings and inline hiccup nodes."}}}
+
+  ;; Tables — structural components; a data-driven table composes
+  ;; these with `:map` over the row data.
+  {:name :table
+   :description "HTML `<table [attrs]>children...</table>`. Slot `:children` is the list of `:table-row` nodes (wrap header rows' cells in `:table-header-cell`)."
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Table rows — typically built via `:table-row`."}}}
+
+  {:name :table-row
+   :description "HTML `<tr [attrs]>children...</tr>` — one row; `:children` is a list of `:table-cell` / `:table-header-cell` nodes."
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Row cells — `:table-cell` or `:table-header-cell` nodes."}}}
+
+  {:name :table-cell
+   :description "HTML `<td [attrs]>children...</td>` — one data cell of a `:table-row`."
+   :parent :hiccup
+   :args {:tag {:value "td"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Cell content."}}}
+
+  {:name :table-header-cell
+   :description "HTML `<th [attrs]>children...</th>` — one header cell of a `:table-row`."
+   :parent :hiccup
+   :args {:tag {:value "th"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Header cell content."}}}
+
+  ;; `<label attrs>children...</label>` — named `:field-label` because
+  ;; `label` clashes with the `:label` SLOT convention used across the
+  ;; component set. Bind `:attrs {:for "input-id"}` to link a control.
+  {:name :field-label
+   :description "HTML `<label [attrs]>children...</label>` — form-field label; bind `:attrs {:for " <input-id> "}` to associate it with a control."
+   :parent :hiccup
+   :args {:tag {:value "label"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Label content."}}}
+
+  ;; ---------------------------------------------------------------------------
   ;; CONVENIENCE BUTTON TEMPLATES
   ;; ---------------------------------------------------------------------------
   ;;
@@ -331,4 +471,23 @@
    :description "Render a JS body as `<script>body</script>` hiccup for inclusion in a page's `:scripts` list."
    :parent :wrap-script
    :args {:content {:as :body :type :js-source
-                    :description "JavaScript source body — wrapped verbatim inside `<script>…</script>`."}}}]}
+                    :description "JavaScript source body — wrapped verbatim inside `<script>…</script>`."}}}
+
+  ;; CSS escape hatch — the stylesheet twin of `:custom-script`.
+  ;; Two use-sites:
+  ;;   1. inline — wrap in `:wrap-custom-style` and put it in a
+  ;;      page's `:head` list;
+  ;;   2. served — bind a `:stylesheet-route` (app.page) to the same
+  ;;      body and `<link>` it from several pages.
+  {:name :custom-stylesheet
+   :description "Named holder for a CSS source body. Compose with `:wrap-custom-style` for an inline `<style>` in a page's `:head`, or serve it via `:stylesheet-route` (app.page) and `<link>` it."
+   :parent :const
+   :return-type :css-source
+   :args {:value {:as :body :type :css-source
+                  :description "CSS source (any valid stylesheet body)."}}}
+
+  {:name :wrap-custom-style
+   :description "Render a CSS body as `<style>body</style>` hiccup for inclusion in a page's `:head` list."
+   :parent :wrap-style
+   :args {:content {:as :body :type :css-source
+                    :description "CSS source body — wrapped verbatim inside `<style>…</style>`."}}}]}

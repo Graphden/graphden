@@ -8,19 +8,24 @@ templates.
 
 **Concepts introduced**: `web.components`, `:button`, `:input`,
 `:textarea`, `:select`, `:option`, `:checkbox`, `:form`,
-`:link`, `:image`, `:card`, convenience templates
+`:link`, `:image`, `:card`, the text/layout set (`:heading`,
+`:paragraph`, `:stack`, `:row`, `:nav-bar`, `:unordered-list`,
+`:list-item`, `:table`, `:table-row`, `:table-cell`,
+`:table-header-cell`, `:field-label`), convenience templates
 (`:submit-button`, `:click-button`, `:navigate-button`,
 `:custom-button`), `:dispatch-action`, `data-action`,
 `/assets/graphden-runtime.js`, `submit-form` handler,
 `navigate` handler, `:html-page-route`, `:html-page-handler`,
-`:html-page-rendered`, `:graphden-runtime-scripts`,
+`:html-page-rendered`, `:stylesheet-route`,
+`:custom-stylesheet`, `:graphden-runtime-scripts`,
 `:graphden-page-head`, `/assets/graphden-components.css`.
 
 ## The starter component library
 
-`web.components` ships ten primitives, each a thin fn-def over
-`:hiccup` that pins the variable bits (label, content, children)
-as slots and inherits an optional `:attrs` map you can extend.
+`web.components` ships two groups of primitives, each a thin
+fn-def over `:hiccup` that pins the variable bits (label,
+content, children) as slots and inherits an optional `:attrs`
+map you can extend.
 
 | fn-def | Renders | Required slots | Optional |
 |---|---|---|---|
@@ -34,6 +39,33 @@ as slots and inherits an optional `:attrs` map you can extend.
 | `:link` | `<a href=...>label</a>` | `:href`, `:label` | `:attrs` |
 | `:image` | `<img src=... alt=.../>` | `:src`, `:alt` | `:attrs` |
 | `:card` | `<div class="card">children...</div>` | `:children` | `:attrs` |
+
+And the text/layout set:
+
+| fn-def | Renders | Required slots | Optional |
+|---|---|---|---|
+| `:heading` | `<h1>`..`<h6>` by `:level` | `:level` (1-6), `:content` | `:attrs` |
+| `:paragraph` | `<p>children...</p>` | `:children` | `:attrs` |
+| `:stack` | `<div class="stack">` (vertical flex) | `:children` | `:attrs` |
+| `:row` | `<div class="row">` (horizontal flex) | `:children` | `:attrs` |
+| `:nav-bar` | `<nav>children...</nav>` | `:children` | `:attrs` |
+| `:unordered-list` | `<ul>children...</ul>` | `:children` | `:attrs` |
+| `:list-item` | `<li>children...</li>` | `:children` | `:attrs` |
+| `:table` | `<table>rows...</table>` | `:children` | `:attrs` |
+| `:table-row` | `<tr>cells...</tr>` | `:children` | `:attrs` |
+| `:table-cell` / `:table-header-cell` | `<td>` / `<th>` | `:children` | `:attrs` |
+| `:field-label` | `<label>children...</label>` | `:children` | `:attrs` |
+
+For example, a two-level page skeleton:
+
+```clojure
+{:name :my-about-body
+ :parent :stack
+ :args {:children [{:parent :heading
+                    :args {:level 1 :content "About us"}}
+                   {:parent :paragraph
+                    :args {:children ["We build things."]}}]}}
+```
 
 `:attrs` is the inherited slot from `:hiccup`. Bind it to a
 keyword-map to add `:class` / `:id` / `:placeholder` / etc.
@@ -198,6 +230,35 @@ color for `type="submit"`, form gap — without any inline
 CSS design tokens (`--gd-primary-bg`, `--gd-radius`, etc.)
 live at the top of the file; re-theme by overriding them in
 your own stylesheet that you append to `:head`.
+
+### Your own stylesheet, from the graph
+
+Two ways to add CSS without leaving the editor:
+
+- **Inline** — a `:custom-stylesheet` const wrapped in
+  `:wrap-custom-style`, appended to the page's `:head` list:
+
+  ```clojure
+  {:name :my-theme
+   :parent :custom-stylesheet
+   :args {:body ".card { border-width: 2px; }"}}
+
+  {:name :my-theme-style-tag
+   :parent :wrap-custom-style
+   :args {:body :my-theme}}
+  ```
+
+- **Served** — mount the same body at its own URL with
+  `:stylesheet-route` and `<link>` it from any number of pages:
+
+  ```clojure
+  {:name :my-styles-route
+   :parent :stylesheet-route
+   :args {:path "/styles.css" :css :my-theme}}
+  ```
+
+  The route serves `text/css` with no cache directives, so an
+  edit in the editor shows on the next reload.
 
 If you don't want the default stylesheet — pass
 `:head {:value []}` and the page gets no styling beyond

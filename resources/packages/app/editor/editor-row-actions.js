@@ -640,7 +640,9 @@ registerActionHandler('seq-insert-before', (btn, e, host) => {
   const arg = _rowActionsUseSiteArgs.get(bindingId);
   if (arg?.['fn-id'] && typeof arg.position === 'number'
       && typeof appendSequenceItem === 'function') {
-    appendSequenceItem(arg['fn-id'], btn, undefined, { position: arg.position });
+    appendSequenceItem(arg['fn-id'], btn, undefined,
+                       { position: arg.position,
+                         elemType: (typeof seqElemType === 'function' ? seqElemType(arg) : null) });
   }
 });
 

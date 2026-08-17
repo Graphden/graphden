@@ -156,7 +156,8 @@ function createPlaceholderOverlay(node, container) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (isSeqAnchor && typeof appendSequenceItem === 'function') {
-      appendSequenceItem(seqFnId, btn, appendT);
+      appendSequenceItem(seqFnId, btn, appendT,
+                         { elemType: (typeof seqElemType === 'function' ? seqElemType(arg) : null) });
     } else if (typeof enterFreeArgBindEditMode === 'function') {
       enterFreeArgBindEditMode(arg, btn);
     }

@@ -488,7 +488,8 @@ function enterArgRenameEditMode(arg, anchorEl, displayLabel) {
 // skeleton serves the free-arg binder and the sequence-append flow
 // (different labels + follow-ups). Both buttons close the popover and
 // hand off; the skeleton's Save is inert.
-function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel, onLiteral, onRef }) {
+function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel,
+                                   onLiteral, onRef, extraButtons }) {
   openInlineEditPopover({
     anchorEl,
     ariaLabel,
@@ -510,6 +511,7 @@ function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel, onLi
       };
       const litBtn = mk(litLabel, onLiteral);
       mk(refLabel, onRef);
+      for (const b of extraButtons || []) mk(b.label, b.handler);
       root.insertBefore(wrap, root.firstChild);
       return litBtn;  // initial focus target
     },
@@ -534,14 +536,20 @@ function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel, onLi
 // `opts.position` (optional) turns the append into an INSERT — the
 // new item takes that position, later items shift +1 (the backend's
 // optional `:position` body field).
+// `opts.elemType` (optional) — the sequence's declared element type
+// (`slotRichType`'s `[:list T]` elem). It types the "New from
+// template…" picker so e.g. a hiccup :children chain offers the
+// component library.
 async function appendSequenceItem(fnId, anchorEl, expectedType, opts) {
   if (!fnId) return;
   const position = (opts && typeof opts.position === 'number') ? opts.position : null;
+  const elemType = (opts && opts.elemType !== undefined) ? opts.elemType : null;
   const verb = position === null ? 'Append' : 'Insert';
   closeInlineEdit();
-  // Two-step UX mirroring free-arg binding: pick "Literal" or "Fn-ref",
-  // then enter the value / pick the fn. The endpoint accepts the
-  // chosen body in the same request, so we wait for the user's pick.
+  // Two-step UX mirroring free-arg binding: pick "Literal" / "Fn-ref" /
+  // "New from template…", then enter the value / pick the fn. The
+  // endpoint accepts the chosen body in the same request, so we wait
+  // for the user's pick.
   openLiteralVsRefChooser({
     anchorEl: anchorEl || document.getElementById('graph-surface') || document.body,
     ariaLabel: verb + ' sequence item',
@@ -560,8 +568,87 @@ async function appendSequenceItem(fnId, anchorEl, expectedType, opts) {
           }
         });
       }
+    },
+    extraButtons: [{
+      label: 'New from template…',
+      handler: () => promptTemplateInstanceInsert(fnId, anchorEl,
+                                                  expectedType || elemType,
+                                                  position)
+    }]
+  });
+}
+
+// "New from template…" — pick a type-compatible fn as the PARENT of a
+// fresh named instance, create it, and append a ref to it. This is how
+// a component drops into a page: pick :button from the (type-filtered)
+// palette, name the instance, then bind its free args on the canvas.
+function promptTemplateInstanceInsert(fnId, anchorEl, expectedType, position) {
+  if (typeof openFnPicker !== 'function') return;
+  openFnPicker({
+    anchorEl: anchorEl || document.body,
+    excludeIds: [fnId],
+    expectedType: expectedType || undefined,
+    onPick: (template) => {
+      if (!template?.id) return;
+      promptTemplateInstanceName(fnId, anchorEl, template, position);
     }
   });
+}
+
+function promptTemplateInstanceName(fnId, anchorEl, template, position) {
+  const owner = lookups?.fnMap?.get(fnId);
+  const suggested = (owner?.name ? '_' + owner.name + '-' : 'my-')
+                  + (template.name || 'instance');
+  openInlineEditPopover({
+    anchorEl: anchorEl || document.body,
+    ariaLabel: 'Name the new ' + (template.name || 'instance'),
+    makeControl(root) {
+      const hint = document.createElement('div');
+      hint.className = 'arg-value-edit-hint';
+      hint.textContent = 'New ' + (template.name || 'fn') + ' — instance name';
+      root.insertBefore(hint, root.firstChild);
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'arg-value-edit-input';
+      input.value = suggested;
+      root.insertBefore(input, root.firstChild.nextSibling);
+      return input;
+    },
+    async doSave(input) {
+      const name = (input.value || '').trim();
+      if (!name) return false;
+      return await createTemplateInstanceAndAppend(fnId, template, name, position);
+    }
+  });
+}
+
+async function createTemplateInstanceAndAppend(fnId, template, name, position) {
+  const owner = lookups?.fnMap?.get(fnId);
+  try {
+    const fields = { name: name,
+                     'namespace-id': owner?.['namespace-id'] || '',
+                     'parent-ids': template.id };
+    const r = await authMutate('POST', API.api_entities_type('fn'),
+                               new URLSearchParams(fields).toString());
+    if (!r?.ok) return { ok: false, error: await responseError(r) };
+    // The create response is a plain confirmation (no id) — resolve the
+    // new row by (namespace-qualified) name, the same path deep links use.
+    const nsPath = owner?.['namespace-id'] != null
+                 ? lookups?.nsPathMap?.get(owner['namespace-id']) : null;
+    const created = (typeof resolveFnByName === 'function')
+                  ? await resolveFnByName(nsPath ? nsPath + '/' + name : name)
+                  : null;
+    if (!created?.id) return { ok: false, error: 'Created, but could not resolve the new fn.' };
+    const body = { ref: created.id };
+    if (typeof position === 'number') body.position = position;
+    const appended = await postSequenceAppend(fnId, body);
+    return appended ? { ok: true }
+                    : { ok: false, error: 'Instance created, but appending the ref failed.' };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('template-instance create threw', err);
+    return { ok: false, error: 'Create failed — network error.' };
+  }
 }
 
 function promptLiteralForAppend(fnId, anchorEl, expectedType, position) {

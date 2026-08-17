@@ -67,6 +67,13 @@ For example, a two-level page skeleton:
                     :args {:children ["We build things."]}}]}}
 ```
 
+You don't have to type these compositions by hand: on any
+hiccup `:children` chain, the `+` button's chooser offers
+**"New from template…"** — pick a component from the
+type-filtered palette, name the instance, and it is created
+(with the component as its parent) and appended in one step;
+its free args then show on the canvas ready to bind.
+
 `:attrs` is the inherited slot from `:hiccup`. Bind it to a
 keyword-map to add `:class` / `:id` / `:placeholder` / etc.
 For `:link`, `:image`, `:card`, and `:checkbox` the

@@ -62,6 +62,16 @@ function slotRichType(arg) {
   return null;
 }
 
+// Element type of a sequence arg — `slotRichType`'s `[:list T]`
+// unwrapped to T. Types the append flow's "New from template…"
+// picker (e.g. a hiccup :children chain offers the component
+// library). null when the slot isn't list-declared anywhere in the
+// chain.
+function seqElemType(arg) {
+  const t = slotRichType(arg);
+  return (Array.isArray(t) && t[0] === 'list' && t.length > 1) ? t[1] : null;
+}
+
 // Resolve an arg row's expected type from its slot. The arg row
 // (synth-shape from the layout pipeline) carries `:slot-id` directly
 // — look up the slot, get its type-fn-id, return either:

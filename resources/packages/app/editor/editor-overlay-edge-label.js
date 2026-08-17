@@ -184,7 +184,8 @@ function createEdgeLabelOverlay(edge, container) {
           addBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             if (typeof appendSequenceItem === 'function') {
-              appendSequenceItem(editArg['fn-id'], addBtn, appendT);
+              appendSequenceItem(editArg['fn-id'], addBtn, appendT,
+                                 { elemType: (typeof seqElemType === 'function' ? seqElemType(editArg) : null) });
             }
           });
           overlay.appendChild(addBtn);

@@ -244,8 +244,14 @@
                                  (when (seq (:err r)) (str "\n--- partial stderr ---\n" (:err r)))))
                   :warnings false
                   :duration-ms duration-ms})
-          (swap! status assoc check-name :timeout)
-          (reset! failed true))
+          ;; An `:info` check that times out is still advisory — a hung
+          ;; `outdated`/antq network call is the very "network hiccup"
+          ;; these checks are expected to have, and must NOT fail the run
+          ;; (mirrors the `:else` branch's `block!`; this arm used to
+          ;; `reset! failed` unconditionally).
+          (let [info? (= :info (:group c))]
+            (swap! status assoc check-name (if info? :warning :timeout))
+            (when-not info? (reset! failed true))))
 
       :else
       (let [output (str (:out result) "\n" (:err result))

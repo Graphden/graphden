@@ -265,8 +265,20 @@
    :loop-until-interrupted loop-until-interrupted-fn
    :cron-parse cron-parse-fn
    :cron-fire-after cron-fire-after-fn
-   :atom atom-fn
-   :cell {:impl cell-fn :compile-time-value? true}
-   :swap swap-fn
-   :reset reset-fn
-   :deref deref-fn})
+   ;; Cell taint (2026-08-17): a secret stored in an atom/cell must stay
+   ;; redacted when read back. Without propagation, `:atom`/`:cell` return
+   ;; `:any` and `:deref` returns `:any`, so `(deref (atom secret))` typed
+   ;; `:any` → tainted-fn? false → the Run pane shows the secret. With the
+   ;; flag (and `taint-with-secret-if-tainted` scanning arg types): a cell
+   ;; CREATED from a `[:secret …]` value is typed `[:secret :any]`, and
+   ;; `:deref`/`:swap`/`:reset` propagate that marker from the atom argument
+   ;; to their result. Only ever taints when an input already carries a
+   ;; marker, so ordinary (non-secret) cache cells are untouched. NB a
+   ;; static analysis cannot follow a secret `:reset` into a cell CREATED
+   ;; non-secret (the atom's type is fixed at creation) — that dynamic
+   ;; case would need runtime taint tracking.
+   :atom {:impl atom-fn :taint-propagate? true}
+   :cell {:impl cell-fn :compile-time-value? true :taint-propagate? true}
+   :swap {:impl swap-fn :taint-propagate? true}
+   :reset {:impl reset-fn :taint-propagate? true}
+   :deref {:impl deref-fn :taint-propagate? true}})

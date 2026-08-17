@@ -1559,6 +1559,67 @@
           :attrs {:value {:class "execute-result-pane"}}
           :children [:_er-large-preview-banner :_er-large-preview-pre]}}
 
+  ;; --- HTML-response preview pane ---
+  ;;
+  ;; A Ring-shaped result (`{:status <int> :body "<html…"}`) is what a
+  ;; page-handler fn returns — the JSON dump showed the page as one
+  ;; escaped string. Render it in a sandboxed iframe instead
+  ;; (`sandbox="allow-scripts"` — no same-origin: the previewed page
+  ;; runs isolated from the editor's cookies and DOM; relative asset
+  ;; URLs still resolve against the parent base). The clause sits
+  ;; BEFORE the map pane in `:_er-succeeded-body` so a Ring map
+  ;; renders as a page, not as a record.
+
+  {:name :_er-ring-status
+   :parent :get :args {:coll :_er-result :key {:value :status} :default nil}}
+
+  {:name :_er-ring-body
+   :parent :get :args {:coll :_er-result :key {:value :body} :default nil}}
+
+  {:name :_er-ring-body-is-html?
+   :description "The body is a string that starts like markup — the cheap shape test that separates a page-handler result from an ordinary record with a `:body` field."
+   :parent :str-starts-with?
+   :args {:string {:parent :to-str :args {:value :_er-ring-body}}
+          :prefix {:value "<"}}}
+
+  {:name :_er-result-is-html-response?
+   :parent :and
+   :args {:values [:_er-result-is-map?
+                   {:parent :is-a? :args {:value :_er-ring-status :type {:value :int}}}
+                   {:parent :is-a? :args {:value :_er-ring-body :type {:value :text}}}
+                   :_er-ring-body-is-html?]}}
+
+  {:name :_er-html-preview-caption
+   :parent :str
+   :args {:parts [{:value "HTML response — status "}
+                  {:parent :to-str :args {:value :_er-ring-status}}]}}
+
+  {:name :_er-html-preview-banner
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-html-caption"}}
+          :children [:_er-html-preview-caption]}}
+
+  {:name :_er-html-preview-iframe-attrs
+   :parent :assoc
+   :args {:map {:value {:class "execute-result-html-preview"
+                        :sandbox "allow-scripts"
+                        :title "Rendered HTML response"}}
+          :key {:value :srcdoc}
+          :value :_er-ring-body}}
+
+  {:name :_er-html-preview-iframe
+   :parent :hiccup
+   :args {:tag {:value "iframe"}
+          :attrs :_er-html-preview-iframe-attrs
+          :children {:value []}}}
+
+  {:name :_er-html-preview-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-html-preview-banner :_er-html-preview-iframe]}}
+
   ;; --- Per-item simple-scalar predicate (used by list + record) ---
   ;; `{:as :item}` is the current element. Simple scalars stringify
   ;; via `:str`; everything else gets a `:pre` JSON dump.
@@ -1781,6 +1842,7 @@
    :parent :cond
    :args {:clauses [:_er-result-truncated?  :_er-truncated-pane
                     :_er-result-nil?        :_er-nil-pane
+                    :_er-result-is-html-response? :_er-html-preview-pane
                     :_er-result-too-large?  :_er-large-preview-pane
                     :_er-result-is-list?    :_er-list-pane
                     :_er-result-is-map?     :_er-record-pane

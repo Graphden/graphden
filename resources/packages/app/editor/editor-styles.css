@@ -1767,6 +1767,19 @@ textarea.arg-value-edit-input {
 .value-form-label {
   font-size: 11px; color: var(--muted-fg);
 }
+/* Hiccup EDN textarea — a page/element source needs real width and
+   height: widen the hosting popover (and the read-only viewer) past
+   the 420px scalar default, and open the textarea tall. */
+.arg-value-edit-popover:has(.value-form-hiccup),
+.value-viewer:has(.value-form-hiccup) {
+  max-width: min(720px, 92vw);
+  width: min(720px, 92vw);
+}
+textarea.value-form-hiccup {
+  min-height: 180px;
+  white-space: pre;
+}
+
 /* Union — a branch <select> stacked over one sub-form per branch.
    Inactive branches carry the `hidden` attribute; no `display` is set
    on the branch so the UA `[hidden]` rule keeps working. */
@@ -4277,6 +4290,21 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 6px 8px;
   background: var(--card-row-highlight);
   border-radius: 2px;
+}
+/* Sandboxed iframe previewing a Ring HTML response — the page picks
+   its own colors inside the frame, the shell just gives it room. */
+.execute-result-html-caption {
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  color: var(--muted-fg);
+  font-size: 11px;
+}
+.execute-result-html-preview {
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  background: var(--card-bg);
 }
 .execute-result-truncated {
   padding: 4px 6px;

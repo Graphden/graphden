@@ -38,7 +38,7 @@
     :_execute-apply :_layout-build-apply :_layout-place-apply
     :_layout-strip-facts-apply :_load-graph-cached :_parse-layout-body
     :_reconcile-services-apply :_rotate-secret-not-owned?
-    :_seq-append-load-binding :_seq-remove-load-item
+    :_seq-append-load-binding :_seq-move-load-item :_seq-remove-load-item
     :_seq-update-load-item :_slot-effective-type-raw
     :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
     :assert-some :assoc :assoc-in :atom :auth-active?
@@ -104,7 +104,10 @@
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create
-    :try-apply-seq-append :try-apply-seq-update :try-apply-tighten
+    ;; :try-apply-seq-move returns only row ids + positions (never the
+    ;; item's content) — no taint to propagate, like seq-update.
+    :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update
+    :try-apply-tighten
     :try-apply-update :type-check-binding-rej
     :type-name-kinds :update-entity :update-in :update-keys
     :update-vals :url-decode :usage-all-org-stats

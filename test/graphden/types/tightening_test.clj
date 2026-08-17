@@ -216,7 +216,8 @@
                :ring-headers :ring-body-input-stream
                :ring-method-entry :ring-uri-entry
                :ring-query-string-entry :ring-headers-entry
-               :ring-body-entry]
+               :ring-body-entry
+               :_ring-async-channel :ring-async-channel-entry]
         shape (types/resolve-alias :ring-request-shape)]
     (doseq [n chain]
       (is (some? (by-name n)) (str n " exists in core+web fn-defs"))

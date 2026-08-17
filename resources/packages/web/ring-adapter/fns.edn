@@ -44,11 +44,16 @@
    ;; for middlewares that decode JSON eagerly. Downstream extractors
    ;; (`:ring-body-input-stream`, `:slurp`, `:parse-json-body`) consume
    ;; one branch of the union per call site.
+   ;; `:async-channel` is httpkit's live channel object, threaded
+   ;; through so a streaming handler (`:sse-stream`) can adopt the
+   ;; connection; nil under test harnesses / non-httpkit hosts, and
+   ;; opaque to the graph (`:any`).
    :type {:request-method :keyword
           :uri            :text
           :query-string   :text
           :headers        :text-map
-          :body           [:union :null :input-stream :text :jsonb]}}
+          :body           [:union :null :input-stream :text :jsonb]
+          :async-channel  :any}}
 
   {:name :security-headers-shape
    :description "Default security response headers — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Content-Security-Policy`, `Strict-Transport-Security`. Keyword-keyed throughout the fn-graph (record-types in graphden are keyword-keyed); the `:http-server` adapter stringifies header keys once on the way to http-kit."
@@ -197,15 +202,25 @@
    :parent :list
    :args {:items [{:value :body} :ring-body-input-stream]}}
 
+  {:name :_ring-async-channel
+   :parent :ring-request-field
+   :args {:key {:value :async-channel}}}
+
+  {:name :ring-async-channel-entry
+   :description "`[:async-channel <httpkit channel>]` entry for the internal-request map — carried through so a streaming handler (`:sse-stream`) can adopt the connection. nil off httpkit."
+   :parent :list
+   :args {:items [{:value :async-channel} :_ring-async-channel]}}
+
   {:name :internal-request
-   :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`, whose static field reconstruction rule proves the computed return IS this record (every entry is a `:list`-built pair with a literal key), so the declared `:return-type :ring-request-shape` is verified by subtyping, not merely asserted."
+   :description "Internal request map — `{:request-method :uri :query-string :headers :body :async-channel}` — fed to the router. All six field extractors plug into one `:pairs->map`, whose static field reconstruction rule proves the computed return IS this record (every entry is a `:list`-built pair with a literal key), so the declared `:return-type :ring-request-shape` is verified by subtyping, not merely asserted."
    :parent :pairs->map
    :return-type :ring-request-shape
    :args {:entries [:ring-method-entry
                     :ring-uri-entry
                     :ring-query-string-entry
                     :ring-headers-entry
-                    :ring-body-entry]}}
+                    :ring-body-entry
+                    :ring-async-channel-entry]}}
 
   ;; =============================================================================
   ;; ROUTER INVOCATION + RESPONSE EXTRACTION

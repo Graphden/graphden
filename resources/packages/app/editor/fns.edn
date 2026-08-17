@@ -676,6 +676,38 @@
                          :value :_htmx-js-url}}
           :children {:value []}}}
 
+  {:name :_htmx-sse-js-paths
+   :parent :const
+   :args {:value ["packages/web/vendor/htmx-ext-sse.min.js"]}}
+
+  {:name :_htmx-sse-js-body
+   :description "The vendored htmx SSE extension read off the classpath."
+   :parent :concat-resources
+   :return-type :text
+   :args {:paths :_htmx-sse-js-paths}}
+
+  {:name :_htmx-sse-js-handler
+   :description "Ring handler for `GET /assets/htmx-ext-sse.min.js` — the vendored htmx SSE extension, immutable-cached like the other assets."
+   :parent :immutable-js-ok-response
+   :args {:body :_htmx-sse-js-body}}
+
+  {:name :_htmx-sse-js-url
+   :description "`/assets/htmx-ext-sse.min.js?v=<frontend-build-hash>` — `<script src>` URL for the vendored htmx SSE extension."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/htmx-ext-sse.min.js?v=" :build-hash-frontend-short]
+          :separator ""}}
+
+  {:name :htmx-sse-script-tag
+   :description "`<script src=\"/assets/htmx-ext-sse.min.js?v=<hash>\">` — loads the vendored htmx SSE extension (after `:htmx-script-tag`)."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :src}
+                         :value :_htmx-sse-js-url}}
+          :children {:value []}}}
+
   {:name :_graphden-runtime-js-url
    :description "`/assets/graphden-runtime.js?v=<frontend-build-hash>` — `<script src>` URL for the runtime bundle. The query-string hash is the FRONTEND build hash so a new deploy invalidates the immutable browser cache; in between deploys the bundle is served from cache without even a conditional request."
    :parent :str-join

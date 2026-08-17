@@ -140,12 +140,58 @@ The page side is a `:form` whose `:attrs` come from
 `:hx-post-attrs {:url "/fragments/vote" :target "#vote-out"}` —
 fields, button, target panel exactly as in the clock example.
 
+## Push, not poll — SSE streams
+
+`hx-trigger="every 5s"` polls. For genuinely live panels the
+server can PUSH instead: `:sse-fragment-handler` (app.page) keeps
+the connection open as a Server-Sent-Events stream, re-renders
+the fragment on an interval server-side, and pushes **only when
+the HTML changed**. The client side is one attrs builder:
+
+```clojure
+{:name :sse-clock-handler
+ :lambda-params [:request]
+ :parent :sse-fragment-handler
+ :args {:fragment :clock-fragment
+        :interval-ms 1000}}
+
+{:name :sse-clock-route
+ :parent :get-route
+ :args {:path "/streams/clock"
+        :handler :sse-clock-handler}}
+
+{:name :sse-clock-panel
+ :parent :card
+ :args {:children ["connecting…"]
+        :attrs {:parent :sse-connect-attrs
+                :args {:url "/streams/clock"}}}}
+```
+
+Put `:sse-clock-panel` in the page body, and take
+`:with-htmx-sse` instead of `:with-htmx` in `:head` (it adds the
+SSE extension on top of htmx — both served locally). The panel's
+content is replaced on every push; unchanged ticks cost the
+client nothing.
+
+Streams are bounded by design: each closes itself after
+`:max-lifetime-ms` (default 5 min, capped at 30) and the
+browser's EventSource transparently reconnects, so a page left
+open keeps updating through stream generations. A
+deployment-wide cap (`GRAPHDEN_SSE_MAX_STREAMS`, default 200)
+turns overload into a clean 503 + retry instead of resource
+exhaustion.
+
+Live demo: the contact-form demo page (`/demo/contact`, lesson
+12) now carries exactly this panel — a server clock streaming
+over `/demo/contact/clock`.
+
 ## When to use which layer
 
 | Need | Take |
 |---|---|
 | Click → run a registered JS handler | `:dispatch-action` (lesson 12) |
 | Click/submit → fetch a **server** fragment | `web.htmx` + `:fragment-route` (this lesson) |
+| Server-pushed live panel (no polling) | `:sse-connect-attrs` + `:sse-fragment-route` (this lesson) |
 | One-off DOM behaviour no vocabulary covers | `:custom-script` (lesson 13) |
 
 htmx fragments keep the behaviour server-side: the fragment is a

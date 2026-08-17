@@ -59,6 +59,35 @@
    :parent :hx-request-attrs
    :args {:verb-attr {:value :hx-post}}}
 
+  ;; --- SSE subscription attrs --------------------------------------
+  ;; The client half of web.sse: `hx-ext="sse"` activates the htmx SSE
+  ;; extension, `sse-connect` opens the EventSource, `sse-swap` names
+  ;; the event whose payload swaps into the element. Pair with
+  ;; `:sse-fragment-route` (app.page) and `:with-htmx-sse` in :head.
+
+  ;; Optional free with a default — introduced as a list item under
+  ;; `:first` because `:required false` is illegal on `:coalesce`'s
+  ;; required `:value` slot (see the same pattern in app.page's
+  ;; `:_sse-interval-opt`).
+  {:name :_sse-swap-event-opt
+   :parent :first
+   :args {:coll [{:as :event :required false :type :nullable-text
+                  :description "SSE event name to swap on. Omit for \"message\" — what `:sse-stream` emits."}]}}
+
+  {:name :_sse-swap-event
+   :parent :coalesce
+   :args {:value :_sse-swap-event-opt
+          :default {:value "message"}}}
+
+  {:name :sse-connect-attrs
+   :description "Attrs map subscribing an element to an SSE stream — `{:hx-ext \"sse\" :sse-connect <url> :sse-swap <event>}`. Each pushed fragment replaces the element's content. Free args: `:url` (a `:sse-fragment-route` path), optional `:event` (default \"message\")."
+   :parent :zipmap
+   :args {:keys [{:value :hx-ext} {:value :sse-connect} {:value :sse-swap}]
+          :vals [{:value "sse"}
+                 {:as :url :type :non-blank-text
+                  :description "The stream URL — typically a `:sse-fragment-route` path."}
+                 :_sse-swap-event]}}
+
   ;; --- convenience template ----------------------------------------
 
   {:name :hx-button

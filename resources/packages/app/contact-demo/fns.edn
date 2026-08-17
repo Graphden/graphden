@@ -4,8 +4,9 @@
 ;; dispatcher pipeline works for a real interactive page.
 ;;
 ;; Routes shipped:
-;;   GET  /demo/contact → :html-page-handler (via merged method-map)
-;;   POST /demo/contact → :_contact-demo-post-handler
+;;   GET  /demo/contact       → :html-page-handler (via merged method-map)
+;;   POST /demo/contact       → :_contact-demo-post-handler
+;;   GET  /demo/contact/clock → :sse-fragment-route (live SSE clock panel)
 ;;
 ;; Mounted in `app.route-groups.all` directly as `:demo-contact`.
 ;; Visit the page, type anything in the email + message fields,
@@ -110,7 +111,44 @@
                               " action handler."]}
                      :_contact-demo-form
                      :_contact-demo-result-panel
-                     :_contact-demo-custom-button]}}
+                     :_contact-demo-custom-button
+                     :_contact-demo-clock-panel]}}
+
+  ;; ---------------------------------------------------------------------------
+  ;; LIVE SSE CLOCK — demo of web.sse + web.htmx's sse-connect-attrs:
+  ;; the panel below subscribes to /demo/contact/clock and the server
+  ;; pushes a freshly rendered timestamp fragment when it changes.
+  ;; ---------------------------------------------------------------------------
+
+  {:name :_contact-demo-clock-fragment
+   :description "The pushed fragment — current server time in ms, re-rendered per stream tick."
+   :parent :wrap-element
+   :args {:tag "p"
+          :content {:parent :str
+                    :args {:parts ["server time: "
+                                   {:parent :to-str
+                                    :args {:value {:parent :current-time-ms
+                                                   :args {}}}}]}}}}
+
+  {:name :_contact-demo-clock-handler
+   :lambda-params [:request]
+   :description "The stream handler — `:sse-fragment-handler` child binding the clock fragment at 1s ticks."
+   :parent :sse-fragment-handler
+   :args {:fragment :_contact-demo-clock-fragment
+          :interval-ms 1000}}
+
+  {:name :demo-contact-clock
+   :description "GET /demo/contact/clock — the SSE stream pushing the clock fragment (1s ticks)."
+   :parent :get-route
+   :args {:path "/demo/contact/clock"
+          :handler :_contact-demo-clock-handler}}
+
+  {:name :_contact-demo-clock-panel
+   :description "The subscribing element — a card that swaps in each pushed clock fragment (`:sse-connect-attrs`)."
+   :parent :card
+   :args {:children ["connecting to the server clock…"]
+          :attrs {:parent :sse-connect-attrs
+                  :args {:url "/demo/contact/clock"}}}}
 
   ;; ---------------------------------------------------------------------------
   ;; GET HANDLER — via :html-page-handler template
@@ -128,7 +166,8 @@
    :parent :html-page-handler
    :args {:title "Contact (Graphden demo)"
           :body :_contact-demo-page-body
-          :head :graphden-page-head
+          :head {:parent :with-htmx-sse
+                 :args {:head :graphden-page-head}}
           :scripts :graphden-runtime-scripts}}
 
   ;; ---------------------------------------------------------------------------

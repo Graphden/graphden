@@ -65,6 +65,15 @@
       (is (= "<button hx-get=\"/f\">Go</button>" (str html))))))
 
 
+(deftest sse-connect-attrs-test
+  (testing "subscribes the element to a stream — ext + connect + default event"
+    (is (= {:hx-ext "sse" :sse-connect "/streams/clock" :sse-swap "message"}
+           (gh/exec-name :sse-connect-attrs {:url "/streams/clock"}))))
+  (testing "a custom event name overrides the default"
+    (is (= {:hx-ext "sse" :sse-connect "/s" :sse-swap "tick"}
+           (gh/exec-name :sse-connect-attrs {:url "/s" :event "tick"})))))
+
+
 (deftest hx-button-test
   (testing "the htmx twin of :submit-button"
     (let [[tag attrs label] (gh/exec-name :hx-button {:label "Vote" :url "/vote"
@@ -161,7 +170,22 @@
    {:name :vote-fragment-route
     :parent :post-route
     :args {:path "/fragments/vote"
-           :handler :vote-fragment-handler}}])
+           :handler :vote-fragment-handler}}
+   ;; — the lesson's SSE section —
+   {:name :sse-clock-handler
+    :lambda-params [:request]
+    :parent :sse-fragment-handler
+    :args {:fragment :clock-fragment
+           :interval-ms 1000}}
+   {:name :sse-clock-route
+    :parent :get-route
+    :args {:path "/streams/clock"
+           :handler :sse-clock-handler}}
+   {:name :sse-clock-panel
+    :parent :card
+    :args {:children ["connecting…"]
+           :attrs {:parent :sse-connect-attrs
+                   :args {:url "/streams/clock"}}}}])
 
 
 (deftest lesson-24-defs-sync-verbatim-test
@@ -175,7 +199,8 @@
         ids (fn-composition/sync-fns-to-storage! storage lesson-24-defs)]
     (is (every? ids [:clock-fragment :clock-fragment-route :clock-page-body
                      :vote-fragment :vote-fragment-handler
-                     :vote-fragment-route])
+                     :vote-fragment-route :sse-clock-handler :sse-clock-route
+                     :sse-clock-panel])
         "every lesson fn-def synced and got an id")))
 
 

@@ -128,6 +128,84 @@
    :parent :with-cdn-script
    :args {:url :_htmx-js-url}}
 
+  ;; --- SSE fragments — the PUSH half (web.htmx pulls, web.sse
+  ;; pushes). The fragment fn is re-rendered server-side on an
+  ;; interval and pushed only when its HTML changed; the element
+  ;; carrying `:sse-connect-attrs` (web.htmx) swaps each push in.
+
+  ;; NOTE — no `:sse-fragment-route` one-liner: the renderer sits
+  ;; behind a `[:fn {} :text]` HOF wrap, so `:fragment` is a
+  ;; closure-capture seed that must bind on a HANDLER child, not
+  ;; through a route ref (same rule as request-reading fragments):
+  ;;
+  ;;   {:name :my-clock-handler
+  ;;    :lambda-params [:request]
+  ;;    :parent :sse-fragment-handler
+  ;;    :args {:fragment :my-clock-fragment :interval-ms 1000}}
+  ;;   {:name :my-clock-route
+  ;;    :parent :get-route
+  ;;    :args {:path "/streams/clock" :handler :my-clock-handler}}
+  {:name :sse-fragment-handler
+   :lambda-params [:request]
+   :description "Ring handler opening an SSE stream that pushes the rendered `:fragment` whenever it changes. Declare a CHILD binding `:fragment` (+ optional `:interval-ms`, default 2000 / `:max-lifetime-ms`, default 5 min) with `:lambda-params [:request]`, and mount it with `:get-route` — see the comment above this fn-def. Pair with `:sse-connect-attrs` client-side."
+   :parent :sse-stream
+   :args {:request {:as :request}
+          :render :_sse-fragment-rendered
+          :interval-ms :_sse-interval-defaulted
+          :max-lifetime-ms :_sse-lifetime-defaulted}}
+
+  ;; Optional-with-default frees — a bound default would CONSUME the
+  ;; arg, so each free stays open and `:coalesce` supplies the
+  ;; default. The optional free is introduced as a LIST ITEM (`:first`
+  ;; over a 1-item list): `:required false` is legal on list items but
+  ;; not on a required scalar slot like `:coalesce`'s `:value`
+  ;; ("bindings cannot widen :required true back to false").
+  {:name :_sse-interval-opt
+   :parent :first
+   :args {:coll [{:as :interval-ms :required false
+                  :type [:union :null :positive-int]
+                  :description "Re-render period in ms (server clamps to >= 1000). Omit for 2000."}]}}
+
+  {:name :_sse-interval-defaulted
+   :parent :coalesce
+   :args {:value :_sse-interval-opt
+          :default {:value 2000}}}
+
+  {:name :_sse-lifetime-opt
+   :parent :first
+   :args {:coll [{:as :max-lifetime-ms :required false
+                  :type [:union :null :positive-int]
+                  :description "Stream lifetime in ms (server clamps to <= 30 min; the client reconnects after). Omit for 5 min."}]}}
+
+  {:name :_sse-lifetime-defaulted
+   :parent :coalesce
+   :args {:value :_sse-lifetime-opt
+          :default {:value 300000}}}
+
+  ;; The 0-arg renderer the stream re-executes — `:render-hiccup`
+  ;; over the free `:fragment`. Named (not inline) so the `[:fn {} …]`
+  ;; slot gets a clean hof-wrap target.
+  {:name :_sse-fragment-rendered
+   :parent :render-hiccup
+   :args {:hiccup {:as :fragment :type :hiccup-node
+                   :description "The fragment's hiccup tree — re-rendered every tick."}}}
+
+  ;; NOT `:with-cdn-script` over `:with-htmx`: the chained ref's
+  ;; propagated free is ALSO named `:head` and gets shadowed by the
+  ;; parent's already-bound `:head` slot — a plain `:concat` of the
+  ;; two ready tags keeps the free open.
+  {:name :_htmx-sse-both-tags
+   :parent :list
+   :args {:items [:htmx-script-tag :htmx-sse-script-tag]}}
+
+  {:name :with-htmx-sse
+   :description "Append BOTH htmx and its SSE extension `<script>` tags (locally served, no CDN) to a page's `:head` list — the head for pages using `:sse-connect-attrs`. Free arg: `:head`."
+   :parent :concat
+   :args {:colls [{:as :head :type [:list :hiccup-node]
+                   :description "Existing head-elements list — e.g. `:graphden-page-head`."}
+                  :_htmx-sse-both-tags]}
+   :return-type [:list :hiccup-node]}
+
   {:name :stylesheet-route
    :description "GET-route template serving a graph-authored stylesheet as `text/css`. Free args: `:path` (e.g. `\"/styles.css\"`), `:css` (the stylesheet body). Reference it from a page with `[:link {:rel \"stylesheet\" :href <path>}]` in `:head`."
    :parent :get-route

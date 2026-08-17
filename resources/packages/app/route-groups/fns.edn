@@ -25,6 +25,7 @@
                   :api-routes-js-asset
                   :graphden-runtime-js-asset
                   :htmx-js-asset
+                  :htmx-sse-js-asset
                   :editor-css-asset
                   :graphden-components-css-asset
                   :partial-effect
@@ -58,6 +59,7 @@
                   :partial-secret-rotate-form
                   :partial-row-actions
                   :demo-contact
+                  :demo-contact-clock
                   :health
                   :metrics
                   :metrics-prometheus

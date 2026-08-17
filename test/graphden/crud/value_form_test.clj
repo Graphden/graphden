@@ -21,11 +21,14 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.value-form :as vf]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
 
-(use-fixtures :once (setup/create-container-fixture))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  exec/with-isolated-rich-types)
 
 
 ;; Private resolver internals exercised directly.
@@ -90,13 +93,15 @@
 
 
 (deftest resolve-form-list-test
-  (is (= {:kind :list :element {:kind :leaf :type :int}}
+  (is (= {:kind :list :type [:list :int] :element {:kind :leaf :type :int}}
          (vf/resolve-form [:list :int]))))
 
 
 (deftest resolve-form-record-test
   (let [r (vf/resolve-form {:host :text :port :int})]
     (is (= :record (:kind r)))
+    (is (= {:host :text :port :int} (:type r))
+        "composite descriptor carries its resolved type for exact dispatch")
     (is (= #{:host :port} (set (map :name (:fields r)))))
     (let [host (first (filter #(= :host (:name %)) (:fields r)))]
       (is (= {:kind :leaf :type :text} (:form host))))))
@@ -105,6 +110,8 @@
 (deftest resolve-form-union-test
   (let [u (vf/resolve-form [:union :int :text])]
     (is (= :union (:kind u)))
+    (is (= [:union :int :text] (:type u))
+        "composite descriptor carries its resolved type for exact dispatch")
     (testing "each branch keeps its raw type AND its resolved form"
       (is (= #{:int :text} (set (map :type (:branches u)))))
       (is (= #{{:kind :leaf :type :int} {:kind :leaf :type :text}}
@@ -116,7 +123,7 @@
     (let [r (vf/resolve-form {:tags [:list :text]})
           tags (first (:fields r))]
       (is (= :record (:kind r)))
-      (is (= {:kind :list :element {:kind :leaf :type :text}}
+      (is (= {:kind :list :type [:list :text] :element {:kind :leaf :type :text}}
              (:form tags))))))
 
 
@@ -167,6 +174,30 @@
         "marker leaf picks the widget row over :any")
     (is (= "_form-text" (vf/pick-form-fn reg :text))
         "plain text unaffected")))
+
+
+(deftest exact-form-fn-test
+  ;; The pre-decomposition tier: a form-fn registered for a whole
+  ;; composite type (the hiccup-node union) wins over structural
+  ;; decomposition — but ONLY on exact structural equality, so the
+  ;; generic :any / :jsonb rows can never swallow record / union
+  ;; editors.
+  (let [hiccup-union [:union :null :text :int :float :bool [:list :any]]
+        reg [[:text "_form-text"] [:any "_form-json"]
+             [hiccup-union "_form-hiccup"]]]
+    (testing "the exact composite row matches"
+      (is (= "_form-hiccup" (vf/exact-form-fn reg hiccup-union))))
+    (testing "a member-order permutation still matches — the rich-types
+              registry canonicalizes unions in sorted order"
+      (is (= "_form-hiccup"
+             (vf/exact-form-fn reg [:union :bool :float :int :null :text
+                                    [:list :any]]))))
+    (testing "a merely-compatible type does NOT match — no subtype fallback"
+      (is (nil? (vf/exact-form-fn reg [:union :null :text])))
+      (is (nil? (vf/exact-form-fn reg {:host :text}))))
+    (testing "generic rows only match themselves"
+      (is (= "_form-json" (vf/exact-form-fn reg :any)))
+      (is (nil? (vf/exact-form-fn [[:any "_form-json"]] [:union :int :text]))))))
 
 
 (deftest pick-form-fn-js-source-prefers-textarea-over-text-input-test
@@ -472,6 +503,24 @@
           (is (= :int (vf/resolve-slot-effective-type
                         storage {:binding-id (:id b)
                                  :item-id (random-uuid)})))))
+
+      (testing "a list-item under a slot that degraded to bare :sequence
+                falls back to the rich-types registry's declared arg
+                element type (the hiccup :children case)"
+        (let [slot (setup/create-slot! storage "children" :sequence)
+              fr   (setup/create-base-fn! storage "owner-5")
+              _    (registry/record-rich-types-raw!
+                     :owner-5 {:return :any
+                               :args {:children [:list :hiccup-node]}
+                               :effects #{}})
+              b    (sp/create-entity storage :binding
+                                     {:fn-id (:id fr) :slot-id (:id slot)
+                                      :list-append true})]
+          (is (= :hiccup-node (vf/resolve-slot-effective-type
+                                storage {:binding-id (:id b)
+                                         :item-id (random-uuid)}))
+              "declared [:list :hiccup-node] beats the :any fallback
+               (the alias resolves at form-classification time)")))
       (finally (sp/close storage)))))
 
 

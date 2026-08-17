@@ -16,7 +16,7 @@
 //   data-form-field  — presence marks a value-bearing control
 //   data-field-path  — dotted path into a composite value; ''/absent
 //                      means the whole value IS this one field
-//   data-field-kind  — text | number | bool | keyword | json | enum
+//   data-field-kind  — text | number | bool | keyword | json | edn | enum
 //
 // Globals consumed: validateLiteralAgainstType (editor-literal-types),
 // writeBindingFields / putSequenceItemValue (editor-edit-modes — both

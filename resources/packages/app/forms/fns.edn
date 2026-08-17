@@ -9,7 +9,7 @@
 ;; The control carries the `data-*` contract the editor's form
 ;; runtime reads:
 ;;   data-form-field   — presence marks a value-bearing control
-;;   data-field-kind   — text | number | bool | keyword | json | enum
+;;   data-field-kind   — text | number | bool | keyword | json | edn | enum
 ;;                       (how the JS reads + coerces the raw value)
 ;; A scalar control omits `data-field-path` (absent = the whole
 ;; value IS this one field).
@@ -80,6 +80,24 @@
                               "spellcheck" "false"
                               "data-form-field" ""
                               "data-field-kind" "text"}]}}
+
+  ;; Hiccup source textarea — EDN, not JSON. Dispatched through the
+  ;; registry's EXACT-type tier (`hiccup-node` row below): the whole
+  ;; union type gets ONE editor instead of decomposing into a 6-branch
+  ;; selector whose list branch would land in the JSON fallback.
+  ;; `data-field-kind="edn"` — the client (graphden-edn.js) parses EDN
+  ;; and normalizes keywords to the stored string form, so the author
+  ;; writes `[:div {:class "x"} "hi"]` exactly like the docs even
+  ;; though storage / transit are JSON-shaped.
+  {:name :_form-hiccup
+   :description "Multi-line EDN textarea — the form for `:hiccup-node` slots. The author writes hiccup as EDN (`[:div {:class \"x\"} \"hi\"]`); the client parses it and normalizes keywords to the stored string form."
+   :parent :const
+   :args {:value ["textarea" {"class" "arg-value-edit-input value-form-hiccup"
+                              "rows" 12
+                              "spellcheck" "false"
+                              "placeholder" "[:div {:class \"box\"} \"text\"]"
+                              "data-form-field" ""
+                              "data-field-kind" "edn"}]}}
 
   ;; --- Tier 2 demo: a custom-widget form-fn ---
   ;;
@@ -237,7 +255,7 @@
                   {:as :branches :type [:list :hiccup-node]}]}}
 
   {:name :_value-form-registry
-   :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]); the resolver subtype-matches the slot's effective type, most-specific wins, falling back to _form-json."
+   :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]). Leaf types subtype-match, most-specific wins, falling back to _form-json; a COMPOSITE type matches only its exact row (the hiccup-node row) — see `crud.value-form/exact-form-fn`."
    :parent :const
    :args {:value [["text" "_form-text"]
                   ["int" "_form-number"]
@@ -248,6 +266,7 @@
                   ["jsonb" "_form-json"]
                   ["any" "_form-json"]
                   ["js-source" "_form-js-source"]
+                  ["hiccup-node" "_form-hiccup"]
                   ["vf-rating" "_form-rating"]
                   [["secret" "any"] "_form-secret-binding"]]}}
 

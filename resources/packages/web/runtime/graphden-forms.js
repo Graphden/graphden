@@ -116,6 +116,13 @@ function readFieldValue(el, kind) {
     try { return { value: JSON.parse(trimmed) }; }
     catch (_) { return { value: raw, error: 'invalid JSON' }; }
   }
+  if (kind === 'edn') {
+    // EDN authoring surface (hiccup editor) — parseEdn normalizes
+    // keywords to the stored string form (graphden-edn.js).
+    if (trimmed === '') return { value: null };
+    try { return { value: parseEdn(trimmed) }; }
+    catch (e) { return { value: raw, error: e.message || 'invalid EDN' }; }
+  }
   if (kind === 'any') {
     // Smart-parse: try JSON, fall back to the raw string. Never
     // errors — used by the legacy fallback control when /api/value-
@@ -140,6 +147,8 @@ function writeFieldValue(el, kind, v) {
   }
   if (kind === 'json') {
     el.value = (typeof v === 'string') ? v : JSON.stringify(v, null, 2);
+  } else if (kind === 'edn') {
+    el.value = printEdn(v);
   } else if (kind === 'keyword') {
     const s = String(v);
     el.value = (s.charAt(0) === ':') ? s : ':' + s;

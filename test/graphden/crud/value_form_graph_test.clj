@@ -45,4 +45,21 @@
                                    "" nil [1 2])))))
     (testing "a leaf descriptor delegates to build-leaf-form"
       (is (= "input"
-             (first (vf/build-form ctx (vf/resolve-form :int) "" nil 7)))))))
+             (first (vf/build-form ctx (vf/resolve-form :int) "" nil 7)))))
+    (testing "a composite type with an EXACT registry row skips
+              decomposition — :hiccup-node renders the single EDN
+              textarea, not a 6-branch union editor"
+      (let [f (vf/build-form ctx (vf/resolve-form :hiccup-node)
+                             "" nil ["div" {"class" "x"} "hi"])]
+        (is (= "textarea" (first f)))
+        ;; The const's attr keys keywordize on the JSONB round trip
+        ;; (they re-stringify in the JSON response the editor reads).
+        (is (= "edn" (get (second f) :data-field-kind))
+            "hiccup-node dispatches to the EDN textarea")
+        (is (not (in-tree? f "value-form-union"))
+            "no branch selector for a registered composite")))
+    (testing "the exact tier does not swallow an UNregistered union —
+              structural decomposition still applies"
+      (is (in-tree? (vf/build-form ctx (vf/resolve-form [:union :int :text])
+                                   "" nil 5)
+                    "value-form-union")))))

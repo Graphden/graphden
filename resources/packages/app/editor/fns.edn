@@ -50,6 +50,9 @@
                   "packages/app/editor/editor-literal-types.js"
                   ;; Presentation half of the type helpers.
                   "packages/app/editor/editor-type-format.js"
+                  ;; EDN reader/printer — graphden-forms.js's `edn`
+                  ;; field-kind calls into it.
+                  "packages/web/runtime/graphden-edn.js"
                   "packages/web/runtime/graphden-forms.js"
                   "packages/app/editor/editor-value-form.js"
                   "packages/app/editor/editor-widget-rating.js"
@@ -614,12 +617,13 @@
   {:name :_graphden-runtime-js-paths
    :parent :const
    :args {:value ["packages/web/runtime/graphden-popover.js"
+                  "packages/web/runtime/graphden-edn.js"
                   "packages/web/runtime/graphden-forms.js"
                   "packages/web/runtime/graphden-runtime.js"
                   "packages/web/runtime/graphden-actions-builtin.js"]}}
 
   {:name :_graphden-runtime-js-body
-   :description "Concatenated `graphden-popover.js` + `graphden-forms.js` + `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (popover positioning + dismiss; hiccup form render / collect / fill / widgets; action dispatch + built-in navigate / submit-form / custom handlers)."
+   :description "Concatenated `graphden-popover.js` + `graphden-edn.js` + `graphden-forms.js` + `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (popover positioning + dismiss; EDN read/print; hiccup form render / collect / fill / widgets; action dispatch + built-in navigate / submit-form / custom handlers)."
    :parent :concat-resources
    :return-type :text
    :args {:paths :_graphden-runtime-js-paths}}

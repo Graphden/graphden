@@ -497,9 +497,11 @@ Enforced at write time:
    `GraphConstraints` check, AND the sync-time topological-sort over
    the whole fn-def set. Bare self-ref (`owner == ref`) passes the
    per-binding layer but is rejected by topological-sort — so
-   graph-level recursion is structurally impossible today
-   (`docs/ARCHITECTURE.md § Part 3` for the empirical demo + planned
-   `:fix`-based path forward).
+   recursion through a bare graph CYCLE is structurally impossible
+   (`docs/ARCHITECTURE.md § Part 3` for the empirical demo). Recursion
+   is instead provided by the shipped `:fix` combinator base-fn
+   (`core/recursion/`, covered by `recursion_test`, used in prod by
+   `storage/branches` `:branch-chain`) — see [docs/RECURSION.md](docs/RECURSION.md).
 2. **Schema-level uniqueness** — `UNIQUE` keys on `fn-slot(fn-id, slot-id)`
    and `binding(fn-id, slot-id)`. Two former keys were retired because the
    base identity row is cross-branch and soft-deleted identities persist,

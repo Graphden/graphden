@@ -71,6 +71,63 @@
    :args {:body {:as :css :type :css-source
                  :description "The stylesheet body — typically a `:custom-stylesheet` ref."}}}
 
+  ;; --- fragments — the tenant-side analogue of the editor's
+  ;; /partials/* (docs/PARTIALS.md): a route that returns a rendered
+  ;; hiccup FRAGMENT (no page shell) as text/html, for htmx swaps.
+  ;; The handler exposes `:request` as a free arg so a fragment
+  ;; composition can read query params (`:query-param`) or a POSTed
+  ;; form body (`:parse-form-body`).
+
+  {:name :html-fragment-rendered
+   :description "Render a hiccup FRAGMENT (no page shell) to an HTML string. Free arg: `:fragment`."
+   :parent :render-hiccup
+   :return-type :text
+   :args {:hiccup {:as :fragment :type :hiccup-node
+                   :description "The fragment's hiccup tree."}}}
+
+  ;; A fragment that READS the request (query params via
+  ;; `:query-param`, a POSTed form via `:parse-form-body`) declares
+  ;; its own handler child so the ring request reaches the `:request`
+  ;; free arg its composition introduces:
+  ;;
+  ;;   {:name :my-frag-handler
+  ;;    :lambda-params [:request]
+  ;;    :parent :html-fragment-handler
+  ;;    :args {:fragment :my-frag}}
+  ;;   {:name :my-frag-route
+  ;;    :parent :post-route
+  ;;    :args {:path "/fragments/vote" :handler :my-frag-handler}}
+  ;;
+  ;; (Same pattern as the contact-demo POST handler; the template
+  ;; itself can't declare `[:request]` — lambda-params must name a
+  ;; real free arg, and a static fragment has none.)
+  {:name :html-fragment-handler
+   :lambda-params []
+   :description "Ring handler returning a rendered hiccup fragment as text/html — the server side of an `hx-get` / `hx-post` swap. Free arg: `:fragment` (the hiccup). A request-reading fragment declares a handler CHILD with `:lambda-params [:request]` — see the comment above this fn-def."
+   :parent :html-ok-response
+   :args {:body :html-fragment-rendered}}
+
+  {:name :fragment-route
+   :description "GET-route template serving a hiccup fragment as text/html — pair with `:hx-get-attrs` (web.htmx) on the requesting element. Free args: `:path`, `:fragment`. A request-reading fragment takes its own `:html-fragment-handler` child instead (see there)."
+   :parent :get-route
+   :args {:path {:as :path :type :text
+                 :description "URL path the fragment is mounted at (e.g. `\"/fragments/stats\"`)."}
+          :handler :html-fragment-handler}}
+
+  {:name :fragment-post-route
+   :description "POST-route template serving a hiccup fragment as text/html — the target of an `:hx-post-attrs` form/button. Free args: `:path`, `:fragment`. To read the submitted fields, take a `:html-fragment-handler` child with `:lambda-params [:request]` + `:parse-form-body` (see there)."
+   :parent :post-route
+   :args {:path {:as :path :type :text
+                 :description "URL path the fragment is mounted at."}
+          :handler :html-fragment-handler}}
+
+  ;; --- with-htmx — PHILOSOPHY's long-named head helper, now real:
+  ;; append the locally-served htmx bundle to a page's :head list.
+  {:name :with-htmx
+   :description "Append the local htmx `<script>` (`/assets/htmx.min.js`, vendored — no CDN) to a page's `:head` list. Bind a page's `:head` to this when any element carries `hx-*` attrs (see web.htmx). Free arg: `:head` (the list to extend — e.g. `:graphden-page-head`)."
+   :parent :with-cdn-script
+   :args {:url :_htmx-js-url}}
+
   {:name :stylesheet-route
    :description "GET-route template serving a graph-authored stylesheet as `text/css`. Free args: `:path` (e.g. `\"/styles.css\"`), `:css` (the stylesheet body). Reference it from a page with `[:link {:rel \"stylesheet\" :href <path>}]` in `:head`."
    :parent :get-route

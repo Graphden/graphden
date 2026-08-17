@@ -1,0 +1,70 @@
+;; htmx attribute vocabulary — the server-driven interactivity layer
+;; for graph-composed pages, mirroring how the editor's own
+;; `/partials/*` fragments work (docs/PARTIALS.md): an element carries
+;; `hx-get`/`hx-post` + `hx-target`/`hx-swap`, htmx fetches the URL
+;; and swaps the returned HTML fragment in. The fragment itself is a
+;; graph fn served by `:fragment-route` / `:fragment-post-route`
+;; (app.page), so data, structure and behaviour all stay visible in
+;; the graph.
+;;
+;; These are ATTRS BUILDERS (like `:dispatch-action` in web.runtime):
+;; they produce a keyword-map you bind into a component's `:attrs`
+;; slot. The htmx library itself is served locally at
+;; `/assets/htmx.min.js` (no CDN) — add it to a page via
+;; `:with-htmx` (app.page).
+
+{:namespace "web.htmx"
+ :description "htmx attrs builders for graph-composed pages — hx-get/hx-post requests with optional target/swap/trigger, plus the :hx-button convenience template. Pair with :fragment-route (app.page) for the server side."
+ :fns
+ [;; Closed enum of htmx swap strategies — the editor renders a
+  ;; `<select>` for it, so authors don't have to remember the words.
+  {:name :hx-swap-mode
+   :description "htmx `hx-swap` strategy — how the fetched fragment replaces content at the target."
+   :refine {:base :text
+            :constraint [:in ["innerHTML" "outerHTML" "beforebegin"
+                              "afterbegin" "beforeend" "afterend"
+                              "delete" "none"]]}}
+
+  ;; --- request builder ---------------------------------------------
+  ;; One zipmap core; the optional slots (`:target` / `:swap` /
+  ;; `:trigger`) map to nil when unbound, and BOTH hiccup renderers
+  ;; (hiccup2 server-side, renderHiccup client-side) drop nil-valued
+  ;; attributes — so an unbound option simply doesn't render.
+  ;; `:hx-get-attrs` / `:hx-post-attrs` pin the verb attribute.
+
+  {:name :hx-request-attrs
+   :description "Generic htmx request attrs — `{<verb-attr> url, :hx-target …, :hx-swap …, :hx-trigger …}`; unbound options carry nil and vanish at render. Use `:hx-get-attrs` / `:hx-post-attrs` unless you need an unusual verb."
+   :parent :zipmap
+   :args {:keys [{:as :verb-attr :type :keyword
+                  :description "The htmx verb attribute — `:hx-get` or `:hx-post`."}
+                 {:value :hx-target}
+                 {:value :hx-swap}
+                 {:value :hx-trigger}]
+          :vals [{:as :url :type :non-blank-text
+                  :description "URL the request goes to — typically a `:fragment-route` path."}
+                 {:as :target :required false :type :nullable-text
+                  :description "CSS selector the fragment swaps into (`hx-target`). Omit to swap into the requesting element."}
+                 {:as :swap :required false :type [:union :null :hx-swap-mode]
+                  :description "Swap strategy (`hx-swap`). Omit for htmx's default `innerHTML`."}
+                 {:as :trigger :required false :type :nullable-text
+                  :description "Trigger spec (`hx-trigger`), e.g. `\"load\"`, `\"every 10s\"`, `\"revealed\"`. Omit for the element's natural trigger (click / submit)."}]}}
+
+  {:name :hx-get-attrs
+   :description "Attrs map for an htmx GET — `{:hx-get <url>}` (+ optional `:target` selector, `:swap` strategy, `:trigger` spec). Bind into any component's `:attrs` slot; the fetched fragment swaps in on the element's trigger."
+   :parent :hx-request-attrs
+   :args {:verb-attr {:value :hx-get}}}
+
+  {:name :hx-post-attrs
+   :description "Attrs map for an htmx POST — `{:hx-post <url>}` (+ optional `:target` / `:swap` / `:trigger`). On a `<form>` htmx serializes the fields into the POST body; pair with `:fragment-post-route` + `:parse-form-body` server-side."
+   :parent :hx-request-attrs
+   :args {:verb-attr {:value :hx-post}}}
+
+  ;; --- convenience template ----------------------------------------
+
+  {:name :hx-button
+   :description "`<button hx-post=<url> [hx-target] [hx-swap] [extras]>label</button>` — the htmx twin of `:submit-button`: clicking POSTs to `:url` and swaps the returned fragment into `:target`. Free args: `:label`, `:url`, optional `:target` / `:swap` / `:extras` (extra attrs, merged last so the caller wins)."
+   :parent :button
+   :args {:attrs {:parent :merge
+                  :args {:maps [:hx-post-attrs
+                                {:as :extras :required false
+                                 :description "Extra attrs merged onto the button (`:class` / `:id` / more `hx-*`)."}]}}}}]}

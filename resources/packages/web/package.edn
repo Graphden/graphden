@@ -6,4 +6,4 @@
  ;; `:current-branch-chain`, …) defined under `storage/branches` +
  ;; `storage/versioned`.
  :dependencies ["core" "storage"]
- :modules ["http" "http-client" "vault" "sql" "reitit" "reitit-text" "html" "crud" "ring-adapter" "branch-router" "runtime" "components" "response" "errors"]}
+ :modules ["http" "http-client" "vault" "sql" "reitit" "reitit-text" "html" "crud" "ring-adapter" "branch-router" "runtime" "components" "htmx" "response" "errors"]}

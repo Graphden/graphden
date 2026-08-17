@@ -45,6 +45,7 @@
 | 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written |
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written |
 | 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written |
+| 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

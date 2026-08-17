@@ -111,4 +111,7 @@ extend-exclude = [
   "*.lock",
   "package-lock.json",
   ".clj-kondo/.cache/",
+  # Vendored third-party minified bundles (see web/vendor/README.md) —
+  # machine-mangled identifiers, not author prose.
+  "resources/packages/web/vendor/*.min.js",
 ]

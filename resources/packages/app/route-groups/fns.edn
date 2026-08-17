@@ -24,6 +24,7 @@
                   :editor-js-asset
                   :api-routes-js-asset
                   :graphden-runtime-js-asset
+                  :htmx-js-asset
                   :editor-css-asset
                   :graphden-components-css-asset
                   :partial-effect

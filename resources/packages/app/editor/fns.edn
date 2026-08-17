@@ -548,10 +548,10 @@
   ;; The graph itself needs no library: nodes are HTML overlays, edges are SVG
   ;; paths, and the viewport is one CSS transform.
   {:name :head
-   :description "Final editor `<head>` element vector — `:_editor-css-link` (cached stylesheet) + HTMX 2.x CDN. HTMX is the declarative-interaction layer the `/partials/*` fragments rely on."
+   :description "Final editor `<head>` element vector — `:_editor-css-link` (cached stylesheet) + the locally-served htmx 2.x bundle (`/assets/htmx.min.js`, vendored — no CDN). HTMX is the declarative-interaction layer the `/partials/*` fragments rely on."
    :parent :with-cdn-script
    :args {:head :head-elements-0
-          :url "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"}}
+          :url :_htmx-js-url}}
 
   ;; Complete HTML page
   ;; Scripts: API constants module (inline) THEN the editor JS
@@ -638,6 +638,43 @@
   ;; `:scripts` slot via :graphden-runtime-scripts (one binding,
   ;; two tags). See :html-page-route in app/page for the
   ;; one-fn-def page-route template that pairs with these.
+
+  ;; --- htmx asset — vendored locally (web/vendor/htmx.min.js, see
+  ;; its README for provenance): no CDN dependency for the editor OR
+  ;; for tenant pages. Same immutable + ?v=hash caching as the other
+  ;; assets.
+
+  {:name :_htmx-js-paths
+   :parent :const
+   :args {:value ["packages/web/vendor/htmx.min.js"]}}
+
+  {:name :_htmx-js-body
+   :description "The vendored htmx 2.x bundle read off the classpath."
+   :parent :concat-resources
+   :return-type :text
+   :args {:paths :_htmx-js-paths}}
+
+  {:name :_htmx-js-handler
+   :description "Ring handler for `GET /assets/htmx.min.js` — the vendored htmx bundle with the standard 1-year `immutable` cache headers (hash-bust via `?v=` on the script tag)."
+   :parent :immutable-js-ok-response
+   :args {:body :_htmx-js-body}}
+
+  {:name :_htmx-js-url
+   :description "`/assets/htmx.min.js?v=<frontend-build-hash>` — `<script src>` URL for the vendored htmx bundle, hash-busted per deploy."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/htmx.min.js?v=" :build-hash-frontend-short]
+          :separator ""}}
+
+  {:name :htmx-script-tag
+   :description "`<script src=\"/assets/htmx.min.js?v=<hash>\">` — loads the locally-served htmx bundle. Tenant pages usually take `:with-htmx` (app.page) instead, which appends this tag to a `:head` list."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :src}
+                         :value :_htmx-js-url}}
+          :children {:value []}}}
 
   {:name :_graphden-runtime-js-url
    :description "`/assets/graphden-runtime.js?v=<frontend-build-hash>` — `<script src>` URL for the runtime bundle. The query-string hash is the FRONTEND build hash so a new deploy invalidates the immutable browser cache; in between deploys the bundle is served from cache without even a conditional request."

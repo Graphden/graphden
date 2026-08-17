@@ -119,16 +119,17 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:abs :add :and :assert-some :assoc :assoc-in :blank? :byte-len :call
-    :call-noargs :case :coalesce :concat :cond :conj :cons :const :do
-    :constant-time-equal? :contains? :count :dissoc :distinct :div :drop
+  #{:abs :add :and :assert-some :assoc :assoc-in :atom :blank? :byte-len :call
+    :call-noargs :case :cell :coalesce :concat :cond :conj :cons :const
+    :constant-time-equal? :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :ex-data :ex-info :first :flatten :get :get-in :gt
     :gte :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str
     :quot :range
-    :re-find? :re-replace :render-hiccup :repeat :rest :reverse :select-keys :digest-hex
+    :re-find? :re-replace :render-hiccup :repeat :reset :rest :reverse :select-keys :digest-hex
     :slurp :some? :sort :str :str-contains? :str-join :str-len :str-lower
+    :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
     :str-upper :sub :subs :take :throw :throwable-class-name :throwable-message
     :to-json-string :to-str :try :update-in :update-keys :update-vals

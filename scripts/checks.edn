@@ -33,18 +33,23 @@
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
  {:name "splint"        :bb "splint"        :timeout 120000 :group :clj
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
+ ;; `^bb\.edn$` in every check whose SCAN SET is defined by its `bb`
+ ;; task body (a narrowed glob there would otherwise skip the very
+ ;; check the edit changed); `^\.cljstyle$` because the extensionless
+ ;; config file doesn't match the `.(clj|…|edn|bb)$` glob. bb.edn is
+ ;; edited rarely, so re-running on such a diff is cheap insurance.
  {:name "cljstyle"      :bb "cljstyle"      :timeout 120000 :group :clj
-  :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
+  :relevant ["\\.(clj|cljc|cljs|edn|bb)$" "^\\.cljstyle$"]}
  {:name "biome"         :bb "biome"         :timeout  60000 :group :web
-  :relevant ["\\.(js|mjs|jsonc?)$"]}
+  :relevant ["\\.(js|mjs|jsonc?)$" "^bb\\.edn$"]}
  {:name "stylelint"     :bb "stylelint"     :timeout 120000 :group :web
-  :relevant ["\\.css$" "^\\.stylelintrc"]}
+  :relevant ["\\.css$" "^\\.stylelintrc" "^bb\\.edn$"]}
  {:name "shellcheck"    :bb "shellcheck"    :timeout 120000 :group :infra
-  :relevant ["\\.sh$" "^dev/wtq/wt$"]}
+  :relevant ["\\.sh$" "^dev/wtq/wt$" "^bb\\.edn$"]}
  {:name "hadolint"      :bb "hadolint"      :timeout 120000 :group :infra
-  :relevant ["^Dockerfile"]}
+  :relevant ["^Dockerfile" "^bb\\.edn$"]}
  {:name "actionlint"    :bb "actionlint"    :timeout  60000 :group :infra
-  :relevant ["^\\.github/workflows/"]}
+  :relevant ["^\\.github/workflows/" "^bb\\.edn$"]}
  ;; Same-repo dual pin: an external package's git coord lives in BOTH deps.edn
  ;; (dev/test resolution) and resources/executor-packages.edn (uberjar bundle).
  ;; Tests always resolve the in-tree :local/root override, so a divergence is
@@ -61,9 +66,9 @@
  {:name "ci-selftest"   :bb "ci-test"       :timeout  60000 :group :infra
   :relevant ["^scripts/ci" "^scripts/checks\\.edn$" "^bb\\.edn$"]}
  {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs
-  :relevant ["\\.md$" "^\\.markdownlint"]}
+  :relevant ["\\.md$" "^\\.markdownlint" "^bb\\.edn$"]}
  {:name "lychee"        :bb "lychee"        :timeout  60000 :group :docs
-  :relevant ["\\.md$" "^\\.lychee"]}
+  :relevant ["\\.md$" "^\\.lychee" "^bb\\.edn$"]}
  {:name "typos"         :bb "typos"         :timeout  60000 :group :docs}
  ;; The unit suite's mcp-doc-sync-test pins the same pair, but tests-unit is
  ;; diff-scoped OUT of a docs-only change — without this check, editing only
@@ -71,7 +76,13 @@
  {:name "ai-context-sync" :bb "ai-context-sync" :timeout 30000 :group :docs
   :relevant ["^docs/AI_CONTEXT\\.md$" "^resources/packages/mcp/mcp/ai-context\\.md$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs
-  :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"]}
+  ;; `resources/packages/**/impls.clj` IS toured (~15 steps anchor on
+  ;; base-fn impls like :add / :http-server / publish-package-apply), so
+  ;; a rename/move of a toured form there must re-run devtour-check —
+  ;; otherwise the anchor drifts and lands green on a diff that only
+  ;; touched impls.clj, reddening the next innocent PR.
+  :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"
+             "^resources/packages/.*impls\\.clj$"]}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}
  {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec
   ;; Three passes (see the `trivy` bb task): (1) `config .` — RECURSIVE IaC
@@ -85,10 +96,10 @@
  ;; npm-only audit — a deps.edn change must NOT trigger it: the green would
  ;; read as "the new JVM dep's license was vetted", which this task never does.
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec
-  :relevant ["package(-lock)?\\.json$"]}
+  :relevant ["package(-lock)?\\.json$" "^bb\\.edn$"]}
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
  {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test
-  :relevant ["\\.(js|mjs)$" "^tools/runtime-test/"]}
+  :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^bb\\.edn$"]}
  {:name "tests-unit"    :bb "test-unit"     :timeout 900000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}

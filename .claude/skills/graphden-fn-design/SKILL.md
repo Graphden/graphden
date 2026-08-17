@@ -342,12 +342,6 @@ Planning to decompose a large fn?
 
 ## 12. What is planned (not implemented right now)
 
-- **Export of a package as EDN.** A planned feature: dump user
-  fn-defs as a portable package. That is why **all** fns must have
-  stable names (including ones that are currently anonymous via
-  shape-dedup) — otherwise there would be no way to reconstruct them when
-  importing onto another instance.
-  Auto-naming makes this feature feasible.
 - **A `:private?` flag** on a namespace + on individual fn-defs — a UI hint
   for the display rules. The equivalent of the `_`-prefix convention. When we
   introduce it, we will pick one of the two as canonical.

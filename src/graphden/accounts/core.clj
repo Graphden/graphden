@@ -286,6 +286,11 @@
   [storage {:keys [email password display-name]}]
   (let [email (normalize-email email)]
     (when (str/blank? email) (throw (ex-info "email required" {:type :accounts/bad-email})))
+    ;; Minimum password strength — the signup path previously accepted a
+    ;; 1-character password. 8 chars is the floor.
+    (when (< (count (str password)) 8)
+      (throw (ex-info "password must be at least 8 characters"
+                      {:type :accounts/weak-password})))
     (when (or (find-identity storage "password" email)
               (account-by-email storage email))
       (throw (ex-info "email already registered" {:type :accounts/email-taken})))

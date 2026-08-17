@@ -47,14 +47,19 @@ Access to components without digging into the map:
 ;; => 15
 ```
 
-### Find a fn-id and inspect its args
+### Find a fn-id and inspect its slots/bindings
+
+The slot/binding model has no `:arg` entity — a fn exposes slots via
+`:fn-slot` junctions and customizes them via `:binding` rows (both
+keyed by `:fn-id`). See CLAUDE.md § Core entities.
 
 ```clojure
 (require '[graphden.storage.protocol.interface :as sp])
 (let [s (dev/storage)
       [f] (sp/query-entities s :fn {:name "add-10"})]
   {:fn f
-   :args (sp/query-entities s :arg {:fn-id (:id f)})})
+   :fn-slots (sp/query-entities s :fn-slot {:fn-id (:id f)})
+   :bindings (sp/query-entities s :binding {:fn-id (:id f)})})
 ```
 
 ### Get the execution-graph (what the compiler sees)

@@ -3,6 +3,7 @@
    pool, LISTEN/NOTIFY transport, SSE relay, service-lock connection,
    and the VersionedStorage decorator."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
@@ -61,11 +62,22 @@
 ;; Storage (unified initialization)
 ;; =============================================================================
 
+(defn- redact-jdbc-url
+  "Strip embedded credentials from a JDBC url before logging. Covers
+   both `//user:password@host` userinfo and `?password=…`/`?user=…`
+   query params — an operator who puts creds in `JDBC_URL` (common)
+   would otherwise leak them to the log at INFO."
+  [url]
+  (-> (str url)
+      (str/replace #"://[^/@]*@" "://<redacted>@")
+      (str/replace #"(?i)([?&](?:password|user)=)[^&]*" "$1<redacted>")))
+
+
 (defn- init-storage!
   "Unified storage initialization.
    Creates storage using create-fn, initializes with schema, seeds traits."
   [storage-name create-fn {:keys [jdbc-url username password pool-size schema]}]
-  (log/info (str "Connecting to " storage-name ":") jdbc-url)
+  (log/info (str "Connecting to " storage-name ":") (redact-jdbc-url jdbc-url))
   (let [storage (-> (create-fn {:jdbc-url jdbc-url
                                 :username username
                                 :password password

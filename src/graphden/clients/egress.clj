@@ -130,21 +130,33 @@
 
 
 (def ^{:private true
-       :doc "JDBC connect params a tenant url must NOT carry. These load an
-             arbitrary class or plug a custom transport into the driver, which
-             would subvert the SSRF guard entirely (a `socketFactory` /
-             `sslfactory` / `sslhostnameverifier` / `authenticationPluginClassName`
-             can dial wherever it likes and ignore our resolved-address check),
-             or turn on multi-host failover that reaches a second, unchecked host
-             (`loadBalanceHosts`). Compared case-insensitively. Denylist, not
+       :doc "JDBC connect params a tenant url must NOT carry. Three
+             classes: (1) class-loading / custom-transport gadgets that
+             subvert the SSRF guard entirely (`socketFactory` /
+             `sslfactory` / `sslhostnameverifier` /
+             `authenticationPluginClassName` can dial anywhere and ignore
+             our resolved-address check); (2) multi-host failover that
+             reaches a second, unchecked host (`loadBalanceHosts`); (3)
+             **local-file-path params** — pgjdbc reads
+             `sslrootcert`/`sslcert`/`sslkey`/`sslpassword` and writes
+             `loggerFile` at connect time, and MySQL's
+             `serverRSAPublicKeyFile` reads a file, so a url like
+             `?sslrootcert=/etc/passwd` turns a DB connection into a
+             file-existence probe / partial-disclosure oracle on the
+             executor host. Compared case-insensitively. Denylist, not
              allowlist, so ordinary connect options (`ssl`, `sslmode`,
-             `connectTimeout`, `ApplicationName`, …) keep working."}
+             `connectTimeout`, `ApplicationName`, …) keep working — but
+             see the allowlist follow-up in docs/SECURITY_MODEL.md if
+             more file/URL params surface."}
   unsafe-jdbc-params
   #{"socketfactory" "socketfactoryarg"
     "sslfactory" "sslfactoryarg"
     "sslpasswordcallback" "sslhostnameverifier"
     "authenticationpluginclassname"
-    "loadbalancehosts"})
+    "loadbalancehosts"
+    ;; local-file-path readers/writers (pgjdbc + MySQL)
+    "sslrootcert" "sslcert" "sslkey" "sslpassword" "loggerfile"
+    "serverrsapublickeyfile"})
 
 
 (defn- jdbc-param-names

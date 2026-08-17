@@ -204,11 +204,16 @@ governance_drift() {
 #   *.md, docs/**                    no runtime surface     -> nothing heavy
 #   dev/**                           this queue's own tooling; not on any
 #                                    classpath, not bundled -> nothing heavy
+#   .github/**                       GitHub Actions + repo metadata (issue
+#                                    templates, dependabot, PR template). It
+#                                    drives GitHub's own CI, NOT this local
+#                                    gate, and its workflows are validated by
+#                                    actionlint in the lint pass -> nothing heavy
 #   tools/browser-test/**            the e2e suite itself   -> e2e
 #   packages' .js/.css/.html/.svg    browser-only surface   -> e2e
 #   everything else                  src, .clj/.edn, deps.edn, bb.edn, scripts/,
-#                                    Dockerfile*, compose,  -> integration + e2e
-#                                    CI config, unknown
+#                                    Dockerfile*, compose, and THIS gate's own
+#                                    config -> integration + e2e; unknown
 #
 # On dev/**: it holds only `wt` and its docs. `bb ci` shellchecks the script,
 # and the gate is itself the script executing — that IS its test. Putting app
@@ -221,7 +226,7 @@ classify_changes() {   # <worktree> -> sets NEED_INTEGRATION / NEED_E2E / CHANGE
     [ -n "$f" ] || continue
     CHANGED_N=$((CHANGED_N + 1))
     case "$f" in
-      *.md|docs/*|dev/*)              : ;;
+      *.md|docs/*|dev/*|.github/*)    : ;;
       tools/browser-test/*)           NEED_E2E=1 ;;
       resources/packages/*.js|resources/packages/*.css|\
       resources/packages/*.html|resources/packages/*.svg)

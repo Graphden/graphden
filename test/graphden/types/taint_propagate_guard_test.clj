@@ -95,6 +95,10 @@
     :select-keys
     :service-blocking-free-args :set-branch-policy! :sleep :sleep-until-ms
     :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
+    ;; :sse-stream returns the adopted-channel response map; the
+    ;; render callable's output goes to the WIRE, never into the
+    ;; return value — no taint to propagate (same as :http-server).
+    :sse-stream
     :sql-query :storage-query-identities :str :str-contains? :str-join
     :str-len :str-lower :str-replace :str-split :str-starts-with?
     :str-to-keyword :str-to-uuid :str-trim :str-upper

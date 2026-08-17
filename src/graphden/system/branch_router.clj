@@ -302,10 +302,26 @@
    ancestor edit C inherits). The default branch's chain is just `[default]`,
    so it yields the empty set and never deltas against itself."
   [base-storage default-branch-id branch-id]
-  (into #{}
-        (comp (remove #(= % default-branch-id))
-              (mapcat #(vmerge/merge-affected-fn-ids base-storage %)))
-        (vres/collect-branch-chain base-storage branch-id)))
+  (let [chain (vres/collect-branch-chain base-storage branch-id)
+        ;; Fns merged INTO an ancestor own their version rows on the merge
+        ;; SOURCE branch, not on the ancestor, and the source is NOT in
+        ;; `branch-id`'s ancestor chain — so `merge-affected-fn-ids` over
+        ;; the chain alone MISSES them. A fork of a merge-target then
+        ;; inherits those merged edits through resolution
+        ;; (`branch-visibility-ids` walks chain + merge-sources) yet is
+        ;; told nothing diverged → it runs main's pre-merge closures (the
+        ;; A1.1 tail of the W1 divergence-set fix — same wrong-result
+        ;; class, one merge-hop deeper). Add the source branch of every
+        ;; merge whose target lands on some chain member; over-inclusion
+        ;; only costs an unnecessary delta-recompile, never a stale run.
+        merge-sources (when (seq chain)
+                        (->> (sp/query-entities base-storage :branch-merge
+                                                {:target-branch-id (vec chain)})
+                             (keep :source-branch-id)))]
+    (into #{}
+          (comp (remove #(= % default-branch-id))
+                (mapcat #(vmerge/merge-affected-fn-ids base-storage %)))
+          (into (set chain) merge-sources))))
 
 
 ;; === Ctx-build diagnostics recompute (error-tolerance, ROADMAP § Error

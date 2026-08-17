@@ -141,3 +141,37 @@
         (testing "a root-forked sibling with no edits stays on the fast path — sees main's value"
           (is (= 1 (cr/execute sib-ctx fn-id {})))))
       (finally (sp/close raw)))))
+
+
+(deftest branch-forked-off-merge-target-inherits-merged-edit-test
+  ;; A1.1 — the tail of the W1 chain-divergence fix. Fns merged INTO an
+  ;; ancestor own their version rows on the merge SOURCE branch, which is
+  ;; NOT in a fork's ancestor chain. So a fork C of a merge-target B saw an
+  ;; EMPTY divergence set for those fns (merge-affected over [C B main] is
+  ;; empty — B has no own rows, main is excluded) and ran main's pre-merge
+  ;; closure verbatim, even though C's storage resolves the merged edit via
+  ;; B's merge record. Fixed by unioning merge-affected over the merge-SOURCE
+  ;; branches of every merge whose target is on the chain.
+  (let [{:keys [raw storage base-ctx router fn-id] :as f} (fixture!)
+        s (vs/create-branch! storage "merge-source-s")
+        s-storage (vs/->VersionedStorage (vs/unwrap storage) (:id s))
+        s-ctx (br/ctx-for router (:id s))
+        b (vs/create-branch! storage "merge-target-b")
+        b-storage (vs/->VersionedStorage (vs/unwrap storage) (:id b))]
+    (try
+      ;; S edits F -> 7 (owns a binding-version row on S).
+      (set-value! f s-storage s-ctx 7)
+      ;; Merge S -> B. B resolves F=7 via the merge record; the version row
+      ;; still lives on S, NOT on B.
+      (vs/merge-branch! b-storage (:id s))
+      (let [b-ctx (br/ctx-for router (:id b))]
+        (testing "precondition: B (a merge-target) sees the merged edit; main untouched"
+          (is (= 7 (cr/execute b-ctx fn-id {})))
+          (is (= 1 (cr/execute base-ctx fn-id {})))))
+      ;; C forks off the merge-target B, with NO own edits and NO merge of its own.
+      (let [c (vs/create-branch! storage "fork-of-merge-target"
+                                 {:base-branch-id (:id b)})
+            c-ctx (br/ctx-for router (:id c))]
+        (testing "C inherits B's MERGED edit (via S), not main's stale closure"
+          (is (= 7 (cr/execute c-ctx fn-id {})))))
+      (finally (sp/close raw)))))

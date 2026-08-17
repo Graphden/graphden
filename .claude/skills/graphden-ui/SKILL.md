@@ -5,7 +5,7 @@ description: Frontend changes to the Graphden editor (resources/packages/app/edi
 
 # graphden-ui — UI work that actually gets verified
 
-Frontend = ~18.6K lines of vanilla JS (editor modules + the shared `web/runtime` bundle) + one CSS file with `:root` / `body.theme-dark` design tokens. No build step, no module system, no React. Files load in the order declared in `app/editor/fns.edn :_editor-script-paths`.
+Frontend = ~22.6K lines of vanilla JS (editor modules + the shared `web/runtime` bundle) + one CSS file with `:root` / `body.theme-dark` design tokens. No build step, no module system, no React. Files load in the order declared in `app/editor/fns.edn :_editor-script-paths`.
 
 The recurring failure mode this skill prevents: **claiming "the UI is done" without ever opening a browser or reading a console log.** `bb rebuild` ships the jar; that's not the same as the feature working.
 
@@ -80,7 +80,7 @@ After ANY editor change, run all six (the Stop hook auto-runs 1 + 2; do the rest
 2. **`bb stylelint`** — CSS lint. Must exit 0. Catches off-palette colours and mis-formed CSS.
 3. **`bb rebuild`** — ships the change to the running container. Wait for "✓ smoke OK".
 4. **Live browser check** — via Playwright MCP:
-   - Navigate to `http://localhost:9002/#<some-fn>` (the Cytoscape canvas only mounts after a fn is selected — the empty editor is not a useful screenshot baseline).
+   - Navigate to `http://localhost:9002/#<some-fn>` (the graph only renders once a fn is selected — nodes/edges are fetched from the server and laid out from server positions, so the empty editor is not a useful screenshot baseline).
    - Read `console` — zero errors expected.
    - Take a screenshot, eyeball it (overlapping elements, cut-off text, contrast issues).
    - For interactive features: click / type / observe state change.
@@ -93,8 +93,8 @@ If any of these fail, **fix before reporting**. Don't ship "the build is green" 
 
 ## 3. Common pitfalls
 
-- **Cross-file `let` vs `const`.** Files share globals via window-scope `let cy = …`. Biome's `useConst` will flag these as warnings — they're false positives because biome doesn't see the cross-file reassignment. Leave them as `let`.
-- **Cytoscape pan/zoom returns LIVE refs.** Snapshot via primitives (`const x = cy.pan().x`); reading `.x` later sees mutations from later writes. Saved as a memory; don't rediscover.
+- **Cross-module globals live on `window.*`, not a bare top-level `let`.** Shared state is published as `window.graph` / `window.graphView` (`editor-graph-model.js`) and read from other modules through `window.*`. A bare top-level `let foo` shadows a `window.foo` accessor inside its own file, and a bare `typeof foo` probe sees the local `let` rather than the window value — reach cross-module state through `window.foo`. Saved as a memory; don't rediscover.
+- **The graph model draws nothing; positions come from the server.** `editor-graph-model.js` is two maps (nodes, edges) plus a position tween — no layout engine, no canvas, no viewport. Pan/zoom live in `editor-viewport.js` (a single CSS transform on `#graph-layer`); its `viewport.pan` is a mutable object, so snapshot the primitive (`const x = viewport.pan.x`) rather than holding the object, which later writes mutate in place.
 - **Theme-dark must mirror every new token.** When you add a `--my-token` to `:root`, also add it to `body.theme-dark` — otherwise dark theme inherits the light value and looks broken under a dark page bg.
 - **No new build steps.** No bundler, no transpiler, no TypeScript. Plain ES2017+ that the browser executes directly. If you want types, JSDoc — biome reads them.
 - **Script load order matters.** New file must be added to `app/editor/fns.edn :_editor-script-paths`, in dependency order. The list lives in `docs/EDITOR_MODULES.md`.
@@ -129,9 +129,10 @@ to client-side JS only when graph+htmx would HURT one of:
    (drag, hover, keystroke-by-keystroke validation). htmx round-trip
    costs ~30ms minimum even on localhost.
 2. **Architectural cleanliness** — visualization that intrinsically
-   binds to a stateful in-page object (Cytoscape canvas, dynamic
-   layout pipelines, the singleton arg-overlay manager). These have
-   no meaningful server-side representation.
+   binds to a stateful in-page object (the graph model + position
+   tween, SVG edges, the CSS-transform viewport, the singleton
+   arg-overlay manager). These have no meaningful server-side
+   representation.
 3. **Security** — anywhere the server should NOT see the editing
    state (e.g. unsubmitted password / vault path while typing).
    Once submitted, server takes over.

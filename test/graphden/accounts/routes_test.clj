@@ -369,3 +369,26 @@
       (is (= 200 (:status (router {:request-method :post :uri "/auth/resend-verification"
                                    :headers {"cookie" (str "gd_session=" session)}}))))
       (is (zero? (count @sink))))))
+
+
+(deftest ^:integration csrf-cross-origin-post-rejected
+  (let [router (routes/make-router {:storage (storage)
+                                    :mailer (email/->CapturingMailer (atom []))
+                                    :app-origin origin})]
+    (testing "a state-changing POST carrying a cross-site Origin is 403 before dispatch"
+      (let [resp (router {:request-method :post :uri "/auth/login"
+                          :headers {"host" "app.graphden.dev"
+                                    "origin" "https://evil.example.com"}
+                          :body (json/generate-string {:email "csrf@x.z" :password "whatever12"})})]
+        (is (= 403 (:status resp)))))
+    (testing "a same-origin POST passes the CSRF gate (reaches the handler)"
+      (let [resp (router {:request-method :post :uri "/auth/login"
+                          :headers {"host" "app.graphden.dev"
+                                    "origin" "https://app.graphden.dev"}
+                          :body (json/generate-string {:email "nobody@x.z" :password "whatever12"})})]
+        (is (not= 403 (:status resp)) "invalid creds 401, not the CSRF 403")))
+    (testing "an absent Origin (API/curl client) is not blocked"
+      (let [resp (router {:request-method :post :uri "/auth/login"
+                          :headers {"host" "app.graphden.dev"}
+                          :body (json/generate-string {:email "nobody2@x.z" :password "whatever12"})})]
+        (is (not= 403 (:status resp)))))))

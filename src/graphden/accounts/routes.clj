@@ -374,6 +374,23 @@
       "unknown"))
 
 
+(defn- cross-site-origin?
+  "CSRF guard for state-changing `/auth/*` POSTs. True when the browser
+   sent an `Origin` that does NOT match the request's own host — a
+   cross-site form/fetch. A MISSING Origin is NOT a mismatch: non-browser
+   clients (API tokens, curl) and some same-site navigations omit it, and
+   a CSRF attack cannot forge a cross-origin request WITHOUT the browser
+   attaching the attacker's Origin — so absent-Origin is allowed and only
+   a present-and-mismatched Origin is rejected. Complements the session
+   cookie's `SameSite=Lax`."
+  [request]
+  (when-let [o (get-in request [:headers "origin"])]
+    (let [host (get-in request [:headers "host"])]
+      (not (or (str/blank? o)
+               (= o (str "https://" host))
+               (= o (str "http://" host)))))))
+
+
 (defn- handle-forgot
   "POST /auth/forgot {email} — always 200 with the same body whether or not
    the email exists (no account enumeration); the reset link goes by email."
@@ -487,7 +504,11 @@
         ;; existence isn't probeable.
         login-limit (crypto/fixed-window-limiter 10 60000)
         signup-limit (crypto/fixed-window-limiter 20 60000)
-        forgot-limit (crypto/fixed-window-limiter 5 60000)]
+        forgot-limit (crypto/fixed-window-limiter 5 60000)
+        ;; TOTP code verification — a 6-digit code is guessable within a
+        ;; window without a per-IP cap. 10/min blunts brute-force across
+        ;; /auth/totp (login 2nd step), /confirm and /disable.
+        totp-limit (crypto/fixed-window-limiter 10 60000)]
     (fn [request]
       (let [uri (str (:uri request))
             method (:request-method request)]
@@ -498,6 +519,13 @@
                 ;; refuses rather than email an attacker's URL.
                 link-orig (link-origin app-origin request)]
             (cond
+              ;; CSRF: reject a state-changing POST carrying a cross-site
+              ;; Origin before it can act on the victim's session cookie
+              ;; (disable-2FA / unlink / mint-token / logout-all …). GETs
+              ;; and OAuth callbacks are unaffected; absent Origin passes.
+              (and (= method :post) (cross-site-origin? request))
+              (json-resp 403 {:ok false :error "bad_origin"})
+
               (and (= method :get) (= uri "/login"))
               (html-resp (graph-page page-renderer :login
                                      {:providers provider-map :telegram telegram}
@@ -567,16 +595,22 @@
               (handle-unlink storage request)
 
               (and (= method :post) (= uri "/auth/totp"))
-              (handle-totp storage origin request)
+              (if (totp-limit (client-ip request))
+                (handle-totp storage origin request)
+                (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/totp/enroll"))
               (handle-totp-enroll storage request)
 
               (and (= method :post) (= uri "/auth/totp/confirm"))
-              (handle-totp-confirm storage request)
+              (if (totp-limit (client-ip request))
+                (handle-totp-confirm storage request)
+                (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :post) (= uri "/auth/totp/disable"))
-              (handle-totp-disable storage request)
+              (if (totp-limit (client-ip request))
+                (handle-totp-disable storage request)
+                (json-resp 429 {:ok false :error "rate_limited"}))
 
               (and (= method :get) (= uri "/auth/telegram/start"))
               (if telegram

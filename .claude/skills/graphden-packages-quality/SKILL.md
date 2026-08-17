@@ -430,7 +430,11 @@ clojure -M:dev tools/reachability_audit.clj 2>&1 | grep -A50 'Unreachable COMPOS
 ```
 
 ```bash
-# fn-def names are globally unique (even `_`-private). Before naming:
+# fn-def names are unique per-(namespace, name) — NOT globally (ADR-identity
+# stage 5). Only base-fn names (`defbase`) are globally unique. A bare ref to a
+# name defined in several namespaces must be qualified (`:other.ns/name`) or
+# sync throws `:packages/ambiguous-ref`. Before naming, grep for a clash in the
+# SAME namespace and for any base-fn of that name:
 grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages/
 ```
 

@@ -249,8 +249,12 @@ For new base-fns in `fns.edn`:
   `:any` = "don't touch", the executor won't force-deref the delay. Use `:jsonb`
   (or a concrete record). `:any` — only for an already-built Clojure fn,
   `:fn` — for an fn-graph under an HOF wrap.
-- The name is checked for GLOBAL uniqueness, including `_`-private ones — grep
-  `:name :foo` / `defbase foo` over `resources/packages/` before naming.
+- **Base-fn** names (the `defbase` ones you are adding here) are GLOBALLY
+  unique — the impls registry is name-keyed. **Fn-def** names (including
+  `_`-private ones) are unique only per-`(namespace, name)` (ADR-identity
+  stage 5); a bare ref to a name defined in several namespaces must be
+  qualified (`:other.ns/name`) or sync throws `:packages/ambiguous-ref`.
+  Grep `:name :foo` / `defbase foo` over `resources/packages/` before naming.
 
 **Gotcha: the JSONB roundtrip keywordizes keys, but stringifies nested keyword values.**
 Literals in a fn-def's `:value` / `:args` are stored as JSONB. On read, map keys

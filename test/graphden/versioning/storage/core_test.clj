@@ -1880,15 +1880,23 @@
             slot    (sp/create-entity v :slot {:name "m3s-x" :type-fn-id (:id type-fn)})
             bid (random-uuid)
             threw? (atom false)]
-        ;; Redef the private version-row writer to blow up AFTER the base
-        ;; :binding row insert inside `do-create!`.
-        (with-redefs-fn {#'vs/create-version-record!
-                         (fn [& _] (throw (ex-info "boom" {:injected true})))}
-          (fn []
-            (try
-              (sp/create-entity v :binding {:id bid :fn-id (:id owner)
-                                            :slot-id (:id slot) :value 1})
-              (catch clojure.lang.ExceptionInfo _ (reset! threw? true)))))
+        ;; Inject the version-row failure through the THREAD-LOCAL
+        ;; `*create-entity-override*` seam (house pattern — the batch
+        ;; twin below). The former `with-redefs-fn` of the private
+        ;; version-row writer was a process-global root rebind: its
+        ;; injected `boom` leaked into whatever sibling NS happened to
+        ;; run a versioned create during the window (observed:
+        ;; merge.core-test's fixture dying with `{:injected true}` in
+        ;; a landing gate).
+        (binding [pg-crud/*create-entity-override*
+                  (fn [ds ename data fields]
+                    (if (= :binding-version ename)
+                      (throw (ex-info "boom" {:injected true}))
+                      (#'pg-crud/create-entity-impl ds ename data fields)))]
+          (try
+            (sp/create-entity v :binding {:id bid :fn-id (:id owner)
+                                          :slot-id (:id slot) :value 1})
+            (catch clojure.lang.ExceptionInfo _ (reset! threw? true))))
         (is @threw? "the injected version-write failure propagates")
         (is (nil? (sp/read-entity base :binding bid))
             "base :binding identity row rolled back with the failed version write — no ghost"))

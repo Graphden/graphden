@@ -110,14 +110,20 @@
       (throw (sp/wrap-batch-error e -1 batch-size nil)))))
 
 
-(defn create-entity
-  "Creates a new entity record in the database.
-   Returns the created record with generated id if not provided.
-   Validates required fields if fields metadata is provided.
-   Throws with :unique-violation type if unique constraint violated.
-   Throws with :invalid-data type if data is not a map.
+(def ^:dynamic *create-entity-override*
+  "Parallel-test failure-injection seam for the SINGULAR create —
+   thread-local twin of `*create-entities-override*` (see its
+   docstring for why `binding` a seam beats `with-redefs`-ing a root
+   var: a root rebind is process-global and the injected failure
+   leaks into sibling test NSes running concurrently). When bound,
+   `create-entity` calls `(f ds entity-name data fields)` instead of
+   the real body. Cost on the real path: one nil check per create."
+  nil)
 
-   For :ref-many fields: writes to junction tables after entity row is created."
+
+(defn- create-entity-impl
+  "Real body of `create-entity` — split out so the
+   `*create-entity-override*` seam check stays a one-liner."
   [ds entity-name data fields]
   (let [data (sp/standard-crud-normalize-data entity-name data)]
     (sp/standard-crud-validations! entity-name data fields)
@@ -151,6 +157,20 @@
                                       (if (seq ref-many-data)
                                         (jdbc/with-transaction [tx ds] (do-create tx))
                                         (do-create ds)))))))
+
+
+(defn create-entity
+  "Creates a new entity record in the database.
+   Returns the created record with generated id if not provided.
+   Validates required fields if fields metadata is provided.
+   Throws with :unique-violation type if unique constraint violated.
+   Throws with :invalid-data type if data is not a map.
+
+   For :ref-many fields: writes to junction tables after entity row is created."
+  [ds entity-name data fields]
+  (if-let [f *create-entity-override*]
+    (f ds entity-name data fields)
+    (create-entity-impl ds entity-name data fields)))
 
 
 (defn read-entity

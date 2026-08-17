@@ -178,7 +178,9 @@
 (def ^:private swept-state
   "{pkg-vec → rich-types-map}. The topological type-check sweep inside
    `bootstrap-from-packages!` is the single most expensive fixture step
-   (~40 s vs ~14 s for the storage-sync + seed passes), and — like the
+   (~30 s with the checker's sweep memo — it had crept to ~170 s as
+   the corpus grew — vs ~14 s for the storage-sync + seed passes),
+   and — like the
    golden bootstrap — it is *pure on its inputs*: the same package set
    yields the same computed rich-types. So a full-system NS need not
    re-run it; we run it ONCE per JVM × package-set and cache the
@@ -189,7 +191,7 @@
 (defn ensure-swept-rich-types!
   "Idempotent: return the rich-types map a full type-check sweep of
    `packages` produces. First caller per JVM × package-set pays the
-   ~40 s sweep on a throwaway golden clone; the rest read the cache.
+   ~30 s sweep on a throwaway golden clone; the rest read the cache.
 
    The map is a snapshot of `*rich-types-override*` AFTER the sweep —
    the global-registry seed PLUS every composed fn-def's computed
@@ -209,7 +211,7 @@
               (let [{:keys [db-config]} (ensure-ns-database-from-golden!
                                           "swept-rich-types-capture" packages)
                     storage (pg/create-storage db-config)]
-                ;; The single most expensive fixture step in the suite (~40 s).
+                ;; The single most expensive fixture step in the suite (~30 s).
                 ;; 6840f542 landed precisely because this ran once per namespace
                 ;; instead of once per JVM — a regression that costs minutes and
                 ;; reads, in a wall-clock report, as "the box was busy".
@@ -233,12 +235,12 @@
 (defn bootstrap-with-cached-sweep!
   "Drop-in for `(bootstrap-from-packages! storage packages
    {:skip-type-check? false})` inside a `with-isolated-rich-types`
-   fixture: runs the storage-sync + seed passes but SKIPS the ~40 s
+   fixture: runs the storage-sync + seed passes but SKIPS the ~30 s
    topological sweep, then overwrites the ambient isolated
    `*rich-types-override*` with the cached swept snapshot for
    `packages` (`ensure-swept-rich-types!`). The compile that follows
    sees the same computed types the inline sweep would have produced,
-   for ~40 s less per NS after the first.
+   for ~30 s less per NS after the first.
 
    MUST run inside a bound `*rich-types-override*` (the isolation
    fixture) — it `reset!`s that atom, and would otherwise clobber the

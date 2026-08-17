@@ -58,7 +58,8 @@
    semantic core is one mutually-recursive strongly-connected component:
 
        effective-binding-type ↔ effective-ref-return
-                              ↔ effective-ref-return*
+                              ↔ effective-ref-return* (memo shell)
+                              ↔ effective-ref-return-uncached
        effective-binding-type → base-fn-type-rule
                               → bindings-info-for-rule
                               → effective-binding-type   (closes the loop)
@@ -378,6 +379,23 @@
 ;; type-check (sequence items, ref-bindings, `bindings-info-for-rule`'s
 ;; ref entries) — see `ref-return-narrowed`.
 (def ^:dynamic *ref-return-overrides* nil)
+
+
+;; Sweep-scoped memo for `effective-ref-return*`. Unbound (nil) on the
+;; CRUD single-fn-def path — behavior there is untouched. The package
+;; sweep (`packages.sync/run-type-check-sweep!`) and `check-all-defs!`
+;; bind one fresh atom per PASS: within a pass the registry grows
+;; append-only in topological order, so by the time any caller re-fires
+;; ref R, every entry R's subtree reads is already final — a cached
+;; result can never go stale mid-pass. The key carries the ambient
+;; `*caller-narrowings*` / `*ref-return-overrides*` (Pass 3 binds them
+;; per fn-def) so results computed under different narrowing contexts
+;; never collide. `seen` is deliberately NOT in the key: the ref graph
+;; is acyclic (sync topological-sort rejects cycles), so the cycle
+;; guard never fires and the result is independent of the path that
+;; reached it; `depth` IS in the key because the `< 6` budget truncates
+;; deep chains differently at different starting depths.
+(def ^:dynamic *ref-return-memo* nil)
 
 
 (defn- ref-return-narrowed
@@ -1607,6 +1625,7 @@
 (declare base-fn-type-rule
          effective-ref-return
          effective-ref-return*
+         effective-ref-return-uncached
          signature-return)
 
 
@@ -1656,6 +1675,21 @@
 
 
 (defn- effective-ref-return*
+  [ref-name caller-bindings seen depth]
+  (if-let [memo *ref-return-memo*]
+    (let [k [ref-name caller-bindings depth
+             *caller-narrowings* *ref-return-overrides*]
+          hit (get @memo k ::memo-miss)]
+      (if (identical? hit ::memo-miss)
+        (let [v (effective-ref-return-uncached ref-name caller-bindings
+                                               seen depth)]
+          (swap! memo assoc k v)
+          v)
+        hit))
+    (effective-ref-return-uncached ref-name caller-bindings seen depth)))
+
+
+(defn- effective-ref-return-uncached
   [ref-name caller-bindings seen depth]
   (when-let [info (registry/rich-type-of ref-name)]
     (let [seen' (conj seen ref-name)
@@ -2395,10 +2429,11 @@
    all-or-nothing variant kept for tests/REPL sweeps. Both topo-sort
    first; the narrowing passes have the same ordering dependency."
   [fn-defs]
-  (into {}
-        (map (fn [fn-def]
-               [(:name fn-def) (check-fn-def! fn-def)]))
-        fn-defs))
+  (binding [*ref-return-memo* (atom {})]
+    (into {}
+          (map (fn [fn-def]
+                 [(:name fn-def) (check-fn-def! fn-def)]))
+          fn-defs)))
 
 
 ;; -----------------------------------------------------------------------------

@@ -403,17 +403,24 @@
                            :diagnostic (diag/from-ex e)})
                    (log/debug "Type-check failed for fn-def" (:name fd) "—"
                               (ex-message e)))]
-    (doseq [fd sorted]
-      (try (types-check/check-fn-def! fd)
-           (catch Exception e
-             (collect! fd e))))
+    ;; One fresh `*ref-return-memo*` per pass: the registry is
+    ;; append-only within a pass (topological order), so ref re-fires
+    ;; are pure for the pass's duration — see the var's docstring.
+    ;; Between passes the registry entries CHANGE (pass 3 re-records
+    ;; under narrowings), so the cache must not survive the boundary.
+    (binding [types-check/*ref-return-memo* (atom {})]
+      (doseq [fd sorted]
+        (try (types-check/check-fn-def! fd)
+             (catch Exception e
+               (collect! fd e)))))
     (let [narrowings (types-narrowing/build-caller-narrowings sorted)
           overrides  (types-narrowing/build-ref-return-overrides sorted)]
       (reset! failures {})
-      (doseq [fd sorted]
-        (try (types-narrowing/check-fn-def-with-narrowings! fd narrowings overrides)
-             (catch Exception e
-               (collect! fd e)))))
+      (binding [types-check/*ref-return-memo* (atom {})]
+        (doseq [fd sorted]
+          (try (types-narrowing/check-fn-def-with-narrowings! fd narrowings overrides)
+               (catch Exception e
+                 (collect! fd e))))))
     ;; Record the final per-fn structured failures under the sync's
     ;; branch; clear entries for sweep-covered fns that now pass.
     ;; Only fns THIS sweep saw are touched — editor-created rows on

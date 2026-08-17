@@ -245,7 +245,20 @@
 
 
 (def impls
-  {:do {:impl do-fn :lazy-seq-args #{:steps}}
+  ;; `:taint-propagate? true` (2026-08-17 security fix): `:do` returns
+  ;; its last step's value — a content-passing `:any`-slot fn. Without
+  ;; the flag it silently DECLASSIFIED a secret (`(:do :steps [1
+  ;; secret-ref])` returned the real secret with a registered type of
+  ;; `:any` → `tainted-fn?` false → `/api/execute` never redacted it),
+  ;; unlike every sibling that returns an input (`:if`/`:cond`/
+  ;; `:coalesce`/…). With the flag AND `taint-with-secret-if-tainted`
+  ;; now scanning `:elem-types`, a `:do` whose `:steps` list carries a
+  ;; `[:secret …]` element is typed `[:secret :any]` → redacted.
+  ;; Conservative (taints if ANY step is secret, not only the last) —
+  ;; over-tainting hides a non-secret result, which is the safe
+  ;; direction; keeping `:do`'s structural return `:any` avoids
+  ;; re-typing its 22 consumers.
+  {:do {:impl do-fn :lazy-seq-args #{:steps} :taint-propagate? true}
    :sleep sleep-fn
    :sleep-until-ms sleep-until-ms-fn
    :future future-fn

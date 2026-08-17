@@ -142,9 +142,17 @@
 
 
 (deftest no-base-fn-calls-another-base-fn
-  (let [analyses (map analyze-file (impls-files))
+  (let [files    (impls-files)
+        analyses (map analyze-file files)
         defbases-by-ns (into {} (map (juxt :ns :defbases)) analyses)
         violations (mapcat #(violations-for % defbases-by-ns) analyses)]
+    ;; Sanity: `impls-files` resolves relative paths and filters on
+    ;; `.exists`, so a wrong cwd or a renamed package tree yields an
+    ;; EMPTY corpus → zero violations → a green no-op that silently
+    ;; stops enforcing the rule. Assert the corpus actually loaded.
+    (is (some (fn [a] (seq (:defbases a))) analyses)
+        (str "empty base-fn corpus — this guard is a no-op. impls.clj "
+             "files found: " (count files) ". Check the cwd / package tree."))
     (is (empty? violations)
         (str "Base-fn calling another base-fn is hidden composition — "
              "move it into a fn-def (see CLAUDE.md § Base Function "

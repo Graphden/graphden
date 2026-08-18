@@ -545,9 +545,13 @@ async function showExecutePopover(fnEntity, anchorEl) {
   requestAnimationFrame(() => {
     const first = executePopoverEl.querySelector(
       '.execute-popover-body textarea, .execute-popover-body input:not([type=checkbox])');
-    if (first) {
-      try { first.focus(); }
-      catch (_) {}
+    if (!first) return;
+    // A code field is CodeMirror-enhanced (editor-code.js) — the
+    // textarea is hidden, focus its view instead.
+    if (first.dataset?.cmEnhanced && window.gdCode) {
+      try { window.gdCode.viewOf(first)?.focus(); } catch (_) {}
+    } else {
+      try { first.focus(); } catch (_) {}
     }
   });
 }

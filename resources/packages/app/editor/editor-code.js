@@ -49,13 +49,17 @@
     const view = new window.CM.EditorView({
       state: window.CM.EditorState.create({ doc: ta.value, extensions: exts }),
     });
-    view.dom.classList.add('gd-code-editor');
-    // Rough height parity with the textarea it replaces.
+    // Own wrapper DIV — CodeMirror rewrites view.dom's className on
+    // every update (theme classes), silently dropping any class added
+    // from outside, so the styling/probe hook must live on OUR node.
+    const wrap = document.createElement('div');
+    wrap.className = 'gd-code-editor';
     const rows = parseInt(ta.getAttribute('rows') || '8', 10);
-    view.dom.style.minHeight = Math.min(rows, 30) * 1.4 + 'em';
+    wrap.style.minHeight = Math.min(rows, 30) * 1.4 + 'em';
+    wrap.appendChild(view.dom);
     ta.dataset.cmEnhanced = '1';
     ta.style.display = 'none';
-    ta.insertAdjacentElement('afterend', view.dom);
+    ta.insertAdjacentElement('afterend', wrap);
     VIEWS.set(ta, view);
     return view;
   }

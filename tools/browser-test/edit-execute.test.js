@@ -109,15 +109,22 @@ async function readResult(page) {
     assert(argRowCountA === 1, 'one free-arg row rendered (nums)');
 
     // Auto-focus: the first form input should be the active element.
+    // A code field is CodeMirror-enhanced (editor-code.js) — focus then
+    // lands on the .gd-code-editor contenteditable, not the textarea.
     await page.waitForFunction(
-      () => document.activeElement?.tagName === 'TEXTAREA'
-            || document.activeElement?.tagName === 'INPUT',
+      () => {
+        const a = document.activeElement;
+        return !!a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT'
+                       || !!a.closest?.('.gd-code-editor'));
+      },
       null,
       {timeout: 3000, polling: 50});
-    const focusedTag = await page.evaluate(() =>
-      document.activeElement?.tagName);
-    assert(focusedTag === 'TEXTAREA' || focusedTag === 'INPUT',
-           'first form input auto-focused (got ' + focusedTag + ')');
+    const focusedOk = await page.evaluate(() => {
+      const a = document.activeElement;
+      return a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT'
+                   || !!a.closest?.('.gd-code-editor'));
+    });
+    assert(focusedOk, 'first form input (or its CodeMirror view) auto-focused');
 
     const _ = await fillNumsAndRun(page, '[1, 2, 3]', false);
     const resultA = await readResult(page);

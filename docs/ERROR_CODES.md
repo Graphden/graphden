@@ -284,6 +284,20 @@ the context's `:allowed-effects` should include the category.
 
 - `:arg` - The invalid arg
 
+### `:execution-error/assertion-failed`
+
+**Component:** core.logic base-fns `:assert` / `:assert-eq`
+**Description:** A test assertion failed — `:assert` saw a falsy value,
+or `:assert-eq`'s operands differ. The failing operands ride the
+ex-data, NOT the message (constant-shaped so a secret-tainted operand
+never leaks through the visible string; the data goes through the
+execute pipeline's standard redaction/scrub chain). See
+[TESTS.md](TESTS.md).
+**Ex-data keys:**
+
+- `:value` - (`:assert`) the falsy value — only ever `nil` or `false`
+- `:actual` / `:expected` - (`:assert-eq`) the two operands
+
 ### `:execution-error/fn-not-found`
 
 **Component:** executor

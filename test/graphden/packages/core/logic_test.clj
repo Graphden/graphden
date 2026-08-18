@@ -74,3 +74,57 @@
       (is (false? (f {:a (delay "abc") :b (delay nil)} nil)))
       (is (false? (f {:a (delay 123) :b (delay "123")} nil))
           "type-mismatched inputs are false even when their string forms match"))))
+
+
+;; ============================================================================
+;; :assert / :assert-eq — the test-assertion primitives. Pass = value
+;; returned unchanged; fail = `:execution-error/assertion-failed` with
+;; the operands in ex-data (NOT in the message — the message stays
+;; constant-shaped so a secret operand can't leak through it).
+;; ============================================================================
+
+(defn- thrown-data
+  [f args]
+  (try (f args nil) nil
+       (catch clojure.lang.ExceptionInfo e (ex-data e))))
+
+
+(deftest assert-passes-truthy-values-through
+  (let [f (impls/impl-of :assert)]
+    (is (= 42 (f {:value (delay 42)} nil)))
+    (is (true? (f {:value (delay true)} nil)))
+    (is (= [] (f {:value (delay [])} nil))
+        "empty collections are truthy, like in Clojure")
+    (is (zero? (f {:value (delay 0)} nil))
+        "zero is truthy, like in Clojure")))
+
+
+(deftest assert-throws-on-falsy
+  (let [f (impls/impl-of :assert)]
+    (testing "nil and false both throw the canonical error type"
+      (is (= :execution-error/assertion-failed
+             (:type (thrown-data f {:value (delay nil)}))))
+      (is (= :execution-error/assertion-failed
+             (:type (thrown-data f {:value (delay false)})))))))
+
+
+(deftest assert-eq-returns-actual-on-match
+  (let [f (impls/impl-of :assert-eq)]
+    (is (= 7 (f {:actual (delay 7) :expected (delay 7)} nil)))
+    (is (= {:a [1 2]} (f {:actual (delay {:a [1 2]}) :expected (delay {:a [1 2]})} nil))
+        "structural equality, Clojure `=`")
+    (is (nil? (f {:actual (delay nil) :expected (delay nil)} nil))
+        "nil = nil passes and returns nil")))
+
+
+(deftest assert-eq-throws-with-both-operands-in-data
+  (let [f (impls/impl-of :assert-eq)
+        ex (try (f {:actual (delay 7) :expected (delay 8)} nil)
+                nil
+                (catch clojure.lang.ExceptionInfo e e))
+        data (ex-data ex)]
+    (is (= :execution-error/assertion-failed (:type data)))
+    (is (= 7 (:actual data)))
+    (is (= 8 (:expected data)))
+    (testing "operand VALUES stay out of the visible message (secret-leak guard)"
+      (is (not (re-find #"7|8" (ex-message ex)))))))

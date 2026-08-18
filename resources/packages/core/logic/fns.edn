@@ -141,6 +141,37 @@
                   :description "Maybe-nil value the caller has audited as unreachable-nil."}}
    :return-type a}
 
+  ;; --- :assert / :assert-eq — the TEST-assertion primitives
+  ;;
+  ;; A test in graphden is a fn in a `tests` namespace (segment
+  ;; convention — `tests.*` or `myproj.tests.*`); it PASSES when it
+  ;; executes without a throw. These two are the vocabulary for making
+  ;; a test fail loudly. Distinct from `:assert-some`, whose job is
+  ;; type-narrowing on the nil-invariant; `:assert` guards general
+  ;; truthiness, `:assert-eq` compares and reports both sides.
+  ;;
+  ;; The failure values ride ex-data (`:error-data` on the execution
+  ;; row), NOT the ex-message — the message stays constant-shaped so a
+  ;; secret-tainted operand never leaks through the human-visible
+  ;; error string; error-data goes through the execute pipeline's
+  ;; standard redaction/scrub chain.
+  ;;
+  ;; Deliberately NO `message` slot (principle 6): the TEST'S NAME is
+  ;; the label of the invariant, and the error data already carries
+  ;; the operands. An optional slot would also surface as a free arg
+  ;; on every assert-composed test, blocking zero-arg runnability.
+  {:name :assert
+   :description "Throws `:execution-error/assertion-failed` when `value` is falsy (nil or false); returns it unchanged otherwise. The test primitive — a fn in a `tests` namespace passes when it runs without a throw; the test's name labels the invariant."
+   :args {:value {:type [:union :null a]
+                  :description "Value asserted truthy — typically a `:equal?` / `:lt` / `:some?` result."}}
+   :return-type a}
+
+  {:name :assert-eq
+   :description "Throws `:execution-error/assertion-failed` — with `:actual` / `:expected` in the error data — unless `actual` equals `expected` (Clojure `=`); returns `actual` otherwise. The shared typevar requires both operands to unify, the same sync-time cross-type-compare guard `:equal?` carries."
+   :args {:actual {:type a :description "Computed value under test."}
+          :expected {:type a :description "Expected value (same type as `actual`)."}}
+   :return-type a}
+
   ;; === Constants ===
   {:name :const
    :description "Identity-style passthrough — returns `:value` unchanged. Building block for capture renames `{:as :name}`."

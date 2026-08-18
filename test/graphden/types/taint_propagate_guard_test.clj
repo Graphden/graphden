@@ -40,8 +40,9 @@
     :_reconcile-services-apply :_rotate-secret-not-owned?
     :_seq-append-load-binding :_seq-move-load-item :_seq-remove-load-item
     :_seq-update-load-item :_slot-effective-type-raw
+    :_tests-run-apply :_tests-status-apply
     :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
-    :assert-some :assoc :assoc-in :atom :auth-active?
+    :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :authenticate-request :blank? :branch-diagnostics-flat
     :brotli-bytes :build-form :byte-count
     :byte-len :cached-api-routes-js :call :call-noargs
@@ -126,7 +127,7 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:abs :add :and :assert-some :assoc :assoc-in :atom :blank? :byte-len :call
+  #{:abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call
     :call-noargs :case :cell :coalesce :concat :cond :conj :cons :const
     :constant-time-equal? :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :ex-data :ex-info :first :flatten :form-decode :get :get-in :gt

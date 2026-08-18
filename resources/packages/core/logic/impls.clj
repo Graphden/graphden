@@ -140,6 +140,30 @@
   value)
 
 
+;; === Test assertions ===
+;; The falsy values are only nil/false, so `:value` may ride the
+;; ex-message safely; `:assert-eq`'s operands stay OUT of the message
+;; (a secret-tainted side must not leak through the visible string)
+;; and ride ex-data, which goes through the execute pipeline's
+;; standard redaction/scrub chain.
+
+(defbase assert-fn [value]
+  (when-not value
+    (throw (ex-info (str "assert failed: got " (pr-str value))
+                    {:type :execution-error/assertion-failed
+                     :value value})))
+  value)
+
+
+(defbase assert-eq-fn [actual expected]
+  (when-not (= actual expected)
+    (throw (ex-info "assert-eq failed: actual ≠ expected"
+                    {:type :execution-error/assertion-failed
+                     :actual actual
+                     :expected expected})))
+  actual)
+
+
 ;; === Constants ===
 
 (defbase const [value]
@@ -445,6 +469,14 @@
    :zero? {:impl zero?-fn :taint-propagate? true}
    :assert-some {:impl assert-some-fn
                  :return-type-rule assert-some-return-rule :taint-propagate? true}
+   ;; `:assert` shares `:assert-some`'s rule: both pass `:value` through
+   ;; and can't return nil (a nil input throws), so stripping `:null`
+   ;; from the input's type is sound for both. (`false` also throws but
+   ;; a `:bool` input keeps its `:bool` type — narrowing is sound, just
+   ;; not complete on the false side.)
+   :assert {:impl assert-fn
+            :return-type-rule assert-some-return-rule :taint-propagate? true}
+   :assert-eq {:impl assert-eq-fn :taint-propagate? true}
    :if {:impl if-fn :return-type-rule if-return-rule :taint-propagate? true}
    :cond {:impl cond-fn
           :return-type-rule cond-return-rule :taint-propagate? true

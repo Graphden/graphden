@@ -46,6 +46,32 @@
    (ig/init (read-config profile) component-keys)))
 
 
+(defn- merged-config
+  "read-config + per-key merge of `overrides`, plus one derived
+   coupling: a `:db/postgres` connection override also retargets
+   `:db/notify-listener`'s `:pg-opts` (unless the caller overrode the
+   listener explicitly). The LISTEN connection is by definition the
+   SAME database — without the mirror, every dev-profile test that
+   points `:db/postgres` at a testcontainer leaves the listener
+   aiming at the config's localhost PG, and any partial init that
+   transitively pulls the listener (e.g. `:exec/context`, which now
+   refs it for event-driven SSE) dies on connection-refused."
+  [profile overrides]
+  (let [base-config (read-config profile)
+        merged (reduce-kv
+                 (fn [cfg k v] (update cfg k merge v))
+                 base-config
+                 overrides)
+        pg-over (:db/postgres overrides)]
+    (if (and pg-over
+             (:jdbc-url pg-over)
+             (contains? merged :db/notify-listener)
+             (not (contains? overrides :db/notify-listener)))
+      (assoc-in merged [:db/notify-listener :pg-opts]
+                (select-keys pg-over [:jdbc-url :username :password]))
+      merged)))
+
+
 (defn start-with-overrides!
   "Starts system with config overrides. Useful for tests.
 
@@ -68,19 +94,9 @@
        {:db/postgres {:jdbc-url \"jdbc:postgresql://…/test\"
                       :username \"…\" :password \"…\"}})"
   ([profile overrides]
-   (let [base-config (read-config profile)
-         merged-config (reduce-kv
-                         (fn [cfg k v] (update cfg k merge v))
-                         base-config
-                         overrides)]
-     (ig/init merged-config)))
+   (ig/init (merged-config profile overrides)))
   ([profile component-keys overrides]
-   (let [base-config (read-config profile)
-         merged-config (reduce-kv
-                         (fn [cfg k v] (update cfg k merge v))
-                         base-config
-                         overrides)]
-     (ig/init merged-config component-keys))))
+   (ig/init (merged-config profile overrides) component-keys)))
 
 
 (defn stop!

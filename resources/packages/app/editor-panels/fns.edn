@@ -929,7 +929,7 @@
 
   {:name :_pedit-override-content
    :parent :_ro-content
-   :args {:path :_pedit-path}}
+   :args {:asset-path :_pedit-path}}
 
   ;; Effective content for the textarea: override if present, else the
   ;; classpath baseline, else "" (an orphan path has no baseline —
@@ -1024,7 +1024,7 @@
 
   {:name :_asave-existing-id
    :parent :get
-   :args {:coll {:parent :_ro-row :args {:path :_asave-path}}
+   :args {:coll {:parent :_ro-row :args {:asset-path :_asave-path}}
           :key {:value :id} :default nil}}
 
   {:name :_asave-write
@@ -1049,10 +1049,20 @@
           :then :_asave-write
           :else {:value nil}}}
 
+  ;; The immutable-response cache (`:response-cache-cell`, web.http) keys
+  ;; on [uri method accept-encoding] — no query — so a saved override
+  ;; would keep serving the pre-save asset bytes from the cell until a
+  ;; restart. Flush it as part of the write step; the next asset request
+  ;; re-renders and re-caches.
+  {:name :_assets-response-cache-flush
+   :description "Reset the immutable-response cache cell to `{}` — asset bodies just changed identity."
+   :parent :reset
+   :args {:a :response-cache-cell :v {:value {}}}}
+
   {:name :_asave-then-panel
-   :description "Write THEN render — `:do` forces order so the refreshed panel shows the new override status."
+   :description "Write THEN flush the immutable-response cache THEN render — `:do` forces order so the refreshed panel shows the new override status and the next asset request serves the new bytes."
    :parent :do
-   :args {:steps [:_asave-write-guarded :_passets-html]}}
+   :args {:steps [:_asave-write-guarded :_assets-response-cache-flush :_passets-html]}}
 
   {:name :_asave-handler
    :lambda-params [:request]
@@ -1069,7 +1079,7 @@
 
   {:name :_arev-id
    :parent :get
-   :args {:coll {:parent :_ro-row :args {:path :_arev-path}}
+   :args {:coll {:parent :_ro-row :args {:asset-path :_arev-path}}
           :key {:value :id} :default nil}}
 
   {:name :_arev-delete
@@ -1081,7 +1091,7 @@
 
   {:name :_arev-then-panel
    :parent :do
-   :args {:steps [:_arev-delete :_passets-html]}}
+   :args {:steps [:_arev-delete :_assets-response-cache-flush :_passets-html]}}
 
   {:name :_arev-handler
    :lambda-params [:request]

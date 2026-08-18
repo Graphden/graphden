@@ -27,7 +27,7 @@
 
 (deftest override-shadows-classpath-and-rolls-the-hash-test
   (let [storage (:storage gh/*graph*)
-        baseline (gh/exec-name :read-resource-overridable {:path css-path})
+        baseline (gh/exec-name :read-resource-overridable {:asset-path css-path})
         hash0 (gh/exec-name :frontend-hash-effective {})]
     (testing "without an override, the classpath baseline is served"
       (is (string? baseline))
@@ -39,7 +39,7 @@
                         {:path css-path
                          :content "/* overridden */ .card{border:0}"})
       (is (= "/* overridden */ .card{border:0}"
-             (gh/exec-name :read-resource-overridable {:path css-path}))))
+             (gh/exec-name :read-resource-overridable {:asset-path css-path}))))
 
     (testing "the bundle chain picks the override up"
       (let [css (gh/exec-name :_graphden-components-css {})]
@@ -53,14 +53,14 @@
     (testing "an unrelated path still reads its classpath baseline"
       (is (str/includes?
             (str (gh/exec-name :read-resource-overridable
-                               {:path "packages/app/editor/editor-styles.css"}))
+                               {:asset-path "packages/app/editor/editor-styles.css"}))
             "arg-value-edit")))
 
     (testing "deleting the override restores the baseline AND the hash"
       (let [row (first (sp/query-entities storage :resource-override
                                           {:path css-path}))]
         (sp/delete-entity storage :resource-override (:id row)))
-      (is (= baseline (gh/exec-name :read-resource-overridable {:path css-path})))
+      (is (= baseline (gh/exec-name :read-resource-overridable {:asset-path css-path})))
       (is (= hash0 (gh/exec-name :frontend-hash-effective {}))))))
 
 
@@ -94,14 +94,14 @@
         (is (= 200 (:status resp)))
         (is (str/includes? (:body resp) "gd-asset-chip-override")))
       (is (= "/* panel */"
-             (gh/exec-name :read-resource-overridable {:path css-path}))))
+             (gh/exec-name :read-resource-overridable {:asset-path css-path}))))
 
     (testing "a second save updates in place — no duplicate row"
       (gh/exec-name :_asave-handler
                     {:request {:request-method :post
                                :headers form-headers
                                :body (str "path=" css-path "&content=v2")}})
-      (is (= "v2" (gh/exec-name :read-resource-overridable {:path css-path})))
+      (is (= "v2" (gh/exec-name :read-resource-overridable {:asset-path css-path})))
       (is (= 1 (count (sp/query-entities storage :resource-override
                                          {:path css-path})))))
 
@@ -126,7 +126,7 @@
         (is (= 200 (:status resp)))
         (is (not (str/includes? (:body resp) "gd-asset-chip-override"))))
       (is (str/includes?
-            (str (gh/exec-name :read-resource-overridable {:path css-path}))
+            (str (gh/exec-name :read-resource-overridable {:asset-path css-path}))
             "--gd-")))
 
     (testing "a body without a path is a no-op, not a blank-path row"

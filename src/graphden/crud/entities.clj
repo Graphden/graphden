@@ -97,6 +97,14 @@
     (when-let [id (:id entity-data)]
       (into #{} (keep :fn-id) (sp/query-entities storage :fn-slot {:slot-id id})))
 
+    ;; A `:resource-override` row shadows a frontend asset BODY — data the
+    ;; asset handlers re-read from storage on every serve, so no compiled
+    ;; closure moves and no recompile is owed. What DOES go stale is the
+    ;; immutable-RESPONSE cache (`:response-cache-cell`, keyed on uri
+    ;; without the `?v=`), and the asset-panel save/revert chains flush
+    ;; that cell themselves (`:_assets-response-cache-flush`).
+    :resource-override #{}
+
     ;; A `:service` row is desired-state metadata — "keep THIS fn running". It
     ;; changes no fn's DEFINITION, so no compiled closure moves. It used to answer
     ;; nil (the fallthrough), which the invalidator reads as "unknown shape" and

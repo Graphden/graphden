@@ -333,13 +333,13 @@
    :description "POST /api/assets/save — upsert a `:resource-override` from the panel form's {path, content}; returns the refreshed Assets panel HTML. Auth-required; tenant writes rejected at the storage layer."
    :parent :post
    :args {:path "/assets/save" :handler :_asave-handler}
-   :expects-effects #{:db}}
+   :expects-effects #{:db :state}}            ; :state — response-cache flush
 
   {:name :api-assets-revert
    :description "DELETE /api/assets/revert?path=… — soft-delete the path's `:resource-override`; returns the refreshed Assets panel HTML. Auth-required."
    :parent :delete
    :args {:path "/assets/revert" :handler :_arev-handler}
-   :expects-effects #{:db}}
+   :expects-effects #{:db :state}}            ; :state — response-cache flush
 
   ;; --- /api/sequence — sequence-arg editing ---
 

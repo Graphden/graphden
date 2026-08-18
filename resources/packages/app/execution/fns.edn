@@ -822,7 +822,7 @@
           :loaded :_get-exec-loaded}}
 
   {:name :get-execution-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for GET /api/execute/:id — 404 (via the envelope's :http-status) when the id doesn't resolve; a FAILED execution is still a successful 200 poll."
    :parent :json-envelope-response
    :args {:envelope :_get-execution}}
@@ -856,7 +856,7 @@
           :applied :_cancel-exec-applied}}
 
   {:name :cancel-execution-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for POST /api/execute/:id/cancel — 404 via the envelope's :http-status when the id doesn't resolve."
    :parent :json-envelope-response
    :args {:envelope :_cancel-execution}}

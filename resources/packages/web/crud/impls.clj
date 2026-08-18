@@ -24,7 +24,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as tcheck]
     [graphden.types.check.literals :as types-lit]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [ring.util.codec :as codec]))
 
 
 ;; === Context-aware Query Functions ===
@@ -713,6 +714,17 @@
     (catch Exception _ nil)))
 
 
+(defbase form-decode
+  "Decode an `application/x-www-form-urlencoded` string into a
+   `{string string}` map (`ring.util.codec/form-decode`). Single
+   library boundary — no regex, so large bodies (a 200KB asset
+   override) don't hit `*max-regex-input-length*`. A body without any
+   `=` decodes to a bare string — coerced to `{}`."
+  [string]
+  (let [decoded (codec/form-decode (or string ""))]
+    (if (map? decoded) decoded {})))
+
+
 ;; === Registry ===
 
 (def impls
@@ -754,6 +766,7 @@
    :type-check-binding-rej type-check-binding-rej
    :extract-entity-params extract-entity-params
    :query-param query-param
+   :form-decode form-decode
    :resolve-type-fn-id resolve-type-fn-id
    :parse-constraint parse-constraint
    :try-apply-create try-apply-create

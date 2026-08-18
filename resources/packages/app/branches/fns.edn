@@ -235,7 +235,7 @@
           :else :_get-branch-err}}
 
   {:name :get-branch-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for GET /api/branches/:ref."
    :parent :json-handler
    :args {:data :_get-branch-data}}
@@ -551,7 +551,7 @@
    :args {:fn-id :_list-fn-versions-fn-id}}
 
   {:name :list-fn-versions-handler
-   :lambda-params [:storage-query :request :default :limit]
+   :lambda-params [:storage-query :request :default]
    :description "Ring handler for GET /api/fns/:fn-id/versions."
    :parent :json-handler
    :args {:data :_list-fn-versions-data}}
@@ -756,7 +756,7 @@
           :source-branch :_diff-source-branch}}
 
   {:name :diff-branches-handler
-   :lambda-params [:branch-row :request :default :limit]
+   :lambda-params [:branch-row :request :default]
    :description "Ring handler for GET /api/branches/:ref/diff."
    :parent :json-handler
    :args {:data :_diff-branches-data}}
@@ -1118,7 +1118,7 @@
           :resolved :_branch-policy-resolved}}
 
   {:name :set-branch-policy-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for POST /api/branches/:ref/policy (auth-required)."
    :parent :json-handler
    :args {:data :_branch-policy-data}}
@@ -1289,7 +1289,7 @@
           :resolved :_delete-branch-resolved}}
 
   {:name :delete-branch-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for DELETE /api/branches/:ref (auth-required)."
    :parent :json-handler
    :args {:data :_delete-branch-data}}
@@ -1448,7 +1448,7 @@
           :source :_source-branch}}
 
   {:name :preview-conflicts-handler
-   :lambda-params [:branch-row :request :default :limit]
+   :lambda-params [:branch-row :request :default]
    :description "Ring handler for GET /api/branches/:ref/conflicts."
    :parent :json-handler
    :args {:data :_preview-conflicts-data}}
@@ -1847,7 +1847,7 @@
           :source :_source-branch}}
 
   {:name :merge-branch-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for POST /api/branches/:ref/merge (auth-required) — a :merge-conflict answers 409 via the envelope's :http-status; the structured conflicts payload rides the body either way."
    :parent :json-envelope-response
    :args {:envelope :_merge-branch-data}}

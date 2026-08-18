@@ -1983,7 +1983,7 @@
    :description "Update/rollback, THEN render the refreshed panel — `:do` forces order so the installed table shows the new version."
    :parent :do :args {:steps [:_pkg-update-do :_pkg-panel-html]}}
   {:name :_pkg-update-panel-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/panel-update — updates and returns the refreshed Packages panel as text/html."
    :parent :html-ok-response :args {:body :_pkg-update-then-panel}}
   {:name :api-packages-panel-update
@@ -2181,7 +2181,7 @@
   {:name :_pkg-publish-then-panel
    :parent :do :args {:steps [:_pkg-publish-result :_pkg-publish-panel-html]}}
   {:name :_pkg-publish-panel-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "Ring handler for POST /api/packages/panel-publish — exports + publishes the named namespace, returns the refreshed Packages panel (new version now in browse) as text/html."
    :parent :html-ok-response :args {:body :_pkg-publish-then-panel}}
   {:name :api-packages-panel-publish

@@ -113,6 +113,12 @@
    :args {:headers {"Content-Type" "application/javascript; charset=utf-8"
                     "Cache-Control" "public, max-age=31536000, immutable"}}}
 
+  {:name :html-no-cache-content-type
+   :description "Content-type axis: `text/html; charset=utf-8` + `Cache-Control: no-cache` — the browser revalidates on every load. For HTML shells whose asset URLs carry a content hash that can roll BETWEEN deploys (asset overrides): without it heuristic caching serves a stale shell pointing at the old `?v=`."
+   :parent :ring-response
+   :args {:headers {"Content-Type" "text/html; charset=utf-8"
+                    "Cache-Control" "no-cache"}}}
+
   {:name :immutable-css-content-type
    :description "Content-type axis: `text/css; charset=utf-8` + `Cache-Control: public, max-age=31536000, immutable`. Pair with a status axis for a hash-busted CSS bundle response."
    :parent :ring-response
@@ -155,6 +161,10 @@
   {:name :immutable-css-ok-response
    :description "200 OK with `text/css` content-type and a 1-year `immutable` `Cache-Control`. Used for hash-busted editor CSS bundle at `/assets/editor.css?v=<hash>`."
    :parents [:immutable-css-content-type :ok-response]}
+
+  {:name :html-no-cache-ok-response
+   :description "200 OK, `text/html`, `Cache-Control: no-cache` — always-revalidated HTML shell (see `:html-no-cache-content-type`)."
+   :parents [:html-no-cache-content-type :ok-response]}
 
   {:name :text-method-not-allowed-response
    :description "405 Method Not Allowed with `text/plain` content-type. Used by the reitit fallback handler."

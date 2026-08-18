@@ -3554,14 +3554,18 @@
                     :args {:string :_request-content-type
                            :substring {:value "application/x-www-form-urlencoded"}}}]}}
 
+  {:name :form-decode
+   :description "Decode an `application/x-www-form-urlencoded` string into a `{string string}` map (ring.util.codec). Library boundary — unlike the graph-composed `:parse-query-string` (query strings are short), a form BODY can be hundreds of KB and must not run through the regex-`:split` input cap."
+   :args {:string {:type :nullable-text :description "Raw form-encoded body; nil reads as empty."}}
+   :return-type :text-map
+   :effects #{}}
+
   {:name :parse-form-body
    :description "Parse an `application/x-www-form-urlencoded` request body into a `{key value}` map. Empty map when body is missing OR content-type doesn't match."
    :parent :if
    :args {:test :_form-body?
-          :then {:parent :coalesce
-                 :args {:value {:parent :parse-query-string
-                                :args {:string :_request-body}}
-                        :default {:value {}}}}
+          :then {:parent :form-decode
+                 :args {:string :_request-body}}
           :else {:value {}}}}
 
   ;; --- :parse-form-body-kw — same, but KEYWORD-keyed. Handlers that
@@ -4589,13 +4593,13 @@
           :parsed :_update-record-type-parsed}}
 
   {:name :create-entity-handler
-   :lambda-params [:default :request :limit]
+   :lambda-params [:default :request]
    :description "Ring handler for `POST /api/entities/:type` — runs `process-create-entity` and wraps the result via `html-action-response`."
    :parent :html-action-response
    :args {:result :process-create-entity}}
 
   {:name :update-entity-handler
-   :lambda-params [:default :request :limit]
+   :lambda-params [:default :request]
    :description "Ring handler for `PUT /api/entities/:type/:id` — runs `process-update-entity` and wraps the result via `html-action-response`."
    :parent :html-action-response
    :args {:result :process-update-entity}}
@@ -4607,25 +4611,25 @@
    :args {:result :process-delete-entity}}
 
   {:name :sequence-append-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for `POST /api/sequence/append/:fn-id` — appends an item to the named sequence-arg."
    :parent :html-action-response
    :args {:result :process-sequence-append}}
 
   {:name :sequence-remove-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for `DELETE /api/sequence/item/:item-id` — removes an item from its sequence-arg."
    :parent :html-action-response
    :args {:result :process-sequence-remove}}
 
   {:name :sequence-update-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for `PUT /api/sequence/item/:item-id` — replaces an item's value/ref."
    :parent :html-action-response
    :args {:result :process-sequence-update}}
 
   {:name :sequence-move-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for `POST /api/sequence/move/:item-id` — swaps an item with its up/down neighbour."
    :parent :html-action-response
    :args {:result :process-sequence-move}}
@@ -4672,7 +4676,7 @@
           :parsed :_tighten-parsed}}
 
   {:name :tighten-binding-effects-handler
-   :lambda-params [:request :default :limit]
+   :lambda-params [:request :default]
    :description "Ring handler for `POST /api/bindings/:binding-id/tighten-fn-effects` — narrow an fn-typed binding's effective type."
    :parent :html-action-response
    :args {:result :process-tighten-binding-effects}}]}

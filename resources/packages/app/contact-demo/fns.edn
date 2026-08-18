@@ -208,7 +208,7 @@
    :args {:hiccup :_contact-demo-thanks-partial}}
 
   {:name :_contact-demo-post-handler
-   :lambda-params [:request :limit]
+   :lambda-params [:request]
    :description "POST /demo/contact handler — returns a thanks partial that the runtime swaps into `#contact-result`."
    :parent :html-ok-response
    :args {:body :_contact-demo-rendered-thanks}}

@@ -10,11 +10,16 @@
   ;; CSS + JS asset loading (fn-def compositions)
   ;; =============================================================================
 
+  ;; A ONE-ITEM bundle, not `:parent :read-resource-overridable` with a
+  ;; `:path` pin: the overridable seam re-exposes callable `:path` sites,
+  ;; and a call-env `:path` (the ROUTE's own "/assets/…" arg) outranks a
+  ;; grandparent pin at run time — the per-item HOF bind is the one
+  ;; call-shape that pins reliably (same as the JS bundles).
   {:name :styles
-   :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css`. Served by `:_editor-css-handler` at `/assets/editor.css?v=<hash>` with a 1-year `immutable` `Cache-Control` so the browser fetches the body exactly once per deploy."
-   :parent :read-resource-overridable
+   :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css` through the override tier. Served by `:_editor-css-handler` at `/assets/editor.css?v=<hash>` with a 1-year `immutable` `Cache-Control` so the browser fetches the body exactly once per deploy."
+   :parent :concat-resources-overridable
    :return-type :text
-   :args {:path "packages/app/editor/editor-styles.css"}}
+   :args {:paths {:value ["packages/app/editor/editor-styles.css"]}}}
 
   ;; Editor JS modules — loaded from resources and concatenated in order.
   ;; Order matters: tooltips/icons/drag must come BEFORE overlays (which
@@ -582,8 +587,11 @@
   {:name :_editor-handler
    ;; [] — static page; [:default] was a leaked derived free, and a 1-param
    ;; shape drops the raw ring request into that slot on the bare-route path.
+   ;; no-cache: the shell's asset URLs carry `?v=<effective hash>` which
+   ;; rolls on an asset-override save — a heuristically-cached shell would
+   ;; keep serving the old URLs.
    :lambda-params []
-   :parent :html-ok-response
+   :parent :html-no-cache-ok-response
    :args {:body :_editor-rendered-page}}
 
   ;; =============================================================================
@@ -630,6 +638,7 @@
    :args {:paths :_graphden-runtime-js-paths}}
 
   {:name :_graphden-runtime-js-handler
+   :lambda-params []
    :description "Ring handler for `GET /assets/graphden-runtime.js` — minimal runtime bundle for graph-composed pages. Same 1-year `immutable` cache headers as editor.js (hash-bust via `?v=` on the script tag)."
    :parent :immutable-js-ok-response
    :args {:body :_graphden-runtime-js-body}}
@@ -655,11 +664,16 @@
   ;; steps aside on the next page load.
   ;; ===========================================================================
 
+  ;; The `:path` free stays a BARE `{:as :path}` — an annotation here
+  ;; (`:type`/`:description`) would mint a DISTINCT slot named `path`
+  ;; next to `:read-resource-or-nil`'s, and a consumer's single
+  ;; `{:path "…"}` pin would close only one of the two; the other
+  ;; surfaces at the ROUTE fn-def and swallows its `:path "/assets/…"`
+  ;; arg (name-shadowing — the editor.css 500).
   {:name :_ro-where
    :parent :zipmap
    :args {:keys [{:value :path}]
-          :vals [{:as :path :type :non-blank-text
-                  :description "Classpath resource path the override shadows."}]}}
+          :vals [{:as :asset-path}]}}
 
   {:name :_ro-row
    :parent :first
@@ -674,13 +688,24 @@
   ;; `:get` computes `:any`, so the then-branch goes through `:to-str`
   ;; (identity on the `:text` content column) to prove `:text` — same
   ;; trick as narrowing, without a refinement row.
+  ;;
+  ;; The `:asset-path` free surfaces at TWO slot sites (the `:_ro-where`
+  ;; zipmap value and the `:read-resource` rename), so it only binds
+  ;; correctly through a NAMED call — the HOF per-item call below, or an
+  ;; `exec` with named args. A parent PIN closes just one of the two
+  ;; sites, which is why every consumer goes through the one-item /
+  ;; n-item bundle shape (`:concat-resources-overridable`) instead of
+  ;; `:parent`-ing this fn with a pinned path. The free is also
+  ;; deliberately NOT named `:path` — the route templates bind a `:path`
+  ;; arg ("/assets/…"), and an unclosed same-name slot resolves from the
+  ;; caller's env (the original editor.css 500).
   {:name :read-resource-overridable
-   :lambda-params [:path]
-   :description "Read a frontend asset — the branch's `:resource-override` row when one exists, else the classpath baseline (`:read-resource`). The seam that makes the editor's own JS/CSS editable in place."
+   :lambda-params [:asset-path]
+   :description "Read a frontend asset — the branch's `:resource-override` row when one exists, else the classpath baseline (`:read-resource`). The seam that makes the editor's own JS/CSS editable in place. Call it with a NAMED `:asset-path` (HOF per-item or exec) — see the slot-sites note above."
    :parent :if
    :args {:test {:parent :some? :args {:value :_ro-content}}
           :then {:parent :to-str :args {:value :_ro-content}}
-          :else {:parent :read-resource :args {:path {:as :path}}}}}
+          :else {:parent :read-resource :args {:path {:as :asset-path}}}}}
 
   {:name :_concat-overridable-list
    :parent :map
@@ -745,6 +770,7 @@
    :args {:paths :_htmx-js-paths}}
 
   {:name :_htmx-js-handler
+   :lambda-params []
    :description "Ring handler for `GET /assets/htmx.min.js` — the vendored htmx bundle with the standard 1-year `immutable` cache headers (hash-bust via `?v=` on the script tag)."
    :parent :immutable-js-ok-response
    :args {:body :_htmx-js-body}}
@@ -777,6 +803,7 @@
    :args {:paths :_htmx-sse-js-paths}}
 
   {:name :_htmx-sse-js-handler
+   :lambda-params []
    :description "Ring handler for `GET /assets/htmx-ext-sse.min.js` — the vendored htmx SSE extension, immutable-cached like the other assets."
    :parent :immutable-js-ok-response
    :args {:body :_htmx-sse-js-body}}
@@ -856,6 +883,7 @@
    :args {:items [:graphden-components-stylesheet-tag]}}
 
   {:name :_editor-css-handler
+   :lambda-params []
    :description "Ring handler for `GET /assets/editor.css` — returns the editor stylesheet as `text/css` with `Cache-Control: public, max-age=31536000, immutable`."
    :parent :immutable-css-ok-response
    :args {:body :styles}}
@@ -865,13 +893,15 @@
   ;; don't look like raw browser-default elements. Loaded via
   ;; `:graphden-components-stylesheet-tag` from `:graphden-page-head`.
 
+  ;; One-item bundle for the same reason as `:styles` — see the note there.
   {:name :_graphden-components-css
-   :description "Default stylesheet for web.components primitives — read from `packages/app/editor/components.css` (despite the path the styles target component tags, not the editor canvas)."
-   :parent :read-resource-overridable
+   :description "Default stylesheet for web.components primitives — read from `packages/app/editor/components.css` through the override tier (despite the path the styles target component tags, not the editor canvas)."
+   :parent :concat-resources-overridable
    :return-type :text
-   :args {:path "packages/app/editor/components.css"}}
+   :args {:paths {:value ["packages/app/editor/components.css"]}}}
 
   {:name :_graphden-components-css-handler
+   :lambda-params []
    :description "Ring handler for `GET /assets/graphden-components.css` — returns the components stylesheet with a 1-year `immutable` Cache-Control. Hash-bust via `?v=` on the inbound `<link href>`."
    :parent :immutable-css-ok-response
    :args {:body :_graphden-components-css}}

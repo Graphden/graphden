@@ -548,7 +548,19 @@
     {:ns graphden.crud.fn-execution.persist :defn write-finished!
      :say "Updates the execution row with the future's terminal outcome (result
            / error / cancelled, with taint redaction). Closes the loop so a
-           polled execution reflects final persisted state."}]}
+           polled execution reflects final persisted state."}
+    {:ns graphden.crud.test-runs :defn run-tests!
+     :say "The tests subsystem (docs/TESTS.md) rides everything above: a test
+           is a fn in a `tests`-segment namespace, executed through
+           `apply-execute` with `{}` args (pass = no throw), its status the
+           newest execution of its CURRENT version — so an edited test reads
+           `stale` by construction, no bookkeeping."}
+    {:ns graphden.crud.test-autorun :defn schedule-affected!
+     :say "Auto-run on writes: from `invalidate!`'s seeds, walk the
+           compile-deps REVERSE closure (the service-restart blast walk),
+           intersect with the branch's tests, gate on an EMPTY effect closure,
+           and re-run debounced on a conveyed-bindings future with
+           `:allowed-effects #{}` as the runtime backstop."}]}
 
   {:id :packages
    :title "Packages — the graph's content"

@@ -68,8 +68,17 @@ Launch-order refinements agreed 2026-07-20:
 
 ### Block 3 — Personal QoL
 
-1. **Tests via `tests/` namespace** convention + UI filter in the
-   sidebar — ~3-4 days
+1. **Tests via `tests/` namespace** — SHIPPED 2026-08-18, as the
+   `tests` namespace SEGMENT convention (any-segment, so
+   `myproj.tests.*` stays inside its project's workspace scope):
+   `:assert` / `:assert-eq` base-fns, the sequential runner + per-
+   current-version statuses over ordinary `:fn-execution` rows
+   (`/api/tests/run` + `/api/tests/status`), the sidebar `tests` lens
+   chip with per-test status dots, the Operate → Tests panel with
+   Run-all, AND write-triggered auto-run of affected PURE tests
+   (reverse compile-deps closure ∩ tests, effect-closure gate +
+   `:allowed-effects #{}` backstop, debounced per org×branch). See
+   [TESTS.md](TESTS.md).
 2. **Workspaces** (namespace M:N self-link + UI scoping) — SHIPPED
    2026-08-13: delivered as the ctxbar workspace chip's project
    checklist (scope the Explorer to picked root namespaces +
@@ -122,7 +131,7 @@ Launch-order refinements agreed 2026-07-20:
 (The routes-API + static-lint-against-drift item shipped as `window.API` +
 a sync-time drift validator — done, see § Implemented.)
 
-Block total (sole remaining item, #1 tests-namespace): **~3-4 days**
+Block total: **done** — every Block 3 item has shipped.
 
 ### Block 4 — Ecosystem (after Block 1)
 

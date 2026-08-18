@@ -148,7 +148,21 @@ spawning processes — is **blocked** for tenant graphs. Compose within
 that budget; if a step needs the outside world, it belongs to a
 platform-provided base-fn, not your composition.
 
-## 10. A complete worked example
+## 10. Tests — pin your invariants in the graph
+
+A test is an ordinary fn in a namespace whose dotted path contains
+the segment `tests` (`myproj.tests`); it passes when it runs without
+a throw. Compose `:assert-eq` (`:actual` = a ref to the fn under
+test with inputs pinned, `:expected` = a literal) or `:assert`
+(truthy check). Bind ALL free args — tests run with no arguments.
+The name IS the label: `slugify-keeps-dashes`, not `test-1`. Pure
+tests re-run automatically when anything in their dependency closure
+changes; effectful ones only via the Run buttons / `POST
+/api/tests/run`. After you build or change a fn, add or update its
+tests in the same session — a green suite is how the human you
+co-edit with trusts your change.
+
+## 11. A complete worked example
 
 Goal: "an order total = sum of line items, plus 20% tax".
 

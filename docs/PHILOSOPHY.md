@@ -529,14 +529,23 @@ already expressible in the existing model. The temptation is to add
 `fn.is_test` (or a `test` entity), so the UI can filter tests out of
 the main list and tools can run them in batch. We reject that:
 
-- **Marker**: the **`tests/` namespace prefix**. Any fn whose
-  namespace starts with `tests/` is a test. Zero schema change.
-- **Querying** "all tests across the project" = "fns with namespace
-  prefix `tests/`" — same cost as a flag.
+- **Marker**: the **`tests` namespace SEGMENT**. Any named,
+  non-`_`-prefixed fn whose namespace path contains a `tests` segment
+  (`tests.parser`, `myproj.tests.api`) is a test. Zero schema change.
+  (Shipped as any-segment rather than the root-only prefix first
+  sketched here: a project's tests then live inside the project's own
+  root namespace, where the workspace chip's scoping can see them.
+  Matched by segment, never substring — `testsuite` is not a test
+  namespace. `_`-prefixed fns are the tests namespace's private
+  scaffolding, not tests.)
+- **Querying** "all tests across the project" = "fns whose namespace
+  path has a `tests` segment" — same cost as a flag.
 - **What this loses**: a test cannot live in the same namespace as
   the fn it tests. Accepted trade-off — segregating tests is the
   common pattern anyway, and the namespace tree is the right place
   to express that segregation.
+- Shipped: [TESTS.md](TESTS.md) — `:assert` / `:assert-eq`, the
+  runner + statuses, the editor surfaces, auto-run on writes.
 
 #### Workspaces / projects are not a new entity
 

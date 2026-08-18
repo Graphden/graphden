@@ -66,7 +66,7 @@ const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring', apps: 'Apps',
   errors: 'Errors', 'type-errors': 'Type errors', 'platform-access': 'Platform access',
-  assets: 'Assets',
+  assets: 'Assets', tests: 'Tests',
 };
 
 // Show one section's pane on a surface and mark its nav item; hide the rest.
@@ -132,6 +132,8 @@ function reloadDynamicOpsSections() {
     errors: typeof buildErrorsSection === 'function' ? buildErrorsSection : null,
     // Assets is live data too — override rows change as the user saves.
     assets: typeof buildAssetsSection === 'function' ? buildAssetsSection : null,
+    // Tests drift as runs/auto-runs land — re-fetch on every Operate open.
+    tests: typeof buildTestsSection === 'function' ? buildTestsSection : null,
   };
   Object.keys(builders).forEach((key) => {
     const build = builders[key];
@@ -246,6 +248,7 @@ function fnKindSet(fn) {
   if (TYPE_ROLES.has(role)) kinds.add('types');
   if (typeof getServiceForFnId === 'function' && getServiceForFnId(fn.id)) kinds.add('services');
   if (typeof getAppRoutesForFnId === 'function' && getAppRoutesForFnId(fn.id).length > 0) kinds.add('apps');
+  if (typeof isTestFn === 'function' && isTestFn(fn)) kinds.add('tests');
   if (kinds.size === 0) kinds.add('fn');
   return kinds;
 }
@@ -311,6 +314,14 @@ function nodeShouldShow(node, searchMode) {
   // "services"/"secrets" focus it floods the tree with namespaces that hold
   // none of the focused kind, which then vanish the moment you expand them.
   // Focus should read as a crisp match list; keep the fallback only for All.
+  // Exception — the tests lens: test-ness is knowable from the NAMESPACE
+  // path alone, and test-ns leaves lazy-load on expand, so an unloaded
+  // `tests` namespace must stay visible (else the lens shows nothing
+  // until every ns was expanded once).
+  if (lensKinds.has('tests') && node.path
+      && typeof isTestNsPath === 'function' && isTestNsPath(node.path)) {
+    return true;
+  }
   if (lensKinds.size > 0) return false;
   // Genuinely empty (nothing loaded here) → keep visible: this covers both
   // a just-created empty namespace AND a collapsed namespace whose leaves
@@ -362,6 +373,17 @@ function primeAppsCacheOnce() {
   _appsCachePrimed = true;
   refreshAppRoutesCache().then(repaintAfterPrime);
 }
+let _testStatusesPrimedGraph = null;
+function primeTestStatusesOnce() {
+  // Same shape as the secrets prime: the ✓/✗ test dots + the `tests`
+  // chip count read the status cache sync'ly; re-prime per graph load
+  // so post-run/auto-run statuses land on the next refresh.
+  if (typeof isAuthenticated !== 'function' || !isAuthenticated()) return;
+  if (_testStatusesPrimedGraph === graphData || typeof loadTestStatuses !== 'function') return;
+  if (!(window.API && API.api_tests_status)) return;
+  _testStatusesPrimedGraph = graphData;
+  loadTestStatuses().then(repaintAfterPrime);
+}
 let _secretsPrimedGraph = null;
 function primeSecretsOnce() {
   if (typeof isAuthenticated !== 'function' || !isAuthenticated()) return;
@@ -401,6 +423,7 @@ function buildNsTree(data) {
         node.children.set(part, {
           children: new Map(),
           fns: [],
+          path: cumulativePath,
           description: entry ? entry.description : null,
           nsId: entry ? entry.id : null
         });
@@ -423,6 +446,7 @@ function buildNsTree(data) {
         node.children.set(part, {
           children: new Map(),
           fns: [],
+          path: cumulativePath,
           description: entry ? entry.description : null,
           nsId: entry ? entry.id : null
         });
@@ -482,6 +506,23 @@ function buildFnItem(fn) {
     m.className = 'fn-kind-marker kind-marker-type';
     m.textContent = 'T';
     m.title = 'Type';
+    item.appendChild(m);
+  }
+  if (kinds.has('tests')) {
+    // Status dot: latest execution of the fn's CURRENT version —
+    // passed / failed / no-run-yet (stale). Reads the primed
+    // /api/tests/status cache (editor-tests.js).
+    const st = (typeof getTestStatusForFnId === 'function') ? getTestStatusForFnId(fn.id) : null;
+    const status = st?.status || null;
+    const m = document.createElement('span');
+    let cls = 'test-stale';
+    let label = 'Test — not run for the current version';
+    if (status === 'succeeded') { cls = 'test-passed'; label = 'Test — passed'; }
+    else if (status === 'failed') { cls = 'test-failed'; label = 'Test — failed' + (st?.error ? ': ' + st.error : ''); }
+    else if (status) { label = 'Test — ' + status; }
+    m.className = 'fn-kind-marker kind-marker-test ' + cls;
+    m.textContent = '●';
+    m.title = label;
     item.appendChild(m);
   }
 
@@ -930,6 +971,8 @@ function syncKindFilterBar() {
         n = getAllServiceFnIdCount();
       } else if (kind === 'apps' && typeof getAppRouteCount === 'function') {
         n = getAppRouteCount();
+      } else if (kind === 'tests' && typeof getTestStatusCount === 'function') {
+        n = getTestStatusCount();
       }
       countEl.textContent = (n === null || n === undefined) ? '' : String(n);
     }
@@ -1082,6 +1125,7 @@ function updateEntityList(data) {
   primeServiceCacheOnce();
   primeAppsCacheOnce();
   primeSecretsOnce();
+  primeTestStatusesOnce();
 
   const searchMode = !!searchFilter;
 
@@ -1156,6 +1200,9 @@ function updateEntityList(data) {
   }
   if (!searchMode && typeof buildTypeErrorsSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'type-errors', buildTypeErrorsSection);
+  }
+  if (!searchMode && typeof buildTestsSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'tests', buildTestsSection);
   }
   if (!searchMode && typeof buildAssetsSection === 'function') {
     // Frontend-asset overrides — self-host only (the builder returns null

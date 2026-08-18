@@ -414,14 +414,15 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    deployment has no app routing. */
 #kind-filters {
   flex: 1 1 100%;
-  /* One line, always — the lens is the explorer's first control and a
-     wrapped second row read as a layout accident. Overflow (very
-     narrow panel + apps chip) degrades to hidden-scrollbar scroll. */
-  display: flex; flex-wrap: nowrap; align-items: center;
+  /* Wrap when the chips outgrow the fixed panel width. The earlier
+     one-line-always rule (overflow → hidden-scrollbar scroll) was
+     re-evaluated when the 7th chip (tests) landed: at the standard
+     panel width the tail chips sat INVISIBLE behind a scrollbar-less
+     overflow, which reads as "the feature doesn't exist" — worse
+     than a second row. */
+  display: flex; flex-wrap: wrap; align-items: center;
   gap: 2px 3px; padding: 2px 0;
-  overflow-x: auto; scrollbar-width: none;
 }
-#kind-filters::-webkit-scrollbar { display: none; }
 .kind-toggle {
   display: inline-flex; align-items: center; gap: 3px;
   background: transparent; border: 1px solid transparent; border-radius: 8px;
@@ -4376,6 +4377,27 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .type-errors-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
 .type-errors-list { max-height: 320px; overflow-y: auto; }
 
+/* Tests ops section (Block 3.1) — summary + Run-all + per-test rows.
+   Same row grammar as the error-log / type-errors families above. */
+.tests-panel-header { display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; }
+.tests-panel-summary { color: var(--muted-fg); font-size: 11px; flex: 1 1 auto; }
+.tests-run-all { font-size: 11px; padding: 2px 10px; cursor: pointer;
+  color: var(--fg); background: var(--card-bg);
+  border: 1px solid var(--input-border); border-radius: 4px; }
+.tests-run-all:hover { background: var(--hover-bg); }
+.tests-run-all:disabled { color: var(--muted-fg); cursor: default; }
+.tests-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);
+  font-size: 11px; }
+.tests-row .test-dot { margin-right: 6px; user-select: none; }
+.test-dot.test-passed { color: var(--success-fg); }
+.test-dot.test-failed { color: var(--error-fg); }
+.test-dot.test-stale  { color: var(--muted-fg); opacity: 0.65; }
+.tests-fn { color: var(--accent); }
+.tests-err { color: var(--error-fg); overflow-wrap: anywhere; margin-top: 2px; }
+.tests-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
+.tests-list { max-height: 320px; overflow-y: auto; }
+
 /* UI Step 1 — Assets ops section: frontend-asset override panel. */
 .gd-asset-hint { padding: 4px 8px; color: var(--muted-fg); font-size: 11px; }
 .gd-asset-list { max-height: 260px; overflow-y: auto; }
@@ -4700,6 +4722,11 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .kind-marker-service.svc-disabled { color: var(--muted-fg); opacity: 0.65; }
 .kind-marker-app { color: var(--accent); }
 .kind-marker-type { font-size: 9px; opacity: 0.8; }
+/* Test status dot — latest execution of the fn's CURRENT version:
+   passed / failed / stale (not run since the last edit). */
+.kind-marker-test.test-passed { color: var(--success-fg); }
+.kind-marker-test.test-failed { color: var(--error-fg); }
+.kind-marker-test.test-stale  { color: var(--muted-fg); opacity: 0.65; }
 
 .secrets-popover {
   position: absolute;

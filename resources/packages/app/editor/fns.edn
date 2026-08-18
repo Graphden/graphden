@@ -122,6 +122,9 @@
                   "packages/app/editor/editor-stats.js"
                   "packages/app/editor/editor-errors.js"
                   "packages/app/editor/editor-type-errors.js"
+                  ;; Tests: status cache + Operate section shell + the
+                  ;; isTestFn predicate editor-sidebar.js's lens reads.
+                  "packages/app/editor/editor-tests.js"
                   "packages/app/editor/editor-apps.js"
                   "packages/app/editor/editor-assets.js"
                   "packages/app/editor/editor-sidebar.js"
@@ -295,6 +298,12 @@
                          :title "Only apps (fns served at a public host)"}
                 [:span {:class "kind-glyph" :aria-hidden "true"} "▣"]
                 [:span {:class "kind-label"} "apps"]
+                [:span {:class "kind-count" :aria-hidden "true"}]]
+               [:button {:type "button" :class "kind-toggle" :data-kind "tests"
+                         :aria-pressed "false" :onclick "toggleKind('tests')"
+                         :title "Only tests (fns in a `tests` namespace)"}
+                [:span {:class "kind-glyph" :aria-hidden "true"} "✓"]
+                [:span {:class "kind-label"} "tests"]
                 [:span {:class "kind-count" :aria-hidden "true"}]]]]
              ;; Create-a-secret action — NOT a filter, so it sits OUTSIDE the
              ;; kind-filters role-group (and the search bar). Contextual:

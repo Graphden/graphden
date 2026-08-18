@@ -15,6 +15,7 @@
     [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
+    [graphden.crud.test-autorun :as test-autorun]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
@@ -198,6 +199,18 @@
             (catch Exception e
               (log/warn e
                         "post-edit service restart hook failed"
+                        {:entity-type entity-type :seeds seeds}))))
+        ;; Third best-effort sibling: queue the affected PURE tests for
+        ;; a debounced background re-run (Block 3.1 phase 2). Same
+        ;; contract as the service-restart hook — a failure here never
+        ;; fails the user's CRUD call.
+        (when (seq seeds)
+          (try
+            (test-autorun/schedule-affected!
+              ctx seeds (vcore/current-branch-id storage))
+            (catch Exception e
+              (log/warn e
+                        "post-edit test auto-run hook failed"
                         {:entity-type entity-type :seeds seeds}))))
         ;; Eager work done — mark the router's epoch watermark with THIS
         ;; write's bump so the lazy fetch-time heal doesn't re-clear what

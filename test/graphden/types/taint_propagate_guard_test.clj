@@ -60,7 +60,7 @@
     :error-http-status :every? :ex-data
     :ex-info :extract-entity-params
     :filter :filter-xf :find-first :first :fix :flatten
-    :fn-names-with-tag :fn-stats-raw :fn-type-bound-effects
+    :fn-names-with-tag :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
     :free-arg-slot-map :free-memory :future :get :get-entity
     :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
@@ -129,7 +129,7 @@
   #{:abs :add :and :assert-some :assoc :assoc-in :atom :blank? :byte-len :call
     :call-noargs :case :cell :coalesce :concat :cond :conj :cons :const
     :constant-time-equal? :contains? :count :deref :dissoc :distinct :div :do :drop
-    :empty? :eq :equal? :ex-data :ex-info :first :flatten :get :get-in :gt
+    :empty? :eq :equal? :ex-data :ex-info :first :flatten :form-decode :get :get-in :gt
     :gte :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str

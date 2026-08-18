@@ -18,8 +18,9 @@
 
 
 (deftest entities-test
-  (testing "schema contains the six core entities of the slot/binding model"
-    (is (= #{:ns :fn :slot :fn-slot :binding :binding-list-item}
+  (testing "schema contains the six core entities of the slot/binding model plus the asset-override row"
+    (is (= #{:ns :fn :slot :fn-slot :binding :binding-list-item
+             :resource-override}
            (set (ds/entities schema))))))
 
 

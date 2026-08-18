@@ -766,7 +766,9 @@
    :type-check-binding-rej type-check-binding-rej
    :extract-entity-params extract-entity-params
    :query-param query-param
-   :form-decode form-decode
+   ;; :form-decode passes caller CONTENT (a user-typed form body decodes
+   ;; into the map's values) — a [:secret …] body must taint the result.
+   :form-decode {:impl form-decode :taint-propagate? true}
    :resolve-type-fn-id resolve-type-fn-id
    :parse-constraint parse-constraint
    :try-apply-create try-apply-create

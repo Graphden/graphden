@@ -3,7 +3,6 @@
    Server-Sent-Events stream primitive behind `:sse-fragment-route`."
   (:require
     [clojure.string :as str]
-    [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.postgres.notify :as pg-notify]
@@ -154,7 +153,14 @@
                           (let [html (cr/run-with-timeout
                                        tick-budget
                                        captured-render
-                                       (persist/current-execution-pool))]
+                                       ;; requiring-resolve (not an ns-level
+                                       ;; require): pulling the crud tree in
+                                       ;; at impls EVAL time runs a heavy
+                                       ;; compile inside the loader's
+                                       ;; eval-load lock — resolved once at
+                                       ;; the first tick instead.
+                                       ((requiring-resolve
+                                          'graphden.crud.fn-execution.persist/current-execution-pool)))]
                             ;; Timeout / handler error / pool saturation →
                             ;; skip this tick, keep the stream (transient).
                             (when (string? html)

@@ -63,7 +63,7 @@
   [m & body]
   `(with-redefs [registry/trace-capture-class
                  (fn [id# _name#] (get ~m id# :plain))]
-     ~@body))
+     (let [res# (do ~@body)] res#)))
 
 
 (defn- frame-of
@@ -87,7 +87,7 @@
             (is (false? (:cache-hit? entry)))
             (is (nat-int? (:duration-ms entry)))
             (testing "root frame carries :seq but no :parent-seq"
-              (is (= 0 (:seq entry)))
+              (is (zero? (:seq entry)))
               (is (not (contains? entry :parent-seq))))
             (testing "plain trace mode captures NO value"
               (is (not (contains? entry :value))))))
@@ -248,9 +248,9 @@
       (let [[e-inner e-outer] (entries trace)]
         (is (= inner (:fn-id e-inner)))
         (is (= outer (:fn-id e-outer)))
-        (is (= 0 (:seq e-outer)) "outer frame entered first")
+        (is (zero? (:seq e-outer)) "outer frame entered first")
         (is (= 1 (:seq e-inner)))
-        (is (= 0 (:parent-seq e-inner)) "inner nests under outer")
+        (is (zero? (:parent-seq e-inner)) "inner nests under outer")
         (is (not (contains? e-outer :parent-seq)))))))
 
 
@@ -275,7 +275,7 @@
                                 {} (fresh-ctx))))))
     (let [[e-secret e-outer] (entries trace)]
       (is (= :secret (:hidden e-secret)))
-      (is (= 0 (:parent-seq e-secret)) "secret frame nests under outer")
+      (is (zero? (:parent-seq e-secret)) "secret frame nests under outer")
       (testing "consumer's value replaced by the derived marker"
         (is (= :secret-derived (:value-hidden e-outer)))
         (is (not (contains? e-outer :value)))))))

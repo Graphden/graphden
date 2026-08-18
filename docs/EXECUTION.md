@@ -307,9 +307,81 @@ signed-in users) opens the **execute popover**:
 - **History toggle** in the header — lazily fetches `/api/executions`
   and renders a collapsible panel. Each row: status chip + time +
   duration + result preview. Click expands full result; **Repeat**
-  refills the form widgets with that run's args.
+  refills the form widgets with that run's args. Rows whose execution
+  stored a `:path-trace` additionally carry **path** (aggregate
+  canvas highlight, `editor-path-view.js`) and **tree** (step-through
+  call tree, below) buttons.
 
 Source: `resources/packages/app/editor/editor-execute*.js`.
+
+## Path trace — the call tree
+
+A `trace?` submission records one entry per `:ref` invocation into
+the row's `:path-trace` jsonb (`capture-values?` additionally stores
+each non-hidden frame's return, 4 KB/entry). Every entry carries
+`:seq` (entry-order frame number) and `:parent-seq` (the frame that
+forced it), so the completion-ordered flat vector reassembles into
+the **call tree**.
+
+- `GET /partials/execute-trace?id=X` renders the tree server-side —
+  one row per frame in depth-first order, fn names joined on the
+  current branch, chips for duration / `cache` / `secret` /
+  `unknown type`, collapsible value viewers. Frames whose parent
+  entry was truncated away (byte cap, 10k entry cap) surface as
+  roots instead of vanishing.
+- The editor opens it from a history row's **tree** button or the
+  Debug panel's «open last captured trace»; `editor-trace-view.js`
+  owns row-click / ◀ ▶ / arrow-key stepping with canvas highlight.
+
+Secret handling is capture-time AND read-time:
+
+- capture classifies every frame via the registry
+  (`registry/trace-capture-class`) — a secret-touching frame records
+  `{:hidden :secret}` (value never read), a frame with **no**
+  registry entry fails CLOSED as `{:hidden :unknown-type}`;
+- a `:secret`-returning (or unknown) frame **poisons** every open
+  ancestor — consumers of its output record
+  `:value-hidden :secret-derived` instead of a value;
+- every read of a stored trace re-redacts through the CURRENT
+  registry (`persist/re-redact-path-trace`) — a fn that became
+  secret after the run stops serving its historical values, and the
+  ancestor chain re-poisons via the stored `:parent-seq` links.
+
+## Debug: catch next request
+
+One-shot, TTL-bounded trap on a branch's web handler
+(`graphden.crud.debug-capture`; hook in
+`branch-router/ring-callable-for-ctx`, unarmed cost = one atom deref).
+While armed, the **next matching HTTP request** runs with the path
+trace bound (optionally value capture) and persists a standard
+`:fn-execution` row: the sanitized request as the handler's arg
+(credential headers — `authorization`, `cookie`, `x-api-key`, … —
+are stripped BEFORE anything is stored; body capped at 64 KB), the
+`Set-Cookie`-stripped Ring response as the result, the call tree as
+`:path-trace`. The captured run then replays through the same
+history/trace UI as any traced run.
+
+- `POST /api/debug/catch` — arm (replace). Body `{path-prefix?,
+  capture-values?, ttl-ms?}`. No prefix = catch-all **minus** the
+  editor-infra paths (`/api/`, `/partials/`, `/assets/`, `/events/`,
+  `/auth/`, `/version`) so the editor's own polling can't consume the
+  trap; an explicit prefix targets whatever it names. TTL default
+  10 min, cap 1 h.
+- `POST /api/debug/catch/cancel` — disarm.
+- `GET /api/debug/catch/status` — `{armed, trap,
+  last-captured-execution-id}`.
+
+Scoping: one trap per `(org, branch)`, armed and fired under the
+SAME org (a trap can never fire on another org's request). The
+registry is runtime-only in-process state (the `*traced-fn-ids*`
+doctrine — no stored field; restart disarms). Org-keyed sharding
+routes an org's requests to its own pod, so arming editor and
+captured request meet on one process by construction.
+
+Editor surface: **Operate → Debug** (`/partials/debug-catch` +
+`editor-debug.js`) — arm form (path prefix, capture-values behind
+the explicit confirm), armed status with Cancel, «open last captured
+trace».
 
 ## Runtime effect tracing
 

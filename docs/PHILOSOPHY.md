@@ -1089,7 +1089,17 @@ capture; every constraint below now has an enforcement site:
   extended guarantee: a secret-touching fn's frame records
   `{:hidden :secret}` and its value is never read into the capture
   buffer — the value renderer is not invoked on that branch (unit
-  test asserts the renderer probe stays at zero).
+  test asserts the renderer probe stays at zero). Hardened
+  2026-08-19 (`registry/trace-capture-class`): the classification
+  FAILS CLOSED — a frame with no registry entry hides as
+  `{:hidden :unknown-type}` instead of capturing; a
+  secret-returning (or unknown) frame POISONS its open ancestors
+  (consumers record `:value-hidden :secret-derived`, the dynamic
+  complement to the static taint rules); and every READ of a stored
+  trace re-redacts through the current registry
+  (`persist/re-redact-path-trace`), so a fn that became secret
+  after the run stops serving its historical values. See
+  SECRETS.md § Path-trace capture (T6).
 - **Constraint 5 (bounds + expiry)** — per-entry 4 KB value cap
   (`:value-truncated? true` marker), 16 MB total value budget
   enforced AT CAPTURE TIME with oldest-first drop
@@ -1101,6 +1111,25 @@ capture; every constraint below now has an enforcement site:
   completion reaper fires), so there is no long-lived buffer to
   expire; persisted `:path-trace` rows ride `:fn-execution`'s
   existing 7/30-day TTL sweeper.
+
+**Implemented (P4)** — the time-travel half, as REPLAY rather than
+live stepping: every trace entry now carries `:seq`/`:parent-seq`
+(entry-order frame number + forcing-frame link), so a stored trace
+reassembles into the call TREE. `GET /partials/execute-trace` renders
+it server-side; `editor-trace-view.js` steps through it (row click /
+◀ ▶ / arrow keys) with canvas highlight — "пошагово проследить" over
+the record, deterministic and pause-free. The companion entry point
+is the **catch-next-request trap** (`crud.debug-capture`, Operate →
+Debug): a one-shot, TTL-bounded, org+branch-scoped arm that runs the
+next matching HTTP request through the same trace machinery and
+persists it as a standard `:fn-execution` row — no new entity, no new
+viewer (docs/EXECUTION.md § Debug). A LIVE pausing stepper was
+considered and deliberately deferred: laziness makes "the next step"
+follow thunk-forcing order (cache hits skip bodies, `:cell` bakes at
+compile, HOF lambdas run outside the seam), so a paused walk is
+frequently LESS legible than the completed tree — and pausing holds
+executor-pool threads against the watchdog. Revisit only if the tree
+proves insufficient.
 
 **Non-negotiable constraints** (kept verbatim from before the
 implementation — they remain the contract any future change must

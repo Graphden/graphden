@@ -63,7 +63,9 @@
   ["/api/" "/partials/" "/assets/" "/events/" "/auth/" "/version"])
 
 
-(defn- now-ms [] (System/currentTimeMillis))
+(defn- now-ms
+  []
+  (System/currentTimeMillis))
 
 
 (defn arm!
@@ -104,7 +106,7 @@
   (get @last-captures [(tc/current-org) branch-id]))
 
 
-(defn- force-expire-for-test!
+(defn force-expire-for-test!
   "Test seam — rewind the trap's expiry so the TTL-drop logic is
    testable without sleeping. No production caller."
   [branch-id trap]
@@ -125,10 +127,10 @@
 
 
 (defn any-traps?
-  "The dispatch fast-path test — one deref + `empty?`, nothing else.
+  "The dispatch fast-path test — one deref + `seq`, nothing else.
    The per-request cost of the whole feature while unarmed."
   []
-  (not (empty? @traps)))
+  (boolean (seq @traps)))
 
 
 (defn consume-trap!
@@ -229,7 +231,7 @@
           (->> (case (:status outcome)
                  :succeeded {:status :succeeded
                              :result (sanitize-response (:result outcome))}
-                 :failed (let [^Throwable t (:throwable outcome)]
+                 :failed (let [^Exception t (:throwable outcome)]
                            {:status :failed
                             :error (or (ex-message t) (str (class t)))
                             :error-data (ex-data t)}))
@@ -263,8 +265,11 @@
     (binding [cr/*path-trace* trace
               cr/*effect-trace* effect-trace
               ce/*traced-fn-ids* (atom ce/trace-all)]
+      ;; Exception, not Throwable: an Error (OOM, StackOverflow)
+      ;; propagates uncaptured — persisting it matters less than not
+      ;; interfering with the JVM's error path.
       (let [outcome (try {:status :succeeded :result (thunk)}
-                         (catch Throwable t {:status :failed :throwable t}))]
+                         (catch Exception t {:status :failed :throwable t}))]
         (persist-captured! branch-id branch-ctx handler-fn-id request
                            trace effect-trace outcome t0)
         (if (= :succeeded (:status outcome))

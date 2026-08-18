@@ -48,6 +48,7 @@
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
 | 25 | Editing the editor: asset overrides | ⏳ planned |
 | 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written |
+| 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written |
 
 Lesson 25 will cover the Operate → Assets panel — editing the
 editor's own JS/CSS in place (save / revert / diff), the rolling

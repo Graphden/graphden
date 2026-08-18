@@ -41,7 +41,7 @@
         ordered (tree-order entries)]
     (testing "pre-tree entries follow the tree at depth 0, stored order kept"
       (is (= ["root" "old-1" "old-2"] (mapv :fn-id ordered)))
-      (is (every? #(= 0 (:depth %)) ordered)))))
+      (is (every? #(zero? (:depth %)) ordered)))))
 
 
 (deftest display-row-chips-test

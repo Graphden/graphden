@@ -373,7 +373,8 @@
                 (let [p (:parent-seq e)]
                   (or (nil? p) (not (contains? present p)))))
         children (group-by :parent-seq (remove root? linked))
-        walk (fn walk [e depth]
+        walk (fn walk
+               [e depth]
                (cons (assoc e :depth depth)
                      (mapcat #(walk % (inc depth))
                              (sort-by :seq (get children (:seq e))))))]

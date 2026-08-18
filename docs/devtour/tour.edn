@@ -549,6 +549,14 @@
      :say "Updates the execution row with the future's terminal outcome (result
            / error / cancelled, with taint redaction). Closes the loop so a
            polled execution reflects final persisted state."}
+    {:ns graphden.crud.debug-capture :defn run-captured!
+     :say "The «catch next request» debugger entry (docs/EXECUTION.md § Debug):
+           a one-shot, TTL-bounded, org+branch-keyed trap consumed in
+           `branch-router/ring-callable-for-ctx` runs the next matching HTTP
+           request through this wrapper — Debug path-trace bound, sanitized
+           request + response persisted as a standard `:fn-execution` row —
+           so a live handler run replays through the same call-tree UI as a
+           traced `/api/execute`."}
     {:ns graphden.crud.test-runs :defn run-tests!
      :say "The tests subsystem (docs/TESTS.md) rides everything above: a test
            is a fn in a `tests`-segment namespace, executed through

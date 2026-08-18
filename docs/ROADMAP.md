@@ -125,7 +125,19 @@ Launch-order refinements agreed 2026-07-20:
    once per top-level execution at bind time — DELIBERATELY
    backend/REPL-only for now: no ambient-sampling UI ships until a
    real need arises, since the constraint is about protecting the
-   user from capture cost, not about UI completeness
+   user from capture cost, not about UI completeness. **P4 shipped**
+   (2026-08-19): trace entries carry `:seq`/`:parent-seq` so a
+   stored trace reassembles into the call TREE — server-rendered
+   `GET /partials/execute-trace` + `editor-trace-view.js` stepping
+   (history "tree" button); the «catch next request» trap
+   (`crud.debug-capture`, Operate → Debug) runs the next matching
+   HTTP request through the same machinery into a standard
+   `:fn-execution` row; secret hardening: fail-closed classification
+   (`:unknown-type`), ancestor poisoning (`:value-hidden
+   :secret-derived`), read-time re-redaction, `core/hof`
+   taint-propagation (docs/EXECUTION.md § Path trace / § Debug,
+   SECRETS.md § T6). A LIVE pausing stepper stays deliberately
+   deferred (PHILOSOPHY § Debugging, P4 note)
 5. ~~**Free-arg aliases**~~ — SHIPPED (the `slot.source-slot-id`
    rename model; see § Future Work entry, kept as the design record)
 (The routes-API + static-lint-against-drift item shipped as `window.API` +

@@ -143,6 +143,7 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/logic` | All 15 fns propagate (passthrough / conditional). |
 | `core/arithmetic` | All 14 fns propagate (`:add` `:sub` `:mul` `:div` `:mod` `:quot` `:neg` `:abs` `:eq` `:neq` `:lt` `:lte` `:gt` `:gte`). `(eq secret 42)` leaks; `:lt` / `:gt` / `:eq` / `:neq` included. |
 | `core/system` | 15 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
+| `core/hof` | All 13 fns propagate (content-passing by construction: `coll` elements / `init` / the captured `value` flow into the result). Pre-2026-08-19 the package was unflagged — `(:map f secret-coll)` statically laundered the marker (result typed from `f`'s plain return). |
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |
 | `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
@@ -342,6 +343,33 @@ every share-shaped bundle treats it explicitly:
   free `[:secret :text]` arg — validate-execute reports it, and the
   editor's inline secret-binding form (vault path + write-only value)
   is the affordance to define it.
+
+## Path-trace capture (T6)
+
+The Debug path trace (docs/EXECUTION.md § Path trace) captures
+per-frame return values — a second read surface with its own
+layered redaction:
+
+- **Capture-time classification** (`registry/trace-capture-class`):
+  a secret-touching frame records `{:hidden :secret}` and its value
+  is never read into the buffer; a frame with NO registry entry
+  fails CLOSED (`{:hidden :unknown-type}`) — absence of type
+  information hides, it does not capture.
+- **Ancestor poisoning** — a `:secret`-returning (or unknown) frame
+  marks every open ancestor frame; those record `:value-hidden
+  :secret-derived` instead of a value. This is the DYNAMIC
+  complement to the static rules: it covers flows the checker can't
+  see (`:any` slots, cells reset to secrets, unregistered fns) for
+  the concrete execution being traced.
+- **Read-time re-redaction** (`persist/re-redact-path-trace`) —
+  every read of a stored trace re-classifies through the CURRENT
+  registry, so a fn that became secret after the run stops serving
+  its historical captured values; ancestor chains re-poison via the
+  stored `:parent-seq` links.
+- **HOF lambda bodies stay untraced** — `hof-wrap` invokes them
+  outside the trace seam, so per-item lambda values never enter the
+  buffer (a blind spot, but a leak-free one; tracing them would
+  need a per-value secret story first).
 
 ## Known limits
 

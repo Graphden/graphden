@@ -69,20 +69,36 @@
     root.querySelectorAll('textarea[data-lang]:not([data-cm-enhanced])').forEach(enhance);
   }
 
+  // CM6 views hold document/window observers — an htmx swap that replaces
+  // the textarea's subtree must destroy them or they leak (the Assets
+  // panel re-renders on every save/revert). Tear down any enhanced
+  // textarea in the OUTGOING subtree before the swap.
+  function destroyWithin(root) {
+    if (!root?.querySelectorAll) return;
+    for (const ta of root.querySelectorAll('textarea[data-cm-enhanced]')) {
+      const v = VIEWS.get(ta);
+      if (v) { try { v.destroy(); } catch (_) {} VIEWS.delete(ta); }
+    }
+  }
+
   // Test/debug seam + programmatic writes after enhancement.
   function viewOf(ta) { return VIEWS.get(ta) || null; }
   function get(ta) { const v = viewOf(ta); return v ? v.state.doc.toString() : ta.value; }
   function set(ta, text) {
     const v = viewOf(ta);
     if (v) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } });
-    else ta.value = text;
+    // Write ta.value directly too: the updateListener mirrors it on the
+    // enhanced path, but the direct assignment guarantees the hidden
+    // textarea is current for form serialization / the save gate the
+    // instant set() returns, regardless of listener timing.
     ta.value = text;
   }
 
   window.gdCode = { enhance, enhanceWithin, viewOf, get, set };
 
   // Server-rendered fragments (Assets panel, future partials) arrive via
-  // htmx swaps — upgrade any code textarea they carry.
-  document.addEventListener('htmx:afterSwap', (e) => enhanceWithin(e.target));
+  // htmx swaps — destroy outgoing views, then upgrade the incoming
+  // textareas. One enhance listener (afterSettle), not two.
+  document.addEventListener('htmx:beforeSwap', (e) => destroyWithin(e.target));
   document.addEventListener('htmx:afterSettle', (e) => enhanceWithin(e.target));
 })();

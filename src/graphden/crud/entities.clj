@@ -99,10 +99,10 @@
 
     ;; A `:resource-override` row shadows a frontend asset BODY — data the
     ;; asset handlers re-read from storage on every serve, so no compiled
-    ;; closure moves and no recompile is owed. What DOES go stale is the
-    ;; immutable-RESPONSE cache (`:response-cache-cell`, keyed on uri
-    ;; without the `?v=`), and the asset-panel save/revert chains flush
-    ;; that cell themselves (`:_assets-response-cache-flush`).
+    ;; closure moves and no recompile is owed. The immutable-RESPONSE
+    ;; cache stays correct on its own: it keys on the query string, and a
+    ;; save rolls the effective `?v=` hash, so the next request is a fresh
+    ;; cache key on every node (no cross-node flush to coordinate).
     :resource-override #{}
 
     ;; A `:service` row is desired-state metadata — "keep THIS fn running". It

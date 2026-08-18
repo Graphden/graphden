@@ -66,13 +66,35 @@ async function revertViaApi(page) {
            'starts baseline (got: ' + chip0 + ')');
 
     // ================================================================
+    // Save gate — a syntax-broken JS override is blocked client-side.
+    // Done FIRST, on a clean editor, and typed through the real
+    // CodeMirror editor (click → select-all → type) so the view and the
+    // serialized textarea stay in sync exactly like a user.
+    // ================================================================
+    const jsRow = page.locator('section[data-section="assets"] .gd-asset-row',
+                               {hasText: 'editor-main.js'}).first();
+    await jsRow.locator('.gd-asset-edit-btn').click();
+    await page.waitForSelector('#gd-asset-editor .cm-content', {timeout: 15000});
+    await page.click('#gd-asset-editor .cm-content');
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.keyboard.type('function broken( {');
+    await page.click('#gd-asset-editor .gd-asset-save-btn');
+    await page.waitForSelector('#gd-asset-editor .gd-asset-error', {timeout: 5000});
+    const errText = await page.textContent('#gd-asset-editor .gd-asset-error');
+    assert(/syntax error/i.test(errText),
+           'broken JS save blocked with a syntax error (got: ' + errText + ')');
+
+    // ================================================================
     // Edit → prefilled textarea → append a marker → save.
     // ================================================================
     await row.locator('.gd-asset-edit-btn').click();
     // CodeMirror hides the textarea (editor-code.js) — wait for presence,
-    // not visibility.
-    await page.waitForSelector('#gd-asset-editor textarea[name="content"]',
-                               {state: 'attached', timeout: 15000});
+    // not visibility, AND for the CSS baseline to actually load (the prior
+    // phase left a small JS editor in the slot; the swap is async).
+    await page.waitForFunction(() => {
+      const t = document.querySelector('#gd-asset-editor textarea[name="content"]');
+      return t && t.value.includes('--gd-');
+    }, null, {timeout: 15000});
     const prefillLen = await page.$eval(
       '#gd-asset-editor textarea[name="content"]', (t) => t.value.length);
     assert(prefillLen > 10000,
@@ -94,34 +116,44 @@ async function revertViaApi(page) {
     assert(chip1.trim() === 'override', 'chip flipped to override');
 
     // ================================================================
-    // The served asset carries the marker; a fresh page load links a
-    // ROLLED ?v= (effective hash ≠ baked hash).
+    // A fresh page load links a ROLLED ?v= (effective ≠ baked), and the
+    // asset AT THAT hashed URL carries the marker. The response cache is
+    // query-keyed, so the new ?v= is a fresh key → the override is served
+    // immediately with no cross-node flush to wait on (browsers always
+    // request the hashed URL the shell links).
     // ================================================================
-    // Write-then-poll: cache invalidation propagates via NOTIFY, so the
-    // asset can serve stale for a moment right after the save.
-    let sawMarker = false;
-    for (let i = 0; i < 30 && !sawMarker; i++) {
-      const tail = await page.evaluate(async ({base}) => {
-        const r = await fetch(base + '/assets/editor.css', {cache: 'no-store'});
-        return (await r.text()).slice(-500);
-      }, {base: BASE});
-      sawMarker = tail.includes(MARKER);
-      if (!sawMarker) await new Promise((r) => setTimeout(r, 1000));
-    }
-    assert(sawMarker, 'served asset carries the override marker (30s poll)');
-
     await page.reload({waitUntil: 'networkidle'});
-    // window.BUILD_HASH is the EFFECTIVE hash too (same substitution), so
-    // the true baked hash comes from /version.
     const {href, baked} = await page.evaluate(async () => ({
       href: document.querySelector('link[href*="editor.css"]').getAttribute('href'),
+      // window.BUILD_HASH is the EFFECTIVE hash too, so read the baked
+      // one from /version.
       baked: (await (await fetch('/version')).json()).frontend.slice(0, 12),
     }));
     assert(!href.includes(baked),
            'fresh shell links a rolled ?v= (href=' + href + ' baked=' + baked + ')');
+    const hashedTail = await page.evaluate(async ({h}) => {
+      const r = await fetch(h, {cache: 'no-store'});
+      return (await r.text()).slice(-500);
+    }, {h: href});
+    assert(hashedTail.includes(MARKER),
+           'the hashed asset URL serves the override');
 
     // ================================================================
-    // Revert restores baseline chip + baked hash.
+    // Diff view — a read-only MergeView of baseline vs current content.
+    // ================================================================
+    await openAssetsSection(page);
+    await stylesRow(page).locator('.gd-asset-edit-btn').click();
+    await page.waitForSelector('#gd-asset-editor .gd-asset-diff-btn', {timeout: 15000});
+    await page.click('#gd-asset-editor .gd-asset-diff-btn');
+    await page.waitForSelector('#gd-asset-editor .gd-asset-diff .cm-mergeView, #gd-asset-editor .gd-asset-diff .cm-editor',
+                               {timeout: 15000});
+    assert(true, 'diff MergeView opened');
+    await page.click('#gd-asset-editor .gd-asset-diff-btn'); // toggle back
+    await page.waitForFunction(
+      () => !document.querySelector('#gd-asset-editor .gd-asset-diff'), {timeout: 5000});
+
+    // ================================================================
+    // Revert restores the CSS override's baseline chip + baked hash.
     // ================================================================
     await openAssetsSection(page);
     await stylesRow(page).locator('.gd-asset-edit-btn').click();
@@ -132,19 +164,15 @@ async function revertViaApi(page) {
       const sec = document.querySelector('section[data-section="assets"]');
       return sec && sec.querySelectorAll('.gd-asset-chip-override').length === 0;
     }, {timeout: 20000});
-
-    // Same stale window on the way back — poll the fresh shell's href.
-    let backToBaked = false;
-    for (let i = 0; i < 30 && !backToBaked; i++) {
-      await page.reload({waitUntil: 'networkidle'});
-      const after = await page.evaluate(async () => ({
-        href: document.querySelector('link[href*="editor.css"]').getAttribute('href'),
-        baked: (await (await fetch('/version')).json()).frontend.slice(0, 12),
-      }));
-      backToBaked = after.href.includes(after.baked);
-      if (!backToBaked) await new Promise((r) => setTimeout(r, 1000));
-    }
-    assert(backToBaked, 'after revert the shell links the baked hash again (30s poll)');
+    // Revert deletes the row synchronously → the effective hash is the
+    // baked one on the next shell render (no stale window to poll).
+    await page.reload({waitUntil: 'networkidle'});
+    const after = await page.evaluate(async () => ({
+      href: document.querySelector('link[href*="editor.css"]').getAttribute('href'),
+      baked: (await (await fetch('/version')).json()).frontend.slice(0, 12),
+    }));
+    assert(after.href.includes(after.baked),
+           'after revert the shell links the baked hash again');
 
     console.log('PASS: edit-asset-override');
     await browser.close();

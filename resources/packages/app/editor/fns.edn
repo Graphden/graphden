@@ -1,6 +1,6 @@
 ;; Graph Editor fn-defs
-;; CSS / JS loaded via the core :read-resource / :concat-resources
-;; chain. No base-fns in this package.
+;; CSS / JS bundles load through `:concat-resources-overridable` (the
+;; override tier over the classpath baseline). No base-fns in this package.
 
 
 {:namespace "app.editor"
@@ -9,6 +9,17 @@
  [;; =============================================================================
   ;; CSS + JS asset loading (fn-def compositions)
   ;; =============================================================================
+
+  ;; Path lists as `:const`s so the serve chain AND the Assets panel's
+  ;; known-asset allowlist share one source of truth (no third copy of
+  ;; the CSS path literal).
+  {:name :_editor-css-paths
+   :parent :const
+   :args {:value ["packages/app/editor/editor-styles.css"]}}
+
+  {:name :_components-css-paths
+   :parent :const
+   :args {:value ["packages/app/editor/components.css"]}}
 
   ;; A ONE-ITEM bundle, not `:parent :read-resource-overridable` with a
   ;; `:path` pin: the overridable seam re-exposes callable `:path` sites,
@@ -19,7 +30,7 @@
    :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css` through the override tier. Served by `:_editor-css-handler` at `/assets/editor.css?v=<hash>` with a 1-year `immutable` `Cache-Control` so the browser fetches the body exactly once per deploy."
    :parent :concat-resources-overridable
    :return-type :text
-   :args {:paths {:value ["packages/app/editor/editor-styles.css"]}}}
+   :args {:paths :_editor-css-paths}}
 
   ;; Editor JS modules — loaded from resources and concatenated in order.
   ;; Order matters: tooltips/icons/drag must come BEFORE overlays (which
@@ -562,11 +573,24 @@
    :args {:head :head-elements-0
           :url :_htmx-js-url}}
 
+  ;; CodeMirror is loaded `defer` — 488 KB that must NOT block first
+  ;; paint. `window.CM` is only read at enhance time (a value-form open
+  ;; or an htmx swap), which is always after a deferred script has run,
+  ;; so nothing races it.
+  {:name :_cm-script-attrs
+   :parent :assoc
+   :args {:map {:value {"defer" "defer"}}
+          :key {:value "src"}
+          :value :_cm-js-url}}
+
+  {:name :_cm-script-tag
+   :parent :hiccup
+   :args {:tag {:value "script"} :attrs :_cm-script-attrs :children {:value []}}}
+
   {:name :head
-   :description "Final editor `<head>` element vector — stylesheet link, htmx, and the vendored CodeMirror bundle (`window.CM` — editor-code.js upgrades the code textareas with it)."
-   :parent :with-cdn-script
-   :args {:head :_head-htmx
-          :url :_cm-js-url}}
+   :description "Final editor `<head>` element vector — stylesheet link, htmx, and the DEFERRED vendored CodeMirror bundle (`window.CM` — editor-code.js upgrades the code textareas with it)."
+   :parent :conj
+   :args {:coll :_head-htmx :item :_cm-script-tag}}
 
   ;; Complete HTML page
   ;; Scripts: API constants module (inline) THEN the editor JS
@@ -781,7 +805,14 @@
   {:name :frontend-hash-effective
    :description "The hash the asset URLs (`?v=…`) and `window.BUILD_HASH` carry: the baked frontend hash when no overrides exist, else 12 hex chars of sha256(baked ++ overrides fingerprint) — so an in-editor asset edit rolls every asset URL and defeats the browser's immutable cache on the next load. `/version` keeps reporting the BAKED hash (jar identity — `bb verify` compares code, not overrides)."
    :parent :if
-   :args {:test {:parent :empty? :args {:coll :_ro-all}}
+   :args {:test {:parent :or
+                 :args {:values [{:parent :empty? :args {:coll :_ro-all}}
+                                 ;; Rescue hatch: when overrides are disabled the
+                                 ;; assets serve their baseline BYTES, so the URL
+                                 ;; must carry the BAKED hash too — otherwise the
+                                 ;; browser keeps the bricked bundle cached under
+                                 ;; the override hash and never re-fetches.
+                                 :_ro-disabled?]}}
           :then :build-hash-frontend-short
           :else :_frontend-hash-with-overrides}}
 
@@ -947,7 +978,7 @@
    :description "Default stylesheet for web.components primitives — read from `packages/app/editor/components.css` through the override tier (despite the path the styles target component tags, not the editor canvas)."
    :parent :concat-resources-overridable
    :return-type :text
-   :args {:paths {:value ["packages/app/editor/components.css"]}}}
+   :args {:paths :_components-css-paths}}
 
   {:name :_graphden-components-css-handler
    :lambda-params []

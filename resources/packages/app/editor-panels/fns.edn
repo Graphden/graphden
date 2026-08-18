@@ -815,14 +815,15 @@
   ;; tenant-forbidden under the tenancy addon (stored-XSS surface).
   ;; ---------------------------------------------------------------------
   {:name :_passets-known-paths
-   :description "Every classpath asset the override tier can shadow — the four JS bundle path lists plus the two standalone stylesheets."
+   :description "Every classpath asset the override tier can shadow — the five JS bundle path lists (editor, runtime, htmx, htmx-sse, CodeMirror) plus the two standalone stylesheets. Shared `:const` lists, so this allowlist can't drift from the serve chain."
    :parent :concat
    :args {:colls [:_editor-script-paths
                   :_graphden-runtime-js-paths
                   :_htmx-js-paths
                   :_htmx-sse-js-paths
-                  {:value ["packages/app/editor/editor-styles.css"
-                           "packages/app/editor/components.css"]}]}}
+                  :_cm-js-paths
+                  :_editor-css-paths
+                  :_components-css-paths]}}
 
   ;; `:contains?` on a LIST checks indices, so membership tests go
   ;; through self-keyed maps (path → path).
@@ -931,16 +932,30 @@
    :parent :_ro-content
    :args {:asset-path :_pedit-path}}
 
+  ;; The classpath fallback reads ONLY a known bundle path — a caller
+  ;; must not turn `?path=` into an arbitrary classpath read (the edit
+  ;; partial is auth-required, but that gate is weaker than "one shipped
+  ;; asset"; a tenant principal could otherwise slurp private source).
+  {:name :_pedit-known?
+   :parent :contains?
+   :args {:coll :_passets-known-map :key :_pedit-path}}
+
+  {:name :_pedit-baseline
+   :parent :if
+   :args {:test :_pedit-known?
+          :then {:parent :coalesce
+                 :args {:value {:parent :read-resource-or-nil
+                                :args {:path :_pedit-path}}
+                        :default {:value ""}}}
+          :else {:value ""}}}
+
   ;; Effective content for the textarea: override if present, else the
-  ;; classpath baseline, else "" (an orphan path has no baseline —
-  ;; `:read-resource-or-nil`, never the throwing `:read-resource`).
+  ;; (allowlisted) classpath baseline, else "" (an orphan path has no
+  ;; baseline).
   {:name :_pedit-content
    :parent :coalesce
    :args {:value :_pedit-override-content
-          :default {:parent :coalesce
-                    :args {:value {:parent :read-resource-or-nil
-                                   :args {:path :_pedit-path}}
-                           :default {:value ""}}}}}
+          :default :_pedit-baseline}}
 
   {:name :_pedit-path-input-attrs
    :parent :assoc
@@ -951,13 +966,18 @@
    :parent :hiccup
    :args {:tag {:value "input"} :attrs :_pedit-path-input-attrs}}
 
+  ;; CodeMirror language by extension. `.json` is checked BEFORE `.js`
+  ;; (`.json` contains `.js` as a substring). Anything else — an orphan
+  ;; `.edn`/`.html` override — gets `text`, NOT `js`, so the client's
+  ;; `new Function` syntax gate (which fires only on `js`) can't make a
+  ;; valid non-JS override unsaveable.
   {:name :_pedit-lang
-   :description "CodeMirror language for the asset — `css` for stylesheet paths, else `js`."
-   :parent :if
-   :args {:test {:parent :str-contains?
-                 :args {:string :_pedit-path :substring {:value ".css"}}}
-          :then {:value "css"}
-          :else {:value "js"}}}
+   :description "CodeMirror language for the asset — `css` / `json` / `js` by extension, else `text` (plain, ungated)."
+   :parent :cond
+   :args {:clauses [{:parent :str-contains? :args {:string :_pedit-path :substring {:value ".css"}}} {:value "css"}
+                    {:parent :str-contains? :args {:string :_pedit-path :substring {:value ".json"}}} {:value "json"}
+                    {:parent :str-contains? :args {:string :_pedit-path :substring {:value ".js"}}} {:value "js"}
+                    {:value true} {:value "text"}]}}
 
   {:name :_pedit-textarea-attrs
    :parent :assoc
@@ -1075,20 +1095,16 @@
           :then :_asave-write
           :else {:value nil}}}
 
-  ;; The immutable-response cache (`:response-cache-cell`, web.http) keys
-  ;; on [uri method accept-encoding] — no query — so a saved override
-  ;; would keep serving the pre-save asset bytes from the cell until a
-  ;; restart. Flush it as part of the write step; the next asset request
-  ;; re-renders and re-caches.
-  {:name :_assets-response-cache-flush
-   :description "Reset the immutable-response cache cell to `{}` — asset bodies just changed identity."
-   :parent :reset
-   :args {:a :response-cache-cell :v {:value {}}}}
-
+  ;; No response-cache flush needed: the immutable-response cache keys on
+  ;; the query string (`:_response-cache-key`), and a save rolls the
+  ;; effective `?v=` hash, so the next asset request is a fresh cache key
+  ;; on EVERY node — the pre-save entry is simply never requested again.
+  ;; (A per-JVM flush here would only have cleared the node that handled
+  ;; the POST, leaving every other node stale.)
   {:name :_asave-then-panel
-   :description "Write THEN flush the immutable-response cache THEN render — `:do` forces order so the refreshed panel shows the new override status and the next asset request serves the new bytes."
+   :description "Write THEN render — `:do` forces order so the refreshed panel shows the new override status."
    :parent :do
-   :args {:steps [:_asave-write-guarded :_assets-response-cache-flush :_passets-html]}}
+   :args {:steps [:_asave-write-guarded :_passets-html]}}
 
   {:name :_asave-handler
    :lambda-params [:request]
@@ -1103,12 +1119,22 @@
                   :args {:param-name {:value "path"}}}
           :default {:value ""}}}
 
+  ;; Allowlisted: only a KNOWN bundle path is read from the classpath —
+  ;; `?path=` must not become an arbitrary classpath read (see
+  ;; `:_pedit-known?`).
+  {:name :_abase-known?
+   :parent :contains?
+   :args {:coll :_passets-known-map :key :_abase-path}}
+
   {:name :_abase-text
-   :description "The classpath baseline for one asset path — empty string when the path doesn't resolve (an orphan override has no baseline)."
-   :parent :coalesce
-   :args {:value {:parent :read-resource-or-nil
-                  :args {:path :_abase-path}}
-          :default {:value ""}}}
+   :description "The classpath baseline for one KNOWN asset path — empty string for an unknown path (rejected) or one that doesn't resolve (an orphan override has no baseline)."
+   :parent :if
+   :args {:test :_abase-known?
+          :then {:parent :coalesce
+                 :args {:value {:parent :read-resource-or-nil
+                                :args {:path :_abase-path}}
+                        :default {:value ""}}}
+          :else {:value ""}}}
 
   {:name :_abase-handler
    :lambda-params [:request]
@@ -1137,7 +1163,7 @@
 
   {:name :_arev-then-panel
    :parent :do
-   :args {:steps [:_arev-delete :_assets-response-cache-flush :_passets-html]}}
+   :args {:steps [:_arev-delete :_passets-html]}}
 
   {:name :_arev-handler
    :lambda-params [:request]

@@ -46,3 +46,20 @@
   (testing "missing body → {}"
     (is (= {}
            (gh/exec-name :parse-form-body-kw {:request {:headers {}}})))))
+
+
+(deftest repeated-key-collapses-to-last-test
+  ;; ring's form-decode returns a VECTOR for a repeated key; `:form-decode`
+  ;; collapses to the LAST occurrence, matching `:parse-query-string`'s
+  ;; prior contract and keeping every string-typed field a string (a
+  ;; vector into a `:text` column would corrupt / throw). A crafted body
+  ;; must not smuggle a vector past the parser.
+  (testing "raw form-decode collapses a repeated key to its last value"
+    (is (= {"content" "b"}
+           (gh/exec-name :form-decode {:string "content=a&content=b"}))))
+  (testing "and through the keyword parser too"
+    (is (= {:path "x" :content "b"}
+           (gh/exec-name :parse-form-body-kw
+                         {:request (form-req "path=x&content=a&content=b")}))))
+  (testing "a body without any `=` decodes to {} (bare-string guard)"
+    (is (= {} (gh/exec-name :form-decode {:string "justtext"})))))

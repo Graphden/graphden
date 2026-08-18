@@ -32,8 +32,8 @@ Two shapes, picked by where you need the JS to live:
 
 `:wrap-custom-script` renders a JS body as
 `<script>body</script>` for inclusion in a page's `:scripts`
-list. Free arg `:body` is typed `:js-source` (the editor's
-textarea widget kicks in).
+list. Free arg `:body` is typed `:js-source` (the editor's code-editor widget — a
+CodeMirror editor with JS syntax highlighting — kicks in).
 
 Worked example — a script that decorates every `[data-tip]`
 element on the page with its tooltip text:
@@ -111,8 +111,8 @@ button shipped on `/demo/contact`):
 
 `:custom-button` (in `web.components`, Lesson 12) is the
 convenience template — its `:body` slot is `:js-source`-typed,
-which gives you the textarea editor widget instead of a
-single-line input.
+which gives you the code-editor widget (CodeMirror, JS-highlighted)
+instead of a single-line input.
 
 If you'd rather see the underlying composition, the raw shape
 is `:button` with `:attrs` built from
@@ -139,11 +139,13 @@ time — the runtime JS parser is the only validator.
 
 A slot typed `:js-source` (which `:body` is, on all three
 escape-hatch entries) resolves through `/api/value-form` to a
-multi-line `<textarea rows="8">` — the same shape as the JSON
-editor but skipping JSON.parse so the value round-trips as a
-plain string. No syntax highlighting; no Monaco. That decision
-is deliberate: the +500 KB bundle isn't worth it until the
-inline-edit experience is a real bottleneck.
+multi-line `<textarea rows="8">` that skips JSON.parse, so the
+value round-trips as a plain string. The textarea is upgraded
+in place to a CodeMirror 6 editor (`editor-code.js`) with JS
+syntax highlighting, line numbers and search — the same widget
+backs the `:css-source`, hiccup-EDN and JSON fields. The
+underlying textarea stays in the DOM and receives every edit, so
+form serialization is unchanged.
 
 ## Try it: extend `/demo/contact`
 

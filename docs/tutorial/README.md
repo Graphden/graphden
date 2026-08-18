@@ -46,6 +46,14 @@
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written |
 | 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written |
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
+| 25 | Editing the editor: asset overrides | ⏳ planned |
+
+Lesson 25 will cover the Operate → Assets panel — editing the
+editor's own JS/CSS in place (save / revert / diff), the rolling
+`?v=` hash, and the JS syntax gate. It stays ⏳ planned until it can
+be written self-host-only (the panel is hidden and its writes are
+platform-only under the cloud tenancy addon, so the paste-into-the-
+editor steps only verify on a single-tenant instance).
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

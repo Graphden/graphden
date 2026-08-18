@@ -121,6 +121,26 @@ time — see [FLEET_RFC.md](FLEET_RFC.md) §5.1).
 - `GET /metrics` — a JVM + structural-counter snapshot (JSON). For a Prometheus
   scrape target, see the observability notes in [SCALING.md](SCALING.md).
 
+## Editor bricked by an asset override
+
+The Operate → Assets panel edits the editor's own JS/CSS (versioned
+`:resource-override` rows). A syntax-broken **JS** override is refused
+client-side, but a broken override applied by another path — or a bad
+CSS/structure change — can leave the editor unusable, and the panel
+lives *inside* that editor. Recovery:
+
+1. Restart the pod(s) with `GRAPHDEN_DISABLE_ASSET_OVERRIDES=1` — every
+   frontend asset then serves its shipped classpath baseline (bytes and
+   the `?v=` hash both ignore the override rows), so the editor loads
+   clean.
+2. Open Operate → Assets and **revert** the offending override.
+3. Unset `GRAPHDEN_DISABLE_ASSET_OVERRIDES` and restart.
+
+The hatch is read at serve time, so it takes effect on restart and needs
+no data change. It is a platform/self-host knob — in the cloud the
+entity is tenant-forbidden, so only an operator can create or revert
+overrides.
+
 ## Suspending an abusive org
 
 To freeze a misbehaving tenant near-instantly, set its plan to `suspended` — no

@@ -330,6 +330,16 @@ running when this row was produced" becomes critical, expand the
 anchor scope; for now, the resolved-view on the run's branch at
 the run's timestamp is the closest the system gets.
 
+### Asset overrides are branch-scoped (`:resource-override`)
+
+`:resource-override` (an in-DB override of a shipped frontend
+asset — `path → content`) IS in `entity-config`, so it resolves
+per branch like the fn graph: a fork inherits the parent's
+overrides, a merge carries them, and a soft-delete on a branch
+reverts that path to the classpath baseline on that branch only.
+It is the first versioned entity that is not part of the fn
+graph. See [PHILOSOPHY § UI as Graph](PHILOSOPHY.md#ui-as-graph--two-step-roadmap).
+
 ### Services CAN now run per-branch (`:service.branch-id`)
 
 `:service` is still NOT in `versioning.storage.resolution/

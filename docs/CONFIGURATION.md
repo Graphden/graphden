@@ -412,9 +412,10 @@ The production config reads these via `#env`:
 | `GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS` | `30000` | Fleet placement-controller tick period (ms) |
 | `GRAPHDEN_MAX_CACHED_BRANCHES` | `16` | LRU cap on warm per-branch ctx entries in the branch router |
 
-(Deployment-specific fleet/BYO knobs read directly via `System/getenv` —
-`GRAPHDEN_MAX_CONCURRENT_EXECUTIONS`, `GRAPHDEN_FLEET_*`, the BYO vars — are
-covered in [DEPLOYMENT.md](DEPLOYMENT.md), [SCALING.md](SCALING.md), and
+(Deployment-specific knobs read directly via `System/getenv` —
+`GRAPHDEN_MAX_CONCURRENT_EXECUTIONS`, `GRAPHDEN_FLEET_*`, the BYO vars, and
+the `GRAPHDEN_DISABLE_ASSET_OVERRIDES` rescue hatch — are covered in
+[DEPLOYMENT.md](DEPLOYMENT.md), [SCALING.md](SCALING.md), and
 [FLEET_DEPLOY.md](FLEET_DEPLOY.md).)
 
 ### Accounts (opt-in identity module)

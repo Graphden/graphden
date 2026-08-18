@@ -25,7 +25,10 @@ editor redesign (rail surfaces + right inspector + sidebar lens +
 workspaces), and the packages-registry redesign (⬆ publish on the
 namespace, Build-surface install chip, org-private registry +
 `publish-packages` capability, Organization governance view —
-[PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md)).
+[PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md)), and the
+asset-override tier (edit the editor's own JS/CSS in place, backed by
+a versioned `:resource-override` entity, with a CodeMirror code editor
+on every code field — Block 6 below).
 
 Unbuilt primitives that never made it into a block below: a **file-I/O**
 base-fn set and **WebSocket** live-updates.
@@ -136,10 +139,18 @@ Implements the MVP launch bar.
 
 Block total: **~4-5 weeks**
 
-### Block 6 — UI Step 1 (any window)
+### Block 6 — UI Step 1 (SHIPPED 2026-08-18)
 
-- **Inline `:const` editor** for JS/CSS in the running editor +
-  rebuild trigger — ~1.5 weeks. See
+- **Edit the editor's own JS/CSS from inside the editor** — done, but
+  as a *versioned `:resource-override`* (per-branch `path → content`
+  rows served live through `:read-resource-overridable`), NOT the
+  originally-sketched `:const`-editor-plus-rebuild-trigger: there is no
+  rebuild step, the effective `?v=` asset hash rolls on save and the
+  browser re-fetches. Operate → Assets panel (list / edit / save /
+  revert / diff-vs-baseline), a CodeMirror 6 code editor on every code
+  field, a JS syntax save-gate, and the `GRAPHDEN_DISABLE_ASSET_OVERRIDES`
+  rescue hatch. Self-host / single-tenant (cloud writes are
+  platform-only — the entity is tenant-forbidden). See
   [PHILOSOPHY § UI as Graph](PHILOSOPHY.md#ui-as-graph--two-step-roadmap).
 
 ### Block 7 — Horizontal scaling foundation

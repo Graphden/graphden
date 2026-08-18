@@ -719,10 +719,18 @@
    `{string string}` map (`ring.util.codec/form-decode`). Single
    library boundary — no regex, so large bodies (a 200KB asset
    override) don't hit `*max-regex-input-length*`. A body without any
-   `=` decodes to a bare string — coerced to `{}`."
+   `=` decodes to a bare string — coerced to `{}`.
+
+   ring returns a VECTOR for a repeated key; a form field is one value,
+   so collapse to the LAST occurrence — matching the `:parse-query-string`
+   contract this replaced (`Repeated keys collapse to last`) and keeping
+   the declared `:text-map` return honest. Otherwise every `:parse-form-body`
+   consumer could receive a vector where it expects a string."
   [string]
   (let [decoded (codec/form-decode (or string ""))]
-    (if (map? decoded) decoded {})))
+    (if (map? decoded)
+      (reduce-kv (fn [m k v] (assoc m k (if (vector? v) (peek v) v))) {} decoded)
+      {})))
 
 
 ;; === Registry ===

@@ -148,3 +148,47 @@
                                           :body "content=zzz"}})]
         (is (= 200 (:status resp))))
       (is (= [] (sp/query-entities storage :resource-override {}))))))
+
+
+(deftest classpath-read-is-allowlisted-test
+  ;; The baseline endpoint and the edit prefill must NOT turn `?path=`
+  ;; into an arbitrary classpath read — an unknown path returns "", never
+  ;; the resource, so an authenticated (in cloud: tenant) principal can't
+  ;; slurp private source off the classpath.
+  (let [traversal "graphden/tenancy/storage.clj"]
+    (testing "baseline endpoint refuses an unknown path"
+      (let [resp (gh/exec-name :_abase-handler
+                               {:request {:query-string (str "path=" traversal)}})]
+        (is (= 200 (:status resp)))
+        (is (= "" (:body resp)) "unknown path yields empty, not the file")))
+    (testing "baseline endpoint still serves a KNOWN bundle path"
+      (let [resp (gh/exec-name :_abase-handler
+                               {:request {:query-string (str "path=" css-path)}})]
+        (is (str/includes? (:body resp) "--gd-"))))
+    (testing "the edit prefill refuses an unknown path (empty textarea, not the file)"
+      (let [resp (gh/exec-name :_partial-asset-edit-handler
+                               {:request {:query-string (str "path=" traversal)}})]
+        (is (= 200 (:status resp)))
+        (is (not (str/includes? (:body resp) "graphden.tenancy"))
+            "no private source leaked into the editor")))))
+
+
+(deftest path-rename-collision-rejected-test
+  ;; The storage-layer update arm (`path-write?` in versioning/storage/core)
+  ;; guards a path RE-POINT even though the panel only edits :content today
+  ;; — pin it so the guard doesn't rot into a silent no-op if a future
+  ;; surface exposes path renames.
+  (let [storage (:storage gh/*graph*)
+        a (sp/create-entity storage :resource-override
+                            {:path "packages/app/editor/editor-styles.css" :content "a"})
+        _ (sp/create-entity storage :resource-override
+                            {:path "packages/app/editor/components.css" :content "b"})]
+    (testing "renaming one override onto another's path is rejected"
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"already exists"
+            (sp/update-entity storage :resource-override (:id a)
+                              {:path "packages/app/editor/components.css"}))))
+    (sp/delete-entity storage :resource-override (:id a))
+    (doseq [row (sp/query-entities storage :resource-override
+                                   {:path "packages/app/editor/components.css"})]
+      (sp/delete-entity storage :resource-override (:id row)))))

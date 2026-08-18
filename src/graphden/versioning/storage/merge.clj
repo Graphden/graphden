@@ -11,7 +11,8 @@
 
    Detects conflicts in any versioned entity — see
    `graphden.versioning.storage.resolution/entity-config` for the
-   authoritative list (fn / fn-slot / binding / binding-list-item)."
+   authoritative list (fn / fn-slot / binding / binding-list-item /
+   resource-override)."
   (:require
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]

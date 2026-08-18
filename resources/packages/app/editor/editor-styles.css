@@ -4391,13 +4391,12 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .gd-asset-edit > .gd-asset-path { display: block; margin-bottom: 4px; }
 .gd-asset-edit-form { display: flex; flex-direction: column; gap: 6px; }
 .gd-asset-textarea { width: 100%; font-size: 11px; }
-.gd-asset-save-btn, .gd-asset-revert-btn { align-self: flex-start; font-size: 11px;
-  padding: 2px 8px; border: 1px solid var(--input-border); border-radius: 3px;
+.gd-asset-save-btn, .gd-asset-revert-btn, .gd-asset-diff-btn {
+  align-self: flex-start; font-size: 11px; padding: 2px 8px;
+  border: 1px solid var(--input-border); border-radius: 3px;
   background: var(--card-bg); color: var(--fg); cursor: pointer; }
 .gd-asset-revert-btn { color: var(--error-fg); margin-top: 4px; }
-.gd-asset-diff-btn { align-self: flex-start; font-size: 11px; padding: 2px 8px;
-  border: 1px solid var(--input-border); border-radius: 3px;
-  background: var(--card-bg); color: var(--fg); cursor: pointer; margin-top: 4px; }
+.gd-asset-diff-btn { margin-top: 4px; }
 .gd-asset-error { color: var(--error-fg); font-size: 11px; padding: 2px 0; }
 .gd-asset-diff { border: 1px solid var(--light-border); border-radius: 3px;
   max-height: 420px; overflow: auto; font-size: 12px; margin-top: 4px; }

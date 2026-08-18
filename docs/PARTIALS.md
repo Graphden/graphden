@@ -408,7 +408,7 @@ The full registry lives in `resources/packages/app/routes/fns.edn`
 `app/editor/fns.edn` (`;; HTMX PARTIALS` and the sections after it),
 `app/execution/fns.edn` (execute-result / service-popover /
 execute-history) and `app/{branches,secrets,registry}` for their
-panels. 30 partials as of 2026-08-14, by consumer surface:
+panels. 32 partials as of 2026-08-18, by consumer surface:
 
 | Partial (route name)                | Path (+key params)                                        | JS consumer |
 |-------------------------------------|-----------------------------------------------------------|-------------|
@@ -420,6 +420,8 @@ panels. 30 partials as of 2026-08-14, by consumer surface:
 | `:partial-stats`                     | GET /partials/stats (auth)                                | editor-stats.js — the org's 7-day run rollups (headline totals, per-day trend, top-fns) |
 | `:partial-error-log`                 | GET /partials/error-log (auth)                            | editor-errors.js — the org's recent failed executions, scrubbed |
 | `:partial-type-errors`               | GET /partials/type-errors (auth)                          | editor-type-errors.js — the current branch's recorded type diagnostics |
+| `:partial-assets-panel`              | GET /partials/assets-panel (auth)                         | editor-assets.js — every frontend bundle file + its override status |
+| `:partial-asset-edit`                | GET /partials/asset-edit?path= (auth)                     | editor-assets.js — the override editor (CodeMirror) for one asset |
 | `:partial-execute-result`            | GET /partials/execute-result?id= (auth)                   | execute orchestrator + history |
 | `:partial-execute-result-inline`     | POST /partials/execute-result-inline (auth)               | non-persisted inline Run |
 | `:partial-execute-result-effects`    | GET /partials/execute-result-effects?runtime=&declared=   | editor-execute.js |

@@ -493,7 +493,11 @@
              :tweaks {:ref-fn-id {:indexed? true}}}
    :resource-override {:identity-fields #{:org-id}
                        :uuids {:path resource-override-version-path-field-uuid
-                               :content resource-override-version-content-field-uuid}}
+                               :content resource-override-version-content-field-uuid}
+                       ;; :indexed? — check-resource-override-path-collision!
+                       ;; finds its candidate set on the version table by
+                       ;; :path (mirror of the base index).
+                       :tweaks {:path {:indexed? true}}}
    :binding-list-item {:identity-fields #{:org-id}
                        :uuids {:binding-id binding-list-item-version-binding-id-field-uuid
                                :position binding-list-item-version-position-field-uuid

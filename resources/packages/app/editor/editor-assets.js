@@ -47,7 +47,14 @@ function gdAssetShowError(form, msg) {
 document.addEventListener('htmx:configRequest', (e) => {
   const form = e.detail?.elt;
   if (!form?.classList?.contains('gd-asset-edit-form')) return;
+  // Clear any stale client-side error each attempt — otherwise a fixed
+  // body whose save then fails server-side (no swap) would still show
+  // the old "JS syntax error" next to correct code.
+  form.querySelector('.gd-asset-error')?.remove();
   const ta = form.querySelector('textarea[name="content"]');
+  // Only JS is gated (data-lang is js|css|json|text; a non-JS override
+  // can't brick the concatenated bundle). ta.value is kept in sync by
+  // the CodeMirror updateListener, so it's the live content.
   if (ta?.dataset.lang !== 'js') return;
   try {
     new Function(ta.value);

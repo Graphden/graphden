@@ -89,17 +89,20 @@
   {:name :htmx-js-asset
    :description "GET /assets/htmx.min.js — the vendored htmx 2.x bundle (web/vendor/, no CDN) for the editor page and tenant pages using `:with-htmx`. Same 1-year `immutable` cache as the other assets."
    :parent :get-route
-   :args {:path "/assets/htmx.min.js" :handler :_htmx-js-handler}}
+   :args {:path "/assets/htmx.min.js" :handler :_htmx-js-handler}
+   :expects-effects #{:io :db :env}}          ; body builds through the override tier (:db lookup + :env hatch)
 
   {:name :codemirror-js-asset
    :description "GET /assets/codemirror.min.js — the vendored CodeMirror 6 bundle (`window.CM`) for the editor's code-editing textareas. Same 1-year `immutable` cache + `?v=` hash-bust as the other assets."
    :parent :get-route
-   :args {:path "/assets/codemirror.min.js" :handler :_cm-js-handler}}
+   :args {:path "/assets/codemirror.min.js" :handler :_cm-js-handler}
+   :expects-effects #{:io :db :env}}          ; body builds through the override tier (:db lookup + :env hatch)
 
   {:name :htmx-sse-js-asset
    :description "GET /assets/htmx-ext-sse.min.js — the vendored htmx SSE extension (web/vendor/, 0BSD) for pages using `:sse-connect-attrs` via `:with-htmx-sse`."
    :parent :get-route
-   :args {:path "/assets/htmx-ext-sse.min.js" :handler :_htmx-sse-js-handler}}
+   :args {:path "/assets/htmx-ext-sse.min.js" :handler :_htmx-sse-js-handler}
+   :expects-effects #{:io :db :env}}          ; body builds through the override tier (:db lookup + :env hatch)
 
   {:name :graphden-runtime-js-asset
    :description "GET /assets/graphden-runtime.js — runtime bundle (graphden-popover.js + graphden-forms.js + graphden-runtime.js + graphden-actions-builtin.js) for user-built pages that don't host the editor canvas: popover positioning/dismiss + hiccup form render/collect/fill/widgets + action dispatch + built-in handlers. Same 1-year `immutable` cache as editor.js."
@@ -338,7 +341,7 @@
    :description "POST /api/assets/save — upsert a `:resource-override` from the panel form's {path, content}; returns the refreshed Assets panel HTML. Auth-required; tenant writes rejected at the storage layer."
    :parent :post
    :args {:path "/assets/save" :handler :_asave-handler}
-   :expects-effects #{:db :state}}            ; :state — response-cache flush
+   :expects-effects #{:db}}
 
   {:name :api-assets-baseline
    :description "GET /api/assets/baseline?path=… — the shipped classpath body of one asset, for the Assets panel's diff view. Auth-required."
@@ -350,7 +353,7 @@
    :description "DELETE /api/assets/revert?path=… — soft-delete the path's `:resource-override`; returns the refreshed Assets panel HTML. Auth-required."
    :parent :delete
    :args {:path "/assets/revert" :handler :_arev-handler}
-   :expects-effects #{:db :state}}            ; :state — response-cache flush
+   :expects-effects #{:db}}
 
   ;; --- /api/sequence — sequence-arg editing ---
 

@@ -585,7 +585,13 @@
    first). Identity-level: `:org-id` (platform rows in practice — the
    entity is tenant-forbidden in the cloud)."
   {:path {:uuid resource-override-path-field-uuid
-          :type :text}
+          :type :text
+          ;; Indexed: `:_ro-row` resolves an asset by path on the hot
+          ;; serve path (~once per bundle FILE per asset request), and
+          ;; `check-resource-override-path-collision!` queries by path.
+          ;; The mirror index (versioned schema) backs the collision
+          ;; candidate set on the version table.
+          :indexed? true}
    :content {:uuid resource-override-content-field-uuid
              :type :text
              :nullable? true}

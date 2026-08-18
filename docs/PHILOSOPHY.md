@@ -855,19 +855,24 @@ The author's eventual goal is a single fully graph-described UI.
 That is a large project, so we commit to it as a **two-step
 roadmap**, where each step delivers value on its own:
 
-**Step 1 — Make `:const` JS/CSS editable from inside the running
-editor.**
+**Step 1 — Make the editor's own JS/CSS editable from inside the
+running editor. (SHIPPED 2026-08-18.)**
 
-- Pop-over editor for the body of `:const` JS/CSS fn-defs (proper
-  monospace edit surface, not the generic value form).
-- One-click "rebuild the bundle and reload" for the editor itself.
-- Optionally back the source blobs by S3 (or any blob store) instead
-  of the file system, so the deployed editor can store edits without
-  shipping a new jar.
+- A versioned `:resource-override` entity (`path → content`, per
+  branch) shadows the shipped classpath asset; every bundle reads
+  through `:read-resource-overridable`. No rebuild and no blob store —
+  the override lives in Postgres like any other versioned row, and
+  `:frontend-hash-effective` rolls the `?v=` asset hash on save so the
+  browser re-fetches. (S3 was considered and rejected: versioning and
+  atomicity are exactly what the existing storage already gives.)
+- The editing surface is the Operate → Assets panel — list every
+  bundle file with its override status, edit it in a CodeMirror code
+  editor, save / revert, and diff the override against the shipped
+  baseline. A JS syntax save-gate and a `GRAPHDEN_DISABLE_ASSET_OVERRIDES`
+  rescue hatch keep a bad override from bricking the editor.
 
-This step is small and removes the immediate pain: today, editing
-the editor's own JS/CSS requires going to disk and rebuilding the
-jar by hand.
+This removed the immediate pain: editing the editor's own JS/CSS no
+longer means going to disk and rebuilding the jar.
 
 **Step 2 — Express UI structure as fn-defs.**
 

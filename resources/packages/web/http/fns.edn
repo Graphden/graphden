@@ -501,10 +501,17 @@
           :key {:value "accept-encoding"}
           :default {:value ""}}}
 
+  {:name :_request-query-string
+   :description "Raw query string (e.g. `\"v=abc123\"`), or `\"\"`. Part of the cache key so hash-busted asset URLs cache PER `?v=` — an asset override rolls the effective hash, the new URL is a fresh key, and every node cache-misses into the new bytes without a cross-node flush."
+   :parent :get
+   :args {:coll {:ref :ring-request :type :ring-request-shape}
+          :key {:value :query-string}
+          :default {:value ""}}}
+
   {:name :_response-cache-key
-   :description "`[uri method accept-encoding]` — distinguishes one cached response from another."
+   :description "`[uri method accept-encoding query-string]` — distinguishes one cached response from another. The query string is load-bearing: static assets carry `?v=<effective-hash>`, so a rolled hash (deploy OR asset override) is a new key and the stale entry is simply never requested again — correct across every node without a shared flush."
    :parent :list
-   :args {:items [:ring-uri :ring-method :_request-accept-encoding]}}
+   :args {:items [:ring-uri :ring-method :_request-accept-encoding :_request-query-string]}}
 
   {:name :_cached-response
    :description "Cache lookup result for the current request — nil on miss."

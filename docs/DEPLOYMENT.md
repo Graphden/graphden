@@ -138,6 +138,7 @@ helm install fleet deploy/helm/graphden \
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |
+| `GRAPHDEN_DISABLE_ASSET_OVERRIDES` | *(empty)* | `1` ⇒ every frontend asset serves its shipped classpath baseline, ignoring `:resource-override` rows (bytes AND the effective `?v=` hash). Rescue hatch for a bad in-editor asset override that bricked the editor — restart with it set, revert the override in Operate → Assets, unset, restart. Restart-scoped. |
 | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS` | `128` | Per-pod cap on concurrent `/api/execute` runs (protects the JVM's executor) |
 | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | `32` | Fleet-wide per-org cap (counts non-terminal `:fn-execution` rows across all pods) |
 

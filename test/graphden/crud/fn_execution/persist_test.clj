@@ -610,3 +610,86 @@
     (binding [cr/*scrub-internal-errors?* true]
       (let [o {:status :succeeded :result 42}]
         (is (= o (persist/scrub-outcome :my-fn o)))))))
+
+
+;; =============================================================================
+;; re-redact-path-trace — READ-time re-redaction of persisted traces
+;; =============================================================================
+
+(deftest re-redact-path-trace-plain-entries-untouched
+  (let [id (random-uuid)]
+    (registry/record-rich-types-raw! id (keyword (str "rr-plain-" id))
+                                     {:return :int :effects #{}})
+    (let [pt {:entries [{:seq 0 :fn-id (str id) :cache-hit? false
+                         :duration-ms 1 :value 42}]}]
+      (is (= pt (persist/re-redact-path-trace pt))
+          "a trace of currently-plain fns passes through unchanged"))))
+
+
+(deftest re-redact-path-trace-newly-secret-hides-and-poisons
+  ;; The fn's return became [:secret …] AFTER the run persisted its
+  ;; captured value — the read path must hide the stored value AND the
+  ;; values of its consumers (the :parent-seq ancestor chain).
+  (let [outer (random-uuid)
+        mid (random-uuid)
+        secret (random-uuid)]
+    (registry/record-rich-types-raw! outer (keyword (str "rr-outer-" outer))
+                                     {:return :text :effects #{}})
+    (registry/record-rich-types-raw! mid (keyword (str "rr-mid-" mid))
+                                     {:return :text :effects #{}})
+    (registry/record-rich-types-raw! secret (keyword (str "rr-secret-" secret))
+                                     {:return [:secret :text] :effects #{}})
+    (let [pt {:entries [{:seq 2 :parent-seq 1 :fn-id (str secret)
+                         :cache-hit? false :duration-ms 1 :value "s3cret"}
+                        {:seq 1 :parent-seq 0 :fn-id (str mid)
+                         :cache-hit? false :duration-ms 2 :value "mid-s3cret"}
+                        {:seq 0 :fn-id (str outer)
+                         :cache-hit? false :duration-ms 3 :value "out-s3cret"}]}
+          [e-secret e-mid e-outer] (:entries (persist/re-redact-path-trace pt))]
+      (testing "the newly-secret entry hides its stored value"
+        (is (= :secret (:hidden e-secret)))
+        (is (not (contains? e-secret :value))))
+      (testing "the whole ancestor chain re-poisons"
+        (doseq [e [e-mid e-outer]]
+          (is (= :secret-derived (:value-hidden e)))
+          (is (not (contains? e :value)))))
+      (testing "idempotent — a second pass changes nothing"
+        (let [once (persist/re-redact-path-trace pt)]
+          (is (= once (persist/re-redact-path-trace once))))))))
+
+
+(deftest re-redact-path-trace-unknown-id-fails-closed
+  ;; No registry entry (fn deleted / registry rebuilt) — absence of
+  ;; type information hides the stored value instead of serving it.
+  (let [pt {:entries [{:seq 0 :fn-id (str (random-uuid))
+                       :cache-hit? false :duration-ms 1 :value "v"}]}
+        [entry] (:entries (persist/re-redact-path-trace pt))]
+    (is (= :unknown-type (:hidden entry)))
+    (is (not (contains? entry :value)))))
+
+
+(deftest re-redact-path-trace-pre-tree-entries-redact-without-links
+  ;; Traces persisted before the :seq/:parent-seq linkage: the entry
+  ;; itself redacts, siblings without links stay (no chain to walk).
+  (let [plain (random-uuid)
+        secret (random-uuid)]
+    (registry/record-rich-types-raw! plain (keyword (str "rr-plain-" plain))
+                                     {:return :int :effects #{}})
+    (registry/record-rich-types-raw! secret (keyword (str "rr-secret-" secret))
+                                     {:return [:secret :text] :effects #{}})
+    (let [pt {:entries [{:fn-id (str secret) :cache-hit? false :value "s"}
+                        {:fn-id (str plain) :cache-hit? false :value 7}]}
+          [e-secret e-plain] (:entries (persist/re-redact-path-trace pt))]
+      (is (= :secret (:hidden e-secret)))
+      (is (not (contains? e-secret :value)))
+      (is (= 7 (:value e-plain)) "linkless sibling untouched"))))
+
+
+(deftest re-redact-path-trace-capture-time-hidden-kept
+  ;; An entry hidden at capture time stays hidden even if its fn is
+  ;; now plain — the value was never captured, nothing to restore.
+  (let [id (random-uuid)]
+    (registry/record-rich-types-raw! id (keyword (str "rr-nowplain-" id))
+                                     {:return :int :effects #{}})
+    (let [pt {:entries [{:seq 0 :fn-id (str id) :hidden :secret}]}]
+      (is (= pt (persist/re-redact-path-trace pt))))))

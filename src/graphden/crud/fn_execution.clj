@@ -337,7 +337,12 @@
   (let [storage (request/require-storage ctx)
         row (sp/read-entity storage :fn-execution execution-id)]
     (when row
-      (assoc row :args (args-for-execution storage execution-id)))))
+      (-> row
+          ;; READ-time re-redaction: a fn that became secret after this
+          ;; run must not keep serving captured values from the stored
+          ;; trace (persist/re-redact-path-trace).
+          (update :path-trace #(some-> % persist/re-redact-path-trace))
+          (assoc :args (args-for-execution storage execution-id))))))
 
 
 ;; =============================================================================
@@ -371,9 +376,13 @@
      ;; base); :fn-version-id is a :ref (indexed), so Postgres filters
      ;; on the index and returns only the newest `lim` rows instead of
      ;; transferring + sorting a hot fn's whole run history.
-     (vec (sp/query-entities storage :fn-execution
-                             {:fn-version-id fn-version-id}
-                             {:order-by [[:started-at :desc]] :limit lim})))))
+     (mapv (fn [row]
+             ;; Same READ-time re-redaction as `get-execution` — these
+             ;; rows go to the history sidebar with their `:path-trace`.
+             (update row :path-trace #(some-> % persist/re-redact-path-trace)))
+           (sp/query-entities storage :fn-execution
+                              {:fn-version-id fn-version-id}
+                              {:order-by [[:started-at :desc]] :limit lim})))))
 
 
 (defn list-executions-for-fn

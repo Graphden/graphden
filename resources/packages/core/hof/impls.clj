@@ -86,16 +86,26 @@
 ;; === Registry ===
 
 (def impls
-  {:map map-fn
-   :filter filter-fn
-   :map-xf map-xf-fn
-   :filter-xf filter-xf-fn
-   :reduce reduce-fn
-   :some some-fn
-   :every? every?-fn
-   :find-first find-first
-   :group-by group-by-fn
-   :sort-by sort-by-fn
-   :constantly constantly-fn
-   :comp comp-fn
-   :transduce transduce-fn})
+  ;; Every entry is a `{:impl … :taint-propagate? true}` map — HOFs are
+  ;; content-passing by construction: elements of `coll` (or `init`, or
+  ;; the captured `value`) flow into the result, so a marker-tainted
+  ;; input (`[:list [:secret :text]]`, secret `init`, …) must lift the
+  ;; result type to `[:secret …]`. Without the flag `(:map f secret-coll)`
+  ;; statically LAUNDERED the marker (result typed from `f`'s plain
+  ;; return), so the trace/result redaction missed it. The propagator is
+  ;; a no-op for plain inputs, so the structurally-preserving fns
+  ;; (`:filter`) and the fn-only forms (`:map-xf`, `:comp`) are
+  ;; annotated too, matching the strings-package convention.
+  {:map        {:impl map-fn        :taint-propagate? true}
+   :filter     {:impl filter-fn     :taint-propagate? true}
+   :map-xf     {:impl map-xf-fn     :taint-propagate? true}
+   :filter-xf  {:impl filter-xf-fn  :taint-propagate? true}
+   :reduce     {:impl reduce-fn     :taint-propagate? true}
+   :some       {:impl some-fn       :taint-propagate? true}
+   :every?     {:impl every?-fn     :taint-propagate? true}
+   :find-first {:impl find-first    :taint-propagate? true}
+   :group-by   {:impl group-by-fn   :taint-propagate? true}
+   :sort-by    {:impl sort-by-fn    :taint-propagate? true}
+   :constantly {:impl constantly-fn :taint-propagate? true}
+   :comp       {:impl comp-fn       :taint-propagate? true}
+   :transduce  {:impl transduce-fn  :taint-propagate? true}})

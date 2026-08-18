@@ -376,6 +376,91 @@
     outcome))
 
 
+(def ^:private poisoning-capture-classes
+  "Capture classes whose frame OUTPUT taints its consumers (mirrors
+   compile-eager's `poisons-ancestors?`): a declaredly-secret return,
+   or fail-closed absence of type information."
+  #{:secret-output :unknown})
+
+
+(defn re-redact-path-trace
+  "READ-time re-redaction of a persisted `:path-trace` (the
+   jsonb-roundtripped shape: keyword keys, stringified ids). Capture-
+   time redaction is final for what it HID — a value never captured
+   can't resurface — but not for what it captured: a fn whose type
+   became secret AFTER the run (marker added, type edited, registry
+   entry gone) must not keep serving its historical captured values
+   from old rows.
+
+   Re-classifies every entry via `registry/trace-capture-class`
+   (id-only — no authored ref-name survives into the row, so the
+   stale-name rescue doesn't apply and an id with no current registry
+   entry redacts FAIL-CLOSED as `:unknown-type`), then re-poisons the
+   `:parent-seq` ancestor chain of every hidden poisoning frame —
+   their values derive from the hidden output. Pre-tree traces (no
+   `:seq` links) redact only the re-classified entries themselves.
+
+   Idempotent; cheap for the common case (every entry `:plain`, no
+   allocation beyond the pass)."
+  [pt]
+  (let [entries (:entries pt)]
+    (if (empty? entries)
+      pt
+      (let [class-of (memoize
+                       (fn [id-str]
+                         (registry/trace-capture-class
+                           (some-> id-str str request/parse-uuid-or-clear)
+                           nil)))
+            pairs (mapv (fn [e]
+                          (let [cls (class-of (:fn-id e))
+                                poisons? (contains? poisoning-capture-classes cls)]
+                            (cond
+                              ;; already hidden at capture — keep as-is,
+                              ;; but its CURRENT class still decides
+                              ;; whether it taints ancestors on read
+                              (contains? e :hidden) [e poisons?]
+                              (= :plain cls) [e false]
+                              :else [(-> e
+                                         (dissoc :value :value-truncated?
+                                                 :value-hidden :duration-ms
+                                                 :cache-hit?)
+                                         (assoc :hidden (if (= :unknown cls)
+                                                          :unknown-type
+                                                          :secret)))
+                                     poisons?])))
+                        entries)
+            entries' (mapv first pairs)
+            poison-roots (into #{}
+                               (comp (filter second)
+                                     (keep #(:seq (first %))))
+                               pairs)]
+        (if (empty? poison-roots)
+          (assoc pt :entries entries')
+          (let [by-seq (into {}
+                             (keep (fn [e]
+                                     (when (some? (:seq e)) [(:seq e) e])))
+                             entries')
+                ancestors (loop [work poison-roots, acc #{}]
+                            (if-let [s (first work)]
+                              (let [p (:parent-seq (get by-seq s))]
+                                (recur (cond-> (disj work s)
+                                         (and (some? p) (not (contains? acc p)))
+                                         (conj p))
+                                       (if (contains? poison-roots s)
+                                         acc     ; roots themselves stay as classified
+                                         (conj acc s))))
+                              acc))]
+            (assoc pt :entries
+                   (mapv (fn [e]
+                           (if (and (contains? ancestors (:seq e))
+                                    (not (contains? e :hidden)))
+                             (-> e
+                                 (dissoc :value :value-truncated?)
+                                 (assoc :value-hidden :secret-derived))
+                             e))
+                         entries'))))))))
+
+
 (def tenant-visible-error-type-namespaces
   "Error `:type` namespaces a tenant may see verbatim — errors the tenant's
    own graph/input CAUSED and can act on (docs/ERROR_CODES.md). Everything

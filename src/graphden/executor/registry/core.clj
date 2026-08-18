@@ -603,6 +603,23 @@
 (declare rich-type-of-id-or-stale-name)
 
 
+(defn- hidden-return?
+  "Registry entry's RETURN type carries a hide-result marker (`:secret`
+   or a graph-declared one). Absent return reads as `:any` — plain."
+  [rt]
+  (types/contains-hide-result-marker? (or (:return rt) :any)))
+
+
+(defn- hidden-arg?
+  "Any declared arg slot of the registry entry carries a hide-result
+   marker — the fn CONSUMES a secret even if its return is plain."
+  [rt]
+  (boolean (some (fn [[_ arg-entry]]
+                   (types/contains-hide-result-marker?
+                     (or (some-> arg-entry :type) arg-entry)))
+                 (:args rt))))
+
+
 (defn touches-secret?
   "True iff the fn's rich-type carries a hide-result marker (the seeded
    `:secret`, or a graph-declared one) on its return OR on any of its
@@ -632,12 +649,48 @@
   ([fn-id row-name]
    (when fn-id
      (when-let [rt (rich-type-of-id-or-stale-name fn-id row-name)]
-       (boolean
-         (or (types/contains-hide-result-marker? (or (:return rt) :any))
-             (some (fn [[_ arg-entry]]
-                     (types/contains-hide-result-marker?
-                       (or (some-> arg-entry :type) arg-entry)))
-                   (:args rt))))))))
+       (boolean (or (hidden-return? rt) (hidden-arg? rt)))))))
+
+
+(defn trace-capture-class
+  "Capture-time classification of a `:ref` frame for the path-trace
+   seam (compile-eager) — decides whether a frame's VALUE may enter the
+   capture buffer, and whether the frame's output taints the frames
+   that consume it:
+
+   - `:plain`         — no hide-result marker anywhere; value may be
+                        captured.
+   - `:secret-output` — the RETURN carries a hide-result marker; the
+                        frame records `{:hidden :secret}` and its output
+                        poisons every ancestor frame on the stack (their
+                        eventual values derive from it).
+   - `:secret-input`  — a declared ARG slot carries the marker but the
+                        return is declaredly plain (a trusted sink like
+                        `:sql-exec`); the frame's own value is still
+                        hidden (`touches-secret?` parity — the value
+                        could echo an input) but ancestors are NOT
+                        poisoned: the checker verified the declared
+                        plain return.
+   - `:unknown`       — NO registry entry even after the stale-name
+                        rescue. FAIL-CLOSED: absence of type information
+                        must read as \"could be secret\", not as
+                        \"capturable\" — the entry hides its value AND
+                        poisons ancestors. Rare by construction (every
+                        checked fn-def records an id-keyed entry): a
+                        stale identity with no same-name rescue, or a
+                        row persisted under Error Tolerance after its
+                        check threw.
+
+   Same identity keying + stale-name rescue as `touches-secret?`; the
+   two agree by construction (`:plain` ⟺ `touches-secret?` false when
+   an entry exists)."
+  [fn-id row-name]
+  (if-let [rt (when fn-id (rich-type-of-id-or-stale-name fn-id row-name))]
+    (cond
+      (hidden-return? rt) :secret-output
+      (hidden-arg? rt) :secret-input
+      :else :plain)
+    :unknown))
 
 
 (defn rich-type-of

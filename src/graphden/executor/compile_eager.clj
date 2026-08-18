@@ -388,11 +388,15 @@
   (delay (requiring-resolve 'graphden.executor.compile-runtime/*path-trace*)))
 
 
-(def ^:private touches-secret?-fn
-  "Var handle to `registry.core/touches-secret?` — the shared registry-
-   based secret predicate (also used by persist-side redaction). Called
-   only on the already-opted-in slow path, never when tracing is off."
-  (delay (requiring-resolve 'graphden.executor.registry.core/touches-secret?)))
+(def ^:private trace-capture-class-fn
+  "Var handle to `registry.core/trace-capture-class` — the capture-time
+   frame classification (`:plain` / `:secret-output` / `:secret-input`
+   / `:unknown`) that decides value capture, `{:hidden …}` marking, and
+   ancestor poisoning. FAIL-CLOSED: a frame with no registry entry
+   classifies `:unknown` and is treated like a secret, not captured.
+   Called only on the already-opted-in slow path, never when tracing
+   is off."
+  (delay (requiring-resolve 'graphden.executor.registry.core/trace-capture-class)))
 
 
 (def max-path-trace-entries
@@ -442,7 +446,17 @@
    half for buffers; persisted rows ride `:fn-execution`'s sweeper)."
   ([] (new-path-trace nil))
   ([{:keys [capture-values?]}]
-   (atom (cond-> {:entries []}
+   (atom (cond-> {:entries []
+                  ;; Frame bookkeeping for the call TREE: `:next-seq`
+                  ;; numbers frames in ENTRY order; `:stack` holds the
+                  ;; currently-open frames so a completing frame knows
+                  ;; its parent (entries land in completion order, so
+                  ;; without the stack the flat vector cannot be
+                  ;; reassembled into a tree). Single-writer by
+                  ;; construction: the trace vars are deliberately not
+                  ;; conveyed to worker threads.
+                  :next-seq 0
+                  :stack []}
            capture-values? (assoc :capture-values? true :value-bytes 0)))))
 
 
@@ -489,6 +503,73 @@
                        dropped? (assoc :values-dropped? true))))))))))
 
 
+(defn- enter-frame!
+  "Open a call frame: draw the next entry-order seq number and push it
+   onto the frame stack. Returns `[seq parent-seq]` — `parent-seq` is
+   the frame that was on top (nil for a root frame). The entry itself
+   is recorded at COMPLETION (with these numbers), so children recorded
+   earlier can already reference this frame as their parent."
+  [trace]
+  (let [{:keys [stack]}
+        (swap! trace (fn [{:keys [next-seq stack] :as st}]
+                       (assoc st
+                              :next-seq (inc (long (or next-seq 0)))
+                              :stack (conj (or stack []) {:seq (long (or next-seq 0))}))))
+        n (count stack)]
+    [(:seq (peek stack))
+     (when (> n 1) (:seq (nth stack (- n 2))))]))
+
+
+(defn- exit-frame!
+  "Close the top call frame and return it (carrying `:poisoned?` when a
+   hidden descendant's output flowed through it). Single-writer, so the
+   read-then-pop pair is race-free."
+  [trace]
+  (let [frame (peek (:stack @trace))]
+    (when frame (swap! trace update :stack pop))
+    frame))
+
+
+(defn- leaf-frame!
+  "Number a LEAF entry (cache hit / hidden node recorded up-front)
+   without pushing a stack frame — nothing records under it before it
+   completes. Returns `[seq parent-seq]` against the current stack top."
+  [trace]
+  (let [{:keys [next-seq stack]}
+        (swap! trace (fn [st] (update st :next-seq (fnil inc 0))))]
+    [(dec (long next-seq)) (:seq (peek stack))]))
+
+
+(defn- poison-stack!
+  "Mark every currently-open frame `:poisoned?` — a hidden node's
+   output was just produced INSIDE each of them (the frame that forced
+   it, and its ancestors), so their eventual return values may derive
+   from the secret. Poisoned frames record `:value-hidden
+   :secret-derived` instead of a captured value — the dynamic,
+   trace-local complement to the static taint rules (it covers the
+   statically-invisible flows: `:any` slots, cells reset to secrets,
+   unregistered fns)."
+  [trace]
+  (swap! trace update :stack
+         (fn [stack] (mapv #(assoc % :poisoned? true) stack))))
+
+
+(defn- hidden-entry-kind
+  "The `:hidden` wire tag for a non-`:plain` capture class."
+  [cls]
+  (if (= :unknown cls) :unknown-type :secret))
+
+
+(defn- poisons-ancestors?
+  "Does a hidden frame's OUTPUT taint its consumers? True for
+   `:secret-output` (return declaredly secret) and `:unknown`
+   (fail-closed — no type information at all); false for
+   `:secret-input` (a trusted sink whose plain return the checker
+   verified)."
+  [cls]
+  (or (= :secret-output cls) (= :unknown cls)))
+
+
 (defn- active-path-trace
   "The bound `*path-trace*` atom when path capture applies to `ref-id`,
    else nil. First check is the nil-check on the var — the entire cost
@@ -505,18 +586,23 @@
 
 
 (defn- record-path-hit!
-  "Record a cache-hit entry: `{:fn-id … :cache-hit? true}` — NO
-   `:duration-ms` (none was spent; absence, not 0, so a reader can
-   distinguish 'free' from 'sub-millisecond'). Secret-touching fns
-   record `{:fn-id … :hidden :secret}` with no cache info at all.
-   `ref-name` (the ref's authored row name) lets `touches-secret?`
-   rescue a stale/abandoned identity id whose secret rich-type lives
-   under its current name."
+  "Record a cache-hit entry: `{:seq … :parent-seq … :fn-id …
+   :cache-hit? true}` — NO `:duration-ms` (none was spent; absence,
+   not 0, so a reader can distinguish 'free' from 'sub-millisecond').
+   Non-`:plain` frames record `{:hidden …}` with no cache info at all,
+   and a hit whose class poisons ancestors STILL poisons them — the
+   memoised secret value flows to the consuming frames exactly like a
+   fresh one. `ref-name` (the ref's authored row name) is the stale-id
+   rescue for the classification."
   [trace ref-id ref-name]
-  (record-path-entry! trace
-                      (if (@touches-secret?-fn ref-id ref-name)
-                        {:fn-id ref-id :hidden :secret}
-                        {:fn-id ref-id :cache-hit? true})))
+  (let [cls (@trace-capture-class-fn ref-id ref-name)
+        [n parent] (leaf-frame! trace)
+        base (cond-> {:seq n :fn-id ref-id}
+               (some? parent) (assoc :parent-seq parent))]
+    (if (= :plain cls)
+      (record-path-entry! trace (assoc base :cache-hit? true))
+      (do (when (poisons-ancestors? cls) (poison-stack! trace))
+          (record-path-entry! trace (assoc base :hidden (hidden-entry-kind cls)))))))
 
 
 (defn- path-traced-fresh-call
@@ -535,37 +621,73 @@
    record no value (the fresh entry for the same `[fn-id fa]` already
    carries it).
 
+   Tree linkage: every entry carries `:seq` (entry-order frame number)
+   and `:parent-seq` (the frame that forced it; absent for roots), so
+   the completion-ordered flat vector reassembles into the call tree.
+
    Secret skip (capture-time, per PHILOSOPHY § Debugging constraint
-   4): a fn whose rich-type touches `:secret` records `{:fn-id …
-   :hidden :secret}` — no duration, no cache info, and the return
-   value is NEVER read into the capture buffer (the renderer is not
-   invoked on this branch, in either mode). `ref-name` (the ref's
-   authored row name) lets the secret check rescue a stale/abandoned
-   identity id — without it a historical id whose secret rich-type
-   lives under its current name reads as non-secret and its return
-   would be captured (a narrow trace leak)."
+   4, now via `trace-capture-class`): a non-`:plain` frame records
+   `{:fn-id … :hidden :secret|:unknown-type}` — no duration, no cache
+   info, and the return value is NEVER read into the capture buffer
+   (the renderer is not invoked on this branch, in either mode).
+   `:unknown-type` is the FAIL-CLOSED arm: no registry entry means \"no
+   type information\", which must hide, not capture. `:secret-output`
+   and `:unknown` classes additionally POISON every open ancestor
+   frame — those frames record `:value-hidden :secret-derived` instead
+   of a value, the dynamic complement to the static taint rules.
+   `ref-name` (the ref's authored row name) lets the classification
+   rescue a stale/abandoned identity id — without it a historical id
+   whose secret rich-type lives under its current name reads as
+   non-secret and its return would be captured (a narrow trace leak)."
   [trace ref-id ref-name child fa ctx]
-  (if (@touches-secret?-fn ref-id ref-name)
-    (do (record-path-entry! trace {:fn-id ref-id :hidden :secret})
-        (child fa ctx))
-    (let [capture? (:capture-values? @trace)
-          t0 (System/nanoTime)
-          recorded? (volatile! false)
-          record! (fn [value-fields]
-                    (record-path-entry!
-                      trace
-                      (merge {:fn-id ref-id
-                              :cache-hit? false
-                              :duration-ms (quot (- (System/nanoTime) t0)
-                                                 1000000)}
-                             value-fields)))]
-      (try
-        (let [v (child fa ctx)]
-          (vreset! recorded? true)
-          (record! (when capture? (render-captured-value v)))
-          v)
-        (finally
-          (when-not @recorded? (record! nil)))))))
+  (let [cls (@trace-capture-class-fn ref-id ref-name)]
+    (if (not= :plain cls)
+      ;; Hidden frame (secret-touching, or fail-closed unknown): the
+      ;; entry records UP-FRONT — the return value is never read into
+      ;; the buffer, in either capture mode. The frame is still pushed
+      ;; so children invoked inside it nest under it in the tree, and
+      ;; so poisoning (when the class taints consumers) reaches the
+      ;; ancestors that will force this frame's value.
+      (let [[n parent] (enter-frame! trace)]
+        (when (poisons-ancestors? cls) (poison-stack! trace))
+        (record-path-entry! trace
+                            (cond-> {:seq n :fn-id ref-id
+                                     :hidden (hidden-entry-kind cls)}
+                              (some? parent) (assoc :parent-seq parent)))
+        (try
+          (child fa ctx)
+          (finally (exit-frame! trace))))
+      (let [capture? (:capture-values? @trace)
+            [n parent] (enter-frame! trace)
+            t0 (System/nanoTime)
+            recorded? (volatile! false)
+            record! (fn [value-fields]
+                      (record-path-entry!
+                        trace
+                        (merge (cond-> {:seq n
+                                        :fn-id ref-id
+                                        :cache-hit? false
+                                        :duration-ms (quot (- (System/nanoTime) t0)
+                                                           1000000)}
+                                 (some? parent) (assoc :parent-seq parent))
+                               value-fields)))]
+        (try
+          (let [v (child fa ctx)]
+            (vreset! recorded? true)
+            (let [frame (exit-frame! trace)]
+              (record! (cond
+                         ;; A hidden descendant's output flowed through
+                         ;; this frame — its value derives from it. The
+                         ;; marker records in BOTH capture modes (the
+                         ;; tree reader should see the derivation), the
+                         ;; value in neither.
+                         (:poisoned? frame) {:value-hidden :secret-derived}
+                         capture? (render-captured-value v))))
+            v)
+          (finally
+            (when-not @recorded?
+              (exit-frame! trace)
+              (record! nil))))))))
 
 
 (defn- fresh-call

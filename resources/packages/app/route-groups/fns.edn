@@ -35,6 +35,8 @@
                   :partial-execute-history
                   :partial-stats
                   :partial-error-log
+                  :partial-assets-panel
+                  :partial-asset-edit
                   :partial-type-errors
                   :partial-branch-diff
                   :partial-merge-conflicts

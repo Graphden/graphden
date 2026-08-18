@@ -78,7 +78,12 @@
         sensitive #{:partial-provenance
                     :partial-return-type-rule
                     :partial-inspector-detail
-                    :partial-inspector-overview}]
+                    :partial-inspector-overview
+                    ;; UI Step 1 — the asset-override panel edits the code the
+                    ;; editor itself runs; its read side must never re-open to
+                    ;; anonymous callers either.
+                    :partial-assets-panel
+                    :partial-asset-edit}]
     (is (= :get-auth-required source-parent)
         "anchor: /api/graph/entities (:api-entities) is auth-gated")
     (is (= :get-auth-required (:parent (by-name :api-types)))

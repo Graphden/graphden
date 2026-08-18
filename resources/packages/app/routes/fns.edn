@@ -155,6 +155,18 @@
    :parent :get-auth-required
    :args {:path "/partials/error-log" :handler :_partial-error-log-handler}}
 
+  {:name :partial-assets-panel
+   :description "GET /partials/assets-panel — the frontend-asset override panel (bundle files + override status + editor slot). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/assets-panel" :handler :_partial-assets-panel-handler}
+   :expects-effects #{:db}}
+
+  {:name :partial-asset-edit
+   :description "GET /partials/asset-edit?path=… — the override editor form for one asset. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/asset-edit" :handler :_partial-asset-edit-handler}
+   :expects-effects #{:db :io}}
+
   {:name :partial-type-errors
    :description "GET /partials/type-errors — the current branch's recorded type diagnostics (error-tolerance Phase 3), one row per diagnostic with a native #hash fn link. Auth-required; the editor's Type-errors sidebar section lazy-loads it."
    :parent :get-auth-required
@@ -314,6 +326,20 @@
    :description "/api/entities/* sub-group — POST `/:type` (create) and PUT/DELETE `/:type/:id` (update/delete). New methods on /:type/:id go into `:_entity-by-id-methods`; new sub-paths get listed here directly."
    :parent :list
    :args {:items ["/entities" :entity-create :entity-by-id]}}
+
+  ;; --- /api/assets — frontend-asset overrides (UI Step 1) ---
+
+  {:name :api-assets-save
+   :description "POST /api/assets/save — upsert a `:resource-override` from the panel form's {path, content}; returns the refreshed Assets panel HTML. Auth-required; tenant writes rejected at the storage layer."
+   :parent :post
+   :args {:path "/assets/save" :handler :_asave-handler}
+   :expects-effects #{:db}}
+
+  {:name :api-assets-revert
+   :description "DELETE /api/assets/revert?path=… — soft-delete the path's `:resource-override`; returns the refreshed Assets panel HTML. Auth-required."
+   :parent :delete
+   :args {:path "/assets/revert" :handler :_arev-handler}
+   :expects-effects #{:db}}
 
   ;; --- /api/sequence — sequence-arg editing ---
 
@@ -657,6 +683,8 @@
    :description "/api/* — full API surface. To add API versioning (e.g. `/v1`), wrap this in a list with the version prefix as first item — one change instead of one-per-endpoint."
    :parent :list
    :args {:items ["/api"
+                  :api-assets-save
+                  :api-assets-revert
                   :entity-routes
                   :sequence-routes
                   :bindings-routes

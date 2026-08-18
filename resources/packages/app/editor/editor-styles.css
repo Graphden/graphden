@@ -4376,6 +4376,26 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .type-errors-empty { padding: 6px 8px; color: var(--muted-fg); font-size: 11px; }
 .type-errors-list { max-height: 320px; overflow-y: auto; }
 
+/* UI Step 1 — Assets ops section: frontend-asset override panel. */
+.gd-asset-hint { padding: 4px 8px; color: var(--muted-fg); font-size: 11px; }
+.gd-asset-list { max-height: 260px; overflow-y: auto; }
+.gd-asset-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+  border-bottom: 1px dashed var(--light-border); font-size: 11px; }
+.gd-asset-path { color: var(--fg); overflow-wrap: anywhere; flex: 1; }
+.gd-asset-chip { color: var(--muted-fg); font-size: 10px; border: 1px solid var(--light-border);
+  border-radius: 3px; padding: 0 4px; white-space: nowrap; }
+.gd-asset-chip-override { color: var(--accent); border-color: var(--accent); }
+.gd-asset-edit-btn { font-size: 10px; padding: 0 6px; border: 1px solid var(--input-border);
+  border-radius: 3px; background: var(--card-bg); color: var(--fg); cursor: pointer; }
+.gd-asset-edit { padding: 6px 8px; }
+.gd-asset-edit > .gd-asset-path { display: block; margin-bottom: 4px; }
+.gd-asset-edit-form { display: flex; flex-direction: column; gap: 6px; }
+.gd-asset-textarea { width: 100%; font-size: 11px; }
+.gd-asset-save-btn, .gd-asset-revert-btn { align-self: flex-start; font-size: 11px;
+  padding: 2px 8px; border: 1px solid var(--input-border); border-radius: 3px;
+  background: var(--card-bg); color: var(--fg); cursor: pointer; }
+.gd-asset-revert-btn { color: var(--error-fg); margin-top: 4px; }
+
 /* Phase C stats sidebar section — org-scoped run rollups. */
 .stats-panel { padding: 4px 8px 8px; font-size: 11px;
   max-height: 480px; overflow-y: auto; }

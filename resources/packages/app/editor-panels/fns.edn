@@ -804,4 +804,287 @@
    :lambda-params []
    :description "Ring handler for GET /partials/settings-access — the Settings access card body as text/html: the principal's own write/execute capability chips under a tenancy addon, or the single-tenant copy without one. Nothing is read off the REQUEST MAP (`:lambda-params []`) — the per-principal fact arrives via the request-scope seam binding, not the Ring map. Shows the requester THEIR OWN capabilities (the same fact every response already carries in `X-Graphden-Capabilities`) — nothing cross-principal to leak."
    :parent :html-ok-response
-   :args {:body :_seta-html}}]}
+   :args {:body :_seta-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; ASSETS panel (UI Step 1) — GET /partials/assets-panel. Every frontend
+  ;; bundle file the platform serves, with its override status; per-row
+  ;; edit loads /partials/asset-edit into the panel's editor slot; saving
+  ;; POSTs /api/assets/save (upsert by path) and re-renders the panel.
+  ;; Writes hit the versioned `:resource-override` entity — per-branch,
+  ;; tenant-forbidden under the tenancy addon (stored-XSS surface).
+  ;; ---------------------------------------------------------------------
+  {:name :_passets-known-paths
+   :description "Every classpath asset the override tier can shadow — the four JS bundle path lists plus the two standalone stylesheets."
+   :parent :concat
+   :args {:colls [:_editor-script-paths
+                  :_graphden-runtime-js-paths
+                  :_htmx-js-paths
+                  :_htmx-sse-js-paths
+                  {:value ["packages/app/editor/editor-styles.css"
+                           "packages/app/editor/components.css"]}]}}
+
+  ;; `:contains?` on a LIST checks indices, so membership tests go
+  ;; through self-keyed maps (path → path).
+  {:name :_passets-known-map
+   :parent :zipmap
+   :args {:keys :_passets-known-paths :vals :_passets-known-paths}}
+
+  {:name :_passets-ro-path
+   :parent :get
+   :args {:coll {:as :item} :key {:value :path} :default {:value ""}}}
+
+  {:name :_passets-ro-paths
+   :parent :map
+   :args {:func :_passets-ro-path :coll :_ro-all}}
+
+  {:name :_passets-ro-by-path
+   :parent :zipmap
+   :args {:keys :_passets-ro-paths :vals :_passets-ro-paths}}
+
+  {:name :_passets-orphan?
+   :description "True for an override row whose path is NOT a known bundle file — inert for serving, but it still rolls the effective hash, so the panel must surface it."
+   :parent :not
+   :args {:value {:parent :contains?
+                  :args {:coll :_passets-known-map :key {:as :item}}}}}
+
+  {:name :_passets-orphans
+   :parent :filter
+   :args {:pred :_passets-orphan? :coll :_passets-ro-paths}}
+
+  {:name :_passets-row-paths
+   :parent :concat
+   :args {:colls [:_passets-known-paths :_passets-orphans]}}
+
+  {:name :_passets-row-overridden?
+   :parent :contains?
+   :args {:coll :_passets-ro-by-path :key {:as :item}}}
+
+  {:name :_passets-row-chip
+   :parent :if
+   :args {:test :_passets-row-overridden?
+          :then {:value [:span {:class "gd-asset-chip gd-asset-chip-override"} "override"]}
+          :else {:value [:span {:class "gd-asset-chip"} "baseline"]}}}
+
+  ;; htmx serializes a named button's value, so the path rides the
+  ;; request without any client JS or URL-encoding of our own.
+  {:name :_passets-row-edit-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button" :name "path" :class "gd-asset-edit-btn"
+                        :hx-get "/partials/asset-edit"
+                        :hx-target "#gd-asset-editor" :hx-swap "innerHTML"}}
+          :key {:value :value} :value {:as :item}}}
+
+  {:name :_passets-row-edit-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_passets-row-edit-attrs
+          :children [{:value "edit"}]}}
+
+  {:name :_passets-row-path-code
+   :parent :hiccup
+   :args {:tag {:value "code"} :attrs {:value {:class "gd-asset-path"}}
+          :children [{:as :item}]}}
+
+  {:name :_passets-row
+   :description "One asset row — path, baseline/override chip, edit button."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-asset-row"}}
+          :children [:_passets-row-path-code :_passets-row-chip :_passets-row-edit-btn]}}
+
+  {:name :_passets-rendered-rows
+   :parent :map
+   :args {:func :_passets-row :coll :_passets-row-paths}}
+
+  {:name :_passets-root
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-assets-panel "1" :class "gd-assets-panel"}}
+          :children [{:value [:p {:class "gd-asset-hint"}
+                              "Per-branch DB overrides shadowing the shipped editor files. Saving rolls every asset URL's ?v= — reload the page to run the edited code."]}
+                     {:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:class "gd-asset-list"}}
+                             :children [:_passets-rendered-rows]}}
+                     {:value [:div {:id "gd-asset-editor" :class "gd-asset-editor"}]}]}}
+
+  {:name :_passets-html
+   :parent :render-hiccup
+   :args {:hiccup :_passets-root}}
+
+  {:name :_partial-assets-panel-handler
+   :lambda-params []
+   :description "Ring handler for GET /partials/assets-panel — the frontend-asset override panel as text/html. Auth-required (route side); writes are additionally tenant-forbidden at the storage layer."
+   :parent :html-ok-response
+   :args {:body :_passets-html}}
+
+  ;; --- GET /partials/asset-edit?path=… — the editor slot's content ----
+  ;; `:query-param` computes `:nullable-text`; the `:coalesce` strips the
+  ;; `:null` so downstream `:text`-typed path slots prove.
+  {:name :_pedit-path
+   :parent :coalesce
+   :args {:value {:parent :query-param
+                  :args {:param-name {:value "path"}}}
+          :default {:value ""}}}
+
+  {:name :_pedit-override-content
+   :parent :_ro-content
+   :args {:path :_pedit-path}}
+
+  ;; Effective content for the textarea: override if present, else the
+  ;; classpath baseline, else "" (an orphan path has no baseline —
+  ;; `:read-resource-or-nil`, never the throwing `:read-resource`).
+  {:name :_pedit-content
+   :parent :coalesce
+   :args {:value :_pedit-override-content
+          :default {:parent :coalesce
+                    :args {:value {:parent :read-resource-or-nil
+                                   :args {:path :_pedit-path}}
+                           :default {:value ""}}}}}
+
+  {:name :_pedit-path-input-attrs
+   :parent :assoc
+   :args {:map {:value {:type "hidden" :name "path"}}
+          :key {:value :value} :value :_pedit-path}}
+
+  {:name :_pedit-path-input
+   :parent :hiccup
+   :args {:tag {:value "input"} :attrs :_pedit-path-input-attrs}}
+
+  {:name :_pedit-textarea
+   :parent :hiccup
+   :args {:tag {:value "textarea"}
+          :attrs {:value {:name "content" :rows "18" :spellcheck "false"
+                          :class "arg-value-edit-input value-form-hiccup gd-asset-textarea"}}
+          :children [:_pedit-content]}}
+
+  {:name :_pedit-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "gd-asset-edit-form"
+                          :hx-post "/api/assets/save"
+                          :hx-target "closest [data-assets-panel]"
+                          :hx-swap "outerHTML"}}
+          :children [:_pedit-path-input :_pedit-textarea
+                     {:value [:button {:type "submit" :class "gd-asset-save-btn"}
+                              "Save override"]}]}}
+
+  ;; Revert sits OUTSIDE the form — htmx would otherwise serialize the
+  ;; whole textarea into the DELETE's query string.
+  {:name :_pedit-revert-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button" :name "path" :class "gd-asset-revert-btn"
+                        :hx-delete "/api/assets/revert"
+                        :hx-target "closest [data-assets-panel]" :hx-swap "outerHTML"
+                        :hx-confirm "Remove the override and return to the shipped baseline?"}}
+          :key {:value :value} :value :_pedit-path}}
+
+  {:name :_pedit-revert-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pedit-revert-attrs
+          :children [{:value "Revert to baseline"}]}}
+
+  {:name :_pedit-revert-opt
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_pedit-override-content}}
+          :then :_pedit-revert-btn
+          :else :_hidden-span}}
+
+  {:name :_pedit-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-asset-edit"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "code"}
+                             :attrs {:value {:class "gd-asset-path"}}
+                             :children [:_pedit-path]}}
+                     :_pedit-form :_pedit-revert-opt]}}
+
+  {:name :_pedit-html
+   :parent :render-hiccup
+   :args {:hiccup :_pedit-body}}
+
+  {:name :_partial-asset-edit-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /partials/asset-edit?path=… — the override editor (textarea prefilled with the effective content, save form, revert-if-overridden) as text/html. Auth-required (route side)."
+   :parent :html-ok-response
+   :args {:body :_pedit-html}}
+
+  ;; --- POST /api/assets/save — upsert by path, then re-render --------
+  {:name :_asave-form
+   :parent :parse-form-body-kw}
+
+  {:name :_asave-path
+   :parent :get
+   :args {:coll :_asave-form :key {:value :path} :default {:value ""}}}
+
+  {:name :_asave-content
+   :parent :get
+   :args {:coll :_asave-form :key {:value :content} :default {:value ""}}}
+
+  {:name :_asave-existing-id
+   :parent :get
+   :args {:coll {:parent :_ro-row :args {:path :_asave-path}}
+          :key {:value :id} :default nil}}
+
+  {:name :_asave-write
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_asave-existing-id}}
+          :then {:parent :update-entity
+                 :args {:entity-type {:value "resource-override"}
+                        :id :_asave-existing-id
+                        :data {:parent :zipmap
+                               :args {:keys [{:value :content}]
+                                      :vals [:_asave-content]}}}}
+          :else {:parent :create-entity
+                 :args {:entity-type {:value "resource-override"}
+                        :data {:parent :zipmap
+                               :args {:keys [{:value :path} {:value :content}]
+                                      :vals [:_asave-path :_asave-content]}}}}}}
+
+  {:name :_asave-write-guarded
+   :description "A blank path never becomes a row — a hand-crafted body without `path` is a no-op, the response is just the re-rendered panel."
+   :parent :if
+   :args {:test {:parent :neq :args {:values [:_asave-path {:value ""}]}}
+          :then :_asave-write
+          :else {:value nil}}}
+
+  {:name :_asave-then-panel
+   :description "Write THEN render — `:do` forces order so the refreshed panel shows the new override status."
+   :parent :do
+   :args {:steps [:_asave-write-guarded :_passets-html]}}
+
+  {:name :_asave-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/assets/save — upserts the form's {path, content} as a `:resource-override` and returns the refreshed Assets panel as text/html. Auth-required; tenant writes are rejected by the storage layer."
+   :parent :html-ok-response
+   :args {:body :_asave-then-panel}}
+
+  ;; --- DELETE /api/assets/revert?path=… — drop override, re-render ---
+  {:name :_arev-path
+   :parent :coalesce
+   :args {:value {:parent :query-param
+                  :args {:param-name {:value "path"}}}
+          :default {:value ""}}}
+
+  {:name :_arev-id
+   :parent :get
+   :args {:coll {:parent :_ro-row :args {:path :_arev-path}}
+          :key {:value :id} :default nil}}
+
+  {:name :_arev-delete
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_arev-id}}
+          :then {:parent :delete-entity
+                 :args {:entity-type {:value "resource-override"} :id :_arev-id}}
+          :else {:value false}}}
+
+  {:name :_arev-then-panel
+   :parent :do
+   :args {:steps [:_arev-delete :_passets-html]}}
+
+  {:name :_arev-handler
+   :lambda-params [:request]
+   :description "Ring handler for DELETE /api/assets/revert?path=… — soft-deletes the path's `:resource-override` (baseline resumes, hash rolls back) and returns the refreshed Assets panel as text/html. Auth-required."
+   :parent :html-ok-response
+   :args {:body :_arev-then-panel}}]}

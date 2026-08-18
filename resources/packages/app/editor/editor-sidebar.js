@@ -66,6 +66,7 @@ const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring', apps: 'Apps',
   errors: 'Errors', 'type-errors': 'Type errors', 'platform-access': 'Platform access',
+  assets: 'Assets',
 };
 
 // Show one section's pane on a surface and mark its nav item; hide the rest.
@@ -129,6 +130,8 @@ function reloadDynamicOpsSections() {
   const builders = {
     'type-errors': typeof buildTypeErrorsSection === 'function' ? buildTypeErrorsSection : null,
     errors: typeof buildErrorsSection === 'function' ? buildErrorsSection : null,
+    // Assets is live data too — override rows change as the user saves.
+    assets: typeof buildAssetsSection === 'function' ? buildAssetsSection : null,
   };
   Object.keys(builders).forEach((key) => {
     const build = builders[key];
@@ -1153,6 +1156,11 @@ function updateEntityList(data) {
   }
   if (!searchMode && typeof buildTypeErrorsSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'type-errors', buildTypeErrorsSection);
+  }
+  if (!searchMode && typeof buildAssetsSection === 'function') {
+    // Frontend-asset overrides — self-host only (the builder returns null
+    // under an active tenancy addon; writes there are system-only).
+    mountAdminSection(opsHost, opsNavHost, 'assets', buildAssetsSection);
   }
   // Select the first section on each surface so a pane is always showing.
   if (!searchMode) {

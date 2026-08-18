@@ -104,6 +104,7 @@
                   "packages/app/editor/editor-errors.js"
                   "packages/app/editor/editor-type-errors.js"
                   "packages/app/editor/editor-apps.js"
+                  "packages/app/editor/editor-assets.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"

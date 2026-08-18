@@ -78,9 +78,16 @@ function refreshTestsPanel(el) {
 
 async function connectTestsStream(el) {
   const finish = (delayMs) => {
-    // Detached panel (Operate re-open rebuilt the section) → stop; the
-    // server's max-lifetime close bounds an orphaned reader anyway.
-    if (el.isConnected) setTimeout(() => connectTestsStream(el), delayMs);
+    // Reconnect only while the panel is both attached AND visible —
+    // a hidden/detached panel must not hold an open request (an
+    // everlasting connection starves every networkidle-style waiter
+    // on the page). Clearing the flag lets ensureTestsStream re-open
+    // on the next Tests activation.
+    if (el.isConnected && el.offsetParent !== null) {
+      setTimeout(() => connectTestsStream(el), delayMs);
+    } else {
+      el.dataset.streaming = '';
+    }
   };
   try {
     const r = await authFetch('/partials/tests-stream',
@@ -118,11 +125,11 @@ async function connectTestsStream(el) {
 
 // Operate → Tests section shell (mounted by editor-sidebar.js's
 // mountAdminSection; rebuilt on every Operate open via
-// reloadDynamicOpsSections). LIVE: the panel body arrives over the
-// SSE stream (/partials/tests-stream — write-wakes + 30 s keepalive,
-// changed-only pushes; the stream ticks once at open, so the first
-// paint is immediate). The rebuilt-on-reopen node detaches the old
-// one, whose reader then aborts via the isConnected watch.
+// reloadDynamicOpsSections). The stream does NOT open here: sections
+// are pre-built hidden at editor boot, and an always-open SSE request
+// on every editor page would starve networkidle-style waiters (it
+// broke unrelated e2e specs' page.goto). ensureTestsStream opens it
+// on the first ACTIVATION of the Tests section instead.
 function buildTestsSection() {
   if (!isAuthenticated()) return null;
   const wrap = document.createElement('div');
@@ -131,10 +138,30 @@ function buildTestsSection() {
   el.className = 'ns-children';
   el.innerHTML = '<div class="loading">Loading…</div>';
   wrap.appendChild(el);
-  // Connect after mountAdminSection has appended the section.
-  setTimeout(() => { if (el.isConnected) connectTestsStream(el); }, 0);
+  // Operate re-open rebuilds this shell while the Tests section may
+  // already be the visible one — reconnect right away in that case.
+  setTimeout(() => { if (el.isConnected && el.offsetParent !== null) ensureTestsStream(); }, 0);
   return wrap;
 }
+
+// Open the panel's live stream once per shown panel node: first paint
+// via the one-shot partial, then the ping stream keeps it fresh.
+function ensureTestsStream() {
+  const el = document.querySelector('section[data-section="tests"] .ns-children');
+  if (!el || el.dataset.streaming === '1') return;
+  el.dataset.streaming = '1';
+  refreshTestsPanel(el);
+  connectTestsStream(el);
+}
+
+// Activating the Tests section (its nav button) is what opens the
+// stream — the section list is client chrome, so this rides the same
+// delegated-click pattern as the Run-all button below.
+document.addEventListener('click', (ev) => {
+  if (ev.target.closest('.gd-op-nav-btn[data-section="tests"]')) {
+    setTimeout(ensureTestsStream, 0);
+  }
+});
 
 // Run-all lifecycle — the panel's markup is server hiccup; JS owns only
 // the click → POST → re-prime cycle (the JSON API stays the single run

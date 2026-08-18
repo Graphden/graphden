@@ -26,6 +26,7 @@
                   :graphden-runtime-js-asset
                   :htmx-js-asset
                   :htmx-sse-js-asset
+                  :codemirror-js-asset
                   :editor-css-asset
                   :graphden-components-css-asset
                   :partial-effect

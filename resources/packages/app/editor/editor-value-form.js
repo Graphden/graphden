@@ -125,10 +125,16 @@ function renderValueForm(hostEl, payload, opts) {
   } else {
     installTextareaEnterGuard(hostEl);
     installFormLiveValidation(hostEl, options.expected, options.statusEl);
+    // Upgrade code textareas (js/css/json/edn source fields) to CodeMirror
+    // AFTER prefill — the view snapshots textarea.value at creation and
+    // syncs every doc change back, so collect/validation keep working.
+    if (window.gdCode) window.gdCode.enhanceWithin(root);
     // Skip hidden inputs — a widget owns a hidden `[data-form-field]`
     // that is never a sensible focus target.
     const first = hostEl.querySelector('input:not([type=hidden]), textarea, select');
-    if (first) { try { first.focus(); } catch (_) {} }
+    if (first?.dataset?.cmEnhanced) {
+      try { window.gdCode.viewOf(first).focus(); } catch (_) {}
+    } else if (first) { try { first.focus(); } catch (_) {} }
   }
   return true;
 }

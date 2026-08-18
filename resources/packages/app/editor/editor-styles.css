@@ -4395,6 +4395,20 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 2px 8px; border: 1px solid var(--input-border); border-radius: 3px;
   background: var(--card-bg); color: var(--fg); cursor: pointer; }
 .gd-asset-revert-btn { color: var(--error-fg); margin-top: 4px; }
+.gd-asset-diff-btn { align-self: flex-start; font-size: 11px; padding: 2px 8px;
+  border: 1px solid var(--input-border); border-radius: 3px;
+  background: var(--card-bg); color: var(--fg); cursor: pointer; margin-top: 4px; }
+.gd-asset-error { color: var(--error-fg); font-size: 11px; padding: 2px 0; }
+.gd-asset-diff { border: 1px solid var(--light-border); border-radius: 3px;
+  max-height: 420px; overflow: auto; font-size: 12px; margin-top: 4px; }
+
+/* CodeMirror host (editor-code.js upgrade of code textareas). The
+   bundle injects its own .cm-* structural styles; ours only frame it. */
+.gd-code-editor { border: 1px solid var(--input-border); border-radius: 3px;
+  background: var(--card-bg); color: var(--fg); font-size: 12px;
+  max-height: 420px; overflow: auto; }
+.gd-code-editor .cm-gutters { background: var(--card-row-highlight);
+  color: var(--muted-fg); border-right: 1px solid var(--light-border); }
 
 /* Phase C stats sidebar section — org-scoped run rollups. */
 .stats-panel { padding: 4px 8px 8px; font-size: 11px;

@@ -129,6 +129,18 @@
             (str (gh/exec-name :read-resource-overridable {:asset-path css-path}))
             "--gd-")))
 
+    (testing "the baseline endpoint serves the SHIPPED body even while overridden"
+      (gh/exec-name :_asave-handler
+                    {:request {:request-method :post
+                               :headers form-headers
+                               :body (str "path=" css-path "&content=zz")}})
+      (let [resp (gh/exec-name :_abase-handler
+                               {:request {:query-string (str "path=" css-path)}})]
+        (is (= 200 (:status resp)))
+        (is (str/includes? (:body resp) "--gd-") "baseline, not the override"))
+      (gh/exec-name :_arev-handler
+                    {:request {:query-string (str "path=" css-path)}}))
+
     (testing "a body without a path is a no-op, not a blank-path row"
       (let [resp (gh/exec-name :_asave-handler
                                {:request {:request-method :post

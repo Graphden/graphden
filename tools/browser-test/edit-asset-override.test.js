@@ -69,15 +69,22 @@ async function revertViaApi(page) {
     // Edit → prefilled textarea → append a marker → save.
     // ================================================================
     await row.locator('.gd-asset-edit-btn').click();
+    // CodeMirror hides the textarea (editor-code.js) — wait for presence,
+    // not visibility.
     await page.waitForSelector('#gd-asset-editor textarea[name="content"]',
-                               {timeout: 15000});
+                               {state: 'attached', timeout: 15000});
     const prefillLen = await page.$eval(
       '#gd-asset-editor textarea[name="content"]', (t) => t.value.length);
     assert(prefillLen > 10000,
            'textarea prefilled with the classpath baseline (' + prefillLen + ' chars)');
 
+    // The textarea is CodeMirror-enhanced (editor-code.js) — write via
+    // the gdCode seam so the view and the serialized value stay in sync.
+    const enhanced = await page.$eval(
+      '#gd-asset-editor textarea[name="content"]', (t) => !!t.dataset.cmEnhanced);
+    assert(enhanced, 'asset textarea is CodeMirror-enhanced');
     await page.$eval('#gd-asset-editor textarea[name="content"]',
-                     (t, marker) => { t.value = t.value + '\n' + marker + '\n'; },
+                     (t, marker) => { window.gdCode.set(t, window.gdCode.get(t) + '\n' + marker + '\n'); },
                      MARKER);
     await page.click('#gd-asset-editor .gd-asset-save-btn');
     await page.waitForSelector(

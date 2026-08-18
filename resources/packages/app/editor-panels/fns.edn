@@ -951,11 +951,25 @@
    :parent :hiccup
    :args {:tag {:value "input"} :attrs :_pedit-path-input-attrs}}
 
+  {:name :_pedit-lang
+   :description "CodeMirror language for the asset — `css` for stylesheet paths, else `js`."
+   :parent :if
+   :args {:test {:parent :str-contains?
+                 :args {:string :_pedit-path :substring {:value ".css"}}}
+          :then {:value "css"}
+          :else {:value "js"}}}
+
+  {:name :_pedit-textarea-attrs
+   :parent :assoc
+   :args {:map {:value {:name "content" :rows "18" :spellcheck "false"
+                        :class "arg-value-edit-input value-form-hiccup gd-asset-textarea"}}
+          :key {:value :data-lang}
+          :value :_pedit-lang}}
+
   {:name :_pedit-textarea
    :parent :hiccup
    :args {:tag {:value "textarea"}
-          :attrs {:value {:name "content" :rows "18" :spellcheck "false"
-                          :class "arg-value-edit-input value-form-hiccup gd-asset-textarea"}}
+          :attrs :_pedit-textarea-attrs
           :children [:_pedit-content]}}
 
   {:name :_pedit-form
@@ -990,6 +1004,18 @@
           :then :_pedit-revert-btn
           :else :_hidden-span}}
 
+  ;; Diff toggle — sits OUTSIDE the form (htmx must not serialize it);
+  ;; editor-assets.js opens a read-only MergeView of baseline vs the
+  ;; CURRENT editor content via GET /api/assets/baseline.
+  {:name :_pedit-diff-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button" :class "gd-asset-diff-btn"}}
+                         :key {:value :data-path}
+                         :value :_pedit-path}}
+          :children [{:value "Diff vs baseline"}]}}
+
   {:name :_pedit-body
    :parent :hiccup
    :args {:tag {:value "div"}
@@ -998,7 +1024,7 @@
                       :args {:tag {:value "code"}
                              :attrs {:value {:class "gd-asset-path"}}
                              :children [:_pedit-path]}}
-                     :_pedit-form :_pedit-revert-opt]}}
+                     :_pedit-form :_pedit-diff-btn :_pedit-revert-opt]}}
 
   {:name :_pedit-html
    :parent :render-hiccup
@@ -1069,6 +1095,26 @@
    :description "Ring handler for POST /api/assets/save — upserts the form's {path, content} as a `:resource-override` and returns the refreshed Assets panel as text/html. Auth-required; tenant writes are rejected by the storage layer."
    :parent :html-ok-response
    :args {:body :_asave-then-panel}}
+
+  ;; --- GET /api/assets/baseline?path=… — shipped file body (diff) ---
+  {:name :_abase-path
+   :parent :coalesce
+   :args {:value {:parent :query-param
+                  :args {:param-name {:value "path"}}}
+          :default {:value ""}}}
+
+  {:name :_abase-text
+   :description "The classpath baseline for one asset path — empty string when the path doesn't resolve (an orphan override has no baseline)."
+   :parent :coalesce
+   :args {:value {:parent :read-resource-or-nil
+                  :args {:path :_abase-path}}
+          :default {:value ""}}}
+
+  {:name :_abase-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /api/assets/baseline?path=… — the SHIPPED body of one asset as text/plain, for the panel's diff view (override vs baseline). Auth-required (route side)."
+   :parent :text-ok-response
+   :args {:body :_abase-text}}
 
   ;; --- DELETE /api/assets/revert?path=… — drop override, re-render ---
   {:name :_arev-path

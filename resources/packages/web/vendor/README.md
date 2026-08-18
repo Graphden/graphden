@@ -23,3 +23,19 @@
 Vendored (not CDN) so deployments carry no third-party runtime
 dependency: air-gapped installs work, the version is pinned by the
 repo, and the supply chain ends at this checkout.
+
+## codemirror.min.js
+
+- Source: built from npm packages by `tools/vendor-build/`
+  (`npm install && npm run build`); versions pinned in its
+  `package.json` (@codemirror/* 6.x, @nextjournal/lang-clojure 1.0.0,
+  esbuild bundler).
+- License: MIT (@codemirror/*, @lezer/*) + ISC (@nextjournal/*).
+- Exposes `window.CM` — EditorView/EditorState/MergeView, the standard
+  keymaps/extensions, and `CM.langs` {javascript, css, json, clojure}.
+- Served at `GET /assets/codemirror.min.js` (1-year immutable cache,
+  `?v=` hash-bust); consumed by `editor-code.js` to upgrade the
+  code-editing textareas (Assets panel, value-form js-source /
+  css-source / edn / json) into real editors.
+- To upgrade: bump versions in `tools/vendor-build/package.json`,
+  rebuild, update this entry.

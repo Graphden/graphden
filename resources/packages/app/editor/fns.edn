@@ -59,6 +59,9 @@
                   ;; field-kind calls into it.
                   "packages/web/runtime/graphden-edn.js"
                   "packages/web/runtime/graphden-forms.js"
+                  ;; CodeMirror upgrade for code textareas — before
+                  ;; editor-value-form.js (which calls gdCode.enhanceWithin).
+                  "packages/app/editor/editor-code.js"
                   "packages/app/editor/editor-value-form.js"
                   "packages/app/editor/editor-widget-rating.js"
                   "packages/app/editor/editor-tooltips.js"
@@ -553,11 +556,17 @@
   ;;
   ;; The graph itself needs no library: nodes are HTML overlays, edges are SVG
   ;; paths, and the viewport is one CSS transform.
-  {:name :head
-   :description "Final editor `<head>` element vector — `:_editor-css-link` (cached stylesheet) + the locally-served htmx 2.x bundle (`/assets/htmx.min.js`, vendored — no CDN). HTMX is the declarative-interaction layer the `/partials/*` fragments rely on."
+  {:name :_head-htmx
+   :description "Head after the locally-served htmx 2.x bundle (`/assets/htmx.min.js`, vendored — no CDN). HTMX is the declarative-interaction layer the `/partials/*` fragments rely on."
    :parent :with-cdn-script
    :args {:head :head-elements-0
           :url :_htmx-js-url}}
+
+  {:name :head
+   :description "Final editor `<head>` element vector — stylesheet link, htmx, and the vendored CodeMirror bundle (`window.CM` — editor-code.js upgrades the code textareas with it)."
+   :parent :with-cdn-script
+   :args {:head :_head-htmx
+          :url :_cm-js-url}}
 
   ;; Complete HTML page
   ;; Scripts: API constants module (inline) THEN the editor JS
@@ -703,9 +712,26 @@
    :lambda-params [:asset-path]
    :description "Read a frontend asset — the branch's `:resource-override` row when one exists, else the classpath baseline (`:read-resource`). The seam that makes the editor's own JS/CSS editable in place. Call it with a NAMED `:asset-path` (HOF per-item or exec) — see the slot-sites note above."
    :parent :if
-   :args {:test {:parent :some? :args {:value :_ro-content}}
+   :args {:test {:parent :and
+                 :args {:values [{:parent :not :args {:value :_ro-disabled?}}
+                                 {:parent :some? :args {:value :_ro-content}}]}}
           :then {:parent :to-str :args {:value :_ro-content}}
           :else {:parent :read-resource :args {:path {:as :asset-path}}}}}
+
+  ;; RESCUE HATCH: a broken JS override can brick the editor (a syntax
+  ;; error in one file kills the whole concatenated bundle, and the
+  ;; Assets panel lives INSIDE the editor). Restart with
+  ;; GRAPHDEN_DISABLE_ASSET_OVERRIDES=1 → every asset serves its shipped
+  ;; baseline (`:and` short-circuits, the override query never runs) →
+  ;; revert the bad row from the panel → unset and restart. The save
+  ;; path also syntax-checks JS client-side, so this is the belt behind
+  ;; that suspender.
+  {:name :_ro-disabled?
+   :parent :non-blank?
+   :args {:string {:parent :coalesce
+                   :args {:value {:parent :env
+                                  :args {:name {:value "GRAPHDEN_DISABLE_ASSET_OVERRIDES"}}}
+                          :default {:value ""}}}}}
 
   {:name :_concat-overridable-list
    :parent :map
@@ -791,6 +817,29 @@
                          :key {:value :src}
                          :value :_htmx-js-url}}
           :children {:value []}}}
+
+  {:name :_cm-js-paths
+   :parent :const
+   :args {:value ["packages/web/vendor/codemirror.min.js"]}}
+
+  {:name :_cm-js-body
+   :description "The vendored CodeMirror 6 bundle (window.CM) read through the override tier."
+   :parent :concat-resources-overridable
+   :return-type :text
+   :args {:paths :_cm-js-paths}}
+
+  {:name :_cm-js-handler
+   :lambda-params []
+   :description "Ring handler for `GET /assets/codemirror.min.js` — the vendored CodeMirror bundle with the standard 1-year `immutable` cache headers (hash-bust via `?v=` on the script tag)."
+   :parent :immutable-js-ok-response
+   :args {:body :_cm-js-body}}
+
+  {:name :_cm-js-url
+   :description "`/assets/codemirror.min.js?v=<hash>` — `<script src>` URL for the vendored CodeMirror bundle."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/codemirror.min.js?v=" :frontend-hash-effective]
+          :separator ""}}
 
   {:name :_htmx-sse-js-paths
    :parent :const

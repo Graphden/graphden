@@ -1,0 +1,24 @@
+{
+  "name": "graphden-vendor-build",
+  "private": true,
+  "description": "Builds the vendored CodeMirror 6 bundle for resources/packages/web/vendor/. Run `npm install && npm run build` after bumping versions.",
+  "scripts": {
+    "build": "esbuild cm-entry.js --bundle --minify --format=iife --outfile=../../resources/packages/web/vendor/codemirror.min.js"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.18.6",
+    "@codemirror/commands": "6.8.1",
+    "@codemirror/lang-css": "6.3.1",
+    "@codemirror/lang-javascript": "6.2.4",
+    "@codemirror/lang-json": "6.0.2",
+    "@codemirror/language": "6.11.2",
+    "@codemirror/merge": "6.10.2",
+    "@codemirror/search": "6.5.11",
+    "@codemirror/state": "6.5.2",
+    "@codemirror/view": "6.38.1",
+    "@nextjournal/lang-clojure": "1.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.8"
+  }
+}

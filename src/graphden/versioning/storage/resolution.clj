@@ -128,7 +128,12 @@
    :binding-list-item {:version-entity :binding-list-item-version
                        :version-id-field :item-id
                        :version-data-fields (vts/version-data-fields :binding-list-item)
-                       :candidate-bound-keys #{:binding-id :ref-fn-id}}})
+                       :candidate-bound-keys #{:binding-id :ref-fn-id}}
+
+   :resource-override {:version-entity :resource-override-version
+                       :version-id-field :override-id
+                       :version-data-fields (vts/version-data-fields :resource-override)
+                       :candidate-bound-keys #{:path}}})
 
 
 (defn versioned-entity?

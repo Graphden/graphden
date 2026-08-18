@@ -405,6 +405,7 @@
             (fn [st]
               (uniq/check-list-item-position-collision! st branch-id entity-name normalized)
               (uniq/check-fn-name-collision! st branch-id entity-name normalized)
+              (uniq/check-resource-override-path-collision! st branch-id entity-name normalized)
               (let [existing (sp/read-entity st entity-name id)
                     base-row (strip-version-framework-cols entity-name normalized)]
                 (if existing
@@ -441,7 +442,8 @@
             lock-key (or (when (and (= entity-name :binding-list-item)
                                     (:binding-id normalized))
                            (str (:binding-id normalized)))
-                         (uniq/fn-name-lock-key branch-id entity-name normalized))]
+                         (uniq/fn-name-lock-key branch-id entity-name normalized)
+                         (uniq/resource-override-path-lock-key branch-id entity-name normalized))]
         (cond
           (and lock-key (:pool base-storage))
           ;; `:ignore` so any nested `with-transaction` in the create path
@@ -516,6 +518,11 @@
                                (:name merged)
                                (or (contains? data :name)
                                    (contains? data :namespace-id)))
+              ;; A :resource-override path RE-POINT can land on a path
+              ;; another live override holds — same live-view rule.
+              path-write? (and (= :resource-override entity-name)
+                               (:path merged)
+                               (contains? data :path))
               ;; A `:binding-list-item` position / binding move can land on a
               ;; (binding-id, position) another item already holds — the same
               ;; live-view rule as create. Only those two keys can introduce a
@@ -538,6 +545,9 @@
                 (when list-item-write?
                   (uniq/check-list-item-position-collision! st branch-id entity-name
                                                             (assoc merged :id id)))
+                (when path-write?
+                  (uniq/check-resource-override-path-collision!
+                    st branch-id entity-name (assoc merged :id id)))
                 ;; Skip creating new version if data unchanged. (A
                 ;; versionless identity can't reach here at all — the
                 ;; `resolve-entity` above is version-gated and already threw
@@ -557,7 +567,9 @@
               ;; per-binding `pg_advisory_xact_lock` the create-append uses.
               lock-key (cond
                          name-write? (uniq/fn-name-lock-key branch-id entity-name merged)
-                         list-item-write? (str (:binding-id merged)))]
+                         list-item-write? (str (:binding-id merged))
+                         path-write? (uniq/resource-override-path-lock-key
+                                       branch-id entity-name merged))]
           (if (and lock-key (:pool base-storage))
             ;; `:ignore` — same reason as the create path: a nested
             ;; `with-transaction` inside `do-update!` (crud/update-entity opens

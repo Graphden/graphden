@@ -12,7 +12,7 @@
 
   {:name :styles
    :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css`. Served by `:_editor-css-handler` at `/assets/editor.css?v=<hash>` with a 1-year `immutable` `Cache-Control` so the browser fetches the body exactly once per deploy."
-   :parent :read-resource
+   :parent :read-resource-overridable
    :return-type :text
    :args {:path "packages/app/editor/editor-styles.css"}}
 
@@ -122,7 +122,7 @@
   ;; literal `__BUILD_HASH__` placeholder from `editor-state.js`.
   {:name :_script-raw
    :description "Concatenated editor JS bundle, BEFORE the build-hash substitution."
-   :parent :concat-resources
+   :parent :concat-resources-overridable
    :return-type :text
    :args {:paths :_editor-script-paths}}
 
@@ -136,7 +136,7 @@
    :return-type :nullable-text
    :args {:string   {:ref :_script-raw                :type :text}
           :match    "__BUILD_HASH__"
-          :replacement :build-hash-frontend-short}}
+          :replacement :frontend-hash-effective}}
 
   ;; =============================================================================
   ;; FN-DEFS: Editor UI structure
@@ -438,14 +438,14 @@
    :description "`/assets/editor.js?v=<frontend-build-hash>` — `<script src>` URL for the bundled editor JS. Hash busts the cache when the frontend section changes."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/editor.js?v=" :build-hash-frontend-short]
+   :args {:coll ["/assets/editor.js?v=" :frontend-hash-effective]
           :separator ""}}
 
   {:name :_editor-css-url
    :description "`/assets/editor.css?v=<frontend-build-hash>` — `<link href>` URL for the bundled editor stylesheet."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/editor.css?v=" :build-hash-frontend-short]
+   :args {:coll ["/assets/editor.css?v=" :frontend-hash-effective]
           :separator ""}}
 
   ;; `<script src=…>` element. NOT `:_cdn-script-element` — that template
@@ -486,7 +486,7 @@
    :description "`/assets/api-routes.js?v=<frontend-build-hash>` — `<script src>` URL for the cached `window.API` module."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/api-routes.js?v=" :build-hash-frontend-short]
+   :args {:coll ["/assets/api-routes.js?v=" :frontend-hash-effective]
           :separator ""}}
 
   {:name :_api-routes-js-handler
@@ -624,7 +624,7 @@
 
   {:name :_graphden-runtime-js-body
    :description "Concatenated `graphden-popover.js` + `graphden-edn.js` + `graphden-forms.js` + `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (popover positioning + dismiss; EDN read/print; hiccup form render / collect / fill / widgets; action dispatch + built-in navigate / submit-form / custom handlers)."
-   :parent :concat-resources
+   :parent :concat-resources-overridable
    :return-type :text
    :args {:paths :_graphden-runtime-js-paths}}
 
@@ -644,13 +644,102 @@
   ;; for tenant pages. Same immutable + ?v=hash caching as the other
   ;; assets.
 
+  ;; ===========================================================================
+  ;; UI Step 1 — asset overrides. `:resource-override` rows (versioned,
+  ;; per-branch, path-unique) shadow classpath frontend assets: reading
+  ;; an asset checks the graph first, so the editor's own JS/CSS is
+  ;; editable from inside the running editor — no jar rebuild. The
+  ;; effective frontend hash folds the overrides in, so every asset URL
+  ;; (?v=…) rolls forward on an edit and the browser's immutable cache
+  ;; steps aside on the next page load.
+  ;; ===========================================================================
+
+  {:name :_ro-where
+   :parent :zipmap
+   :args {:keys [{:value :path}]
+          :vals [{:as :path :type :non-blank-text
+                  :description "Classpath resource path the override shadows."}]}}
+
+  {:name :_ro-row
+   :parent :first
+   :args {:coll {:parent :query-entities
+                 :args {:entity-type {:value "resource-override"}
+                        :where :_ro-where}}}}
+
+  {:name :_ro-content
+   :parent :get
+   :args {:coll :_ro-row :key {:value :content} :default nil}}
+
+  ;; `:get` computes `:any`, so the then-branch goes through `:to-str`
+  ;; (identity on the `:text` content column) to prove `:text` — same
+  ;; trick as narrowing, without a refinement row.
+  {:name :read-resource-overridable
+   :lambda-params [:path]
+   :description "Read a frontend asset — the branch's `:resource-override` row when one exists, else the classpath baseline (`:read-resource`). The seam that makes the editor's own JS/CSS editable in place."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_ro-content}}
+          :then {:parent :to-str :args {:value :_ro-content}}
+          :else {:parent :read-resource :args {:path {:as :path}}}}}
+
+  {:name :_concat-overridable-list
+   :parent :map
+   :args {:func :read-resource-overridable
+          :coll {:as :paths}}}
+
+  {:name :concat-resources-overridable
+   :description "`:concat-resources` with the override tier — each path reads through `:read-resource-overridable`. Every editor/runtime bundle builds through this."
+   :parent :str-join
+   :return-type :text
+   :args {:coll :_concat-overridable-list
+          :separator {:value "\n\n"}}}
+
+  ;; --- effective frontend hash: baked hash ++ overrides fingerprint.
+  {:name :_ro-all
+   :parent :query-entities
+   :args {:entity-type {:value "resource-override"}
+          :where {:value {}}}}
+
+  {:name :_ro-row-fingerprint
+   :parent :str
+   :args {:parts [{:parent :get :args {:coll {:as :item} :key {:value :path} :default ""}}
+                  {:value ":"}
+                  {:parent :sha256-hex
+                   :args {:s {:parent :to-str
+                              :args {:value {:parent :get
+                                             :args {:coll {:as :item}
+                                                    :key {:value :content}
+                                                    :default ""}}}}}}]}}
+
+  {:name :_ro-fingerprint
+   :parent :str-join
+   :args {:coll {:parent :sort
+                 :args {:coll {:parent :map
+                               :args {:func :_ro-row-fingerprint
+                                      :coll :_ro-all}}}}
+          :separator {:value "|"}}}
+
+  {:name :_frontend-hash-with-overrides
+   :parent :subs
+   :args {:string {:parent :sha256-hex
+                   :args {:s {:parent :str
+                              :args {:parts [:build-hash-frontend-short
+                                             :_ro-fingerprint]}}}}
+          :start {:value 0} :end {:value 12}}}
+
+  {:name :frontend-hash-effective
+   :description "The hash the asset URLs (`?v=…`) and `window.BUILD_HASH` carry: the baked frontend hash when no overrides exist, else 12 hex chars of sha256(baked ++ overrides fingerprint) — so an in-editor asset edit rolls every asset URL and defeats the browser's immutable cache on the next load. `/version` keeps reporting the BAKED hash (jar identity — `bb verify` compares code, not overrides)."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_ro-all}}
+          :then :build-hash-frontend-short
+          :else :_frontend-hash-with-overrides}}
+
   {:name :_htmx-js-paths
    :parent :const
    :args {:value ["packages/web/vendor/htmx.min.js"]}}
 
   {:name :_htmx-js-body
    :description "The vendored htmx 2.x bundle read off the classpath."
-   :parent :concat-resources
+   :parent :concat-resources-overridable
    :return-type :text
    :args {:paths :_htmx-js-paths}}
 
@@ -663,7 +752,7 @@
    :description "`/assets/htmx.min.js?v=<frontend-build-hash>` — `<script src>` URL for the vendored htmx bundle, hash-busted per deploy."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/htmx.min.js?v=" :build-hash-frontend-short]
+   :args {:coll ["/assets/htmx.min.js?v=" :frontend-hash-effective]
           :separator ""}}
 
   {:name :htmx-script-tag
@@ -682,7 +771,7 @@
 
   {:name :_htmx-sse-js-body
    :description "The vendored htmx SSE extension read off the classpath."
-   :parent :concat-resources
+   :parent :concat-resources-overridable
    :return-type :text
    :args {:paths :_htmx-sse-js-paths}}
 
@@ -695,7 +784,7 @@
    :description "`/assets/htmx-ext-sse.min.js?v=<frontend-build-hash>` — `<script src>` URL for the vendored htmx SSE extension."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/htmx-ext-sse.min.js?v=" :build-hash-frontend-short]
+   :args {:coll ["/assets/htmx-ext-sse.min.js?v=" :frontend-hash-effective]
           :separator ""}}
 
   {:name :htmx-sse-script-tag
@@ -712,14 +801,14 @@
    :description "`/assets/graphden-runtime.js?v=<frontend-build-hash>` — `<script src>` URL for the runtime bundle. The query-string hash is the FRONTEND build hash so a new deploy invalidates the immutable browser cache; in between deploys the bundle is served from cache without even a conditional request."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/graphden-runtime.js?v=" :build-hash-frontend-short]
+   :args {:coll ["/assets/graphden-runtime.js?v=" :frontend-hash-effective]
           :separator ""}}
 
   {:name :_graphden-components-css-url
    :description "`/assets/graphden-components.css?v=<frontend-build-hash>` — `<link href>` URL for the components stylesheet. Hash-busted on every frontend-section change."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/graphden-components.css?v=" :build-hash-frontend-short]
+   :args {:coll ["/assets/graphden-components.css?v=" :frontend-hash-effective]
           :separator ""}}
 
   {:name :graphden-runtime-script-tag
@@ -777,7 +866,7 @@
 
   {:name :_graphden-components-css
    :description "Default stylesheet for web.components primitives — read from `packages/app/editor/components.css` (despite the path the styles target component tags, not the editor canvas)."
-   :parent :read-resource
+   :parent :read-resource-overridable
    :return-type :text
    :args {:path "packages/app/editor/components.css"}}
 

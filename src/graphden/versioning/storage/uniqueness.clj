@@ -166,6 +166,49 @@
                            :reason human})))))))
 
 
+(defn check-resource-override-path-collision!
+  "Per-branch resolved-view uniqueness for a live :resource-override's
+   `:path` — the fn-name check's shape applied to asset overrides: an
+   override whose path is already live on this branch would make
+   `:read-resource-overridable` nondeterministic (whichever row a query
+   returns first wins). Candidates come from one indexed version query
+   on `:path`; off-branch / tombstoned rows resolve to nil and can't
+   collide."
+  [base-storage branch-id entity-name merged]
+  (when (and (= :resource-override entity-name) (:path merged))
+    (let [path (:path merged)
+          self-id (:id merged)
+          version-matches (sp/query-entities base-storage :resource-override-version
+                                             {:path path})
+          cand-ids (-> #{}
+                       (into (map :override-id) version-matches)
+                       (disj self-id))
+          colliding (into []
+                          (comp (map #(res/resolve-entity base-storage :resource-override % branch-id))
+                                (filter #(and (some? %) (= path (:path %))))
+                                (map :id))
+                          cand-ids)]
+      (when (seq colliding)
+        (let [human (str "an override for " (pr-str path)
+                         " already exists on this branch — edit it instead")]
+          (throw (ex-info human
+                          {:type :constraint-violation/resource-override-path-collision
+                           :entity-name :resource-override
+                           :path path
+                           :branch-id branch-id
+                           :colliding-ids colliding
+                           :reason human})))))))
+
+
+(defn resource-override-path-lock-key
+  "Advisory-lock key serializing writes that could collide on the same
+   `(branch, path)` — mirrors `fn-name-lock-key`. nil when not a
+   path-bearing :resource-override write."
+  [branch-id entity-name merged]
+  (when (and (= :resource-override entity-name) (:path merged))
+    (str "resource-override-path|" branch-id "|" (:path merged))))
+
+
 (defn fn-name-lock-key
   "Advisory-lock key serializing all name-writes that could collide on the
    same `(branch, namespace, name)` triple — concurrent create/rename/move

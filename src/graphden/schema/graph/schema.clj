@@ -559,6 +559,42 @@
             :nullable? true}})
 
 
+;; =============================================================================
+;; Field UUIDs — :resource-override
+;; =============================================================================
+
+(def ^:private resource-override-entity-uuid
+  #uuid "1e77e7a2-cde4-489d-9f50-0098b5f8ff8e")
+
+
+(def ^:private resource-override-path-field-uuid
+  #uuid "20f148ed-3825-4521-9466-29c768786a8a")
+
+
+(def ^:private resource-override-content-field-uuid
+  #uuid "bb0ec1ef-df59-45de-9e6d-23448f61f1dd")
+
+
+(def ^:private resource-override-org-id-field-uuid
+  #uuid "a68cd771-e7d0-4693-9fe3-f712d9e2a35a")
+
+
+(def resource-override-fields
+  "Base `:resource-override` field specs — an in-DB override of a
+   classpath frontend asset (`:read-resource-overridable` reads it
+   first). Identity-level: `:org-id` (platform rows in practice — the
+   entity is tenant-forbidden in the cloud)."
+  {:path {:uuid resource-override-path-field-uuid
+          :type :text}
+   :content {:uuid resource-override-content-field-uuid
+             :type :text
+             :nullable? true}
+   ;; Tenant owner (§3.0 B2). NULL ≡ public/platform.
+   :org-id {:uuid resource-override-org-id-field-uuid
+            :type :text
+            :nullable? true}})
+
+
 (def binding-list-item-fields
   "Base `:binding-list-item` field specs. Identity-level: `:org-id`."
   {:binding-id {:uuid binding-list-item-binding-id-field-uuid
@@ -726,6 +762,16 @@
       ;; `versioning.storage.core/check-list-item-position-collision!`.
       ;; Existing DBs get the legacy index dropped by
       ;; `storage.postgres.migration/drop-retired-indexes!`.
+
+      ;; -----------------------------------------------------------------
+      ;; resource-override: an in-DB override of a classpath frontend
+      ;; asset (UI Step 1 — edit the editor's own JS/CSS from inside the
+      ;; running editor). `path` uniqueness is a per-branch RESOLVED-VIEW
+      ;; property (like fn names) enforced in VersionedStorage
+      ;; (`check-resource-override-path-collision!`), not a base index.
+      ;; -----------------------------------------------------------------
+      (ds/add-entity :resource-override resource-override-entity-uuid
+                     resource-override-fields)
 
       ;; -----------------------------------------------------------------
       ;; Retired fields (Phase 6e — drop binding.rename-to)

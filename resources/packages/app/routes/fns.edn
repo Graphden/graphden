@@ -64,7 +64,7 @@
    :description "GET / — the graph-editor HTML page."
    :parent :get-route
    :args {:path "/" :handler :_editor-handler}
-   :expects-effects #{:io}}
+   :expects-effects #{:io :db}}                ; :db — the resource-override tier shadows inlined assets
 
   ;; The /demo/contact route entry (`:demo-contact`) lives in
   ;; app.contact-demo alongside its handlers; referenced
@@ -79,7 +79,7 @@
    :description "GET /assets/editor.js — bundled editor JS with 1-year `immutable` `Cache-Control`. Hash-busted via `?v=` query string on the inbound `<script src>`."
    :parent :get-route
    :args {:path "/assets/editor.js" :handler :_editor-js-handler}
-   :expects-effects #{:io}}
+   :expects-effects #{:io :db}}                ; :db — override-tier lookup per bundle path
 
   {:name :api-routes-js-asset
    :description "GET /assets/api-routes.js — boot-cached `window.API = {…}` module derived from the live reitit router. 1-year `immutable` cache, hash-busted via `?v=` on the inbound `<script src>`. Loaded before editor.js so every editor module can resolve `/api/*` URLs via `window.API.<key>` at file-eval time."
@@ -100,19 +100,19 @@
    :description "GET /assets/graphden-runtime.js — runtime bundle (graphden-popover.js + graphden-forms.js + graphden-runtime.js + graphden-actions-builtin.js) for user-built pages that don't host the editor canvas: popover positioning/dismiss + hiccup form render/collect/fill/widgets + action dispatch + built-in handlers. Same 1-year `immutable` cache as editor.js."
    :parent :get-route
    :args {:path "/assets/graphden-runtime.js" :handler :_graphden-runtime-js-handler}
-   :expects-effects #{:io}}
+   :expects-effects #{:io :db}}                ; :db — override-tier lookup per bundle path
 
   {:name :editor-css-asset
    :description "GET /assets/editor.css — bundled editor stylesheet with 1-year `immutable` `Cache-Control`. Hash-busted via `?v=` query string on the inbound `<link href>`."
    :parent :get-route
    :args {:path "/assets/editor.css" :handler :_editor-css-handler}
-   :expects-effects #{:io}}                   ; reads classpath CSS
+   :expects-effects #{:io :db}}               ; classpath CSS + override-tier lookup
 
   {:name :graphden-components-css-asset
    :description "GET /assets/graphden-components.css — default stylesheet for web.components primitives. Same 1-year `immutable` cache + `?v=` hash-bust."
    :parent :get-route
    :args {:path "/assets/graphden-components.css" :handler :_graphden-components-css-handler}
-   :expects-effects #{:io}}
+   :expects-effects #{:io :db}}               ; classpath CSS + override-tier lookup
 
   ;; HTMX partials — server-rendered HTML fragments that the editor's
   ;; JS swaps into mount-points instead of building DOM client-side.

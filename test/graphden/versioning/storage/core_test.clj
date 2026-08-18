@@ -973,6 +973,48 @@
       (finally (sp/close base)))))
 
 
+(deftest resource-override-versioned-lifecycle-test
+  ;; UI Step 1's asset-override entity rides the standard versioned
+  ;; machinery: per-branch resolved reads, per-branch PATH uniqueness
+  ;; (the fn-name rule's shape), branch isolation for edits.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [row (sp/create-entity v :resource-override
+                                  {:path "packages/app/editor/x.css"
+                                   :content "a{color:red}"})]
+        (testing "resolved read returns the created override"
+          (is (= "a{color:red}"
+                 (:content (sp/read-entity v :resource-override (:id row))))))
+        (testing "a second live override for the SAME path is rejected"
+          (let [ex (try (sp/create-entity v :resource-override
+                                          {:path "packages/app/editor/x.css"
+                                           :content "b{}"})
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :constraint-violation/resource-override-path-collision
+                   (:type (ex-data ex))))))
+        (testing "an update versions the content"
+          (sp/update-entity v :resource-override (:id row)
+                            {:content "a{color:blue}"})
+          (is (= "a{color:blue}"
+                 (:content (sp/read-entity v :resource-override (:id row))))))
+        (testing "a branch edit stays on the branch; main keeps its view"
+          (let [br (vs/create-branch! v "ro-branch")
+                vb (vs/switch-branch v (:id br))]
+            (sp/update-entity vb :resource-override (:id row)
+                              {:content "a{color:green}"})
+            (is (= "a{color:green}"
+                   (:content (sp/read-entity vb :resource-override (:id row)))))
+            (is (= "a{color:blue}"
+                   (:content (sp/read-entity v :resource-override (:id row))))
+                "main's resolved view untouched by the branch edit")))
+        (testing "query-entities by :path resolves per-branch"
+          (is (= [(:id row)]
+                 (mapv :id (sp/query-entities v :resource-override
+                                              {:path "packages/app/editor/x.css"}))))))
+      (finally (sp/close base)))))
+
+
 (deftest list-item-batch-permutation-does-not-self-collide-test
   ;; Regression: a BATCH update that permutes the positions of a
   ;; binding's items (declarative re-sync of a reordered list, merge

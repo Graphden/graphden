@@ -333,6 +333,34 @@
   #uuid "f544e4e7-bc24-4859-a99f-0b542e8311fd")
 
 
+(def ^:private resource-override-version-entity-uuid
+  #uuid "561fafda-d391-4c1b-bab4-09a14a443946")
+
+
+(def ^:private resource-override-version-override-id-field-uuid
+  #uuid "0b467e5d-4480-4ed4-a962-f017390ea133")
+
+
+(def ^:private resource-override-version-branch-id-field-uuid
+  #uuid "0cecfb2b-dc9b-4d08-b4dc-944c6339e7c1")
+
+
+(def ^:private resource-override-version-created-at-field-uuid
+  #uuid "b9c8e2a6-4060-42a4-9cd6-ee1243f0dd68")
+
+
+(def ^:private resource-override-version-deleted-at-field-uuid
+  #uuid "14c74217-6137-4f21-8210-963afe7b908c")
+
+
+(def ^:private resource-override-version-path-field-uuid
+  #uuid "f65b08fe-3704-48d0-8712-5e0e410ab635")
+
+
+(def ^:private resource-override-version-content-field-uuid
+  #uuid "01925e50-4a98-47e7-9f13-ce435ee09865")
+
+
 (def ^:private binding-list-item-version-literal-field-uuid
   #uuid "18875e04-1876-45f8-aae3-1dd8548458ec")
 
@@ -463,6 +491,9 @@
              ;; deleted while a version row lingers), so it needs the
              ;; explicit index flag.
              :tweaks {:ref-fn-id {:indexed? true}}}
+   :resource-override {:identity-fields #{:org-id}
+                       :uuids {:path resource-override-version-path-field-uuid
+                               :content resource-override-version-content-field-uuid}}
    :binding-list-item {:identity-fields #{:org-id}
                        :uuids {:binding-id binding-list-item-version-binding-id-field-uuid
                                :position binding-list-item-version-position-field-uuid
@@ -521,6 +552,18 @@
       :created-at {:uuid binding-list-item-version-created-at-field-uuid
                    :type :timestamptz}
       :deleted-at {:uuid binding-list-item-version-deleted-at-field-uuid
+                   :type :timestamptz :nullable? true}})
+   :resource-override-version
+   (derive-version-fields
+     :resource-override gds/resource-override-fields
+     (mirror-config :resource-override)
+     {:override-id {:uuid resource-override-version-override-id-field-uuid
+                    :type :ref :ref-entity :resource-override}
+      :branch-id {:uuid resource-override-version-branch-id-field-uuid
+                  :type :ref :ref-entity :branch}
+      :created-at {:uuid resource-override-version-created-at-field-uuid
+                   :type :timestamptz}
+      :deleted-at {:uuid resource-override-version-deleted-at-field-uuid
                    :type :timestamptz :nullable? true}})})
 
 
@@ -543,14 +586,16 @@
   {:fn               :fn-version
    :fn-slot          :fn-slot-version
    :binding          :binding-version
-   :binding-list-item :binding-list-item-version})
+   :binding-list-item :binding-list-item-version
+   :resource-override :resource-override-version})
 
 
 (def version-id-field-for
   {:fn               :fn-id
    :fn-slot          :fn-slot-id
    :binding          :binding-id
-   :binding-list-item :item-id})
+   :binding-list-item :item-id
+   :resource-override :override-id})
 
 
 (defn version-data-fields
@@ -656,6 +701,14 @@
                      (mirror-fields :binding-list-item-version))
       (ds/add-constraint :binding-list-item-version
                          {:type :unique :fields [:item-id :branch-id :created-at]})
+
+      ;; -----------------------------------------------------------------
+      ;; resource-override-version (UI Step 1)
+      ;; -----------------------------------------------------------------
+      (ds/add-entity :resource-override-version resource-override-version-entity-uuid
+                     (mirror-fields :resource-override-version))
+      (ds/add-constraint :resource-override-version
+                         {:type :unique :fields [:override-id :branch-id :created-at]})
 
       ;; -----------------------------------------------------------------
       ;; Retired fields (Phase 6e)

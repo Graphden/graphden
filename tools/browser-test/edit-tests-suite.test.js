@@ -182,6 +182,7 @@ async function cleanup(page) {
             hasRow: !![...(sec?.querySelectorAll('.tests-row .tests-fn') || [])]
               .find((a) => a.textContent === 'e2e-sum-is-four'),
             hasRunBtn: !!sec?.querySelector('#gd-tests-run-all'),
+            live: sec?.querySelector('.ns-children')?.dataset?.testsLive || null,
           });
         }, 4000);
       }, 1000));
@@ -191,6 +192,8 @@ async function cleanup(page) {
     assert(/\d+ tests · \d+ passed/.test(panel.summary),
            'panel summary renders counts (' + panel.summary + ')');
     assert(panel.hasRunBtn, 'Run-all button present');
+    assert(panel.live === '1',
+           'panel content arrived over the live SSE stream');
     const runCycle = await page.evaluate(() => {
       document.querySelector('#gd-tests-run-all').click();
       return new Promise((res) => setTimeout(() => {

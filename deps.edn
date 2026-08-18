@@ -4,7 +4,7 @@
  {org.clojure/clojure {:mvn/version "1.12.5"}
   ;; Logging
   org.clojure/tools.logging {:mvn/version "1.3.1"}
-  ch.qos.logback/logback-classic {:mvn/version "1.6.2"}
+  ch.qos.logback/logback-classic {:mvn/version "1.6.3"}
   ;; Schema validation
   metosin/malli {:mvn/version "0.20.1"}
   ;; PostgreSQL
@@ -18,8 +18,8 @@
   ;; PolymorphicTypeValidator bypass + jackson-core GHSA-r7wm-3cxj-wff9). A
   ;; direct dep wins over cheshire's transitive one; 2.21.4 is patch-compatible.
   ;; Surfaced by `bb trivy`'s JVM classpath scan — keep in sync with it.
-  com.fasterxml.jackson.core/jackson-core {:mvn/version "2.22.1"}
-  com.fasterxml.jackson.core/jackson-databind {:mvn/version "2.22.1"}
+  com.fasterxml.jackson.core/jackson-core {:mvn/version "2.22.2"}
+  com.fasterxml.jackson.core/jackson-databind {:mvn/version "2.22.2"}
   ;; Web
   http-kit/http-kit {:mvn/version "2.8.1"}
   ;; OkHttp — used ONLY for a tenant's RESTRICTED outbound call, where its
@@ -29,7 +29,7 @@
   ;; graphden.clients.egress. (Apache-2.0; pulls okio + kotlin-stdlib.
   ;; okhttp 5.x is Kotlin-multiplatform — the bare `okhttp` coord is Gradle
   ;; module metadata; Maven/tools.deps consumers need the -jvm artifact.)
-  com.squareup.okhttp3/okhttp-jvm {:mvn/version "5.4.0"}
+  com.squareup.okhttp3/okhttp-jvm {:mvn/version "5.5.0"}
   metosin/reitit {:mvn/version "0.10.1"}
   ;; HTML templating
   hiccup/hiccup {:mvn/version "2.0.0"}

@@ -52,6 +52,8 @@
     :constant-time-equal? :constantly :contains? :count
     :counters-snapshot :create-branch! :create-entity :cron-fire-after
     :cron-parse :current-branch-id :current-branch-router
+    ;; /api/debug/catch — trap admin (runtime state, no caller content).
+    :debug-catch-arm! :debug-catch-disarm! :debug-catch-status
     :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :deref
     :describe-type-mismatch :detect-conflicts :diff-branches
@@ -128,19 +130,20 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call
-    :call-noargs :case :cell :coalesce :concat :cond :conj :cons :const
-    :constant-time-equal? :contains? :count :deref :dissoc :distinct :div :do :drop
-    :empty? :eq :equal? :ex-data :ex-info :first :flatten :form-decode :get :get-in :gt
-    :gte :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
-    :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
+    :call-noargs :case :cell :coalesce :comp :concat :cond :conj :cons :const
+    :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
+    :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
+    :first :flatten :form-decode :get :get-in :gt
+    :gte :group-by :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
+    :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str
     :quot :range
-    :re-find? :re-replace :render-hiccup :repeat :reset :rest :reverse :select-keys :digest-hex
-    :slurp :some? :sort :str :str-contains? :str-join :str-len :str-lower
+    :re-find? :re-replace :reduce :render-hiccup :repeat :reset :rest :reverse :select-keys :digest-hex
+    :slurp :some :some? :sort :sort-by :str :str-contains? :str-join :str-len :str-lower
     :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
     :str-upper :sub :subs :take :throw :throwable-class-name :throwable-message
-    :to-json-string :to-str :try :update-in :update-keys :update-vals
+    :to-json-string :to-str :transduce :try :update-in :update-keys :update-vals
     :url-decode :vals :vec :zero? :zipmap})
 
 

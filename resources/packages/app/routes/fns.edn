@@ -561,6 +561,23 @@
    :parent :get-auth-required
    :args {:path "/executions" :handler :list-executions-handler}}
 
+  ;; --- /api/debug/catch — one-shot «catch next request» trap ---
+
+  {:name :api-debug-catch-arm
+   :description "POST /api/debug/catch — arm (replace) the current org+branch's one-shot request trap. Body `{path-prefix?, capture-values?, ttl-ms?}`. The next matching HTTP request through the branch router runs path-traced and persists a :fn-execution row. Auth-required."
+   :parent :post
+   :args {:path "/debug/catch" :handler :debug-catch-arm-handler}}
+
+  {:name :api-debug-catch-cancel
+   :description "POST /api/debug/catch/cancel — disarm the current org+branch's trap. `{disarmed: bool}`. Auth-required."
+   :parent :post
+   :args {:path "/debug/catch/cancel" :handler :debug-catch-disarm-handler}}
+
+  {:name :api-debug-catch-status
+   :description "GET /api/debug/catch/status — the current org+branch's live trap (`{armed, trap}`; expired ≡ unarmed). Separate path from the POST arm route — reitit rejects the same path split across two route rows. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/debug/catch/status" :handler :debug-catch-status-handler}}
+
   ;; --- /api/tests — run + status of `tests`-namespace fns ---
 
   {:name :api-tests-run
@@ -733,6 +750,9 @@
                   :api-execution-by-id
                   :api-execution-cancel
                   :api-executions-list
+                  :api-debug-catch-arm
+                  :api-debug-catch-cancel
+                  :api-debug-catch-status
                   :api-tests-run
                   :api-tests-status
                   :api-services-reconcile

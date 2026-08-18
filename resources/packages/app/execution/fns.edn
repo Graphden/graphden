@@ -2682,4 +2682,92 @@
    :lambda-params [:storage-query :request]
    :description "Ring handler for `GET /partials/service-popover?fn-id=X` — returns the popover body as `text/html`. JS swaps the response into the popover host and binds save/delete/close handlers via `.service-popover-*-btn` selectors + `data-existing-service-id` attrs the partial emits."
    :parent :html-ok-response
-   :args {:body :_partial-service-popover-html}}]}
+   :args {:body :_partial-service-popover-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; /api/debug/catch — the one-shot «catch next request» trap
+  ;; (crud.debug-capture). Arm → the next matching HTTP request through
+  ;; the branch router runs path-traced and persists a :fn-execution
+  ;; row; the captured run replays through the same history/trace UI as
+  ;; a traced /api/execute run.
+  ;; ---------------------------------------------------------------------
+
+  {:name :debug-catch-arm!
+   :description "Arm (or re-arm, replacing) the current org's one-shot request trap on `branch-id`. `path-prefix` nil = catch-all with the editor-infra exclusion (`/api/`, `/partials/`, `/assets/`, `/events/`, `/auth/`, `/version`); `ttl-ms` clamps to at most 1 h (default 10 min). Returns the armed trap."
+   :args {:branch-id {:type :uuid
+                      :description "Branch whose web handler to trap — normally `:current-branch-id`."}
+          :path-prefix {:type :nullable-text
+                        :description "Match only request URIs starting with this prefix; nil/blank = catch-all (minus editor-infra paths)."}
+          :capture-values? {:type [:union :null :bool]
+                            :description "Also capture per-node intermediate VALUES (Debug P3 semantics — same confirm doctrine as the Run popover's checkbox)."}
+          :ttl-ms {:type :nullable-int
+                   :description "Trap lifetime; nil = 10 min, cap 1 h. An expired trap never fires."}}
+   :return-type {:path-prefix :nullable-text :capture-values? :bool
+                 :armed-at-ms :int :expires-at-ms :int}
+   :effects #{:state}}
+
+  {:name :debug-catch-disarm!
+   :description "Remove the current org's trap on `branch-id` — `{:disarmed bool}`, false when nothing was armed. `:request` pins the request scope."
+   :args {:branch-id {:type :uuid}
+          :request {:type :ring-request-shape
+                    :description "The Ring request (scope pin only)."}}
+   :return-type {:disarmed :bool}
+   :effects #{:state}}
+
+  {:name :debug-catch-status
+   :description "The current org's live trap on `branch-id` — `{:armed bool, :trap …|null}` (expired ≡ unarmed). `:request` pins the request scope so the answer is never call-cached across requests."
+   :args {:branch-id {:type :uuid}
+          :request {:type :ring-request-shape
+                    :description "The Ring request (scope pin only)."}}
+   :return-type {:armed :bool :trap [:union :null :keyword-map]}
+   :effects #{}}
+
+  ;; POST /api/debug/catch — body `{path-prefix?, capture-values?, ttl-ms?}`
+  {:name :_dbgc-body
+   :description "POST /api/debug/catch request body parsed as JSON; nil for an empty body (= catch-all defaults)."
+   :parent :parse-json-body}
+
+  {:name :_dbgc-path-prefix
+   :parent :get :args {:coll :_dbgc-body :key {:value :path-prefix} :default nil}}
+
+  {:name :_dbgc-capture-values
+   :parent :get :args {:coll :_dbgc-body :key {:value :capture-values} :default nil}}
+
+  {:name :_dbgc-ttl-ms
+   :parent :get :args {:coll :_dbgc-body :key {:value :ttl-ms} :default nil}}
+
+  {:name :_dbgc-armed
+   :description "The arm call with the body fields bound — `:request` stays free and unifies with the parse chain's request."
+   :parent :debug-catch-arm!
+   :args {:branch-id :current-branch-id
+          :path-prefix :_dbgc-path-prefix
+          :capture-values? :_dbgc-capture-values
+          :ttl-ms :_dbgc-ttl-ms}}
+
+  {:name :debug-catch-arm-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/debug/catch."
+   :parent :json-handler
+   :args {:data :_dbgc-armed}}
+
+  ;; POST /api/debug/catch/cancel
+  {:name :_dbgc-disarmed
+   :parent :debug-catch-disarm!
+   :args {:branch-id :current-branch-id}}
+
+  {:name :debug-catch-disarm-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/debug/catch/cancel."
+   :parent :json-handler
+   :args {:data :_dbgc-disarmed}}
+
+  ;; GET /api/debug/catch/status
+  {:name :_dbgc-status
+   :parent :debug-catch-status
+   :args {:branch-id :current-branch-id}}
+
+  {:name :debug-catch-status-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /api/debug/catch/status."
+   :parent :json-handler
+   :args {:data :_dbgc-status}}]}

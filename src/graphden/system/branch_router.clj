@@ -21,6 +21,7 @@
     [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.debug-capture :as debug-capture]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-runtime :as cr]
@@ -158,19 +159,29 @@
   "Returns a `(fn [request])` callable that delegates to the compiled
    closure for `handler-fn-id` in `branch-ctx`. The registry is
    re-read on every invocation so the latest delta-recompile result
-   is visible without rebuilding the callable."
+   is visible without rebuilding the callable.
+
+   Debug «catch next request» (crud.debug-capture): when a trap is
+   armed for the request's org + this branch and the request matches,
+   the invocation runs through `run-captured!` — path-trace bound,
+   outcome persisted as a `:fn-execution` row — and returns the same
+   response. Unarmed cost: one atom deref + `empty?`."
   [branch-ctx handler-fn-id]
-  (fn [request]
-    (let [reg (cr/registry branch-ctx)
-          closure (get reg handler-fn-id)]
-      (when-not closure
-        (throw (ex-info "Branch handler closure missing"
-                        {:type :execution-error/fn-not-found
-                         :fn-id handler-fn-id
-                         :branch-id (vs/current-branch-id
-                                      (:storage branch-ctx))})))
-      ;; compile-eager closure signature: `(fn [free-args ctx])`.
-      (closure {:request request} branch-ctx))))
+  (let [branch-id (vs/current-branch-id (:storage branch-ctx))]
+    (fn [request]
+      (let [reg (cr/registry branch-ctx)
+            closure (get reg handler-fn-id)]
+        (when-not closure
+          (throw (ex-info "Branch handler closure missing"
+                          {:type :execution-error/fn-not-found
+                           :fn-id handler-fn-id
+                           :branch-id branch-id})))
+        ;; compile-eager closure signature: `(fn [free-args ctx])`.
+        (if-some [trap (when (debug-capture/any-traps?)
+                         (debug-capture/consume-trap! branch-id request))]
+          (debug-capture/run-captured! trap branch-ctx handler-fn-id request
+                                       #(closure {:request request} branch-ctx))
+          (closure {:request request} branch-ctx))))))
 
 
 (defn- optional-ring-callable-for-ctx

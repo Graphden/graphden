@@ -294,16 +294,26 @@
                                         :type :bool
                                         :nullable? true}
                       ;; Debug P1+P3 execution-path capture:
-                      ;; `{:entries [{:fn-id :cache-hit? :duration-ms
-                      ;;              (:value | :value-truncated?)?}|
-                      ;;             {:fn-id :hidden}]
+                      ;; `{:entries [{:seq :parent-seq? :fn-id
+                      ;;              :cache-hit? :duration-ms
+                      ;;              (:value | :value-truncated? |
+                      ;;               :value-hidden)?}|
+                      ;;             {:seq :parent-seq? :fn-id :hidden}]
                       ;;   :path-truncated? :values-dropped?}`.
-                      ;; Snapshotted on terminal status from the
-                      ;; `*path-trace*` atom (opt-in `trace?` submits
-                      ;; only); byte-capped (256 KB) with oldest-first
-                      ;; truncation — the marker lives INSIDE the json,
-                      ;; no extra column. `:fn-execution` is
-                      ;; non-versioned, so this is a plain column.
+                      ;; `:seq` numbers frames in ENTRY order and
+                      ;; `:parent-seq` links to the forcing frame, so
+                      ;; the completion-ordered vector reassembles into
+                      ;; the call tree. `:hidden` is `:secret` or the
+                      ;; fail-closed `:unknown-type`; `:value-hidden
+                      ;; :secret-derived` marks a consumer of a hidden
+                      ;; frame's output. Snapshotted on terminal status
+                      ;; from the `*path-trace*` atom (opt-in `trace?`
+                      ;; submits only); byte-capped (256 KB) with
+                      ;; oldest-first truncation — the marker lives
+                      ;; INSIDE the json, no extra column; re-redacted
+                      ;; through the CURRENT registry on every read
+                      ;; (persist/re-redact-path-trace). `:fn-execution`
+                      ;; is non-versioned, so this is a plain column.
                       :path-trace {:uuid fn-execution-path-trace-field-uuid
                                    :type :jsonb
                                    :nullable? true}

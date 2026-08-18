@@ -4,6 +4,7 @@
    symbol is in scope via defbase; it carries the storage handle the
    stage functions read."
   (:require
+    [graphden.crud.debug-capture :as debug-capture]
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.errors :as exec-errors]
     [graphden.crud.fn-execution.lookup :as lookup]
@@ -217,8 +218,47 @@
     []))
 
 
+;; --- /api/debug/catch — the one-shot «catch next request» trap ---
+;; Runtime-only state in `crud.debug-capture` (the `*traced-fn-ids*`
+;; doctrine); each base-fn is a single library call, org-scoping comes
+;; from the request scope inside the ns.
+
+
+(defbase debug-catch-arm!
+  "Arm (or re-arm) the current org's one-shot request trap on
+   `branch-id` — the next matching HTTP request through the branch
+   router runs path-traced and persists a `:fn-execution` row. Single
+   library call over `debug-capture/arm!`."
+  [branch-id path-prefix capture-values? ttl-ms]
+  (cr/record-effect! :state)
+  (debug-capture/arm! branch-id {:path-prefix path-prefix
+                                 :capture-values? capture-values?
+                                 :ttl-ms ttl-ms}))
+
+
+(defbase debug-catch-disarm!
+  "Remove the current org's trap on `branch-id`. `{:disarmed bool}` —
+   false when nothing was armed. Single library call."
+  [branch-id _request]
+  (cr/record-effect! :state)
+  {:disarmed (debug-capture/disarm! branch-id)})
+
+
+(defbase debug-catch-status
+  "The current org's live trap on `branch-id` (`{:armed bool
+   :trap …|null}`). Pure runtime-state read, like `:running-entry`.
+   `:request` pins the request scope so the answer is never
+   call-cached across requests."
+  [branch-id _request]
+  (let [t (debug-capture/trap-status branch-id)]
+    {:armed (some? t) :trap t}))
+
+
 (def impls
   {:resolve-fn                 resolve-fn
+   :debug-catch-arm!           debug-catch-arm!
+   :debug-catch-disarm!        debug-catch-disarm!
+   :debug-catch-status         debug-catch-status
    :_execute-apply             _execute-apply
    :get-execution              get-execution
    :cancel-execution!          cancel-execution!

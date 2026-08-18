@@ -23,4 +23,10 @@
           :wake-on-writes {:type :bool
                            :description "When true (and the deployment wires a NOTIFY listener), any graph/data write schedules one debounced extra tick — a change reaches the client in well under a second and `:interval-ms` degrades to the keepalive ceiling. Spurious wakes cost one render (only CHANGED fragments push)."}}
    :return-type :keyword-map
-   :effects #{:network :process}}]}
+   ;; :time only — deliberately NOT :network (no egress; the stream
+   ;; writes into the already-open inbound socket) and NOT :process
+   ;; (ticks ride the platform's shared bounded scheduler behind the
+   ;; global cap, not a tenant-owned process). The fragment's own
+   ;; effects are re-gated per tick under the opening request's
+   ;; captured effect gate. See the impl docstring.
+   :effects #{:time}}]}

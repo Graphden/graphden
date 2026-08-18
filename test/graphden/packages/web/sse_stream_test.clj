@@ -203,3 +203,79 @@
       (finally
         (HttpURLConnection/.disconnect conn)
         (stop)))))
+
+
+;; =============================================================================
+;; Tenancy correctness — binding capture + per-tick time-bound
+;; =============================================================================
+
+(def ^:dynamic *probe-org*
+  "Stands in for the request-scoped dynamic confinement vars
+   (*current-org* / *allowed-effects*) the stream must capture."
+  nil)
+
+
+(deftest ticks-run-under-the-opening-requests-bindings-test
+  ;; The render closure reads a dynamic var bound ONLY around the
+  ;; opening request's handler call. Scheduler/pool ticks see the
+  ;; captured value — without bound-fn* they'd see the root nil and a
+  ;; tenant fragment would render org-unscoped.
+  (let [listener {:callbacks (atom #{})}
+        f (impls/impl-of :sse-stream)
+        stop (hk/run-server
+               (fn [req]
+                 (binding [*probe-org* "tenant-a"]
+                   (f {:request req
+                       :render (fn [] (str "<p>" (or *probe-org* "UNSCOPED") "</p>"))
+                       :interval-ms 60000
+                       :max-lifetime-ms 60000
+                       :wake-on-writes true}
+                      {:notify-listener listener})))
+               {:port 0})
+        port (:local-port (meta stop))
+        lines (atom [])
+        conn (read-stream! port lines)]
+    (try
+      (testing "the initial frame renders under the request's binding"
+        (is (wait/wait-for 5000 #(some #{"<p>tenant-a</p>"} (data-frames @lines)))))
+      (testing "an event-driven tick (scheduler thread) still sees the
+                captured binding — never the root value"
+        (is (wait/wait-for 5000 #(seq @(:callbacks listener))))
+        ;; Force a re-render by... the content is constant, so drive a
+        ;; second frame via a probe-visible change: rebind is impossible
+        ;; post-capture BY DESIGN — assert no UNSCOPED frame ever shows.
+        (doseq [cb @(:callbacks listener)] (cb {:kind :fn}))
+        (Thread/sleep 600)
+        (is (not-any? #(str/includes? % "UNSCOPED") @lines)
+            "no tick rendered outside the captured sandbox"))
+      (finally
+        (HttpURLConnection/.disconnect conn)
+        (stop)))))
+
+
+(deftest slow-render-skips-tick-but-stream-survives-test
+  ;; A fragment that overruns the tick budget (min(interval, 10 s))
+  ;; costs its own tick — the stream stays open and recovers once the
+  ;; render behaves again.
+  (let [listener {:callbacks (atom #{})}
+        slow? (atom true)
+        {:keys [port stop]} (start-stream-server!
+                              {:render (fn []
+                                         (when @slow? (Thread/sleep 3000))
+                                         "<p>ok</p>")
+                               :interval-ms 1000
+                               :wake-on-writes true
+                               :ctx {:notify-listener listener}})
+        lines (atom [])
+        conn (read-stream! port lines)]
+    (try
+      (testing "while slow, ticks are skipped — no frames, no crash"
+        (Thread/sleep 2500)
+        (is (empty? (data-frames @lines)) "overrunning renders pushed nothing"))
+      (testing "once fast again, the next tick pushes"
+        (reset! slow? false)
+        (is (wait/wait-for 5000 #(some #{"<p>ok</p>"} (data-frames @lines)))
+            "the stream survived the timeouts and recovered"))
+      (finally
+        (HttpURLConnection/.disconnect conn)
+        (stop)))))

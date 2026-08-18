@@ -318,6 +318,17 @@ ensureRowActionsDismissHandler();
 // which both need the arg's `:type` / `:item-id` / etc. fields.
 const _rowActionsUseSiteArgs = new Map();
 
+// Edge flags for a sequence-item row — the partial renders ↑ / ↓
+// disabled at the chain's ends (an edge move is a server no-op).
+// Flags ride the partial URL, so they also key the HTML cache.
+function _seqEdgeParams(arg) {
+  const items = lookups?.itemsByBinding?.get(arg['binding-id']) || [];
+  const idx = items.findIndex((i) => i.id === arg['item-id']);
+  if (idx < 0) return '';
+  return (idx === 0 ? '&seq-first=true' : '')
+       + (idx === items.length - 1 ? '&seq-last=true' : '');
+}
+
 // Cache of rendered row-actions partial HTML, keyed by the full partial URL
 // (which encodes fn-id + context + editable / owned / show-open). The popover
 // is a FIXED set of actions for a given fn+context, so re-fetching it on every
@@ -409,7 +420,9 @@ async function loadRowActionsContent(host, fnId, context, opts) {
             + (useSiteBindingId
                 ? '&binding-id=' + encodeURIComponent(useSiteBindingId)
                 : '')
-            + (opts.useSiteArg?.['item-id'] ? '&seq-item=true' : '')
+            + (opts.useSiteArg?.['item-id']
+                ? '&seq-item=true' + _seqEdgeParams(opts.useSiteArg)
+                : '')
             + (opts.editBlockReason
                 ? '&edit-block-reason='
                   + encodeURIComponent(opts.editBlockReason)

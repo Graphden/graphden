@@ -3,6 +3,7 @@
    Server-Sent-Events stream primitive behind `:sse-fragment-route`."
   (:require
     [clojure.string :as str]
+    [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.postgres.notify :as pg-notify]
@@ -86,18 +87,36 @@
    pushed (org/branch-selective waking is a tenancy-scale
    optimization that belongs in the addon's listener, not here).
 
-   §3.3 atomic unit: the channel open, the tick schedule, the
-   changed-only dedupe, the notify (un)registration and the
-   close/cancel lifecycle share state that cannot split across graph
-   nodes without leak/race risk (a tick firing after close, a
+   Tenancy correctness: the request thread's DYNAMIC BINDINGS —
+   org confinement (`*current-org*`), the plan's effect gate
+   (`*allowed-effects*`), cooperative cancellation — are captured
+   with `bound-fn*` when the stream opens, so every tick renders
+   under EXACTLY the sandbox the opening request ran in (without the
+   capture, a scheduler-thread tick would read org-UNSCOPED and
+   ungated). Each tick is additionally wall-clock-bounded on the
+   shared execution pool (`run-with-timeout`; min(interval, 10 s)) —
+   a spinning fragment costs its own tick, not a scheduler thread;
+   timeout/error/saturation SKIP the tick and keep the stream alive.
+
+   §3.3 atomic unit: the channel open, the binding capture, the tick
+   schedule, the changed-only dedupe, the notify (un)registration and
+   the close/cancel lifecycle share state that cannot split across
+   graph nodes without leak/race risk (a tick firing after close, a
    cancelled stream still counted against the cap, a dead stream's
    callback lingering on the bus). Each tick runs the render as a NEW
-   logical execution under a fresh per-request call-cache; ticks are
-   for READ-rendering — their effects are not re-gated per tick (the
-   stream's own :network + :process cover the contract)."
+   logical execution under a fresh per-request call-cache."
   [request render interval-ms max-lifetime-ms wake-on-writes]
-  (cr/record-effect! :network)
-  (cr/record-effect! :process)
+  ;; Effect classification (deliberate, security-reviewed): :time only.
+  ;; NOT :network — that category gates tenant EGRESS (http-request &
+  ;; co.); an SSE stream writes into the ALREADY-OPEN inbound socket,
+  ;; the same transport a plain response uses. NOT :process — that
+  ;; gates tenant-owned long-lived processes (http-server services);
+  ;; the tick task lives on the PLATFORM's shared bounded scheduler
+  ;; behind the global stream cap / lifetime clamp / per-tick budget,
+  ;; exactly like /api/execute's async persistence. The RENDER runs
+  ;; under the opening request's captured *allowed-effects*, so
+  ;; whatever the fragment actually does is still plan-gated per tick.
+  (cr/record-effect! :time)
   (let [interval (max 1000 (long interval-ms))
         lifetime (min (* 30 60 1000) (long max-lifetime-ms))
         deadline (+ (System/currentTimeMillis) lifetime)
@@ -109,6 +128,12 @@
       (let [state (atom {:prev nil :task nil :callback nil})
             wake-pending (atom false)
             closed? (atom false)
+            ;; Capture the OPENING REQUEST's dynamic bindings (org
+            ;; confinement, effect gate, cancel check) into the render
+            ;; thunk — ticks run on the scheduler/pool, where none of
+            ;; those bindings would otherwise exist.
+            captured-render (bound-fn* (fn [] (str (cr/with-fresh-call-cache render))))
+            tick-budget (min (long interval) 10000)
             ;; Idempotent teardown — reached from httpkit's on-close AND
             ;; from a failed frame send (a silently-dead socket is only
             ;; DETECTED on write; without this a dead stream's callback +
@@ -126,12 +151,18 @@
                         (if (> (System/currentTimeMillis) deadline)
                           (do (send! ch "event: close\ndata: lifetime\n\n" true)
                               (cleanup!))
-                          (let [html (str (cr/with-fresh-call-cache render))
-                                h (hash html)]
-                            (when (not= h (:prev @state))
-                              (swap! state assoc :prev h)
-                              (when-not (send! ch (sse-frame html) false)
-                                (cleanup!)))))
+                          (let [html (cr/run-with-timeout
+                                       tick-budget
+                                       captured-render
+                                       (persist/current-execution-pool))]
+                            ;; Timeout / handler error / pool saturation →
+                            ;; skip this tick, keep the stream (transient).
+                            (when (string? html)
+                              (let [h (hash html)]
+                                (when (not= h (:prev @state))
+                                  (swap! state assoc :prev h)
+                                  (when-not (send! ch (sse-frame html) false)
+                                    (cleanup!)))))))
                         (catch Exception _
                           (try (send! ch "event: close\ndata: error\n\n" true)
                                (catch Exception _ nil))

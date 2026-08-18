@@ -24,16 +24,18 @@
 
 (defn- start-stream-server!
   "httpkit server on an ephemeral port whose every request opens an
-   `:sse-stream` with the given args. Returns {:port :stop}."
-  [{:keys [render interval-ms max-lifetime-ms]}]
+   `:sse-stream` with the given args (`:ctx` carries e.g. the fake
+   `:notify-listener` for the wake tests). Returns {:port :stop}."
+  [{:keys [render interval-ms max-lifetime-ms wake-on-writes ctx]}]
   (let [f (impls/impl-of :sse-stream)
         stop (hk/run-server
                (fn [req]
                  (f {:request req
                      :render render
                      :interval-ms (or interval-ms 1000)
-                     :max-lifetime-ms (or max-lifetime-ms 60000)}
-                    nil))
+                     :max-lifetime-ms (or max-lifetime-ms 60000)
+                     :wake-on-writes (boolean wake-on-writes)}
+                    ctx))
                {:port 0})]
     {:port (:local-port (meta stop))
      :stop stop}))
@@ -128,3 +130,76 @@
               (is (= 503 (HttpURLConnection/.getResponseCode conn)))))
           (finally (stop))))
       (finally (reset! cap nil)))))
+
+
+;; =============================================================================
+;; wake-on-writes — event-driven ticks off the NOTIFY bus
+;; =============================================================================
+
+(deftest wake-on-writes-pushes-on-event-not-interval-test
+  ;; interval = 60 s (keepalive only), so any frame after the first
+  ;; PROVES the event path: fire a fake graphden_events callback and
+  ;; the changed fragment must arrive within the ~200 ms debounce, not
+  ;; a minute later.
+  (let [listener {:callbacks (atom #{})}
+        content (atom "<p>A</p>")
+        renders (atom 0)
+        {:keys [port stop]} (start-stream-server!
+                              {:render (fn [] (swap! renders inc) @content)
+                               :interval-ms 60000
+                               :wake-on-writes true
+                               :ctx {:notify-listener listener}})
+        lines (atom [])
+        conn (read-stream! port lines)
+        fire! (fn []
+                (doseq [cb @(:callbacks listener)]
+                  (cb {:kind :fn :op :invalidate :id "x"})))]
+    (try
+      (testing "the stream registered its wake callback"
+        (is (wait/wait-for 5000 #(seq @(:callbacks listener)))))
+      (testing "initial frame arrives"
+        (is (wait/wait-for 5000 #(some #{"<p>A</p>"} (data-frames @lines)))))
+      (testing "a write event pushes the changed fragment within ~1 s"
+        (reset! content "<p>B</p>")
+        (fire!)
+        (is (wait/wait-for 2000 #(some #{"<p>B</p>"} (data-frames @lines)))
+            "event-driven push beat the 60 s keepalive"))
+      (testing "an event BURST coalesces into one debounced render"
+        (let [before @renders]
+          (reset! content "<p>C</p>")
+          (dotimes [_ 10] (fire!))
+          (is (wait/wait-for 2000 #(some #{"<p>C</p>"} (data-frames @lines))))
+          (is (<= (- @renders before) 2)
+              "ten events cost at most two renders, not ten")))
+      (finally
+        (HttpURLConnection/.disconnect conn)
+        (stop)))))
+
+
+(deftest wake-callback-unregisters-on-stream-close-test
+  ;; Deterministic teardown proof via the lifetime path (the same
+  ;; `cleanup!` the on-close and send-failure paths run — a client
+  ;; disconnect is only NOTICED on a later write, which makes it an
+  ;; unreliable thing to assert on directly).
+  (let [listener {:callbacks (atom #{})}
+        ;; interval 1000 (not 60000): with a 1 ms lifetime the FIRST
+        ;; tick can land in the same millisecond as the deadline and
+        ;; push instead of closing — the close then rides the next
+        ;; keepalive tick, which must come promptly.
+        {:keys [port stop]} (start-stream-server!
+                              {:render (fn [] "<p>x</p>")
+                               :interval-ms 1000
+                               :max-lifetime-ms 1
+                               :wake-on-writes true
+                               :ctx {:notify-listener listener}})
+        lines (atom [])
+        conn (read-stream! port lines)]
+    (try
+      (testing "the expired stream unregistered its wake callback"
+        (is (wait/wait-for 5000 #(some #{"event: close"} @lines))
+            "lifetime close arrived")
+        (is (wait/wait-for 5000 #(empty? @(:callbacks listener)))
+            "no dead callback lingers on the bus"))
+      (finally
+        (HttpURLConnection/.disconnect conn)
+        (stop)))))

@@ -59,6 +59,7 @@
  :exec/context
  {:storage #ig/ref :db/versioned
   :vault-client #ig/ref :vault/client
+  :notify-listener #ig/ref :db/notify-listener
   :pg-storage #ig/ref :db/postgres
   :base-fns #ig/ref :exec/base-fns
   :auth-provider #ig/ref :auth/provider}

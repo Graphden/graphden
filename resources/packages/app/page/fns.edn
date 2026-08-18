@@ -147,12 +147,13 @@
   ;;    :args {:path "/streams/clock" :handler :my-clock-handler}}
   {:name :sse-fragment-handler
    :lambda-params [:request]
-   :description "Ring handler opening an SSE stream that pushes the rendered `:fragment` whenever it changes. Declare a CHILD binding `:fragment` (+ optional `:interval-ms`, default 2000 / `:max-lifetime-ms`, default 5 min) with `:lambda-params [:request]`, and mount it with `:get-route` — see the comment above this fn-def. Pair with `:sse-connect-attrs` client-side."
+   :description "Ring handler opening an SSE stream that pushes the rendered `:fragment` whenever it changes. Declare a CHILD binding `:fragment` (+ optional `:interval-ms`, default 2000 / `:max-lifetime-ms`, default 5 min / `:wake-on-writes`, default false) with `:lambda-params [:request]`, and mount it with `:get-route` — see the comment above this fn-def. Pair with `:sse-connect-attrs` client-side."
    :parent :sse-stream
    :args {:request {:as :request}
           :render :_sse-fragment-rendered
           :interval-ms :_sse-interval-defaulted
-          :max-lifetime-ms :_sse-lifetime-defaulted}}
+          :max-lifetime-ms :_sse-lifetime-defaulted
+          :wake-on-writes :_sse-wake-defaulted}}
 
   ;; Optional-with-default frees — a bound default would CONSUME the
   ;; arg, so each free stays open and `:coalesce` supplies the
@@ -181,6 +182,17 @@
    :parent :coalesce
    :args {:value :_sse-lifetime-opt
           :default {:value 300000}}}
+
+  {:name :_sse-wake-opt
+   :parent :first
+   :args {:coll [{:as :wake-on-writes :required false
+                  :type [:union :null :bool]
+                  :description "true = event-driven: a write on the graphden_events bus triggers a debounced extra tick, `:interval-ms` becomes the keepalive ceiling. Omit for interval-only."}]}}
+
+  {:name :_sse-wake-defaulted
+   :parent :coalesce
+   :args {:value :_sse-wake-opt
+          :default {:value false}}}
 
   ;; The 0-arg renderer the stream re-executes — `:render-hiccup`
   ;; over the free `:fragment`. Named (not inline) so the `[:fn {} …]`

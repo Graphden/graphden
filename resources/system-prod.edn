@@ -90,6 +90,9 @@
  :exec/context
  {:storage #ig/ref :db/versioned
   :vault-client #ig/ref :vault/client
+  ;; NOTIFY listener — event-driven SSE (`:sse-stream`'s
+  ;; :wake-on-writes) registers per-stream callbacks on it.
+  :notify-listener #ig/ref :db/notify-listener
   ;; Raw PG storage for NOTIFY emission (the pool is on PostgresStorage).
   ;; Emission is fire-and-forget — done on the main pool, not on the
   ;; listener's dedicated connection.

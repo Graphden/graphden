@@ -133,6 +133,9 @@
       ;; only the base ctx used to carry it, so every branch edit was
       ;; silently pod-local.
       (:notify-emitter base-ctx) (assoc :notify-emitter (:notify-emitter base-ctx))
+      ;; Inherit the LISTEN side too — an event-driven SSE stream served
+      ;; on a branch registers its wake callback on the same listener.
+      (:notify-listener base-ctx) (assoc :notify-listener (:notify-listener base-ctx))
       ;; Inherit the off-record auth seam so per-branch execution
       ;; authenticates through the same provider as the base context.
       (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx))

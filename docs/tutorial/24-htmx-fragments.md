@@ -173,6 +173,29 @@ SSE extension on top of htmx — both served locally). The panel's
 content is replaced on every push; unchanged ticks cost the
 client nothing.
 
+### Event-driven, not just interval-driven
+
+Add `:wake-on-writes true` to the handler and the interval stops
+being the latency: any write on the platform's event bus (a graph
+edit, a `:create-entity` from another page, a cron writing rows)
+triggers one debounced extra render, so a data change reaches every
+subscribed page in well under a second — while `:interval-ms`
+degrades to a keepalive ceiling:
+
+```clojure
+{:name :sse-clock-handler
+ :lambda-params [:request]
+ :parent :sse-fragment-handler
+ :args {:fragment :clock-fragment
+        :interval-ms 5000
+        :wake-on-writes true}}
+```
+
+Spurious wakes are cheap — a wake is one server-side render plus a
+hash compare, and only a **changed** fragment is pushed. The demo
+clock on `/demo/contact` runs exactly this way: save any fn in the
+editor and watch the panel jump ahead of its 5-second keepalive.
+
 Streams are bounded by design: each closes itself after
 `:max-lifetime-ms` (default 5 min, capped at 30) and the
 browser's EventSource transparently reconnects, so a page left

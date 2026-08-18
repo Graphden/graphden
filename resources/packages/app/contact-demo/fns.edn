@@ -132,13 +132,14 @@
 
   {:name :_contact-demo-clock-handler
    :lambda-params [:request]
-   :description "The stream handler — `:sse-fragment-handler` child binding the clock fragment at 1s ticks."
+   :description "The stream handler — `:sse-fragment-handler` child binding the clock fragment: 5s keepalive ticks PLUS event-driven wakes (`:wake-on-writes`), so any graph write refreshes the panel in well under a second — watch it jump when you save an fn in the editor."
    :parent :sse-fragment-handler
    :args {:fragment :_contact-demo-clock-fragment
-          :interval-ms 1000}}
+          :interval-ms 5000
+          :wake-on-writes true}}
 
   {:name :demo-contact-clock
-   :description "GET /demo/contact/clock — the SSE stream pushing the clock fragment (1s ticks)."
+   :description "GET /demo/contact/clock — the SSE stream pushing the clock fragment (5s keepalive + write-event wakes)."
    :parent :get-route
    :args {:path "/demo/contact/clock"
           :handler :_contact-demo-clock-handler}}

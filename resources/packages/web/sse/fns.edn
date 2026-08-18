@@ -11,7 +11,7 @@
  :description "SSE stream primitive — push a re-rendered fragment to the client whenever it changes (interval-driven, change-deduped, lifetime-bounded)."
  :fns
  [{:name :sse-stream
-   :description "Open an SSE stream on `:request` and push `:render`'s HTML whenever it changes, re-executing every `:interval-ms` (clamped >= 1s). Self-closes after `:max-lifetime-ms` (clamped <= 30 min; the browser's EventSource auto-reconnects, so pages stay live through bounded stream generations). 503 when the deployment-wide cap (GRAPHDEN_SSE_MAX_STREAMS, default 200) is reached."
+   :description "Open an SSE stream on `:request` and push `:render`'s HTML whenever it changes, re-executing every `:interval-ms` (clamped >= 1s) — and, with `:wake-on-writes`, immediately (debounced) after any write event on the graphden_events bus. Self-closes after `:max-lifetime-ms` (clamped <= 30 min; the browser's EventSource auto-reconnects, so pages stay live through bounded stream generations). 503 when the deployment-wide cap (GRAPHDEN_SSE_MAX_STREAMS, default 200) is reached."
    :args {:request {:type :ring-request-shape
                     :description "The incoming ring request — carries the httpkit async channel the stream opens on."}
           :render {:type [:fn {} :text]
@@ -19,6 +19,8 @@
           :interval-ms {:type :int
                         :description "Re-render period in ms; the impl clamps to >= 1000 (an :int rather than :positive-int slot — the graph-side default flows through :coalesce, which the checker can only prove to :int)."}
           :max-lifetime-ms {:type :int
-                            :description "Stream lifetime in ms; the impl clamps to <= 30 min, then the stream closes and the client reconnects."}}
+                            :description "Stream lifetime in ms; the impl clamps to <= 30 min, then the stream closes and the client reconnects."}
+          :wake-on-writes {:type :bool
+                           :description "When true (and the deployment wires a NOTIFY listener), any graph/data write schedules one debounced extra tick — a change reaches the client in well under a second and `:interval-ms` degrades to the keepalive ceiling. Spurious wakes cost one render (only CHANGED fragments push)."}}
    :return-type :keyword-map
    :effects #{:network :process}}]}

@@ -106,7 +106,7 @@
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
              execute-guard app-router verify-domain user-ops
-             my-tokens executor-orgs byo-executor? executor-id]}]
+             my-tokens executor-orgs byo-executor? executor-id notify-listener]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -188,6 +188,10 @@
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client)
+      ;; The LISTEN side of the NOTIFY pair — event-driven SSE
+      ;; (`:sse-stream` :wake-on-writes) registers per-stream
+      ;; callbacks here. Absent in tests without PG wiring.
+      notify-listener (assoc :notify-listener notify-listener)
       ;; Privileged structural-read storage (§4 org-agnostic compile): the raw
       ;; PG beneath OrgScoped, re-wrapped for this branch. `rebuild!` reads the
       ;; fn-graph STRUCTURE through it so the compiled registry contains every

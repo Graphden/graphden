@@ -176,7 +176,8 @@
     :lambda-params [:request]
     :parent :sse-fragment-handler
     :args {:fragment :clock-fragment
-           :interval-ms 1000}}
+           :interval-ms 5000
+           :wake-on-writes true}}
    {:name :sse-clock-route
     :parent :get-route
     :args {:path "/streams/clock"

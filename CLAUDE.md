@@ -106,6 +106,11 @@ Graphden is a visual functional programming environment where functions and thei
 - `service` — desired-state row "keep THIS fn running". `branch-id` scopes
   it to a per-branch `ExecutionContext` so the same fn can run on dev +
   prod simultaneously. NOT versioned. See [docs/SERVICES.md](docs/SERVICES.md).
+- `resource-override` — versioned `path → content` row shadowing a shipped
+  frontend asset (the editor's own JS/CSS), served through
+  `:read-resource-overridable`; every save rolls the effective `?v=` asset
+  hash. Edited via Operate → Assets (self-host; cloud writes are
+  system-only — tenant-forbidden as a stored-XSS surface).
 
 ## Core Concept: Inheritance Model
 

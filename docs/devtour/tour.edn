@@ -312,6 +312,14 @@
            `check-fn-name-collision!` just below replaced the raw
            `UNIQUE (namespace_id, name)`, whose soft-deleted identities blocked
            their names forever."}
+    {:ns graphden.versioning.storage.uniqueness :defn check-resource-override-path-collision!
+     :say "The same resolved-view doctrine applied to the newest versioned
+           entity: `:resource-override` (UI Step 1) shadows a shipped frontend
+           asset — path → content, per branch — so the editor's own JS/CSS is
+           editable from inside the editor (Operate → Assets). One override
+           per path per branch view, guarded here; serving goes through
+           `:read-resource-overridable` in the app package, and every save
+           rolls the effective `?v=` asset hash so browsers re-fetch."}
     {:ns graphden.versioning.storage.core :defn purgeable-identity-ids
      :say "Delete has TWO modes, and this guard is the heart of the hard one.
            User-facing deletes tombstone (a version row with `:deleted-at`, so

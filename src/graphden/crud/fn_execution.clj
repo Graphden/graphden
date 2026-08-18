@@ -362,12 +362,22 @@
    tree."
   [entries]
   (let [{linked true, linkless false} (group-by #(some? (:seq %)) entries)
-        children (group-by :parent-seq linked)
+        present (into #{} (map :seq) linked)
+        ;; ORPHANS are roots too: a truncated trace (byte cap dropped
+        ;; the oldest entries; entry cap stopped recording before the
+        ;; outer frames completed) keeps children whose parent entry
+        ;; never landed — walking only nil-parent roots would silently
+        ;; drop the entire surviving forest (a captured page render
+        ;; over the 10k-entry cap rendered ZERO rows).
+        root? (fn [e]
+                (let [p (:parent-seq e)]
+                  (or (nil? p) (not (contains? present p)))))
+        children (group-by :parent-seq (remove root? linked))
         walk (fn walk [e depth]
                (cons (assoc e :depth depth)
                      (mapcat #(walk % (inc depth))
                              (sort-by :seq (get children (:seq e))))))]
-    (concat (mapcat #(walk % 0) (sort-by :seq (get children nil)))
+    (concat (mapcat #(walk % 0) (sort-by :seq (filter root? linked)))
             (map #(assoc % :depth 0) linkless))))
 
 

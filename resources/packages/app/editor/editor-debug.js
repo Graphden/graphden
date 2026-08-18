@@ -17,6 +17,7 @@
 // Globals consumed: isAuthenticated, authFetch, htmx, openTraceView.
 
 let _debugRefreshInFlight = false;
+let _debugRefreshQueued = false;
 let _debugPollTimer = null;
 
 
@@ -27,7 +28,15 @@ function _debugPanelEl() {
 
 function refreshDebugPanel() {
   const el = _debugPanelEl();
-  if (!el || _debugRefreshInFlight) return;
+  if (!el) return;
+  if (_debugRefreshInFlight) {
+    // Don't DROP a refresh that races an in-flight one (e.g. the arm
+    // POST completing while the section-activation refresh is still
+    // loading) — queue one trailing re-fetch so the panel always ends
+    // on current state.
+    _debugRefreshQueued = true;
+    return;
+  }
   _debugRefreshInFlight = true;
   authFetch('/partials/debug-catch')
     .then((r) => (r.ok ? r.text() : null))
@@ -37,6 +46,11 @@ function refreshDebugPanel() {
     .catch(() => null)
     .then(() => {
       _debugRefreshInFlight = false;
+      if (_debugRefreshQueued) {
+        _debugRefreshQueued = false;
+        refreshDebugPanel();
+        return;
+      }
       _debugSchedulePoll();
     });
 }

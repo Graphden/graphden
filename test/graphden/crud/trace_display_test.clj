@@ -24,6 +24,18 @@
     (is (= [0 1 2 0] (mapv :depth ordered)))))
 
 
+(deftest tree-order-orphans-become-roots-test
+  ;; A truncated trace keeps children whose parent entry was dropped
+  ;; (byte-cap oldest-first drop / the 10k entry cap stopping before
+  ;; outer frames completed) — they must surface as roots, not vanish.
+  (let [entries [{:seq 8 :parent-seq 7 :fn-id "orphan"}
+                 {:seq 9 :parent-seq 8 :fn-id "orphan-child"}
+                 {:seq 0 :fn-id "root"}]
+        ordered (tree-order entries)]
+    (is (= ["root" "orphan" "orphan-child"] (mapv :fn-id ordered)))
+    (is (= [0 0 1] (mapv :depth ordered)))))
+
+
 (deftest tree-order-keeps-linkless-entries-test
   (let [entries [{:fn-id "old-1"} {:seq 0 :fn-id "root"} {:fn-id "old-2"}]
         ordered (tree-order entries)]

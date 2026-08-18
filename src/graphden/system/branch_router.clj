@@ -179,7 +179,8 @@
         ;; compile-eager closure signature: `(fn [free-args ctx])`.
         (if-some [trap (when (debug-capture/any-traps?)
                          (debug-capture/consume-trap! branch-id request))]
-          (debug-capture/run-captured! trap branch-ctx handler-fn-id request
+          (debug-capture/run-captured! trap branch-id branch-ctx handler-fn-id
+                                       request
                                        #(closure {:request request} branch-ctx))
           (closure {:request request} branch-ctx))))))
 

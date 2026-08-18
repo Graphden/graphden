@@ -133,7 +133,8 @@
                   sp/update-entity (fn [& _] nil)]
       (testing "the response returns unchanged (capture is invisible to the caller)"
         (is (= response
-               (dbg/run-captured! {:capture-values? false} {} (random-uuid)
+               (dbg/run-captured! {:capture-values? false} branch-id {}
+                                  (random-uuid)
                                   request (constantly response)))))
       (let [[id outcome] @writes]
         (is (= row-id id))
@@ -146,9 +147,11 @@
             (is (= {"accept" "text/html"} (:headers captured)))
             (is (= "post" (:request-method captured)))
             (is (= "payload" (:body captured))))))
+      (testing "the last-captured id is recorded for the panel"
+        (is (= row-id (dbg/last-captured-execution-id branch-id))))
       (testing "a throwing handler rethrows AND persists the failure"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"boom"
-              (dbg/run-captured! {} {} (random-uuid) request
+              (dbg/run-captured! {} branch-id {} (random-uuid) request
                                  (fn [] (throw (ex-info "boom" {:k 1}))))))
         (let [[_ outcome] @writes]
           (is (= :failed (:status outcome)))
@@ -156,5 +159,5 @@
       (testing "a persist failure never breaks the response"
         (with-redefs [persist/create-pending-row! (fn [& _] (throw (ex-info "db down" {})))]
           (is (= response
-                 (dbg/run-captured! {} {} (random-uuid)
+                 (dbg/run-captured! {} branch-id {} (random-uuid)
                                     request (constantly response)))))))))

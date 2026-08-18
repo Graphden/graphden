@@ -47,6 +47,13 @@
   (atom {}))
 
 
+(defonce ^:private last-captures
+  ;; `{[org-id branch-id] → execution-id}` — the newest captured run
+  ;; per scope, so the Debug panel can offer «open its trace» without
+  ;; knowing the handler fn. Same runtime-only lifetime as `traps`.
+  (atom {}))
+
+
 (def ^:private infra-path-prefixes
   "Paths served by the editor/platform itself. A CATCH-ALL trap (no
    explicit `:path-prefix`) skips these — otherwise the editor's own
@@ -88,6 +95,13 @@
   (let [t (get @traps [(tc/current-org) branch-id])]
     (when (and t (< (now-ms) (:expires-at-ms t)))
       t)))
+
+
+(defn last-captured-execution-id
+  "The newest captured run's execution id for the current org+branch
+   (nil when nothing was captured since the process started)."
+  [branch-id]
+  (get @last-captures [(tc/current-org) branch-id]))
 
 
 (defn- force-expire-for-test!
@@ -194,7 +208,7 @@
    the branch ctx's storage — org-stamped by the tenancy decorator
    like any request-path write). Best-effort: a persist failure logs
    and the response still returns."
-  [branch-ctx handler-fn-id request trace effect-trace outcome started-at-ms]
+  [branch-id branch-ctx handler-fn-id request trace effect-trace outcome started-at-ms]
   (try
     (when-let [fn-version-id (lookup/resolve-fn-version-id branch-ctx handler-fn-id)]
       (let [storage (:storage branch-ctx)
@@ -223,6 +237,7 @@
                        :path-trace (persist/snapshot-path-trace trace)})
                (persist/redact-outcome handler-fn-id)
                (persist/stamp-touched-secret handler-fn-id)))
+        (swap! last-captures assoc [(tc/current-org) branch-id] (:id row))
         (log/info "debug-capture: captured request persisted"
                   {:execution-id (:id row)
                    :uri (:uri request)
@@ -240,7 +255,7 @@
    response (or rethrow the handler's throwable) EXACTLY as the
    uncaptured path would — capture must never change what the caller
    observes."
-  [trap branch-ctx handler-fn-id request thunk]
+  [trap branch-id branch-ctx handler-fn-id request thunk]
   (let [t0 (now-ms)
         trace (ce/new-path-trace (when (:capture-values? trap)
                                    {:capture-values? true}))
@@ -250,7 +265,7 @@
               ce/*traced-fn-ids* (atom ce/trace-all)]
       (let [outcome (try {:status :succeeded :result (thunk)}
                          (catch Throwable t {:status :failed :throwable t}))]
-        (persist-captured! branch-ctx handler-fn-id request
+        (persist-captured! branch-id branch-ctx handler-fn-id request
                            trace effect-trace outcome t0)
         (if (= :succeeded (:status outcome))
           (:result outcome)

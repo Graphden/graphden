@@ -163,6 +163,16 @@
    :parent :get-auth-required
    :args {:path "/partials/error-log" :handler :_partial-error-log-handler}}
 
+  {:name :partial-execute-trace
+   :description "GET /partials/execute-trace?id=X — a persisted run's :path-trace as a depth-first call tree (rows carry data-seq/data-fn-id hooks). `editor-trace-view.js` owns the panel lifecycle: row-click canvas highlight + ◀/▶ stepping. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/execute-trace" :handler :_partial-execute-trace-handler}}
+
+  {:name :partial-debug-catch
+   :description "GET /partials/debug-catch — the Operate → Debug panel: trap status, arm form shell, «open last captured trace». `editor-debug.js` owns arm/cancel POSTs + refresh. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/debug-catch" :handler :_partial-debug-catch-handler}}
+
   {:name :partial-tests
    :description "GET /partials/tests — the Operate → Tests panel (summary + Run-all button + per-test latest status of the current version) as text/html. Auth-required; `editor-tests.js` owns the Run-all POST → refresh lifecycle."
    :parent :get-auth-required

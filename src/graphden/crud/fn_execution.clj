@@ -29,6 +29,7 @@
    (read-only DB navigation) live in `.lookup`; row writes + future
    plumbing + size caps live in `.persist`."
   (:require
+    [cheshire.core :as json]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
@@ -343,6 +344,98 @@
           ;; trace (persist/re-redact-path-trace).
           (update :path-trace #(some-> % persist/re-redact-path-trace))
           (assoc :args (args-for-execution storage execution-id))))))
+
+
+;; =============================================================================
+;; GET /partials/execute-trace — display rows of a persisted trace
+;; =============================================================================
+
+(def ^:private trace-indent-px 14)
+(def ^:private trace-max-indent-depth 12)
+
+
+(defn- trace-tree-order
+  "Depth-first ordering of re-redacted trace `entries` with a `:depth`
+   assigned to each. Tree-linked entries (`:seq` present) nest via
+   `:parent-seq`, children sorted by `:seq` (entry order); pre-tree
+   entries (no `:seq`) keep their stored order at depth 0, after the
+   tree."
+  [entries]
+  (let [{linked true, linkless false} (group-by #(some? (:seq %)) entries)
+        children (group-by :parent-seq linked)
+        walk (fn walk [e depth]
+               (cons (assoc e :depth depth)
+                     (mapcat #(walk % (inc depth))
+                             (sort-by :seq (get children (:seq e))))))]
+    (concat (mapcat #(walk % 0) (sort-by :seq (get children nil)))
+            (map #(assoc % :depth 0) linkless))))
+
+
+(defn- trace-display-row
+  "One depth-annotated entry → the display-ready row the partial
+   renders: name, indent, a single status chip, and the (already
+   redaction-filtered) captured value pretty-printed."
+  [names e]
+  (let [hidden (:hidden e)
+        chip-kind (cond
+                    hidden (if (= "unknown-type" (name hidden)) "unknown" "secret")
+                    (:cache-hit? e) "cache"
+                    :else "time")
+        fn-id (str (:fn-id e))]
+    (cond-> {:seq (:seq e)
+             :fn-id fn-id
+             :fn-name (or (get names fn-id) (str (subs fn-id 0 8) "…"))
+             :indent-px (* trace-indent-px
+                           (min (long (:depth e)) trace-max-indent-depth))
+             :chip (case chip-kind
+                     "secret" "secret"
+                     "unknown" "unknown type"
+                     "cache" "cache"
+                     (str (or (:duration-ms e) 0) "ms"))
+             :chip-kind chip-kind}
+      (:value-hidden e) (assoc :derived? true)
+      (contains? e :value)
+      (assoc :value-str (json/generate-string (:value e) {:pretty true}))
+      (:value-truncated? e) (assoc :value-truncated? true))))
+
+
+(defn- trace-fn-names
+  "`{fn-id-str → name}` for every distinct fn-id in `entries`, resolved
+   against the current branch view. A deleted/foreign id simply stays
+   unnamed (the row falls back to the short id)."
+  [storage entries]
+  (let [ids (into [] (comp (keep :fn-id) (map str) (distinct)
+                           (keep request/parse-uuid-or-clear))
+                  entries)]
+    (if (empty? ids)
+      {}
+      (into {}
+            (keep (fn [row] (when (:name row) [(str (:id row)) (:name row)])))
+            (sp/query-entities storage :fn {:id ids})))))
+
+
+(defn trace-display-rows
+  "Display payload for one persisted execution's `:path-trace`, shaped
+   for the `/partials/execute-trace` hiccup: `{:found? bool :rows […]
+   :truncated? :values-dropped?}`. Entries pass READ-time re-redaction
+   first (`persist/re-redact-path-trace`), then reassemble into the
+   depth-first call tree (`:seq`/`:parent-seq`), then join fn names.
+   The tree walk + name join is one cohesive read-shaping algorithm —
+   the graph layer renders the rows, it doesn't rebuild trees."
+  [ctx execution-id]
+  (let [storage (request/require-storage ctx)
+        row (when execution-id
+              (sp/read-entity storage :fn-execution execution-id))
+        pt (some-> (:path-trace row) persist/re-redact-path-trace)
+        entries (:entries pt)]
+    (if (empty? entries)
+      {:found? false :rows []}
+      (let [names (trace-fn-names storage entries)]
+        (cond-> {:found? true
+                 :rows (mapv #(trace-display-row names %)
+                             (trace-tree-order entries))}
+          (:path-truncated? pt) (assoc :truncated? true)
+          (:values-dropped? pt) (assoc :values-dropped? true))))))
 
 
 ;; =============================================================================

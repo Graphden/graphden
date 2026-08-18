@@ -438,6 +438,29 @@
           :then :_partial-eh-row-path-btn-el
           :else :_hidden-span}}
 
+  ;; "tree" button — the step-through call-tree view of the same trace
+  ;; (`/partials/execute-trace`; editor-trace-view.js owns the panel).
+  ;; Same render condition as "path": only rows carrying a trace.
+  {:name :_partial-eh-row-tree-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "execute-history-tree-btn"
+                        :title "Step through this run's call tree"}}
+          :key {:value :data-execution-id}
+          :value :_partial-eh-row-id}}
+
+  {:name :_partial-eh-row-tree-btn-el
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_partial-eh-row-tree-attrs
+          :children ["tree"]}}
+
+  {:name :_partial-eh-row-tree-btn
+   :parent :if
+   :args {:test :_partial-eh-row-path-trace
+          :then :_partial-eh-row-tree-btn-el
+          :else :_hidden-span}}
+
   ;; Preview text dispatch by status. JSON-stringifying the result
   ;; server-side keeps the format identical to what `shortPreview`
   ;; produced in JS. Error path picks `:error`; cancelled is literal.
@@ -482,7 +505,8 @@
           :children [:_partial-eh-row-status-span
                      :_partial-eh-row-ts-span
                      :_partial-eh-row-repeat-btn
-                     :_partial-eh-row-path-btn]}}
+                     :_partial-eh-row-path-btn
+                     :_partial-eh-row-tree-btn]}}
 
   {:name :_partial-eh-row-attrs
    :parent :assoc

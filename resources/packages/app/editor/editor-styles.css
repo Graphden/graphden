@@ -6019,3 +6019,149 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   body.gd-insp-open #gd-inspector { transform: translateY(0); }
   .gd-insp-close { display: inline-flex; }
 }
+
+/* =========================================================================
+   TRACE VIEW — the step-through CALL TREE panel of a stored run's
+   :path-trace (server hiccup from /partials/execute-trace;
+   editor-trace-view.js owns selection/stepping/canvas highlight).
+   ========================================================================= */
+
+.execute-history-tree-btn {
+  padding: 1px 6px;
+  font-family: inherit; font-size: 10px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.execute-history-tree-btn:hover { background: var(--hover-bg); }
+
+.trace-view-panel {
+  position: fixed;
+  top: 64px; right: 16px; bottom: 16px;
+  width: 360px;
+  z-index: 10002;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 12px;
+}
+.trace-view-body { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.trace-view-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--card-border);
+  background: var(--header-bg); color: var(--header-fg);
+}
+.trace-view-title { font-weight: 600; flex: 1 1 auto; }
+.trace-note { color: var(--muted-fg); font-size: 10px; }
+.trace-step-btn, .trace-close-btn {
+  background: transparent;
+  color: var(--header-fg);
+  border: 1px solid var(--light-border);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+.trace-step-btn:hover, .trace-close-btn:hover { background: var(--hover-bg); }
+
+.trace-rows { overflow-y: auto; flex: 1 1 auto; padding: 4px 0; }
+.trace-empty { padding: 12px; color: var(--muted-fg); }
+.trace-row {
+  padding: 3px 10px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  display: block;
+}
+.trace-row:hover { background: var(--hover-bg); }
+.trace-row.trace-row-selected {
+  background: var(--selected-bg);
+  border-left-color: var(--accent);
+}
+.trace-row-name {
+  font-family: monospace; font-size: 11px;
+  margin-right: 6px;
+  overflow-wrap: anywhere;
+}
+.trace-chip {
+  display: inline-block;
+  font-size: 9.5px;
+  line-height: 1.5;
+  padding: 0 5px;
+  margin-right: 4px;
+  border-radius: 7px;
+  border: 1px solid var(--card-border);
+  color: var(--muted-fg);
+  white-space: nowrap;
+}
+.trace-chip-time { color: var(--fg); }
+.trace-chip-cache { color: var(--muted-fg); }
+.trace-chip-secret, .trace-chip-unknown, .trace-chip-derived {
+  color: var(--error-fg-strong);
+  border-color: var(--error-fg-strong);
+}
+.trace-chip-truncated { color: var(--muted-fg); }
+.trace-value { margin: 2px 0 2px 6px; }
+.trace-value summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 10px;
+}
+.trace-value pre {
+  margin: 3px 0 0;
+  padding: 5px 7px;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 10.5px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--light-border);
+  border-radius: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================================
+   OPERATE → DEBUG — the «catch next request» trap panel
+   (/partials/debug-catch; editor-debug.js owns arm/cancel/refresh).
+   ========================================================================= */
+
+.debug-panel { display: flex; flex-direction: column; gap: 10px; font-size: 12px; }
+.debug-help { color: var(--muted-fg); font-size: 11px; }
+.debug-arm-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.debug-prefix-input {
+  flex: 1 1 220px;
+  font-family: monospace; font-size: 11px;
+  padding: 4px 6px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+}
+.debug-capture-label {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--card-fg); font-size: 11px;
+  white-space: nowrap;
+}
+.debug-arm-btn, .debug-cancel-btn, .debug-open-trace-btn {
+  padding: 3px 10px;
+  font-family: inherit; font-size: 11px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.debug-arm-btn:hover, .debug-cancel-btn:hover, .debug-open-trace-btn:hover {
+  background: var(--hover-bg);
+}
+.debug-armed-line {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--card-fg);
+}
+.debug-armed-dot { color: var(--success-fg); }
+.debug-last-capture { color: var(--muted-fg); }

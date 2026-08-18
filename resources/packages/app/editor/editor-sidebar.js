@@ -66,7 +66,7 @@ const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring', apps: 'Apps',
   errors: 'Errors', 'type-errors': 'Type errors', 'platform-access': 'Platform access',
-  assets: 'Assets', tests: 'Tests',
+  assets: 'Assets', tests: 'Tests', debug: 'Debug',
 };
 
 // Show one section's pane on a surface and mark its nav item; hide the rest.
@@ -134,6 +134,8 @@ function reloadDynamicOpsSections() {
     assets: typeof buildAssetsSection === 'function' ? buildAssetsSection : null,
     // Tests drift as runs/auto-runs land — re-fetch on every Operate open.
     tests: typeof buildTestsSection === 'function' ? buildTestsSection : null,
+    // Debug trap state is live (arms, fires, expires) — always re-fetch.
+    debug: typeof buildDebugSection === 'function' ? buildDebugSection : null,
   };
   Object.keys(builders).forEach((key) => {
     const build = builders[key];
@@ -1203,6 +1205,10 @@ function updateEntityList(data) {
   }
   if (!searchMode && typeof buildTestsSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'tests', buildTestsSection);
+  }
+  if (!searchMode && typeof buildDebugSection === 'function') {
+    // «Catch next request» trap + last-captured trace (editor-debug.js).
+    mountAdminSection(opsHost, opsNavHost, 'debug', buildDebugSection);
   }
   if (!searchMode && typeof buildAssetsSection === 'function') {
     // Frontend-asset overrides — self-host only (the builder returns null

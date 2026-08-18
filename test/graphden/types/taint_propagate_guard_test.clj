@@ -60,7 +60,7 @@
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :effective-branch-local? :empty? :env :eq
     :encode-unreadable-kws :equal? :error-boundary-wrap
-    :error-http-status :every? :ex-data
+    :error-http-status :every? :ex-data :execute-trace-rows
     :ex-info :extract-entity-params
     :filter :filter-xf :find-first :first :fix :flatten
     :fn-names-with-tag :form-decode :fn-stats-raw :fn-type-bound-effects

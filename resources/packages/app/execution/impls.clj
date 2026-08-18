@@ -224,6 +224,17 @@
 ;; from the request scope inside the ns.
 
 
+(defbase execute-trace-rows
+  "Display payload for one execution's stored `:path-trace` — the
+   depth-first call tree the `/partials/execute-trace` panel renders.
+   Single call over `fn-exec/trace-display-rows` (READ-time
+   re-redaction + tree reassembly + name join are one cohesive
+   read-shaping algorithm — the §3.3 invariant carve-out)."
+  [id]
+  (cr/record-effect! :db)
+  (fn-exec/trace-display-rows ctx id))
+
+
 (defbase debug-catch-arm!
   "Arm (or re-arm) the current org's one-shot request trap on
    `branch-id` — the next matching HTTP request through the branch
@@ -246,16 +257,19 @@
 
 (defbase debug-catch-status
   "The current org's live trap on `branch-id` (`{:armed bool
-   :trap …|null}`). Pure runtime-state read, like `:running-entry`.
-   `:request` pins the request scope so the answer is never
-   call-cached across requests."
+   :trap …|null :last-captured-execution-id uuid|null}`). Pure
+   runtime-state read, like `:running-entry`. `:request` pins the
+   request scope so the answer is never call-cached across requests."
   [branch-id _request]
   (let [t (debug-capture/trap-status branch-id)]
-    {:armed (some? t) :trap t}))
+    {:armed (some? t)
+     :trap t
+     :last-captured-execution-id (debug-capture/last-captured-execution-id branch-id)}))
 
 
 (def impls
   {:resolve-fn                 resolve-fn
+   :execute-trace-rows         execute-trace-rows
    :debug-catch-arm!           debug-catch-arm!
    :debug-catch-disarm!        debug-catch-disarm!
    :debug-catch-status         debug-catch-status

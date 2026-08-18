@@ -2715,11 +2715,12 @@
    :effects #{:state}}
 
   {:name :debug-catch-status
-   :description "The current org's live trap on `branch-id` — `{:armed bool, :trap …|null}` (expired ≡ unarmed). `:request` pins the request scope so the answer is never call-cached across requests."
+   :description "The current org's live trap on `branch-id` — `{:armed bool, :trap …|null, :last-captured-execution-id uuid|null}` (expired ≡ unarmed; the last-captured id survives until process restart). `:request` pins the request scope so the answer is never call-cached across requests."
    :args {:branch-id {:type :uuid}
           :request {:type :ring-request-shape
                     :description "The Ring request (scope pin only)."}}
-   :return-type {:armed :bool :trap [:union :null :keyword-map]}
+   :return-type {:armed :bool :trap [:union :null :keyword-map]
+                 :last-captured-execution-id :nullable-uuid}
    :effects #{}}
 
   ;; POST /api/debug/catch — body `{path-prefix?, capture-values?, ttl-ms?}`
@@ -2770,4 +2771,322 @@
    :lambda-params [:request]
    :description "Ring handler for GET /api/debug/catch/status."
    :parent :json-handler
-   :args {:data :_dbgc-status}}]}
+   :args {:data :_dbgc-status}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /partials/execute-trace?id=X — a persisted run's :path-trace as
+  ;; a depth-first call TREE (server-shaped rows via :execute-trace-rows;
+  ;; READ-time re-redaction applies inside). editor-trace-view.js owns
+  ;; the panel lifecycle: row-click → canvas highlight, ◀/▶ stepping.
+  ;; ---------------------------------------------------------------------
+
+  {:name :execute-trace-rows
+   :description "Display payload for one execution's stored trace: `{:found? bool, :rows [{seq, fn-id, fn-name, indent-px, chip, chip-kind, derived?, value-str?, value-truncated?} …], :truncated?, :values-dropped?}` — rows in depth-first call-tree order, fn names joined on the current branch, values re-redacted through the CURRENT registry. Single call over `fn-execution/trace-display-rows` (the tree walk + name join is one cohesive read-shaping algorithm)."
+   :args {:id {:type :nullable-uuid
+               :description "The :fn-execution row id; nil / unknown / traceless → `{:found? false}`."}}
+   :return-type {:found? :bool :rows [:list :keyword-map]
+                 :truncated? [:union :null :bool]
+                 :values-dropped? [:union :null :bool]}
+   :effects #{:db}}
+
+  {:name :_ptrace-id-raw
+   :parent :query-param
+   :args {:param-name {:value "id"}}}
+  {:name :_ptrace-id
+   :parent :parse-uuid
+   :args {:string :_ptrace-id-raw}}
+  {:name :_ptrace-payload
+   :parent :execute-trace-rows
+   :args {:id :_ptrace-id}}
+  {:name :_ptrace-rows
+   :parent :get
+   :args {:coll :_ptrace-payload :key {:value :rows} :default {:value []}}}
+  {:name :_ptrace-found?
+   :parent :get
+   :args {:coll :_ptrace-payload :key {:value :found?} :default {:value false}}}
+
+  ;; one row per trace frame
+  {:name :_ptrace-r-seq-str
+   :parent :to-str
+   :args {:value {:parent :get
+                  :args {:coll {:as :item} :key {:value :seq} :default {:value ""}}}}}
+  {:name :_ptrace-r-fn-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default {:value ""}}}
+  {:name :_ptrace-r-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+  {:name :_ptrace-r-style
+   :parent :str
+   :args {:parts [{:value "padding-left:"}
+                  {:parent :to-str
+                   :args {:value {:parent :get
+                                  :args {:coll {:as :item} :key {:value :indent-px}
+                                         :default {:value 0}}}}}
+                  {:value "px"}]}}
+  {:name :_ptrace-r-attrs
+   :description "Row attrs — class + data-seq/data-fn-id (the JS step/highlight hooks) + the depth indent."
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map {:parent :assoc
+                             :args {:map {:value {:class "trace-row" :tabindex "0" :role "button"}}
+                                    :key {:value :data-seq}
+                                    :value :_ptrace-r-seq-str}}
+                       :key {:value :data-fn-id}
+                       :value :_ptrace-r-fn-id}}
+          :key {:value :style}
+          :value :_ptrace-r-style}}
+
+  {:name :_ptrace-r-chip-cls
+   :parent :str
+   :args {:parts [{:value "trace-chip trace-chip-"}
+                  {:parent :get
+                   :args {:coll {:as :item} :key {:value :chip-kind}
+                          :default {:value "time"}}}]}}
+  {:name :_ptrace-r-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class}] :vals [:_ptrace-r-chip-cls]}}
+          :children [{:parent :get
+                      :args {:coll {:as :item} :key {:value :chip}
+                             :default {:value ""}}}]}}
+
+  {:name :_ptrace-r-derived
+   :description "«derived from secret» marker — nil child renders nothing."
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll {:as :item} :key {:value :derived?} :default {:value false}}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "span"}
+                        :attrs {:value {:class "trace-chip trace-chip-derived"}}
+                        :children ["derived from secret"]}}
+          :else {:value nil}}}
+
+  {:name :_ptrace-r-value-str
+   :parent :get
+   :args {:coll {:as :item} :key {:value :value-str} :default {:value nil}}}
+  {:name :_ptrace-r-value
+   :description "Collapsed captured-value viewer; absent value renders nothing."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_ptrace-r-value-str}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "details"}
+                        :attrs {:value {:class "trace-value"}}
+                        :children [{:parent :hiccup
+                                    :args {:tag {:value "summary"} :attrs {:value {}}
+                                           :children ["value"]}}
+                                   {:parent :hiccup
+                                    :args {:tag {:value "pre"} :attrs {:value {}}
+                                           :children [:_ptrace-r-value-str]}}]}}
+          :else {:value nil}}}
+  {:name :_ptrace-r-value-truncated
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll {:as :item} :key {:value :value-truncated?}
+                        :default {:value false}}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "span"}
+                        :attrs {:value {:class "trace-chip trace-chip-truncated"}}
+                        :children ["value > 4KB"]}}
+          :else {:value nil}}}
+
+  {:name :_ptrace-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_ptrace-r-attrs
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "trace-row-name"}}
+                             :children [:_ptrace-r-name]}}
+                     :_ptrace-r-chip
+                     :_ptrace-r-derived
+                     :_ptrace-r-value-truncated
+                     :_ptrace-r-value]}}
+  {:name :_ptrace-rendered-rows
+   :parent :map
+   :args {:func :_ptrace-row
+          :coll {:ref :_ptrace-rows :type [:list :keyword-map]}}}
+
+  ;; header: title + step/close chrome (bound by editor-trace-view.js)
+  {:name :_ptrace-trunc-note
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll :_ptrace-payload :key {:value :truncated?}
+                        :default {:value false}}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "span"}
+                        :attrs {:value {:class "trace-note"}}
+                        :children ["trace truncated"]}}
+          :else {:value nil}}}
+  {:name :_ptrace-dropped-note
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll :_ptrace-payload :key {:value :values-dropped?}
+                        :default {:value false}}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "span"}
+                        :attrs {:value {:class "trace-note"}}
+                        :children ["some values dropped"]}}
+          :else {:value nil}}}
+  {:name :_ptrace-header
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "trace-view-header"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "trace-view-title"}}
+                             :children ["Call tree"]}}
+                     :_ptrace-trunc-note
+                     :_ptrace-dropped-note
+                     {:parent :hiccup
+                      :args {:tag {:value "button"}
+                             :attrs {:value {:id "gd-trace-prev" :type "button"
+                                             :class "trace-step-btn"
+                                             :title "Previous step"}}
+                             :children ["◀"]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "button"}
+                             :attrs {:value {:id "gd-trace-next" :type "button"
+                                             :class "trace-step-btn"
+                                             :title "Next step"}}
+                             :children ["▶"]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "button"}
+                             :attrs {:value {:id "gd-trace-close" :type "button"
+                                             :class "trace-close-btn"
+                                             :aria-label "Close the call tree"}}
+                             :children ["✕"]}}]}}
+
+  {:name :_ptrace-empty
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "trace-empty"}}
+          :children ["No trace stored for this run — submit with «Trace path» checked (or catch a request via Operate → Debug)."]}}
+  {:name :_ptrace-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "trace-rows"}}
+          :children [:_ptrace-rendered-rows]}}
+  {:name :_ptrace-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "trace-view-body"}}
+          :children [:_ptrace-header
+                     {:parent :if
+                      :args {:test :_ptrace-found?
+                             :then :_ptrace-list
+                             :else :_ptrace-empty}}]}}
+  {:name :_ptrace-html
+   :parent :render-hiccup
+   :args {:hiccup :_ptrace-body}}
+  {:name :_partial-execute-trace-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /partials/execute-trace?id=X — the call-tree panel body as text/html."
+   :parent :html-ok-response
+   :args {:body :_ptrace-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /partials/debug-catch — the Operate → Debug panel: trap status,
+  ;; the arm form shell, and the «open last captured trace» affordance.
+  ;; editor-debug.js owns arm/cancel POSTs + the refresh cycle.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_pdbg-status
+   :parent :_dbgc-status}
+  {:name :_pdbg-armed?
+   :parent :get
+   :args {:coll :_pdbg-status :key {:value :armed} :default {:value false}}}
+  {:name :_pdbg-trap-prefix
+   :parent :get
+   :args {:coll {:parent :get
+                 :args {:coll :_pdbg-status :key {:value :trap} :default {:value {}}}}
+          :key {:value :path-prefix}
+          :default {:value "any app path"}}}
+  {:name :_pdbg-armed-line
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "debug-armed-line"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "debug-armed-dot"}}
+                             :children ["●"]}}
+                     {:parent :str
+                      :args {:parts [{:value "Armed — waiting for a request ("}
+                                     :_pdbg-trap-prefix
+                                     {:value "). The first match is captured."}]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "button"}
+                             :attrs {:value {:id "gd-debug-cancel" :type "button"
+                                             :class "debug-cancel-btn"}}
+                             :children ["Cancel"]}}]}}
+  {:name :_pdbg-form
+   :description "Arm form shell — inputs are client state; editor-debug.js reads them and POSTs /api/debug/catch."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "debug-arm-form"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "input"}
+                             :attrs {:value {:id "gd-debug-prefix" :type "text"
+                                             :class "debug-prefix-input"
+                                             :placeholder "/path prefix (optional — empty catches any app path)"}}
+                             :children []}}
+                     {:parent :hiccup
+                      :args {:tag {:value "label"}
+                             :attrs {:value {:class "debug-capture-label"}}
+                             :children [{:parent :hiccup
+                                         :args {:tag {:value "input"}
+                                                :attrs {:value {:id "gd-debug-capture-values"
+                                                                :type "checkbox"}}
+                                                :children []}}
+                                        "capture values"]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "button"}
+                             :attrs {:value {:id "gd-debug-arm" :type "button"
+                                             :class "debug-arm-btn"}}
+                             :children ["Catch next request"]}}]}}
+  {:name :_pdbg-last-id
+   :parent :get
+   :args {:coll :_pdbg-status :key {:value :last-captured-execution-id}
+          :default {:value nil}}}
+  {:name :_pdbg-last
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_pdbg-last-id}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "debug-last-capture"}}
+                        :children [{:value "Last captured request: "}
+                                   {:parent :hiccup
+                                    :args {:tag {:value "button"}
+                                           :attrs {:parent :assoc
+                                                   :args {:map {:value {:id "gd-debug-open-trace"
+                                                                        :type "button"
+                                                                        :class "debug-open-trace-btn"}}
+                                                          :key {:value :data-execution-id}
+                                                          :value {:parent :to-str
+                                                                  :args {:value :_pdbg-last-id}}}}
+                                           :children ["open call tree"]}}]}}
+          :else {:value nil}}}
+  {:name :_pdbg-help
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "debug-help"}}
+          :children ["Catch the next HTTP request served by this branch's web handler: it runs with the path trace on and lands in run history like a traced run. One-shot; expires after 10 min. Credential headers are never stored."]}}
+  {:name :_pdbg-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "debug-panel"}}
+          :children [:_pdbg-help
+                     {:parent :if
+                      :args {:test :_pdbg-armed?
+                             :then :_pdbg-armed-line
+                             :else :_pdbg-form}}
+                     :_pdbg-last]}}
+  {:name :_pdbg-html
+   :parent :render-hiccup
+   :args {:hiccup :_pdbg-body}}
+  {:name :_partial-debug-catch-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /partials/debug-catch — the Operate → Debug panel body as text/html."
+   :parent :html-ok-response
+   :args {:body :_pdbg-html}}]}

@@ -123,6 +123,17 @@ function bindHistoryActions(panel, fnEntity, resultHostEl) {
       } catch (_) {}
     });
   });
+  // "tree" button — the step-through call-tree panel of the same
+  // trace (server-rendered /partials/execute-trace; lifecycle in
+  // editor-trace-view.js). Same render condition as "path".
+  panel.querySelectorAll('.execute-history-tree-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();   // don't bubble to row-click expand
+      if (typeof openTraceView === 'function') {
+        openTraceView(btn.getAttribute('data-execution-id'));
+      }
+    });
+  });
   panel.querySelectorAll('.execute-history-row[data-execution-id]').forEach((row) => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('button')) return;

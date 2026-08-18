@@ -122,7 +122,7 @@
    and-logged — this runs on a background future off a user's CRUD
    write, and ALL storage reads (tests discovery included) happen
    here, off the write path."
-  [ctx key branch-id]
+  [ctx key]
   (try
     (loop []
       (Thread/sleep debounce-ms)
@@ -140,13 +140,9 @@
           ;; `:allowed-effects #{}` — the runtime backstop; a hidden
           ;; effect throws instead of firing, and the test records as
           ;; failed. Static selection already excluded declared-effect
-          ;; tests.
+          ;; tests. run-tests! itself emits the `test:updated` nudge.
           (test-runs/run-tests! (assoc ctx :allowed-effects #{})
-                                {:fn-ids capped})
-          (when-let [emit (:notify-emitter ctx)]
-            (try (emit {:kind :test :op :updated :id ""
-                        :branch-id (some-> branch-id str)})
-                 (catch Exception _ nil)))))
+                                {:fn-ids capped})))
       (when-not (try-release! key)
         (recur)))
     (catch Exception e
@@ -175,5 +171,5 @@
                                     (update-in [key :seeds] (fnil into #{}) seeds)
                                     (assoc-in [key :runner?] true))))]
       (when-not (get-in old [key :runner?])
-        (future (run-pending! ctx key branch-id)))
+        (future (run-pending! ctx key)))
       (count seeds))))

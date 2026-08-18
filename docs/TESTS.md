@@ -82,10 +82,19 @@ per-branch routing) and auth-required. Core:
   namespaces stay visible even before their leaves lazy-load. Each
   test row carries a status dot: green passed, red failed, grey
   stale/not-run (primed from `/api/tests/status`).
-- **Operate → Tests panel** (`GET /partials/tests`, graph hiccup) —
-  summary line, Run-all button, per-test rows with status + error.
-  Re-fetched on every Operate open; `editor-tests.js` owns only the
-  Run-all POST → refresh lifecycle.
+- **Operate → Tests panel** — summary line, Run-all button, per-test
+  rows with status + error. LIVE via SSE ping + re-fetch:
+  `GET /partials/tests-stream` pushes a server-time PING on write
+  wakes and a 30 s keepalive (`run-tests!` emits a `test:updated`
+  NOTIFY after every batch — immediately and again after a 2 s
+  settle, covering the async terminal-row write); on each ping the
+  editor re-fetches the always-fresh one-shot `GET /partials/tests`.
+  The stream deliberately does NOT carry the panel body: a
+  long-lived stream's captured render freezes data-dependent
+  fragments (a `:time`-effect ping re-renders every tick by
+  construction). The editor subscribes over fetch-streaming, not
+  EventSource — the Authorization + X-Graphden-Branch headers ride
+  the editor's patched fetch (`editor-tests.js`).
 
 ## Auto-run on writes (phase 2)
 
@@ -120,9 +129,13 @@ write; statuses land in shared storage either way.
 
 ## Known limitations
 
-- A test with OPTIONAL unbound frees still reads `not-runnable` — the
-  free-arg surface doesn't distinguish requiredness. Bind the arg (or
-  restructure) for now.
+- An unbound free arg blocks the run UNLESS its slot's DECLARED type
+  explicitly admits nil (`[:union :null …]` — e.g. a `:nullable-text`
+  slot) — those default to nil, type-soundly. Concrete types and
+  `:any` stay blocking (conservative: an `:any` free is usually a
+  forgotten binding, and running it as nil would pass vacuously).
+  Note typevar unions (`[:union :null a]`) materialise as `:any`
+  slots, so they block too.
 - Effectful tests never auto-run (by design) and prompt the standard
   side-effect confirmation when run individually from the Run
   popover.

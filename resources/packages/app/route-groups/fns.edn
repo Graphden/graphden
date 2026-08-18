@@ -40,6 +40,7 @@
                   :partial-asset-edit
                   :partial-type-errors
                   :partial-tests
+                  :partial-tests-stream
                   :partial-branch-diff
                   :partial-merge-conflicts
                   :partial-execute-result-effects

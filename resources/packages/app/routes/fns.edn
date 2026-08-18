@@ -168,6 +168,11 @@
    :parent :get-auth-required
    :args {:path "/partials/tests" :handler :_partial-tests-handler}}
 
+  {:name :partial-tests-stream
+   :description "GET /partials/tests-stream — SSE stream of the Operate → Tests panel body (write-wakes + 30 s keepalive, changed-only pushes). Auth-required; the editor's Tests section subscribes via the htmx SSE extension."
+   :parent :get-auth-required
+   :args {:path "/partials/tests-stream" :handler :_tests-stream-handler}}
+
   {:name :partial-assets-panel
    :description "GET /partials/assets-panel — the frontend-asset override panel (bundle files + override status + editor slot). Auth-required."
    :parent :get-auth-required

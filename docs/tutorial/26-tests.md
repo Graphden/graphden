@@ -60,7 +60,8 @@ Now the surfaces:
   focuses on your tests, each with a status dot: **green** passed,
   **red** failed, **grey** not run since its last edit.
 - Open **Operate → Tests** — the same list with a summary line and a
-  **Run all tests** button.
+  **Run all tests** button. The panel is live: it re-renders on its
+  own as runs land — no refresh needed.
 
 Break the test on purpose (change `:expected`) and watch the dot:
 right after the edit it turns grey — the status is keyed to the

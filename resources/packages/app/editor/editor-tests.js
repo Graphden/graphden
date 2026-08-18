@@ -48,23 +48,99 @@ function loadTestStatuses() {
     .catch(() => null);
 }
 
+// --- live panel transport: SSE ping + one-shot re-fetch -------------
+// EventSource can't carry the Authorization / X-Graphden-Branch
+// headers the editor's auth + branch model rides on (self-host auth
+// is Bearer-only), so the subscription streams over fetch: the
+// monkey-patched window.fetch (editor-branches.js) adds the branch
+// header and authFetch stacks the Bearer. The stream carries only a
+// PING (see :_tests-stream-handler) — on each ping the client
+// re-fetches the always-fresh one-shot partial, coalescing while a
+// fetch is in flight.
+// graph-first-exception: transport plumbing only — every byte the
+// panel shows is server-rendered hiccup.
+
+let _testsRefreshInFlight = false;
+function refreshTestsPanel(el) {
+  if (_testsRefreshInFlight) return;
+  _testsRefreshInFlight = true;
+  authFetch('/partials/tests')
+    .then((r) => (r.ok ? r.text() : null))
+    .then((html) => {
+      if (html && el.isConnected) {
+        el.innerHTML = html;
+        el.dataset.testsLive = '1';
+      }
+    })
+    .catch(() => null)
+    .then(() => { _testsRefreshInFlight = false; });
+}
+
+async function connectTestsStream(el) {
+  const finish = (delayMs) => {
+    // Detached panel (Operate re-open rebuilt the section) → stop; the
+    // server's max-lifetime close bounds an orphaned reader anyway.
+    if (el.isConnected) setTimeout(() => connectTestsStream(el), delayMs);
+  };
+  try {
+    const r = await authFetch('/partials/tests-stream',
+                              { headers: { Accept: 'text/event-stream' } });
+    if (!r.ok || !r.body) { refreshTestsPanel(el); finish(15000); return; }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx = buf.indexOf('\n\n');
+      while (idx >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        idx = buf.indexOf('\n\n');
+        if (frame.includes('event: close')) {
+          reader.cancel().catch(() => {});
+        } else if (frame.includes('data:')) {
+          // Any ping = "something may have changed" — re-fetch the
+          // always-fresh one-shot panel.
+          refreshTestsPanel(el);
+        }
+      }
+      if (!el.isConnected) { reader.cancel().catch(() => {}); return; }
+    }
+    // Clean end (server lifetime close) — reconnect promptly.
+    finish(1000);
+  } catch (_) {
+    refreshTestsPanel(el);
+    finish(15000);
+  }
+}
+
 // Operate → Tests section shell (mounted by editor-sidebar.js's
-// mountAdminSection; re-fetched on every Operate open via
-// reloadDynamicOpsSections — statuses drift as tests run).
+// mountAdminSection; rebuilt on every Operate open via
+// reloadDynamicOpsSections). LIVE: the panel body arrives over the
+// SSE stream (/partials/tests-stream — write-wakes + 30 s keepalive,
+// changed-only pushes; the stream ticks once at open, so the first
+// paint is immediate). The rebuilt-on-reopen node detaches the old
+// one, whose reader then aborts via the isConnected watch.
 function buildTestsSection() {
   if (!isAuthenticated()) return null;
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-tests';
-  wrap.innerHTML = ''
-    + '<div class="ns-children" hx-get="/partials/tests" hx-trigger="load" hx-swap="innerHTML">'
-    +   '<div class="loading">Loading…</div>'
-    + '</div>';
+  const el = document.createElement('div');
+  el.className = 'ns-children';
+  el.innerHTML = '<div class="loading">Loading…</div>';
+  wrap.appendChild(el);
+  // Connect after mountAdminSection has appended the section.
+  setTimeout(() => { if (el.isConnected) connectTestsStream(el); }, 0);
   return wrap;
 }
 
 // Run-all lifecycle — the panel's markup is server hiccup; JS owns only
-// the click → POST → refresh cycle (the JSON API stays the single run
-// entry point for the editor, MCP and scripts alike).
+// the click → POST → re-prime cycle (the JSON API stays the single run
+// entry point for the editor, MCP and scripts alike). The PANEL itself
+// refreshes via the SSE push run-tests! nudges (the pushed body carries
+// a fresh, enabled button).
 document.addEventListener('click', (ev) => {
   const btn = ev.target.closest('#gd-tests-run-all');
   if (!btn || btn.disabled) return;
@@ -75,19 +151,14 @@ document.addEventListener('click', (ev) => {
     .catch(() => null)
     .then(() => loadTestStatuses())
     .then(() => {
-      // Fresh dots in the tree + a fresh panel (counts, per-row status).
+      // Fresh dots in the tree; the panel body lands via SSE.
       if (typeof repaintAfterPrime === 'function') repaintAfterPrime();
-      const host = btn.closest('.sidebar-tests');
-      if (host && typeof buildTestsSection === 'function' && window.htmx) {
-        const fresh = buildTestsSection();
-        if (fresh) {
-          const freshChild = fresh.querySelector('.ns-children');
-          const old = host.querySelector('.ns-children');
-          if (freshChild && old) {
-            old.replaceWith(freshChild);
-            window.htmx.process(freshChild);
-          }
-        }
-      }
+      // Belt-and-braces: if the stream is down (proxy without SSE),
+      // the pushed replacement never arrives — restore the button so
+      // the panel stays usable.
+      setTimeout(() => {
+        const b = document.querySelector('#gd-tests-run-all');
+        if (b?.disabled) { b.disabled = false; b.textContent = 'Run all tests'; }
+      }, 4000);
     });
 });

@@ -220,6 +220,41 @@
 
   {:name :_partial-tests-handler
    :lambda-params [:request]
-   :description "Ring handler for GET /partials/tests — the Operate → Tests panel as text/html. Auth-required (route side)."
+   :description "Ring handler for GET /partials/tests — the Operate → Tests panel as text/html. Auth-required (route side). The one-shot sibling of the LIVE stream below (kept for clients without SSE and as the JS fallback)."
    :parent :html-ok-response
-   :args {:body :_ptst-html}}]}
+   :args {:body :_ptst-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; LIVE panel stream — GET /partials/tests-stream. The same panel
+  ;; body pushed over SSE: `:wake-on-writes` re-renders on any
+  ;; graphden_events event (graph writes AND the `test:updated` nudge
+  ;; run-tests! emits after every batch), changed-only, ~200 ms
+  ;; debounce; `:interval-ms` is just the keepalive ceiling. The
+  ;; editor's Tests section subscribes via `hx-ext="sse"` attrs
+  ;; (editor-tests.js builds the shell; the htmx SSE extension rides
+  ;; the editor head).
+  ;; ---------------------------------------------------------------------
+
+  ;; The stream deliberately pushes a PING (server time), not the
+  ;; panel body: a long-lived stream's captured render freezes
+  ;; data-dependent fragments (observed live — the panel body
+  ;; re-rendered stale on every tick while a fresh request saw new
+  ;; data), whereas a `:time`-effect fragment re-renders every tick
+  ;; by construction (cacheability excludes :time). The client
+  ;; treats each ping as "something changed" and re-fetches the
+  ;; one-shot `/partials/tests`, which is always fresh. Write-wakes
+  ;; (~200 ms) + the `test:updated` NOTIFY run-tests! emits after
+  ;; each batch make runs land promptly; 30 s keepalive bounds drift.
+  {:name :_tests-ping
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "tests-ping"}}
+          :children [{:parent :to-str :args {:value {:parent :current-time-ms :args {}}}}]}}
+
+  {:name :_tests-stream-handler
+   :lambda-params [:request]
+   :description "SSE ping stream for the Operate → Tests panel — write-wakes + 30 s keepalive; each pushed ping tells the client to re-fetch `/partials/tests`."
+   :parent :sse-fragment-handler
+   :args {:fragment :_tests-ping
+          :interval-ms 30000
+          :wake-on-writes true}}]}

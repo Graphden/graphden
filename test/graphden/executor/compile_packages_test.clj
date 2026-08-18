@@ -44,7 +44,14 @@
           config (-> (sys/read-config :dev)
                      (assoc-in [:db/postgres :jdbc-url] (:jdbc-url cfg))
                      (assoc-in [:db/postgres :username] (:username cfg))
-                     (assoc-in [:db/postgres :password] (:password cfg)))
+                     (assoc-in [:db/postgres :password] (:password cfg))
+                     ;; :exec/context refs :db/notify-listener (event-driven
+                     ;; SSE), so the partial init below now pulls the LISTEN
+                     ;; connection too — point it at the same container.
+                     (assoc-in [:db/notify-listener :pg-opts]
+                               {:jdbc-url (:jdbc-url cfg)
+                                :username (:username cfg)
+                                :password (:password cfg)}))
           ;; :exec/compiled-registry pulls in storage → base-fns →
           ;; fn-entities → context → cr/rebuild!. cr/rebuild! runs
           ;; `compile-all` over the whole graph.

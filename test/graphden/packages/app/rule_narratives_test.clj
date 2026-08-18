@@ -58,7 +58,7 @@
     :constantly :transduce :call :call-noargs :try
     ;; audit-3 guard additions (every-rule-owner-has-a-narrative):
     :vec :to-set :flatten :zipmap :select-keys
-    :update-keys :update-vals :assert-some :name :str-to-keyword
+    :update-keys :update-vals :assert-some :assert :assert-eq :name :str-to-keyword
     ;; static field reconstruction (the :zipmap counterpart for
     ;; entry lists):
     :pairs->map})

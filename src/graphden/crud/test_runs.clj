@@ -30,9 +30,10 @@
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
-    [graphden.crud.types-api :as types-api]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
+    [graphden.types.core :as types]
+    [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
 
@@ -74,19 +75,23 @@
 
 
 (defn test-fn-rows
-  "Named fns of the current branch living in test namespaces — light
-   rows off the ctx graph cache (branch- and org-correct by
-   construction), sorted by name. `_`-prefixed fns are NOT tests:
-   the `_`-private convention marks scaffolding, and a tests
-   namespace needs private helpers like any other."
+  "Named fns of the current branch living in test namespaces — read
+   DIRECTLY from the request storage (branch- and org-scoped by the
+   handle), one query per test namespace, sorted by name. Deliberately
+   NOT the ctx graph cache: the SSE panel stream is one long request
+   whose per-request cache would freeze at its first tick, so every
+   caller here pays the fresh (small — test namespaces only) read
+   instead. `_`-prefixed fns are NOT tests: the `_`-private convention
+   marks scaffolding, and a tests namespace needs private helpers like
+   any other."
   [ctx]
   (let [storage (request/require-storage ctx)
         ns-ids (test-namespace-ids storage)]
     (when (seq ns-ids)
-      (->> (:fns (types-api/cached-or-load-graph ctx))
+      (->> ns-ids
+           (mapcat #(sp/query-entities storage :fn {:namespace-id %}))
            (filter #(and (:name %)
-                         (not (str/starts-with? (str (:name %)) "_"))
-                         (contains? ns-ids (:namespace-id %))))
+                         (not (str/starts-with? (str (:name %)) "_"))))
            (sort-by :name)
            vec))))
 
@@ -100,15 +105,67 @@
   10000)
 
 
+(defn nullable-type?
+  "True iff type expression `t` explicitly admits nil — `:null` itself
+   or a union containing it (aliases resolved first, so
+   `:nullable-text` qualifies)."
+  [t]
+  (let [t (types/resolve-alias t)]
+    (or (= :null t)
+        (and (types/union-type? t)
+             (boolean (some #{:null} (types/union-members t)))))))
+
+
+(defn blocking-frees
+  "Free args that BLOCK a zero-arg run: `free` (`{arg-name → slot-id}`)
+   minus slots whose DECLARED type explicitly admits nil
+   (`nullable-slot?` — a slot-id predicate) — the executor hands an
+   unbound slot nil, so an explicitly-nullable free runs type-soundly
+   as its absent case. Everything else (concrete types, bare
+   typevars, `:any`) stays blocking — conservative: an `:any` free is
+   usually a forgotten binding."
+  [free nullable-slot?]
+  (into {}
+        (remove (fn [[_ slot-id]] (nullable-slot? slot-id)))
+        free))
+
+
+(defn- nullable-slot-pred
+  "Batched slot-id → \"declared type admits nil\" predicate over the
+   free-arg surface: two org/branch-scoped reads (slot rows, then
+   their type-fn rows), then a set lookup. The slot's type-fn
+   `:constraint` is the SAME type expression the checker resolves
+   (`[:union :null …]` for a nullable alias/anon union row); primitive
+   type-rows carry no constraint and stay blocking."
+  [storage slot-ids]
+  (let [slots (when (seq slot-ids) (sp/read-entities storage :slot slot-ids))
+        type-ids (into [] (distinct) (keep :type-fn-id (vals slots)))
+        type-rows (when (seq type-ids) (sp/read-entities storage :fn type-ids))
+        nullable-slot-ids (into #{}
+                                (keep (fn [[sid row]]
+                                        (when (some-> (get type-rows (:type-fn-id row))
+                                                      :constraint
+                                                      nullable-type?)
+                                          sid)))
+                                slots)]
+    (fn [slot-id] (contains? nullable-slot-ids slot-id))))
+
+
 (defn- run-one!
-  "Execute one test fn through the standard pipeline. A fn with free
-   args isn't runnable as a test (nothing supplies them) — reported,
-   never submitted."
+  "Execute one test fn through the standard pipeline. A fn with
+   BLOCKING free args isn't runnable as a test (nothing supplies
+   them) — reported, never submitted; frees whose declared slot type
+   explicitly admits nil default to nil (see `blocking-frees`)."
   [ctx fn-row timeout-ms]
-  (let [free (lookup/free-arg-slot-map-cached ctx (:id fn-row))]
-    (if (seq free)
+  (let [storage (request/require-storage ctx)
+        free (lookup/free-arg-slot-map-cached ctx (:id fn-row))
+        blocking (if (seq free)
+                   (blocking-frees free (nullable-slot-pred storage (vec (vals free))))
+                   free)]
+    (if (seq blocking)
       {:status :not-runnable
-       :error (str "test has unbound args: " (str/join ", " (sort (map name (keys free)))))}
+       :error (str "test has unbound args: "
+                   (str/join ", " (sort (map name (keys blocking)))))}
       (-> (fn-exec/apply-execute ctx {:fn-id (:id fn-row) :args {}
                                       :timeout-ms timeout-ms :persist? true}
                                  fn-row)
@@ -139,6 +196,22 @@
                                (run-one! ctx row (or timeout-ms default-test-timeout-ms))))
                       rows)
         by-status (frequencies (map :status results))]
+    ;; Nudge SSE listeners (the live Tests panel) — best-effort, from
+    ;; EVERY run path (button, API, auto-run). TWICE: once now, once
+    ;; after a settle delay — the terminal execution row lands via the
+    ;; async `record-completion!` tail, so the immediate wake's render
+    ;; can still read the previous status and dedupe away; the delayed
+    ;; wake re-renders after the write has landed (the 30 s keepalive
+    ;; tick remains the backstop for pathological lag).
+    (when (seq results)
+      (when-let [emit (:notify-emitter ctx)]
+        (let [ev {:kind :test :op :updated :id ""
+                  :branch-id (some-> (vs/current-branch-id
+                                       (request/require-storage ctx))
+                                     str)}]
+          (try (emit ev) (catch Exception _ nil))
+          (future (Thread/sleep 2000)
+                  (try (emit ev) (catch Exception _ nil))))))
     {:total (count results)
      :passed (get by-status :succeeded 0)
      :failed (get by-status :failed 0)

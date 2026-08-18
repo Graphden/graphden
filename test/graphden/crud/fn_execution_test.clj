@@ -1263,6 +1263,15 @@
       (let [wrapped (setup/create-composed-fn!
                       storage (str "my-trace-wrap-" suffix) (:id wrap-base))]
         (setup/bind-ref! storage (:id wrapped) (:id slot-x) (:id composed))
+        ;; Raw-storage fns never pass check-fn-def!, so they'd have NO
+        ;; rich-types entries — and trace capture FAILS CLOSED on an
+        ;; unregistered id (`{:hidden :unknown-type}`, no timings, no
+        ;; values). Register plain entries so these tests exercise the
+        ;; plain-capture path through the real classifier, like every
+        ;; editor/sync-created fn in production.
+        (doseq [row [wrapped composed]]
+          (registry/record-rich-types-raw!
+            (:id row) (keyword (:name row)) {:return :int :effects #{}}))
         {:wrapped wrapped :target composed}))))
 
 

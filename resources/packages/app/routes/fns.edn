@@ -163,6 +163,11 @@
    :parent :get-auth-required
    :args {:path "/partials/error-log" :handler :_partial-error-log-handler}}
 
+  {:name :partial-tests
+   :description "GET /partials/tests — the Operate → Tests panel (summary + Run-all button + per-test latest status of the current version) as text/html. Auth-required; `editor-tests.js` owns the Run-all POST → refresh lifecycle."
+   :parent :get-auth-required
+   :args {:path "/partials/tests" :handler :_partial-tests-handler}}
+
   {:name :partial-assets-panel
    :description "GET /partials/assets-panel — the frontend-asset override panel (bundle files + override status + editor slot). Auth-required."
    :parent :get-auth-required
@@ -551,6 +556,18 @@
    :parent :get-auth-required
    :args {:path "/executions" :handler :list-executions-handler}}
 
+  ;; --- /api/tests — run + status of `tests`-namespace fns ---
+
+  {:name :api-tests-run
+   :description "POST /api/tests/run — run every test on the current branch (or the body's `{fn-ids: […]}` subset) sequentially through the standard execute pipeline; returns `{total, passed, failed, other, results}`. Auth-required."
+   :parent :post
+   :args {:path "/tests/run" :handler :tests-run-handler}}
+
+  {:name :api-tests-status
+   :description "GET /api/tests/status — every test fn on the current branch with the newest execution status of its CURRENT version (`status` null = never ran since the last edit). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/tests/status" :handler :tests-status-handler}}
+
   ;; --- /api/services/reconcile — Phase 1 hot-reload trigger ---
 
   {:name :api-services-reconcile
@@ -711,6 +728,8 @@
                   :api-execution-by-id
                   :api-execution-cancel
                   :api-executions-list
+                  :api-tests-run
+                  :api-tests-status
                   :api-services-reconcile
                   :api-services-list
                   :api-branches-root

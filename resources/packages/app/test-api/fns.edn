@@ -1,0 +1,225 @@
+;; Tests API — the `tests` namespace convention (Roadmap Block 3.1).
+;;
+;; A test is a named fn in a namespace whose dotted path contains the
+;; segment `tests`; it passes when it executes without a throw
+;; (`:assert` / `:assert-eq` are the failure vocabulary). Discovery,
+;; the sequential runner and the latest-status join live in
+;; `graphden.crud.test-runs`; this module is the HTTP face — request
+;; parsing as graph composition (the `:_execute-parsed` pattern) over
+;; two thin boundary base-fns.
+
+{:namespace "app.test-api"
+ :description "Tests API: POST /api/tests/run (run the branch's tests through the execute pipeline) + GET /api/tests/status (per-test latest status of the current version)."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; POST /api/tests/run — body `{fn-ids?: [uuid-str …], timeout-ms?: int}`
+  ;; ---------------------------------------------------------------------
+
+  {:name :_tests-run-body
+   :description "POST /api/tests/run request body parsed as JSON; nil for an empty body (= run all tests)."
+   :parent :parse-json-body}
+
+  {:name :_tests-run-fn-ids
+   :parent :get :args {:coll :_tests-run-body :key {:value :fn-ids} :default nil}}
+
+  {:name :_tests-run-timeout-ms
+   :parent :get :args {:coll :_tests-run-body :key {:value :timeout-ms} :default nil}}
+
+  {:name :_tests-run-apply
+   :description "Single `test-runs/run-tests!` call — sequential execution of the branch's tests through the standard execute pipeline (effect gating, redaction, per-org caps, persistence), summarised as `{:total :passed :failed :other :results}`. `:request` is unused data-wise but pins the fn to the request scope so the summary is never call-cached across requests."
+   :args {:request {:type :ring-request-shape
+                    :description "The Ring request (scope pin only)."}
+          :fn-ids {:type [:union :null [:list :text]]
+                   :description "Optional fn-id strings — run only these tests; nil = every test on the branch."}
+          :timeout-ms {:type :nullable-int
+                       :description "Per-test deref timeout; nil = 10000 ms. An overrunning test reports `:pending` and its terminal status lands on the execution row asynchronously."}}
+   :return-type {:total :int :passed :int :failed :int :other :int
+                 :results [:list :keyword-map]}
+   :effects #{:db}}
+
+  {:name :_tests-run
+   :description "The apply stage with the body fields bound — `:request` stays free and unifies with the parse chain's request."
+   :parent :_tests-run-apply
+   :args {:fn-ids :_tests-run-fn-ids
+          :timeout-ms :_tests-run-timeout-ms}}
+
+  {:name :tests-run-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/tests/run."
+   :parent :json-handler
+   :args {:data :_tests-run}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/tests/status
+  ;; ---------------------------------------------------------------------
+
+  {:name :_tests-status-apply
+   :description "Single `test-runs/tests-with-statuses` call — every test fn on the current branch joined with the newest execution of its CURRENT version (`:status` nil = never ran since last edit; keying by current version makes an edited test read as stale by construction). `:request` pins the request scope, as in `:_tests-run-apply`."
+   :args {:request {:type :ring-request-shape
+                    :description "The Ring request (scope pin only)."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :tests-status-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /api/tests/status."
+   :parent :json-handler
+   :args {:data :_tests-status-apply}}
+
+  ;; ---------------------------------------------------------------------
+  ;; TESTS panel partial — GET /partials/tests. The Operate → Tests
+  ;; section: summary line (total / passed / failed), the Run-all
+  ;; button (`editor-tests.js` owns its POST → refresh lifecycle),
+  ;; one row per test: status dot, fn name (#hash link), error text.
+  ;; Mirrors the type-errors partial family in `app/editor-panels`.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_ptst-rows
+   :parent :_tests-status-apply}
+
+  ;; per-row status classification (also reused as filter predicates
+  ;; for the summary counts — pure, so it satisfies `:filter`'s `#{}`
+  ;; effect-constrained predicate slot)
+  {:name :_ptst-e-status-raw
+   :parent :get
+   :args {:coll {:as :item} :key {:value :status} :default nil}}
+  {:name :_ptst-e-status
+   :parent :coalesce
+   :args {:value :_ptst-e-status-raw :default {:value "stale"}}}
+  {:name :_ptst-passed?
+   :parent :equal?
+   :args {:a :_ptst-e-status :b {:value "succeeded"}}}
+  {:name :_ptst-failed?
+   :parent :equal?
+   :args {:a :_ptst-e-status :b {:value "failed"}}}
+
+  ;; summary counts
+  {:name :_ptst-total
+   :parent :count
+   :args {:coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
+  {:name :_ptst-passed-rows
+   :parent :filter
+   :args {:pred :_ptst-passed?
+          :coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
+  {:name :_ptst-passed-n
+   :parent :count
+   :args {:coll {:ref :_ptst-passed-rows :type [:list :keyword-map]}}}
+  {:name :_ptst-failed-rows
+   :parent :filter
+   :args {:pred :_ptst-failed?
+          :coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
+  {:name :_ptst-failed-n
+   :parent :count
+   :args {:coll {:ref :_ptst-failed-rows :type [:list :keyword-map]}}}
+
+  {:name :_ptst-summary
+   :parent :str
+   :args {:parts [{:parent :to-str :args {:value :_ptst-total}}
+                  {:value " tests · "}
+                  {:parent :to-str :args {:value :_ptst-passed-n}}
+                  {:value " passed · "}
+                  {:parent :to-str :args {:value :_ptst-failed-n}}
+                  {:value " failed"}]}}
+  {:name :_ptst-summary-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-panel-summary"}}
+          :children [:_ptst-summary]}}
+  {:name :_ptst-run-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "gd-tests-run-all" :type "button"
+                          :class "tests-run-all"}}
+          :children ["Run all tests"]}}
+  {:name :_ptst-header
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-panel-header"}}
+          :children [:_ptst-summary-div :_ptst-run-btn]}}
+
+  ;; one row per test
+  {:name :_ptst-dot-cls
+   :parent :cond
+   :args {:clauses [:_ptst-passed? {:value "test-dot test-passed"}
+                    :_ptst-failed? {:value "test-dot test-failed"}
+                    {:value true} {:value "test-dot test-stale"}]}}
+  {:name :_ptst-dot-attrs
+   :parent :zipmap
+   :args {:keys [{:value :class}] :vals [:_ptst-dot-cls]}}
+  {:name :_ptst-dot
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs :_ptst-dot-attrs
+          :children ["●"]}}
+  {:name :_ptst-e-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+  {:name :_ptst-e-href
+   :parent :str
+   :args {:parts [{:value "#"} :_ptst-e-name]}}
+  {:name :_ptst-link-attrs
+   :parent :assoc
+   :args {:map {:value {:class "tests-fn"}}
+          :key {:value :href}
+          :value :_ptst-e-href}}
+  {:name :_ptst-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs :_ptst-link-attrs
+          :children [:_ptst-e-name]}}
+  {:name :_ptst-e-error
+   :parent :get
+   :args {:coll {:as :item} :key {:value :error} :default {:value ""}}}
+  {:name :_ptst-err-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-err"}}
+          :children [:_ptst-e-error]}}
+  {:name :_ptst-row-err
+   :description "Error line only on a failed row — nil child renders nothing."
+   :parent :if
+   :args {:test :_ptst-failed?
+          :then :_ptst-err-div
+          :else {:value nil}}}
+  {:name :_ptst-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-row"}}
+          :children [:_ptst-dot :_ptst-link :_ptst-row-err]}}
+  {:name :_ptst-rendered-rows
+   :parent :map
+   :args {:func :_ptst-row
+          :coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
+
+  {:name :_ptst-empty?
+   :parent :empty?
+   :args {:coll {:ref :_ptst-rows :type [:list :keyword-map]}}}
+  {:name :_ptst-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-empty"}}
+          :children ["No tests yet — a test is a fn in a namespace containing the `tests` segment (e.g. `myproj.tests`). Compose it over `assert` / `assert-eq`; it passes when it runs without a throw."]}}
+  {:name :_ptst-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-list"}}
+          :children [:_ptst-rendered-rows]}}
+  {:name :_ptst-list-or-empty
+   :parent :if
+   :args {:test :_ptst-empty?
+          :then :_ptst-empty-msg
+          :else :_ptst-list}}
+  {:name :_ptst-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "tests-panel"}}
+          :children [:_ptst-header :_ptst-list-or-empty]}}
+  {:name :_ptst-html
+   :parent :render-hiccup
+   :args {:hiccup :_ptst-body}}
+
+  {:name :_partial-tests-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /partials/tests — the Operate → Tests panel as text/html. Auth-required (route side)."
+   :parent :html-ok-response
+   :args {:body :_ptst-html}}]}

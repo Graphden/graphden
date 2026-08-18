@@ -39,6 +39,7 @@
                   :partial-assets-panel
                   :partial-asset-edit
                   :partial-type-errors
+                  :partial-tests
                   :partial-branch-diff
                   :partial-merge-conflicts
                   :partial-execute-result-effects

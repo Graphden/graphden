@@ -30,6 +30,7 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.fn-execution.stats :as exec-stats]
+    [graphden.crud.test-runs :as test-runs]
     [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
@@ -2021,3 +2022,132 @@
 ;; truncate-error / ref-arg?) are unit-tested in
 ;; `graphden.crud.fn-execution.persist-test` — their dedicated ns. This
 ;; file keeps only the storage-backed persist coverage.
+
+
+;; ============================================================================
+;; test-runs — the `tests` namespace convention (discovery / runner /
+;; status). Lives here to reuse this ns's shared storage fixture — the
+;; runner is an execute-pipeline consumer like exec-errors/exec-stats.
+;; ============================================================================
+
+(deftest test-ns-path?-segment-matching-test
+  (testing "the `tests` segment matches at any depth"
+    (is (test-runs/test-ns-path? "tests"))
+    (is (test-runs/test-ns-path? "tests.parser"))
+    (is (test-runs/test-ns-path? "myproj.tests"))
+    (is (test-runs/test-ns-path? "myproj.tests.api")))
+  (testing "substrings and lookalikes do NOT match"
+    (is (not (test-runs/test-ns-path? "testsuite")))
+    (is (not (test-runs/test-ns-path? "myproj.testsuite.api")))
+    (is (not (test-runs/test-ns-path? "test")))
+    (is (not (test-runs/test-ns-path? "")))
+    (is (not (test-runs/test-ns-path? nil)))))
+
+
+(defn- make-noarg-fn!
+  "Base-fn with no slots + a composed instance — a zero-free-arg fn the
+   test runner can execute. `impl` is the base's `(fn [args ctx])`.
+   Returns the composed fn row."
+  [storage suffix impl]
+  (let [base-name (str "test-runs-base-" suffix)]
+    (exec/register-base-fn! (keyword base-name) impl)
+    (let [base (setup/create-base-fn! storage base-name :any)]
+      (setup/create-composed-fn! storage (str "t-" suffix) (:id base)))))
+
+
+(defn- await-terminal-statuses
+  "Poll `tests-with-statuses` until every fn in `names` reports a
+   TERMINAL status (or 10 s passes) — inline successes may still have
+   their row finalised by the async `record-completion!` writer."
+  [ctx names]
+  (let [deadline (+ (System/currentTimeMillis) 10000)]
+    (loop []
+      (let [by-name (into {} (map (juxt :fn-name identity))
+                          (test-runs/tests-with-statuses ctx))
+            terminal? (fn [n]
+                        (contains? #{"succeeded" "failed" "cancelled"}
+                                   (str (:status (get by-name n)))))]
+        (if (or (every? terminal? names)
+                (>= (System/currentTimeMillis) deadline))
+          by-name
+          (do (Thread/sleep 50) (recur)))))))
+
+
+(deftest test-runs-discovery-run-status-test
+  (let [storage (create-full-storage)
+        ns-tests (sp/create-entity storage :ns {:name "tests"})
+        ns-proj (sp/create-entity storage :ns {:name "myproj"})
+        ns-proj-tests (sp/create-entity storage :ns {:name "tests"
+                                                     :parent-id (:id ns-proj)})
+        ns-suite (sp/create-entity storage :ns {:name "testsuite"})
+        passing (make-noarg-fn! storage "pass" (fn [_ _] 42))
+        failing (make-noarg-fn! storage "fail"
+                                (fn [_ _]
+                                  (throw (ex-info "assert-eq failed: actual ≠ expected"
+                                                  {:type :execution-error/assertion-failed
+                                                   :actual 1 :expected 2}))))
+        outside (make-noarg-fn! storage "outside" (fn [_ _] 1))
+        helper (make-noarg-fn! storage "helper" (fn [_ _] 1))
+        _ (sp/update-entity storage :fn (:id helper) {:name "_t-helper"})
+        {unrunnable :composed} (make-pure-add-fn! storage "unrun")
+        ;; ctx AFTER the register-base-fn! calls — default-registry-ctx
+        ;; snapshots the registry. :pg-storage carries the raw pool for
+        ;; latest-statuses, same handle apply-execute's stats-ctx uses.
+        c (-> (setup/default-registry-ctx storage)
+              (assoc :pg-storage @shared-storage))]
+    (sp/update-entity storage :fn (:id passing) {:namespace-id (:id ns-tests)})
+    (sp/update-entity storage :fn (:id failing) {:namespace-id (:id ns-proj-tests)})
+    (sp/update-entity storage :fn (:id outside) {:namespace-id (:id ns-suite)})
+    (sp/update-entity storage :fn (:id helper) {:namespace-id (:id ns-tests)})
+    (sp/update-entity storage :fn (:id unrunnable) {:namespace-id (:id ns-tests)})
+
+    (testing "discovery — segment-matched namespaces only, named fns only"
+      (is (= #{(:id ns-tests) (:id ns-proj-tests)}
+             (test-runs/test-namespace-ids storage))
+          "testsuite (substring lookalike) and myproj (no tests segment) excluded")
+      (is (= #{(:id passing) (:id failing) (:id unrunnable)}
+             (into #{} (map :id) (test-runs/test-fn-rows c)))
+          "the `_`-private helper inside the tests ns is scaffolding, not a test"))
+
+    (testing "status before any run — every test present, status nil"
+      (let [sts (test-runs/tests-with-statuses c)]
+        (is (= 3 (count sts)))
+        (is (every? (comp nil? :status) sts))))
+
+    (testing "run — pass / fail / not-runnable buckets"
+      (let [out (test-runs/run-tests! c {})]
+        (is (= 3 (:total out)))
+        (is (= 1 (:passed out)))
+        (is (= 1 (:failed out)))
+        (is (= 1 (:other out)))
+        (let [by-name (into {} (map (juxt :fn-name identity)) (:results out))]
+          (is (= :succeeded (:status (get by-name "t-pass"))))
+          (is (= :failed (:status (get by-name "t-fail"))))
+          (is (str/includes? (str (:error (get by-name "t-fail"))) "assert-eq")
+              "the assertion message surfaces on the result")
+          (is (= :not-runnable (:status (get by-name "my-test-add-unrun"))))
+          (is (str/includes? (str (:error (get by-name "my-test-add-unrun"))) "a, b")
+              "unbound args are named"))))
+
+    (testing "run — :fn-ids subset (uuid strings, the wire shape)"
+      (let [out (test-runs/run-tests! c {:fn-ids [(str (:id passing))]})]
+        (is (= 1 (:total out)))
+        (is (= 1 (:passed out)))))
+
+    (testing "status after the run — latest execution per current version"
+      (let [by-name (await-terminal-statuses c ["t-pass" "t-fail"])]
+        (is (= "succeeded" (str (:status (get by-name "t-pass")))))
+        (is (= "failed" (str (:status (get by-name "t-fail")))))
+        (is (some? (:execution-id (get by-name "t-fail"))))
+        (is (str/includes? (str (:error (get by-name "t-fail"))) "assert-eq"))
+        (is (nil? (:status (get by-name "my-test-add-unrun")))
+            "a never-run test stays status-less")))
+
+    (testing "editing a test rolls its version — status honestly resets to nil"
+      (sp/update-entity storage :fn (:id passing) {:description "edited"})
+      (let [by-name (into {} (map (juxt :fn-name identity))
+                          (test-runs/tests-with-statuses c))]
+        (is (nil? (:status (get by-name "t-pass")))
+            "stale-by-construction: the new version has no recorded run")
+        (is (= "failed" (str (:status (get by-name "t-fail"))))
+            "untouched tests keep their status")))))

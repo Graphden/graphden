@@ -55,6 +55,49 @@ If you create a tutorial fn-def with multiple free args, the
 form lists them all. The card's free-arg strip at the bottom
 mirrors the form so you can see what's needed at a glance.
 
+## Typed result representations
+
+The result pane doesn't always print text — it first asks *what
+type* the result is and picks a representation:
+
+- A **numeric series** (`[:list :numeric]` — ints or floats)
+  renders as an inline **sparkline** with a value-count caption
+  instead of a bullet list.
+- A fn whose return type is **`:hiccup-node`** (a component — a
+  form, a card, anything you'd normally insert into a page)
+  renders as a **Component preview**: the markup, live, inside a
+  fully sandboxed frame (no scripts, no access to your session).
+  You see what the component looks like without inserting it
+  anywhere.
+- Everything else falls back to the shape panes you'll see below
+  (list bullets / record table / scalar).
+
+The dispatch runs on the fn's declared or inferred return type —
+the same type you see in the inspector's RETURNS strip — with the
+runtime value's shape as a fallback, so even an untyped sketch
+returning `[3 1 4]` sparklines.
+
+### Try it
+
+1. Open `:range` (core.collections) and click `▶`. Set `end` to
+   `12`, leave `start`/`step` at their defaults.
+2. Run. Instead of twelve bullet rows you get a rising sparkline
+   and the caption `12 values`.
+3. Create a component fn-def: **New fn** → name `hello-card`,
+   parent `:wrap-element`, bind `:tag` to `div` and `:content` to
+   `hello from a card`.
+4. Click `▶` → Run on `hello-card`. The pane shows **Component
+   preview** — your `<div>` rendered as markup in a sandboxed
+   frame, because the fn's inferred return type is `:hiccup-node`.
+
+Representations are themselves graph code: the type→repr table is
+the `:_value-repr-registry` fn-def (`app.reprs` namespace), each
+repr a pure `value → hiccup` fn-def whose output is sanitized
+before the editor inlines it. On a self-hosted deployment an admin
+extends the system by adding a repr fn-def plus one registry row —
+no server change. (On cloud the shipped registry is read-only for
+tenants.)
+
 ## The effect gate
 
 Every fn carries a set of effects it transitively touches

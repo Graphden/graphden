@@ -299,8 +299,12 @@ signed-in users) opens the **execute popover**:
 - **Persist toggle** — "Save to history". Pre-checked + disabled for
   effect-bearing fns (backend auto-persists those).
 - **Run** → POST `/api/execute` → response handled:
-  - `:succeeded` → inline type-aware result pane (scalar chip / list
-    bullets / record table / JSON `<pre>` with > 50 KB truncation).
+  - `:succeeded` → inline type-aware result pane. Dispatch order in
+    `:_er-succeeded-body` (`app/execution/fns.edn`): truncated → nil
+    → **typed repr** (`:_value-repr-registry`, § below) →
+    **component preview** (declared `:hiccup-node` return →
+    sandboxed iframe) → HTML-response iframe → > 50 KB JSON
+    truncation → list bullets / record table / scalar chip.
   - `:pending` → spinner + execution-id + polling with exponential
     backoff (500 ms → 1 s → 2 s → 5 s → 30 s) + Cancel button.
   - `:failed` → error pane with message + ex-data.
@@ -313,6 +317,57 @@ signed-in users) opens the **execute popover**:
   call tree, below) buttons.
 
 Source: `resources/packages/app/editor/editor-execute*.js`.
+
+## Typed value representations
+
+The result pane's first non-trivial dispatch tier is the
+**value-repr registry** — the read-side sibling of the value-form
+system: `:_value-form-registry` answers "how do I EDIT a value of
+this type", `:_value-repr-registry` (`app/reprs/fns.edn`) answers
+"how do I SHOW one".
+
+- **Registry** — a `:const` list of `[type-name repr-fn-name]` pairs
+  (vector type-name = structural key, `["list" "numeric"]` →
+  `[:list :numeric]`), matched most-specific-first by `subtype?` —
+  the same shared-list pattern and matching code
+  (`crud.value-form/pick-form-fn`) as the form registry. Adding a
+  repr = one fn-def + one registry row; no Clojure change.
+- **Dispatch type** — the executed fn's declared/inferred RETURN
+  type from the id-keyed rich-types registry (`:fn-id` reaches the
+  partial via a read-time fn-version join in `get-execution` for
+  persisted rows, and via an editor-stamped body field on the
+  inline `POST /partials/execute-result-inline` path). When the
+  registry knows nothing narrower than `:any`, the runtime value's
+  literal classification is the fallback — so a numeric list from
+  an untyped ad-hoc fn still sparklines.
+- **Repr fns are pure `value → hiccup`** — enforced at runtime, not
+  by declaration: the repr subtree executes under
+  `:allowed-effects #{}`, so the first `record-effect!` of any
+  category throws and the pane falls back to shape-based rendering.
+- **Output is sanitized** (`graphden.web.hiccup-sanitize`) before
+  the editor inlines it: allowlist of presentation + SVG tags, fixed
+  attribute allowlist (no `on*`, no `hx-*`/`data-*` — the pane runs
+  `htmx.process` — no URL-bearing attributes, paint values checked),
+  `h-raw` RawStrings collapse to escaped text, bounded depth/size.
+  Repr output is editor-DOM content, i.e. the same stored-XSS
+  surface class as `:resource-override` — the sanitizer keeps the
+  property independent of who authored the repr fn.
+- Shipped repr: `_repr-numeric-list` — an SVG sparkline (240×48,
+  min..max scaled, stride-downsampled via `svg-polyline-points`)
+  plus a value-count caption, registered for `["list" "numeric"]`.
+
+**Component preview** is the neighbouring tier, not a registry row:
+when the fn's declared return type is semantically `:hiccup-node`
+(mutual-`subtype?` equality — one-way `⊆` would swallow every
+scalar, `:hiccup-node` being a union), the result renders as markup
+in a fully sandboxed iframe (`sandbox=""` — no scripts, no
+same-origin; unlike the HTML-response pane's `allow-scripts`). This
+is the static half of a devcards-style component preview; an
+INTERACTIVE preview needs a served per-branch `/preview` route with
+its own auth story and is deliberately out of scope.
+
+Tests: `graphden.packages.app.value-repr-test`,
+`graphden.web.hiccup-sanitize-test`.
 
 ## Path trace — the call tree
 

@@ -67,8 +67,12 @@ function _tourCheckPasses(check) {
   try {
     switch (check.kind) {
       case 'ns-exists':
+        // ROOT namespaces only: `name` is the SEGMENT, not the path, so a
+        // nested ns elsewhere (the cloud's landing.tutorial lesson pages)
+        // must not false-pass the "create a namespace" step.
         return typeof graphData !== 'undefined' && !!graphData
-          && (graphData.namespaces || []).some((n) => n.name === check.name);
+          && (graphData.namespaces || []).some(
+            (n) => n.name === check.name && !n['parent-id']);
       case 'fn-exists':
         return !!_tourFindFn(check.name);
       case 'fn-parent': {

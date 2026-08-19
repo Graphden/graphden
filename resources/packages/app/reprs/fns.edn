@@ -130,9 +130,14 @@
    :return-type :non-negative-int
    :args {:value 50}}
 
+  ;; `:first` types nullable; `:keys` demands a map — the `{}` default
+  ;; is unreachable at runtime (the dispatch only fires on a non-empty
+  ;; record list) but keeps the boot sweep satisfied.
   {:name :_repr-rl-first
-   :parent :first
-   :args {:coll {:as :value :type [:list :keyword-map]}}}
+   :parent :coalesce
+   :args {:value {:parent :first
+                  :args {:coll {:as :value :type [:list :keyword-map]}}}
+          :default {:value {}}}}
 
   {:name :_repr-rl-cols
    :description "Column keys — the first record's keys, sorted for a deterministic column order."

@@ -116,29 +116,26 @@ def dark_banner(w, h, tile_size, tile_xy, wm_size, wm_dxy, tag_size, tag_y,
 
 
 def boosty(out):
-    """Boosty cover at the platform's NATIVE 1920x240 strip (~8:1). The
-    site scales it to the window width and crops the SIDES, so the lockup
-    is centered and kept inside the middle ~1000px; the round avatar
-    overlays the strip's bottom-left (roughly x 400..570, y 180+ on a
-    desktop window) — nothing important lives there."""
-    w, h = 1920, 240
-    im = Image.new("RGBA", (w, h), INK + (255,))
+    """Boosty cover, 2560x1440 — empirically the shape their uploader
+    accepts (1500x500 and the 'recommended' 1920x240 both get rejected by
+    the file picker; a 16:9 image works). The site shows the middle
+    horizontal band (desktop ≈ y 500..940) and overlays the round λ
+    avatar bottom-left (circle ≈ x 276..587, y 838..1150), so: light
+    ground to match the page, NO tile (the avatar already carries the
+    mark), wordmark + tagline centered inside the visible band, clear of
+    the avatar circle."""
+    w, h = 2560, 1440
+    im = light_gradient(w, h)
     d = ImageDraw.Draw(im, "RGBA")
-    backdrop(d, CONST_NODES, CONST_EDGES, (60, 90, 140), 110, 55,
-             scale=0.38, dx=1470, dy=10)
-    tile = 110
-    wm_size = 88
-    gap = 28
+    backdrop(d, CONST_NODES, CONST_EDGES, (150, 180, 225), 110, 65,
+             scale=0.55, dx=1880, dy=520)
+    wm_size = 150
     wm_w = d.textlength("graphden", ImageFont.truetype(BOLD, wm_size)) \
         + wm_size * -0.02 * 7
-    tx = int((w - (tile + gap + wm_w)) / 2)
-    ty = 25
-    im.alpha_composite(rounded_tile(tile), (tx, ty))
-    d = ImageDraw.Draw(im, "RGBA")
-    wordmark(d, tx + tile + gap, ty + 4, wm_size, LIGHT_TEXT, BLUE_LIGHT)
-    fm = ImageFont.truetype(MONO, 22)
+    wordmark(d, (w - wm_w) / 2, 570, wm_size, DARK_TEXT, BLUE)
+    fm = ImageFont.truetype(MONO, 38)
     tag_w = d.textlength(TAGLINE, font=fm)
-    d.text(((w - tag_w) / 2, 155), TAGLINE, font=fm, fill=MUTED)
+    d.text(((w - tag_w) / 2, 800), TAGLINE, font=fm, fill=(105, 115, 132))
     im.convert("RGB").save(out)
     print(out)
 

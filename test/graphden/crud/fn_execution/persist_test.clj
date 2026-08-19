@@ -1,7 +1,12 @@
-(ns graphden.crud.fn-execution.persist-test
+(ns ^:serial graphden.crud.fn-execution.persist-test
   "Unit tests for the pure helpers in `graphden.crud.fn-execution.persist`.
 
-   Parallel-safe: no `with-redefs`. The effect-drift log assertions
+   `^:serial`: the three `acquire-execution-slot-*` tests reset and
+   assert the PROCESS-GLOBAL `live-executions` counter — any parallel
+   test that runs a real execution (the /api/execute suites, the
+   preview gallery's per-card renders) transiently holds a slot and
+   flakes the zero-assertions. Everything else here is parallel-safe:
+   no `with-redefs`. The effect-drift log assertions
    capture output by `binding` `log/*logger-factory*` to a reifying
    sink — thread-local, so sibling NS-threads neither see the capture
    nor pollute its counts. The `declared-effects-of` inputs are REAL

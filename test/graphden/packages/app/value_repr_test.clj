@@ -132,12 +132,15 @@
           (is (in-tree? f "execute-result-list")))))
 
     (finally
-      ;; Restore the shipped registry so sibling deftests in this NS
-      ;; (whatever order kaocha runs them in) see the real dispatch.
+      ;; Restore the FULL shipped registry so sibling deftests in this
+      ;; NS (whatever order kaocha runs them in) see the real dispatch —
+      ;; a partial restore is an order-dependent flake (caught by a
+      ;; landing gate whose seed ran repr-safety first).
       (harness/sync! [{:name :_value-repr-registry
                        :namespace "app.reprs"
                        :parent :const
-                       :args {:value [[["list" "numeric"] "_repr-numeric-list"]]}}]))))
+                       :args {:value [[["list" "numeric"] "_repr-numeric-list"]
+                                      [["list" "keyword-map"] "_repr-record-list"]]}}]))))
 
 
 (deftest render-value-repr-direct-test

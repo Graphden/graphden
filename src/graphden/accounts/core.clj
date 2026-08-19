@@ -256,6 +256,60 @@
                    :token-scopes (parse-scopes (:scopes s)))))))))
 
 
+;; --- Preview capsules -------------------------------------------------------
+;;
+;; The cloud interactive component preview (docs/EXECUTION.md § Interactive
+;; component preview) runs on the org's APPS domain, where the editor's
+;; session cookie deliberately does not exist. Authorization crosses the
+;; origin as a CAPSULE: a short-lived `:session` row of kind "preview",
+;; minted only after the tenancy addon has checked the requester's
+;; `:execute` capability, scope-bound to exactly (org, fn-id, branch-id).
+;; `authenticate-token` refuses every non-nil/"api" kind by construction,
+;; so a leaked capsule can never become a login session — the only thing
+;; it can ever do is render that one fn on that one branch for its TTL.
+
+(def preview-token-ttl-ms
+  "Preview capsules live two minutes — long enough to open the tab and
+   press the effect-confirm link (which re-uses the same capsule, so a
+   reload within the TTL keeps working), short enough that a URL leaked
+   through history/logs goes stale almost immediately."
+  (* 2 60 1000))
+
+
+(defn mint-preview-token!
+  "Mint a preview capsule for `account-id`: kind \"preview\",
+   `preview-token-ttl-ms` TTL, scope string binding (org, fn-id,
+   branch-id) — all three DNS-/UUID-shaped, so the space-separated
+   `:scopes` encoding is unambiguous. Returns the raw token."
+  [storage account-id org fn-id branch-id]
+  (mint-session! storage account-id
+                 {:ttl-ms preview-token-ttl-ms
+                  :kind "preview"
+                  :label "preview"
+                  :scopes (str org " " fn-id " " branch-id)}))
+
+
+(defn preview-grant-by-token
+  "Resolve a preview capsule to its grant, or nil (fail closed): the
+   session must exist, be kind \"preview\", be unexpired, and belong to
+   an ACTIVE account. Returns `{:account-id :org :fn-id :branch-id}`
+   with ids as strings — the consumer compares them against its own
+   trusted request context before rendering anything."
+  [storage token]
+  (when-not (str/blank? token)
+    (when-let [s (first (sp/query-entities storage :session
+                                           {:token-hash (crypto/sha256-hex token)}))]
+      (when (and (= "preview" (:kind s)) (session-live? s))
+        (when-let [acct (account-of storage (:account-id s))]
+          (when (= "active" (:status acct))
+            (let [[org fn-id branch-id] (str/split (str (:scopes s)) #"\s+")]
+              (when (and org fn-id branch-id)
+                {:account-id (:account-id s)
+                 :org org
+                 :fn-id fn-id
+                 :branch-id branch-id}))))))))
+
+
 (defn revoke-token!
   "Delete the session behind `token` (server-side logout). No-op if unknown."
   [storage token]

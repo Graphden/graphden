@@ -270,6 +270,37 @@ function confirmCaptureValues(fnEntity) {
 }
 
 
+// Cloud interactive preview: the apps-domain URL needs a freshly-minted
+// capsule (short-TTL, fn+branch-scoped), so the pane renders a BUTTON and
+// we mint on click. Self-host renders a plain <a> instead — this handler
+// only ever sees the button variant. Delegated: result panes arrive via
+// innerHTML swaps.
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button.execute-result-open-preview[data-preview-fn-id]');
+  if (!btn) return;
+  e.preventDefault();
+  btn.disabled = true;
+  try {
+    const r = await authFetch('/api/preview-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 'fn-id': btn.dataset.previewFnId }),
+    });
+    const body = await r.json().catch(() => null);
+    if (r.ok && body?.url) {
+      window.open(body.url, '_blank', 'noopener');
+    } else {
+      window.alert(body?.error
+        || 'Interactive preview is unavailable (HTTP ' + r.status + ').');
+    }
+  } catch (err) {
+    window.alert('Interactive preview failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+
 async function submitExecution(fnEntity, args, persist, trace, captureValues,
                                resultHostEl, cancelBtn) {
   resultHostEl.textContent = '';

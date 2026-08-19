@@ -1730,10 +1730,26 @@
                                 {:value "execute-result-open-preview"}]}}
           :children [{:value "Open interactive preview ↗"}]}}
 
+  ;; Cloud (tenancy active): a BUTTON instead of a direct link — the
+  ;; apps-domain preview URL needs a freshly-minted capsule, so
+  ;; editor-execute.js POSTs /api/preview-token (addon route) on click
+  ;; and window.opens the returned URL. Self-host keeps the plain
+  ;; same-origin link.
+  {:name :_er-cp-cloud-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :class}
+                                {:value :data-preview-fn-id}]
+                         :vals [{:value "button"}
+                                {:value "execute-result-open-preview"}
+                                {:parent :to-str :args {:value :_er-exec-fn-id}}]}}
+          :children [{:value "Open interactive preview ↗"}]}}
+
   {:name :_er-cp-affordance
    :parent :if
    :args {:test {:parent :some? :args {:value :request-capabilities}}
-          :then :_er-hidden-placeholder
+          :then :_er-cp-cloud-btn
           :else :_er-cp-open-link}}
 
   {:name :_er-component-preview-banner

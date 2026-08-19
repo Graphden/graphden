@@ -140,3 +140,30 @@
             body (str (:body r))]
         (is (= 200 (:status r)))
         (is (str/includes? body "eff-rendered"))))))
+
+
+(deftest component-preview-pane-cloud-button-test
+  ;; Under a tenancy addon the caption swaps the direct link for the
+  ;; capsule-minting BUTTON (editor-execute.js POSTs /api/preview-token
+  ;; on click — an addon route; the apps-domain URL can't be static).
+  (let [_ (setup/sync-and-invalidate!
+            (:ctx h/*graph*) (:storage h/*graph*)
+            [{:name :pv-cloud-comp
+              :parent :wrap-element
+              :return-type :hiccup-node
+              :args {:tag {:value "div"}
+                     :content {:value "y"}}}])
+        row-id (:id (first (sp/query-entities
+                             (:storage h/*graph*) :fn {:name "pv-cloud-comp"})))
+        f (binding [tc/*current-capabilities* ["write" "execute"]]
+            (h/exec-name :_er-succeeded-body
+                         {:exec {:status "succeeded"
+                                 :result ["div" {} "y"]
+                                 :fn-id (str row-id)}}))
+        flat (tree-seq coll? seq f)]
+    (is (some #(= "execute-result-open-preview" %) flat)
+        "the affordance is present")
+    (is (some #(= (str row-id) %) flat)
+        "the button carries the fn-id for the mint POST")
+    (is (not-any? #(and (string? %) (str/starts-with? % "/preview?fn-id=")) flat)
+        "no direct same-origin link on cloud")))

@@ -915,22 +915,20 @@
                                     :_xp-has-effects?]}}
                    {:parent :not :args {:value :_pv-confirmed?}}]}}
 
-  {:name :_pv-branch-param
-   :parent :query-param
-   :args {:request {:as :request} :param-name {:value "branch"}}}
-
-  {:name :_pv-branch-suffix
-   :parent :if
-   :args {:test {:parent :some? :args {:value :_pv-branch-param}}
-          :then {:parent :str :args {:parts [{:value "&branch="} :_pv-branch-param]}}
-          :else {:value ""}}}
-
+  ;; Path- AND query-preserving: rebuilt from the request's own uri +
+  ;; query string, so the same chain serves the editor origin
+  ;; (`/preview?fn-id=…&branch=…`) and the apps-domain cloud preview
+  ;; (`/__preview?fn-id=…&t=<capsule>` — the capsule must survive the
+  ;; confirm round-trip).
   {:name :_pv-confirm-href
    :parent :str
-   :args {:parts [{:value "/preview?fn-id="}
-                  {:parent :to-str :args {:value :fn-id-param}}
-                  {:value "&effects=confirm"}
-                  :_pv-branch-suffix]}}
+   :args {:parts [{:parent :ring-uri :args {:request {:as :request}}}
+                  {:value "?"}
+                  {:parent :coalesce
+                   :args {:value {:parent :ring-query-string
+                                  :args {:request {:as :request}}}
+                          :default {:value ""}}}
+                  {:value "&effects=confirm"}]}}
 
   ;; --- page shell — full HTML page, htmx + runtime live ---
 

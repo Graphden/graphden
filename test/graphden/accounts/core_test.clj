@@ -175,3 +175,32 @@
                           (storage)
                           [nil (str (:id a)) (str (:id a))
                            (str (random-uuid)) "not-a-uuid"]))))))))
+
+
+(deftest ^:integration preview-capsule-roundtrip
+  (let [{:keys [account-id]}
+        (accounts/password-signup! (storage)
+                                   {:email "pv-capsule@example.com"
+                                    :password "s3cret-pw"
+                                    :display-name "PV"})
+        fn-id (random-uuid)
+        branch-id (random-uuid)
+        token (accounts/mint-preview-token! (storage) account-id
+                                            "acme" fn-id branch-id)]
+    (testing "the capsule resolves to its exact (org, fn, branch) grant"
+      (let [g (accounts/preview-grant-by-token (storage) token)]
+        (is (= "acme" (:org g)))
+        (is (= (str fn-id) (:fn-id g)))
+        (is (= (str branch-id) (:branch-id g)))
+        (is (= account-id (str (:account-id g))))))
+    (testing "a capsule NEVER authenticates as a session (kind gate)"
+      (is (nil? (accounts/authenticate-token (storage) token))))
+    (testing "an ordinary session is NOT a preview grant (kind gate, other way)"
+      (let [session (accounts/mint-session! (storage) account-id)]
+        (is (nil? (accounts/preview-grant-by-token (storage) session)))))
+    (testing "unknown / blank tokens fail closed"
+      (is (nil? (accounts/preview-grant-by-token (storage) "nope")))
+      (is (nil? (accounts/preview-grant-by-token (storage) ""))))
+    (testing "revocation kills the capsule"
+      (accounts/revoke-token! (storage) token)
+      (is (nil? (accounts/preview-grant-by-token (storage) token))))))

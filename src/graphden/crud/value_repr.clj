@@ -49,15 +49,29 @@
     (some-> id registry/rich-type-of-id :return)))
 
 
+(defn- record-list?
+  "Every element a non-empty keyword-keyed map — the everyday
+   storage-query / API-selection shape. Checked directly because the
+   literal classifier lubs heterogeneous field types to `[:list :any]`
+   (a nullable column is enough), which would silently lose the
+   record-table repr for exactly the lists it exists for."
+  [v]
+  (and (sequential? v) (seq v)
+       (every? #(and (map? %) (seq %) (every? keyword? (keys %))) v)))
+
+
 (defn dispatch-type
   "The type repr dispatch runs on: the alias-resolved declared type
    when it says something (`nil`/`:any` don't), else the runtime
-   value's literal classification. nil when neither knows."
+   value's shape — a keyword-map list dispatches as
+   `[:list [:map :keyword :any]]`, everything else via the literal
+   classifier. nil when nothing knows."
   [declared value]
   (let [d (some-> declared types/resolve-alias)]
-    (if (and (some? d) (not= :any d))
-      d
-      (types-lit/classify-literal value))))
+    (cond
+      (and (some? d) (not= :any d)) d
+      (record-list? value) [:list [:map :keyword :any]]
+      :else (types-lit/classify-literal value))))
 
 
 (defn render-repr

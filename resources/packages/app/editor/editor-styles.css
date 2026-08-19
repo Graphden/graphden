@@ -4348,6 +4348,21 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
   font-size: 11px;
 }
+/* Record-list table repr — reuses the record-pane table styling via
+   the shared execute-result-record class; only the wrap + caption
+   are new. */
+.execute-result-repr .repr-record-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.execute-result-repr .repr-record-table th {
+  text-align: left;
+}
+.execute-result-repr .repr-record-caption {
+  color: var(--muted-fg);
+  font-size: 11px;
+}
 .execute-result-truncated {
   padding: 4px 6px;
   margin-bottom: 6px;

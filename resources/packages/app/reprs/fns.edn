@@ -34,6 +34,14 @@
                   :description "Id of the fn that produced the value — drives declared-return-type dispatch. nil falls back to literal classification."}}
    :return-type [:union :null :hiccup-node]}
 
+  {:name :tabulate-records
+   :description "Project a list of keyword-keyed records onto ordered `columns` as display strings — `[[cell ...] ...]`, one row per record, a missing key an empty cell; structured values render as their JSON. The record-table repr's pure data half."
+   :args {:records {:type [:list :keyword-map]
+                    :description "The records to tabulate, in order."}
+          :columns {:type [:list :keyword]
+                    :description "Ordered column keys."}}
+   :return-type [:list [:list :text]]}
+
   {:name :svg-polyline-points
    :description "SVG polyline `points` string for a numeric series scaled into a `width` x `height` viewport — min..max stretched to fit, y growing downward, series longer than 2 x width stride-downsampled (output-size bound). Pure geometry; empty/single-point series -> \"\"."
    :args {:nums {:type [:list :numeric]
@@ -105,9 +113,115 @@
           :attrs {:value {:class "repr-sparkline-wrap"}}
           :children [:_repr-nl-svg :_repr-nl-caption]}}
 
+
+  ;; --- built-in repr: record-list table ---
+  ;;
+  ;; A list of keyword-keyed records — the everyday shape of a storage
+  ;; query / API selection — renders as a real table instead of the
+  ;; shape pane's bullet list of JSON dumps. Columns come from the
+  ;; FIRST record's keys (sorted for determinism); a record missing a
+  ;; column renders an empty cell; complex cell values fall back to
+  ;; their JSON string. Rows are capped with a visible count caption —
+  ;; never silently.
+
+  {:name :_repr-rl-row-cap
+   :description "Visible-row budget of the record-list repr. `:take :count` requires `:non-negative-int`, so declare narrower than `:const`'s inferred `:int`."
+   :parent :const
+   :return-type :non-negative-int
+   :args {:value 50}}
+
+  {:name :_repr-rl-first
+   :parent :first
+   :args {:coll {:as :value :type [:list :keyword-map]}}}
+
+  {:name :_repr-rl-cols
+   :description "Column keys — the first record's keys, sorted for a deterministic column order."
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :keys :args {:map :_repr-rl-first}}}}}}
+
+  {:name :_repr-rl-td-cb
+   :description "One cell — `{:as :item}` is the pre-tabulated cell STRING (a real slot binding, evaluated per-item at call time; env-style keys capture at wrap time and cannot carry the per-row value — docs/CLOSURE_CAPTURE.md)."
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value nil}
+          :children [{:as :item}]}}
+
+  {:name :_repr-rl-th-cb
+   :parent :hiccup
+   :args {:tag {:value "th"} :attrs {:value nil}
+          :children [{:parent :keyword-to-str :args {:keyword {:as :item}}}]}}
+
+  {:name :_repr-rl-header
+   :parent :hiccup
+   :args {:tag {:value "tr"} :attrs {:value nil}
+          :children {:parent :map
+                     :args {:func :_repr-rl-th-cb :coll :_repr-rl-cols}}}}
+
+  {:name :_repr-rl-header-list
+   :parent :list
+   :args {:items [:_repr-rl-header]}}
+
+  {:name :_repr-rl-tr-cb
+   :description "One row — `{:as :item}` is the tabulated row (a list of cell strings); its cells iterate over it through the inner `:map`'s `:coll` SLOT."
+   :parent :hiccup
+   :args {:tag {:value "tr"} :attrs {:value nil}
+          :children {:parent :map
+                     :args {:func :_repr-rl-td-cb
+                            :coll {:as :item}}}}}
+
+  {:name :_repr-rl-shown
+   :parent :take
+   :args {:count :_repr-rl-row-cap :coll {:as :value :type [:list :keyword-map]}}}
+
+  {:name :_repr-rl-cells
+   :parent :tabulate-records
+   :args {:records :_repr-rl-shown :columns :_repr-rl-cols}}
+
+  {:name :_repr-rl-total
+   :parent :count
+   :args {:coll {:as :value}}}
+
+  {:name :_repr-rl-rows
+   :parent :map
+   :args {:func :_repr-rl-tr-cb :coll :_repr-rl-cells}}
+
+  {:name :_repr-rl-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "execute-result-record repr-record-table"}}
+          :children {:parent :concat
+                     :args {:colls [:_repr-rl-header-list :_repr-rl-rows]}}}}
+
+  {:name :_repr-rl-caption-text
+   :parent :if
+   :args {:test {:parent :gt :args {:nums [:_repr-rl-total :_repr-rl-row-cap]}}
+          :then {:parent :str
+                 :args {:parts [{:value "showing "}
+                                {:parent :to-str :args {:value :_repr-rl-row-cap}}
+                                {:value " of "}
+                                {:parent :to-str :args {:value :_repr-rl-total}}
+                                {:value " rows"}]}}
+          :else {:parent :str
+                 :args {:parts [{:parent :to-str :args {:value :_repr-rl-total}}
+                                {:value " rows"}]}}}}
+
+  {:name :_repr-rl-caption
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "repr-record-caption"}}
+          :children [:_repr-rl-caption-text]}}
+
+  {:name :_repr-record-list
+   :description "Table repr for a list of keyword-keyed records — the `[" list " " keyword-map "]` row of :_value-repr-registry."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "repr-record-wrap"}}
+          :children [:_repr-rl-table :_repr-rl-caption]}}
+
   ;; --- the dispatch registry ---
 
   {:name :_value-repr-registry
    :description "Type -> repr-fn dispatch table for typed value representations. Each pair is [type-name repr-fn-name]; a VECTOR type-name is a structural key ([\"list\" \"numeric\"] means [:list :numeric]). Matched by `subtype?`, most-specific wins. Repr fns must be PURE (value -> hiccup); the resolver refuses effectful targets and sanitizes output (graphden.web.hiccup-sanitize) before the editor inlines it. Add a repr fn-def + a row here to extend — no executor / resolver change needed."
    :parent :const
-   :args {:value [[["list" "numeric"] "_repr-numeric-list"]]}}]}
+   :args {:value [[["list" "numeric"] "_repr-numeric-list"]
+                  [["list" "keyword-map"] "_repr-record-list"]]}}]}

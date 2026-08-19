@@ -443,10 +443,13 @@
                     (let [t (first pair)
                           ;; A VECTOR type-name is a structural key —
                           ;; `["secret" "any"]` → `[:secret :any]`
-                          ;; (marker-typed rows). Scalars stay the
+                          ;; (marker-typed rows). Elements alias-resolve
+                          ;; too, so `["list" "keyword-map"]` becomes
+                          ;; `[:list [:map :keyword :any]]` (non-aliases
+                          ;; resolve to themselves). Scalars stay the
                           ;; alias-resolved keyword path.
                           t' (if (sequential? t)
-                               (mapv keyword t)
+                               (mapv #(types/resolve-alias (keyword %)) t)
                                (types/resolve-alias (keyword t)))]
                       [t' (str (second pair))]))))
           vec)

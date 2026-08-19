@@ -352,9 +352,15 @@ this type", `:_value-repr-registry` (`app/reprs/fns.edn`) answers
   Repr output is editor-DOM content, i.e. the same stored-XSS
   surface class as `:resource-override` — the sanitizer keeps the
   property independent of who authored the repr fn.
-- Shipped repr: `_repr-numeric-list` — an SVG sparkline (240×48,
+- Shipped reprs: `_repr-numeric-list` — an SVG sparkline (240×48,
   min..max scaled, stride-downsampled via `svg-polyline-points`)
-  plus a value-count caption, registered for `["list" "numeric"]`.
+  plus a value-count caption, registered for `["list" "numeric"]`;
+  `_repr-record-list` — a real TABLE for a list of keyword-keyed
+  records (columns from the first record's sorted keys, complex
+  cells as JSON, 50-row cap with a visible count), registered for
+  `["list" "keyword-map"]` — the everyday storage-query /
+  API-selection result stops rendering as a bullet list of JSON
+  dumps.
 
 **Component preview** is the neighbouring tier, not a registry row:
 when the fn's declared return type is semantically `:hiccup-node`

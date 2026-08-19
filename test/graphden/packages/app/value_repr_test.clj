@@ -152,3 +152,30 @@
                                     {:value nil :fn-id nil})))
     (is (nil? (exec/execute-by-name harness/*context* "render-value-repr"
                                     {:value "plain" :fn-id nil})))))
+
+
+(deftest record-list-table-repr-test
+  (testing "a list of keyword-keyed records renders as a table"
+    (let [f (succeeded-body [{:name "a" :n 1 :extra {:deep true}}
+                             {:name "b" :n 2 :extra nil}])]
+      (is (tree-string-containing f "repr-record-table"))
+      (is (in-tree? f "th") "header cells present")
+      (is (in-tree? f "name") "column from record keys")
+      (is (in-tree? f "a") "simple cell as text")
+      (is (some #(and (string? %) (str/includes? % "deep"))
+                (tree-seq coll? seq f))
+          "complex cell falls back to JSON text")
+      (is (tree-string-containing f "2 rows"))))
+
+  (testing "records with disagreeing shapes keep the plain list pane"
+    (let [f (succeeded-body [{:a 1} "not-a-record" {:b 2}])]
+      (is (not (tree-string-containing f "repr-record-table")))
+      (is (in-tree? f "execute-result-list"))))
+
+  (testing "a single record (not a list) keeps the record pane"
+    (let [f (succeeded-body {:a 1 :b "x"})]
+      (is (not (tree-string-containing f "repr-record-table")))
+      (is (in-tree? f "execute-result-record"))))
+
+  (testing "numeric lists still sparkline (registry rows are disjoint)"
+    (is (in-tree? (succeeded-body [1 2 3]) "repr-sparkline-wrap"))))

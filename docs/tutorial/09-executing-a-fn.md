@@ -63,6 +63,9 @@ type* the result is and picks a representation:
 - A **numeric series** (`[:list :numeric]` — ints or floats)
   renders as an inline **sparkline** with a value-count caption
   instead of a bullet list.
+- A **list of records** (keyword-keyed maps — a storage query, an
+  API selection) renders as a **table**: columns from the first
+  record's keys, a visible row-count caption.
 - A fn whose return type is **`:hiccup-node`** (a component — a
   form, a card, anything you'd normally insert into a page)
   renders as a **Component preview**: the markup, live, inside a

@@ -93,6 +93,43 @@ user/org/platform management (invites, grants, roles, members, registration),
 and can never mint or revoke API tokens (`/api/my-tokens/*` requires a
 browser session).
 
+## Preview surfaces (typed reprs, /preview, /__preview)
+
+Three related surfaces render graph-authored content, each on a different
+trust footing:
+
+- **Typed value representations** (the execute-result pane, the trace-less
+  half of devcards): repr fns are pure `value → hiccup` — enforced at
+  runtime by executing the repr subtree under `:allowed-effects #{}` —
+  and their output passes the `graphden.web.hiccup-sanitize` allowlist
+  (no script/frame/form tags, no `on*` / `hx-*` / `data-*` / URL-bearing
+  attributes, paint-value policy, raw-string collapse, bounded depth and
+  size) before the editor inlines it. Repr output is editor-DOM content:
+  the same stored-XSS class as `:resource-override`, and the sanitizer
+  keeps the property independent of who authored the repr fn.
+
+- **`GET /preview` on the editor origin** (interactive component preview +
+  the components gallery) is **self-host only**: under an active tenancy
+  addon the route answers 403 and the editor hides its links, because the
+  page runs component markup and scripts LIVE on the editor origin with
+  the viewer's session in scope — exactly what the apps-domain split
+  exists to prevent. Auth: the ordinary `:get-auth-required` seam.
+
+- **`/__preview*` on the apps domain** is the cloud path — the first
+  reserved platform prefix on app domains. Authorization crosses the
+  origin as a **preview capsule**: a `kind="preview"` accounts session
+  (2-minute TTL, scope-bound to exactly org + fn + branch) minted by
+  `POST /api/preview-token` only after the requester passed the same
+  `:execute` guard `/api/execute` runs behind. A capsule can never
+  authenticate as a login session (`authenticate-token` refuses every
+  non-nil/"api" kind by construction), so a leaked URL can at most
+  re-render that one component for its TTL. The endpoint serves a
+  validated proxy into the org's branch router — only `/preview` and the
+  four shell assets are reachable — inside the same sandbox as the org's
+  own app (`tc/with-org`, plan `:allowed-effects` on the component run,
+  shared bounded pool, wall-clock timeout); the org's scripts run on the
+  org's OWN origin, never the editor's.
+
 ## Your responsibility (self-host)
 
 Graphden provides the isolation layers above; the deployment perimeter is

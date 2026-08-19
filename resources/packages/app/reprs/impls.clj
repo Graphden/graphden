@@ -4,6 +4,7 @@
    `graphden.crud.value-repr`, mirroring how app/forms delegates to
    `crud.value-form`) plus the sparkline geometry primitive."
   (:require
+    [cheshire.core :as cheshire]
     [clojure.math :as math]
     [clojure.string :as str]
     [graphden.crud.value-repr :as value-repr]
@@ -24,6 +25,24 @@
    extensibility seam is the `:_value-repr-registry` fn-def."
   [value fn-id]
   (value-repr/render-repr ctx value fn-id))
+
+
+(defn- cell-str
+  "Display string for one table cell — simple scalars verbatim,
+   anything structured as its JSON."
+  [v]
+  (if (or (nil? v) (string? v) (number? v) (boolean? v) (keyword? v) (uuid? v))
+    (str (if (keyword? v) (name v) v))
+    (cheshire/generate-string v)))
+
+
+(defbase tabulate-records
+  "Project `records` onto ordered `columns` as display strings —
+   `[[cell …] …]`, one row per record, a missing key an empty cell.
+   Pure tabular projection (the record-table repr's data half; the
+   hiccup half stays in the graph)."
+  [records columns]
+  (mapv (fn [r] (mapv #(cell-str (get r %)) columns)) records))
 
 
 (defn- fmt2
@@ -69,4 +88,6 @@
 (def impls
   {:fn-return-type fn-return-type-fn
    :render-value-repr {:impl render-value-repr :taint-propagate? true}
+   ;; content-passing (record values → cell strings) — SECRETS.md § T3
+   :tabulate-records {:impl tabulate-records :taint-propagate? true}
    :svg-polyline-points svg-polyline-points})

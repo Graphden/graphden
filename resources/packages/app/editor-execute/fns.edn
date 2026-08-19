@@ -1002,7 +1002,7 @@
   {:name :_pv-tenancy-rej
    :parent :html-error-response
    :args {:status {:value 403}
-          :reason {:value "Interactive preview is self-host only. On multi-tenant cloud it would run org-authored scripts on the editor origin — use the Run popover's static component preview instead."}}}
+          :reason {:value "This preview page is self-host only — on multi-tenant cloud it would run org-authored scripts on the editor origin. Use the Run popover instead: its component preview offers \"Open interactive preview\", which serves the component from your own app domain."}}}
 
   {:name :_pv-bad-id-rej
    :parent :html-error-response

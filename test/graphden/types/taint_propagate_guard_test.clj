@@ -106,7 +106,7 @@
     :str-len :str-lower :str-replace :str-split :str-starts-with?
     :str-to-keyword :str-to-uuid :str-trim :str-upper
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
-    :sub :subs :subtype? :svg-polyline-points
+    :sub :subs :subtype? :svg-polyline-points :tabulate-records
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-string
@@ -142,7 +142,7 @@
     :slurp :some :some? :sort :sort-by :str :str-contains? :str-join :str-len :str-lower
     :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
-    :str-upper :sub :subs :take :throw :throwable-class-name :throwable-message
+    :str-upper :sub :subs :tabulate-records :take :throw :throwable-class-name :throwable-message
     :to-json-string :to-str :transduce :try :update-in :update-keys :update-vals
     :url-decode :vals :vec :zero? :zipmap})
 

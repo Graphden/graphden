@@ -441,15 +441,23 @@
           (keep (fn [pair]
                   (when (and (sequential? pair) (= 2 (count pair)))
                     (let [t (first pair)
-                          ;; A VECTOR type-name is a structural key —
-                          ;; `["secret" "any"]` → `[:secret :any]`
-                          ;; (marker-typed rows). Elements alias-resolve
-                          ;; too, so `["list" "keyword-map"]` becomes
-                          ;; `[:list [:map :keyword :any]]` (non-aliases
-                          ;; resolve to themselves). Scalars stay the
+                          ;; A VECTOR type-name is a structural key,
+                          ;; keywordized RECURSIVELY — `["secret" "any"]`
+                          ;; → `[:secret :any]`, `["list" ["map" "keyword"
+                          ;; "any"]]` → `[:list [:map :keyword :any]]`.
+                          ;; Deliberately NO alias resolution inside
+                          ;; vectors: alias registration is registry
+                          ;; state (per-NS-thread-isolated under the
+                          ;; parallel test runner), and a dispatch key
+                          ;; must not change meaning with it — write
+                          ;; the structural form out. Scalars stay the
                           ;; alias-resolved keyword path.
                           t' (if (sequential? t)
-                               (mapv #(types/resolve-alias (keyword %)) t)
+                               ((fn deep [x]
+                                  (if (sequential? x)
+                                    (mapv deep x)
+                                    (keyword x)))
+                                t)
                                (types/resolve-alias (keyword t)))]
                       [t' (str (second pair))]))))
           vec)

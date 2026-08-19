@@ -142,7 +142,7 @@
                        :namespace "app.reprs"
                        :parent :const
                        :args {:value [[["list" "numeric"] "_repr-numeric-list"]
-                                      [["list" "keyword-map"] "_repr-record-list"]]}}]))))
+                                      [["list" ["map" "keyword" "any"]] "_repr-record-list"]]}}]))))
 
 
 (deftest render-value-repr-direct-test
@@ -168,7 +168,7 @@
                    :namespace "app.reprs"
                    :parent :const
                    :args {:value [[["list" "numeric"] "_repr-numeric-list"]
-                                  [["list" "keyword-map"] "_repr-record-list"]]}}])
+                                  [["list" ["map" "keyword" "any"]] "_repr-record-list"]]}}])
   (testing "a list of keyword-keyed records renders as a table"
     (let [v [{:name "a" :n 1 :extra {:deep true}}
              {:name "b" :n 2 :extra nil}]

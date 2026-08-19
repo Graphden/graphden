@@ -224,4 +224,4 @@
    :description "Type -> repr-fn dispatch table for typed value representations. Each pair is [type-name repr-fn-name]; a VECTOR type-name is a structural key ([\"list\" \"numeric\"] means [:list :numeric]). Matched by `subtype?`, most-specific wins. Repr fns must be PURE (value -> hiccup); the resolver refuses effectful targets and sanitizes output (graphden.web.hiccup-sanitize) before the editor inlines it. Add a repr fn-def + a row here to extend — no executor / resolver change needed."
    :parent :const
    :args {:value [[["list" "numeric"] "_repr-numeric-list"]
-                  [["list" "keyword-map"] "_repr-record-list"]]}}]}
+                  [["list" ["map" "keyword" "any"]] "_repr-record-list"]]}}]}

@@ -22,6 +22,13 @@ let _tourState = null;   // {lessonId, step, created: [{type,name}]}
 let _tourTimer = null;
 let _tourEls = null;     // {spot, pop}
 
+function _tourCurrentBranch() {
+  // editor-branches keeps its branch getter module-private; the URL param
+  // IS the branch context (switchToBranch round-trips through it).
+  try { return new URLSearchParams(window.location.search).get('branch'); }
+  catch (_) { return null; }
+}
+
 function _tourSaveState() {
   try {
     if (_tourState) localStorage.setItem(TOUR_STORE_KEY, JSON.stringify(_tourState));
@@ -97,9 +104,18 @@ function _tourCheckPasses(check) {
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
           const s = lookups.slotMap?.get(b['slot-id']);
-          return s && s.name === check.slot
-            && (b.value != null || b['ref-fn-id']);
+          if (!s || s.name !== check.slot) return false;
+          if (b.value != null || b['ref-fn-id']) return true;
+          // Sequence slots: the binding row itself carries no value —
+          // the content lives in binding-list-item rows.
+          const items = lookups.itemsByBinding?.get(b.id) || [];
+          return items.length > 0;
         });
+      }
+      case 'selected': {
+        if (typeof selectedFnId === 'undefined' || !selectedFnId) return false;
+        const sel = lookups?.fnMap ? lookups.fnMap.get(selectedFnId) : null;
+        return !!(sel && sel.name === check.name);
       }
       case 'dom':
         return !!document.querySelector(check.selector);
@@ -230,6 +246,16 @@ function _tourTick() {
   if (!_tourState) return;
   const step = _tourStep();
   if (!step) { _tourTeardown(); return; }
+  // A sidebar-anchored step is unreachable while the Explorer is
+  // collapsed (narrow viewports default to collapsed) — expand it once
+  // per step so the spotlight has something to point at.
+  if (step.target && !document.querySelector(step.target)
+      && document.body.classList.contains('sidebar-collapsed')
+      && _tourState._expandedFor !== _tourState.step
+      && typeof toggleCollapsed === 'function') {
+    _tourState._expandedFor = _tourState.step;
+    try { toggleCollapsed(false); } catch (_) { /* stay collapsed */ }
+  }
   _tourPosition();
   if (step.check && step.check.kind !== 'manual' && _tourCheckPasses(step.check)) {
     if (typeof gdToast === 'function') gdToast('Step complete ✓');
@@ -275,6 +301,39 @@ async function _tourDeleteCreated() {
 }
 
 function _tourEnd() {
+  // Branch-isolated run (org mode): the WHOLE lesson lives on a tour
+  // branch, so the cleanup offer is one decision — delete the branch
+  // (full rollback, returns to main) or keep it.
+  if (_tourState?.branch && _tourCurrentBranch() === _tourState.branch) {
+    const branch = _tourState.branch;
+    const { spot, pop } = _tourEnsureEls();
+    spot.classList.remove('gd-tour-visible');
+    pop.replaceChildren();
+    pop.classList.add('gd-tour-visible', 'gd-tour-centered');
+    const title = document.createElement('div');
+    title.className = 'gd-tour-title';
+    title.textContent = 'Delete the tutorial branch?';
+    const body = document.createElement('div');
+    body.className = 'gd-tour-body';
+    body.textContent = 'This lesson ran on its own branch “' + branch
+      + '”. Deleting it removes everything the lesson created and returns'
+      + ' you to main — the full rollback. Keeping it lets you continue'
+      + ' exploring on the branch.';
+    const foot = document.createElement('div');
+    foot.className = 'gd-tour-foot';
+    foot.appendChild(_tourBtn('Delete branch & return', 'gd-tour-btn-primary', async () => {
+      try {
+        await authFetch(API.api_branches_ref(branch), { method: 'DELETE' });
+      } catch (_) { /* branch stays; still return to main */ }
+      _tourTeardown();
+      if (typeof switchToBranch === 'function') switchToBranch(null);
+    }));
+    foot.appendChild(_tourBtn('Keep branch', 'gd-tour-btn-quiet', () => _tourTeardown()));
+    pop.appendChild(title);
+    pop.appendChild(body);
+    pop.appendChild(foot);
+    return;
+  }
   const created = (_tourState?.created) || [];
   const existing = created.filter((c) => (c.type === 'fn' ? _tourFindFn(c.name)
     : typeof graphData !== 'undefined' && graphData
@@ -349,6 +408,10 @@ async function startTutorial(lessonId, resumeStep, resumeCreated) {
     step: Math.min(resumeStep || 0, lesson.steps.length - 1),
     created: resumeCreated || [],
   };
+  {
+    const cur = _tourCurrentBranch();
+    if (cur && /^tutorial-/.test(cur)) _tourState.branch = cur;
+  }
   _tourSaveState();
   _tourEnsureEls();
   _tourRenderStep();
@@ -379,5 +442,78 @@ async function maybeStartTutorial() {
   return false;
 }
 
+// Org-mode entry: run the lesson on its OWN branch — create
+// tutorial-<lesson>-<suffix> off main, switch (the reload resumes the
+// saved tour state on the branch), and the end-of-tour dialog offers
+// branch deletion = full rollback. Falls back to a plain in-place tour
+// when branch creation is unavailable (401/403/older deploys).
+async function startTutorialIsolated(lessonId) {
+  const lessons = await _tourFetchLessons();
+  if (!lessons) {
+    if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
+    return false;
+  }
+  const canBranch = window.API && API.api_branches
+    && typeof switchToBranch === 'function';
+  const onMain = canBranch && !_tourCurrentBranch();
+  if (!canBranch || !onMain) return startTutorial(lessonId);
+  const branch = 'tutorial-' + lessonId + '-'
+    + Math.random().toString(36).slice(2, 6);
+  try {
+    const r = await authFetch(API.api_branches, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: branch, 'base-branch-id': 'main' }),
+    });
+    const bodyJson = await r.json().catch(() => ({}));
+    if (!r.ok || bodyJson.ok === false) throw new Error('branch create failed');
+  } catch (_) {
+    if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
+    return startTutorial(lessonId);
+  }
+  _tourState = { lessonId, step: 0, created: [], branch };
+  _tourSaveState();
+  switchToBranch(branch); // reload; maybeStartTutorial resumes on the branch
+  return true;
+}
+
+// Lesson picker — the shell-menu entry point once there is more than one
+// lesson. Centered dialog listing every lesson from /api/tour.
+async function openTutorialMenu() {
+  const lessons = await _tourFetchLessons();
+  if (!lessons || !(lessons.lessons || []).length) {
+    if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
+    return;
+  }
+  const { spot, pop } = _tourEnsureEls();
+  spot.classList.remove('gd-tour-visible');
+  pop.replaceChildren();
+  pop.classList.add('gd-tour-visible', 'gd-tour-centered');
+  const title = document.createElement('div');
+  title.className = 'gd-tour-title';
+  title.textContent = 'Interactive tutorial';
+  const body = document.createElement('div');
+  body.className = 'gd-tour-body';
+  body.textContent = 'Pick a lesson. In an organization workspace the'
+    + ' lesson runs on its own branch, so ending it can roll everything'
+    + ' back in one step.';
+  pop.appendChild(title);
+  pop.appendChild(body);
+  const list = document.createElement('div');
+  list.className = 'gd-tour-foot gd-tour-lesson-list';
+  for (const lesson of lessons.lessons) {
+    list.appendChild(_tourBtn(
+      lesson.id + ' · ' + (lesson.title || ''), 'gd-tour-btn-primary',
+      () => startTutorialIsolated(lesson.id)));
+  }
+  list.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => {
+    if (_tourState) _tourRenderStep();
+    else _tourTeardown();
+  }));
+  pop.appendChild(list);
+}
+
 window.startTutorial = startTutorial;
+window.startTutorialIsolated = startTutorialIsolated;
+window.openTutorialMenu = openTutorialMenu;
 window.maybeStartTutorial = maybeStartTutorial;

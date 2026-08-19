@@ -440,11 +440,11 @@ function openShellMenu() {
   if (document.body.classList.contains('gd-platform') || isOp) {
     item('Platform', () => goSurface('platform'));
   }
-  // Interactive tutorial — guided in-editor lesson (editor-tour.js).
-  if (typeof window.startTutorial === 'function') {
+  // Interactive tutorial — guided in-editor lessons (editor-tour.js).
+  if (typeof window.openTutorialMenu === 'function') {
     item('Interactive tutorial', () => {
       closeAuthPopover();
-      window.startTutorial('01');
+      window.openTutorialMenu();
     });
   }
   divider();

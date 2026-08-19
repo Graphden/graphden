@@ -23,9 +23,9 @@
 | # | Lesson | Status |
 |---|---|---|
 | 01 | [Anatomy of a fn-def](01-fn-defs.md) | ✅ written · ▶ interactive |
-| 02 | [Parents and inheritance — single parent, then multiple](02-parents-and-inheritance.md) | ✅ written |
+| 02 | [Parents and inheritance — single parent, then multiple](02-parents-and-inheritance.md) | ✅ written · ▶ interactive |
 | 03 | [Slots and bindings — what they are at the data level](03-slots-and-bindings.md) | ✅ written |
-| 04 | [Free arguments and how they propagate](04-free-arguments.md) | ✅ written |
+| 04 | [Free arguments and how they propagate](04-free-arguments.md) | ✅ written · ▶ interactive |
 | 05 | [Types — atomic, refinement, record, union, variant, list](05-types.md) | ✅ written |
 | 06 | [Higher-order functions and `:fn`-typed slots](06-higher-order-functions.md) | ✅ written |
 | 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written |
@@ -51,8 +51,10 @@
 | 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
-open the editor with `?tutorial=01` (the landing demo link does this),
-or pick “Interactive tutorial” in the account-chip menu. The tour's
+open the editor with `?tutorial=NN` (the landing demo link does this for
+lesson 01), or pick “Interactive tutorial” in the account-chip menu —
+in an organization workspace the lesson runs on its own `tutorial-NN-*`
+branch, and ending it offers branch deletion = full rollback. The tour's
 step scripts live in the graph (`app.tour/_tour-lessons`) and are
 drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
 keep the written lesson's “Try it” section and the tour steps in

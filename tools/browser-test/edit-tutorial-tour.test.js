@@ -1,4 +1,4 @@
-// Interactive-tutorial drift guard — walks EVERY step of lesson 01 by
+// Interactive-tutorial drift guard — walks EVERY step of lessons 01/02/04 by
 // performing the real UI actions the tour asks for, asserting the tour
 // auto-advances after each. This is the contract that keeps the tour's
 // spotlight selectors + completion checks honest against the live editor:
@@ -26,6 +26,9 @@ async function hardCleanup(page) {
   // leave it orphaned outside the (deleted) tutorial ns, where the
   // ns-subtree walk below would miss it and the next run's create 409s.
   try { await deleteFnByName(page, FN_NAME); } catch (_) { /* absent */ }
+  for (const nm of ['add-10', 'tutorial-json']) {
+    try { await deleteFnByName(page, nm); } catch (_) { /* absent */ }
+  }
   try {
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
     const ns = (tree.namespaces || []).find((n) => n.name === NS_NAME);
@@ -55,7 +58,7 @@ async function waitTourTitle(page, title, timeoutMs) {
   await page.waitForFunction((expected) => {
     const t = document.querySelector('#gd-tour-pop .gd-tour-title');
     return t && t.textContent.trim() === expected;
-  }, title, {timeout: timeoutMs || 20000, polling: 150});
+  }, title, {timeout: timeoutMs || 45000, polling: 150});
 }
 
 
@@ -68,6 +71,116 @@ function clickTourButton(page, label) {
     btn.click();
     return true;
   }, label);
+}
+
+
+async function filterAndSelect(page, filterText, fnName) {
+  await page.fill('input[placeholder="Filter..."]', filterText);
+  await page.waitForTimeout(900);
+  await page.evaluate(async (name) => { await selectFnByName(name); }, fnName);
+}
+
+
+async function extendViaRowActions(page, childName) {
+  await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
+  await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+  await page.waitForFunction(() => !!document.querySelector(
+    '.row-actions-popover [data-action="extend-fn"]'), null,
+    {timeout: 15000, polling: 100});
+  await page.evaluate(() => {
+    document.querySelector('.row-actions-popover [data-action="extend-fn"]')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  });
+  await page.waitForSelector('.arg-value-edit-popover .arg-value-edit-input',
+    {timeout: 10000});
+  await page.evaluate((name) => {
+    const pop = document.querySelector('.arg-value-edit-popover');
+    const input = pop.querySelector('.arg-value-edit-input');
+    input.value = name;
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, childName);
+  // The extend popover unmounts on success — waiting for that prevents
+  // the NEXT bind step from typing into this (dead) popover's input.
+  await page.waitForFunction(
+    () => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 15000, polling: 100});
+}
+
+
+async function bindFirstPlaceholder(page, literalText) {
+  await page.waitForSelector('.placeholder-binder', {timeout: 15000});
+  await page.evaluate(() => {
+    document.querySelector('.placeholder-binder').click();
+  });
+  // Scalar slots offer "Bind literal"; sequence slots offer "Append
+  // literal" — accept either.
+  await page.waitForFunction(() => {
+    return Array.from(document.querySelectorAll('button'))
+      .some((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()));
+  }, null, {timeout: 8000, polling: 100});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button'))
+      .find((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()))
+      .click();
+  });
+  await page.waitForFunction(() => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    return pop && (pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]'));
+  }, null, {timeout: 10000, polling: 100});
+  await page.evaluate((text) => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    const field = pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]');
+    field.value = text;
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, literalText);
+}
+
+
+async function runViaRowActions(page, formValue) {
+  await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
+  await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+  await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('.row-actions-popover button'))
+      .find((b) => b.textContent.trim() === '▶')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  });
+  await page.waitForSelector('.execute-popover.visible .execute-run-btn',
+    {timeout: 10000});
+  if (formValue !== undefined) {
+    await page.waitForFunction(() => {
+      const p = document.querySelector('.execute-popover.visible');
+      return p && p.querySelector('[data-form-field]');
+    }, null, {timeout: 10000, polling: 100}).catch(() => {});
+    await page.evaluate((v) => {
+      const p = document.querySelector('.execute-popover.visible');
+      const f = p.querySelector('[data-form-field]');
+      if (f) {
+        f.value = v;
+        f.dispatchEvent(new Event('input', {bubbles: true}));
+        f.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    }, formValue);
+  }
+  await page.click('.execute-popover.visible .execute-run-btn');
+}
+
+
+async function finishAndDelete(page) {
+  assert(await clickTourButton(page, 'Finish'), 'Finish button');
+  await waitTourTitle(page, 'Clean up tutorial items?');
+  assert(await clickTourButton(page, 'Delete them'), 'Delete them button');
+  await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+    null, {timeout: 20000, polling: 200});
 }
 
 
@@ -87,7 +200,7 @@ function clickTourButton(page, label) {
     await page.goto(BASE + '/?tutorial=01');
 
     // Step 1 — welcome (manual).
-    await waitTourTitle(page, 'Welcome to the interactive tutorial', 30000);
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 60000);
     console.log('  step 1: welcome shown');
     assert(await clickTourButton(page, 'Next'), 'welcome Next button');
 
@@ -132,7 +245,7 @@ function clickTourButton(page, label) {
     await page.waitForSelector('.inline-input', {timeout: 5000});
     await page.fill('.inline-input', FN_NAME);
     await page.press('.inline-input', 'Enter');
-    await waitTourTitle(page, 'Set the parent', 30000);
+    await waitTourTitle(page, 'Set the parent', 60000);
     console.log('  step 3: fn created, tour advanced');
 
     // Step 4 — assign :const through the reparent strip + fn picker.
@@ -155,7 +268,7 @@ function clickTourButton(page, label) {
         });
       row.click();
     });
-    await waitTourTitle(page, 'Bind :value', 30000);
+    await waitTourTitle(page, 'Bind :value', 60000);
     console.log('  step 4: parent set, tour advanced');
 
     // Step 5 — bind the :value literal.
@@ -184,7 +297,7 @@ function clickTourButton(page, label) {
       Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
         .find((b) => b.textContent.trim() === 'Save').click();
     });
-    await waitTourTitle(page, 'Run it', 30000);
+    await waitTourTitle(page, 'Run it', 60000);
     console.log('  step 5: value bound, tour advanced');
 
     // Step 6 — run the fn via ⋯ → ▶ → Run.
@@ -203,7 +316,7 @@ function clickTourButton(page, label) {
     await page.waitForSelector('.execute-popover.visible .execute-run-btn',
       {timeout: 10000});
     await page.click('.execute-popover.visible .execute-run-btn');
-    await waitTourTitle(page, "That's the whole loop", 30000);
+    await waitTourTitle(page, "That's the whole loop", 60000);
     console.log('  step 6: executed, tour advanced');
 
     // Step 7 — finish → cleanup dialog → delete what the tour created.
@@ -218,6 +331,61 @@ function clickTourButton(page, label) {
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
     assert(!(tree.namespaces || []).some((n) => n.name === NS_NAME),
       'tutorial namespace deleted by the tour cleanup');
+
+    // ---------- Lesson 02 — parents & inheritance (extend flow) ----------
+    await page.goto(BASE + '/?tutorial=02');
+    await waitTourTitle(page, 'Inheritance, hands on', 60000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 02 Next');
+    await waitTourTitle(page, 'Find :add');
+    await filterAndSelect(page, 'add', 'add');
+    await waitTourTitle(page, 'Extend it', 45000);
+    await extendViaRowActions(page, 'add-10');
+    await waitTourTitle(page, 'Seed the inherited slot', 60000);
+    await bindFirstPlaceholder(page, '10');
+    await waitTourTitle(page, 'Run the child', 60000);
+    await runViaRowActions(page);
+    await waitTourTitle(page, "That's inheritance", 60000);
+    await finishAndDelete(page);
+    console.log('  lesson 02: walked + cleaned');
+
+    // ---------- Lesson 04 — free arguments ----------
+    await page.goto(BASE + '/?tutorial=04');
+    await waitTourTitle(page, 'Free args: the template mechanism', 60000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 04 Next');
+    await waitTourTitle(page, 'Find to-json-string');
+    await filterAndSelect(page, 'to-json', 'to-json-string');
+    await waitTourTitle(page, 'A free arg becomes a Run field', 45000);
+    await runViaRowActions(page, '{"a": 1}');
+    await waitTourTitle(page, 'Pin it in a child', 60000);
+    await extendViaRowActions(page, 'tutorial-json');
+    await page.waitForTimeout(2500); // extend re-selects the child
+    await bindFirstPlaceholder(page, '{"greeting": "hello"}');
+    await waitTourTitle(page, 'Bound beats free', 60000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 04 step-5 Next');
+    await waitTourTitle(page, 'Templates, specialized');
+    await finishAndDelete(page);
+    console.log('  lesson 04: walked + cleaned');
+
+    // ---------- Branch isolation (org mode entry) ----------
+    const startedIso = await page.evaluate(async () => {
+      return await window.startTutorialIsolated('01');
+    });
+    assert(startedIso, 'startTutorialIsolated returned true');
+    await page.waitForFunction(() => {
+      return /[?&]branch=tutorial-01-/.test(location.search)
+        && !!document.querySelector('#gd-tour-pop .gd-tour-title');
+    }, null, {timeout: 45000, polling: 300});
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 60000);
+    await page.evaluate(() => {
+      Array.from(document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
+        .find((b) => b.textContent.trim() === 'End tour').click();
+    });
+    await waitTourTitle(page, 'Delete the tutorial branch?');
+    assert(await clickTourButton(page, 'Delete branch & return'),
+      'Delete branch & return button');
+    await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
+      null, {timeout: 45000, polling: 300});
+    console.log('  branch isolation: created, resumed, deleted, returned');
 
     console.log('PASS');
   } catch (err) {

@@ -21,6 +21,7 @@
 ;;                      {:kind "fn-exists"  :name N}
 ;;                      {:kind "fn-parent"  :name N :parent P}
 ;;                      {:kind "binding-bound" :name N :slot S}
+;;                      {:kind "selected" :name N}            fn selected on canvas
 ;;                      {:kind "dom" :selector SEL}           element appears
 ;;   :creates       — {:type "ns"|"fn" :name N} — tracked for the end-of-tour
 ;;                    cleanup offer (soft-deletes, nothing is lost).
@@ -67,6 +68,62 @@
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "That's the whole loop"
                :body "You built a function from a primitive, typed data flowed through it, and you executed it in place. The written lesson (graphden.dev/tutorial → Lesson 01) explains what a fn-def, a parent and a slot really are. Click Finish — the tour will offer to delete what you created, or you can keep it and explore."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "02"
+             :title "Parents and inheritance"
+             :steps
+             [{:title "Inheritance, hands on"
+               :body "A composed fn inherits its parent's slots and can pin some of them. You will find a primitive, extend it into a child, seed the child's argument and run it. Everything you create can be deleted at the end."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find :add"
+               :body "Type add in the Explorer filter and click the add row (in core.arithmetic). Its card shows a single row — a base function has no parents."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "add"}}
+              {:title "Extend it"
+               :body "Click the ⋯ button on the add row, choose “Extend”, type exactly: add-10 — then Save. That creates a child fn whose :parent is add; the editor opens it."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "add-10" :parent "add"}
+               :creates {:type "fn" :name "add-10"}}
+              {:title "Seed the inherited slot"
+               :body "add-10 inherited add's :nums slot — a sequence. Click the “+” placeholder on :nums, choose “Append literal”, enter: 10 — then Save. The seed becomes the list's first item."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "add-10" :slot "nums"}}
+              {:title "Run the child"
+               :body "Click ⋯ on the add-10 row, then ▶ Run, then Run. The bound seed makes the sum 10 — the child runs the parent's implementation with its own bindings."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "That's inheritance"
+               :body "One parent, inherited slots, per-child bindings. The written lesson 02 goes further: multiple parents (the response-matrix diamond) and how bindings overlay closest-fn-wins. Click Finish to clean up or keep add-10."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "04"
+             :title "Free arguments"
+             :steps
+             [{:title "Free args: the template mechanism"
+               :body "An UNBOUND slot of a fn becomes the CALLER's input — that is how reusable templates work. You will run a template through its free arg, then pin that arg in a child of your own and watch the input disappear."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find to-json-string"
+               :body "Type to-json in the Explorer filter and click the to-json-string row (core.system). Its card shows a “+” placeholder on :data — the slot is FREE."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "to-json-string"}}
+              {:title "A free arg becomes a Run field"
+               :body "Click ⋯ on the to-json-string row, then ▶ Run. The popover shows a data field — the free slot surfaced as your input. Enter {\"a\": 1} and Run: the JSON string comes back."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Pin it in a child"
+               :body "Now the other direction: click ⋯ again, choose “Extend”, name it tutorial-json, Save. On the new card click the “+” on :data, choose “Bind literal”, enter: {\"greeting\": \"hello\"} — Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "binding-bound" :name "tutorial-json" :slot "data"}
+               :creates {:type "fn" :name "tutorial-json"}}
+              {:title "Bound beats free"
+               :body "Run tutorial-json (⋯ → ▶ Run → Run): no fields this time — the binding closed the slot, so callers have nothing left to supply. Free args propagate UP until someone pins them."
+               :target "button.more-actions-trigger"
+               :check {:kind "manual"}}
+              {:title "Templates, specialized"
+               :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize. The written lesson 04 adds renames ({:as :name}) and deep propagation. Click Finish to clean up or keep tutorial-json."
                :target nil
                :check {:kind "manual"}}]}]}}}
 

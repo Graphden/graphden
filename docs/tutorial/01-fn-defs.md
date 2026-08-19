@@ -87,6 +87,11 @@ cover that in lesson 06 when we hit higher-order functions.
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=01)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 In the running editor, in a namespace of your choice (or create
 `tutorial/01-fn-defs`):
 

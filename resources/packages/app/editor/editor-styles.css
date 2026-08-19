@@ -6328,3 +6328,8 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   color: var(--muted-fg);
 }
 .gd-tour-btn-quiet:hover { color: var(--fg); background: var(--hover-bg); }
+.gd-tour-lesson-list {
+  flex-direction: column;
+  align-items: stretch;
+}
+.gd-tour-lesson-list .gd-tour-btn { text-align: left; }

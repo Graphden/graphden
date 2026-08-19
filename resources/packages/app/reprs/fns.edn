@@ -1,0 +1,113 @@
+;; app.reprs — typed value REPRESENTATIONS: the read-side sibling of
+;; app.forms. `:_value-form-registry` answers "how do I EDIT a value
+;; of this type"; `:_value-repr-registry` answers "how do I SHOW one".
+;;
+;; The execute-result pane (`:_er-succeeded-body` in app/execution)
+;; consults the registry through `:render-value-repr`: dispatch runs
+;; on the executed fn's declared/inferred RETURN type (rich-types by
+;; id), falling back to the runtime value's literal classification,
+;; matched most-specific-first by `subtype?` — the same shared-list
+;; pattern as `:_value-form-registry`. Add a repr by adding a fn-def
+;; + a registry row; no executor / resolver change needed.
+;;
+;; Safety contract (see graphden.web.hiccup-sanitize / crud.value-repr):
+;; a repr fn must be PURE (`value -> hiccup`; effectful targets are
+;; refused), and its output is allowlist-sanitized before it is
+;; inlined into the editor DOM.
+
+{:namespace "app.reprs"
+ :description "Typed value representations — the type -> repr-fn dispatch registry consumed by the execute-result pane, the repr resolver base-fns, and the built-in numeric-series sparkline repr."
+ :fns
+ [;; --- resolver base-fns ---
+
+  {:name :fn-return-type
+   :description "Declared/inferred return type of fn `fn-id`, read from the id-keyed rich-types registry — nil when the registry has no entry. Lets graph code branch on WHAT a fn returns (the execute-result component-preview clause) without a DB read. Accepts a UUID or its string form (the inline execute path round-trips ids through JSON)."
+   :args {:fn-id {:type [:union :null :uuid :text]
+                  :description "fn id — UUID, or its string form."}}
+   :return-type [:union :null :type-expression]}
+
+  {:name :render-value-repr
+   :description "Registered representation of `value` as returned by fn `fn-id` — resolves the repr fn through :_value-repr-registry (declared return type first, literal classification fallback; most-specific `subtype?` match), verifies it is pure, executes it with `{:value value}`, and sanitizes the resulting hiccup. nil when no repr applies or anything fails — callers fall back to shape-based rendering. Kept atomic like :build-form: the dispatch+verify+sanitize pipeline is the safety boundary, and the extensibility seam is the registry itself."
+   :args {:value {:type :any
+                  :description "The runtime value to represent. Polymorphic by design — the registry decides."}
+          :fn-id {:type [:union :null :uuid :text]
+                  :description "Id of the fn that produced the value — drives declared-return-type dispatch. nil falls back to literal classification."}}
+   :return-type [:union :null :hiccup-node]}
+
+  {:name :svg-polyline-points
+   :description "SVG polyline `points` string for a numeric series scaled into a `width` x `height` viewport — min..max stretched to fit, y growing downward, series longer than 2 x width stride-downsampled (output-size bound). Pure geometry; empty/single-point series -> \"\"."
+   :args {:nums {:type [:list :numeric]
+                 :description "The numeric series to plot, in order."}
+          :width {:type :positive-int
+                  :description "Viewport width in SVG user units."}
+          :height {:type :positive-int
+                   :description "Viewport height in SVG user units."}}
+   :return-type :text}
+
+  ;; --- built-in repr: numeric-series sparkline ---
+  ;;
+  ;; Free arg `:value` (the represented value) propagates from the
+  ;; leaf refs — the resolver executes the repr with `{:value v}`.
+
+  {:name :_repr-nl-points
+   :parent :svg-polyline-points
+   :args {:nums {:as :value :type [:list :numeric]}
+          :width {:value 240}
+          :height {:value 48}}}
+
+  {:name :_repr-nl-polyline-attrs
+   :description "Static polyline presentation + the computed `points`. `currentColor` keeps the stroke on the editor's CSS token (`.repr-sparkline` sets `color`)."
+   :parent :assoc
+   :args {:map {:value {:fill "none"
+                        :stroke "currentColor"
+                        :stroke-width "1.5"
+                        :stroke-linejoin "round"
+                        :stroke-linecap "round"
+                        :vector-effect "non-scaling-stroke"}}
+          :key {:value :points}
+          :value :_repr-nl-points}}
+
+  {:name :_repr-nl-polyline
+   :parent :hiccup
+   :args {:tag {:value "polyline"}
+          :attrs :_repr-nl-polyline-attrs
+          :children {:value []}}}
+
+  {:name :_repr-nl-svg
+   :parent :hiccup
+   :args {:tag {:value "svg"}
+          :attrs {:value {:viewBox "0 0 240 48"
+                          :preserveAspectRatio "none"
+                          :class "repr-sparkline"
+                          :role "img"
+                          :aria-label "Sparkline of the numeric series"}}
+          :children [:_repr-nl-polyline]}}
+
+  {:name :_repr-nl-count
+   :parent :count
+   :args {:coll {:as :value}}}
+
+  {:name :_repr-nl-caption-text
+   :parent :str
+   :args {:parts [{:parent :to-str :args {:value :_repr-nl-count}}
+                  {:value " values"}]}}
+
+  {:name :_repr-nl-caption
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "repr-sparkline-caption"}}
+          :children [:_repr-nl-caption-text]}}
+
+  {:name :_repr-numeric-list
+   :description "Sparkline repr for a numeric series — the `[\"list\" \"numeric\"]` row of :_value-repr-registry. SVG polyline scaled to the series' min..max plus a value-count caption."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "repr-sparkline-wrap"}}
+          :children [:_repr-nl-svg :_repr-nl-caption]}}
+
+  ;; --- the dispatch registry ---
+
+  {:name :_value-repr-registry
+   :description "Type -> repr-fn dispatch table for typed value representations. Each pair is [type-name repr-fn-name]; a VECTOR type-name is a structural key ([\"list\" \"numeric\"] means [:list :numeric]). Matched by `subtype?`, most-specific wins. Repr fns must be PURE (value -> hiccup); the resolver refuses effectful targets and sanitizes output (graphden.web.hiccup-sanitize) before the editor inlines it. Add a repr fn-def + a row here to extend — no executor / resolver change needed."
+   :parent :const
+   :args {:value [[["list" "numeric"] "_repr-numeric-list"]]}}]}

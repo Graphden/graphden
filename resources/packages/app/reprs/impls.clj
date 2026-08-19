@@ -1,0 +1,65 @@
+(ns graphden.packages.app.reprs.impls
+  "Implementations for the app/reprs base functions — the typed
+   value-representation resolver shims (delegating to
+   `graphden.crud.value-repr`, mirroring how app/forms delegates to
+   `crud.value-form`) plus the sparkline geometry primitive."
+  (:require
+    [clojure.math :as math]
+    [clojure.string :as str]
+    [graphden.crud.value-repr :as value-repr]
+    [graphden.executor.defbase :refer [defbase]]))
+
+
+(defbase fn-return-type-fn
+  "Declared/inferred return type of fn `fn-id` from the id-keyed
+   rich-types registry — nil when unknown. §3.1 library boundary."
+  [fn-id]
+  (value-repr/declared-return-type fn-id))
+
+
+(defbase render-value-repr
+  "Resolve + purity-check + execute + sanitize the registered repr of
+   `value` (see `crud.value-repr/render-repr`). Kept atomic like
+   `:build-form`: the dispatch pipeline is the safety boundary; the
+   extensibility seam is the `:_value-repr-registry` fn-def."
+  [value fn-id]
+  (value-repr/render-repr ctx value fn-id))
+
+
+(defn- fmt2
+  "Locale-independent 2-decimal string for an SVG coordinate."
+  [d]
+  (str (/ (math/round (* 100.0 (double d))) 100.0)))
+
+
+(defbase svg-polyline-points
+  "SVG polyline `points` for `nums` scaled into `width` x `height` —
+   min..max stretched to fit, y growing downward. Series longer than
+   2 x width stride-downsampled: an output-size bound (a 100k-point
+   string helps nobody at 240px), part of safely bounding the
+   primitive, not composition."
+  [nums width height]
+  (let [xs0 (vec nums)
+        step (max 1 (quot (count xs0) (* 2 (long width))))
+        xs (if (> step 1) (vec (take-nth step xs0)) xs0)
+        n (count xs)]
+    (if (< n 2)
+      ""
+      (let [lo (double (reduce min (first xs) (rest xs)))
+            hi (double (reduce max (first xs) (rest xs)))
+            span (if (== lo hi) 1.0 (- hi lo))
+            sx (/ (double width) (dec n))]
+        (str/join " "
+                  (map-indexed
+                    (fn [i v]
+                      (str (fmt2 (* i sx)) ","
+                           (fmt2 (- height (* height (/ (- (double v) lo) span))))))
+                    xs))))))
+
+
+;; The package loader pairs each base-fn declared in `fns.edn` with its
+;; impl by looking up this `impls` map (keyword name -> impl fn).
+(def impls
+  {:fn-return-type fn-return-type-fn
+   :render-value-repr render-value-repr
+   :svg-polyline-points svg-polyline-points})

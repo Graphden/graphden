@@ -1620,6 +1620,106 @@
           :attrs {:value {:class "execute-result-pane"}}
           :children [:_er-html-preview-banner :_er-html-preview-iframe]}}
 
+  ;; --- Typed-representation pane (app.reprs) ---
+  ;;
+  ;; The `:_value-repr-registry` dispatch: `:render-value-repr`
+  ;; resolves a PURE repr fn by the executed fn's declared/inferred
+  ;; return type (runtime-shape fallback), executes it, and sanitizes
+  ;; the hiccup (graphden.web.hiccup-sanitize) before it is inlined
+  ;; here. nil (no registered repr / not verifiably pure / sanitized
+  ;; away / any failure) falls through to the shape panes below. The
+  ;; clause sits right after the nil pane so a registered repr wins
+  ;; over every shape-based rendering.
+  ;;
+  ;; `:fn-id` on `:exec`: the persisted path assocs it in
+  ;; `crud.fn-execution/get-execution` (fn-version JOIN); the inline
+  ;; path has the editor stamp it into the POSTed body
+  ;; (editor-execute.js) — a forged id can only pick a different
+  ;; SANITIZED repr, so the client-supplied value is harmless.
+
+  {:name :_er-exec-fn-id
+   :parent :get :args {:coll {:as :exec} :key {:value :fn-id} :default nil}}
+
+  {:name :_er-repr-hiccup
+   :parent :render-value-repr
+   :args {:value :_er-result :fn-id :_er-exec-fn-id}}
+
+  {:name :_er-has-repr?
+   :parent :some? :args {:value :_er-repr-hiccup}}
+
+  {:name :_er-repr-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane execute-result-repr"}}
+          :children [:_er-repr-hiccup]}}
+
+  ;; --- Component-preview pane (declared `:hiccup-node` return) ---
+  ;;
+  ;; A fn whose DECLARED/INFERRED return type is a hiccup node is a
+  ;; frontend component — render it as markup in a sandboxed iframe
+  ;; instead of dumping the hiccup EDN as a list. `sandbox=""` (no
+  ;; allow-scripts, unlike the full HTML-response pane): a component
+  ;; preview is static markup; scripts and same-origin API calls stay
+  ;; off. The devcards-style INTERACTIVE preview is a deliberate
+  ;; non-goal here — it needs a served per-branch /preview route with
+  ;; its own auth story.
+
+  {:name :_er-declared-return-type
+   :parent :fn-return-type
+   :args {:fn-id :_er-exec-fn-id}}
+
+  ;; nil (no rich-types entry) coalesces to `:any`, which is a subtype
+  ;; of nothing — one `:subtype?` call covers both "unknown fn" and
+  ;; "known but not a component".
+  {:name :_er-declared-return-or-any
+   :parent :coalesce
+   :args {:value :_er-declared-return-type :default {:value :any}}}
+
+  ;; MUTUAL subtype = semantic type equality (the `exact-form-fn`
+  ;; rule). One-way `⊆ :hiccup-node` would be a trap: `:hiccup-node`
+  ;; is a UNION containing `:text`/`:int`/`:bool`/`:null`, so every
+  ;; scalar-returning fn would satisfy it and scalars would render in
+  ;; iframes. Only a fn declaring the hiccup-node contract itself (in
+  ;; alias or resolved structural form) previews as a component.
+  {:name :_er-return-is-hiccup?
+   :parent :and
+   :args {:values [{:parent :subtype?
+                    :args {:candidate :_er-declared-return-or-any
+                           :expected {:value :hiccup-node}}}
+                   {:parent :subtype?
+                    :args {:candidate {:value :hiccup-node}
+                           :expected :_er-declared-return-or-any}}]}}
+
+  {:name :_er-component-preview-html
+   :parent :render-hiccup
+   :args {:hiccup :_er-result}}
+
+  {:name :_er-component-preview-iframe-attrs
+   :parent :assoc
+   :args {:map {:value {:class "execute-result-html-preview execute-result-component-preview"
+                        :sandbox ""
+                        :title "Component preview"}}
+          :key {:value :srcdoc}
+          :value :_er-component-preview-html}}
+
+  {:name :_er-component-preview-banner
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-html-caption"}}
+          :children [{:value "Component preview"}]}}
+
+  {:name :_er-component-preview-iframe
+   :parent :hiccup
+   :args {:tag {:value "iframe"}
+          :attrs :_er-component-preview-iframe-attrs
+          :children {:value []}}}
+
+  {:name :_er-component-preview-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-component-preview-banner :_er-component-preview-iframe]}}
+
   ;; --- Per-item simple-scalar predicate (used by list + record) ---
   ;; `{:as :item}` is the current element. Simple scalars stringify
   ;; via `:str`; everything else gets a `:pre` JSON dump.
@@ -1842,6 +1942,8 @@
    :parent :cond
    :args {:clauses [:_er-result-truncated?  :_er-truncated-pane
                     :_er-result-nil?        :_er-nil-pane
+                    :_er-has-repr?          :_er-repr-pane
+                    :_er-return-is-hiccup?  :_er-component-preview-pane
                     :_er-result-is-html-response? :_er-html-preview-pane
                     :_er-result-too-large?  :_er-large-preview-pane
                     :_er-result-is-list?    :_er-list-pane

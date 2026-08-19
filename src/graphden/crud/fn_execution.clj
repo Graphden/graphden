@@ -343,7 +343,14 @@
           ;; run must not keep serving captured values from the stored
           ;; trace (persist/re-redact-path-trace).
           (update :path-trace #(some-> % persist/re-redact-path-trace))
-          (assoc :args (args-for-execution storage execution-id))))))
+          (assoc :args (args-for-execution storage execution-id))
+          ;; The logical base fn behind the frozen fn-version snapshot —
+          ;; drives typed-repr dispatch in the execute-result partial
+          ;; (`:_er-exec-fn-id`). Derived at read time so the historical
+          ;; row itself stays version-pinned.
+          (assoc :fn-id (some->> (:fn-version-id row)
+                                 (sp/read-entity storage :fn-version)
+                                 :fn-id))))))
 
 
 ;; =============================================================================

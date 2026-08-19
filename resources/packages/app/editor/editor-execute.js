@@ -320,7 +320,10 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
           : await authFetch('/partials/execute-result-inline', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body),
+              // fn-id drives the typed-repr / component-preview
+              // dispatch server-side; the inline /api/execute
+              // response doesn't carry it.
+              body: JSON.stringify({ ...body, 'fn-id': fnEntity.id }),
             });
         if (bodyResp.ok) {
           resultHostEl.innerHTML = await bodyResp.text();

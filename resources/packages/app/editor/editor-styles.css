@@ -4307,6 +4307,31 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   border-radius: 3px;
   background: var(--card-bg);
 }
+/* Component preview (declared :hiccup-node return) — a fragment, not
+   a page: fragment-sized room. */
+.execute-result-component-preview {
+  min-height: 120px;
+}
+/* Typed-repr pane (:_value-repr-registry) — sanitized graph-authored
+   hiccup inlined into the pane. `color` is the ink repr SVG strokes
+   pick up via currentColor. */
+.execute-result-repr .repr-sparkline-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--card-row-highlight);
+  border-radius: 2px;
+}
+.execute-result-repr .repr-sparkline {
+  width: 100%;
+  height: 48px;
+  color: var(--accent);
+}
+.execute-result-repr .repr-sparkline-caption {
+  color: var(--muted-fg);
+  font-size: 11px;
+}
 .execute-result-truncated {
   padding: 4px 6px;
   margin-bottom: 6px;

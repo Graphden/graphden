@@ -425,40 +425,44 @@
 ;; Form-fn dispatch
 ;; =============================================================================
 
-(defn- registry-pairs
-  "Read `:_value-form-registry` (a `:const` vector of
-   `[type-name form-fn-name]` string pairs) -> `[[type fn-name] …]`.
+(defn registry-pairs
+  "Read a type-dispatch registry fn-def (a `:const` vector of
+   `[type-name target-fn-name]` string pairs) -> `[[type fn-name] …]`.
+   The 1-arity reads `:_value-form-registry`; the 2-arity takes the
+   registry fn name so sibling dispatch tables (the value-REPR
+   registry in `crud.value-repr`) reuse the same read/normalize path.
    The type-name is alias-resolved to its structural form so a NAMED
    type (a refinement / record alias) matches the structural slot type
    under `subtype?`. Empty when the registry isn't synced yet."
-  [ctx]
-  (try
-    (->> (executor/execute-by-name ctx "_value-form-registry" {})
-         (keep (fn [pair]
-                 (when (and (sequential? pair) (= 2 (count pair)))
-                   (let [t (first pair)
-                         ;; A VECTOR type-name is a structural key —
-                         ;; `["secret" "any"]` → `[:secret :any]`
-                         ;; (marker-typed rows). Scalars stay the
-                         ;; alias-resolved keyword path.
-                         t' (if (sequential? t)
-                              (mapv keyword t)
-                              (types/resolve-alias (keyword t)))]
-                     [t' (str (second pair))]))))
-         vec)
-    (catch clojure.lang.ExceptionInfo e
-      ;; `fn-not-found` is expected during early sync (registry fn-def
-      ;; not loaded yet). Other ExceptionInfo types (malformed registry
-      ;; result, type-check failure, executor-internal bug) are real
-      ;; problems — log so the editor's empty form-picker isn't
-      ;; silently masking a regression.
-      (let [reason (-> e ex-data :error-data :reason)]
-        (when-not (= :fn-not-found reason)
-          (log/warn e "value-form-registry read failed — form-picker will be empty")))
-      [])
-    (catch Exception e
-      (log/warn e "value-form-registry read failed — form-picker will be empty")
-      [])))
+  ([ctx] (registry-pairs ctx "_value-form-registry"))
+  ([ctx registry-fn-name]
+   (try
+     (->> (executor/execute-by-name ctx registry-fn-name {})
+          (keep (fn [pair]
+                  (when (and (sequential? pair) (= 2 (count pair)))
+                    (let [t (first pair)
+                          ;; A VECTOR type-name is a structural key —
+                          ;; `["secret" "any"]` → `[:secret :any]`
+                          ;; (marker-typed rows). Scalars stay the
+                          ;; alias-resolved keyword path.
+                          t' (if (sequential? t)
+                               (mapv keyword t)
+                               (types/resolve-alias (keyword t)))]
+                      [t' (str (second pair))]))))
+          vec)
+     (catch clojure.lang.ExceptionInfo e
+       ;; `fn-not-found` is expected during early sync (registry fn-def
+       ;; not loaded yet). Other ExceptionInfo types (malformed registry
+       ;; result, type-check failure, executor-internal bug) are real
+       ;; problems — log so the editor's empty form-picker isn't
+       ;; silently masking a regression.
+       (let [reason (-> e ex-data :error-data :reason)]
+         (when-not (= :fn-not-found reason)
+           (log/warn e registry-fn-name "read failed — type dispatch will be empty")))
+       [])
+     (catch Exception e
+       (log/warn e registry-fn-name "read failed — type dispatch will be empty")
+       []))))
 
 
 (defn pick-form-fn

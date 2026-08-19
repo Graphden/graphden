@@ -4,9 +4,11 @@
 [![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-**A functional programming environment where the program is a typed graph
-in a database — not text in files — and the runtime executes that graph
-directly, hot-reloads it, branches it, and multi-tenants it.**
+**Graphden makes software something your whole team can see — and your
+AI can safely change.** It is a functional programming environment where
+the program is a typed graph in a database — not text in files — and the
+runtime executes that graph directly, hot-reloads it, branches it, and
+multi-tenants it.
 
 Functions and their compositions are stored as rows (`fn`, `slot`,
 `binding`), edited through a visual graph editor, type-checked and

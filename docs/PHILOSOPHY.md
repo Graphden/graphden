@@ -20,6 +20,19 @@
 
 ## Positioning
 
+**The one-sentence why (canonical — keep every outward surface in
+sync):** *Graphden makes software something your whole team can see —
+and your AI can safely change.* The living, typed graph is the
+**mechanism**, not the headline: because the program is a graph and not
+text in files, engineers review structural diffs instead of prose,
+non-programmer teammates compose ready-made typed blocks without being
+able to break them, and AI edits land as inspectable, effect-gated
+changes. Lead outward-facing copy with the benefit; introduce the graph
+one beat later as the how. Surfaces that carry this line and must stay
+in sync: the graphden.dev hero (graphden-cloud
+`resources/packages/landing/landing/fns.edn`), this repo's README lead,
+and the social profiles/banners (`docs/brand/`).
+
 Graphden is built **first as the author's own tool** — to make day-to-day
 software work less annoying — and **only secondarily as a product**.
 This ordering is load-bearing for design decisions:

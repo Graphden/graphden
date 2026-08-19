@@ -116,23 +116,29 @@ def dark_banner(w, h, tile_size, tile_xy, wm_size, wm_dxy, tag_size, tag_y,
 
 
 def boosty(out):
-    """Boosty cover, 1500x500 — but Boosty DISPLAYS it as a ~5.9:1 strip
-    (only the middle band, roughly y 120..390, is visible on desktop) and
-    overlays the round avatar on the bottom-left. So: no footer, all
-    content inside the middle band, and x < ~400 left clear."""
-    w, h = 1500, 500
+    """Boosty cover at the platform's NATIVE 1920x240 strip (~8:1). The
+    site scales it to the window width and crops the SIDES, so the lockup
+    is centered and kept inside the middle ~1000px; the round avatar
+    overlays the strip's bottom-left (roughly x 400..570, y 180+ on a
+    desktop window) — nothing important lives there."""
+    w, h = 1920, 240
     im = Image.new("RGBA", (w, h), INK + (255,))
     d = ImageDraw.Draw(im, "RGBA")
     backdrop(d, CONST_NODES, CONST_EDGES, (60, 90, 140), 110, 55,
-             scale=0.42, dx=1030, dy=40)
-    tile = 140
-    tx, ty = 420, 155
-    glow(im, tx + tile / 2, ty + tile / 2, tile * 1.1, (120, 170, 255), 26)
+             scale=0.38, dx=1470, dy=10)
+    tile = 110
+    wm_size = 88
+    gap = 28
+    wm_w = d.textlength("graphden", ImageFont.truetype(BOLD, wm_size)) \
+        + wm_size * -0.02 * 7
+    tx = int((w - (tile + gap + wm_w)) / 2)
+    ty = 25
     im.alpha_composite(rounded_tile(tile), (tx, ty))
     d = ImageDraw.Draw(im, "RGBA")
-    wordmark(d, tx + tile + 34, ty - 2, 105, LIGHT_TEXT, BLUE_LIGHT)
-    fm = ImageFont.truetype(MONO, 23)
-    d.text((tx + 2, 325), TAGLINE, font=fm, fill=MUTED)
+    wordmark(d, tx + tile + gap, ty + 4, wm_size, LIGHT_TEXT, BLUE_LIGHT)
+    fm = ImageFont.truetype(MONO, 22)
+    tag_w = d.textlength(TAGLINE, font=fm)
+    d.text(((w - tag_w) / 2, 155), TAGLINE, font=fm, fill=MUTED)
     im.convert("RGB").save(out)
     print(out)
 

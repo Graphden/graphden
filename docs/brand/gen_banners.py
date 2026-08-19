@@ -123,15 +123,16 @@ def youtube(out):
              scale=1.05, dx=w * 0.60, dy=h * 0.02)
     backdrop(d, CONST_NODES, CONST_EDGES, (150, 180, 225), 90, 55,
              scale=0.9, dx=w * 0.58, dy=h * 0.62)
-    # YouTube safe area (TV crop is huge; desktop shows ~2560x423 middle):
-    # everything important sits in the centered 1546x423 box.
+    # YouTube safe area: the centered 1546x423 box (x 507..2053) is all
+    # that every device shows — tile, wordmark AND the tagline's end must
+    # sit inside it (tagline at 31px ends at ~1998).
     tile = 175
-    tx, ty = 640, (h - tile) // 2
+    tx, ty = 530, (h - tile) // 2
     im.alpha_composite(rounded_tile(tile), (tx, ty))
     d = ImageDraw.Draw(im, "RGBA")
     wm_size = 120
     wordmark(d, tx + tile + 55, ty - 14, wm_size, DARK_TEXT, BLUE)
-    fm = ImageFont.truetype(MONO, 32)
+    fm = ImageFont.truetype(MONO, 31)
     d.text((tx + tile + 58, ty + tile - 26), TAGLINE, font=fm, fill=(105, 115, 132))
     im.convert("RGB").save(out)
     print(out)

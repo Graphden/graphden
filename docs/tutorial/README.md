@@ -22,7 +22,7 @@
 
 | # | Lesson | Status |
 |---|---|---|
-| 01 | [Anatomy of a fn-def](01-fn-defs.md) | ✅ written |
+| 01 | [Anatomy of a fn-def](01-fn-defs.md) | ✅ written · ▶ interactive |
 | 02 | [Parents and inheritance — single parent, then multiple](02-parents-and-inheritance.md) | ✅ written |
 | 03 | [Slots and bindings — what they are at the data level](03-slots-and-bindings.md) | ✅ written |
 | 04 | [Free arguments and how they propagate](04-free-arguments.md) | ✅ written |
@@ -49,6 +49,15 @@
 | 25 | Editing the editor: asset overrides | ⏳ planned |
 | 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written |
 | 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written |
+
+▶ interactive — the lesson also exists as a guided in-editor tour:
+open the editor with `?tutorial=01` (the landing demo link does this),
+or pick “Interactive tutorial” in the account-chip menu. The tour's
+step scripts live in the graph (`app.tour/_tour-lessons`) and are
+drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
+keep the written lesson's “Try it” section and the tour steps in
+sync when either changes.
+
 
 Lesson 25 will cover the Operate → Assets panel — editing the
 editor's own JS/CSS in place (save / revert / diff), the rolling

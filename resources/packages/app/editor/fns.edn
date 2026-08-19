@@ -146,6 +146,11 @@
                   ;; Loads before main so window.gdShellSurface / the hash
                   ;; router exist for the boot navigation.
                   "packages/app/editor/editor-shell.js"
+                  ;; Interactive tutorial overlay — before main so the boot
+                  ;; hook (maybeStartTutorial) exists for main's
+                  ;; DOMContentLoaded, and in the same lexical scope as
+                  ;; graphData/lookups (its checks read them bare).
+                  "packages/app/editor/editor-tour.js"
                   "packages/app/editor/editor-main.js"]}}
 
   ;; Raw concatenation of every editor module — still contains the

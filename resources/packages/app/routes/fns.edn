@@ -547,6 +547,13 @@
    :parent :get-auth-required
    :args {:path "/value-kinds" :handler :value-kinds-handler}}
 
+  ;; --- /api/tour — interactive-tutorial lesson scripts ---
+
+  {:name :api-tour
+   :description "GET /api/tour — the interactive in-editor tutorial's lesson scripts as JSON (steps, spotlight targets, completion checks). Static teaching content served from the graph (`app.tour/_tour-lessons`); open route so the anonymous landing-demo session can start a lesson."
+   :parent :get-route
+   :args {:path "/tour" :handler :tour-lessons-handler}}
+
   ;; --- /api/value-form — type-aware editor form for a binding/slot ---
 
   {:name :api-value-form
@@ -761,6 +768,7 @@
                   :graph-routes
                   :api-value-kinds
                   :api-value-form
+                  :api-tour
                   :api-execute
                   :api-execution-by-id
                   :api-execution-cancel

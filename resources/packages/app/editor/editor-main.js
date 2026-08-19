@@ -433,7 +433,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // outage, 5xx, branch-router error) shows a user-visible error in the
   // header instead of leaving the editor silently broken with just an
   // uncaught-promise message in DevTools.
-  initGraph().catch((err) => {
+  initGraph().then(() => {
+    // Interactive tutorial (?tutorial=NN or a mid-lesson resume) — only
+    // once the graph is loaded, since its step checks read graphData.
+    if (typeof maybeStartTutorial === 'function') maybeStartTutorial();
+  }).catch((err) => {
     // eslint-disable-next-line no-console
     console.error('initGraph failed', err);
     const banner = document.createElement('div');

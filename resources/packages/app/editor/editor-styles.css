@@ -6221,3 +6221,110 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 }
 .debug-armed-dot { color: var(--success-fg); }
 .debug-last-capture { color: var(--muted-fg); }
+
+/* ============================================================================
+ * Interactive tutorial (editor-tour.js) — spotlight ring + step popover.
+ * The spotlight is a fixed-position ring around the step's target; its huge
+ * box-shadow dims everything else (same scrim token the modal backdrop
+ * uses). pointer-events stays none so the user CLICKS THE REAL UI — the
+ * tour only observes. The ring sits ABOVE the base layout but BELOW the
+ * editor's floating UI (create menus / pickers / popovers, 10002+), so a
+ * menu the user opens mid-step floats bright over the dim; the tour's own
+ * popover stays on top of everything.
+ * ========================================================================== */
+#gd-tour-spot {
+  position: fixed;
+  z-index: 9000;
+  display: none;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px var(--modal-backdrop-bg);
+}
+#gd-tour-spot.gd-tour-visible { display: block; }
+
+#gd-tour-pop {
+  position: fixed;
+  /* Above the spotlight scrim (9000) but BELOW the editor's floating UI
+     (10002+): a run/edit popover the user opens mid-step must win over
+     the tour's own popover, never hide behind it. */
+  z-index: 9001;
+  display: none;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  background: var(--card-bg);
+  color: var(--fg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-xl);
+  padding: 14px 16px;
+}
+#gd-tour-pop.gd-tour-visible { display: block; }
+#gd-tour-pop.gd-tour-centered {
+  left: 50%; top: 20%;
+  transform: translateX(-50%);
+}
+
+.gd-tour-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.gd-tour-progress {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-fg);
+}
+.gd-tour-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.gd-tour-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg);
+}
+.gd-tour-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.gd-tour-hint {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--muted-fg);
+}
+.gd-tour-btn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.gd-tour-btn:hover { background: var(--hover-bg); }
+.gd-tour-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gd-tour-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  /* --bg flips with the theme: white on the light theme's teal accent,
+     ink on the dark theme's lighter accent — both clear WCAG AA (the
+     --header-fg pick failed contrast at 3.75:1). */
+  color: var(--bg);
+}
+.gd-tour-btn-primary:hover { background: var(--accent); filter: brightness(1.1); }
+.gd-tour-btn-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted-fg);
+}
+.gd-tour-btn-quiet:hover { color: var(--fg); background: var(--hover-bg); }

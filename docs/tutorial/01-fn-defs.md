@@ -93,7 +93,9 @@ In the running editor, in a namespace of your choice (or create
 1. Click `+` to add a new fn. Name it `hello-handler`.
 2. Set its parent to `:const`. The editor will show one free arg
    `:value`.
-3. Click `:value` and bind a literal map: `{:status 200 :body "Hello!"}`.
+3. Click `:value` and bind a literal map. The editor's value form
+   takes JSON: `{"status": 200, "body": "Hello!"}` (in `fns.edn`
+   you'd write the same map as EDN).
 4. Open the row's `⋯` actions popover and click ▶ Run — you
    should see the map come back.
 

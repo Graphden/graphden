@@ -440,6 +440,13 @@ function openShellMenu() {
   if (document.body.classList.contains('gd-platform') || isOp) {
     item('Platform', () => goSurface('platform'));
   }
+  // Interactive tutorial — guided in-editor lesson (editor-tour.js).
+  if (typeof window.startTutorial === 'function') {
+    item('Interactive tutorial', () => {
+      closeAuthPopover();
+      window.startTutorial('01');
+    });
+  }
   divider();
 
   // Session actions per auth mode.

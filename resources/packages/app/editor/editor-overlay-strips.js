@@ -70,10 +70,21 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   // "set parent…" are fn vocabulary — a type has no return and gets
   // its hierarchy through the type-create flows, so both strips are
   // noise on a type card (worst on stdlib primitives like `int`).
+  //
+  // EXCEPT the bare draft: a fresh sidebar "New graph…" fn has the exact
+  // primitive shape (no parents, no impl, no structure) and used to be
+  // swallowed by this guard, leaving NO affordance to assign its first
+  // parent (the 2026-08-19 tutorial-tour finding). The discriminator is
+  // the namespace: stdlib primitives are namespace-less, drafts are
+  // created inside one — and real type-rows classify as refinement/
+  // union/record/…, never `primitive`, so they keep hiding the strip.
+  const isBareDraftFn = cardFnEntity.role === 'primitive'
+                     && !!cardFnEntity['namespace-id'];
   const isTypeRow = !(Array.isArray(cardFnEntity['parent-ids'])
                       && cardFnEntity['parent-ids'].length)
                  && !cardFnEntity['return-type-fn-id']
-                 && !rt;
+                 && !rt
+                 && !isBareDraftFn;
   const rtEditable = isNavRoot && !isTypeRow
                   && (typeof isFnEditable === 'function' && isFnEditable(originalFnId))
                   && (typeof isAuthenticated === 'function' && isAuthenticated());

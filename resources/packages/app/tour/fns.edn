@@ -1,0 +1,80 @@
+;; Interactive editor tours — the lesson SCRIPTS for the in-editor guided
+;; tutorial (spotlight + step popover, `editor-tour.js`).
+;;
+;; Split of responsibilities (graph-first): step CONTENT lives here in the
+;; graph — texts, target selectors, declarative completion checks — served
+;; as JSON at `GET /api/tour`. The client module only interprets it:
+;; spotlight geometry, popover lifecycle, check polling. So lesson prose is
+;; editable in the editor like any other fn-def, and self-hosted deploys
+;; get the tours for free.
+;;
+;; Each step:
+;;   :title / :body — popover copy (plain text).
+;;   :target        — CSS selector the spotlight anchors to; nil = centered
+;;                    modal step. Selectors are DRIFT-PRONE: the e2e guard
+;;                    `tools/browser-test/edit-tutorial-tour.test.js` walks
+;;                    every step of every lesson against the live editor,
+;;                    so a renamed class fails CI, not a user.
+;;   :check         — how the step completes:
+;;                      {:kind "manual"}                      Next button
+;;                      {:kind "ns-exists"  :name N}
+;;                      {:kind "fn-exists"  :name N}
+;;                      {:kind "fn-parent"  :name N :parent P}
+;;                      {:kind "binding-bound" :name N :slot S}
+;;                      {:kind "dom" :selector SEL}           element appears
+;;   :creates       — {:type "ns"|"fn" :name N} — tracked for the end-of-tour
+;;                    cleanup offer (soft-deletes, nothing is lost).
+;;
+;; The texts parallel docs/tutorial/01-fn-defs.md § "Try it" — same hard bar
+;; as the written lessons: every step must be DO-able against the tree it
+;; lands with (the e2e guard enforces it).
+{:namespace "app.tour"
+ :description "Interactive in-editor tutorial: lesson scripts (steps, targets, completion checks) served as JSON at GET /api/tour; editor-tour.js renders them."
+ :fns
+ [{:name :_tour-lessons
+   :description "Every interactive lesson — `{:lessons [{:id :title :steps […]}]}`. Content parallels docs/tutorial lessons; keep both in sync when a lesson's flow changes."
+   :parent :const
+   :args {:value
+          {:lessons
+           [{:id "01"
+             :title "Your first function"
+             :steps
+             [{:title "Welcome to the interactive tutorial"
+               :body "In the next few minutes you will create a function, give it a parent, bind a value and run it — the whole Graphden loop. Do each step yourself; the tour advances automatically when it sees the result in the graph. You can stop any time with “End tour” — everything you create here can be cleaned up at the end."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Create a namespace"
+               :body "Functions live in namespaces. At the bottom of the Explorer click “New namespace”, type exactly: tutorial — and press Enter."
+               :target ".create-root-ns-btn"
+               :check {:kind "ns-exists" :name "tutorial"}
+               :creates {:type "ns" :name "tutorial"}}
+              {:title "Add a function"
+               :body "Click the “tutorial” row to expand it, then hover it and click its “+” button. Choose “New graph…”, type exactly: hello-handler — and press Enter. The new function opens on the canvas."
+               :target ".ns-header[data-ns-path=\"tutorial\"]"
+               :check {:kind "fn-exists" :name "hello-handler"}
+               :creates {:type "fn" :name "hello-handler"}}
+              {:title "Set the parent"
+               :body "Every fn inherits from a parent. On the card click “set parent…”, type const in the picker and pick core.logic.const — the :const primitive, which returns its :value argument unchanged."
+               :target ".reparent-strip"
+               :check {:kind "fn-parent" :name "hello-handler" :parent "const"}}
+              {:title "Bind :value"
+               :body "Inheriting :const exposed its :value slot. Click the “+” placeholder on the :value slot, choose “Bind literal”, enter this JSON: {\"status\": 200, \"body\": \"Hello!\"} — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "hello-handler" :slot "value"}}
+              {:title "Run it"
+               :body "Click the ⋯ button on the card's top row, then ▶ Run, then the Run button in the popover. Your map comes straight back — no build, no deploy: the graph you just edited is already the running system."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "That's the whole loop"
+               :body "You built a function from a primitive, typed data flowed through it, and you executed it in place. The written lesson (graphden.dev/tutorial → Lesson 01) explains what a fn-def, a parent and a slot really are. Click Finish — the tour will offer to delete what you created, or you can keep it and explore."
+               :target nil
+               :check {:kind "manual"}}]}]}}}
+
+  {:name :_tour-json
+   :parent :to-json-string
+   :args {:data :_tour-lessons}}
+
+  {:name :tour-lessons-handler
+   :description "GET /api/tour handler — the interactive-tutorial lesson scripts as JSON. Static teaching content, no data reads; open route (the demo's anonymous session must reach it)."
+   :parent :json-ok-response
+   :args {:body :_tour-json}}]}

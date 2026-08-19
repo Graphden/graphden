@@ -7,6 +7,8 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.value-form :as vform]
+    [graphden.crud.value-repr :as vrepr]
     [graphden.executor.interface :as exec]
     [graphden.test-infra.exec-harness :as harness]))
 
@@ -172,10 +174,10 @@
              {:name "b" :n 2 :extra nil}]
           f (succeeded-body v)]
       (is (tree-string-containing f "repr-record-table")
-          (str "DIAG dt=" (pr-str (graphden.crud.value-repr/dispatch-type nil v))
-               " pairs=" (pr-str (graphden.crud.value-form/registry-pairs
+          (str "DIAG dt=" (pr-str (vrepr/dispatch-type nil v))
+               " pairs=" (pr-str (vform/registry-pairs
                                    harness/*context* "_value-repr-registry"))
-               " direct=" (pr-str (try (graphden.crud.value-repr/render-repr
+               " direct=" (pr-str (try (vrepr/render-repr
                                          harness/*context* v nil)
                                        (catch Exception e (ex-message e))))))
       (is (in-tree? f "th") "header cells present")

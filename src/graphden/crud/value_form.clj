@@ -453,7 +453,8 @@
                           ;; the structural form out. Scalars stay the
                           ;; alias-resolved keyword path.
                           t' (if (sequential? t)
-                               ((fn deep [x]
+                               ((fn deep
+                                  [x]
                                   (if (sequential? x)
                                     (mapv deep x)
                                     (keyword x)))

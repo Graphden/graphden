@@ -19,15 +19,31 @@ const NS_NAME = 'tutorial';
 const FN_NAME = 'hello-handler';
 
 
+// Retry wrapper for cleanup deletes: a DELETE fired right after a UI write
+// can 409 while the write (or its invalidation) is still settling on the
+// loaded gate stack. A short backoff clears the transient case without
+// masking a REAL in-use 409 (three failures still surface as a leak).
+async function retryingDelete(fn) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (_) { /* fall through to backoff */ }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  try { await fn(); } catch (_) { /* best-effort — leak counter reports */ }
+}
+
+
 async function hardCleanup(page) {
   // Belt for a mid-test failure: remove the tutorial fn + ns via the API
   // so the runner's leak counter stays clean even when the tour's own
   // cleanup never ran. The fn is deleted BY NAME first — a prior crash can
   // leave it orphaned outside the (deleted) tutorial ns, where the
   // ns-subtree walk below would miss it and the next run's create 409s.
-  try { await deleteFnByName(page, FN_NAME); } catch (_) { /* absent */ }
+  await retryingDelete(() => deleteFnByName(page, FN_NAME));
   for (const nm of ['add-10', 'tutorial-json']) {
-    try { await deleteFnByName(page, nm); } catch (_) { /* absent */ }
+    await retryingDelete(() => deleteFnByName(page, nm));
   }
   try {
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
@@ -43,6 +59,18 @@ async function hardCleanup(page) {
       await api(page, 'DELETE', '/api/entities/ns/' + ns.id);
     }
   } catch (_) { /* best-effort */ }
+  // Leaked isolation branches: a run that dies between startTutorialIsolated
+  // and "Delete branch & return" leaves a tutorial-NN-xxxx branch behind, and
+  // each retry of the suite adds another. Sweep them so per-branch contexts
+  // don't pile up across gate attempts.
+  try {
+    const branches = await api(page, 'GET', '/api/branches');
+    for (const b of (Array.isArray(branches) ? branches : (branches.branches || []))) {
+      if (/^tutorial-\d\d-/.test(b.name || '')) {
+        await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(b.name));
+      }
+    }
+  } catch (_) { /* best-effort */ }
 }
 
 
@@ -54,11 +82,16 @@ function tourTitle(page) {
 }
 
 
+// Deadlines are sized for the GATE's shared e2e stack, not a dev laptop:
+// a write-following step there can stall >60s behind a registry recompile
+// plus GC churn (observed 2026-08-19: three 45s branch-wait timeouts and
+// one 60s seed-step timeout in one gate run). Polling keeps the success
+// path fast — a generous ceiling only slows the FAILURE case.
 async function waitTourTitle(page, title, timeoutMs) {
   await page.waitForFunction((expected) => {
     const t = document.querySelector('#gd-tour-pop .gd-tour-title');
     return t && t.textContent.trim() === expected;
-  }, title, {timeout: timeoutMs || 45000, polling: 150});
+  }, title, {timeout: timeoutMs || 120000, polling: 150});
 }
 
 
@@ -142,6 +175,12 @@ async function bindFirstPlaceholder(page, literalText) {
     Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
       .find((b) => b.textContent.trim() === 'Save').click();
   }, literalText);
+  // The bind/append popover unmounts once the write's response lands —
+  // waiting here keeps a later cleanup DELETE from racing an in-flight
+  // write on the same fn (the 2026-08-19 gate-poisoning trigger window).
+  await page.waitForFunction(
+    () => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 60000, polling: 100});
 }
 
 
@@ -200,7 +239,7 @@ async function finishAndDelete(page) {
     await page.goto(BASE + '/?tutorial=01');
 
     // Step 1 — welcome (manual).
-    await waitTourTitle(page, 'Welcome to the interactive tutorial', 60000);
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
     console.log('  step 1: welcome shown');
     assert(await clickTourButton(page, 'Next'), 'welcome Next button');
 
@@ -245,7 +284,7 @@ async function finishAndDelete(page) {
     await page.waitForSelector('.inline-input', {timeout: 5000});
     await page.fill('.inline-input', FN_NAME);
     await page.press('.inline-input', 'Enter');
-    await waitTourTitle(page, 'Set the parent', 60000);
+    await waitTourTitle(page, 'Set the parent', 150000);
     console.log('  step 3: fn created, tour advanced');
 
     // Step 4 — assign :const through the reparent strip + fn picker.
@@ -268,7 +307,7 @@ async function finishAndDelete(page) {
         });
       row.click();
     });
-    await waitTourTitle(page, 'Bind :value', 60000);
+    await waitTourTitle(page, 'Bind :value', 150000);
     console.log('  step 4: parent set, tour advanced');
 
     // Step 5 — bind the :value literal.
@@ -297,7 +336,7 @@ async function finishAndDelete(page) {
       Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
         .find((b) => b.textContent.trim() === 'Save').click();
     });
-    await waitTourTitle(page, 'Run it', 60000);
+    await waitTourTitle(page, 'Run it', 150000);
     console.log('  step 5: value bound, tour advanced');
 
     // Step 6 — run the fn via ⋯ → ▶ → Run.
@@ -316,7 +355,7 @@ async function finishAndDelete(page) {
     await page.waitForSelector('.execute-popover.visible .execute-run-btn',
       {timeout: 10000});
     await page.click('.execute-popover.visible .execute-run-btn');
-    await waitTourTitle(page, "That's the whole loop", 60000);
+    await waitTourTitle(page, "That's the whole loop", 150000);
     console.log('  step 6: executed, tour advanced');
 
     // Step 7 — finish → cleanup dialog → delete what the tour created.
@@ -334,33 +373,33 @@ async function finishAndDelete(page) {
 
     // ---------- Lesson 02 — parents & inheritance (extend flow) ----------
     await page.goto(BASE + '/?tutorial=02');
-    await waitTourTitle(page, 'Inheritance, hands on', 60000);
+    await waitTourTitle(page, 'Inheritance, hands on', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 02 Next');
     await waitTourTitle(page, 'Find :add');
     await filterAndSelect(page, 'add', 'add');
-    await waitTourTitle(page, 'Extend it', 45000);
+    await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'add-10');
-    await waitTourTitle(page, 'Seed the inherited slot', 60000);
+    await waitTourTitle(page, 'Seed the inherited slot', 150000);
     await bindFirstPlaceholder(page, '10');
-    await waitTourTitle(page, 'Run the child', 60000);
+    await waitTourTitle(page, 'Run the child', 150000);
     await runViaRowActions(page);
-    await waitTourTitle(page, "That's inheritance", 60000);
+    await waitTourTitle(page, "That's inheritance", 150000);
     await finishAndDelete(page);
     console.log('  lesson 02: walked + cleaned');
 
     // ---------- Lesson 04 — free arguments ----------
     await page.goto(BASE + '/?tutorial=04');
-    await waitTourTitle(page, 'Free args: the template mechanism', 60000);
+    await waitTourTitle(page, 'Free args: the template mechanism', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 04 Next');
     await waitTourTitle(page, 'Find to-json-string');
     await filterAndSelect(page, 'to-json', 'to-json-string');
-    await waitTourTitle(page, 'A free arg becomes a Run field', 45000);
+    await waitTourTitle(page, 'A free arg becomes a Run field');
     await runViaRowActions(page, '{"a": 1}');
-    await waitTourTitle(page, 'Pin it in a child', 60000);
+    await waitTourTitle(page, 'Pin it in a child', 150000);
     await extendViaRowActions(page, 'tutorial-json');
     await page.waitForTimeout(2500); // extend re-selects the child
     await bindFirstPlaceholder(page, '{"greeting": "hello"}');
-    await waitTourTitle(page, 'Bound beats free', 60000);
+    await waitTourTitle(page, 'Bound beats free', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 04 step-5 Next');
     await waitTourTitle(page, 'Templates, specialized');
     await finishAndDelete(page);
@@ -371,11 +410,13 @@ async function finishAndDelete(page) {
       return await window.startTutorialIsolated('01');
     });
     assert(startedIso, 'startTutorialIsolated returned true');
+    // First load on a fresh branch compiles that branch's registry on the
+    // (loaded) gate stack — by far the slowest wait in this file.
     await page.waitForFunction(() => {
       return /[?&]branch=tutorial-01-/.test(location.search)
         && !!document.querySelector('#gd-tour-pop .gd-tour-title');
-    }, null, {timeout: 45000, polling: 300});
-    await waitTourTitle(page, 'Welcome to the interactive tutorial', 60000);
+    }, null, {timeout: 240000, polling: 300});
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
         .find((b) => b.textContent.trim() === 'End tour').click();
@@ -384,7 +425,7 @@ async function finishAndDelete(page) {
     assert(await clickTourButton(page, 'Delete branch & return'),
       'Delete branch & return button');
     await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
-      null, {timeout: 45000, polling: 300});
+      null, {timeout: 240000, polling: 300});
     console.log('  branch isolation: created, resumed, deleted, returned');
 
     console.log('PASS');

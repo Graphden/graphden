@@ -63,7 +63,7 @@
     :error-http-status :every? :ex-data :execute-trace-rows
     :ex-info :extract-entity-params
     :filter :filter-xf :find-first :first :fix :flatten
-    :fn-names-with-tag :form-decode :fn-stats-raw :fn-type-bound-effects
+    :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
     :free-arg-slot-map :free-memory :future :get :get-entity
     :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
@@ -88,7 +88,7 @@
     ;; :request-capabilities reads the request-scope SEAM (server-derived
     ;; capability names), never caller content — no taint to propagate.
     :request-capabilities
-    :render-hiccup :repeat :reset :resolve-branch-ref :resolve-fn
+    :render-hiccup :render-value-repr :repeat :reset :resolve-branch-ref :resolve-fn
     :resolve-fn-version-id :resolve-form :resolve-package-version
     :resolve-type-fn-id :response-immutable? :rest :reverse
     :rewrite-refs-to-version
@@ -106,7 +106,7 @@
     :str-len :str-lower :str-replace :str-split :str-starts-with?
     :str-to-keyword :str-to-uuid :str-trim :str-upper
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
-    :sub :subs :subtype?
+    :sub :subs :subtype? :svg-polyline-points
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-string
@@ -138,7 +138,7 @@
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str
     :quot :range
-    :re-find? :re-replace :reduce :render-hiccup :repeat :reset :rest :reverse :select-keys :digest-hex
+    :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :select-keys :digest-hex
     :slurp :some :some? :sort :sort-by :str :str-contains? :str-join :str-len :str-lower
     :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim

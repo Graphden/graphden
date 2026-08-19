@@ -147,6 +147,7 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |
 | `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
+| `app/reprs` | `:render-value-repr` propagates — its `:value` slot is `:any`, so a marked value can enter, and the returned repr hiccup derives from it. `:svg-polyline-points` (`[:list :numeric]` slot) and `:fn-return-type` (id in, type expr out) are bare — taint can't enter. |
 
 `web/http-*` and `web/sql` SQL impls are sinks — they don't return
 the input content, they send it as a side-effect. Mark a sink's

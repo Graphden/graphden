@@ -59,7 +59,14 @@
 
 ;; The package loader pairs each base-fn declared in `fns.edn` with its
 ;; impl by looking up this `impls` map (keyword name -> impl fn).
+;; `:render-value-repr` propagates marker taint (SECRETS.md § T3): its
+;; `:value` slot is `:any`, so a `[:secret T]` CAN reach it, and the
+;; returned hiccup derives from that content — the flag keeps the
+;; output marked so hide-at-sink still fires. The other two can't
+;; carry taint: `:fn-return-type` passes an id, not content, and
+;; `:svg-polyline-points`' `[:list :numeric]` slot rejects
+;; secret-marked input outright (same rationale as `:h-raw`).
 (def impls
   {:fn-return-type fn-return-type-fn
-   :render-value-repr render-value-repr
+   :render-value-repr {:impl render-value-repr :taint-propagate? true}
    :svg-polyline-points svg-polyline-points})

@@ -281,7 +281,7 @@ document.addEventListener('click', async (e) => {
   e.preventDefault();
   btn.disabled = true;
   try {
-    const r = await authFetch('/api/preview-token', {
+    const r = await authFetch('/api/preview-token', { // api-url-drift-allow: route-collection (tenancy addon)
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 'fn-id': btn.dataset.previewFnId }),

@@ -31,8 +31,8 @@
 
 
 (deftest preview-gate-cascade-test
-  (testing "missing fn-id → 400"
-    (let [r (h/via :_pv-handler (preview-req nil))]
+  (testing "malformed fn-id → 400 (a MISSING one serves the gallery — see components-gallery-test)"
+    (let [r (h/via :_pv-handler (preview-req "fn-id=zzz"))]
       (is (= 400 (:status r)))
       (is (str/includes? (str (:body r)) "Missing or malformed fn-id"))))
 
@@ -105,6 +105,52 @@
         "caption carries the /preview link")
     (is (some #(= "_blank" %) flat) "opens in a new tab")
     (is (some #(= "noopener" %) flat) "without window.opener")))
+
+
+(deftest components-gallery-test
+  (let [_ (setup/sync-and-invalidate!
+            (:ctx h/*graph*) (:storage h/*graph*)
+            ;; declared :return-type / :effects — harness convention
+            ;; (prod's sweep computes them; see the notes above).
+            [{:name :pvg-live
+              :parent :wrap-element
+              :return-type :hiccup-node
+              :args {:tag {:value "div"}
+                     :content {:value "gallery-live-render"}}}
+             {:name :_pvg-priv-comp
+              :parent :wrap-element
+              :return-type :hiccup-node
+              :args {:tag {:value "div"}
+                     :content {:value "pvg-private-body"}}}
+             {:name :pvg-eff
+              :parent :wrap-element
+              :return-type :hiccup-node
+              :effects #{:env}
+              :args {:tag {:value "div"}
+                     :content {:parent :coalesce
+                               :args {:value {:parent :env
+                                              :args {:name {:value "GRAPHDEN_PVG_UNSET"}}}
+                                      :default {:value "pvg-eff-rendered"}}}}}])
+        r (h/via :_pv-handler (preview-req nil))
+        body (str (:body r))]
+    (testing "no fn-id → the gallery page"
+      (is (= 200 (:status r)))
+      (is (str/includes? body "Components gallery")))
+    (testing "a pure zero-arg component renders LIVE in its card"
+      (is (str/includes? body "gallery-live-render"))
+      (is (str/includes? body "pvg-live")))
+    (testing "an effectful component is listed but NOT executed"
+      (is (str/includes? body "pvg-eff"))
+      (is (not (str/includes? body "pvg-eff-rendered")))
+      (is (str/includes? body "has side effects")))
+    (testing "cards link to their single-fn preview"
+      (is (str/includes? body "/preview?fn-id=")))
+    (testing "_-private components hidden by default, shown with ?all=1"
+      (is (not (str/includes? body "_pvg-priv-comp")))
+      (let [all-body (str (:body (h/via :_pv-handler (preview-req "all=1"))))]
+        (is (str/includes? all-body "_pvg-priv-comp"))))
+    (testing "malformed fn-id still 400s (raw-param distinction)"
+      (is (= 400 (:status (h/via :_pv-handler (preview-req "fn-id=not-a-uuid"))))))))
 
 
 (deftest preview-effect-confirm-test

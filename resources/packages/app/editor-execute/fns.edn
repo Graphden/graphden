@@ -937,9 +937,9 @@
    :args {:coll [{:value "Preview :"} :_xp-title-name] :separator {:value ""}}}
 
   {:name :_pv-page-html
-   :description "Full preview page HTML — components stylesheet + htmx + the SSE extension in head (a component may carry `:sse-connect-attrs`), runtime dispatcher scripts at end of body. Free arg `:pv-body` — the page body hiccup a variant supplies."
+   :description "Full preview page HTML — components stylesheet + htmx + the SSE extension in head (a component may carry `:sse-connect-attrs`), runtime dispatcher scripts at end of body. Free args `:pv-title` / `:pv-body` — the variant supplies both (the single-fn variants bind `:_pv-title`, the gallery its own)."
    :parent :html-page-rendered
-   :args {:title :_pv-title
+   :args {:title {:as :pv-title}
           :head {:parent :with-htmx-sse :args {:head :graphden-page-head}}
           :scripts :graphden-runtime-scripts
           :body {:as :pv-body}}}
@@ -964,7 +964,8 @@
 
   {:name :_pv-ok-response
    :parent :html-ok-response
-   :args {:body {:parent :_pv-page-html :args {:pv-body :_pv-success-body}}}}
+   :args {:body {:parent :_pv-page-html :args {:pv-title :_pv-title
+                                               :pv-body :_pv-success-body}}}}
 
   ;; --- effect-confirm page — mirrors the Run popover's gate ---
 
@@ -988,7 +989,8 @@
 
   {:name :_pv-confirm-response
    :parent :html-ok-response
-   :args {:body {:parent :_pv-page-html :args {:pv-body :_pv-confirm-body}}}}
+   :args {:body {:parent :_pv-page-html :args {:pv-title :_pv-title
+                                               :pv-body :_pv-confirm-body}}}}
 
   ;; --- gate / failure responses ---
 
@@ -1052,11 +1054,301 @@
           :then :_pv-ok-response
           :else :_pv-failed-rej}}
 
+  ;; ---------------------------------------------------------------------
+  ;; Components gallery — `GET /preview` with NO fn-id (devcards L3).
+  ;;
+  ;; Every named, non-anonymous fn whose declared/inferred return type
+  ;; is semantically `:hiccup-node` becomes a card, sorted by
+  ;; namespace-path + name. A PURE, zero-free-args component renders
+  ;; LIVE inside its card (per-card `:_execute-apply` — inline pure
+  ;; runs write no rows); anything effectful or parameterised shows
+  ;; its effect chips / free-arg count and defers to its single-fn
+  ;; `/preview?fn-id=…` page (where the confirm gate applies).
+  ;;
+  ;; Pipeline shape honours the HOF purity contracts: the `:filter`
+  ;; predicate and the `:sort-by` key are PURE (registry reads only);
+  ;; the effectful lookups (`:fn-ns-path`, `:free-arg-slot-map`, the
+  ;; render itself) live in `:map` callbacks, where effects propagate.
+  ;; Missing-vs-malformed fn-id is decided on the RAW query param:
+  ;; absent → gallery, present-but-unparseable → 400.
+
+  {:name :_pvg-no-fn-id?
+   :parent :nil?
+   :args {:value {:parent :query-param
+                  :args {:request {:as :request}
+                         :param-name {:value "fn-id"}}}}}
+
+  {:name :_pvg-card-cap
+   :description "Gallery card budget — components beyond it are counted in the overflow note, never silently dropped. `:take :count` requires `:non-negative-int`, so declare narrower than `:const`'s inferred `:int` (the `:_er-max-list-items` pattern)."
+   :parent :const
+   :return-type :non-negative-int
+   :args {:value 60}}
+
+  {:name :_pvg-all-fns
+   :parent :get
+   :args {:coll :_load-graph-cached :key {:value :fns} :default {:value []}}}
+
+  ;; --- pure component predicate (filter demands a pure callback) ---
+
+  {:name :_pvg-it-id
+   :parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_pvg-it-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+
+  {:name :_pvg-it-return-or-any
+   :parent :coalesce
+   :args {:value {:parent :fn-return-type :args {:fn-id :_pvg-it-id}}
+          :default {:value :any}}}
+
+  {:name :_pvg-include-private?
+   :description "`?all=1` widens the gallery to `_`-private components — the shipped editor's own panes and any internal wiring. Default is PUBLIC components only: per the naming philosophy a `_`-name is internal scaffolding, and 600+ platform panes would drown a user's own cards."
+   :parent :equal?
+   :args {:a {:parent :query-param
+              :args {:request {:as :request} :param-name {:value "all"}}}
+          :b {:value "1"}}}
+
+  {:name :_pvg-it-component?-cb
+   :description "Card admission: named, PUBLIC unless `?all=1` (never `_anon-*`), return type semantically `:hiccup-node` (mutual subtype — the union trap again). Pure — registry/type/request reads only."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_pvg-it-name}}
+                   {:parent :or
+                    :args {:values [:_pvg-include-private?
+                                    {:parent :not
+                                     :args {:value {:parent :str-starts-with?
+                                                    :args {:string {:parent :to-str :args {:value :_pvg-it-name}}
+                                                           :prefix {:value "_"}}}}}]}}
+                   {:parent :not
+                    :args {:value {:parent :str-starts-with?
+                                   :args {:string {:parent :to-str :args {:value :_pvg-it-name}}
+                                          :prefix {:value "_anon-"}}}}}
+                   {:parent :subtype?
+                    :args {:candidate :_pvg-it-return-or-any
+                           :expected {:value :hiccup-node}}}
+                   {:parent :subtype?
+                    :args {:candidate {:value :hiccup-node}
+                           :expected :_pvg-it-return-or-any}}]}}
+
+  {:name :_pvg-components
+   :parent :filter
+   :args {:pred :_pvg-it-component?-cb :coll :_pvg-all-fns}}
+
+  ;; --- enrich (effectful map — ns walk + free-arg lookup) ---
+
+  {:name :_pvg-it-entry
+   :parent :rich-type-of-name
+   :args {:fn-name :_pvg-it-name}}
+
+  {:name :_pvg-it-effects
+   :parent :sort
+   :args {:coll {:parent :vec
+                 :args {:coll {:parent :get
+                               :args {:coll :_pvg-it-entry
+                                      :key {:value :effects}
+                                      :default {:value []}}}}}}}
+
+  {:name :_pvg-it-frees
+   :parent :free-arg-slot-map
+   :args {:fn-id :_pvg-it-id}}
+
+  {:name :_pvg-enrich-cb
+   :description "Row → card map: id / name / ns-path / effect vec / pure? (effects KNOWN and empty — unknown fails closed, same as the single-fn confirm gate) / zero-free? / the row itself (the live render hands it to `:_execute-apply` as the resolved fn-row)."
+   :parent :zipmap
+   :args {:keys [{:value :id} {:value :name} {:value :ns-path}
+                 {:value :effects} {:value :pure?} {:value :zero-free?}
+                 {:value :row}]
+          :vals [:_pvg-it-id
+                 :_pvg-it-name
+                 {:parent :fn-ns-path
+                  :args {:ns-id {:parent :get
+                                 :args {:coll {:as :item}
+                                        :key {:value :namespace-id}
+                                        :default nil}}}}
+                 :_pvg-it-effects
+                 {:parent :and
+                  :args {:values [{:parent :some? :args {:value :_pvg-it-entry}}
+                                  {:parent :empty? :args {:coll :_pvg-it-effects}}]}}
+                 {:parent :empty? :args {:coll :_pvg-it-frees}}
+                 {:as :item}]}}
+
+  {:name :_pvg-enriched
+   :parent :map
+   :args {:func :_pvg-enrich-cb :coll :_pvg-components}}
+
+  ;; --- pure sort key over the enriched card ---
+
+  {:name :_pvg-sort-key-cb
+   :parent :str
+   :args {:parts [{:parent :get :args {:coll {:as :item} :key {:value :ns-path} :default {:value ""}}}
+                  {:value "/"}
+                  {:parent :to-str
+                   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}}}]}}
+
+  {:name :_pvg-sorted
+   :parent :sort-by
+   :args {:key-fn :_pvg-sort-key-cb :coll :_pvg-enriched}}
+
+  {:name :_pvg-total
+   :parent :count :args {:coll :_pvg-sorted}}
+
+  {:name :_pvg-shown
+   :parent :take :args {:count :_pvg-card-cap :coll :_pvg-sorted}}
+
+  ;; --- per-card hiccup ---
+
+  {:name :_pvg-card-id
+   :parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_pvg-card-href
+   :parent :str
+   :args {:parts [{:value "/preview?fn-id="}
+                  {:parent :to-str :args {:value :_pvg-card-id}}
+                  {:parent :if
+                   :args {:test {:parent :some? :args {:value :current-branch-id}}
+                          :then {:parent :str
+                                 :args {:parts [{:value "&branch="}
+                                                {:parent :to-str :args {:value :current-branch-id}}]}}
+                          :else {:value ""}}}]}}
+
+  {:name :_pvg-card-live?
+   :parent :and
+   :args {:values [{:parent :get :args {:coll {:as :item} :key {:value :pure?} :default {:value false}}}
+                   {:parent :get :args {:coll {:as :item} :key {:value :zero-free?} :default {:value false}}}]}}
+
+  {:name :_pvg-card-parsed
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
+                 {:value :timeout-ms} {:value :persist?}
+                 {:value :trace?} {:value :capture-values?}]
+          ;; `:get`-plucked ids type as `:any`, and record-field
+          ;; comparison is strict (`:any` ⊄ `[:union :null :uuid]`) —
+          ;; the to-str→parse-uuid roundtrip launders the field to
+          ;; `:nullable-uuid` for the parsed-shape contract.
+          :vals [{:parent :parse-uuid
+                  :args {:string {:parent :to-str :args {:value :_pvg-card-id}}}}
+                 {:value nil} {:value {}}
+                 {:value 10000} {:value false} {:value false}
+                 {:value false}]}}
+
+  {:name :_pvg-card-outcome
+   :parent :_execute-apply
+   :args {:parsed :_pvg-card-parsed
+          :fn-row {:parent :get :args {:coll {:as :item} :key {:value :row} :default nil}}}}
+
+  {:name :_pvg-card-rendered
+   :parent :if
+   :args {:test {:parent :equal?
+                 :args {:a {:parent :name
+                            :args {:value {:parent :get
+                                           :args {:coll :_pvg-card-outcome
+                                                  :key {:value :status}
+                                                  :default {:value :unknown}}}}}
+                        :b {:value "succeeded"}}}
+          :then {:parent :get :args {:coll :_pvg-card-outcome :key {:value :result} :default nil}}
+          :else {:value [:em "render failed — open the card for details"]}}}
+
+  {:name :_pvg-card-placeholder
+   :description "Body for a card the gallery must NOT auto-execute — effectful/unknown (the single-fn page shows the confirm gate) or parameterised (needs args via the Run popover)."
+   :parent :hiccup
+   :args {:tag {:value "p"}
+          :attrs {:value {:style "color:#889; font-size:12px; margin:8px 0 0"}}
+          :children [{:parent :if
+                      :args {:test :_pvg-card-live?
+                             :then {:value ""}
+                             :else {:parent :if
+                                    :args {:test {:parent :get :args {:coll {:as :item} :key {:value :zero-free?} :default {:value false}}}
+                                           :then {:value "has side effects — open to render (confirm gate applies)"}
+                                           :else {:value "takes arguments — open, or run via the Run popover"}}}}}]}}
+
+  {:name :_pvg-card-body
+   :parent :if
+   :args {:test :_pvg-card-live?
+          :then :_pvg-card-rendered
+          :else :_pvg-card-placeholder}}
+
+  {:name :_pvg-card-eff-chips
+   :parent :map
+   :args {:func :_xp-eff-chip
+          :coll {:parent :get :args {:coll {:as :item} :key {:value :effects} :default {:value []}}}}}
+
+  {:name :_pvg-card-cb
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-preview-card"
+                          :style "border:1px solid #dde; border-radius:6px; padding:10px 12px; background:#fff"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:style "display:flex; gap:8px; align-items:baseline; flex-wrap:wrap"}}
+                             :children [{:parent :hiccup
+                                         :args {:tag {:value "span"}
+                                                :attrs {:value {:style "color:#98a; font-size:11px"}}
+                                                :children [{:parent :get :args {:coll {:as :item} :key {:value :ns-path} :default {:value ""}}}]}}
+                                        {:parent :hiccup
+                                         :args {:tag {:value "a"}
+                                                :attrs {:parent :zipmap
+                                                        :args {:keys [{:value :href} {:value :style}]
+                                                               :vals [:_pvg-card-href
+                                                                      {:value "font-weight:600; text-decoration:none"}]}}
+                                                :children [{:parent :to-str :args {:value :_pvg-it-name}}
+                                                           {:value " ↗"}]}}
+                                        :_pvg-card-eff-chips]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:style "margin-top:8px"}}
+                             :children [:_pvg-card-body]}}]}}
+
+  {:name :_pvg-cards
+   :parent :map
+   :args {:func :_pvg-card-cb :coll :_pvg-shown}}
+
+  {:name :_pvg-overflow-note
+   :parent :if
+   :args {:test {:parent :gt :args {:nums [:_pvg-total :_pvg-card-cap]}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "p"}
+                        :attrs {:value {:style "color:#889; font-size:12px"}}
+                        :children [{:parent :str
+                                    :args {:parts [{:value "Showing "}
+                                                   {:parent :to-str :args {:value :_pvg-card-cap}}
+                                                   {:value " of "}
+                                                   {:parent :to-str :args {:value :_pvg-total}}
+                                                   {:value " components."}]}}]}}
+          :else {:value nil}}}
+
+  {:name :_pvg-gallery-banner
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-preview-banner"
+                          :style "font-family: system-ui, sans-serif; font-size: 12px; color: #556; border-bottom: 1px solid #dde; padding: 6px 10px; margin-bottom: 12px;"}}
+          :children [{:value "Components gallery — every :hiccup-node fn on this branch; pure zero-arg components render live. "}
+                     {:parent :if
+                      :args {:test :_pvg-include-private?
+                             :then {:value [:a {:href "/preview" :style "color:#568"} "public only"]}
+                             :else {:value [:a {:href "/preview?all=1" :style "color:#568"} "include internals"]}}}]}}
+
+  {:name :_pvg-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-preview-page"}}
+          :children [:_pvg-gallery-banner
+                     :_pvg-overflow-note
+                     {:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:style "display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px; padding:0 10px"}}
+                             :children :_pvg-cards}}]}}
+
+  {:name :_pvg-response
+   :parent :html-ok-response
+   :args {:body {:parent :_pv-page-html
+                 :args {:pv-title {:value "Components gallery"}
+                        :pv-body :_pvg-body}}}}
+
   {:name :_pv-handler
    :lambda-params [:storage-query :request]
    :description "Ring handler for `GET /preview` — gate cascade (tenancy 403 → bad id 400 → unknown fn 404 → non-component 400 → execute-guard rejection 400 → effect-confirm page) then the live render. `:cond` is lazy: the execute apply runs only on the final branch."
    :parent :cond
    :args {:clauses [:_pv-tenancy-active?  :_pv-tenancy-rej
+                    :_pvg-no-fn-id?       :_pvg-response
                     :_pv-fn-id-nil?       :_pv-bad-id-rej
                     :_pv-row-nil?         :_pv-not-found-rej
                     :_pv-not-component?   :_pv-not-component-rej

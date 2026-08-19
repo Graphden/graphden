@@ -398,6 +398,19 @@ is open by the same `:get-auth-required` seam).
 - Everything is graph-composed fn-defs (`:_pv-*` in
   `app/editor-execute/fns.edn`) — zero new base-fns.
 
+**Components gallery** — `GET /preview` with NO `fn-id` (devcards
+L3): one card per named fn whose return type is semantically
+`:hiccup-node`, sorted by namespace-path + name, capped at 60 with a
+visible overflow count. A PURE component with zero free args renders
+LIVE inside its card (per-card `:_execute-apply`; inline pure runs
+write no rows); effectful/unknown or parameterised components show
+their effect chips / a hint and defer to their single-fn page (where
+the confirm gate applies). Same self-host-only 403 gate. Missing vs
+malformed `fn-id` is decided on the RAW query param — absent serves
+the gallery, present-but-unparseable is a 400. The `:filter` /
+`:sort-by` callbacks stay pure per the HOF contracts; the effectful
+lookups live in `:map` callbacks (`:_pvg-*`).
+
 Tests: `graphden.packages.app.value-repr-test`,
 `graphden.web.hiccup-sanitize-test`,
 `graphden.packages.app.preview-page-test`.

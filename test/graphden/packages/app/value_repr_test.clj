@@ -158,6 +158,15 @@
 
 
 (deftest record-list-table-repr-test
+  ;; Self-contained: sync the shipped registry value explicitly — the
+  ;; golden template DB is cached per PACKAGE-NAME set (not content)
+  ;; and shared across the gate's unit/perf JVMs, so a clone may carry
+  ;; a pre-table registry row regardless of this checkout's fns.edn.
+  (harness/sync! [{:name :_value-repr-registry
+                   :namespace "app.reprs"
+                   :parent :const
+                   :args {:value [[["list" "numeric"] "_repr-numeric-list"]
+                                  [["list" "keyword-map"] "_repr-record-list"]]}}])
   (testing "a list of keyword-keyed records renders as a table"
     (let [f (succeeded-body [{:name "a" :n 1 :extra {:deep true}}
                              {:name "b" :n 2 :extra nil}])]

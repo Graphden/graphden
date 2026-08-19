@@ -137,6 +137,36 @@ def youtube(out):
     print(out)
 
 
+def org_profile(dark, out):
+    """GitHub org profile banner (Graphden/.github profile/assets/) —
+    tile + wordmark with the tagline directly under the wordmark, in a
+    dark and a light colorway for the two <picture> sources."""
+    w, h = 2400, 760
+    if dark:
+        im = Image.new("RGBA", (w, h), INK + (255,))
+        bd_color, na, ea = (60, 90, 140), 120, 60
+        graph_c, den_c, tag_c = LIGHT_TEXT, BLUE_LIGHT, MUTED
+    else:
+        im = light_gradient(w, h)
+        bd_color, na, ea = (150, 180, 225), 110, 65
+        graph_c, den_c, tag_c = DARK_TEXT, BLUE, (105, 115, 132)
+    d = ImageDraw.Draw(im, "RGBA")
+    backdrop(d, CONST_NODES, CONST_EDGES, bd_color, na, ea,
+             scale=0.78, dx=w * 0.625, dy=h * 0.10)
+    tile = 350
+    tx, ty = 145, (h - tile) // 2
+    if dark:
+        glow(im, tx + tile / 2, ty + tile / 2, tile * 1.05, (120, 170, 255), 22)
+    im.alpha_composite(rounded_tile(tile), (tx, ty))
+    d = ImageDraw.Draw(im, "RGBA")
+    wx = tx + tile + 90
+    wordmark(d, wx, ty - 20, 190, graph_c, den_c)
+    fm = ImageFont.truetype(MONO, 38)
+    d.text((wx + 6, ty + tile - 82), TAGLINE, font=fm, fill=tag_c)
+    im.convert("RGB").save(out)
+    print(out)
+
+
 if __name__ == "__main__":
     import sys
     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
@@ -147,3 +177,5 @@ if __name__ == "__main__":
                 "graphden.dev", 560,
                 f"{outdir}/gd-social-preview.png")
     youtube(f"{outdir}/gd-banner-youtube.png")
+    org_profile(True, f"{outdir}/gd-org-banner-dark.png")
+    org_profile(False, f"{outdir}/gd-org-banner-light.png")

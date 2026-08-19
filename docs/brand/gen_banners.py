@@ -129,13 +129,17 @@ def boosty(out):
     d = ImageDraw.Draw(im, "RGBA")
     backdrop(d, CONST_NODES, CONST_EDGES, (150, 180, 225), 110, 65,
              scale=0.55, dx=1880, dy=520)
+    # Lockup centered on x=1400 (not the canvas center): at narrower
+    # desktop windows the avatar circle reaches image-x ~670 and up to
+    # y~777, so the tagline must start right of that — measured live.
+    cx = 1400
     wm_size = 150
     wm_w = d.textlength("graphden", ImageFont.truetype(BOLD, wm_size)) \
         + wm_size * -0.02 * 7
-    wordmark(d, (w - wm_w) / 2, 570, wm_size, DARK_TEXT, BLUE)
-    fm = ImageFont.truetype(MONO, 38)
+    wordmark(d, cx - wm_w / 2, 570, wm_size, DARK_TEXT, BLUE)
+    fm = ImageFont.truetype(MONO, 34)
     tag_w = d.textlength(TAGLINE, font=fm)
-    d.text(((w - tag_w) / 2, 800), TAGLINE, font=fm, fill=(105, 115, 132))
+    d.text((cx - tag_w / 2, 800), TAGLINE, font=fm, fill=(105, 115, 132))
     im.convert("RGB").save(out)
     print(out)
 

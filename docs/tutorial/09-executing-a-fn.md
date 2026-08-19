@@ -89,7 +89,11 @@ returning `[3 1 4]` sparklines.
 4. Click `▶` → Run on `hello-card`. The pane shows **Component
    preview** — your `<div>` rendered as markup in a sandboxed
    frame, because the fn's inferred return type is `:hiccup-node`.
-5. **Self-host only:** the preview caption also carries **"Open
+5. **Self-host only:** open `/preview` with no parameters — the
+   **components gallery**: every `:hiccup-node`-returning fn as a
+   card, pure zero-arg components rendered live, the rest one click
+   away.
+6. **Self-host only:** the preview caption also carries **"Open
    interactive preview ↗"** — it opens `/preview?fn-id=…` in a new
    tab, where the component runs as a REAL page: htmx swaps fire,
    forms submit, custom scripts run. An effectful component first

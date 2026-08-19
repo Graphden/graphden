@@ -259,3 +259,74 @@ that is a deliberate sequencing choice, not an omission.
 **Strength:** Fine as deliberate sequencing. The only failure mode is
 conflating the microbenchmarks you have with the load testing you don't —
 keep them clearly separate.
+
+---
+
+## 8. "Why not just use n8n / Zapier / Make / Retool?"
+
+**Short answer:** Those tools validate the demand for node-graph composition
+— and stop at coarse integration granularity. Graphden is a *programming
+substrate*, not an integration canvas: fine-grained typed functions, a real
+type system, and version control of the graph itself.
+
+**Detail — the concrete differences:**
+
+- **Granularity.** An n8n node is a whole integration step ("send a Slack
+  message"); a Graphden fn is a function (`:map`, `:str-join`, a typed HTTP
+  route). You compose *programs*, not pipelines — with inheritance, closures,
+  recursion (`:fix`), HOFs, transducers. When a workflow tool runs out of
+  expressiveness you drop into a "code node" (an untyped JS escape hatch);
+  Graphden's answer to more complexity is *more graph*, still typed.
+- **Types + effects + secrets.** Connections are type-checked as you make
+  them; every side effect is declared and gated at runtime; secrets are
+  taint-tracked through composition. Workflow tools have none of that —
+  a mis-wired node fails at runtime, in production, at 3am.
+- **Versioning.** Branch / diff / merge of the whole system is a substrate
+  property. Workflow tools bolt on "revisions" per workflow at best; none
+  give you a reviewable structural diff across the whole graph.
+- **The honest flip side:** those tools ship thousands of ready-made
+  integrations; Graphden's package ecosystem is young. If the job is "wire
+  Salesforce to a spreadsheet by Friday, exactly once", an integration tool
+  with a ready connector is the right choice today. The wedge is when
+  logic grows: the discount rule, the bot with state, the API with types —
+  the point where workflow canvases turn into unmaintainable spaghetti plus
+  code-node islands.
+
+**Strength:** Strong when granularity + types + versioning are stated
+together, with the young-ecosystem concession made *first* — conceding it
+preempts the rebuttal and frames the category as validated rather than
+competitive.
+
+---
+
+## 9. "What if I outgrow it — am I locked in?"
+
+**Short answer:** The exits are unusually good for this category, by
+construction rather than by promise.
+
+**Detail — the three exit doors:**
+
+- **Self-host, same binary.** The cloud runs the exact same AGPL core anyone
+  can run (`docs/PACKAGE_DISTRIBUTION.md` §16: cloud vs self-hosted is a
+  *mode*, not a fork). Leaving the cloud is a config change plus a Postgres
+  dump — not a rewrite onto different software. Postgres is the only
+  dependency.
+- **The graph is exportable data.** A program is rows in a database with a
+  documented schema, plus a whole-graph EDN export. There is no proprietary
+  binary format between you and your own system.
+- **AGPL, not "source-available".** The core's license guarantees the code
+  stays open; a rug-pull relicensing can't take away the version you run.
+
+**The honest residual:** the *paradigm* is the lock-in — fn-defs don't
+mechanically transpile to a classical codebase (nothing graph-shaped does;
+the same is true of n8n workflows, Airtable bases, or spreadsheet logic).
+The mitigations are structural: base-fns are thin wrappers over ordinary
+Clojure/libraries, so the impl layer ports; and the graph's explicit
+structure — types, effects, named compositions — is exactly the artifact
+you'd hand an AI to rewrite into text code, far better input than a legacy
+codebase. State it plainly rather than claiming zero lock-in: the data and
+the runtime are exit-safe, the program shape is a commitment.
+
+**Strength:** Strong on data/runtime exits (verifiable, structural). The
+paradigm-commitment concession must stay in — dropping it turns a credible
+answer into marketing.

@@ -810,4 +810,258 @@
    :lambda-params [:request]
    :description "Ring handler for `GET /partials/execute-result-effects?runtime=db,io&declared=db` — returns the runtime-effects strip hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the result host below the result body."
    :parent :html-ok-response
-   :args {:body :_partial-rfx-html}}]}
+   :args {:body :_partial-rfx-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Interactive component preview — `GET /preview?fn-id=<uuid>`
+  ;;   [`&effects=confirm`] [`&branch=<ref>`]
+  ;;
+  ;; The devcards-L2 surface the static component-preview pane points
+  ;; at: render a `:hiccup-node`-returning fn as a REAL page (runtime
+  ;; scripts + htmx live) opened in a NEW TAB from the editor. A tab
+  ;; keeps the editor DOM out of reach, sidesteps the global
+  ;; `frame-ancestors 'none'` / `X-Frame-Options: DENY` headers (no
+  ;; framing at all), and authenticates like any page navigation
+  ;; (session cookie under accounts; the auth-off self-host is open by
+  ;; the same `:get-auth-required` seam).
+  ;;
+  ;; SECURITY — SELF-HOST ONLY. Under an active tenancy addon the
+  ;; route answers 403: the page would run org-authored markup and
+  ;; scripts on the EDITOR origin with the viewer's session in scope —
+  ;; the same stored-XSS class the `:resource-override` "cloud writes
+  ;; are system-only" rule and the apps-domain split exist to prevent
+  ;; (docs/tutorial/20-apps.md). The cloud path is a future
+  ;; apps-domain preview owned by the tenancy addon.
+  ;;
+  ;; The component renders through the STANDARD execute pipeline
+  ;; (`:_execute-validation` + `:_execute-apply-bound` over a
+  ;; query-built parsed map), so the type-error gate, the capacity
+  ;; cap, and the effectful-run auto-persist audit trail apply
+  ;; unchanged. An effectful — or effects-UNKNOWN, failing closed —
+  ;; component requires the explicit `effects=confirm` param; the
+  ;; confirm page mirrors the Run popover's effect chips.
+
+  {:name :_pv-parsed
+   :description "Execute-pipeline parsed map for a preview render — query-param fn-id, no args, inline timeout, `persist? false` BY REQUEST (the apply's auto-persist matrix still persists effectful runs for the audit trail)."
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :args}
+                 {:value :timeout-ms} {:value :persist?}
+                 {:value :trace?} {:value :capture-values?}]
+          ;; :fn-name is always nil (the preview anchors on fn-id) but
+          ;; the key must be PRESENT — the execute stages' parsed-shape
+          ;; is a record type, and a record with a missing field is not
+          ;; a subtype (the boot sweep rejects it).
+          :vals [{:ref :fn-id-param} {:value nil} {:value {}}
+                 {:value 10000} {:value false} {:value false}
+                 {:value false}]}}
+
+  {:name :_pv-validation
+   :description "The standard execute stage-2 guards over the preview's parsed map — nil, or the `{:ok false :error …}` rejection envelope."
+   :parent :_execute-validation
+   :args {:parsed :_pv-parsed}}
+
+  ;; Binds BOTH `:_execute-apply` slots directly (not through
+  ;; `:_execute-apply-bound`, whose `{:as :parsed}` rename captures the
+  ;; fn-row ref's free at ITS level) so the preview's parsed map is the
+  ;; one the resolve actually sees.
+  {:name :_pv-outcome
+   :parent :_execute-apply
+   :args {:parsed :_pv-parsed
+          :fn-row {:parent :_execute-fn-row :args {:parsed :_pv-parsed}}}}
+
+  {:name :_pv-fn-id-nil?
+   :parent :nil? :args {:value :fn-id-param}}
+
+  {:name :_pv-row-nil?
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll :_xp-row :key {:value :id} :default nil}}}}
+
+  ;; MUTUAL subtype = semantic type equality — same rule (and trap) as
+  ;; `:_er-return-is-hiccup?`: one-way `⊆ :hiccup-node` would admit
+  ;; every scalar, `:hiccup-node` being a union.
+  {:name :_pv-return-or-any
+   :parent :coalesce
+   :args {:value {:parent :fn-return-type :args {:fn-id :fn-id-param}}
+          :default {:value :any}}}
+
+  {:name :_pv-is-component?
+   :parent :and
+   :args {:values [{:parent :subtype?
+                    :args {:candidate :_pv-return-or-any
+                           :expected {:value :hiccup-node}}}
+                   {:parent :subtype?
+                    :args {:candidate {:value :hiccup-node}
+                           :expected :_pv-return-or-any}}]}}
+
+  {:name :_pv-not-component?
+   :parent :not :args {:value :_pv-is-component?}}
+
+  {:name :_pv-rejected?
+   :parent :some? :args {:value :_pv-validation}}
+
+  {:name :_pv-confirmed?
+   :parent :equal?
+   :args {:a {:parent :query-param
+              :args {:request {:as :request} :param-name {:value "effects"}}}
+          :b {:value "confirm"}}}
+
+  ;; Effects UNKNOWN (no rich-types entry — e.g. an anonymous fn)
+  ;; fails CLOSED: the preview auto-executes on page load, unlike the
+  ;; click-gated Run popover, so "can't verify pure" means confirm.
+  {:name :_pv-needs-confirm?
+   :parent :and
+   :args {:values [{:parent :or
+                    :args {:values [{:parent :nil? :args {:value :_xp-entry}}
+                                    :_xp-has-effects?]}}
+                   {:parent :not :args {:value :_pv-confirmed?}}]}}
+
+  {:name :_pv-branch-param
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "branch"}}}
+
+  {:name :_pv-branch-suffix
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_pv-branch-param}}
+          :then {:parent :str :args {:parts [{:value "&branch="} :_pv-branch-param]}}
+          :else {:value ""}}}
+
+  {:name :_pv-confirm-href
+   :parent :str
+   :args {:parts [{:value "/preview?fn-id="}
+                  {:parent :to-str :args {:value :fn-id-param}}
+                  {:value "&effects=confirm"}
+                  :_pv-branch-suffix]}}
+
+  ;; --- page shell — full HTML page, htmx + runtime live ---
+
+  {:name :_pv-title
+   :parent :str-join
+   :args {:coll [{:value "Preview :"} :_xp-title-name] :separator {:value ""}}}
+
+  {:name :_pv-page-html
+   :description "Full preview page HTML — components stylesheet + htmx + the SSE extension in head (a component may carry `:sse-connect-attrs`), runtime dispatcher scripts at end of body. Free arg `:pv-body` — the page body hiccup a variant supplies."
+   :parent :html-page-rendered
+   :args {:title :_pv-title
+          :head {:parent :with-htmx-sse :args {:head :graphden-page-head}}
+          :scripts :graphden-runtime-scripts
+          :body {:as :pv-body}}}
+
+  {:name :_pv-banner
+   :description "Slim identity strip so a preview tab is never mistaken for a real app page. Inline style — this shell is origin-neutral and deliberately independent of the editor stylesheet."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-preview-banner"
+                          :style "font-family: system-ui, sans-serif; font-size: 12px; color: #556; border-bottom: 1px solid #dde; padding: 6px 10px; margin-bottom: 12px;"}}
+          :children [{:value "Interactive preview — :"}
+                     :_xp-title-name]}}
+
+  {:name :_pv-result
+   :parent :get :args {:coll :_pv-outcome :key {:value :result} :default nil}}
+
+  {:name :_pv-success-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-preview-page"}}
+          :children [:_pv-banner :_pv-result]}}
+
+  {:name :_pv-ok-response
+   :parent :html-ok-response
+   :args {:body {:parent :_pv-page-html :args {:pv-body :_pv-success-body}}}}
+
+  ;; --- effect-confirm page — mirrors the Run popover's gate ---
+
+  {:name :_pv-confirm-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "gd-preview-page"}}
+          :children [:_pv-banner
+                     {:value [:p "This component declares side effects — rendering the preview will execute them."]}
+                     {:parent :hiccup
+                      :args {:tag {:value "div"}
+                             :attrs {:value {:class "gd-preview-effects"}}
+                             :children :_xp-eff-chips}}
+                     {:parent :hiccup
+                      :args {:tag {:value "a"}
+                             :attrs {:parent :zipmap
+                                     :args {:keys [{:value :href} {:value :class}]
+                                            :vals [:_pv-confirm-href
+                                                   {:value "gd-preview-confirm"}]}}
+                             :children [{:value "Render anyway"}]}}]}}
+
+  {:name :_pv-confirm-response
+   :parent :html-ok-response
+   :args {:body {:parent :_pv-page-html :args {:pv-body :_pv-confirm-body}}}}
+
+  ;; --- gate / failure responses ---
+
+  {:name :_pv-tenancy-active?
+   :description "The tenancy addon computed capabilities for this request — multi-tenant cloud. nil = single-tenant / self-host."
+   :parent :some?
+   :args {:value :request-capabilities}}
+
+  {:name :_pv-tenancy-rej
+   :parent :html-error-response
+   :args {:status {:value 403}
+          :reason {:value "Interactive preview is self-host only. On multi-tenant cloud it would run org-authored scripts on the editor origin — use the Run popover's static component preview instead."}}}
+
+  {:name :_pv-bad-id-rej
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason {:value "Missing or malformed fn-id query parameter."}}}
+
+  {:name :_pv-not-found-rej
+   :parent :html-error-response
+   :args {:status {:value 404}
+          :reason {:parent :str
+                   :args {:parts [{:value "Function not found: "}
+                                  {:parent :to-str :args {:value :fn-id-param}}]}}}}
+
+  {:name :_pv-not-component-rej
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason {:value "Not a component — the fn's return type must be :hiccup-node. Use the Run popover for ordinary results."}}}
+
+  {:name :_pv-validation-rej
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason {:parent :coalesce
+                   :args {:value {:parent :get
+                                  :args {:coll :_pv-validation
+                                         :key {:value :error} :default nil}}
+                          :default {:value "Preview request rejected."}}}}}
+
+  {:name :_pv-outcome-succeeded?
+   :parent :equal?
+   :args {:a {:parent :name
+              :args {:value {:parent :get
+                             :args {:coll :_pv-outcome
+                                    :key {:value :status}
+                                    :default {:value :unknown}}}}}
+          :b {:value "succeeded"}}}
+
+  {:name :_pv-failed-rej
+   :parent :html-error-response
+   :args {:status {:value 500}
+          :reason {:parent :coalesce
+                   :args {:value {:parent :get
+                                  :args {:coll :_pv-outcome
+                                         :key {:value :error} :default nil}}
+                          :default {:value "Render did not complete inline — run the fn via the Run popover instead."}}}}}
+
+  {:name :_pv-run-response
+   :parent :if
+   :args {:test :_pv-outcome-succeeded?
+          :then :_pv-ok-response
+          :else :_pv-failed-rej}}
+
+  {:name :_pv-handler
+   :lambda-params [:storage-query :request]
+   :description "Ring handler for `GET /preview` — gate cascade (tenancy 403 → bad id 400 → unknown fn 404 → non-component 400 → execute-guard rejection 400 → effect-confirm page) then the live render. `:cond` is lazy: the execute apply runs only on the final branch."
+   :parent :cond
+   :args {:clauses [:_pv-tenancy-active?  :_pv-tenancy-rej
+                    :_pv-fn-id-nil?       :_pv-bad-id-rej
+                    :_pv-row-nil?         :_pv-not-found-rej
+                    :_pv-not-component?   :_pv-not-component-rej
+                    :_pv-rejected?        :_pv-validation-rej
+                    :_pv-needs-confirm?   :_pv-confirm-response
+                    {:value true}         :_pv-run-response]}}]}

@@ -65,6 +65,7 @@
                   :partial-secret-create-form
                   :partial-secret-rotate-form
                   :partial-row-actions
+                  :preview-page
                   :demo-contact
                   :demo-contact-clock
                   :health

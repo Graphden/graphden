@@ -261,6 +261,11 @@
    :parent :get-auth-required
    :args {:path "/partials/execute-popover" :handler :_partial-xp-handler}}
 
+  {:name :preview-page
+   :description "GET /preview?fn-id={uuid}[&effects=confirm][&branch=...] — the interactive component preview page (devcards L2): the component rendered as a REAL page with runtime scripts + htmx live, opened in a new tab from the static component-preview pane. AUTH-REQUIRED; SELF-HOST ONLY at the handler level (active tenancy addon => 403 — org-authored scripts must not run on the editor origin)."
+   :parent :get-auth-required
+   :args {:path "/preview" :handler :_pv-handler}}
+
   {:name :partial-type-name-datalist
    :description "GET /partials/type-name-datalist — the create-type popover's name-autocomplete <datalist> (named type-rows with kind labels + primitives). AUTH-REQUIRED — only the authed create/edit-type flow mounts it."
    :parent :get-auth-required

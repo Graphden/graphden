@@ -4300,6 +4300,16 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
   font-size: 11px;
 }
+/* "Open interactive preview" — new-tab link in the component-preview
+   caption (self-host only; server hides it under a tenancy addon). */
+.execute-result-html-caption .execute-result-open-preview {
+  float: right;
+  color: var(--accent);
+  text-decoration: none;
+}
+.execute-result-html-caption .execute-result-open-preview:hover {
+  text-decoration: underline;
+}
 .execute-result-html-preview {
   width: 100%;
   min-height: 320px;

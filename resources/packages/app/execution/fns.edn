@@ -6,9 +6,9 @@
   ;; ---------------------------------------------------------------------
 
   {:name :_execute-parsed-shape
-   :description "Output of `:_execute-parsed` — the request body normalised to `{:fn-id :fn-name :args :timeout-ms :persist? :trace? :capture-values?}`."
-   :type {:fn-id           :uuid
-          :fn-name         :text
+   :description "Output of `:_execute-parsed` — the request body normalised to `{:fn-id :fn-name :args :timeout-ms :persist? :trace? :capture-values?}`. `:fn-id`/`:fn-name` are NULLABLE honestly (same convention as `:_value-form-parsed-shape`): the parser returns nil for a missing anchor, and it is the VALIDATION stage (`:_execute-no-fn-err` / fn-not-found) — not this shape — that enforces the at-least-one-anchor contract. Consumers (`:resolve-fn`, the guards) all nil-guard."
+   :type {:fn-id           :nullable-uuid
+          :fn-name         :nullable-text
           :args            :jsonb
           :timeout-ms      :int
           :persist?        :bool
@@ -1660,9 +1660,9 @@
   ;; instead of dumping the hiccup EDN as a list. `sandbox=""` (no
   ;; allow-scripts, unlike the full HTML-response pane): a component
   ;; preview is static markup; scripts and same-origin API calls stay
-  ;; off. The devcards-style INTERACTIVE preview is a deliberate
-  ;; non-goal here — it needs a served per-branch /preview route with
-  ;; its own auth story.
+  ;; off. The devcards-style INTERACTIVE preview lives at the served
+  ;; `GET /preview` route (app/editor-execute `:_pv-*`), reached via
+  ;; the caption's new-tab link below — self-host only.
 
   {:name :_er-declared-return-type
    :parent :fn-return-type
@@ -1702,11 +1702,45 @@
           :key {:value :srcdoc}
           :value :_er-component-preview-html}}
 
+  ;; The "open interactive preview" affordance — a new-tab link to
+  ;; `GET /preview?fn-id=…&branch=…` (devcards L2, app/editor-execute).
+  ;; Hidden under an active tenancy addon: the interactive page runs
+  ;; the component's scripts live on the editor origin, which is
+  ;; self-host-only (the route itself also 403s — this is the
+  ;; affordance-level mirror, same pattern as the Assets panel).
+  {:name :_er-cp-preview-url
+   :parent :str
+   :args {:parts [{:value "/preview?fn-id="}
+                  {:parent :to-str :args {:value :_er-exec-fn-id}}
+                  {:parent :if
+                   :args {:test {:parent :some? :args {:value :current-branch-id}}
+                          :then {:parent :str
+                                 :args {:parts [{:value "&branch="}
+                                                {:parent :to-str :args {:value :current-branch-id}}]}}
+                          :else {:value ""}}}]}}
+
+  {:name :_er-cp-open-link
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :href} {:value :target}
+                                {:value :rel} {:value :class}]
+                         :vals [:_er-cp-preview-url {:value "_blank"}
+                                {:value "noopener"}
+                                {:value "execute-result-open-preview"}]}}
+          :children [{:value "Open interactive preview ↗"}]}}
+
+  {:name :_er-cp-affordance
+   :parent :if
+   :args {:test {:parent :some? :args {:value :request-capabilities}}
+          :then :_er-hidden-placeholder
+          :else :_er-cp-open-link}}
+
   {:name :_er-component-preview-banner
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-result-html-caption"}}
-          :children [{:value "Component preview"}]}}
+          :children [{:value "Component preview"} :_er-cp-affordance]}}
 
   {:name :_er-component-preview-iframe
    :parent :hiccup

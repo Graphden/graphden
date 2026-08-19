@@ -15,6 +15,13 @@ Functions and their compositions are stored as rows (`fn`, `slot`,
 effect-tracked as you build, and executed by an in-memory compiled
 registry that refreshes from the database without a redeploy.
 
+![The Graphden editor: the app.server.web-server fn-def as a graph — typed slots (handler, port 1..65535), bound refs, and the inspector showing parent, return type, and the tracked effect set](docs/editor-screenshot.png)
+
+<sub>The editor showing this repo's own application root: `web-server`
+is a fn-def over `http-server`, its `handler` slot typed
+`(request)→ring-response`, its effect set tracked in the inspector.
+[Try it live — no sign-up.](https://app.graphden.dev/?demo=1)</sub>
+
 ---
 
 ## Why this exists

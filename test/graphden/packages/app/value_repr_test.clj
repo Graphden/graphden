@@ -168,9 +168,16 @@
                    :args {:value [[["list" "numeric"] "_repr-numeric-list"]
                                   [["list" "keyword-map"] "_repr-record-list"]]}}])
   (testing "a list of keyword-keyed records renders as a table"
-    (let [f (succeeded-body [{:name "a" :n 1 :extra {:deep true}}
-                             {:name "b" :n 2 :extra nil}])]
-      (is (tree-string-containing f "repr-record-table"))
+    (let [v [{:name "a" :n 1 :extra {:deep true}}
+             {:name "b" :n 2 :extra nil}]
+          f (succeeded-body v)]
+      (is (tree-string-containing f "repr-record-table")
+          (str "DIAG dt=" (pr-str (graphden.crud.value-repr/dispatch-type nil v))
+               " pairs=" (pr-str (graphden.crud.value-form/registry-pairs
+                                   harness/*context* "_value-repr-registry"))
+               " direct=" (pr-str (try (graphden.crud.value-repr/render-repr
+                                         harness/*context* v nil)
+                                       (catch Exception e (ex-message e))))))
       (is (in-tree? f "th") "header cells present")
       (is (in-tree? f "name") "column from record keys")
       (is (in-tree? f "a") "simple cell as text")

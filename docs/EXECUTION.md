@@ -362,12 +362,45 @@ when the fn's declared return type is semantically `:hiccup-node`
 scalar, `:hiccup-node` being a union), the result renders as markup
 in a fully sandboxed iframe (`sandbox=""` — no scripts, no
 same-origin; unlike the HTML-response pane's `allow-scripts`). This
-is the static half of a devcards-style component preview; an
-INTERACTIVE preview needs a served per-branch `/preview` route with
-its own auth story and is deliberately out of scope.
+is the static half of a devcards-style component preview.
+
+## Interactive component preview — `GET /preview`
+
+The dynamic half: the component-preview caption carries an **"Open
+interactive preview ↗"** link to `GET /preview?fn-id=<uuid>`
+(`&branch=` preserved), which renders the component as a REAL page —
+components stylesheet, htmx, and the runtime dispatcher scripts all
+live — in a **new tab**. A tab keeps the editor DOM out of reach,
+avoids the global `frame-ancestors 'none'` / `X-Frame-Options: DENY`
+headers entirely (no framing), and authenticates like any page
+navigation (the session cookie under accounts; an auth-off self-host
+is open by the same `:get-auth-required` seam).
+
+- **Self-host only.** Under an active tenancy addon the route
+  answers 403 and the editor hides the link (the same
+  affordance+route double gate as the Assets panel): the page would
+  run org-authored markup and scripts on the EDITOR origin with the
+  viewer's session in scope — the stored-XSS class the
+  `:resource-override` "cloud writes are system-only" rule and the
+  apps-domain split exist to prevent. The cloud path is a future
+  apps-domain preview owned by the tenancy addon.
+- **The render is a standard execute-pipeline run**
+  (`:_execute-validation` + `:_execute-apply` over a query-built
+  parsed map), so the type-error gate, the capacity cap and the
+  effectful-run auto-persist audit trail apply unchanged.
+- **Effect-confirm mirror of the Run gate**: a component whose
+  declared effects are non-empty — or UNKNOWN (no rich-types entry;
+  the preview auto-executes on page load, so unknown fails closed) —
+  gets a confirm page with the Run popover's effect chips and a
+  "Render anyway" link carrying `effects=confirm`.
+- Non-components (return type not semantically `:hiccup-node`)
+  get a 400; unknown fn-ids a 404.
+- Everything is graph-composed fn-defs (`:_pv-*` in
+  `app/editor-execute/fns.edn`) — zero new base-fns.
 
 Tests: `graphden.packages.app.value-repr-test`,
-`graphden.web.hiccup-sanitize-test`.
+`graphden.web.hiccup-sanitize-test`,
+`graphden.packages.app.preview-page-test`.
 
 ## Path trace — the call tree
 

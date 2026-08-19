@@ -89,6 +89,14 @@ returning `[3 1 4]` sparklines.
 4. Click `▶` → Run on `hello-card`. The pane shows **Component
    preview** — your `<div>` rendered as markup in a sandboxed
    frame, because the fn's inferred return type is `:hiccup-node`.
+5. **Self-host only:** the preview caption also carries **"Open
+   interactive preview ↗"** — it opens `/preview?fn-id=…` in a new
+   tab, where the component runs as a REAL page: htmx swaps fire,
+   forms submit, custom scripts run. An effectful component first
+   shows a confirm page mirroring the Run gate. (On multi-tenant
+   cloud this link is hidden and the route answers 403 — live
+   org-authored scripts must not run on the editor origin; that's
+   what the apps domain is for.)
 
 Representations are themselves graph code: the type→repr table is
 the `:_value-repr-registry` fn-def (`app.reprs` namespace), each

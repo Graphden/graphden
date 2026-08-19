@@ -60,7 +60,9 @@
    :api-execution-cancel
    :api-executions-list
    :api-services-reconcile
-   :api-services-list])
+   :api-services-list
+   ;; devcards-L2 interactive preview — renders + may execute graph code
+   :preview-page])
 
 
 (deftest api-execute-routes-are-auth-required

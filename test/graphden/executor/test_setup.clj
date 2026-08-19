@@ -544,7 +544,15 @@
       (doseq [fd fn-defs]
         (when-let [fn-name (:name fd)]
           (try (registry-core/record-rich-types! fn-name fd)
-               (catch Exception _ nil))
+               (catch Exception _
+                 ;; Composed defs carry BINDINGS in :args ({:value …}
+                 ;; maps), which the base-fn-style arg validation
+                 ;; rejects — re-record without them so a declared
+                 ;; :return-type / :effects still lands (prod's full
+                 ;; sweep computes these transitively; the harness
+                 ;; takes the declaration).
+                 (try (registry-core/record-rich-types! fn-name (dissoc fd :args))
+                      (catch Exception _ nil))))
           (try (types-check/check-fn-def! fd)
                (catch Exception _ nil)))))
     ;; Invalidate on the ids the sync ACTUALLY wrote — including anonymous

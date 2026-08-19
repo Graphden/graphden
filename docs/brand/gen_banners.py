@@ -115,6 +115,28 @@ def dark_banner(w, h, tile_size, tile_xy, wm_size, wm_dxy, tag_size, tag_y,
     print(out)
 
 
+def boosty(out):
+    """Boosty cover, 1500x500 — but Boosty DISPLAYS it as a ~5.9:1 strip
+    (only the middle band, roughly y 120..390, is visible on desktop) and
+    overlays the round avatar on the bottom-left. So: no footer, all
+    content inside the middle band, and x < ~400 left clear."""
+    w, h = 1500, 500
+    im = Image.new("RGBA", (w, h), INK + (255,))
+    d = ImageDraw.Draw(im, "RGBA")
+    backdrop(d, CONST_NODES, CONST_EDGES, (60, 90, 140), 110, 55,
+             scale=0.42, dx=1030, dy=40)
+    tile = 140
+    tx, ty = 420, 155
+    glow(im, tx + tile / 2, ty + tile / 2, tile * 1.1, (120, 170, 255), 26)
+    im.alpha_composite(rounded_tile(tile), (tx, ty))
+    d = ImageDraw.Draw(im, "RGBA")
+    wordmark(d, tx + tile + 34, ty - 2, 105, LIGHT_TEXT, BLUE_LIGHT)
+    fm = ImageFont.truetype(MONO, 23)
+    d.text((tx + 2, 325), TAGLINE, font=fm, fill=MUTED)
+    im.convert("RGB").save(out)
+    print(out)
+
+
 def youtube(out):
     w, h = 2560, 1440
     im = light_gradient(w, h)
@@ -171,9 +193,7 @@ def org_profile(dark, out):
 if __name__ == "__main__":
     import sys
     outdir = sys.argv[1] if len(sys.argv) > 1 else "."
-    dark_banner(1500, 500, 150, (110, 130), 118, (36, -4), 27, 355,
-                "graphden.dev · boosty.to/graphden", 435,
-                f"{outdir}/gd-banner-boosty.png")
+    boosty(f"{outdir}/gd-banner-boosty.png")
     dark_banner(1280, 640, 150, (96, 200), 118, (36, -4), 24, 420,
                 "graphden.dev", 560,
                 f"{outdir}/gd-social-preview.png")

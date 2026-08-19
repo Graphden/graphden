@@ -79,7 +79,7 @@ function _tourCheckPasses(check) {
         // If the parent row isn't in the lazy cache yet, accept any parent —
         // the lesson's instruction was followed structurally.
         return parents.some((pid) => {
-          const p = lookups && lookups.fnMap ? lookups.fnMap.get(pid) : null;
+          const p = lookups?.fnMap ? lookups.fnMap.get(pid) : null;
           return p ? p.name === check.parent : true;
         });
       }
@@ -90,9 +90,9 @@ function _tourCheckPasses(check) {
         // (which is keyed by the slot-OWNING fn).
         const fn = _tourFindFn(check.name);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
-        const list = (lookups.bindingsByFn && lookups.bindingsByFn.get(fn.id)) || [];
+        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
-          const s = lookups.slotMap && lookups.slotMap.get(b['slot-id']);
+          const s = lookups.slotMap?.get(b['slot-id']);
           return s && s.name === check.slot
             && (b.value != null || b['ref-fn-id']);
         });
@@ -185,7 +185,7 @@ function _tourPosition() {
   if (!_tourEls || !_tourState) return;
   const step = _tourStep();
   const { spot, pop } = _tourEls;
-  const target = step && step.target ? document.querySelector(step.target) : null;
+  const target = step?.target ? document.querySelector(step.target) : null;
   const rect = target ? target.getBoundingClientRect() : null;
   const visible = rect && rect.width > 0 && rect.height > 0
     && rect.bottom > 0 && rect.top < window.innerHeight;
@@ -249,7 +249,7 @@ function _tourAdvance(skipped) {
 }
 
 async function _tourDeleteCreated() {
-  const created = (_tourState && _tourState.created) || [];
+  const created = (_tourState?.created) || [];
   // fns first — a namespace only deletes once empty.
   for (const c of created) {
     if (c.type !== 'fn') continue;
@@ -271,7 +271,7 @@ async function _tourDeleteCreated() {
 }
 
 function _tourEnd() {
-  const created = (_tourState && _tourState.created) || [];
+  const created = (_tourState?.created) || [];
   const existing = created.filter((c) => (c.type === 'fn' ? _tourFindFn(c.name)
     : typeof graphData !== 'undefined' && graphData
       && (graphData.namespaces || []).some((n) => n.name === c.name)));
@@ -369,7 +369,7 @@ async function maybeStartTutorial() {
     return startTutorial(id);
   }
   const saved = _tourLoadState();
-  if (saved && saved.lessonId) {
+  if (saved?.lessonId) {
     return startTutorial(saved.lessonId, saved.step, saved.created);
   }
   return false;

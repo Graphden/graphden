@@ -2160,3 +2160,21 @@
             "stale-by-construction: the new version has no recorded run")
         (is (= "failed" (str (:status (get by-name "t-fail"))))
             "untouched tests keep their status")))))
+
+
+(deftest get-execution-carries-logical-fn-id-test
+  ;; Typed-repr dispatch (`:_er-exec-fn-id` in the execute-result
+  ;; partial) reads `:fn-id` off the exec row — get-execution derives
+  ;; it at read time through the fn-version JOIN, keeping the stored
+  ;; row itself version-pinned.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "reprfnid")
+        c (setup/default-registry-ctx storage)
+        result (apply-and-await! c {:fn-id (:id composed)
+                                    :args {:a 2 :b 3}
+                                    :timeout-ms 5000 :persist? true})
+        eid (some-> (:execution-id result) parse-uuid)
+        row (fn-exec/get-execution c eid)]
+    (is (some? eid) "persisted run returns an execution id")
+    (is (= (:id composed) (:fn-id row))
+        "read-time join back to the LOGICAL fn id")))

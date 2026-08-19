@@ -12,6 +12,7 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.executor.runtime :as rt]
     [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
@@ -23,6 +24,7 @@
     [graphden.test-infra.schemas :as schemas]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.test-infra.shared-container :as sc]
+    [graphden.types.check :as types-check]
     [graphden.versioning.storage.core :as vs])
   (:import
     (java.io
@@ -526,12 +528,30 @@
   ;; `materialize-fns!`) — without this, a fn-def carrying a `:namespace` the
   ;; graph hasn't seen lands with a nil namespace-id. Fns without `:namespace`
   ;; contribute nothing, so this is a no-op for the common case.
-  (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))]
-    (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map))
-  (let [synced-ids (keep #(:id (first (sp/query-entities storage :fn
-                                                         {:name (name (:name %))})))
-                         fn-defs)]
-    (exec-ctx/invalidate-graph-cache! ctx synced-ids)))
+  (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))
+        name->id  (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)]
+    ;; Record rich-types for the synced defs — mirrors `packages.sync`'s
+    ;; seed pass + type-check sweep. Without it a declared `:return-type`
+    ;; / `:effects` on a test-synced fn-def is invisible to every id-keyed
+    ;; consumer (`:fn-return-type`, redaction, compile-time-value?),
+    ;; because the branch-router ctx-rebuild that records editor-authored
+    ;; fns in prod doesn't run under the test harness. The seed pass
+    ;; covers base-fn-style defs; `check-fn-def!` records COMPOSED defs
+    ;; (computed return via `record-result!`). Callers pass defs
+    ;; dependencies-first, same as the fixture's own topo order; failures
+    ;; are non-fatal exactly like the prod sweep's fault-tolerant loop.
+    (binding [types-check/*ref-return-memo* (atom {})]
+      (doseq [fd fn-defs]
+        (when-let [fn-name (:name fd)]
+          (try (registry-core/record-rich-types! fn-name fd)
+               (catch Exception _ nil))
+          (try (types-check/check-fn-def! fd)
+               (catch Exception _ nil)))))
+    ;; Invalidate on the ids the sync ACTUALLY wrote — including anonymous
+    ;; inline-arg children (`_anon-*`), which a lookup by the DECLARED names
+    ;; misses; an un-recompiled anon child throws `:fn-not-found` at its
+    ;; parent's first execute.
+    (exec-ctx/invalidate-graph-cache! ctx (vec (vals name->id)))))
 
 
 (defn inject-storage-query

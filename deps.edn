@@ -137,7 +137,7 @@
    :main-opts ["-m" "cljstyle.main"]}
 
   :splint
-  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.24.0"}}
+  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.25.0"}}
    ;; Tool aliases resolve the ROOT :deps too, which include the mathx git
    ;; coord. This override resolves it from the in-tree copy so lint needs no
    ;; network fetch (the repo is public and would resolve over https, but

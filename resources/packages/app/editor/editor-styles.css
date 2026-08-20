@@ -2891,6 +2891,25 @@ textarea.value-form-hiccup {
   text-overflow: ellipsis;
 }
 
+/* On an editable card each `?name` is a binder button. It has to read as
+   part of the strip's prose rather than as a control tray, so it inherits
+   the strip's type and only lifts on hover/focus. */
+.optional-arg-binder {
+  padding: 0 2px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.optional-arg-binder:hover,
+.optional-arg-binder:focus-visible {
+  background: var(--hover-bg);
+  text-decoration: underline;
+}
+
 /* HOF-context strips — `λname` (args the enclosing HOF supplies at
    runtime) and `⇣name` (free args threaded into the sub-tree). Same
    look for both; rendered by appendHofCapturedArgsStrip /

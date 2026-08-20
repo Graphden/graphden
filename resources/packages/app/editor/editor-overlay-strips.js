@@ -19,6 +19,14 @@
 //
 // Wire format: each entry is `{:name "n" :slot-id "uuid"}` (or a plain
 // string in older payloads — kept for backward compatibility).
+//
+// On an editable card each chip is also a BINDER. These args reach the
+// card by propagation (a component's `{:as :label}` inside its parent's
+// hiccup children, say), so they never materialise as `fn_slot` rows and
+// never grow a `+` placeholder node — which left the editor with no way at
+// all to pin one. `{:parent :button :args {:label "Run"}}` in a fns.edn is
+// exactly a binding on (this fn, the origin slot), so the chip writes the
+// same row the package sync would.
 function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
   if (!Array.isArray(optionalArgs) || !optionalArgs.length) return;
   // Normalise the wire shape so the rendering loop stays uniform.
@@ -28,14 +36,28 @@ function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
   });
   const strip = document.createElement('div');
   strip.className = 'optional-args-strip';   // static looks in editor-styles.css
-  strip.title = 'Optional args (unset, using defaults): '
-              + entries.map((e) => e.name).join(', ');
   const fnName = originalFnId && lookups?.fnMap?.get(originalFnId)?.name;
   const richArgs = (fnName && typeof richTypes === 'object' && richTypes)
                    ? (richTypes[fnName]?.args || null) : null;
+  // Same gate the `+` placeholders use — signed in, and not a
+  // package-synced fn whose bindings the boot sync owns.
+  const bindable = !!originalFnId
+                && typeof isAuthenticated === 'function' && isAuthenticated()
+                && !(typeof isPackageOwnedFn === 'function'
+                     && isPackageOwnedFn(originalFnId))
+                && typeof enterFreeArgBindEditMode === 'function';
+  strip.title = (bindable
+                 ? 'Unset args — click one to bind it: '
+                 : 'Optional args (unset, using defaults): ')
+              + entries.map((e) => e.name).join(', ');
   entries.forEach((entry, i) => {
     if (i > 0) strip.appendChild(document.createTextNode(' '));
-    const span = document.createElement('span');
+    const canBind = bindable && !!entry.slotId;
+    const span = document.createElement(canBind ? 'button' : 'span');
+    if (canBind) {
+      span.type = 'button';
+      span.className = 'optional-arg-binder';
+    }
     span.textContent = '?' + entry.name;
     const argType = richArgs ? richArgs[entry.name] : null;
     const typePart = (argType != null && typeof formatTypeHint === 'function')
@@ -45,7 +67,35 @@ function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
       const decl = findSlotDeclaringFn(originalFnId, entry.slotId);
       if (decl?.fnName) originPart = ' (from :' + decl.fnName + ')';
     }
-    span.title = '?' + entry.name + typePart + originPart;
+    span.title = '?' + entry.name + typePart + originPart
+                 + (canBind ? ' — click to bind' : '');
+    if (canBind) {
+      span.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const slot = lookups?.slotMap?.get(entry.slotId);
+        const argRow = {
+          'fn-id': originalFnId,
+          'slot-id': entry.slotId,
+          'binding-id': null,
+          name: entry.name,
+          type: slot?.['type-fn-id']
+                ? lookups?.fnMap?.get(slot['type-fn-id'])?.name : null,
+          value: null,
+          'ref-id': null,
+          description: slot?.description || null
+        };
+        // A LIST-typed arg (`:children` on every component) holds items,
+        // not one value — binding a single ref there would type-fail. Send
+        // it into the same append flow the sequence anchor's `+` uses.
+        const elemT = (typeof seqElemType === 'function')
+                      ? seqElemType(argRow) : null;
+        if (elemT !== null && typeof appendSequenceItem === 'function') {
+          appendSequenceItem(originalFnId, span, elemT, { elemType: elemT });
+        } else {
+          enterFreeArgBindEditMode(argRow, span);
+        }
+      });
+    }
     strip.appendChild(span);
   });
   overlay.appendChild(strip);

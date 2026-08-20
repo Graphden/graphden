@@ -45,7 +45,8 @@ async function hardCleanup(page) {
   const leftovers = ['tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
-                     'tutorial-card', 'tutorial-button', 'tutorial-script'];
+                     'tutorial-card', 'tutorial-button', 'tutorial-script',
+                     'tutorial-renamed'];
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));
@@ -629,6 +630,44 @@ async function appendFnRefViaChip(page, chipName, fnName) {
 }
 
 
+// Rename an arg through its EDGE LABEL — the name span, not the type chip
+// beside it. The rename writes a `:rename-to` binding, which mints the
+// rename-view slot; the label on the edge changes to the new name.
+async function renameArgViaEdgeLabel(page, currentName, newName) {
+  await page.waitForFunction((name) => Array.from(
+    document.querySelectorAll('.edge-label-overlay span'))
+    .some((sp) => sp.textContent.trim() === name && sp.title === 'Click to rename arg'),
+  currentName, {timeout: 30000, polling: 150});
+  // A row-actions popover left open from an earlier step sits over the
+  // label. Close it the way a user does — Escape — and NOT by removing the
+  // node: the editor holds a singleton reference to that element, so
+  // deleting it leaves every later ⋯ click with nothing to open.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  await page.evaluate((name) => {
+    Array.from(document.querySelectorAll('.edge-label-overlay span'))
+      .find((sp) => sp.textContent.trim() === name
+                 && sp.title === 'Click to rename arg')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  }, currentName);
+  await page.waitForFunction(() => {
+    const pop = document.querySelector('.arg-value-edit-popover');
+    return pop && pop.getAttribute('aria-label') === 'Rename arg';
+  }, null, {timeout: 15000, polling: 100});
+  await page.evaluate((name) => {
+    const pop = document.querySelector('.arg-value-edit-popover');
+    const input = pop.querySelector('input');
+    input.value = name;
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, newName);
+  await page.waitForFunction(
+    () => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 20000, polling: 100});
+}
+
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
@@ -637,5 +676,5 @@ module.exports = {
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, bindFnRefPlaceholder,
-  bindOptionalArgChip, appendFnRefViaChip,
+  bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
 };

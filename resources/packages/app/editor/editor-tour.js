@@ -126,6 +126,17 @@ function _tourCheckPasses(check) {
         return check.name === 'main' ? (!cur || cur === 'main')
                                      : cur === check.name;
       }
+      case 'arg-named': {
+        // "an arg on the canvas now carries THIS name" — the completion
+        // signal for a rename. Neither `binding-bound` nor `bindings-count`
+        // can see one: a rename-only binding has no value, no ref and no
+        // items, and the client lookups don't carry it either — the new
+        // name reaches the client as the layout's edge label. So read the
+        // label: the check then passes exactly when the user can SEE the
+        // rename, which is what the step asked for.
+        return Array.from(document.querySelectorAll('.edge-label-overlay span'))
+          .some((sp) => sp.textContent.trim() === check.arg);
+      }
       case 'bindings-count': {
         // "at least N of this fn's slots are bound" — order-independent,
         // which is what a step asking for two sibling slots needs: the

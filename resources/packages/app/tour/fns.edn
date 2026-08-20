@@ -29,6 +29,11 @@
 ;;                      {:kind "binding-bound" :name N :slot S}
 ;;                      {:kind "binding-value" :name N :slot S :value V}
 ;;                      {:kind "bindings-count" :name N :count C}
+;;                      {:kind "arg-named" :arg A}   an edge label reads A
+;;                                                    (a rename's signal — a
+;;                                                    rename-only binding has no
+;;                                                    value for the other checks
+;;                                                    to see)
 ;;                      {:kind "selected" :name N}            fn selected on canvas
 ;;                      {:kind "on-branch" :name B}           "main" = default
 ;;                      {:kind "dom" :selector SEL}           element appears
@@ -214,8 +219,30 @@
                :body "Run tutorial-json (⋯ → ▶ Run → Run): no fields this time — the binding closed the slot, so callers have nothing left to supply. Free args propagate UP until someone pins them."
                :target "button.more-actions-trigger"
                :check {:kind "manual"}}
+              {:title "A free arg can also be RENAMED"
+               :body "A template's slot name is its public label, and borrowed from a primitive it rarely reads well. Type to-json in the filter and click the to-json-string row again — we will make a second child."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "to-json-string"}}
+              {:title "A second child"
+               :body "Click ⋯ on the to-json-string row, choose “Extend”, name it tutorial-renamed — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-renamed" :parent "to-json-string"}
+               :creates {:type "fn" :name "tutorial-renamed"}}
+              ;; Selection gate — the rename must land on the child.
+              {:title "tutorial-renamed is open"
+               :body "Its :data arrives free, as before. This time we leave it open and change what callers CALL it."
+               :target nil
+               :check {:kind "selected" :name "tutorial-renamed"}}
+              {:title "Rename it"
+               :body "On the edge running into the card, click the arg's name (data) — not its type chip next to it. Type exactly: payload — then Save. The label on the edge changes."
+               :target ".edge-label-overlay"
+               :check {:kind "arg-named" :arg "payload"}}
+              {:title "The new name is the interface"
+               :body "⋯ → ▶ Run. The form asks for payload now, not data — enter {\"a\": 1} and Run: back comes {\"a\":1}. A rename is a VIEW over the same slot — the parent still knows it as :data, your callers see payload. Click Next when you have run it."
+               :target "button.more-actions-trigger"
+               :check {:kind "manual"}}
               {:title "Templates, specialized"
-               :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize. The written lesson 04 adds renames ({:as :name}) and deep propagation. Click Finish to clean up or keep tutorial-json."
+               :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize, rename them to give the template its own vocabulary. The written lesson 04 adds deep propagation through several levels. Click Finish to clean up or keep both children."
                :target nil
                :check {:kind "manual"}}]}
             {:id "05"

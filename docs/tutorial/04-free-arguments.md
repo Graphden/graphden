@@ -116,6 +116,13 @@ node** hanging off the fn — a small empty node with a binder button
 visual "this slot is still open" signal, and it's where you fill a
 slot in without leaving the graph.
 
+Renaming one is a click on the arg's NAME on the incoming edge
+(the type chip beside it opens the type editor instead). The new
+name is what your callers — and the run form — see; the ancestor
+that declared the slot keeps its own name for it, because a
+rename is a view over the same slot, not a second slot. An arg
+that only got a rename stays unbound.
+
 The run form mirrors them: open the row's `⋯` popover and click
 ▶ Run → the execute popover has exactly one field per free arg. A
 fn with **no** free args (every slot bound) shows *"No free

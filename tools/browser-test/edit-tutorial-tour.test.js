@@ -14,6 +14,7 @@ const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
+  renameArgViaEdgeLabel,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
@@ -207,7 +208,34 @@ const {
     await bindFirstPlaceholder(page, '{"greeting": "hello"}');
     await waitTourTitle(page, 'Bound beats free', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 04 step-5 Next');
-    await waitTourTitle(page, 'Templates, specialized');
+    // --- the rename arc ---
+    await waitTourTitle(page, 'A free arg can also be RENAMED', 150000);
+    await filterAndSelect(page, 'to-json', 'to-json-string');
+    await waitTourTitle(page, 'A second child', 150000);
+    await extendViaRowActions(page, 'tutorial-renamed', 'to-json-string');
+    await waitTourTitle(page, 'tutorial-renamed is open', 150000);
+    await waitTourTitle(page, 'Rename it', 150000);
+    await renameArgViaEdgeLabel(page, 'data', 'payload');
+    await waitTourTitle(page, 'The new name is the interface', 150000);
+    // The result pane still holds the run from earlier in this lesson, so
+    // this step is `manual` — a dom check on it would pass before the user
+    // ran anything.
+    await runViaRowActions(page, '{"a": 1}');
+    assert(await clickTourButton(page, 'Next'), 'lesson 04 rename-run Next');
+    await waitTourTitle(page, 'Templates, specialized', 150000);
+    // The rename must be a VIEW over the same slot, so the value has to
+    // arrive under the NEW name — a binding written on the view slot
+    // instead of the declared one would look right and run empty.
+    const renamedFound = await api(page, 'GET',
+      '/api/graph/entities?scope=search&q=tutorial-renamed');
+    const renamedFn = (renamedFound.fns || [])
+      .find((f) => f.name === 'tutorial-renamed');
+    assert(renamedFn, 'tutorial-renamed exists');
+    const renamedRan = await api(page, 'POST', '/api/execute',
+      {'fn-id': renamedFn.id, args: {payload: {a: 1}}});
+    assert(renamedRan.result === '{"a":1}',
+      'the value arrives under the new name (got: '
+      + JSON.stringify(renamedRan.result) + ')');
     await finishAndDelete(page);
     console.log('  lesson 04: walked + cleaned');
 

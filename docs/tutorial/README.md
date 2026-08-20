@@ -30,7 +30,7 @@
 | 06 | [Higher-order functions and `:fn`-typed slots](06-higher-order-functions.md) | ✅ written · ▶ interactive |
 | 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written · ▶ interactive |
 | 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written · ▶ interactive |
-| 09 | [Executing a fn — free-arg form, history, cancel](09-executing-a-fn.md) | ✅ written |
+| 09 | [Executing a fn — free-arg form, history, cancel](09-executing-a-fn.md) | ✅ written · ▶ interactive |
 | 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written |
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
 | 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written |
@@ -43,8 +43,8 @@
 | 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written |
 | 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written |
 | 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written |
-| 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written |
-| 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written |
+| 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |
+| 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written · ▶ interactive |
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
 | 25 | Editing the editor: asset overrides | ⏳ planned |
 | 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written · ▶ interactive |

@@ -413,6 +413,83 @@
               {:title "Tests are graph, too"
                :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. The written lesson 26 covers statuses (including “stale by construction”), the tests lens and Run-all. Click Finish to clean up or keep it."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "09"
+             :title "Executing a fn"
+             :steps
+             [{:title "Running is part of editing"
+               :body "There is no build step: the fn you are looking at IS the running one. The Run popover turns every unbound slot into an input field, keeps a history of what you ran, and can persist the interesting runs."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find str-len"
+               :body "Type str-len in the Explorer filter and click the str-len row (core.strings) — one free slot, :string."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-len"}}
+              {:title "Free args become the form"
+               :body "Click ⋯ on the row, then ▶ Run. The popover shows one field, named after the free slot. Type hello and click Run: the answer 5 comes back under the card."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Keep the interesting one"
+               :body "Open Run again, tick “Save to history”, enter graphden and Run. Unticked runs are transient; a ticked one is stored with its arguments and result."
+               :target ".execute-persist-checkbox"
+               :check {:kind "dom" :selector ".execute-history-toggle"}}
+              {:title "History is a graph read"
+               :body "Click “History” at the top of the popover: your persisted run is listed with its input. Repeat re-fills the form from it — the same execution API the editor uses is what /api/execute exposes to your own callers."
+               :target ".execute-history-toggle"
+               :check {:kind "manual"}}
+              {:title "That's the run loop"
+               :body "Free args in, result out, history when you ask for it. The written lesson 09 adds cancellation, TTLs and the run-from-another-fn story. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "23"
+             :title "Explorer and Inspector"
+             :steps
+             [{:title "Two panes, one graph"
+               :body "The Explorer on the left narrows WHAT you see; the Inspector on the right explains the one thing you selected. Neither changes the graph — they change your view of it."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Narrow by kind"
+               :body "Under the filter box sit the kind chips: ◍ all, λ fn, T types, 🔒 secrets, ⚙ services. Click T types — the tree collapses to type-rows only, and the chip carries their count."
+               :target ".kind-toggle"
+               :check {:kind "manual"}}
+              {:title "Back to everything"
+               :body "Click ◍ all to clear the lens. Your choice is remembered per browser, so the editor opens where you left it."
+               :target ".kind-toggle.kind-all"
+               :check {:kind "manual"}}
+              {:title "Select something"
+               :body "Type str-len in the filter and click the row. The Inspector fills in: name, kind, namespace, description."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-len"}}
+              {:title "The Inspector's tabs"
+               :body "Overview, Bindings, Runs. Click Bindings — it lists the same slot table you would assemble by hand from lesson 03, computed server-side."
+               :target ".gd-insp-tabs"
+               :check {:kind "dom" :selector ".gd-insp-tab"}}
+              {:title "That's the view layer"
+               :body "Lenses and tabs are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 23 covers the remaining chips and the Runs tab. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "22"
+             :title "Workspaces"
+             :steps
+             [{:title "Your slice of a shared graph"
+               :body "A workspace is a personal scope: pick the namespace roots you work in and the Explorer shows those. It lives in your browser, not in the graph — nobody else's view changes."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open the workspace chip"
+               :body "At the top of the Explorer, click the chip that reads “workspace — All functions”."
+               :target "#gd-ws-chip"
+               :check {:kind "dom" :selector "#gd-ws-pop, .gd-ws-pop, [class*=\"ws-pop\"]"}}
+              {:title "Pick a root"
+               :body "Tick one namespace — say core. The Explorer collapses to that subtree; the chip now names your scope instead of “All functions”."
+               :target "#gd-ws-chip"
+               :check {:kind "manual"}}
+              {:title "And back"
+               :body "Reopen the chip and choose “All functions” to clear the scope. Reloading the page would have kept it — the choice is yours per browser, and it survives."
+               :target "#gd-ws-chip"
+               :check {:kind "manual"}}
+              {:title "That's workspaces"
+               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 22 adds per-fn hiding (⊘) and how workspaces interact with grants. Click Finish."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

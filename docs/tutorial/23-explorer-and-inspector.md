@@ -70,6 +70,11 @@ The Inspector is the "read" side of the editor: popovers are for
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=23)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 1. Click the **⚙ services** chip — the tree collapses to service
    fns; note the count on the chip. Click **◍ all** to clear.
 2. Focus **🔒 secrets** — the **+ New secret** button appears

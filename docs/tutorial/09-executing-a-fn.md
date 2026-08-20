@@ -262,6 +262,11 @@ Two side effects of this:
 
 ## Try it (the persist + history loop)
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=09)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 1. On `:str-len`, run with `:string = "hello"` (no persist).
    See the result + a fresh history row.
 2. Run again with `:string = "world"` (also no persist).

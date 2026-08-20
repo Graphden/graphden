@@ -93,6 +93,11 @@ browser's local storage. Consequences worth knowing:
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=22)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 1. Open the **workspace chip** in the Build context bar. Tick
    `mycorp` — the Explorer collapses to `mycorp.*` and the
    "(primitives)" bucket disappears.

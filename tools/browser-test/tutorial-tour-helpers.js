@@ -44,7 +44,7 @@ async function hardCleanup(page) {
   // whatever the first pass unblocked.
   const leftovers = ['tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
-                     'two-plus-two'];
+                     'two-plus-two', 'tutorial-bump', 'tutorial-cell'];
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));

@@ -407,8 +407,18 @@
   "Validates that a value is a UUID. Throws if not."
   [context value]
   (when-not (uuid? value)
+    ;; `:type` is the canonical ERROR-CODE key (docs/ERROR_CODES.md) and the
+    ;; status mapper reads its namespace. Putting the value's CLASS there
+    ;; both lost the code and left ex-data unencodable — a `java.lang.Class`
+    ;; has no JSON form, so an honest 400 surfaced as a 500. Keep the code a
+    ;; keyword; report the class by NAME under its own key.
     (throw (ex-info "UUID required"
-                    (merge context {:value value :type (type value)})))))
+                    (merge context
+                           {:value (pr-str value)
+                            :type :validation-error/type-mismatch
+                            :value-type (if (nil? value)
+                                          "nil"
+                                          (Class/.getName (Object/.getClass value)))})))))
 
 
 (defn check-uuid-uniqueness

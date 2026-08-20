@@ -1,6 +1,7 @@
 (ns graphden.schema.malli.uuid-validation-test
   "UUID validation tests for malli-data-schema."
   (:require
+    [cheshire.core :as cheshire]
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [uuid]]
@@ -34,7 +35,21 @@
           clojure.lang.ExceptionInfo #"UUID required"
           (-> (mds/create-builder)
               (ds/add-enum :status (uuid) [{:uuid "not-a-uuid" :value :active}])
-              (ds/build))))))
+              (ds/build)))))
+
+  (testing "ex-data keeps the canonical error code and stays JSON-encodable"
+    ;; `:type` is the ERROR-CODE key the status mapper reads; it used to be
+    ;; overwritten with the offending value's `java.lang.Class`, which both
+    ;; lost the code and made the ex-data unencodable.
+    (try
+      (-> (mds/create-builder)
+          (ds/add-entity :item "not-a-uuid" {:field {:uuid (uuid) :type :text}})
+          (ds/build))
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (is (= :validation-error/type-mismatch (:type data)))
+          (is (= "java.lang.String" (:value-type data)))
+          (is (string? (cheshire/generate-string data))))))))
 
 
 (deftest uuid-uniqueness-test

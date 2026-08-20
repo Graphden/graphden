@@ -201,7 +201,12 @@
                            :field k
                            :expected-type (:expected error)
                            :actual-type (:actual error)
-                           :value-type (type v)})))))))
+                           ;; The CLASS NAME, not the class. ex-data reaches
+                           ;; the caller as the JSON `error-data` of a 400,
+                           ;; and a `java.lang.Class` has no JSON encoding —
+                           ;; it turned this precise, actionable message into
+                           ;; an opaque 500 "internal error, see server log".
+                           :value-type (Class/.getName (Object/.getClass v))})))))))
 
 
 (defn validate-entity-name!

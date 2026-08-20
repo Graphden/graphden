@@ -373,13 +373,36 @@ async function _tourDeleteCreated() {
   const created = (_tourState?.created) || [];
   await _tourDeleteCreatedBranches();
   // fns first — a namespace only deletes once empty.
-  for (const c of created) {
-    if (c.type !== 'fn') continue;
-    const fn = _tourFindFn(c.name);
-    if (fn) {
-      try { await authMutate('DELETE', API.api_entities_type_id('fn', fn.id)); } catch (_) {}
+  //
+  // NEWEST FIRST, and twice. A lesson that builds a chain creates the
+  // target before the fn that points at it (lesson 15: the cell, then the
+  // swap that writes to it; lesson 27: the inner fn, then the outer one),
+  // and the server refuses to delete a fn something still references —
+  // correctly. Deleting in creation order therefore left the FIRST fn of
+  // every chain behind; the second pass covers a lesson whose order is
+  // less tidy than reverse-creation.
+  const fns = created.filter((c) => c.type === 'fn').reverse();
+  for (let pass = 0; pass < 2; pass++) {
+    for (const c of fns) {
+      // Resolve through the SEARCH endpoint, not the lexical graph: the
+      // client only holds the selected fn's subtree, so a fn the lesson
+      // created earlier can be absent from it by cleanup time — and an
+      // absent row read as "already gone", which is how the first fn of
+      // every chain survived the cleanup.
+      let id = null;
+      try {
+        const r = await authFetch(API.api_graph_entities
+          + '?scope=search&q=' + encodeURIComponent(c.name));
+        const payload = await r.json();
+        id = (payload.fns || []).find((f) => f.name === c.name)?.id || null;
+      } catch (_) { /* fall through: nothing to delete */ }
+      if (!id) continue;
+      try {
+        await authMutate('DELETE', API.api_entities_type_id('fn', id));
+      } catch (_) { /* still referenced — the next pass retries */ }
     }
   }
+  if (typeof initGraph === 'function') { try { await initGraph(); } catch (_) {} }
   for (const c of created) {
     if (c.type !== 'ns') continue;
     const ns = (typeof graphData !== 'undefined' && graphData

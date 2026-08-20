@@ -287,6 +287,66 @@
       (is (nil? (sp/read-entity storage :binding (:id bind)))))))
 
 
+(deftest delete-guard-counts-only-live-referrers-test
+  ;; A reverse-ref answers WHO POINTED HERE. It must not answer WHO STILL
+  ;; EXISTS. Deletion is a TOMBSTONE, and deleting a fn leaves the binding
+  ;; rows it owns untouched — so the guard kept counting a dead fn's binding
+  ;; as a live dependent and refused forever:
+  ;;
+  ;;     DELETE referrer -> 200
+  ;;     DELETE target   -> 409  "referenced by 1 binding"
+  ;;
+  ;; From then on nobody could delete that target: not the user in the
+  ;; editor, not a test cleaning up after itself. Twin of
+  ;; `ref-many-owners-excludes-deleted-owners-test`, which closed the same
+  ;; hole on the `:parent-ids` junction.
+  (let [storage (:storage *graph*)
+        target  (setup/create-base-fn! storage (uniq "orph-target"))
+        base    (setup/create-base-fn! storage (uniq "orph-base"))
+        slot    (setup/create-slot! storage "v" :any)
+        _       (setup/attach-slot! storage (:id base) (:id slot) 0)
+        referrer (setup/create-composed-fn! storage (uniq "orph-ref") (:id base))
+        _ (sp/create-entity storage :binding {:fn-id (:id referrer)
+                                              :slot-id (:id slot)
+                                              :ref-fn-id (:id target)})
+        del (fn [id]
+              (:status (via-delete {:uri (str "/api/entities/fn/" id)
+                                    :request-method :delete})))]
+    (testing "a LIVE referrer still blocks — the guard must keep biting"
+      (is (= 409 (del (:id target)))))
+
+    (testing "once the referrer is gone, its orphaned binding no longer counts"
+      (is (= 200 (del (:id referrer))))
+      (is (= 200 (del (:id target)))))))
+
+
+(deftest delete-guard-counts-only-live-list-item-referrers-test
+  ;; Same hole one level down: a sequence item's owner is a BINDING, whose
+  ;; owner is a fn. Deleting the host fn orphans both, and the orphaned item
+  ;; kept the fn it pointed at undeletable.
+  (let [storage (:storage *graph*)
+        target  (setup/create-base-fn! storage (uniq "orph-item-target"))
+        base    (setup/create-base-fn! storage (uniq "orph-item-base"))
+        slot    (setup/create-slot! storage "items" :sequence)
+        _       (setup/attach-slot! storage (:id base) (:id slot) 0)
+        host    (setup/create-composed-fn! storage (uniq "orph-item-host") (:id base))
+        bind    (sp/create-entity storage :binding {:fn-id (:id host)
+                                                    :slot-id (:id slot)
+                                                    :list-append true})
+        _ (sp/create-entity storage :binding-list-item {:binding-id (:id bind)
+                                                        :position 0
+                                                        :ref-fn-id (:id target)})
+        del (fn [id]
+              (:status (via-delete {:uri (str "/api/entities/fn/" id)
+                                    :request-method :delete})))]
+    (testing "a LIVE list item still blocks"
+      (is (= 409 (del (:id target)))))
+
+    (testing "deleting the host releases the target"
+      (is (= 200 (del (:id host))))
+      (is (= 200 (del (:id target)))))))
+
+
 (deftest process-delete-entity-secret-gate-test
   ;; Seed a `secret-leaf` base-fn + a secret-shaped child of it (a
   ;; composed fn whose parent-ids is exactly [secret-leaf-id]).

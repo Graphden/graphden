@@ -2333,10 +2333,81 @@
    :parent :if
    :args {:test :_ref-owner-bind-empty? :then {:value []} :else :_ref-owner-bind-cand-resolved}}
 
-  {:name :ref-owner-bindings
-   :description "RESOLVED binding rows whose :ref-fn-id is :target-fn-id (version-aware; see the section header)."
+  {:name :_ref-owner-bind-matched
+   :description "Resolved binding rows whose :ref-fn-id is the target — BEFORE the live-owner filter below."
    :parent :filter
    :args {:pred :_ref-owner-eq? :coll :_ref-owner-bind-resolved}}
+
+  ;; =====================================================================
+  ;; Live-owner filter — a reverse-ref answers WHO POINTED HERE, never
+  ;; WHO STILL EXISTS.
+  ;;
+  ;; Deletion is a TOMBSTONE, and deleting a fn does not tombstone the
+  ;; binding rows it owns. So a plain reverse-ref keeps reporting a dead
+  ;; fn's binding as a live dependent, and the delete gate built on it
+  ;; refused forever:
+  ;;
+  ;;     DELETE referrer -> 200
+  ;;     DELETE target   -> 409   "referenced by 1 binding"
+  ;;
+  ;; From then on NOBODY could delete that target — not the user in the
+  ;; editor, not a test cleaning up after itself; the leaked entities
+  ;; poisoned every later e2e file. Identical disease to the `:parent-ids`
+  ;; junction, fixed the same way there — see `query-ref-many-owners` in
+  ;; `versioning.storage.core`: ask the junction who pointed, then resolve
+  ;; those owners against this branch and keep the living.
+  ;; =====================================================================
+  {:name :_ref-owner-get-fn-id
+   :parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_owner-fn-ids-empty?
+   :parent :empty?
+   :args {:coll {:as :owner-fn-ids :type [:list :uuid]
+                 :description "Owner fn-ids to test for liveness on this branch."}}}
+
+  {:name :_owner-fn-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "fn"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [{:as :owner-fn-ids}]}}}}
+
+  {:name :_owner-fn-resolved-all
+   :parent :resolve-fn-rows
+   :args {:identities :_owner-fn-identities :branch-chain :current-branch-chain}}
+
+  {:name :_owner-fn-resolved
+   :parent :if
+   :args {:test :_owner-fn-ids-empty? :then {:value []} :else :_owner-fn-resolved-all}}
+
+  {:name :owner-live-fn-index
+   :description "`{fn-id → [row]}` over the `:owner-fn-ids` that STILL resolve live on this branch — tombstoned fns are absent. Membership index for the `:_owner-alive?` predicate."
+   :parent :group-by
+   :args {:key-fn :_ref-owner-get-id :coll :_owner-fn-resolved}}
+
+  {:name :_owner-alive?
+   :description "HOF pred over rows carrying `:fn-id` — true iff the owning fn is in `:owner-index`."
+   :parent :contains?
+   :args {:coll {:as :owner-index :type [:map :uuid :any]
+                 :description "Live-owner index from `:owner-live-fn-index`."}
+          :key :_ref-owner-get-fn-id}}
+
+  {:name :_ref-owner-bind-owner-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-fn-id
+                                      :coll :_ref-owner-bind-matched}}}}}}
+
+  {:name :_ref-owner-bind-owner-index
+   :parent :owner-live-fn-index
+   :args {:owner-fn-ids :_ref-owner-bind-owner-ids}}
+
+  {:name :ref-owner-bindings
+   :description "RESOLVED binding rows whose :ref-fn-id is :target-fn-id AND whose owning fn is still live on this branch (version-aware; see the section header)."
+   :parent :filter
+   :args {:pred :_owner-alive?
+          :coll :_ref-owner-bind-matched
+          :owner-index :_ref-owner-bind-owner-index}}
 
   ;; --- resolver variant: bindings whose :resolver-fn-id is the target.
   ;; A resolver runs at the owner's arg-resolution time, so deleting an
@@ -2394,10 +2465,27 @@
    :args {:a {:parent :get :args {:coll {:as :item} :key {:value :resolver-fn-id} :default nil}}
           :b {:as :target-fn-id}}}
 
-  {:name :resolver-owner-bindings
-   :description "RESOLVED binding rows whose :resolver-fn-id is :target-fn-id (version-aware; twin of :ref-owner-bindings)."
+  {:name :_resolver-owner-bind-matched
    :parent :filter
    :args {:pred :_resolver-owner-eq? :coll :_resolver-owner-bind-resolved}}
+
+  {:name :_resolver-owner-bind-owner-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-fn-id
+                                      :coll :_resolver-owner-bind-matched}}}}}}
+
+  {:name :_resolver-owner-bind-owner-index
+   :parent :owner-live-fn-index
+   :args {:owner-fn-ids :_resolver-owner-bind-owner-ids}}
+
+  {:name :resolver-owner-bindings
+   :description "RESOLVED binding rows whose :resolver-fn-id is :target-fn-id and whose owning fn is still live (version-aware; twin of :ref-owner-bindings)."
+   :parent :filter
+   :args {:pred :_owner-alive?
+          :coll :_resolver-owner-bind-matched
+          :owner-index :_resolver-owner-bind-owner-index}}
 
   ;; --- list-item variant (FK to identity is :item-id) ---
   {:name :_ref-owner-item-id-rows
@@ -2440,10 +2528,73 @@
    :parent :if
    :args {:test :_ref-owner-item-empty? :then {:value []} :else :_ref-owner-item-cand-resolved}}
 
-  {:name :ref-owner-list-items
-   :description "RESOLVED binding-list-item rows whose :ref-fn-id is :target-fn-id (version-aware)."
+  {:name :_ref-owner-item-matched
    :parent :filter
    :args {:pred :_ref-owner-eq? :coll :_ref-owner-item-resolved}}
+
+  ;; A list item's owner is a BINDING, and that binding's owner is a fn —
+  ;; so the item survives the live-owner filter only if BOTH still resolve.
+  ;; (A tombstoned binding drops out at resolution; a binding orphaned by
+  ;; its fn's deletion needs the fn-index check, same as above.)
+  {:name :_ref-owner-item-owner-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-binding-id
+                                      :coll :_ref-owner-item-matched}}}}}}
+
+  {:name :_ref-owner-item-owner-empty?
+   :parent :empty? :args {:coll :_ref-owner-item-owner-ids}}
+
+  {:name :_ref-owner-item-owner-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_ref-owner-item-owner-ids]}}}}
+
+  {:name :_ref-owner-item-owner-resolved-all
+   :parent :resolve-binding-rows
+   :args {:identities :_ref-owner-item-owner-identities :branch-chain :current-branch-chain}}
+
+  {:name :_ref-owner-item-owner-resolved
+   :parent :if
+   :args {:test :_ref-owner-item-owner-empty?
+          :then {:value []} :else :_ref-owner-item-owner-resolved-all}}
+
+  {:name :_ref-owner-item-owner-fn-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-fn-id
+                                      :coll :_ref-owner-item-owner-resolved}}}}}}
+
+  {:name :_ref-owner-item-owner-fn-index
+   :parent :owner-live-fn-index
+   :args {:owner-fn-ids :_ref-owner-item-owner-fn-ids}}
+
+  {:name :_ref-owner-item-owner-live
+   :parent :filter
+   :args {:pred :_owner-alive?
+          :coll :_ref-owner-item-owner-resolved
+          :owner-index :_ref-owner-item-owner-fn-index}}
+
+  {:name :_ref-owner-item-owner-index
+   :parent :group-by
+   :args {:key-fn :_ref-owner-get-id :coll :_ref-owner-item-owner-live}}
+
+  {:name :_item-owner-alive?
+   :description "HOF pred over list-item rows — true iff the owning binding is still live."
+   :parent :contains?
+   :args {:coll {:as :item-owner-index :type [:map :uuid :any]
+                 :description "Live owning-binding index."}
+          :key :_ref-owner-get-binding-id}}
+
+  {:name :ref-owner-list-items
+   :description "RESOLVED binding-list-item rows whose :ref-fn-id is :target-fn-id and whose owning binding (and its fn) are still live (version-aware)."
+   :parent :filter
+   :args {:pred :_item-owner-alive?
+          :coll :_ref-owner-item-matched
+          :item-owner-index :_ref-owner-item-owner-index}}
 
   ;; Bindings referencing the delete target — the shared version-aware
   ;; primitive, bound to this delete's target id.

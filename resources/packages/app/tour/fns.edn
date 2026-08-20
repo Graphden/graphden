@@ -582,6 +582,61 @@
               {:title "That's debugging in place"
                :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 27 adds the call-tree view and catching a live HTTP request. Click Finish to clean up or keep the two fns."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "12"
+             :title "Components"
+             :steps
+             [{:title "A page is a function"
+               :body "There is no template language here. A page is a fn that returns hiccup, and the component library (web.components) is a set of fn-defs over :hiccup — a button, a card, a form. You will specialize one, then put it inside another."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find button"
+               :body "Type button in the Explorer filter and click the button row (web.components). Its card ends in an amber ?-strip: ?label ?attrs — the inputs it leaves open."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "button"}}
+              {:title "Make it yours"
+               :body "Click ⋯ on the button row, choose “Extend”, name it tutorial-button — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-button" :parent "button"}
+               :creates {:type "fn" :name "tutorial-button"}}
+              ;; Selection gate — the next step binds on the child.
+              {:title "tutorial-button is open"
+               :body "Notice there is no “+” on this card. A component's inputs arrive as FREE args (lesson 04), so they live in the ?-strip along the bottom rather than on a slot row — and each chip there is clickable."
+               :target nil
+               :check {:kind "selected" :name "tutorial-button"}}
+              {:title "Give it a label"
+               :body "In the ?-strip click ?label, choose “Bind literal”, type exactly: Run — then Save. The chip disappears: that input is pinned now."
+               :target ".optional-arg-binder"
+               :check {:kind "binding-bound" :name "tutorial-button" :slot "label"}}
+              {:title "Run it"
+               :body "⋯ → ▶ Run → Run. Back comes [\"button\" \"Run\"] — hiccup, the data form of HTML. Nothing renders it yet; it is a value like any other."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Now something to put it in"
+               :body "Type card in the filter and click the card row (web.components) — a <div class=\"card\"> whose :children is a LIST of hiccup nodes."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "card"}}
+              {:title "Extend the card too"
+               :body "Click ⋯ on the card row, choose “Extend”, name it tutorial-card — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-card" :parent "card"}
+               :creates {:type "fn" :name "tutorial-card"}}
+              ;; Selection gate — the next step appends on the child.
+              {:title "tutorial-card is open"
+               :body "Its ?-strip shows ?children. That one is a LIST, so clicking it offers Append instead of Bind — a container holds items, not a single value."
+               :target nil
+               :check {:kind "selected" :name "tutorial-card"}}
+              {:title "Put your button inside"
+               :body "Click ?children, choose “Append fn-ref”, type tutorial in the picker and click the tutorial-button row. The canvas draws the edge: the card now contains your button."
+               :target ".optional-arg-binder"
+               :check {:kind "bindings-count" :name "tutorial-card" :count 1}}
+              {:title "Run the card"
+               :body "⋯ → ▶ Run → Run. The result nests: [\"div\" {\"class\" \"card\"} [\"button\" \"Run\"]]. Composing fns IS composing markup — there is no separate component runtime."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "That's a page, in pieces"
+               :body "Keep nesting — rows, forms, a nav-bar — and the outermost fn is the page. The written lesson 12 wires one to a route and adds click handlers. Click Finish to clean up or keep both."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

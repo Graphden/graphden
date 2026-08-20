@@ -1,4 +1,4 @@
-// Lessons 03, 05, 06 — slots/bindings, types, higher-order fns
+// Lessons 03, 05, 06, 12 — slots/bindings, types, higher-order fns, components
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -18,6 +18,7 @@ const {
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
+  bindOptionalArgChip, appendFnRefViaChip,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -29,7 +30,7 @@ const {
   });
   // Lesson 05's "remove this binding" step fires a native confirm().
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06');
+  console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06 / 12');
   let failed = false;
   try {
     await hardCleanup(page);
@@ -137,6 +138,52 @@ const {
     await waitTourTitle(page, "That's a HOF", 150000);
     await finishAndDelete(page);
     console.log('  lesson 06: walked + cleaned');
+
+    // ---------- Lesson 12 — components (free-arg chips + list append) ------
+    await page.goto(BASE + '/?tutorial=12');
+    await waitTourTitle(page, 'A page is a function', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 12 Next');
+    await waitTourTitle(page, 'Find button');
+    await filterAndSelect(page, 'button', 'button');
+    await waitTourTitle(page, 'Make it yours', 150000);
+    await extendViaRowActions(page, 'tutorial-button', 'button');
+    // Selection gate — the chip must be the CHILD's.
+    // Selection-gate steps carry a `selected` check — they advance on their
+    // own once the child is open; there is no Next to click.
+    await waitTourTitle(page, 'tutorial-button is open', 150000);
+    await waitTourTitle(page, 'Give it a label', 150000);
+    // A component's inputs are propagated free args: no `+` placeholder
+    // exists for them, only the `?name` chip. That IS the lesson's claim.
+    const placeholderCount = await page.evaluate(
+      () => document.querySelectorAll('.placeholder-binder').length);
+    assert(placeholderCount === 0,
+      'a component descendant offers chips, not slot placeholders');
+    await bindOptionalArgChip(page, 'label', 'Run');
+    await waitTourTitle(page, 'Run it', 150000);
+    await runViaRowActions(page);
+    await waitTourTitle(page, 'Now something to put it in', 150000);
+    await filterAndSelect(page, 'card', 'card');
+    await waitTourTitle(page, 'Extend the card too', 150000);
+    await extendViaRowActions(page, 'tutorial-card', 'card');
+    await waitTourTitle(page, 'tutorial-card is open', 150000);
+    await waitTourTitle(page, 'Put your button inside', 150000);
+    await appendFnRefViaChip(page, 'children', 'tutorial-button');
+    await waitTourTitle(page, 'Run the card', 150000);
+    await runViaRowActions(page);
+    await waitTourTitle(page, "That's a page, in pieces", 150000);
+    // The composition itself, asserted over the API — the card's hiccup
+    // must nest the button's.
+    const cardFound = await api(page, 'GET',
+      '/api/graph/entities?scope=search&q=tutorial-card');
+    const cardFn = (cardFound.fns || []).find((f) => f.name === 'tutorial-card');
+    assert(cardFn, 'tutorial-card exists');
+    const ran = await api(page, 'POST', '/api/execute',
+      {'fn-id': cardFn.id, args: {}});
+    assert(JSON.stringify(ran.result) === '["div",{"class":"card"},["button","Run"]]',
+      'card renders with the button nested inside (got: '
+      + JSON.stringify(ran.result) + ')');
+    await finishAndDelete(page);
+    console.log('  lesson 12: walked + cleaned');
 
     console.log('PASS');
   } catch (err) {

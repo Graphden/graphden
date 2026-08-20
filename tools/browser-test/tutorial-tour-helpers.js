@@ -44,7 +44,8 @@ async function hardCleanup(page) {
   // whatever the first pass unblocked.
   const leftovers = ['tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
-                     'two-plus-two', 'tutorial-bump', 'tutorial-cell'];
+                     'two-plus-two', 'tutorial-bump', 'tutorial-cell',
+                     'tutorial-card', 'tutorial-button'];
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));
@@ -544,6 +545,82 @@ async function bindFnRefPlaceholder(page, fnName) {
 }
 
 
+// --- lesson 12 (components) helpers -----------------------------------------
+// A component's inputs arrive as propagated FREE args, so they never grow a
+// `+` placeholder — they are the `?name` chips in the card's amber strip, and
+// each chip is the binder.
+
+async function chipByName(page, chipName) {
+  await page.waitForFunction((name) => Array.from(
+    document.querySelectorAll('.optional-arg-binder'))
+    .some((b) => b.textContent.trim() === '?' + name),
+  chipName, {timeout: 30000, polling: 150});
+  await page.evaluate((name) => {
+    Array.from(document.querySelectorAll('.optional-arg-binder'))
+      .find((b) => b.textContent.trim() === '?' + name).click();
+  }, chipName);
+}
+
+
+async function bindOptionalArgChip(page, chipName, literalText) {
+  await chipByName(page, chipName);
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
+    .some((b) => b.textContent.trim() === 'Bind literal'),
+  null, {timeout: 15000, polling: 100});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button'))
+      .find((b) => b.textContent.trim() === 'Bind literal').click();
+  });
+  await page.waitForFunction(() => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    return pop && (pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]'));
+  }, null, {timeout: 10000, polling: 100});
+  await page.evaluate((text) => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    const field = pop.querySelector('.arg-value-edit-input')
+      || pop.querySelector('[data-form-field]');
+    field.value = text;
+    field.dispatchEvent(new Event('input', {bubbles: true}));
+    field.dispatchEvent(new Event('change', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, literalText);
+  await page.waitForFunction(
+    () => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 20000, polling: 100});
+}
+
+
+// A LIST-typed chip (`?children` on any container) appends items instead of
+// binding one value — same flow the sequence anchor's `+` opens.
+async function appendFnRefViaChip(page, chipName, fnName) {
+  await chipByName(page, chipName);
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
+    .some((b) => b.textContent.trim() === 'Append fn-ref'),
+  null, {timeout: 15000, polling: 100});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button'))
+      .find((b) => b.textContent.trim() === 'Append fn-ref').click();
+  });
+  await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
+  await page.fill('.fn-picker-popover input', fnName);
+  await page.waitForFunction((name) => Array.from(
+    document.querySelectorAll('.fn-picker-row')).some((r) =>
+    (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(name)),
+  fnName, {timeout: 30000, polling: 150});
+  await page.evaluate((name) => {
+    Array.from(document.querySelectorAll('.fn-picker-row')).find((r) =>
+      (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(name))
+      .click();
+  }, fnName);
+  await page.waitForFunction(() => !document.querySelector('.fn-picker-popover'),
+    null, {timeout: 30000, polling: 150});
+}
+
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
@@ -552,4 +629,5 @@ module.exports = {
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, bindFnRefPlaceholder,
+  bindOptionalArgChip, appendFnRefViaChip,
 };

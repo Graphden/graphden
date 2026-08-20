@@ -93,6 +93,16 @@ Open the editor, hit "New fn-def", and create:
 Execute it. The result hiccup is `[:button "Run"]`. You just
 built your first component composition.
 
+In the editor the same thing is two clicks. Select `:button`,
+⋯ → "Extend", name the child — and look at the amber `?`-strip
+along the bottom of its card: `?label ?attrs`. A component's
+inputs reach a descendant as propagated *free* args (Lesson 04),
+so they never appear as slot rows with a `+` — the chips in that
+strip are the binder. Click `?label`, "Bind literal", type
+`Run`. A list-typed chip (`?children` on any container) opens the
+*append* flow instead, because a container holds items rather than
+one value.
+
 Now extend it with caller attrs:
 
 ```clojure

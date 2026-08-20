@@ -33,7 +33,7 @@
 | 09 | [Executing a fn — free-arg form, history, cancel](09-executing-a-fn.md) | ✅ written · ▶ interactive |
 | 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written |
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
-| 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written |
+| 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written · ▶ interactive |
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |

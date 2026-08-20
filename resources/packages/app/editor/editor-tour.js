@@ -117,8 +117,35 @@ function _tourCheckPasses(check) {
         const sel = lookups?.fnMap ? lookups.fnMap.get(selectedFnId) : null;
         return !!(sel && sel.name === check.name);
       }
+      case 'on-branch': {
+        // Branch context IS the URL param; switching reloads the page and
+        // the tour resumes from localStorage, so this check re-evaluates on
+        // the OTHER side of the reload — which is exactly what it asserts.
+        // "main" also matches the no-param (default-branch) case.
+        const cur = _tourCurrentBranch();
+        return check.name === 'main' ? (!cur || cur === 'main')
+                                     : cur === check.name;
+      }
+      case 'binding-value': {
+        // binding-bound, but the literal must equal `check.value`. Compared
+        // as TEXT: a JSON literal round-trips through jsonb, so 42 can come
+        // back as a number or a string depending on the slot's type.
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
+        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
+        return list.some((b) => {
+          const s = lookups.slotMap?.get(b['slot-id']);
+          return !!(s && s.name === check.slot
+                    && b.value != null
+                    && String(b.value) === String(check.value));
+        });
+      }
       case 'dom':
         return !!document.querySelector(check.selector);
+      case 'dom-absent':
+        // The inverse of `dom` — completes when something DISAPPEARS (a
+        // type-error badge cleared by the fixing edit).
+        return !document.querySelector(check.selector);
       default:
         return false;
     }
@@ -229,6 +256,18 @@ function _tourPosition() {
       if (top + ph > window.innerHeight - 12) top = Math.max(12, rect.top - ph - 14);
     }
     top = Math.min(Math.max(12, top), Math.max(12, window.innerHeight - ph - 12));
+    // Never cover the thing the step tells you to click: the clamps above
+    // can push the popover back over a target near a viewport edge (the
+    // branch chip sits top-left), and then the click lands on the popover.
+    const overlaps = left < rect.right + 8 && left + pw > rect.left - 8
+      && top < rect.bottom + 8 && top + ph > rect.top - 8;
+    if (overlaps) {
+      const below = rect.bottom + 14;
+      const above = rect.top - ph - 14;
+      if (below + ph <= window.innerHeight - 12) top = below;
+      else if (above >= 12) top = above;
+      else left = Math.min(rect.right + 16, Math.max(12, window.innerWidth - pw - 12));
+    }
     pop.style.left = left + 'px';
     pop.style.top = top + 'px';
     pop.classList.remove('gd-tour-centered');
@@ -278,8 +317,21 @@ function _tourAdvance(skipped) {
   else _tourRenderStep();
 }
 
+async function _tourDeleteCreatedBranches() {
+  // Branches the LESSON created (lesson 08 forks one by hand). Deleted
+  // before anything else: a branch with children refuses to delete, so a
+  // lesson-made fork must go before the isolation branch it forked from.
+  for (const c of (_tourState?.created) || []) {
+    if (c.type !== 'branch') continue;
+    try {
+      await authFetch(API.api_branches_ref(c.name), { method: 'DELETE' });
+    } catch (_) { /* already gone / refused — reported by the branch list */ }
+  }
+}
+
 async function _tourDeleteCreated() {
   const created = (_tourState?.created) || [];
+  await _tourDeleteCreatedBranches();
   // fns first — a namespace only deletes once empty.
   for (const c of created) {
     if (c.type !== 'fn') continue;
@@ -323,6 +375,9 @@ function _tourEnd() {
     foot.className = 'gd-tour-foot';
     foot.appendChild(_tourBtn('Delete branch & return', 'gd-tour-btn-primary', async () => {
       try {
+        // Children first — a fork the lesson itself made (lesson 08) would
+        // otherwise block its parent's delete.
+        await _tourDeleteCreatedBranches();
         await authFetch(API.api_branches_ref(branch), { method: 'DELETE' });
       } catch (_) { /* branch stays; still return to main */ }
       _tourTeardown();
@@ -335,9 +390,14 @@ function _tourEnd() {
     return;
   }
   const created = (_tourState?.created) || [];
-  const existing = created.filter((c) => (c.type === 'fn' ? _tourFindFn(c.name)
-    : typeof graphData !== 'undefined' && graphData
-      && (graphData.namespaces || []).some((n) => n.name === c.name)));
+  const existing = created.filter((c) => {
+    // A branch isn't in graphData (it's a routing context, not a graph
+    // row) — offer it unconditionally; the delete is idempotent.
+    if (c.type === 'branch') return true;
+    if (c.type === 'fn') return !!_tourFindFn(c.name);
+    return typeof graphData !== 'undefined' && graphData
+      && (graphData.namespaces || []).some((n) => n.name === c.name);
+  });
   if (!existing.length) { _tourTeardown(); return; }
 
   // Cleanup offer — reuse the popover as a small centered dialog.

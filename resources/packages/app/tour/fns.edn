@@ -21,10 +21,20 @@
 ;;                      {:kind "fn-exists"  :name N}
 ;;                      {:kind "fn-parent"  :name N :parent P}
 ;;                      {:kind "binding-bound" :name N :slot S}
+;;                      {:kind "binding-value" :name N :slot S :value V}
 ;;                      {:kind "selected" :name N}            fn selected on canvas
+;;                      {:kind "on-branch" :name B}           "main" = default
 ;;                      {:kind "dom" :selector SEL}           element appears
+;;                      {:kind "dom-absent" :selector SEL}    element gone
 ;;   :creates       — {:type "ns"|"fn" :name N} — tracked for the end-of-tour
 ;;                    cleanup offer (soft-deletes, nothing is lost).
+;;
+;; SELECTION GATE (2026-08-20, hard-won): a step that says "click the +"
+;; MUST be preceded by a `selected`-checked step naming the fn that owns
+;; that +. Without it the spotlight can ring the PARENT's placeholder while
+;; the editor is still re-selecting, and the write lands on a PACKAGE fn —
+;; which every descendant inherits. The server now refuses that write
+;; (crud/package_guard), but the lesson would still dead-end.
 ;;
 ;; The texts parallel docs/tutorial/01-fn-defs.md § "Try it" — same hard bar
 ;; as the written lessons: every step must be DO-able against the tree it
@@ -147,6 +157,100 @@
                :check {:kind "manual"}}
               {:title "Templates, specialized"
                :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize. The written lesson 04 adds renames ({:as :name}) and deep propagation. Click Finish to clean up or keep tutorial-json."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "05"
+             :title "Types"
+             :steps
+             [{:title "Types are fn-rows too"
+               :body "There is no separate type table: a type IS a fn row with no impl and no parents. Slots point at those rows, so the checker can compare them. A mismatch you save is recorded as a DIAGNOSTIC — the write lands, the fn is flagged. You will make one on purpose, then clear it."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find str-len"
+               :body "Type str-len in the Explorer filter and click the str-len row (core.strings)."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-len"}}
+              {:title "Read the chips"
+               :body "The chip next to the :string slot says text — the slot's declared type. The return strip says non-negative-int: a REFINEMENT, an int narrowed by [:>= 0]. Both are ordinary fn rows the graph points at."
+               :target ".arg-type-chip"
+               :check {:kind "manual"}}
+              {:title "Extend it"
+               :body "Click ⋯ on the str-len row, choose “Extend”, name it tutorial-typed — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-typed" :parent "str-len"}
+               :creates {:type "fn" :name "tutorial-typed"}}
+              ;; Selection gate — see the header note. The next step clicks a
+              ;; "+" and must not hit str-len's own placeholder.
+              {:title "The editor opened tutorial-typed"
+               :body "Your child inherited the :string slot, so the “+” placeholder is now on YOUR card."
+               :target nil
+               :check {:kind "selected" :name "tutorial-typed"}}
+              {:title "Ask for a fn the slot cannot take"
+               :body "Click the “+” on :string and choose “Bind fn-ref”. The picker states Expected: text and splits candidates into Compatible and Other. Expand “Other”, then click the str-len row there — it returns an int, not text."
+               :target ".placeholder-binder"
+               :check {:kind "dom" :selector ".mismatch-explainer.visible [data-pick-fn-id]"}}
+              {:title "The server explains the mismatch"
+               :body "Expected text, got [:refine :int [:>= 0]], and the reason: that refinement is not a subtype of text. The verdict comes from the same checker the backend uses. Click “Pick anyway” — graphden lets you save it."
+               :target ".mismatch-explainer"
+               :check {:kind "dom" :selector ".type-error-badge"}}
+              {:title "A diagnostic, not a wall"
+               :body "The binding saved and the card gained a ⚠ badge (the Type errors panel lists it). The fn refuses to EXECUTE until it is fixed, but your work was never blocked — that is the doctrine: warn and record, not reject."
+               :target ".type-error-badge"
+               :check {:kind "manual"}}
+              {:title "Clear it"
+               :body "Click ⋯ on the str-len value node (the one hanging under :string), choose × to remove the binding and confirm. The slot goes back to free — and the ⚠ disappears."
+               :target ".type-error-badge"
+               :check {:kind "dom-absent" :selector ".type-error-badge"}}
+              {:title "That's the type system"
+               :body "Slots carry types, the picker knows what fits, and a violation is a recorded diagnostic you can fix later. The written lesson 05 adds records, unions, variants, lists and [:secret T]. Click Finish to clean up or keep tutorial-typed."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "08"
+             :title "Branches"
+             :steps
+             [{:title "Branches are views, not copies"
+               :body "A branch is a name plus a pointer to its parent. Editing on a branch writes a VERSION row scoped to it; main keeps its own. You will make a small fn, fork a branch, change it there, and watch main stay untouched."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find str-upper"
+               :body "Type str-upper in the Explorer filter and click the str-upper row (core.strings) — a one-slot fn is the easiest thing to give a value to."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-upper"}}
+              {:title "Extend it"
+               :body "Click ⋯ on the str-upper row, choose “Extend”, name it branch-demo — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "branch-demo" :parent "str-upper"}
+               :creates {:type "fn" :name "branch-demo"}}
+              ;; Selection gate — the next step binds a value.
+              {:title "The editor opened branch-demo"
+               :body "It inherited str-upper's :string slot, so the “+” placeholder is on your card."
+               :target nil
+               :check {:kind "selected" :name "branch-demo"}}
+              {:title "Give it a value on main"
+               :body "Click the “+” on :string, choose “Bind literal”, type exactly: main version — then Save. (The slot is text, so the field takes plain text — no quotes.)"
+               :target ".placeholder-binder"
+               :check {:kind "binding-value" :name "branch-demo"
+                       :slot "string" :value "main version"}}
+              {:title "Fork a branch"
+               :body "Click the branch chip at the top of the Explorer. In the create row type tutorial-branch and click Create. The editor reloads on the new branch — the URL gains ?branch=tutorial-branch."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "tutorial-branch"}
+               :creates {:type "branch" :name "tutorial-branch"}}
+              {:title "Change the value here"
+               :body "You are on tutorial-branch, still looking at branch-demo. Click its value (“main version”) and change it to: branch version — then Save."
+               :target ".arg-value-editable"
+               :check {:kind "binding-value" :name "branch-demo"
+                       :slot "string" :value "branch version"}}
+              {:title "Go back to main"
+               :body "Open the branch chip again and click the main row. The editor reloads on main."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "main"}}
+              {:title "main never saw it"
+               :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. In the branch popover, Δ shows the difference and ⇢ merges the branch in when you want it."
+               :target "#branch-chip-btn"
+               :check {:kind "manual"}}
+              {:title "That's branching"
+               :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The written lesson 08 covers protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
                :target nil
                :check {:kind "manual"}}]}]}}}
 

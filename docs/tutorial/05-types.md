@@ -242,6 +242,11 @@ same constraint on the slot.
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=05)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 Create one of each kind:
 
 ```edn

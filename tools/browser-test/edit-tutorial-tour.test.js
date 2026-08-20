@@ -42,7 +42,7 @@ async function hardCleanup(page) {
   // leave it orphaned outside the (deleted) tutorial ns, where the
   // ns-subtree walk below would miss it and the next run's create 409s.
   await retryingDelete(() => deleteFnByName(page, FN_NAME));
-  for (const nm of ['add-10', 'tutorial-json']) {
+  for (const nm of ['add-10', 'tutorial-json', 'tutorial-typed', 'branch-demo']) {
     await retryingDelete(() => deleteFnByName(page, nm));
   }
   try {
@@ -88,7 +88,9 @@ async function hardCleanup(page) {
   try {
     const branches = await api(page, 'GET', '/api/branches');
     for (const b of (Array.isArray(branches) ? branches : (branches.branches || []))) {
-      if (/^tutorial-\d\d-/.test(b.name || '')) {
+      // tutorial-NN-xxxx = an isolation branch; tutorial-branch = the one
+      // lesson 08 forks by hand.
+      if (/^tutorial-(\d\d-|branch$)/.test(b.name || '')) {
         await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(b.name));
       }
     }
@@ -206,6 +208,141 @@ async function bindFirstPlaceholder(page, literalText) {
 }
 
 
+// --- lesson 05 (types) helpers ----------------------------------------------
+
+// Open the "+" binder, switch to fn-ref, expand the incompatible "Other"
+// section and click the named candidate — which opens the server-rendered
+// mismatch explainer instead of binding straight away.
+async function pickIncompatFnRef(page, fnName) {
+  await page.waitForSelector('.placeholder-binder', {timeout: 15000});
+  await page.evaluate(() => document.querySelector('.placeholder-binder').click());
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
+    .some((b) => b.textContent.trim() === 'Bind fn-ref'),
+  null, {timeout: 10000, polling: 100});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button'))
+      .find((b) => b.textContent.trim() === 'Bind fn-ref').click();
+  });
+  await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
+  await page.fill('.fn-picker-popover input', fnName);
+  await page.waitForTimeout(1200);
+  // The incompatible candidates hide behind a collapsed "Other · N" header.
+  await page.evaluate(() => {
+    const hdr = Array.from(document.querySelectorAll('.fn-picker-section-header'))
+      .find((h) => /Other/.test(h.textContent));
+    if (hdr) hdr.click();
+  });
+  await page.waitForSelector('.fn-picker-row-incompat', {timeout: 10000});
+  await page.evaluate(() => document.querySelector('.fn-picker-row-incompat').click());
+}
+
+
+// Confirm the mismatch explainer's "Pick anyway" — the write lands and the
+// fn gains a type-error badge (diagnostic, not a rejection).
+async function pickAnyway(page) {
+  await page.waitForSelector('.mismatch-explainer.visible [data-pick-fn-id]',
+    {timeout: 15000});
+  await page.evaluate(() => {
+    document.querySelector('.mismatch-explainer [data-pick-fn-id]').click();
+  });
+}
+
+
+// Remove a use-site binding through the arg node's ⋯ menu. Fires a native
+// confirm() — the caller must have a dialog handler installed.
+async function removeUseSiteBinding(page, ownerText) {
+  await page.evaluate((txt) => {
+    const btns = Array.from(document.querySelectorAll('button.more-actions-trigger'));
+    const target = btns.find((b) => {
+      const ov = b.closest('.node-overlay');
+      return ov && ov.textContent.trim().startsWith(txt);
+    }) || btns[btns.length - 1];
+    target.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+  }, ownerText);
+  await page.waitForFunction(() => !!document.querySelector(
+    '.row-actions-popover [data-action="remove-use-site-binding"]'),
+  null, {timeout: 15000, polling: 100});
+  await page.evaluate(() => {
+    document.querySelector('.row-actions-popover [data-action="remove-use-site-binding"]')
+      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  });
+}
+
+
+// --- lesson 08 (branches) helpers -------------------------------------------
+
+// The tour popover repositions on a tick; clicking the chip the instant a
+// step renders can land on the popover instead. Wait until the chip is the
+// element actually under its own centre.
+async function waitClickable(page, selector) {
+  await page.waitForFunction((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return !!hit && (hit === el || el.contains(hit));
+  }, selector, {timeout: 60000, polling: 200});
+}
+
+
+async function createBranchViaChip(page, name) {
+  await waitClickable(page, '#branch-chip-btn');
+  // dispatch, not page.click: the tour popover re-positions on a tick, and
+  // Playwright's actionability wait can race it forever even though the chip
+  // IS hittable (waitClickable above already asserted that).
+  await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  await page.waitForSelector('#branch-create-input', {timeout: 15000});
+  await page.fill('#branch-create-input', name);
+  await page.evaluate(() => document.getElementById('branch-create-btn').click());
+  // switchToBranch reloads the page; the tour resumes from localStorage.
+  await page.waitForFunction((n) => new URLSearchParams(location.search).get('branch') === n,
+    name, {timeout: 120000, polling: 300});
+}
+
+
+async function switchBranchViaChip(page, name) {
+  await waitClickable(page, '#branch-chip-btn');
+  // dispatch, not page.click: the tour popover re-positions on a tick, and
+  // Playwright's actionability wait can race it forever even though the chip
+  // IS hittable (waitClickable above already asserted that).
+  await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  await page.waitForSelector('.branch-row[data-branch-name]', {timeout: 15000});
+  await page.evaluate((n) => {
+    Array.from(document.querySelectorAll('.branch-row[data-branch-name]'))
+      .find((r) => r.getAttribute('data-branch-name') === n).click();
+  }, name);
+  await page.waitForFunction((n) => {
+    const cur = new URLSearchParams(location.search).get('branch');
+    return n === 'main' ? !cur : cur === n;
+  }, name, {timeout: 120000, polling: 300});
+}
+
+
+// Edit an already-bound literal in place (the value node is clickable).
+async function editBoundValue(page, text) {
+  await page.waitForSelector('.arg-value-editable', {timeout: 30000});
+  await page.evaluate(() => document.querySelector('.arg-value-editable').click());
+  await page.waitForFunction(() => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    return pop && pop.querySelector('[data-form-field], .arg-value-edit-input');
+  }, null, {timeout: 15000, polling: 100});
+  await page.evaluate((v) => {
+    const pops = document.querySelectorAll('.arg-value-edit-popover');
+    const pop = pops[pops.length - 1];
+    const f = pop.querySelector('[data-form-field]') || pop.querySelector('.arg-value-edit-input');
+    f.value = v;
+    f.dispatchEvent(new Event('input', {bubbles: true}));
+    f.dispatchEvent(new Event('change', {bubbles: true}));
+    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
+      .find((b) => b.textContent.trim() === 'Save').click();
+  }, text);
+  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
+    null, {timeout: 30000, polling: 100});
+}
+
+
 async function runViaRowActions(page, formValue) {
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
@@ -252,6 +389,9 @@ async function finishAndDelete(page) {
       console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
     }
   });
+  // Lesson 05's "remove this binding" step fires a native confirm(); with no
+  // handler Playwright auto-dismisses it and the step would never complete.
+  page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour — lesson 01 walked end-to-end');
   let failed = false;
   try {
@@ -432,6 +572,66 @@ async function finishAndDelete(page) {
     await waitTourTitle(page, 'Templates, specialized');
     await finishAndDelete(page);
     console.log('  lesson 04: walked + cleaned');
+
+    // ---------- Lesson 05 — types (mismatch explainer + diagnostic) ----------
+    await page.goto(BASE + '/?tutorial=05');
+    await waitTourTitle(page, 'Types are fn-rows too', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 05 Next');
+    await waitTourTitle(page, 'Find str-len');
+    await filterAndSelect(page, 'str-len', 'str-len');
+    await waitTourTitle(page, 'Read the chips', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 05 chips Next');
+    await waitTourTitle(page, 'Extend it');
+    await extendViaRowActions(page, 'tutorial-typed');
+    // Selection gate — the "+" must be the CHILD's (see lesson 02's note).
+    await waitTourTitle(page, 'Ask for a fn the slot cannot take', 150000);
+    await pickIncompatFnRef(page, 'str-len');
+    await waitTourTitle(page, 'The server explains the mismatch', 150000);
+    await pickAnyway(page);
+    await waitTourTitle(page, 'A diagnostic, not a wall', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 05 diagnostic Next');
+    await waitTourTitle(page, 'Clear it');
+    await removeUseSiteBinding(page, 'str-len');
+    await waitTourTitle(page, "That's the type system", 150000);
+    await finishAndDelete(page);
+    console.log('  lesson 05: walked + cleaned');
+
+    // ---------- Lesson 08 — branches (fork, edit, come back) ----------
+    await page.goto(BASE + '/?tutorial=08');
+    await waitTourTitle(page, 'Branches are views, not copies', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 Next');
+    await waitTourTitle(page, 'Find str-upper');
+    await filterAndSelect(page, 'str-upper', 'str-upper');
+    await waitTourTitle(page, 'Extend it', 150000);
+    await extendViaRowActions(page, 'branch-demo');
+    await waitTourTitle(page, 'Give it a value on main', 150000);
+    await bindFirstPlaceholder(page, 'main version');
+    await waitTourTitle(page, 'Fork a branch', 150000);
+    await createBranchViaChip(page, 'tutorial-branch');
+    // Page reloaded on the branch — the tour resumes from localStorage.
+    await waitTourTitle(page, 'Change the value here', 150000);
+    await editBoundValue(page, 'branch version');
+    await waitTourTitle(page, 'Go back to main', 150000);
+    await switchBranchViaChip(page, 'main');
+    await waitTourTitle(page, 'main never saw it', 150000);
+    // main still reads the original literal — the whole point of the lesson.
+    const mainValue = await page.evaluate(() => {
+      const fn = Array.from(lookups.fnMap.values()).find((f) => f.name === 'branch-demo');
+      const bs = fn ? (lookups.bindingsByFn.get(fn.id) || []) : [];
+      return bs.map((b) => b.value);
+    });
+    assert(mainValue.includes('main version'),
+      'main still reads "main version" after the branch edit');
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 back-on-main Next');
+    await waitTourTitle(page, "That's branching", 150000);
+    await finishAndDelete(page);
+    // The cleanup must have removed the lesson's BRANCH too, not just the fn.
+    const branches = await api(page, 'GET', '/api/branches');
+    const names = (Array.isArray(branches) ? branches : (branches.branches || []))
+      .map((b) => b.name);
+    assert(!names.includes('tutorial-branch'),
+      'tour cleanup deleted the lesson branch');
+    console.log('  lesson 08: walked + cleaned (branch too)');
 
     // ---------- Branch isolation (org mode entry) ----------
     // Local-run only (GRAPHDEN_TOUR_BRANCH_E2E=1). On the gate's fixture-

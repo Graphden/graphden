@@ -174,6 +174,11 @@ when propagation may happen at all.
 
 ## Try it (sticky-local edition)
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=08)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 1. On `main`, find `:web-server` (the editor's own server). Note
    its port (8080).
 2. Fork to `feat-dev-server`. On the new branch, copy `:web-

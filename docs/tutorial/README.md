@@ -26,10 +26,10 @@
 | 02 | [Parents and inheritance — single parent, then multiple](02-parents-and-inheritance.md) | ✅ written · ▶ interactive |
 | 03 | [Slots and bindings — what they are at the data level](03-slots-and-bindings.md) | ✅ written |
 | 04 | [Free arguments and how they propagate](04-free-arguments.md) | ✅ written · ▶ interactive |
-| 05 | [Types — atomic, refinement, record, union, variant, list](05-types.md) | ✅ written |
+| 05 | [Types — atomic, refinement, record, union, variant, list](05-types.md) | ✅ written · ▶ interactive |
 | 06 | [Higher-order functions and `:fn`-typed slots](06-higher-order-functions.md) | ✅ written |
 | 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written |
-| 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written |
+| 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written · ▶ interactive |
 | 09 | [Executing a fn — free-arg form, history, cancel](09-executing-a-fn.md) | ✅ written |
 | 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written |
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |

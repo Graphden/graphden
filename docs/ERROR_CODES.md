@@ -30,7 +30,7 @@ shape, self-hosted included.
 | `:quota/entity-limit` (tenant fn row-cap, #7) | 429 |
 | execute args-too-large (256 KB) | 413 |
 | `:vault/not-configured` | 503 |
-| `validation-error/*`, `constraint-violation/*` (other), `type-check/*`, `packages/*`, `refinement/*`, `execution-error/*`, `graph-error/*`, `secrets/*`, execute rejected (other) | 400 |
+| `validation-error/*`, `constraint-violation/*` (other), `type-check/*`, `packages/*`, `refinement/*`, `execution-error/*`, `graph-error/*`, `secrets/*`, `sequence-op/*`, execute rejected (other) | 400 |
 | `branch-router/*` | 404 |
 | unknown / internal | 500 (opaque `:ref`) |
 
@@ -431,3 +431,15 @@ left unchanged.
         ;; Re-throw unknown errors
         (throw e)))))
 ```
+
+### `:sequence-op/invalid-body`
+
+A `POST /api/sequence/append/:fn-id` (or insert) body carried none of
+`:ref`, `:ref-name`, `:value` — there is nothing to append. Nothing is
+written: the body is parsed before the host `:list-append` binding is
+materialised.
+
+### `:sequence-op/fn-not-found`
+
+The body's `:ref-name` matches no fn on this branch. Pass `:ref` with a
+fn-id when the name is ambiguous across namespaces.

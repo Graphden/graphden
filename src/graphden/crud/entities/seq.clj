@@ -143,6 +143,25 @@
     (find-sequence-binding ctx fn-id)))
 
 
+(defn- materialize-synthetic-binding!
+  "The `:list-append` host binding for a sequence slot that has none yet
+   — reusing the row if one already exists.
+
+   `find-sequence-binding` answers from the in-memory graph cache, so a
+   binding written outside that cache's last refresh reads as absent and
+   a blind create hits the per-branch uniqueness check (a 500 the caller
+   can do nothing about). Ask storage before creating, and once more if
+   the create loses a race."
+  [storage {:keys [fn-id slot-id] :as data}]
+  (or (first (sp/query-entities storage :binding {:fn-id fn-id :slot-id slot-id}))
+      (try
+        (sp/create-entity storage :binding data)
+        (catch Exception e
+          (or (first (sp/query-entities storage :binding
+                                        {:fn-id fn-id :slot-id slot-id}))
+              (throw e))))))
+
+
 (defn- shift-items!
   "Shift the `:position` of every row in `items` by `delta`, writing
    in an order that can never collide with a not-yet-moved sibling
@@ -214,8 +233,14 @@
       (:error req-pos) req-pos
       synth-rej {:error (:reason synth-rej)}
       :else
-      (let [seq-binding (if synthetic?
-                          (sp/create-entity storage :binding synth-data)
+      ;; Parse the BODY before writing anything. It used to be parsed after
+      ;; the synthetic host binding was created, so a malformed body threw
+      ;; past the rollback and left an empty `:list-append` binding on the
+      ;; slot — and the next (well-formed) append then collided with it,
+      ;; failing forever until the process restarted.
+      (let [payload (resolve-sequence-payload storage body)
+            seq-binding (if synthetic?
+                          (materialize-synthetic-binding! storage synth-data)
                           seq-binding)
             binding-id (:id seq-binding)
             existing (sp/query-entities storage :binding-list-item
@@ -225,7 +250,6 @@
             new-pos (if req-pos (min (:pos req-pos) end-pos) end-pos)
             ;; Items the insert displaces — empty for a plain append.
             displaced (filterv #(>= (:position %) new-pos) existing)
-            payload (resolve-sequence-payload storage body)
             new-item (merge {:id (random-uuid)
                              :binding-id binding-id
                              :position new-pos}

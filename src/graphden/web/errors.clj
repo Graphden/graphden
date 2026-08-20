@@ -68,6 +68,11 @@
    "execution-error" 400
    "graph-error" 400
    "secrets" 400
+   ;; `:sequence-op/invalid-body` / `:sequence-op/fn-not-found` — the
+   ;; client's append/insert body, rejected with a message that says how
+   ;; to fix it. Unmapped, they read as 500 "Internal error — see server
+   ;; log" and the caller never sees that message.
+   "sequence-op" 400
    "branch-router" 404})
 
 
@@ -80,7 +85,7 @@
     "refinement" "capability" "execution" "execution-error"
     "graph-error" "secrets" "authz" "user" "grant" "domain"
     "merge-conflict" "merge-protection-violation" "not-found" "vault"
-    "quota"})
+    "quota" "sequence-op"})
 
 
 (defn status-for

@@ -1,5 +1,5 @@
-// Lessons 09, 22, 23 — running fns, workspaces, the Explorer/Inspector
-// view layer.
+// Lessons 09, 22, 23, 15, 27 — running fns, workspaces, the
+// Explorer/Inspector view layer, in-graph state, and tracing a run.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -14,7 +14,8 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
-  runViaRowActions, tourTitle,
+  runViaRowActions, tourTitle, extendViaRowActions, bindFirstPlaceholder,
+  bindFnRefPlaceholder, finishAndDelete, runWithEffectAck,
 } = require('./tutorial-tour-helpers');
 
 
@@ -26,7 +27,7 @@ const {
     }
   });
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-ux — lessons 09 / 23 / 22');
+  console.log('edit-tutorial-tour-ux — lessons 09 / 23 / 22 / 15 / 27');
   let failed = false;
   try {
     await hardCleanup(page);
@@ -111,6 +112,91 @@ const {
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 30000, polling: 200});
     console.log('  lesson 22: walked (nothing created)');
+
+    // ---------- Lesson 15 — in-graph state ----------
+    await page.goto(BASE + '/?tutorial=15');
+    await waitTourTitle(page, 'A graph can remember', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
+    await waitTourTitle(page, 'Find cell');
+    await filterAndSelect(page, 'cell', 'cell');
+    await waitTourTitle(page, 'Make your own', 150000);
+    await extendViaRowActions(page, 'tutorial-cell', 'cell');
+    await waitTourTitle(page, 'Seed it with an empty list', 150000);
+    await bindFirstPlaceholder(page, '[]');
+    await waitTourTitle(page, 'Now something that writes to it', 150000);
+    await filterAndSelect(page, 'swap-conj', 'swap-conj');
+    await waitTourTitle(page, 'Extend it too', 150000);
+    await extendViaRowActions(page, 'tutorial-bump', 'swap-conj');
+    await waitTourTitle(page, 'Point it at your cell', 150000);
+    await bindFnRefPlaceholder(page, 'tutorial-cell');
+    await waitTourTitle(page, 'Run it twice', 150000);
+    // Writing to a cell is the :state effect, so Run is gated behind the
+    // acknowledgement checkbox — the same gate lesson 07 teaches.
+    await runWithEffectAck(page, 'tick');
+    // The lesson's whole claim: the SECOND run sees the first one's value.
+    // Read the result only once it has SETTLED — the host shows
+    // "Submitting…" first, and reading through that compares nothing.
+    await waitTourTitle(page, "That's in-graph state", 150000);
+    // The lesson's whole claim, checked where it is unambiguous: run the
+    // fn twice through the API and watch the cell's list GROW. (The result
+    // pane renders effects and typed representations, so asserting on its
+    // text would be asserting on the rendering, not on the state.)
+    const runViaApi = async () => {
+      const r = await page.evaluate(async () => {
+        const resp = await authFetch(API.api_execute, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({'fn-name': 'tutorial-bump', args: {value: 'tick'}})});
+        return resp.json();
+      });
+      assert(r.status === 'succeeded',
+        'tutorial-bump ran (got ' + JSON.stringify(r).slice(0, 120) + ')');
+      return r.result || [];
+    };
+    const before = await runViaApi();
+    const after = await runViaApi();
+    assert(after.length > before.length,
+      'the cell kept its value between runs (' + JSON.stringify(before)
+      + ' → ' + JSON.stringify(after) + ')');
+    await finishAndDelete(page);
+    console.log('  lesson 15: walked + cleaned (state survived the second run)');
+
+    // ---------- Lesson 27 — tracing a run ----------
+    await page.goto(BASE + '/?tutorial=27');
+    await waitTourTitle(page, 'What actually ran?', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 27 Next');
+    await waitTourTitle(page, 'Build something with a step in it');
+    await filterAndSelect(page, 'const', 'const');
+    await extendViaRowActions(page, 'tutorial-inner', 'const');
+    await waitTourTitle(page, 'Give the inner fn a value', 150000);
+    await bindFirstPlaceholder(page, '"hi"');
+    await waitTourTitle(page, 'Now the outer fn', 150000);
+    await filterAndSelect(page, 'str-upper', 'str-upper');
+    await extendViaRowActions(page, 'tutorial-outer', 'str-upper');
+    await waitTourTitle(page, 'Chain them', 150000);
+    await bindFnRefPlaceholder(page, 'tutorial-inner');
+    await waitTourTitle(page, 'Run it with a trace', 150000);
+    // Run WITH the trace box ticked — that is what makes the path button
+    // appear at all (an untraced run has no entries to draw).
+    await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
+    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+    await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
+    await page.evaluate(() => {
+      Array.from(document.querySelectorAll('.row-actions-popover button'))
+        .find((b) => b.textContent.trim() === '▶')
+        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await page.waitForSelector('.execute-popover.visible .execute-run-btn', {timeout: 15000});
+    await page.evaluate(() => {
+      const tr = document.querySelector('.execute-trace-checkbox');
+      if (tr && !tr.checked) tr.click();
+    });
+    await page.evaluate(() => document.querySelector('.execute-run-btn').click());
+    await waitTourTitle(page, 'Draw the path', 150000);
+    await page.waitForSelector('.execute-show-path-btn', {timeout: 60000});
+    await page.evaluate(() => document.querySelector('.execute-show-path-btn').click());
+    await waitTourTitle(page, "That's debugging in place", 150000);
+    await finishAndDelete(page);
+    console.log('  lesson 27: walked + cleaned (path drawn on canvas)');
 
     console.log('PASS');
   } catch (err) {

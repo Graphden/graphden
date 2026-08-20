@@ -490,6 +490,98 @@
               {:title "That's workspaces"
                :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 22 adds per-fn hiding (⊘) and how workspaces interact with grants. Click Finish."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "15"
+             :title "State: cells"
+             :steps
+             [{:title "A graph can remember"
+               :body "Most fns are pure — same inputs, same answer. A :cell is the exception: a value allocated ONCE per compiled registry and kept between runs. It is how a cache or a counter lives inside the graph rather than beside it."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find cell"
+               :body "Type cell in the Explorer filter and click the cell row (core.concurrency)."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "cell"}}
+              {:title "Make your own"
+               :body "Click ⋯ on the cell row, choose “Extend”, name it tutorial-cell — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-cell" :parent "cell"}
+               :creates {:type "fn" :name "tutorial-cell"}}
+              ;; Selection gate — the next step binds on the child.
+              {:title "tutorial-cell is open"
+               :body "It inherited :initial-value. That value must be a LITERAL: bound to a fn-ref instead, the cell stops being persistent and becomes a fresh value on every call."
+               :target nil
+               :check {:kind "selected" :name "tutorial-cell"}}
+              {:title "Seed it with an empty list"
+               :body "Click the “+” on :initial-value, choose “Bind literal”, enter exactly: [] — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-cell" :slot "initial-value"}}
+              {:title "Now something that writes to it"
+               :body "Type swap-conj in the filter and click the swap-conj row (core.concurrency) — it appends a value to a list-holding cell, atomically."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "swap-conj"}}
+              {:title "Extend it too"
+               :body "Click ⋯ on the swap-conj row, choose “Extend”, name it tutorial-bump — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-bump" :parent "swap-conj"}
+               :creates {:type "fn" :name "tutorial-bump"}}
+              {:title "tutorial-bump is open"
+               :body "One “+” shows, on :a — WHICH cell to append to. What to append stays a free argument, so it gets asked for at run time (the form from lesson 09)."
+               :target nil
+               :check {:kind "selected" :name "tutorial-bump"}}
+              {:title "Point it at your cell"
+               :body "Click the “+” on :a, choose “Bind fn-ref”, type tutorial in the picker and click the tutorial-cell row."
+               :target ".placeholder-binder"
+               :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
+              {:title "Run it twice"
+               :body "⋯ → ▶ Run. Writing to a cell is the :state effect, so the popover asks you to acknowledge it first (lesson 07's gate). Tick the box, type tick in the field and Run — you get [\"tick\"]. Now Run it a SECOND time the same way: [\"tick\" \"tick\"]. Nothing in the graph changed between the runs; the cell kept the value."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "That's in-graph state"
+               :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 15 covers :swap vs :reset and cache patterns. Click Finish to clean up or keep both."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "27"
+             :title "Tracing a run"
+             :steps
+             [{:title "What actually ran?"
+               :body "A result tells you the answer; a trace tells you the path. Ask for one at run time and the editor can draw it back onto the canvas — which fns were traversed, and how long each took."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Build something with a step in it"
+               :body "A trace shows REFERENCES followed during a run, so we need two fns. Type const in the filter, click the const row, then ⋯ → “Extend” and name it tutorial-inner — Save."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "fn-parent" :name "tutorial-inner" :parent "const"}
+               :creates {:type "fn" :name "tutorial-inner"}}
+              {:title "Give the inner fn a value"
+               :body "On the tutorial-inner card click the “+” on :value, choose “Bind literal”, enter this JSON: \"hi\" — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-inner" :slot "value"}}
+              {:title "Now the outer fn"
+               :body "Type str-upper in the filter, click the str-upper row, then ⋯ → “Extend” and name it tutorial-outer — Save."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "fn-parent" :name "tutorial-outer" :parent "str-upper"}
+               :creates {:type "fn" :name "tutorial-outer"}}
+              ;; Selection gate before the bind.
+              {:title "tutorial-outer is open"
+               :body "Its :string slot is free — and this time you will fill it with another FN rather than a literal."
+               :target nil
+               :check {:kind "selected" :name "tutorial-outer"}}
+              {:title "Chain them"
+               :body "Click the “+” on :string, choose “Bind fn-ref”, type tutorial in the picker and click the tutorial-inner row. The canvas draws the edge: outer now calls inner."
+               :target ".placeholder-binder"
+               :check {:kind "bindings-count" :name "tutorial-outer" :count 1}}
+              {:title "Run it with a trace"
+               :body "⋯ → ▶ Run, tick “Trace path”, then Run. The answer is HI — and under it a new button appears: “Show path on canvas”."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-show-path-btn"}}
+              {:title "Draw the path"
+               :body "Click “Show path on canvas”. Every fn the run traversed is highlighted with a timing badge, and a small panel offers to clear the view. Ticking “+ capture values” as well would put each node's return value on its card."
+               :target ".execute-show-path-btn"
+               :check {:kind "dom" :selector ".path-view-panel"}}
+              {:title "That's debugging in place"
+               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 27 adds the call-tree view and catching a live HTTP request. Click Finish to clean up or keep the two fns."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

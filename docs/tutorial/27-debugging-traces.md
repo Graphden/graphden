@@ -23,6 +23,11 @@ sits paused holding threads.
 
 ## Try it — trace a run
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=27)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 Take any composed fn of yours (something with a few refs — the
 `slugify` test subject from lesson 26, or any page fn):
 

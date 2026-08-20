@@ -172,3 +172,8 @@ falls back to `:atom` behaviour — fresh each call.
 ## Next
 
 [Lesson 16 — Members: managing who is in your org](16-users-admin.md)
+
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=15)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.

@@ -36,7 +36,7 @@
 | 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written |
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
-| 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written |
+| 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |
 | 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written |
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written |
 | 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
@@ -48,7 +48,7 @@
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
 | 25 | Editing the editor: asset overrides | ⏳ planned |
 | 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written · ▶ interactive |
-| 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written |
+| 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written · ▶ interactive |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for

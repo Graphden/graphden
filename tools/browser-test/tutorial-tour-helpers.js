@@ -514,6 +514,36 @@ async function finishAndDelete(page) {
 }
 
 
+// Bind the currently-shown placeholder to a fn-ref through the picker.
+// Waits for the FILTERED row to appear rather than sleeping: the picker
+// re-renders per keystroke, and clicking before it settles picks nothing
+// (or the wrong row).
+async function bindFnRefPlaceholder(page, fnName) {
+  await page.waitForSelector('.placeholder-binder', {timeout: 30000});
+  await page.evaluate(() => document.querySelector('.placeholder-binder').click());
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
+    .some((b) => b.textContent.trim() === 'Bind fn-ref'),
+  null, {timeout: 15000, polling: 100});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('button'))
+      .find((b) => b.textContent.trim() === 'Bind fn-ref').click();
+  });
+  await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
+  await page.fill('.fn-picker-popover input', fnName);
+  await page.waitForFunction((name) => {
+    return Array.from(document.querySelectorAll('.fn-picker-row')).some((r) =>
+      (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(name));
+  }, fnName, {timeout: 30000, polling: 150});
+  await page.evaluate((name) => {
+    const row = Array.from(document.querySelectorAll('.fn-picker-row')).find((r) =>
+      (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(name));
+    row.click();
+  }, fnName);
+  await page.waitForFunction(() => !document.querySelector('.fn-picker-popover'),
+    null, {timeout: 30000, polling: 150});
+}
+
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
@@ -521,5 +551,5 @@ module.exports = {
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
-  runWithEffectAck, finishAndDelete,
+  runWithEffectAck, finishAndDelete, bindFnRefPlaceholder,
 };

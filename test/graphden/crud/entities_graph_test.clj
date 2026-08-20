@@ -150,6 +150,39 @@
                   (sp/query-entities storage :slot {})))))))
 
 
+(deftest binding-on-a-renamed-view-slot-targets-the-declared-slot-test
+  ;; A `{:as :new-name}` rename mints a VIEW slot so the new name resolves
+  ;; for descendants — but a BINDING must target the DECLARED slot, which is
+  ;; what the package parser writes and what the executor reads. Written on
+  ;; the view slot it lands, shows on the card, and is then invisible at run
+  ;; time: the value silently never arrives. So the write normalises.
+  (let [storage (:storage *graph*)
+        base  (setup/create-base-fn! storage (uniq "rv-base"))
+        slot  (setup/create-slot! storage "content" :text)
+        _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+        owner (setup/create-composed-fn! storage (uniq "rv-owner") (:id base))
+        renamed (uniq "rv-body")
+        _ (via-create (form-req "/api/entities/binding"
+                                (str "fn-id=" (:id owner)
+                                     "&slot-id=" (:id slot)
+                                     "&override-kind=fixed"
+                                     "&rename-to=" renamed)))
+        view (first (filter #(= renamed (:name %))
+                            (sp/query-entities storage :slot {})))
+        child (setup/create-composed-fn! storage (uniq "rv-child") (:id owner))
+        resp (via-create (form-req "/api/entities/binding"
+                                   (str "fn-id=" (:id child)
+                                        "&slot-id=" (:id view)
+                                        "&value=%22hi%22&override-kind=fixed")))]
+    (is (= (:id slot) (:source-slot-id view))
+        "the rename minted a view slot pointing at the declared one")
+    (is (= 200 (:status resp)))
+    (let [rows (sp/query-entities storage :binding {:fn-id (:id child)})]
+      (is (= 1 (count rows)))
+      (is (= (:id slot) (:slot-id (first rows)))
+          "the binding was normalised onto the DECLARED slot, not the view"))))
+
+
 ;; ============================================================================
 ;; process-update-entity
 ;; ============================================================================

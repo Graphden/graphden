@@ -1480,6 +1480,35 @@
                                 (web-errors/status-for-ex-data (ex-data e)))})))))
 
 
+(defn- rename-root-slot-id
+  "Follow `slot.source-slot-id` to the slot that DECLARED the arg.
+
+   A `{:as :new-name}` rename mints a VIEW slot whose `:source-slot-id`
+   points at the declared one, so the new name resolves for descendants.
+   Bindings, though, always target the DECLARED slot — that is what the
+   package parser writes (`packages.records.slot-resolution` walks the
+   rename chain to the declaring ancestor) and what the executor reads.
+   A binding written on the view slot lands, shows on the card, and is
+   then invisible at run time: the value silently never arrives."
+  [storage slot-id]
+  (loop [id slot-id
+         seen #{}]
+    (if (or (nil? id) (contains? seen id))
+      id
+      (if-let [src (:source-slot-id (sp/read-entity storage :slot id))]
+        (recur src (conj seen id))
+        id))))
+
+
+(defn- normalize-binding-slot
+  "Rewrite a binding write's `:slot-id` to its rename root, so every
+   client — editor, MCP, raw API — writes the slot the executor reads."
+  [storage entity-type entity-data]
+  (if (and (= entity-type :binding) (:slot-id entity-data))
+    (update entity-data :slot-id #(rename-root-slot-id storage %))
+    entity-data))
+
+
 (defn- forward-rename-slot!
   "Phase 6c — forward a form `:rename-to` to the dedicated renamed-view
    slot. A failure here is logged, not fatal — the binding is still
@@ -1561,6 +1590,7 @@
    on the derived diagnostics store (docs/SECRETS.md)."
   [{:keys [entity-type type-str form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
+        entity-data (normalize-binding-slot storage entity-type entity-data)
         pkg-reason (pkg-guard/write-rejection storage entity-type entity-data)
         create-result (if pkg-reason
                         {:error pkg-reason :http-status 403}
@@ -1614,6 +1644,9 @@
    ordinary type errors only (docs/SECRETS.md)."
   [{:keys [entity-type type-str id-uuid form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
+        ;; An update rarely carries `:slot-id`, but when it does the same
+        ;; rename-root rule applies as on create.
+        entity-data (normalize-binding-slot storage entity-type entity-data)
         error-msg (volatile! nil)
         ;; Pre-image for the secret carve-out rollback (binding family)
         ;; and for the package-owner write guard (adds fn-slot).

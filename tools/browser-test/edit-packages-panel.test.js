@@ -201,14 +201,17 @@ async function panelState(page) {
       btn && btn.click();
     }, PKG);
     // install materializes the version's fns + delta-recompiles them (see
-    // PERF note at the top of this file — no longer a full-graph freeze);
-    // 30s is GC-stall tolerance for the constrained stack, not freeze headroom.
+    // PERF note at the top of this file — no longer a full-graph freeze).
+    // The ceiling is GC-stall tolerance for the constrained gate stack, not
+    // freeze headroom: 60s flaked a landing gate on 2026-08-20 (install took
+    // 1s, the NEXT step never landed inside the minute), while the same run
+    // takes ~2s on a warm box. Polling keeps the success path fast.
     await page.waitForFunction((pkg) => {
       const root = document.querySelector('#gd-pkg-pop [data-packages-panel]');
       const t = root && root.querySelector(':scope > .packages-panel-table');
       return t && [...t.querySelectorAll('tbody tr td:first-child')]
         .some((td) => td.textContent === pkg);
-    }, PKG, {timeout: 60000, polling: 250});
+    }, PKG, {timeout: 150000, polling: 250});
     const c = await panelState(page);
     const cRow = c.installedRows.find((r) => r.name === PKG);
     assert(cRow && cRow.version === '1.0.0',
@@ -236,7 +239,7 @@ async function panelState(page) {
         const td = [...tr.querySelectorAll('td')];
         return td[0]?.textContent === pkg && td[1]?.textContent === '1.1.0';
       });
-    }, PKG, {timeout: 60000, polling: 250});
+    }, PKG, {timeout: 150000, polling: 250});
     const d = await panelState(page);
     const dRow = d.installedRows.find((r) => r.name === PKG);
     assert(dRow && dRow.version === '1.1.0',
@@ -262,7 +265,7 @@ async function panelState(page) {
       const stillThere = t && [...t.querySelectorAll('tbody tr td:first-child')]
         .some((td) => td.textContent === pkg);
       return !stillThere;
-    }, PKG, {timeout: 60000, polling: 250});
+    }, PKG, {timeout: 150000, polling: 250});
     const e = await panelState(page);
     assert(!e.installedRows.some((r) => r.name === PKG),
       'installed table no longer lists ' + PKG + ' after uninstall');

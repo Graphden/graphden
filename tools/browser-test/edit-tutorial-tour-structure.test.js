@@ -1,4 +1,4 @@
-// Lessons 03, 05, 06, 12 — slots/bindings, types, higher-order fns, components
+// Lessons 03, 05, 06, 12, 13 — slots/bindings, types, HOFs, components, escape hatch
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -30,7 +30,7 @@ const {
   });
   // Lesson 05's "remove this binding" step fires a native confirm().
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06 / 12');
+  console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06 / 12 / 13');
   let failed = false;
   try {
     await hardCleanup(page);
@@ -184,6 +184,39 @@ const {
       + JSON.stringify(ran.result) + ')');
     await finishAndDelete(page);
     console.log('  lesson 12: walked + cleaned');
+
+    // ---------- Lesson 13 — the escape hatch (code editor + rename) --------
+    await page.goto(BASE + '/?tutorial=13');
+    await waitTourTitle(page, 'When no component fits', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 13 Next');
+    await waitTourTitle(page, 'Find wrap-custom-script');
+    await filterAndSelect(page, 'custom-script', 'wrap-custom-script');
+    await waitTourTitle(page, 'Extend it', 150000);
+    await extendViaRowActions(page, 'tutorial-script', 'wrap-custom-script');
+    await waitTourTitle(page, 'tutorial-script is open', 150000);
+    await waitTourTitle(page, 'Write some JavaScript', 150000);
+    await bindOptionalArgChip(page, 'body', "document.title = 'Graphden';",
+                              {code: true});
+    await waitTourTitle(page, 'Run it', 150000);
+    await runViaRowActions(page);
+    await waitTourTitle(page, 'Know what you gave up', 150000);
+    // `?body` is a RENAME of the inherited `:content` slot, and a binding
+    // must land on the declared slot — written on the rename view it shows
+    // on the card and is invisible at run time. Assert the value actually
+    // arrives.
+    const scriptFound = await api(page, 'GET',
+      '/api/graph/entities?scope=search&q=tutorial-script');
+    const scriptFn = (scriptFound.fns || [])
+      .find((f) => f.name === 'tutorial-script');
+    assert(scriptFn, 'tutorial-script exists');
+    const scriptRan = await api(page, 'POST', '/api/execute',
+      {'fn-id': scriptFn.id, args: {}});
+    assert(JSON.stringify(scriptRan.result)
+             === '["script",{},"document.title = \'Graphden\';"]',
+      'the JS reached the rendered tag (got: '
+      + JSON.stringify(scriptRan.result) + ')');
+    await finishAndDelete(page);
+    console.log('  lesson 13: walked + cleaned');
 
     console.log('PASS');
   } catch (err) {

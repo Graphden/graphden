@@ -8,6 +8,12 @@
 ;; editable in the editor like any other fn-def, and self-hosted deploys
 ;; get the tours for free.
 ;;
+;; Lessons are served in TEACHING order and carry a `:chapter` label
+;; (Basics → Composing → Running it → The editor); the picker emits a heading
+;; whenever the chapter changes, so this vector's order IS the reading order.
+;; The `:id` stays the WRITTEN lesson's number (docs/tutorial/NN-*.md) — it is
+;; the deep link (`?tutorial=12`), not a position.
+;;
 ;; Each step:
 ;;   :title / :body — popover copy (plain text).
 ;;   :target        — CSS selector the spotlight anchors to; nil = centered
@@ -49,6 +55,7 @@
    :args {:value
           {:lessons
            [{:id "01"
+             :chapter "Basics"
              :title "Your first function"
              :steps
              [{:title "Welcome to the interactive tutorial"
@@ -82,6 +89,7 @@
                :target nil
                :check {:kind "manual"}}]}
             {:id "02"
+             :chapter "Basics"
              :title "Parents and inheritance"
              :steps
              [{:title "Inheritance, hands on"
@@ -121,140 +129,8 @@
                :body "One parent, inherited slots, per-child bindings. The written lesson 02 goes further: multiple parents (the response-matrix diamond) and how bindings overlay closest-fn-wins. Click Finish to clean up or keep add-10."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "04"
-             :title "Free arguments"
-             :steps
-             [{:title "Free args: the template mechanism"
-               :body "An UNBOUND slot of a fn becomes the CALLER's input — that is how reusable templates work. You will run a template through its free arg, then pin that arg in a child of your own and watch the input disappear."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Find to-json-string"
-               :body "Type to-json in the Explorer filter and click the to-json-string row (core.system). Its card shows a “+” placeholder on :data — the slot is FREE."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "to-json-string"}}
-              {:title "A free arg becomes a Run field"
-               :body "Click ⋯ on the to-json-string row, then ▶ Run. The popover shows a data field — the free slot surfaced as your input. Enter {\"a\": 1} and Run: the JSON string comes back."
-               :target "button.more-actions-trigger"
-               :check {:kind "dom" :selector ".execute-result-host > *"}}
-              {:title "Pin it in a child"
-               :body "Now the other direction: click ⋯ again, choose “Extend”, name it tutorial-json — then Save. The editor opens your new child fn."
-               :target "button.more-actions-trigger"
-               :check {:kind "fn-parent" :name "tutorial-json" :parent "to-json-string"}
-               :creates {:type "fn" :name "tutorial-json"}}
-              ;; Same selection gate as lesson 02 — binding :data before the
-              ;; child is selected would pin it on to-json-string ITSELF,
-              ;; hijacking every JSON response in the system.
-              {:title "Your template child"
-               :body "tutorial-json inherited the free :data slot from its parent — the “+” placeholder moved onto your card."
-               :target nil
-               :check {:kind "selected" :name "tutorial-json"}}
-              {:title "Bind :data in the child"
-               :body "On the tutorial-json card click the “+” on :data, choose “Bind literal”, enter: {\"greeting\": \"hello\"} — then Save."
-               :target ".placeholder-binder"
-               :check {:kind "binding-bound" :name "tutorial-json" :slot "data"}}
-              {:title "Bound beats free"
-               :body "Run tutorial-json (⋯ → ▶ Run → Run): no fields this time — the binding closed the slot, so callers have nothing left to supply. Free args propagate UP until someone pins them."
-               :target "button.more-actions-trigger"
-               :check {:kind "manual"}}
-              {:title "Templates, specialized"
-               :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize. The written lesson 04 adds renames ({:as :name}) and deep propagation. Click Finish to clean up or keep tutorial-json."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "05"
-             :title "Types"
-             :steps
-             [{:title "Types are fn-rows too"
-               :body "There is no separate type table: a type IS a fn row with no impl and no parents. Slots point at those rows, so the checker can compare them. A mismatch you save is recorded as a DIAGNOSTIC — the write lands, the fn is flagged. You will make one on purpose, then clear it."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Find str-len"
-               :body "Type str-len in the Explorer filter and click the str-len row (core.strings)."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "str-len"}}
-              {:title "Read the chips"
-               :body "The chip next to the :string slot says text — the slot's declared type. The return strip says non-negative-int: a REFINEMENT, an int narrowed by [:>= 0]. Both are ordinary fn rows the graph points at."
-               :target ".arg-type-chip"
-               :check {:kind "manual"}}
-              {:title "Extend it"
-               :body "Click ⋯ on the str-len row, choose “Extend”, name it tutorial-typed — then Save."
-               :target "button.more-actions-trigger"
-               :check {:kind "fn-parent" :name "tutorial-typed" :parent "str-len"}
-               :creates {:type "fn" :name "tutorial-typed"}}
-              ;; Selection gate — see the header note. The next step clicks a
-              ;; "+" and must not hit str-len's own placeholder.
-              {:title "The editor opened tutorial-typed"
-               :body "Your child inherited the :string slot, so the “+” placeholder is now on YOUR card."
-               :target nil
-               :check {:kind "selected" :name "tutorial-typed"}}
-              {:title "Ask for a fn the slot cannot take"
-               :body "Click the “+” on :string and choose “Bind fn-ref”. The picker states Expected: text and splits candidates into Compatible and Other. Expand “Other”, then click the str-len row there — it returns an int, not text."
-               :target ".placeholder-binder"
-               :check {:kind "dom" :selector ".mismatch-explainer.visible [data-pick-fn-id]"}}
-              {:title "The server explains the mismatch"
-               :body "Expected text, got [:refine :int [:>= 0]], and the reason: that refinement is not a subtype of text. The verdict comes from the same checker the backend uses. Click “Pick anyway” — graphden lets you save it."
-               :target ".mismatch-explainer"
-               :check {:kind "dom" :selector ".type-error-badge"}}
-              {:title "A diagnostic, not a wall"
-               :body "The binding saved and the card gained a ⚠ badge (the Type errors panel lists it). The fn refuses to EXECUTE until it is fixed, but your work was never blocked — that is the doctrine: warn and record, not reject."
-               :target ".type-error-badge"
-               :check {:kind "manual"}}
-              {:title "Clear it"
-               :body "Click ⋯ on the str-len value node (the one hanging under :string), choose × to remove the binding and confirm. The slot goes back to free — and the ⚠ disappears."
-               :target ".type-error-badge"
-               :check {:kind "dom-absent" :selector ".type-error-badge"}}
-              {:title "That's the type system"
-               :body "Slots carry types, the picker knows what fits, and a violation is a recorded diagnostic you can fix later. The written lesson 05 adds records, unions, variants, lists and [:secret T]. Click Finish to clean up or keep tutorial-typed."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "08"
-             :title "Branches"
-             :steps
-             [{:title "Branches are views, not copies"
-               :body "A branch is a name plus a pointer to its parent. Editing on a branch writes a VERSION row scoped to it; main keeps its own. You will make a small fn, fork a branch, change it there, and watch main stay untouched."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Find str-upper"
-               :body "Type str-upper in the Explorer filter and click the str-upper row (core.strings) — a one-slot fn is the easiest thing to give a value to."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "str-upper"}}
-              {:title "Extend it"
-               :body "Click ⋯ on the str-upper row, choose “Extend”, name it branch-demo — then Save."
-               :target "button.more-actions-trigger"
-               :check {:kind "fn-parent" :name "branch-demo" :parent "str-upper"}
-               :creates {:type "fn" :name "branch-demo"}}
-              ;; Selection gate — the next step binds a value.
-              {:title "The editor opened branch-demo"
-               :body "It inherited str-upper's :string slot, so the “+” placeholder is on your card."
-               :target nil
-               :check {:kind "selected" :name "branch-demo"}}
-              {:title "Give it a value on main"
-               :body "Click the “+” on :string, choose “Bind literal”, type exactly: main version — then Save. (The slot is text, so the field takes plain text — no quotes.)"
-               :target ".placeholder-binder"
-               :check {:kind "binding-value" :name "branch-demo"
-                       :slot "string" :value "main version"}}
-              {:title "Fork a branch"
-               :body "Click the branch chip at the top of the Explorer. In the create row type tutorial-branch and click Create. The editor reloads on the new branch — the URL gains ?branch=tutorial-branch."
-               :target "#branch-chip-btn"
-               :check {:kind "on-branch" :name "tutorial-branch"}
-               :creates {:type "branch" :name "tutorial-branch"}}
-              {:title "Change the value here"
-               :body "You are on tutorial-branch, still looking at branch-demo. Click its value (“main version”) and change it to: branch version — then Save."
-               :target ".arg-value-editable"
-               :check {:kind "binding-value" :name "branch-demo"
-                       :slot "string" :value "branch version"}}
-              {:title "Go back to main"
-               :body "Open the branch chip again and click the main row. The editor reloads on main."
-               :target "#branch-chip-btn"
-               :check {:kind "on-branch" :name "main"}}
-              {:title "main never saw it"
-               :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. In the branch popover, Δ shows the difference and ⇢ merges the branch in when you want it."
-               :target "#branch-chip-btn"
-               :check {:kind "manual"}}
-              {:title "That's branching"
-               :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The written lesson 08 covers protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
-               :target nil
-               :check {:kind "manual"}}]}
             {:id "03"
+             :chapter "Basics"
              :title "Slots and bindings"
              :steps
              [{:title "One slot, many bindings"
@@ -302,7 +178,95 @@
                :body "tutorial-a says alpha, tutorial-b says beta, str-upper stays open — one slot identity, three independent binding states. That separation is why inheritance never copies anything. Click Finish to clean up or keep both."
                :target nil
                :check {:kind "manual"}}]}
+            {:id "04"
+             :chapter "Basics"
+             :title "Free arguments"
+             :steps
+             [{:title "Free args: the template mechanism"
+               :body "An UNBOUND slot of a fn becomes the CALLER's input — that is how reusable templates work. You will run a template through its free arg, then pin that arg in a child of your own and watch the input disappear."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find to-json-string"
+               :body "Type to-json in the Explorer filter and click the to-json-string row (core.system). Its card shows a “+” placeholder on :data — the slot is FREE."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "to-json-string"}}
+              {:title "A free arg becomes a Run field"
+               :body "Click ⋯ on the to-json-string row, then ▶ Run. The popover shows a data field — the free slot surfaced as your input. Enter {\"a\": 1} and Run: the JSON string comes back."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Pin it in a child"
+               :body "Now the other direction: click ⋯ again, choose “Extend”, name it tutorial-json — then Save. The editor opens your new child fn."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-json" :parent "to-json-string"}
+               :creates {:type "fn" :name "tutorial-json"}}
+              ;; Same selection gate as lesson 02 — binding :data before the
+              ;; child is selected would pin it on to-json-string ITSELF,
+              ;; hijacking every JSON response in the system.
+              {:title "Your template child"
+               :body "tutorial-json inherited the free :data slot from its parent — the “+” placeholder moved onto your card."
+               :target nil
+               :check {:kind "selected" :name "tutorial-json"}}
+              {:title "Bind :data in the child"
+               :body "On the tutorial-json card click the “+” on :data, choose “Bind literal”, enter: {\"greeting\": \"hello\"} — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-json" :slot "data"}}
+              {:title "Bound beats free"
+               :body "Run tutorial-json (⋯ → ▶ Run → Run): no fields this time — the binding closed the slot, so callers have nothing left to supply. Free args propagate UP until someone pins them."
+               :target "button.more-actions-trigger"
+               :check {:kind "manual"}}
+              {:title "Templates, specialized"
+               :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize. The written lesson 04 adds renames ({:as :name}) and deep propagation. Click Finish to clean up or keep tutorial-json."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "05"
+             :chapter "Basics"
+             :title "Types"
+             :steps
+             [{:title "Types are fn-rows too"
+               :body "There is no separate type table: a type IS a fn row with no impl and no parents. Slots point at those rows, so the checker can compare them. A mismatch you save is recorded as a DIAGNOSTIC — the write lands, the fn is flagged. You will make one on purpose, then clear it."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find str-len"
+               :body "Type str-len in the Explorer filter and click the str-len row (core.strings)."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-len"}}
+              {:title "Read the chips"
+               :body "The chip next to the :string slot says text — the slot's declared type. The return strip says non-negative-int: a REFINEMENT, an int narrowed by [:>= 0]. Both are ordinary fn rows the graph points at."
+               :target ".arg-type-chip"
+               :check {:kind "manual"}}
+              {:title "Extend it"
+               :body "Click ⋯ on the str-len row, choose “Extend”, name it tutorial-typed — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-typed" :parent "str-len"}
+               :creates {:type "fn" :name "tutorial-typed"}}
+              ;; Selection gate — see the header note. The next step clicks a
+              ;; "+" and must not hit str-len's own placeholder.
+              {:title "The editor opened tutorial-typed"
+               :body "Your child inherited the :string slot, so the “+” placeholder is now on YOUR card."
+               :target nil
+               :check {:kind "selected" :name "tutorial-typed"}}
+              {:title "Ask for a fn the slot cannot take"
+               :body "Click the “+” on :string and choose “Bind fn-ref”. The picker states Expected: text and splits candidates into Compatible and Other. Expand “Other”, then click the str-len row there — it returns an int, not text."
+               :target ".placeholder-binder"
+               :check {:kind "dom" :selector ".mismatch-explainer.visible [data-pick-fn-id]"}}
+              {:title "The server explains the mismatch"
+               :body "Expected text, got [:refine :int [:>= 0]], and the reason: that refinement is not a subtype of text. The verdict comes from the same checker the backend uses. Click “Pick anyway” — graphden lets you save it."
+               :target ".mismatch-explainer"
+               :check {:kind "dom" :selector ".type-error-badge"}}
+              {:title "A diagnostic, not a wall"
+               :body "The binding saved and the card gained a ⚠ badge (the Type errors panel lists it). The fn refuses to EXECUTE until it is fixed, but your work was never blocked — that is the doctrine: warn and record, not reject."
+               :target ".type-error-badge"
+               :check {:kind "manual"}}
+              {:title "Clear it"
+               :body "Click ⋯ on the str-len value node (the one hanging under :string), choose × to remove the binding and confirm. The slot goes back to free — and the ⚠ disappears."
+               :target ".type-error-badge"
+               :check {:kind "dom-absent" :selector ".type-error-badge"}}
+              {:title "That's the type system"
+               :body "Slots carry types, the picker knows what fits, and a violation is a recorded diagnostic you can fix later. The written lesson 05 adds records, unions, variants, lists and [:secret T]. Click Finish to clean up or keep tutorial-typed."
+               :target nil
+               :check {:kind "manual"}}]}
             {:id "06"
+             :chapter "Composing"
              :title "Higher-order functions"
              :steps
              [{:title "A slot that wants a function"
@@ -346,244 +310,8 @@
                :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 06 goes further — closure capture, lambda-params, and why a deeply nested callable can still see the request it was built under. Click Finish to clean up or keep tutorial-map."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "07"
-             :title "Effects"
-             :steps
-             [{:title "Effects are declared, then they spread"
-               :body "Every base-fn declares what it touches — :db, :network, :io, :env, :time, :random, :state, :process. The checker unions those along parent and ref edges, so a fn's effect set is what it TRANSITIVELY pulls in. You will read one, then watch it gate a run."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Find env"
-               :body "Type env in the Explorer filter and click the env row (core.system) — it reads an OS environment variable."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "env"}}
-              {:title "Read the effect chip"
-               :body "The card's effects strip carries one chip: env. That is a computed value, not a label someone typed on this fn — the checker derived it."
-               :target ".effects-chip"
-               :check {:kind "manual"}}
-              {:title "Open Run"
-               :body "Click ⋯ on the env row, then ▶ Run. Before the fields, the popover states “side effects: env” — and the Run button is DISABLED."
-               :target "button.more-actions-trigger"
-               :check {:kind "dom" :selector ".execute-effects-warning"}}
-              {:title "Acknowledge, then run"
-               :body "Tick “I understand this will produce side effects”, enter PATH in the name field, and click Run. On a self-hosted instance the value comes back; in the public demo you get “Forbidden effect: :env” instead — the demo tier allows only :db, :time, :state and :random."
-               :target ".execute-confirm-checkbox"
-               :check {:kind "dom" :selector ".execute-result-host > *"}}
-              {:title "Two gates, one vocabulary"
-               :body "The checkbox is the human gate; the tier's allowed-effect set is the machine one, enforced at the execution boundary — the same mechanism that keeps a cloud tenant from reaching the network on a free plan. Declared effects are what both read."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Secrets ride the same rails"
-               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane shows ●●●). Creating one needs vault access, so the written lesson 07 covers it end to end — the marker is the part to remember. Click Finish."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "26"
-             :title "Tests"
-             :steps
-             [{:title "A test is just a fn"
-               :body "No test entity, no flag: a test is a named fn in a namespace whose path contains the segment tests. It PASSES when it runs without throwing — :assert throws on a falsy value, :assert-eq throws when two values differ."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Create the tests namespace"
-               :body "In the Explorer, click “+ Namespace” and name it exactly: tests"
-               :target ".create-root-ns-btn"
-               :check {:kind "ns-exists" :name "tests"}
-               :creates {:type "ns" :name "tests"}}
-              {:title "Add the test fn"
-               :body "Expand the tests namespace, click its “+” and create a fn named: two-plus-two — the name states the invariant it pins."
-               :target ".ns-header[data-ns-path=\"tests\"]"
-               :check {:kind "fn-exists" :name "two-plus-two"}
-               :creates {:type "fn" :name "two-plus-two"}}
-              {:title "Make it an assertion"
-               :body "On the new card click “set parent…” and pick assert-eq (core.logic). The card gains two slots: :actual and :expected."
-               :target ".reparent-strip"
-               :check {:kind "fn-parent" :name "two-plus-two" :parent "assert-eq"}}
-              {:title "Bind one side"
-               :body "The card shows two “+” placeholders, :actual and :expected. Click either one, choose “Bind literal”, enter: 4 — then Save."
-               :target ".placeholder-binder"
-               :check {:kind "bindings-count" :name "two-plus-two" :count 1}}
-              {:title "Bind the other"
-               :body "Now the remaining “+”: “Bind literal”, enter: 4 again — Save. With every free arg bound the test becomes runnable, and graphden runs it FOR you on the write."
-               :target ".placeholder-binder"
-               :check {:kind "bindings-count" :name "two-plus-two" :count 2}}
-              {:title "See it pass"
-               :body "Open Operate → Tests. Your test is listed with a green dot and the summary reads 1 passed — nobody pressed Run: the write itself triggered the auto-run."
-               :target nil
-               :check {:kind "dom" :selector ".test-dot.test-passed"}}
-              {:title "Tests are graph, too"
-               :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. The written lesson 26 covers statuses (including “stale by construction”), the tests lens and Run-all. Click Finish to clean up or keep it."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "09"
-             :title "Executing a fn"
-             :steps
-             [{:title "Running is part of editing"
-               :body "There is no build step: the fn you are looking at IS the running one. The Run popover turns every unbound slot into an input field, keeps a history of what you ran, and can persist the interesting runs."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Find str-len"
-               :body "Type str-len in the Explorer filter and click the str-len row (core.strings) — one free slot, :string."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "str-len"}}
-              {:title "Free args become the form"
-               :body "Click ⋯ on the row, then ▶ Run. The popover shows one field, named after the free slot. Type hello and click Run: the answer 5 comes back under the card."
-               :target "button.more-actions-trigger"
-               :check {:kind "dom" :selector ".execute-result-host > *"}}
-              {:title "Keep the interesting one"
-               :body "Open Run again, tick “Save to history”, enter graphden and Run. Unticked runs are transient; a ticked one is stored with its arguments and result."
-               :target ".execute-persist-checkbox"
-               :check {:kind "dom" :selector ".execute-history-toggle"}}
-              {:title "History is a graph read"
-               :body "Click “History” at the top of the popover: your persisted run is listed with its input. Repeat re-fills the form from it — the same execution API the editor uses is what /api/execute exposes to your own callers."
-               :target ".execute-history-toggle"
-               :check {:kind "manual"}}
-              {:title "That's the run loop"
-               :body "Free args in, result out, history when you ask for it. The written lesson 09 adds cancellation, TTLs and the run-from-another-fn story. Click Finish."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "23"
-             :title "Explorer and Inspector"
-             :steps
-             [{:title "Two panes, one graph"
-               :body "The Explorer on the left narrows WHAT you see; the Inspector on the right explains the one thing you selected. Neither changes the graph — they change your view of it."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Narrow by kind"
-               :body "Under the filter box sit the kind chips: ◍ all, λ fn, T types, 🔒 secrets, ⚙ services. Click T types — the tree collapses to type-rows only, and the chip carries their count."
-               :target ".kind-toggle"
-               :check {:kind "manual"}}
-              {:title "Back to everything"
-               :body "Click ◍ all to clear the lens. Your choice is remembered per browser, so the editor opens where you left it."
-               :target ".kind-toggle.kind-all"
-               :check {:kind "manual"}}
-              {:title "Select something"
-               :body "Type str-len in the filter and click the row. The Inspector fills in: name, kind, namespace, description."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "str-len"}}
-              {:title "The Inspector's tabs"
-               :body "Overview, Bindings, Runs. Click Bindings — it lists the same slot table you would assemble by hand from lesson 03, computed server-side."
-               :target ".gd-insp-tabs"
-               :check {:kind "dom" :selector ".gd-insp-tab"}}
-              {:title "That's the view layer"
-               :body "Lenses and tabs are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 23 covers the remaining chips and the Runs tab. Click Finish."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "22"
-             :title "Workspaces"
-             :steps
-             [{:title "Your slice of a shared graph"
-               :body "A workspace is a personal scope: pick the namespace roots you work in and the Explorer shows those. It lives in your browser, not in the graph — nobody else's view changes."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Open the workspace chip"
-               :body "At the top of the Explorer, click the chip that reads “workspace — All functions”."
-               :target "#gd-ws-chip"
-               :check {:kind "dom" :selector "#gd-ws-pop, .gd-ws-pop, [class*=\"ws-pop\"]"}}
-              {:title "Pick a root"
-               :body "Tick one namespace — say core. The Explorer collapses to that subtree; the chip now names your scope instead of “All functions”."
-               :target "#gd-ws-chip"
-               :check {:kind "manual"}}
-              {:title "And back"
-               :body "Reopen the chip and choose “All functions” to clear the scope. Reloading the page would have kept it — the choice is yours per browser, and it survives."
-               :target "#gd-ws-chip"
-               :check {:kind "manual"}}
-              {:title "That's workspaces"
-               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 22 adds per-fn hiding (⊘) and how workspaces interact with grants. Click Finish."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "15"
-             :title "State: cells"
-             :steps
-             [{:title "A graph can remember"
-               :body "Most fns are pure — same inputs, same answer. A :cell is the exception: a value allocated ONCE per compiled registry and kept between runs. It is how a cache or a counter lives inside the graph rather than beside it."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Find cell"
-               :body "Type cell in the Explorer filter and click the cell row (core.concurrency)."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "cell"}}
-              {:title "Make your own"
-               :body "Click ⋯ on the cell row, choose “Extend”, name it tutorial-cell — then Save."
-               :target "button.more-actions-trigger"
-               :check {:kind "fn-parent" :name "tutorial-cell" :parent "cell"}
-               :creates {:type "fn" :name "tutorial-cell"}}
-              ;; Selection gate — the next step binds on the child.
-              {:title "tutorial-cell is open"
-               :body "It inherited :initial-value. That value must be a LITERAL: bound to a fn-ref instead, the cell stops being persistent and becomes a fresh value on every call."
-               :target nil
-               :check {:kind "selected" :name "tutorial-cell"}}
-              {:title "Seed it with an empty list"
-               :body "Click the “+” on :initial-value, choose “Bind literal”, enter exactly: [] — then Save."
-               :target ".placeholder-binder"
-               :check {:kind "binding-bound" :name "tutorial-cell" :slot "initial-value"}}
-              {:title "Now something that writes to it"
-               :body "Type swap-conj in the filter and click the swap-conj row (core.concurrency) — it appends a value to a list-holding cell, atomically."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "swap-conj"}}
-              {:title "Extend it too"
-               :body "Click ⋯ on the swap-conj row, choose “Extend”, name it tutorial-bump — then Save."
-               :target "button.more-actions-trigger"
-               :check {:kind "fn-parent" :name "tutorial-bump" :parent "swap-conj"}
-               :creates {:type "fn" :name "tutorial-bump"}}
-              {:title "tutorial-bump is open"
-               :body "One “+” shows, on :a — WHICH cell to append to. What to append stays a free argument, so it gets asked for at run time (the form from lesson 09)."
-               :target nil
-               :check {:kind "selected" :name "tutorial-bump"}}
-              {:title "Point it at your cell"
-               :body "Click the “+” on :a, choose “Bind fn-ref”, type tutorial in the picker and click the tutorial-cell row."
-               :target ".placeholder-binder"
-               :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
-              {:title "Run it twice"
-               :body "⋯ → ▶ Run. Writing to a cell is the :state effect, so the popover asks you to acknowledge it first (lesson 07's gate). Tick the box, type tick in the field and Run — you get [\"tick\"]. Now Run it a SECOND time the same way: [\"tick\" \"tick\"]. Nothing in the graph changed between the runs; the cell kept the value."
-               :target "button.more-actions-trigger"
-               :check {:kind "dom" :selector ".execute-result-host > *"}}
-              {:title "That's in-graph state"
-               :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 15 covers :swap vs :reset and cache patterns. Click Finish to clean up or keep both."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "27"
-             :title "Tracing a run"
-             :steps
-             [{:title "What actually ran?"
-               :body "A result tells you the answer; a trace tells you the path. Ask for one at run time and the editor can draw it back onto the canvas — which fns were traversed, and how long each took."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Build something with a step in it"
-               :body "A trace shows REFERENCES followed during a run, so we need two fns. Type const in the filter, click the const row, then ⋯ → “Extend” and name it tutorial-inner — Save."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "fn-parent" :name "tutorial-inner" :parent "const"}
-               :creates {:type "fn" :name "tutorial-inner"}}
-              {:title "Give the inner fn a value"
-               :body "On the tutorial-inner card click the “+” on :value, choose “Bind literal”, enter this JSON: \"hi\" — then Save."
-               :target ".placeholder-binder"
-               :check {:kind "binding-bound" :name "tutorial-inner" :slot "value"}}
-              {:title "Now the outer fn"
-               :body "Type str-upper in the filter, click the str-upper row, then ⋯ → “Extend” and name it tutorial-outer — Save."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "fn-parent" :name "tutorial-outer" :parent "str-upper"}
-               :creates {:type "fn" :name "tutorial-outer"}}
-              ;; Selection gate before the bind.
-              {:title "tutorial-outer is open"
-               :body "Its :string slot is free — and this time you will fill it with another FN rather than a literal."
-               :target nil
-               :check {:kind "selected" :name "tutorial-outer"}}
-              {:title "Chain them"
-               :body "Click the “+” on :string, choose “Bind fn-ref”, type tutorial in the picker and click the tutorial-inner row. The canvas draws the edge: outer now calls inner."
-               :target ".placeholder-binder"
-               :check {:kind "bindings-count" :name "tutorial-outer" :count 1}}
-              {:title "Run it with a trace"
-               :body "⋯ → ▶ Run, tick “Trace path”, then Run. The answer is HI — and under it a new button appears: “Show path on canvas”."
-               :target "button.more-actions-trigger"
-               :check {:kind "dom" :selector ".execute-show-path-btn"}}
-              {:title "Draw the path"
-               :body "Click “Show path on canvas”. Every fn the run traversed is highlighted with a timing badge, and a small panel offers to clear the view. Ticking “+ capture values” as well would put each node's return value on its card."
-               :target ".execute-show-path-btn"
-               :check {:kind "dom" :selector ".path-view-panel"}}
-              {:title "That's debugging in place"
-               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 27 adds the call-tree view and catching a live HTTP request. Click Finish to clean up or keep the two fns."
-               :target nil
-               :check {:kind "manual"}}]}
             {:id "12"
+             :chapter "Composing"
              :title "Components"
              :steps
              [{:title "A page is a function"
@@ -636,6 +364,333 @@
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "That's a page, in pieces"
                :body "Keep nesting — rows, forms, a nav-bar — and the outermost fn is the page. The written lesson 12 wires one to a route and adds click handlers. Click Finish to clean up or keep both."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "13"
+             :chapter "Composing"
+             :title "The escape hatch"
+             :steps
+             [{:title "When no component fits"
+               :body "The component library covers the common shapes, and two built-in click handlers cover the common behaviours. For everything else — a hover effect, a third-party widget — raw JavaScript can live in the graph itself, instead of the need becoming a feature request."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find wrap-custom-script"
+               :body "Type custom-script in the Explorer filter and click the wrap-custom-script row (web.components). It renders a JS body as <script>…</script> for a page's scripts list."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "wrap-custom-script"}}
+              {:title "Extend it"
+               :body "Click ⋯ on the wrap-custom-script row, choose “Extend”, name it tutorial-script — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-script" :parent "wrap-custom-script"}
+               :creates {:type "fn" :name "tutorial-script"}}
+              ;; Selection gate — the next step binds on the child.
+              {:title "tutorial-script is open"
+               :body "One chip in the ?-strip: ?body. Its type is :js-source — a type-row like any other, and the reason the next step gets a code editor instead of a plain text box."
+               :target nil
+               :check {:kind "selected" :name "tutorial-script"}}
+              {:title "Write some JavaScript"
+               :body "Click ?body, choose “Bind literal”. The value form opens a real code editor — syntax highlighting, bracket matching. Type exactly: document.title = 'Graphden'; — then Save."
+               :target ".optional-arg-binder"
+               :check {:kind "binding-bound" :name "tutorial-script" :slot "content"}}
+              {:title "Run it"
+               :body "⋯ → ▶ Run → Run. Back comes [\"script\" {} \"document.title = 'Graphden';\"] — hiccup carrying your JS, ready to sit in a page's scripts list. The JS itself runs in the BROWSER when that page loads; running the fn here only builds the tag."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Know what you gave up"
+               :body "Inside that string the graph sees nothing: no types, no effects, no references. That is the trade — full freedom, zero analysis — so keep the hatch small and the composition in fns. The written lesson 13 adds the per-click twin (:dispatch-custom) and the CSS variant. Click Finish to clean up or keep it."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "15"
+             :chapter "Composing"
+             :title "State: cells"
+             :steps
+             [{:title "A graph can remember"
+               :body "Most fns are pure — same inputs, same answer. A :cell is the exception: a value allocated ONCE per compiled registry and kept between runs. It is how a cache or a counter lives inside the graph rather than beside it."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find cell"
+               :body "Type cell in the Explorer filter and click the cell row (core.concurrency)."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "cell"}}
+              {:title "Make your own"
+               :body "Click ⋯ on the cell row, choose “Extend”, name it tutorial-cell — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-cell" :parent "cell"}
+               :creates {:type "fn" :name "tutorial-cell"}}
+              ;; Selection gate — the next step binds on the child.
+              {:title "tutorial-cell is open"
+               :body "It inherited :initial-value. That value must be a LITERAL: bound to a fn-ref instead, the cell stops being persistent and becomes a fresh value on every call."
+               :target nil
+               :check {:kind "selected" :name "tutorial-cell"}}
+              {:title "Seed it with an empty list"
+               :body "Click the “+” on :initial-value, choose “Bind literal”, enter exactly: [] — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-cell" :slot "initial-value"}}
+              {:title "Now something that writes to it"
+               :body "Type swap-conj in the filter and click the swap-conj row (core.concurrency) — it appends a value to a list-holding cell, atomically."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "swap-conj"}}
+              {:title "Extend it too"
+               :body "Click ⋯ on the swap-conj row, choose “Extend”, name it tutorial-bump — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-bump" :parent "swap-conj"}
+               :creates {:type "fn" :name "tutorial-bump"}}
+              {:title "tutorial-bump is open"
+               :body "One “+” shows, on :a — WHICH cell to append to. What to append stays a free argument, so it gets asked for at run time (the form from lesson 09)."
+               :target nil
+               :check {:kind "selected" :name "tutorial-bump"}}
+              {:title "Point it at your cell"
+               :body "Click the “+” on :a, choose “Bind fn-ref”, type tutorial in the picker and click the tutorial-cell row."
+               :target ".placeholder-binder"
+               :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
+              {:title "Run it twice"
+               :body "⋯ → ▶ Run. Writing to a cell is the :state effect, so the popover asks you to acknowledge it first (lesson 07's gate). Tick the box, type tick in the field and Run — you get [\"tick\"]. Now Run it a SECOND time the same way: [\"tick\" \"tick\"]. Nothing in the graph changed between the runs; the cell kept the value."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "That's in-graph state"
+               :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 15 covers :swap vs :reset and cache patterns. Click Finish to clean up or keep both."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "09"
+             :chapter "Running it"
+             :title "Executing a fn"
+             :steps
+             [{:title "Running is part of editing"
+               :body "There is no build step: the fn you are looking at IS the running one. The Run popover turns every unbound slot into an input field, keeps a history of what you ran, and can persist the interesting runs."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find str-len"
+               :body "Type str-len in the Explorer filter and click the str-len row (core.strings) — one free slot, :string."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-len"}}
+              {:title "Free args become the form"
+               :body "Click ⋯ on the row, then ▶ Run. The popover shows one field, named after the free slot. Type hello and click Run: the answer 5 comes back under the card."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Keep the interesting one"
+               :body "Open Run again, tick “Save to history”, enter graphden and Run. Unticked runs are transient; a ticked one is stored with its arguments and result."
+               :target ".execute-persist-checkbox"
+               :check {:kind "dom" :selector ".execute-history-toggle"}}
+              {:title "History is a graph read"
+               :body "Click “History” at the top of the popover: your persisted run is listed with its input. Repeat re-fills the form from it — the same execution API the editor uses is what /api/execute exposes to your own callers."
+               :target ".execute-history-toggle"
+               :check {:kind "manual"}}
+              {:title "That's the run loop"
+               :body "Free args in, result out, history when you ask for it. The written lesson 09 adds cancellation, TTLs and the run-from-another-fn story. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "07"
+             :chapter "Running it"
+             :title "Effects"
+             :steps
+             [{:title "Effects are declared, then they spread"
+               :body "Every base-fn declares what it touches — :db, :network, :io, :env, :time, :random, :state, :process. The checker unions those along parent and ref edges, so a fn's effect set is what it TRANSITIVELY pulls in. You will read one, then watch it gate a run."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find env"
+               :body "Type env in the Explorer filter and click the env row (core.system) — it reads an OS environment variable."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "env"}}
+              {:title "Read the effect chip"
+               :body "The card's effects strip carries one chip: env. That is a computed value, not a label someone typed on this fn — the checker derived it."
+               :target ".effects-chip"
+               :check {:kind "manual"}}
+              {:title "Open Run"
+               :body "Click ⋯ on the env row, then ▶ Run. Before the fields, the popover states “side effects: env” — and the Run button is DISABLED."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-effects-warning"}}
+              {:title "Acknowledge, then run"
+               :body "Tick “I understand this will produce side effects”, enter PATH in the name field, and click Run. On a self-hosted instance the value comes back; in the public demo you get “Forbidden effect: :env” instead — the demo tier allows only :db, :time, :state and :random."
+               :target ".execute-confirm-checkbox"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Two gates, one vocabulary"
+               :body "The checkbox is the human gate; the tier's allowed-effect set is the machine one, enforced at the execution boundary — the same mechanism that keeps a cloud tenant from reaching the network on a free plan. Declared effects are what both read."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Secrets ride the same rails"
+               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane shows ●●●). Creating one needs vault access, so the written lesson 07 covers it end to end — the marker is the part to remember. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "26"
+             :chapter "Running it"
+             :title "Tests"
+             :steps
+             [{:title "A test is just a fn"
+               :body "No test entity, no flag: a test is a named fn in a namespace whose path contains the segment tests. It PASSES when it runs without throwing — :assert throws on a falsy value, :assert-eq throws when two values differ."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Create the tests namespace"
+               :body "In the Explorer, click “+ Namespace” and name it exactly: tests"
+               :target ".create-root-ns-btn"
+               :check {:kind "ns-exists" :name "tests"}
+               :creates {:type "ns" :name "tests"}}
+              {:title "Add the test fn"
+               :body "Expand the tests namespace, click its “+” and create a fn named: two-plus-two — the name states the invariant it pins."
+               :target ".ns-header[data-ns-path=\"tests\"]"
+               :check {:kind "fn-exists" :name "two-plus-two"}
+               :creates {:type "fn" :name "two-plus-two"}}
+              {:title "Make it an assertion"
+               :body "On the new card click “set parent…” and pick assert-eq (core.logic). The card gains two slots: :actual and :expected."
+               :target ".reparent-strip"
+               :check {:kind "fn-parent" :name "two-plus-two" :parent "assert-eq"}}
+              {:title "Bind one side"
+               :body "The card shows two “+” placeholders, :actual and :expected. Click either one, choose “Bind literal”, enter: 4 — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "bindings-count" :name "two-plus-two" :count 1}}
+              {:title "Bind the other"
+               :body "Now the remaining “+”: “Bind literal”, enter: 4 again — Save. With every free arg bound the test becomes runnable, and graphden runs it FOR you on the write."
+               :target ".placeholder-binder"
+               :check {:kind "bindings-count" :name "two-plus-two" :count 2}}
+              {:title "See it pass"
+               :body "Open Operate → Tests. Your test is listed with a green dot and the summary reads 1 passed — nobody pressed Run: the write itself triggered the auto-run."
+               :target nil
+               :check {:kind "dom" :selector ".test-dot.test-passed"}}
+              {:title "Tests are graph, too"
+               :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. The written lesson 26 covers statuses (including “stale by construction”), the tests lens and Run-all. Click Finish to clean up or keep it."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "27"
+             :chapter "Running it"
+             :title "Tracing a run"
+             :steps
+             [{:title "What actually ran?"
+               :body "A result tells you the answer; a trace tells you the path. Ask for one at run time and the editor can draw it back onto the canvas — which fns were traversed, and how long each took."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Build something with a step in it"
+               :body "A trace shows REFERENCES followed during a run, so we need two fns. Type const in the filter, click the const row, then ⋯ → “Extend” and name it tutorial-inner — Save."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "fn-parent" :name "tutorial-inner" :parent "const"}
+               :creates {:type "fn" :name "tutorial-inner"}}
+              {:title "Give the inner fn a value"
+               :body "On the tutorial-inner card click the “+” on :value, choose “Bind literal”, enter this JSON: \"hi\" — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-inner" :slot "value"}}
+              {:title "Now the outer fn"
+               :body "Type str-upper in the filter, click the str-upper row, then ⋯ → “Extend” and name it tutorial-outer — Save."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "fn-parent" :name "tutorial-outer" :parent "str-upper"}
+               :creates {:type "fn" :name "tutorial-outer"}}
+              ;; Selection gate before the bind.
+              {:title "tutorial-outer is open"
+               :body "Its :string slot is free — and this time you will fill it with another FN rather than a literal."
+               :target nil
+               :check {:kind "selected" :name "tutorial-outer"}}
+              {:title "Chain them"
+               :body "Click the “+” on :string, choose “Bind fn-ref”, type tutorial in the picker and click the tutorial-inner row. The canvas draws the edge: outer now calls inner."
+               :target ".placeholder-binder"
+               :check {:kind "bindings-count" :name "tutorial-outer" :count 1}}
+              {:title "Run it with a trace"
+               :body "⋯ → ▶ Run, tick “Trace path”, then Run. The answer is HI — and under it a new button appears: “Show path on canvas”."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-show-path-btn"}}
+              {:title "Draw the path"
+               :body "Click “Show path on canvas”. Every fn the run traversed is highlighted with a timing badge, and a small panel offers to clear the view. Ticking “+ capture values” as well would put each node's return value on its card."
+               :target ".execute-show-path-btn"
+               :check {:kind "dom" :selector ".path-view-panel"}}
+              {:title "That's debugging in place"
+               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 27 adds the call-tree view and catching a live HTTP request. Click Finish to clean up or keep the two fns."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "23"
+             :chapter "The editor"
+             :title "Explorer and Inspector"
+             :steps
+             [{:title "Two panes, one graph"
+               :body "The Explorer on the left narrows WHAT you see; the Inspector on the right explains the one thing you selected. Neither changes the graph — they change your view of it."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Narrow by kind"
+               :body "Under the filter box sit the kind chips: ◍ all, λ fn, T types, 🔒 secrets, ⚙ services. Click T types — the tree collapses to type-rows only, and the chip carries their count."
+               :target ".kind-toggle"
+               :check {:kind "manual"}}
+              {:title "Back to everything"
+               :body "Click ◍ all to clear the lens. Your choice is remembered per browser, so the editor opens where you left it."
+               :target ".kind-toggle.kind-all"
+               :check {:kind "manual"}}
+              {:title "Select something"
+               :body "Type str-len in the filter and click the row. The Inspector fills in: name, kind, namespace, description."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-len"}}
+              {:title "The Inspector's tabs"
+               :body "Overview, Bindings, Runs. Click Bindings — it lists the same slot table you would assemble by hand from lesson 03, computed server-side."
+               :target ".gd-insp-tabs"
+               :check {:kind "dom" :selector ".gd-insp-tab"}}
+              {:title "That's the view layer"
+               :body "Lenses and tabs are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 23 covers the remaining chips and the Runs tab. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "22"
+             :chapter "The editor"
+             :title "Workspaces"
+             :steps
+             [{:title "Your slice of a shared graph"
+               :body "A workspace is a personal scope: pick the namespace roots you work in and the Explorer shows those. It lives in your browser, not in the graph — nobody else's view changes."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open the workspace chip"
+               :body "At the top of the Explorer, click the chip that reads “workspace — All functions”."
+               :target "#gd-ws-chip"
+               :check {:kind "dom" :selector "#gd-ws-pop, .gd-ws-pop, [class*=\"ws-pop\"]"}}
+              {:title "Pick a root"
+               :body "Tick one namespace — say core. The Explorer collapses to that subtree; the chip now names your scope instead of “All functions”."
+               :target "#gd-ws-chip"
+               :check {:kind "manual"}}
+              {:title "And back"
+               :body "Reopen the chip and choose “All functions” to clear the scope. Reloading the page would have kept it — the choice is yours per browser, and it survives."
+               :target "#gd-ws-chip"
+               :check {:kind "manual"}}
+              {:title "That's workspaces"
+               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 22 adds per-fn hiding (⊘) and how workspaces interact with grants. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "08"
+             :chapter "The editor"
+             :title "Branches"
+             :steps
+             [{:title "Branches are views, not copies"
+               :body "A branch is a name plus a pointer to its parent. Editing on a branch writes a VERSION row scoped to it; main keeps its own. You will make a small fn, fork a branch, change it there, and watch main stay untouched."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find str-upper"
+               :body "Type str-upper in the Explorer filter and click the str-upper row (core.strings) — a one-slot fn is the easiest thing to give a value to."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-upper"}}
+              {:title "Extend it"
+               :body "Click ⋯ on the str-upper row, choose “Extend”, name it branch-demo — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "branch-demo" :parent "str-upper"}
+               :creates {:type "fn" :name "branch-demo"}}
+              ;; Selection gate — the next step binds a value.
+              {:title "The editor opened branch-demo"
+               :body "It inherited str-upper's :string slot, so the “+” placeholder is on your card."
+               :target nil
+               :check {:kind "selected" :name "branch-demo"}}
+              {:title "Give it a value on main"
+               :body "Click the “+” on :string, choose “Bind literal”, type exactly: main version — then Save. (The slot is text, so the field takes plain text — no quotes.)"
+               :target ".placeholder-binder"
+               :check {:kind "binding-value" :name "branch-demo"
+                       :slot "string" :value "main version"}}
+              {:title "Fork a branch"
+               :body "Click the branch chip at the top of the Explorer. In the create row type tutorial-branch and click Create. The editor reloads on the new branch — the URL gains ?branch=tutorial-branch."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "tutorial-branch"}
+               :creates {:type "branch" :name "tutorial-branch"}}
+              {:title "Change the value here"
+               :body "You are on tutorial-branch, still looking at branch-demo. Click its value (“main version”) and change it to: branch version — then Save."
+               :target ".arg-value-editable"
+               :check {:kind "binding-value" :name "branch-demo"
+                       :slot "string" :value "branch version"}}
+              {:title "Go back to main"
+               :body "Open the branch chip again and click the main row. The editor reloads on main."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "main"}}
+              {:title "main never saw it"
+               :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. In the branch popover, Δ shows the difference and ⇢ merges the branch in when you want it."
+               :target "#branch-chip-btn"
+               :check {:kind "manual"}}
+              {:title "That's branching"
+               :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The written lesson 08 covers protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
                :target nil
                :check {:kind "manual"}}]}]}}}
 

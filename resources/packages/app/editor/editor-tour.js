@@ -638,7 +638,19 @@ async function openTutorialMenu() {
   pop.appendChild(body);
   const list = document.createElement('div');
   list.className = 'gd-tour-foot gd-tour-lesson-list';
+  // Lessons arrive in TEACHING order, grouped by `:chapter` — a flat wall of
+  // fifteen buttons told the reader nothing about where to start. The heading
+  // is emitted when the chapter changes, so the graph's order is the only
+  // ordering authority (no sort here).
+  let chapter = null;
   for (const lesson of lessons.lessons) {
+    if (lesson.chapter && lesson.chapter !== chapter) {
+      chapter = lesson.chapter;
+      const head = document.createElement('div');
+      head.className = 'gd-tour-chapter';
+      head.textContent = chapter;
+      list.appendChild(head);
+    }
     list.appendChild(_tourBtn(
       lesson.id + ' · ' + (lesson.title || ''), 'gd-tour-btn-primary',
       () => startTutorialIsolated(lesson.id)));

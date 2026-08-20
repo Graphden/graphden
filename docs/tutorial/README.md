@@ -34,7 +34,7 @@
 | 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written |
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
 | 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written · ▶ interactive |
-| 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written |
+| 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |
 | 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written |
@@ -59,6 +59,11 @@ step scripts live in the graph (`app.tour/_tour-lessons`) and are
 drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
+
+The picker lists the tours in TEACHING order, grouped into chapters
+(Basics → Composing → Running it → The editor) — the numbering above is
+the written lesson's id, which stays the deep link (`?tutorial=13`) and
+is deliberately not the tour's reading order.
 
 
 Lesson 25 will cover the Operate → Assets panel — editing the

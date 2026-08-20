@@ -45,7 +45,7 @@ async function hardCleanup(page) {
   const leftovers = ['tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
-                     'tutorial-card', 'tutorial-button'];
+                     'tutorial-card', 'tutorial-button', 'tutorial-script'];
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));
@@ -562,7 +562,11 @@ async function chipByName(page, chipName) {
 }
 
 
-async function bindOptionalArgChip(page, chipName, literalText) {
+// `opts.code` — the slot is code-typed (`:js-source` / CSS / EDN), so the
+// value form upgrades its textarea to CodeMirror and CM is then the source
+// of truth: writing `textarea.value` directly is silently discarded on save.
+// `window.gdCode.set` is the wrapper's documented write seam.
+async function bindOptionalArgChip(page, chipName, literalText, opts) {
   await chipByName(page, chipName);
   await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
     .some((b) => b.textContent.trim() === 'Bind literal'),
@@ -577,17 +581,21 @@ async function bindOptionalArgChip(page, chipName, literalText) {
     return pop && (pop.querySelector('.arg-value-edit-input')
       || pop.querySelector('[data-form-field]'));
   }, null, {timeout: 10000, polling: 100});
-  await page.evaluate((text) => {
+  await page.evaluate(({text, code}) => {
     const pops = document.querySelectorAll('.arg-value-edit-popover');
     const pop = pops[pops.length - 1];
     const field = pop.querySelector('.arg-value-edit-input')
       || pop.querySelector('[data-form-field]');
-    field.value = text;
-    field.dispatchEvent(new Event('input', {bubbles: true}));
-    field.dispatchEvent(new Event('change', {bubbles: true}));
+    if (code && window.gdCode) {
+      window.gdCode.set(field, text);
+    } else {
+      field.value = text;
+      field.dispatchEvent(new Event('input', {bubbles: true}));
+      field.dispatchEvent(new Event('change', {bubbles: true}));
+    }
     Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
       .find((b) => b.textContent.trim() === 'Save').click();
-  }, literalText);
+  }, {text: literalText, code: !!(opts && opts.code)});
   await page.waitForFunction(
     () => !document.querySelector('.arg-value-edit-popover'),
     null, {timeout: 20000, polling: 100});

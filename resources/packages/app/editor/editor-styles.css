@@ -6352,3 +6352,16 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   align-items: stretch;
 }
 .gd-tour-lesson-list .gd-tour-btn { text-align: left; }
+
+/* Chapter heading in the lesson picker — a quiet label, not a control:
+   it must group the buttons under it without competing with them. */
+.gd-tour-chapter {
+  margin: 10px 2px 2px;
+  color: var(--muted-fg);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gd-tour-chapter:first-child { margin-top: 0; }

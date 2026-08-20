@@ -147,6 +147,19 @@ backs the `:css-source`, hiccup-EDN and JSON fields. The
 underlying textarea stays in the DOM and receives every edit, so
 form serialization is unchanged.
 
+## Try it: a script fn, in the editor
+
+The smallest version needs no page at all. Select
+`:wrap-custom-script`, ⋯ → "Extend", name the child — its card
+shows one chip, `?body`. Click it, "Bind literal", and the value
+form opens a **code editor** (syntax highlighting, bracket
+matching) rather than a text box: the slot's type is
+`:js-source`, and the form picks its widget from the type like
+everywhere else. Type `document.title = 'Graphden';`, Save, then
+run the fn: `["script" {} "document.title = 'Graphden';"]`. The
+JS runs in the browser when a page carrying that tag loads —
+running the fn only builds the tag.
+
 ## Try it: extend `/demo/contact`
 
 The contact-form demo already ships one escape-hatch button.

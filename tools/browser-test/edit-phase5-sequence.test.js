@@ -195,10 +195,12 @@ const TEST_NAME = 'test-edit-phase5';
     // dispatched against a mid-rebuild (empty) fnMap silently no-ops
     // inside `enterNamespaceMoveEditMode(undefined)`. Wait for the fn to
     // be back in the map before driving the move.
-    await page.waitForFunction(
-      (fnId) => typeof lookups !== 'undefined' && !!lookups?.fnMap?.get(fnId),
-      created.id,
-      {timeout: 30000, polling: 100});
+    //
+    // Poll and dispatch in the SAME evaluate. Waiting in one evaluate and
+    // dispatching in the next is a read-then-use race: another rebuild can
+    // land in the gap, and the dispatch then sees an empty map and returns
+    // false — the "ns-move (set) dispatched" flake.
+    //
     // NOTE: fire-and-return — do NOT hold the evaluate open on a promise
     // that resolves only after onPick's PUT completes. Under a loaded
     // executor that PUT can take 20s+, and a page.evaluate promise held
@@ -207,18 +209,24 @@ const TEST_NAME = 'test-edit-phase5';
     // navigation, no context-destroyed and no crash (reproduced 3/8 under
     // load, 2026-07-18). The storage poll below is the real confirmation
     // anyway, so the evaluate only needs to *dispatch* the pick.
-    const setDispatched = await page.evaluate(({ fnId, nsId }) => {
-      const fn = lookups.fnMap.get(fnId);
-      if (!fn) return false;
-      const origOpen = openNamespacePicker;
-      // Stub the picker so we don't depend on popover anchoring.
-      openNamespacePicker = (opts) => {
-        origOpen && (openNamespacePicker = origOpen);
-        opts.onPick({ id: nsId });
-      };
-      enterNamespaceMoveEditMode(fn, document.body);
-      return true;
-    }, { fnId: created.id, nsId: firstNsId });
+    const dispatchDeadline = Date.now() + 30000;
+    let setDispatched = false;
+    while (!setDispatched && Date.now() < dispatchDeadline) {
+      setDispatched = await page.evaluate(({ fnId, nsId }) => {
+        const fn = typeof lookups !== 'undefined' && lookups?.fnMap?.get(fnId);
+        if (!fn) return false;
+        const origOpen = openNamespacePicker;
+        // Stub the picker so we don't depend on popover anchoring.
+        openNamespacePicker = (opts) => {
+          origOpen && (openNamespacePicker = origOpen);
+          opts.onPick({ id: nsId });
+        };
+        enterNamespaceMoveEditMode(fn, document.body);
+        return true;
+      }, { fnId: created.id, nsId: firstNsId });
+      if (setDispatched) break;
+      await new Promise(r => setTimeout(r, 200));
+    }
     assert(setDispatched, 'ns-move (set) dispatched with fn present in lookups');
     // Wait until the fn's namespace-id flips to the picked ns.
     {
@@ -236,23 +244,26 @@ const TEST_NAME = 'test-edit-phase5';
     const movedNs = (await getEntities(page, created.id)).fns.find(f => f.id === created.id)['namespace-id'];
     assert(movedNs === firstNsId, 'fn now has the picked namespace-id');
 
-    // Same fire-and-return shape as the set-direction above — including the
-    // fnMap wait: onPick's success path fired another `initGraph()` rebuild.
-    await page.waitForFunction(
-      (fnId) => typeof lookups !== 'undefined' && !!lookups?.fnMap?.get(fnId),
-      created.id,
-      {timeout: 30000, polling: 100});
-    const clearDispatched = await page.evaluate((fnId) => {
-      const fn = lookups.fnMap.get(fnId);
-      if (!fn) return false;
-      const origOpen = openNamespacePicker;
-      openNamespacePicker = (opts) => {
-        origOpen && (openNamespacePicker = origOpen);
-        opts.onPick({ id: null });
-      };
-      enterNamespaceMoveEditMode(fn, document.body);
-      return true;
-    }, created.id);
+    // Same shape as the set-direction above — poll-and-dispatch in ONE
+    // evaluate, because onPick's success path fired another `initGraph()`
+    // rebuild and a separate wait would race it.
+    const clearDeadline = Date.now() + 30000;
+    let clearDispatched = false;
+    while (!clearDispatched && Date.now() < clearDeadline) {
+      clearDispatched = await page.evaluate((fnId) => {
+        const fn = typeof lookups !== 'undefined' && lookups?.fnMap?.get(fnId);
+        if (!fn) return false;
+        const origOpen = openNamespacePicker;
+        openNamespacePicker = (opts) => {
+          origOpen && (openNamespacePicker = origOpen);
+          opts.onPick({ id: null });
+        };
+        enterNamespaceMoveEditMode(fn, document.body);
+        return true;
+      }, created.id);
+      if (clearDispatched) break;
+      await new Promise(r => setTimeout(r, 200));
+    }
     assert(clearDispatched, 'ns-move (clear) dispatched with fn present in lookups');
     // Wait for the ns to clear back to root (null / undefined).
     {

@@ -374,39 +374,53 @@ async function _tourDeleteCreated() {
   await _tourDeleteCreatedBranches();
   // fns first — a namespace only deletes once empty.
   //
-  // NEWEST FIRST, and twice. A lesson that builds a chain creates the
-  // target before the fn that points at it (lesson 15: the cell, then the
-  // swap that writes to it; lesson 27: the inner fn, then the outer one),
-  // and the server refuses to delete a fn something still references —
-  // correctly. Deleting in creation order therefore left the FIRST fn of
-  // every chain behind; the second pass covers a lesson whose order is
-  // less tidy than reverse-creation.
+  // NEWEST FIRST. A lesson that builds a chain creates the target before
+  // the fn that points at it (lesson 15: the cell, then the swap that
+  // writes to it; lesson 27: the inner fn, then the outer one), and the
+  // server refuses to delete a fn something still references — correctly.
+  // Deleting in creation order therefore left the FIRST fn of every chain
+  // behind; anything that still refuses is retried once below.
   const fns = created.filter((c) => c.type === 'fn').reverse();
-  for (let pass = 0; pass < 2; pass++) {
-    for (const c of fns) {
-      // Resolve through the SEARCH endpoint, not the lexical graph: the
-      // client only holds the selected fn's subtree, so a fn the lesson
-      // created earlier can be absent from it by cleanup time — and an
-      // absent row read as "already gone", which is how the first fn of
-      // every chain survived the cleanup.
-      let id = null;
-      try {
-        const r = await authFetch(API.api_graph_entities
-          + '?scope=search&q=' + encodeURIComponent(c.name));
-        const payload = await r.json();
-        id = (payload.fns || []).find((f) => f.name === c.name)?.id || null;
-      } catch (_) { /* fall through: nothing to delete */ }
-      if (!id) continue;
-      try {
-        await authMutate('DELETE', API.api_entities_type_id('fn', id));
-      } catch (_) { /* still referenced — the next pass retries */ }
-    }
+  // Resolve through the SEARCH endpoint, not the lexical graph: the client
+  // only holds the SELECTED fn's subtree, so a fn the lesson created earlier
+  // can be absent from it by cleanup time — and an absent row reads as
+  // "already gone", which is how the first fn of every chain survived.
+  const idOf = async (name) => {
+    try {
+      const r = await authFetch(API.api_graph_entities
+        + '?scope=search&q=' + encodeURIComponent(name));
+      const payload = await r.json();
+      return (payload.fns || []).find((f) => f.name === name)?.id || null;
+    } catch (_) { return null; }
+  };
+  const retry = [];
+  for (const c of fns) {
+    const id = await idOf(c.name);
+    if (!id) continue;
+    try {
+      await authMutate('DELETE', API.api_entities_type_id('fn', id));
+    } catch (_) { retry.push(c); }
   }
-  if (typeof initGraph === 'function') { try { await initGraph(); } catch (_) {} }
+  // Only what actually refused goes round again, so the happy path pays for
+  // one pass — the namespace delete waits behind this loop and the user
+  // (and the guard) waits on the namespace.
+  for (const c of retry) {
+    const id = await idOf(c.name);
+    if (!id) continue;
+    try { await authMutate('DELETE', API.api_entities_type_id('fn', id)); } catch (_) {}
+  }
   for (const c of created) {
     if (c.type !== 'ns') continue;
-    const ns = (typeof graphData !== 'undefined' && graphData
+    // The lesson created this namespace through the editor, so the client
+    // already holds it — a full `initGraph()` just to learn one id costs
+    // seconds on a large graph. Refresh only if it somehow isn't there.
+    let ns = (typeof graphData !== 'undefined' && graphData
       && (graphData.namespaces || []).find((n) => n.name === c.name)) || null;
+    if (!ns && typeof initGraph === 'function') {
+      try { await initGraph(); } catch (_) {}
+      ns = (typeof graphData !== 'undefined' && graphData
+        && (graphData.namespaces || []).find((n) => n.name === c.name)) || null;
+    }
     if (ns) {
       try { await authMutate('DELETE', API.api_entities_type_id('ns', ns.id)); } catch (_) {}
     }

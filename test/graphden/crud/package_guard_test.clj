@@ -44,13 +44,14 @@
         slot (sp/create-entity storage :slot {:name "s" :type-fn-id (:id parent)})
         child (sp/create-entity storage :fn {:name "dup-child"
                                              :parent-ids [(:id parent)]})
-        mk (fn [] (entities/apply-create-core
-                    {:entity-type :binding
-                     :type-str "binding"
-                     :form-data {}
-                     :entity-data {:fn-id (:id child) :slot-id (:id slot)
-                                   :value 1 :value-present true}}
-                    {:storage storage}))]
+        mk (fn []
+             (entities/apply-create-core
+               {:entity-type :binding
+                :type-str "binding"
+                :form-data {}
+                :entity-data {:fn-id (:id child) :slot-id (:id slot)
+                              :value 1 :value-present true}}
+               {:storage storage}))]
     (testing "the first write lands"
       (is (some? (:created (mk)))))
     (testing "the duplicate answers 409, not 500"

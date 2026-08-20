@@ -26,6 +26,7 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
     [graphden.packages.loader :as pkg]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
     [graphden.services.port-check :as port-check]
@@ -337,6 +338,11 @@
            base-fns-map (merge (registry/compute-base-fns-map base-fn-defs)
                                extra-base-fns)]
        (registry/sync-primitives! storage)
+       ;; Feed the package-write guard: every deterministic id this sync
+       ;; is about to write (base-fns + composed fn-defs + primitives)
+       ;; becomes API-read-only — see `graphden.packages.owned`.
+       (owned/record-owned-ids! (vals all-name->id))
+       (owned/record-owned-ids! (vals (records/primitive-fn-ids)))
        ;; Register refinement type-aliases BEFORE base-fn rich-type
        ;; recording so `:http-server :args {:port :port}` stores the
        ;; structural `[:refine :int …]` form, not the bare keyword.

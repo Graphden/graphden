@@ -13,6 +13,7 @@
     [clojure.set]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
     [graphden.crud.test-autorun :as test-autorun]
@@ -1544,7 +1545,10 @@
    on the derived diagnostics store (docs/SECRETS.md)."
   [{:keys [entity-type type-str form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
-        create-result (try-create-or-error storage entity-type entity-data type-str)]
+        pkg-reason (pkg-guard/write-rejection storage entity-type entity-data)
+        create-result (if pkg-reason
+                        {:error pkg-reason :http-status 403}
+                        (try-create-or-error storage entity-type entity-data type-str))]
     (if (:created create-result)
       (let [rej (post-write-type-rej storage type-str entity-data nil)]
         (if (:secret? rej)
@@ -1595,22 +1599,26 @@
   [{:keys [entity-type type-str id-uuid form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
         error-msg (volatile! nil)
-        ;; Pre-image for the secret carve-out rollback. Only binding-
-        ;; family rows are type-checked, so only those pay the read.
-        pre-row (when (and id-uuid (#{"binding" "binding-list-item"} type-str))
+        ;; Pre-image for the secret carve-out rollback (binding family)
+        ;; and for the package-owner write guard (adds fn-slot).
+        pre-row (when (and id-uuid (#{"binding" "binding-list-item" "fn-slot"} type-str))
                   (sp/read-entity storage entity-type id-uuid))
-        updated (try (sp/update-entity storage entity-type id-uuid entity-data)
-                     (catch Exception e
-                       (log/error e "update-entity failed for"
-                                  entity-type id-uuid entity-data)
-                       ;; Surface a write-rejection reason when the storage
-                       ;; layer provides one (e.g. the fn-name collision
-                       ;; check) — a bare "Failed to update entity" hides
-                       ;; exactly the message the user can act on.
-                       (vreset! error-msg (some-> (ex-data e) :reason))
-                       nil))]
+        pkg-reason (when pre-row
+                     (pkg-guard/write-rejection storage entity-type pre-row))
+        updated (when-not pkg-reason
+                  (try (sp/update-entity storage entity-type id-uuid entity-data)
+                       (catch Exception e
+                         (log/error e "update-entity failed for"
+                                    entity-type id-uuid entity-data)
+                         ;; Surface a write-rejection reason when the storage
+                         ;; layer provides one (e.g. the fn-name collision
+                         ;; check) — a bare "Failed to update entity" hides
+                         ;; exactly the message the user can act on.
+                         (vreset! error-msg (some-> (ex-data e) :reason))
+                         nil)))]
     (if-not updated
-      {:error (or @error-msg "Failed to update entity")}
+      (cond-> {:error (or pkg-reason @error-msg "Failed to update entity")}
+        pkg-reason (assoc :http-status 403))
       (let [rej (post-write-type-rej storage type-str entity-data id-uuid)]
         (if (:secret? rej)
           ;; Hard reject: restore every field the update touched from

@@ -59,7 +59,17 @@ so a gap in one does not by itself cross tenants:
    `[:secret T]`, tracked through composition, and hidden at execution sinks
    (the Run pane). This is **best-effort taint-tracking, not a proven
    non-interference guarantee** — read [SECRETS.md § Scope](SECRETS.md).
-7. **Resource isolation** — see below.
+7. **Package-write guard** — fn rows written by the boot package sync
+   (base-fns, first-party fn-defs, primitives) are **read-only through the
+   editor API**: binding / list-item / fn-slot writes whose owner is
+   package-synced, and deletes of the package rows themselves, answer 403
+   (`crud/package_guard.clj` over the `packages.owned` boot registry). One
+   stray write onto a shared parent like `:add` propagates to every
+   descendant in the installation through inheritance and is silently
+   reverted by the next sync — the guard makes that class impossible for
+   ANY principal; the legitimate paths are extending into a child fn or
+   editing the package's `fns.edn`.
+8. **Resource isolation** — see below.
 
 ## Resource isolation: shared vs dedicated
 

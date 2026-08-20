@@ -14,6 +14,7 @@
     [clojure.math :as math]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
@@ -203,8 +204,13 @@
         ;; DIRECT `sp/create-entity`, bypassing `write-rej` (list-closed /
         ;; terminal guards). Validate it FIRST so an append onto a sealed
         ;; slot is rejected before anything is written.
-        synth-rej (when synthetic? (validation/write-rej storage :binding synth-data))]
+        synth-rej (when synthetic? (validation/write-rej storage :binding synth-data))
+        ;; Appending onto a PACKAGE-SYNCED fn's own chain mutates every
+        ;; descendant in the installation and is reverted by the next
+        ;; sync — refuse it here, whichever fn the "+" click landed on.
+        pkg-reason (pkg-guard/write-rejection storage :binding {:fn-id fn-id})]
     (cond
+      pkg-reason {:error pkg-reason}
       (:error req-pos) req-pos
       synth-rej {:error (:reason synth-rej)}
       :else
@@ -320,9 +326,13 @@
    reversed — the security carve-out)."
   [parsed item ctx]
   (let [storage (request/require-storage ctx)
-        direction (get-in parsed [:body :direction])]
-    (if-not (contains? #{"up" "down"} direction)
+        direction (get-in parsed [:body :direction])
+        pkg-reason (pkg-guard/write-rejection storage :binding-list-item item)]
+    (cond
+      pkg-reason {:error pkg-reason}
+      (not (contains? #{"up" "down"} direction))
       {:error "Body requires {\"direction\": \"up\"} or {\"direction\": \"down\"}"}
+      :else
       (let [items (->> (sp/query-entities storage :binding-list-item
                                           {:binding-id (:binding-id item)})
                        (sort-by :position)
@@ -368,10 +378,12 @@
         item-id (:item-id parsed)
         payload (resolve-sequence-payload storage (:body parsed))
         changes (merge {:value nil :ref-fn-id nil :literal nil} payload)
-        pre-rej (validation/write-rej storage :binding-list-item
-                                      (merge item changes {:id item-id}))]
-    (if pre-rej
-      {:error (:reason pre-rej)}
+        pkg-reason (pkg-guard/write-rejection storage :binding-list-item item)
+        pre-rej (when-not pkg-reason
+                  (validation/write-rej storage :binding-list-item
+                                        (merge item changes {:id item-id})))]
+    (if (or pkg-reason pre-rej)
+      {:error (or pkg-reason (:reason pre-rej))}
       (do (sp/update-entity storage :binding-list-item item-id changes)
           ;; Post-write whole-fn type-check (Phase 3, Gap A) — same
           ;; record-or-clear semantics as the binding update core.

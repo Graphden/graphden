@@ -23,6 +23,7 @@
    rejection as a 400."
   (:require
     [clojure.set]
+    [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
@@ -187,5 +188,9 @@
    `tighten-fn-type-impl!` unchanged — the outer graph dispatches on
    `:status` and runs invalidate + response."
   [parsed ctx]
-  (tighten-fn-type-impl! (request/require-storage ctx)
-                         (:binding-id parsed) (:delta parsed)))
+  (let [storage (request/require-storage ctx)
+        binding-row (some->> (:binding-id parsed)
+                             (sp/read-entity storage :binding))]
+    (if-let [pkg-reason (pkg-guard/write-rejection storage :binding binding-row)]
+      {:status :rejected :reason pkg-reason}
+      (tighten-fn-type-impl! storage (:binding-id parsed) (:delta parsed)))))

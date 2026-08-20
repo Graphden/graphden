@@ -2885,15 +2885,35 @@
    :return-type :_partial-response-shape
    :args {:value {:status 409 :body "<p class=\"error\">Secret fn-defs must be deleted via DELETE /api/secrets/:fn-id (cleans up OpenBao alongside the row)</p>"}}}
 
+  ;; Package-guard clause pieces — mirror the fn-in-use pattern: the
+  ;; reason computes once as a shared cond arg, the predicate + error
+  ;; builder both consume it.
+  {:name :_delete-pkg-guard-reason
+   :parent :pkg-delete-guard-reason
+   :args {:entity-type :_delete-apply-entity-type-str
+          :row :_delete-apply-existing}}
+
+  {:name :_delete-pkg-guard?
+   :description "Guard — the delete would damage a package-synced fn."
+   :parent :some?
+   :args {:value {:as :pkg-guard-reason}}}
+
+  {:name :_delete-err-pkg-guard
+   :parent :html-error-response
+   :args {:status {:value 403}
+          :reason {:as :pkg-guard-reason}}}
+
   {:name :process-delete-entity
-   :description "DELETE /api/entities/:type/:id — flat `:cond` of `[invalid-request? → 400, secret-fn? → 409, fn-in-use? → 409, ns-non-empty? → 409, true → apply]`. `:cond` is lazy, so the delete + invalidate (and the secret-shape DB lookup) only run when every guard up to that point passes. `parsed`, `fn-in-use-reason`, `ns-non-empty-reason` are shared sub-results bound once at the `:cond` fn-def — the two dynamic-reason error builders consume the same reason their predicate observed."
+   :description "DELETE /api/entities/:type/:id — flat `:cond` of `[invalid-request? → 400, secret-fn? → 409, pkg-owned? → 403, fn-in-use? → 409, ns-non-empty? → 409, true → apply]`. `:cond` is lazy, so the delete + invalidate (and the secret-shape DB lookup) only run when every guard up to that point passes. `parsed`, `pkg-guard-reason`, `fn-in-use-reason`, `ns-non-empty-reason` are shared sub-results bound once at the `:cond` fn-def — the dynamic-reason error builders consume the same reason their predicate observed."
    :parent :cond
    :args {:clauses [:_delete-request-invalid? :_delete-err-invalid-request
                     :_delete-fn-is-secret?    :_delete-err-secret-fn
+                    :_delete-pkg-guard?       :_delete-err-pkg-guard
                     :_delete-fn-in-use?       :_delete-err-fn-in-use
                     :_delete-ns-non-empty?    :_delete-err-ns-non-empty
                     {:value true}             :_delete-apply]
           :parsed :_delete-parsed
+          :pkg-guard-reason :_delete-pkg-guard-reason
           :fn-in-use-reason :_delete-fn-in-use-reason
           :ns-non-empty-reason :_delete-ns-non-empty-reason}}
 
@@ -3084,6 +3104,15 @@
    :return-type [:union :null :binding-list-item-row-shape]
    :effects #{:db}}
 
+  {:name :pkg-delete-guard-reason
+   :description "Reason string when deleting `row` of `entity-type` would damage a PACKAGE-SYNCED fn — the fn row itself, or a binding-family row it owns. nil when the delete is fine. Package fns are declaratively re-synced on boot, so an API delete against one silently mutates every descendant until the next restart (the 2026-08-20 :add poisoning class). Shared by the generic entity-delete flow and sequence-remove."
+   :args {:entity-type {:type :text
+                        :description "Entity-type name (\"fn\", \"binding\", \"binding-list-item\", \"fn-slot\")."}
+          :row {:type :nullable-keyword-map
+                :description "The row about to be deleted (pre-read snapshot); nil short-circuits to nil."}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
   {:name :_seq-remove-item-not-found?
    :description "Guard #2 — no binding-list-item matches the parsed id."
    :parent :nil?
@@ -3112,14 +3141,33 @@
           :id {:parent :get :type :uuid
                :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
 
+  ;; Package-guard clause pieces for sequence-remove — same reason
+  ;; base-fn as the generic delete flow, applied to the loaded item.
+  {:name :_seq-remove-pkg-reason
+   :parent :pkg-delete-guard-reason
+   :args {:entity-type {:value "binding-list-item"}
+          :row {:as :item}}}
+
+  {:name :_seq-remove-pkg-blocked?
+   :description "Guard — the item belongs to a package-synced fn's chain."
+   :parent :some?
+   :args {:value {:as :pkg-reason}}}
+
+  {:name :_seq-remove-err-pkg
+   :parent :html-error-response
+   :args {:status {:value 403}
+          :reason {:as :pkg-reason}}}
+
   {:name :process-sequence-remove
-   :description "DELETE /api/sequence/item/:item-id — remove one binding-list-item. The two validation guards and the success path are a flat `:cond` — `[invalid-id? → 400, not-found? → 404, true → apply]`. `:cond` is lazy, so the DB delete runs only when both guards pass. `parsed` + `item` are shared sub-results bound once at the `:cond` fn-def."
+   :description "DELETE /api/sequence/item/:item-id — remove one binding-list-item. The validation guards and the success path are a flat `:cond` — `[invalid-id? → 400, not-found? → 404, pkg-owned? → 403, true → apply]`. `:cond` is lazy, so the DB delete runs only when every guard passes. `parsed`, `item`, `pkg-reason` are shared sub-results bound once at the `:cond` fn-def."
    :parent :cond
    :args {:clauses [:_seq-remove-item-id-invalid?  :_html-err-invalid-item-id
                     :_seq-remove-item-not-found?   :_html-err-item-not-found
+                    :_seq-remove-pkg-blocked?      :_seq-remove-err-pkg
                     {:value true}                  :_seq-remove-apply]
           :parsed :_seq-remove-parsed
-          :item :_seq-remove-load-item}}
+          :item :_seq-remove-load-item
+          :pkg-reason :_seq-remove-pkg-reason}}
 
   ;; --- sequence-update primitives.
   ;; Shares `:_seq-remove-item-id-raw` (same URL shape — both routes

@@ -81,7 +81,11 @@
     :os-load-average :os-name :os-processors :package-upsert-pin
     :package-version-materialized? :pairs->map :parse-constraint
     :parse-edn :parse-int :parse-json :parse-uuid :pg-execute
-    :pg-notify :pg-query :pg-tx :pick-encoding :position-in :postwalk
+    :pg-notify :pg-query :pg-tx :pick-encoding
+    ;; :pkg-delete-guard-reason reads server rows (fn name via the
+    ;; owned registry) — the reason string carries no caller content.
+    :pkg-delete-guard-reason
+    :position-in :postwalk
     :pr-str :publish-package-apply :query-entities :query-param
     :query-ref-many-owners :quot :range :re-find? :read-resource-or-nil
     :re-replace :realize-request-body :recent-failures :reduce

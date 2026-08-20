@@ -13,6 +13,7 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as fn-exec-lookup]
+    [graphden.crud.package-guard :as package-guard]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
@@ -648,6 +649,17 @@
   (entities/load-seq-remove-item parsed ctx))
 
 
+(defbase pkg-delete-guard-reason
+  "Reason string when deleting `row` of `entity-type` would damage a
+   package-synced fn (the fn row itself, or a binding-family row it
+   owns); nil when the delete is fine. §3.1 thin wrapper over
+   `crud.package-guard/delete-rejection`."
+  [entity-type row]
+  (cr/record-effect! :db)
+  (package-guard/delete-rejection (request/require-storage ctx)
+                                  (keyword entity-type) row))
+
+
 ;; `:_seq-update-item-id-invalid?` / `:_seq-update-body-invalid?` are
 ;; now graph fn-defs — see fns.edn.
 
@@ -784,6 +796,7 @@
    :_seq-append-load-binding _seq-append-load-binding
    :try-apply-seq-append try-apply-seq-append
    :_seq-remove-load-item _seq-remove-load-item
+   :pkg-delete-guard-reason pkg-delete-guard-reason
    :_seq-update-load-item _seq-update-load-item
    :try-apply-seq-update try-apply-seq-update
    :_seq-move-load-item _seq-move-load-item

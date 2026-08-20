@@ -80,6 +80,26 @@
   (or (nil? event-org) (= event-org sub-org)))
 
 
+(defn open-subscriber!
+  "Send the SSE response HEAD on `ch`, then register it in `subscribers`
+   under `org`.
+
+   ORDER IS LOAD-BEARING. Registering first opens a window in which a
+   concurrent `broadcast!` finds the channel and writes a `data:` frame as
+   its FIRST frame — httpkit sends that in place of the response head, and
+   the client dies parsing body bytes as a status line (`Invalid status
+   line: \"d\"`), drops the stream and reconnects. Sending the head first
+   costs at most the events fired inside the same window, which the
+   client's on-connect resync covers anyway (`storage.remote.sse`)."
+  [subscribers ch org]
+  (send! ch {:status 200
+             :headers {"Content-Type" "text/event-stream"
+                       "Cache-Control" "no-cache"}}
+         false)
+  (send! ch ": connected\n\n" false)
+  (swap! subscribers assoc ch org))
+
+
 (defn make-handler
   "Ring handler for `GET /events/stream`. Authenticates, opens an SSE channel,
    and registers it in `subscribers` (an atom of `{AsyncChannel → sub-org}`)
@@ -94,17 +114,7 @@
          :body "{\"ok\":false,\"error\":\"unauthorized\"}"}
         (hk/as-channel
           request
-          {:on-open (fn [ch]
-                      ;; Register first, then send the SSE response HEAD (status
-                      ;; + headers, no body — httpkit makes it a chunked stream)
-                      ;; so the client's request resolves and `data:` frames
-                      ;; flow.
-                      (swap! subscribers assoc ch org)
-                      (send! ch {:status 200
-                                 :headers {"Content-Type" "text/event-stream"
-                                           "Cache-Control" "no-cache"}}
-                             false)
-                      (send! ch ": connected\n\n" false))
+          {:on-open (fn [ch] (open-subscriber! subscribers ch org))
            :on-close (fn [ch _status] (swap! subscribers dissoc ch))})))))
 
 

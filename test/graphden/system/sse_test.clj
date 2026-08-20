@@ -12,6 +12,7 @@
    and assert the remote source turns it back into the same parsed event a
    local pod would get from Postgres."
   (:require
+    [clojure.string]
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
     [graphden.storage.remote.sse :as remote-sse]
@@ -38,6 +39,38 @@
                                       {:kind :fn :op :invalidate :id "f" :org-id "acme"})]
         (is (= 1 delivered) "only the healthy subscriber is counted")
         (is (= {:good "acme"} @subscribers) "the failed subscriber was evicted")))))
+
+
+(deftest sse-subscriber-head-precedes-registration
+  ;; The response HEAD must be on the wire BEFORE the channel joins the
+  ;; fan-out set. Registered first, a broadcast landing in that window sends
+  ;; a `data:` frame as the channel's FIRST frame — httpkit writes it in
+  ;; place of the response head and the client dies parsing body bytes as a
+  ;; status line ("Invalid status line: \"d\""), drops the stream and
+  ;; reconnects, losing every event until it is back. That is what made
+  ;; `sse-relay-fans-out-per-org` flake under a loaded gate.
+  (let [subscribers (atom {})
+        frames (atom [])
+        ;; Broadcast the moment the channel appears in the set — the
+        ;; deterministic stand-in for a concurrent write.
+        seen-registered (atom false)]
+    (binding [sse/*send-override* (fn [_ch frame _close?]
+                                    (swap! frames conj frame)
+                                    true)]
+      (add-watch subscribers ::race
+                 (fn [_ _ _ new-state]
+                   (when (and (seq new-state) (not @seen-registered))
+                     (reset! seen-registered true)
+                     (sse/broadcast! subscribers
+                                     {:kind :fn :op :invalidate :id "f1"}))))
+      (sse/open-subscriber! subscribers :ch "acme")
+      (remove-watch subscribers ::race))
+    (is (map? (first @frames))
+        (str "the first frame on a channel is the response head, got: "
+             (pr-str (first @frames))))
+    (is (= 200 (:status (first @frames))))
+    (is (some #(and (string? %) (clojure.string/starts-with? % "data:")) @frames)
+        "the concurrent broadcast still reached the subscriber")))
 
 
 (deftest sse-relay-round-trips-an-event-to-the-remote-source

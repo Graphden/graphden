@@ -36,6 +36,11 @@ executes it with no arguments. A test with unbound args shows up as
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=26)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 Say you have a fn `slugify` you want to pin down. In the running
 editor:
 

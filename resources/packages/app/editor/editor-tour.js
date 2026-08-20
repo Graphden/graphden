@@ -126,6 +126,21 @@ function _tourCheckPasses(check) {
         return check.name === 'main' ? (!cur || cur === 'main')
                                      : cur === check.name;
       }
+      case 'bindings-count': {
+        // "at least N of this fn's slots are bound" — order-independent,
+        // which is what a step asking for two sibling slots needs: the
+        // canvas decides which placeholder sits where, and a lesson must
+        // not depend on that.
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
+        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
+        const bound = list.filter((b) => {
+          if (b.value != null || b['ref-fn-id']) return true;
+          const items = lookups.itemsByBinding?.get(b.id) || [];
+          return items.length > 0;
+        });
+        return bound.length >= (check.count || 1);
+      }
       case 'binding-value': {
         // binding-bound, but the literal must equal `check.value`. Compared
         // as TEXT: a JSON literal round-trips through jsonb, so 42 can come

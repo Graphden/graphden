@@ -28,7 +28,7 @@
 | 04 | [Free arguments and how they propagate](04-free-arguments.md) | ✅ written · ▶ interactive |
 | 05 | [Types — atomic, refinement, record, union, variant, list](05-types.md) | ✅ written · ▶ interactive |
 | 06 | [Higher-order functions and `:fn`-typed slots](06-higher-order-functions.md) | ✅ written · ▶ interactive |
-| 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written |
+| 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written · ▶ interactive |
 | 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written · ▶ interactive |
 | 09 | [Executing a fn — free-arg form, history, cancel](09-executing-a-fn.md) | ✅ written |
 | 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written |
@@ -47,7 +47,7 @@
 | 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written |
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
 | 25 | Editing the editor: asset overrides | ⏳ planned |
-| 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written |
+| 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written · ▶ interactive |
 | 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:

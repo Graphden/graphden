@@ -260,6 +260,36 @@ window.graphdenIsOrgOwner = graphdenIsOrgOwner;
 window.graphdenIsFnOwned = graphdenIsFnOwned;
 window.graphdenIsPlatformTier = graphdenIsPlatformTier;
 
+// A branch can disappear under a tab that is still standing on it — someone
+// merges and deletes it, or the tour's own "Delete branch & return" runs in
+// another window. The stored branch name then rides out on EVERY internal
+// call and the server answers 400 "Unknown branch", so the editor renders
+// nothing at all with no explanation: sidebar empty, panels empty, every
+// action dead. Recover once, loudly: drop the stored branch and reload on
+// the default one. Guarded by a flag so a burst of parallel 400s (boot fires
+// a dozen) triggers exactly one reload.
+let _branchRecoveryStarted = false;
+
+function maybeRecoverFromDeletedBranch(resp, branch) {
+  if (_branchRecoveryStarted) return;
+  if (resp?.status !== 400) return;
+  if (!branch || branch === DEFAULT_BRANCH) return;
+  resp.clone().json().then((body) => {
+    if (_branchRecoveryStarted) return;
+    if (!/unknown branch/i.test(body?.error || '')) return;
+    _branchRecoveryStarted = true;
+    try { localStorage.removeItem(BRANCH_STORAGE_KEY); } catch (_) { /* ignore */ }
+    if (typeof gdToast === 'function') {
+      gdToast('Branch “' + branch + '” no longer exists — returning to '
+              + DEFAULT_BRANCH);
+    }
+    const url = new URL(location.href);
+    url.searchParams.delete('branch');
+    location.replace(url.toString());
+  }).catch(() => { /* non-JSON 400s are someone else's problem */ });
+}
+
+
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);
   window.fetch = function branchAwareFetch(input, init) {
@@ -293,7 +323,11 @@ window.graphdenIsPlatformTier = graphdenIsPlatformTier;
     // Read the capability header off internal responses (headers only — the
     // body is untouched, so no clone needed).
     return isInternal
-      ? promise.then((resp) => { captureCapabilities(resp); return resp; })
+      ? promise.then((resp) => {
+          captureCapabilities(resp);
+          maybeRecoverFromDeletedBranch(resp, branch);
+          return resp;
+        })
       : promise;
   };
 })();

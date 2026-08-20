@@ -72,6 +72,36 @@
     chosen))
 
 
+(defn document-navigation?
+  "Is this a browser NAVIGATION (a page load), rather than an API/XHR
+   call? A GET whose `Accept` asks for HTML — Fetch/XHR from the editor
+   ask for JSON or `*/*`, and htmx sends `HX-Request`. Used to answer a
+   stale `?branch=` with a redirect instead of a 400 the browser would
+   render as a dead page."
+  [request]
+  (let [headers (:headers request)
+        accept (or (get headers "accept") "")]
+    (and (= :get (:request-method request))
+         (not (get headers "hx-request"))
+         (str/includes? accept "text/html"))))
+
+
+(defn uri-without-branch
+  "The same URL with `branch` stripped from the query string — where a
+   navigation naming a dead branch gets sent."
+  [request]
+  (let [qs (:query-string request)
+        kept (when qs
+               (->> (str/split qs #"&")
+                    (remove #(or (str/blank? %)
+                                 (str/starts-with? % "branch=")
+                                 (= % "branch")))
+                    (str/join "&")))]
+    (if (str/blank? kept)
+      (:uri request)
+      (str (:uri request) "?" kept))))
+
+
 ;; =============================================================================
 ;; Per-branch ctx + Ring callable cache
 ;; =============================================================================
@@ -1211,7 +1241,27 @@
                     (or (rc/dispatch-first request)
                         (let [branch-ref (extract-branch-ref request)
                               branch-id (resolve-branch-id router branch-ref)]
-                          (if (and (some? branch-ref) (nil? branch-id))
+                          (cond
+                            (or (nil? branch-ref) (some? branch-id))
+                            ((handler-for router branch-id) request)
+
+                            ;; A PAGE load naming a branch that is gone (merged
+                            ;; and deleted elsewhere, or by this user's own tour
+                            ;; cleanup in another tab) used to answer 400 — and
+                            ;; since the 400 replaced the HTML, the editor never
+                            ;; booted: no scripts, no explanation, nothing to
+                            ;; click. Send the navigation to the same URL without
+                            ;; the stale `?branch=` instead; the editor loads on
+                            ;; the default branch and the user is back in
+                            ;; business. API/XHR callers still get the 400 below,
+                            ;; which is what they can act on.
+                            (document-navigation? request)
+                            {:status 302
+                             :headers {"Location" (uri-without-branch request)
+                                       "Cache-Control" "no-store"}
+                             :body ""}
+
+                            :else
                             {:status 400
                              :headers {"Content-Type" "application/json"}
                              ;; JSON-encode — `branch-ref` is user-controlled
@@ -1220,8 +1270,7 @@
                              ;; into the response envelope.
                              :body (json/generate-string
                                      {:ok false
-                                      :error (str "Unknown branch: " branch-ref)})}
-                            ((handler-for router branch-id) request)))))]
+                                      :error (str "Unknown branch: " branch-ref)})}))))]
           (if request-scope
             (request-scope base-ctx request run)
             (run))))))

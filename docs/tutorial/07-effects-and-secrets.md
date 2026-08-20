@@ -273,6 +273,11 @@ The graphden DB never holds the secret value. Only the path.
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=07)
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 1. Find `:current-time-ms` in the editor. Its effects strip
    shows ONE chip: `:time`. Click the chip — the explainer
    popover gives the plain-English description.

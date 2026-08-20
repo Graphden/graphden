@@ -33,6 +33,35 @@
       (is (false? (pkg-guard/package-owned-fn? storage (random-uuid)))))))
 
 
+(deftest duplicate-binding-is-a-conflict-test
+  "A second binding on the same (fn-id, slot-id) is a CONFLICT, not an
+   internal error. The editor can produce one by double-clicking a
+   placeholder that has not repainted yet; it used to surface as a 500
+   (raw Postgres unique-violation carries no ex-data), which reads as a
+   server fault in logs and alerting."
+  (let [storage (setup/create-test-storage)
+        parent (sp/create-entity storage :fn {:name "dup-parent"})
+        slot (sp/create-entity storage :slot {:name "s" :type-fn-id (:id parent)})
+        child (sp/create-entity storage :fn {:name "dup-child"
+                                             :parent-ids [(:id parent)]})
+        mk (fn [] (entities/apply-create-core
+                    {:entity-type :binding
+                     :type-str "binding"
+                     :form-data {}
+                     :entity-data {:fn-id (:id child) :slot-id (:id slot)
+                                   :value 1 :value-present true}}
+                    {:storage storage}))]
+    (testing "the first write lands"
+      (is (some? (:created (mk)))))
+    (testing "the duplicate answers 409, not 500"
+      (let [result (mk)]
+        (is (string? (:error result)))
+        (is (= 409 (:http-status result))
+            "duplicate (fn-id, slot-id) is a conflict")
+        (is (re-find #"(?i)already exists" (:error result))
+            "and says so in words the editor can show")))))
+
+
 (deftest write-and-delete-rejection-test
   (let [storage (setup/create-test-storage)
         pkg (sp/create-entity storage :fn {:name "pgx-guarded"})

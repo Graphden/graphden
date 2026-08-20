@@ -858,6 +858,9 @@ async function finishAndDelete(page) {
     await waitTourTitle(page, 'Find env');
     await filterAndSelect(page, 'env', 'env');
     await waitTourTitle(page, 'Read the effect chip', 150000);
+    // The step's title lands as soon as the fn is SELECTED; the card (and
+    // its effects strip) paints a beat later.
+    await page.waitForSelector('.effects-chip', {timeout: 60000});
     const effChip = await page.evaluate(
       () => document.querySelector('.effects-chip')?.className);
     assert(/effects-chip-env/.test(effChip || ''),
@@ -886,8 +889,21 @@ async function finishAndDelete(page) {
     await waitTourTitle(page, 'Make it an assertion', 150000);
     await setParentViaStrip(page, 'assert-eq');
     await waitTourTitle(page, 'Bind one side', 150000);
+    // assert-eq exposes exactly two slots — wait for BOTH placeholders to
+    // paint before touching either. (The step's title lands on selection,
+    // which is earlier than the card.)
+    await page.waitForFunction(
+      () => document.querySelectorAll('.placeholder-binder').length === 2,
+      null, {timeout: 60000, polling: 150});
     await bindFirstPlaceholder(page, '4');
     await waitTourTitle(page, 'Bind the other', 150000);
+    // The card repaints asynchronously after the first bind. Clicking
+    // before it does hits the SAME (now bound) placeholder, and the write
+    // collides on `(fn-id, slot-id)` — a genuine 409 that reads as a broken
+    // lesson. Wait for exactly one placeholder to remain.
+    await page.waitForFunction(
+      () => document.querySelectorAll('.placeholder-binder').length === 1,
+      null, {timeout: 60000, polling: 150});
     await bindFirstPlaceholder(page, '4');
     // The write itself triggers the auto-run — that IS the lesson's claim.
     await waitTourTitle(page, 'See it pass', 150000);

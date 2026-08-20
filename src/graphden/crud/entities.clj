@@ -1467,8 +1467,17 @@
                 ;; The error's HTTP status comes from the central map —
                 ;; a name/position collision is a 409 CONFLICT, not a
                 ;; malformed 400 (audit-7 error honesty).
+                ;;
+                ;; A raw Postgres unique-violation carries NO ex-data, so it
+                ;; used to fall through to 500 — an editor double-click on a
+                ;; not-yet-repainted placeholder (two binds racing the same
+                ;; `(fn-id, slot-id)`) then read as an internal error and
+                ;; paged as one. It is a conflict: the row is already there.
                 {:error (humanise-create-exception e entity-type entity-data type-str)
-                 :http-status (web-errors/status-for-ex-data (ex-data e))})))))
+                 :http-status (if (re-find #"(?i)duplicate key"
+                                           (or (Throwable/.getMessage e) ""))
+                                409
+                                (web-errors/status-for-ex-data (ex-data e)))})))))
 
 
 (defn- forward-rename-slot!

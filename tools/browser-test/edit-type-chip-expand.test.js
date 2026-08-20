@@ -161,15 +161,18 @@ const TARGET_FN = 'assoc-fn';
     // Phase E: Escape dismisses the provenance popover.
     // ===================================================================
     await page.keyboard.press('Escape');
-    // (escape dispatched; the following assertion gates the next step)
-    const dismissed = await page.evaluate(() => {
+    // The keydown handler hides the popover on its own tick, so reading the
+    // DOM in the very next round-trip is a race — it flaked a landing gate
+    // on 2026-08-20 (failed, then passed on the retry). Poll for the
+    // dismissal: a real regression still fails, it just takes the timeout.
+    const dismissed = await page.waitForFunction(() => {
       const pop = document.querySelector('.provenance-popover');
       const visible = pop && pop.style.display !== 'none'
                           && !pop.classList.contains('hidden');
-      return {dismissed: !visible};
-    });
-    assert(dismissed.dismissed,
-           'provenance popover dismissed on Escape');
+      return !visible;
+    }, null, {timeout: 10000, polling: 100})
+      .then(() => true).catch(() => false);
+    assert(dismissed, 'provenance popover dismissed on Escape');
 
     console.log('✓ type chip expand + provenance popover verified');
   } catch (e) {

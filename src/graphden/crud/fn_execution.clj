@@ -37,6 +37,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.types.diagnostics :as diag]
+    [graphden.util.json-safe :as json-safe]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -287,7 +288,12 @@
                 (finalize-inline-outcome
                   {:status :failed
                    :error (or (ex-message cause) (str cause))
-                   :error-data (ex-data cause)}
+                   ;; ex-data is author-controlled and leaves here twice —
+                   ;; as the response's JSON `error-data` and as the row's
+                   ;; jsonb. One unencodable leaf would cost the caller the
+                   ;; whole failure report (500, log ref, nothing else), so
+                   ;; render such leaves instead of dropping the report.
+                   :error-data (json-safe/json-safe (ex-data cause))}
                   {:storage storage :row row :fn-id fn-id
                    :declared-effects declared-eff :runtime-effects (runtime-eff)
                    :path-trace (path-snapshot)

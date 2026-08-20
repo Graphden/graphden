@@ -22,6 +22,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
+    [graphden.util.json-safe :as json-safe]
     [graphden.util.json-size :as json-size]))
 
 
@@ -131,7 +132,12 @@
 
 (defn jsonize-error-data
   [data]
-  (let [json-str (try (json/generate-string data)
+  ;; Render unencodable leaves rather than let one of them cost the whole
+  ;; report: ex-data is author-controlled, and a lone `java.lang.Class` or
+  ;; atom in it used to truncate the row down to `:type` (and, on the inline
+  ;; response path, to fail the response outright).
+  (let [data (json-safe/json-safe data)
+        json-str (try (json/generate-string data)
                       (catch Exception e
                         (log/warn e "Error-data JSON-encode failed — truncating to :type")
                         nil))]

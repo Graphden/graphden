@@ -1,6 +1,7 @@
 (ns graphden.storage.protocol.crud-validation-test
   "Tests for CRUD validation helpers."
   (:require
+    [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as storage]
@@ -919,7 +920,7 @@
                 {:name {:type :text}}
                 "not-a-map"))))
 
-  (testing "exception data includes value-type"
+  (testing "exception data includes value-type, as a JSON-encodable name"
     (try
       (storage/validate-where-clause-types!
         :user
@@ -931,7 +932,11 @@
         (is (= :age (:field (ex-data e))))
         (is (= :int (:expected-type (ex-data e))))
         (is (= :text (:actual-type (ex-data e))))
-        (is (= String (:value-type (ex-data e)))))))
+        (is (= "java.lang.String" (:value-type (ex-data e))))
+        ;; This ex-data becomes the JSON `error-data` of a 400. A
+        ;; `java.lang.Class` here has no JSON form, and the honest
+        ;; type-mismatch message surfaced as a 500 instead.
+        (is (string? (cheshire/generate-string (ex-data e)))))))
 
   (testing "boolean for uuid throws"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo

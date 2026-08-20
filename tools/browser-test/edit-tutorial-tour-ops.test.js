@@ -1,0 +1,199 @@
+// Lessons 07, 08, 26 — effects, branches, tests (+ branch isolation)
+//
+// Part of the interactive-tutorial drift guard: walks every step of its
+// lessons by doing the real UI actions, so a renamed class or a changed
+// flow fails HERE, not on a visitor. The lessons are split across files
+// because the runner caps one file at 5 minutes — see
+// tutorial-tour-helpers.js.
+//
+// Run from this directory:  node edit-tutorial-tour-ops.test.js
+// Exit code 0 = PASS, 1 = FAIL.
+
+const {chromium} = require('playwright');
+const {assert, newContext, api} = require('./edit-test-helpers');
+const {
+  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
+  filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
+  pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
+  createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
+  createRootNamespace, createFnInNamespace, setParentViaStrip,
+  runWithEffectAck, finishAndDelete, tourTitle,
+} = require('./tutorial-tour-helpers');
+
+(async () => {
+  const {browser, page} = await newContext(chromium);
+  page.on('console', (m) => {
+    if (m.type() === 'error') {
+      console.log('  (console.error: ' + m.text().slice(0, 200) + ')');
+    }
+  });
+  page.on('dialog', (d) => { d.accept().catch(() => {}); });
+  console.log('edit-tutorial-tour-ops — lessons 07 / 08 / 26 + branch isolation');
+  let failed = false;
+  try {
+    await hardCleanup(page);
+    const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
+    // ---------- Lesson 08 — branches (fork, edit, come back) ----------
+    await page.goto(BASE + '/?tutorial=08');
+    await waitTourTitle(page, 'Branches are views, not copies', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 Next');
+    await waitTourTitle(page, 'Find str-upper');
+    await filterAndSelect(page, 'str-upper', 'str-upper');
+    await waitTourTitle(page, 'Extend it', 150000);
+    await extendViaRowActions(page, 'branch-demo', 'str-upper');
+    await waitTourTitle(page, 'Give it a value on main', 150000);
+    await bindFirstPlaceholder(page, 'main version');
+    await waitTourTitle(page, 'Fork a branch', 150000);
+    await createBranchViaChip(page, 'tutorial-branch');
+    // Page reloaded on the branch — the tour resumes from localStorage.
+    await waitTourTitle(page, 'Change the value here', 150000);
+    await editBoundValue(page, 'branch version');
+    await waitTourTitle(page, 'Go back to main', 150000);
+    await switchBranchViaChip(page, 'main');
+    await waitTourTitle(page, 'main never saw it', 150000);
+    // main still reads the original literal — the whole point of the lesson.
+    const mainValue = await page.evaluate(() => {
+      const fn = Array.from(lookups.fnMap.values()).find((f) => f.name === 'branch-demo');
+      const bs = fn ? (lookups.bindingsByFn.get(fn.id) || []) : [];
+      return bs.map((b) => b.value);
+    });
+    assert(mainValue.includes('main version'),
+      'main still reads "main version" after the branch edit');
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 back-on-main Next');
+    await waitTourTitle(page, "That's branching", 150000);
+    await finishAndDelete(page);
+    // The cleanup must have removed the lesson's BRANCH too, not just the fn.
+    const branches = await api(page, 'GET', '/api/branches');
+    const names = (Array.isArray(branches) ? branches : (branches.branches || []))
+      .map((b) => b.name);
+    assert(!names.includes('tutorial-branch'),
+      'tour cleanup deleted the lesson branch');
+    console.log('  lesson 08: walked + cleaned (branch too)');
+
+    // ---------- Lesson 07 — effects (chip, ack gate, run) ----------
+    await page.goto(BASE + '/?tutorial=07');
+    await waitTourTitle(page, 'Effects are declared, then they spread', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 Next');
+    await waitTourTitle(page, 'Find env');
+    await filterAndSelect(page, 'env', 'env');
+    await waitTourTitle(page, 'Read the effect chip', 150000);
+    // The step's title lands as soon as the fn is SELECTED; the card (and
+    // its effects strip) paints a beat later.
+    await page.waitForSelector('.effects-chip', {timeout: 60000});
+    const effChip = await page.evaluate(
+      () => document.querySelector('.effects-chip')?.className);
+    assert(/effects-chip-env/.test(effChip || ''),
+      'the env card carries an :env effect chip (got: ' + effChip + ')');
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 chip Next');
+    await waitTourTitle(page, 'Open Run');
+    // runWithEffectAck asserts the disabled-until-acknowledged gate itself.
+    await runWithEffectAck(page, 'PATH');
+    await waitTourTitle(page, 'Two gates, one vocabulary', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 gates Next');
+    await waitTourTitle(page, 'Secrets ride the same rails');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 07 Finish');
+    // Nothing was created — the tour closes without a cleanup dialog.
+    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+      null, {timeout: 30000, polling: 200});
+    console.log('  lesson 07: walked (no leftovers to clean)');
+
+    // ---------- Lesson 26 — tests (ns tests → assert-eq → green dot) -------
+    await page.goto(BASE + '/?tutorial=26');
+    await waitTourTitle(page, 'A test is just a fn', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 26 Next');
+    await waitTourTitle(page, 'Create the tests namespace');
+    await createRootNamespace(page, 'tests');
+    await waitTourTitle(page, 'Add the test fn', 150000);
+    await createFnInNamespace(page, 'tests', 'two-plus-two');
+    await waitTourTitle(page, 'Make it an assertion', 150000);
+    await setParentViaStrip(page, 'assert-eq');
+    await waitTourTitle(page, 'Bind one side', 150000);
+    // assert-eq exposes exactly two slots — wait for BOTH placeholders to
+    // paint before touching either. (The step's title lands on selection,
+    // which is earlier than the card.)
+    await page.waitForFunction(
+      () => document.querySelectorAll('.placeholder-binder').length === 2,
+      null, {timeout: 60000, polling: 150});
+    await bindFirstPlaceholder(page, '4');
+    await waitTourTitle(page, 'Bind the other', 150000);
+    // The card repaints asynchronously after the first bind. Clicking
+    // before it does hits the SAME (now bound) placeholder, and the write
+    // collides on `(fn-id, slot-id)` — a genuine 409 that reads as a broken
+    // lesson. Wait for exactly one placeholder to remain.
+    await page.waitForFunction(
+      () => document.querySelectorAll('.placeholder-binder').length === 1,
+      null, {timeout: 60000, polling: 150});
+    await bindFirstPlaceholder(page, '4');
+    // The write itself triggers the auto-run — that IS the lesson's claim.
+    await waitTourTitle(page, 'See it pass', 150000);
+    // The step completes on the panel's green dot, so open the panel the
+    // way the lesson tells the reader to.
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button, a'))
+        .find((b) => /^tests$/i.test(b.textContent.trim()));
+      if (btn) btn.click();
+    });
+    // Auto-run is asynchronous (the write returns first) — poll rather than
+    // read once.
+    let testRow = null;
+    for (let i = 0; i < 30; i++) {
+      const statuses = await api(page, 'GET', '/api/tests/status');
+      testRow = (Array.isArray(statuses) ? statuses : []).find(
+        (t) => t['fn-name'] === 'two-plus-two');
+      if (testRow && testRow.status) break;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    assert(testRow && testRow.status === 'succeeded',
+      'the test auto-ran and passed (got: ' + JSON.stringify(testRow) + ')');
+    await waitTourTitle(page, 'Tests are graph, too', 150000);
+    await finishAndDelete(page);
+    console.log('  lesson 26: walked + cleaned');
+
+    // ---------- Branch isolation (org mode entry) ----------
+    // Back IN the gate (2026-08-20). It was flagged off after five 240s
+    // stalls, on the theory that a fresh branch pays a full branch-ctx
+    // compile. Measured since, on a realistic 5763-fn graph: branch create
+    // 43ms, first request on the branch 60ms, whole switch 1.03s — so the
+    // stalls were the gate box, not the branch machinery. The deadlines
+    // below are generous for that reason; the scenario is worth real
+    // coverage since org-mode lessons all run through it. If it stalls
+    // again, the timing line printed on the way through is the evidence
+    // to look at BEFORE blaming branch-ctx.
+    const isoT0 = Date.now();
+    const startedIso = await page.evaluate(async () => {
+      return await window.startTutorialIsolated('01');
+    });
+    assert(startedIso, 'startTutorialIsolated returned true');
+    await page.waitForFunction(() => {
+      return /[?&]branch=tutorial-01-/.test(location.search)
+        && !!document.querySelector('#gd-tour-pop .gd-tour-title');
+    }, null, {timeout: 240000, polling: 300});
+    const isoSwitchMs = Date.now() - isoT0;
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
+    await page.evaluate(() => {
+      Array.from(document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
+        .find((b) => b.textContent.trim() === 'End tour').click();
+    });
+    await waitTourTitle(page, 'Delete the tutorial branch?');
+    assert(await clickTourButton(page, 'Delete branch & return'),
+      'Delete branch & return button');
+    await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
+      null, {timeout: 240000, polling: 300});
+    console.log('  branch isolation: created, resumed, deleted, returned'
+      + ' (switch took ' + isoSwitchMs + 'ms)');
+
+    console.log('PASS');
+  } catch (err) {
+    failed = true;
+    console.error('FAIL:', err.message);
+    try {
+      console.error('  tour title at failure:', await tourTitle(page));
+      await page.screenshot({path: '/tmp/edit-tutorial-tour-fail.png'});
+      console.error('  screenshot: /tmp/edit-tutorial-tour-fail.png');
+    } catch (_) { /* page may be gone */ }
+  } finally {
+    await hardCleanup(page);
+    await browser.close();
+  }
+  process.exit(failed ? 1 : 0);
+})();

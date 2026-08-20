@@ -68,7 +68,11 @@ so a gap in one does not by itself cross tenants:
    descendant in the installation through inheritance and is silently
    reverted by the next sync — the guard makes that class impossible for
    ANY principal; the legitimate paths are extending into a child fn or
-   editing the package's `fns.edn`.
+   editing the package's `fns.edn`. Renaming or re-describing the package
+   fn itself is refused for the same reason. The editor mirrors the rule
+   client-side (`package-owned` rides out on each fn row): no `+`
+   placeholder, no rename/delete, and the edit-block reason says to
+   extend instead — so the affordance is absent rather than failing.
 8. **Resource isolation** — see below.
 
 ## Resource isolation: shared vs dedicated

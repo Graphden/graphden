@@ -328,9 +328,22 @@ function argRowFromNode(nodeData) {
 // to navigate to the dependents and detach them first.
 function isFnEditable(fnId) {
   if (!fnId || !lookups) return false;
+  if (isPackageOwnedFn(fnId)) return false;
   const usedAsParent = (lookups.fnUsedAsParent?.get(fnId)) || 0;
   const usedAsRef    = (lookups.fnUsedAsRef?.get(fnId))    || 0;
   return usedAsParent === 0 && usedAsRef === 0;
+}
+
+
+// A fn the boot package sync owns (`package-owned` on the row, set
+// server-side from the `packages.owned` registry). Its bindings are
+// re-synced declaratively every boot, so the API refuses edits and
+// deletes on it with a 403 — the editor mirrors that by not offering
+// the affordance at all. EXTENDING it into a child stays available;
+// that is the supported way to customize a package fn.
+function isPackageOwnedFn(fnId) {
+  if (!fnId || !lookups?.fnMap) return false;
+  return !!lookups.fnMap.get(fnId)?.['package-owned'];
 }
 
 // Human-readable explanation when `isFnEditable` returns false — used
@@ -339,6 +352,11 @@ function isFnEditable(fnId) {
 // Returns null when the fn IS editable.
 function getFnEditBlockReason(fnId) {
   if (!fnId || !lookups) return null;
+  if (isPackageOwnedFn(fnId)) {
+    return 'Package fn — synced declaratively from its package, so an edit '
+      + 'here changes every descendant and is reverted on the next boot '
+      + '(the API refuses it). Extend it into a child fn and edit that.';
+  }
   const asParent = (lookups.fnUsedAsParent?.get(fnId)) || 0;
   const asRef    = (lookups.fnUsedAsRef?.get(fnId))    || 0;
   if (asParent === 0 && asRef === 0) return null;

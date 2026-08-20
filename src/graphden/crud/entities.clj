@@ -22,6 +22,7 @@
     [graphden.crud.validation :as validation]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -658,7 +659,7 @@
    (internals hidden) in the light scopes too; it is dropped from the wire
    when nil (single-tenant) by the `remove nil? val` projection."
   [:id :name :namespace-id :org-id :role :description :constraint
-   :parent-ids :return-type-fn-id
+   :parent-ids :return-type-fn-id :package-owned
    :used-as-parent-count :used-as-ref-count])
 
 
@@ -736,11 +737,17 @@
         fn-slots-by-fn (group-by :fn-id (:fn-slots base))
         rich-snapshot (delay (registry/rich-types-snapshot))
         role-of (fn [f]
-                  (assoc f :role
-                         (types-api/compute-fn-role
-                           f
-                           (boolean (seq (get fn-slots-by-fn (:id f))))
-                           @rich-snapshot)))]
+                  (cond-> (assoc f :role
+                                 (types-api/compute-fn-role
+                                   f
+                                   (boolean (seq (get fn-slots-by-fn (:id f))))
+                                   @rich-snapshot))
+                    ;; Package-synced fns are API-read-only (package-guard
+                    ;; answers 403 on binding writes + deletes). The flag
+                    ;; rides out with the row so the editor can HIDE those
+                    ;; affordances instead of offering a click that fails.
+                    ;; Omitted when false — costs nothing on user fns.
+                    (owned/owned-fn-id? (:id f)) (assoc :package-owned true)))]
     {:base base
      :role-of role-of
      :roled-fns (delay (mapv role-of (:fns base)))
@@ -1603,8 +1610,14 @@
         ;; and for the package-owner write guard (adds fn-slot).
         pre-row (when (and id-uuid (#{"binding" "binding-list-item" "fn-slot"} type-str))
                   (sp/read-entity storage entity-type id-uuid))
-        pkg-reason (when pre-row
-                     (pkg-guard/write-rejection storage entity-type pre-row))
+        ;; A `:fn` update (rename / description / ns-move) targets the row
+        ;; identified by `id-uuid` itself — no pre-image read needed, and
+        ;; the guard refuses it on a package-synced fn (the next boot's
+        ;; sync would revert it, and a rename breaks every bare ref).
+        pkg-reason (if (and id-uuid (= "fn" type-str))
+                     (pkg-guard/write-rejection storage entity-type {:id id-uuid})
+                     (when pre-row
+                       (pkg-guard/write-rejection storage entity-type pre-row)))
         updated (when-not pkg-reason
                   (try (sp/update-entity storage entity-type id-uuid entity-data)
                        (catch Exception e

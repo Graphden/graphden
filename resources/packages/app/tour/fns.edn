@@ -252,6 +252,98 @@
               {:title "That's branching"
                :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The written lesson 08 covers protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "03"
+             :title "Slots and bindings"
+             :steps
+             [{:title "One slot, many bindings"
+               :body "A slot is a global identity that belongs to the fn that DECLARES it. A binding is per (fn, slot): children of the same parent share one slot but each carries its own value. You will prove that with two children of one fn."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find str-upper"
+               :body "Type str-upper in the Explorer filter and click the str-upper row (core.strings). It declares one slot, :string."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-upper"}}
+              {:title "Make the first child"
+               :body "Click ⋯ on the str-upper row, choose “Extend”, name it tutorial-a — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-a" :parent "str-upper"}
+               :creates {:type "fn" :name "tutorial-a"}}
+              ;; Selection gate before every bind — see the header note.
+              {:title "tutorial-a is open"
+               :body "The :string row on this card comes from str-upper: the slot is INHERITED, not copied. Note the card has its own “+”."
+               :target nil
+               :check {:kind "selected" :name "tutorial-a"}}
+              {:title "Bind the inherited slot"
+               :body "Click the “+” on :string, choose “Bind literal”, type: alpha — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-value" :name "tutorial-a"
+                       :slot "string" :value "alpha"}}
+              {:title "Back to the parent"
+               :body "Type str-upper in the filter and select it again. Its :string is still unbound — your binding lives on tutorial-a, not on the slot itself."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-upper"}}
+              {:title "Make a second child"
+               :body "Click ⋯ → “Extend” again, name this one tutorial-b — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-b" :parent "str-upper"}
+               :creates {:type "fn" :name "tutorial-b"}}
+              {:title "tutorial-b is open"
+               :body "Same slot identity as tutorial-a's — and an empty “+” again, because tutorial-b has no binding of its own yet."
+               :target nil
+               :check {:kind "selected" :name "tutorial-b"}}
+              {:title "Give it a different value"
+               :body "Click the “+” on :string, choose “Bind literal”, type: beta — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-value" :name "tutorial-b"
+                       :slot "string" :value "beta"}}
+              {:title "One slot, two values"
+               :body "tutorial-a says alpha, tutorial-b says beta, str-upper stays open — one slot identity, three independent binding states. That separation is why inheritance never copies anything. Click Finish to clean up or keep both."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "06"
+             :title "Higher-order functions"
+             :steps
+             [{:title "A slot that wants a function"
+               :body "Every slot so far wanted a VALUE. A slot whose type starts with :fn wants a CALLABLE instead — the executor hands the fn over unrun, and the impl decides when to invoke it. That is how map, filter and friends work."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find map"
+               :body "Type map in the Explorer filter and click the map row (core.hof)."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "map"}}
+              {:title "Read the two slots"
+               :body "The :coll chip reads ['a] — a list of anything. The :func chip reads (item:'a) → 'b — a callable taking :item and returning something else. Only the second one is a HOF slot."
+               :target ".arg-type-chip"
+               :check {:kind "manual"}}
+              {:title "Extend it"
+               :body "Click ⋯ on the map row, choose “Extend”, name it tutorial-map — then Save. (map itself is package-owned, so its own slots are read-only — you customize by extending.)"
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-map" :parent "map"}
+               :creates {:type "fn" :name "tutorial-map"}}
+              {:title "tutorial-map is open"
+               :body "Both inherited slots show a “+” on your card."
+               :target nil
+               :check {:kind "selected" :name "tutorial-map"}}
+              {:title "A callable slot offers no literal"
+               :body "Click the “+” on :func. Instead of the value form you saw in earlier lessons, the fn picker opens straight away: a literal is not a thing you can put in a callable slot."
+               :target ".placeholder-binder"
+               :check {:kind "dom" :selector ".fn-picker-popover"}}
+              {:title "Compatible means callable-shaped"
+               :body "The picker states Expected: (item:a) → b and splits candidates into Compatible and Other. A fn qualifies when its FREE argument is named :item — that is the name a HOF passes each element under. Press Escape to close the picker."
+               :target ".fn-picker-popover"
+               :check {:kind "dom-absent" :selector ".fn-picker-popover"}}
+              {:title "See one wired up"
+               :body "Type stringify-map-keys in the filter and select it (core.collections). Its :f slot is already bound to a callback fn — the edge on the canvas is that binding."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "stringify-map-keys"}}
+              {:title "Run it"
+               :body "Click ⋯ on the stringify-map-keys row, then ▶ Run. Its free arg is the map to convert — enter {\"a\": 1} and Run. The callback ran once per key, without you ever invoking it yourself."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "That's a HOF"
+               :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 06 goes further — closure capture, lambda-params, and why a deeply nested callable can still see the request it was built under. Click Finish to clean up or keep tutorial-map."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

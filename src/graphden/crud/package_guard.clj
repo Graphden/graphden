@@ -56,11 +56,20 @@
   "Reason string when a create/update of `entity-type` with row data
    `row` (entity-data for creates, the pre-image for updates) targets
    a package-owned fn; nil when the write is fine. `entity-type` is a
-   keyword."
+   keyword.
+
+   `:fn` itself counts: renaming or re-describing a package fn through
+   the API is reverted by the next boot's sync just like a binding edit
+   would be, and a rename mid-flight breaks every bare ref to that name.
+   The sync itself writes through `sp/upsert-entities`, not this CRUD
+   path, so it is unaffected."
   [storage entity-type row]
-  (when-let [fid (owner-fn-id storage entity-type row)]
-    (when (package-owned-fn? storage fid)
-      (rejection-reason storage fid "editing its bindings"))))
+  (if (= :fn entity-type)
+    (when (and (:id row) (package-owned-fn? storage (:id row)))
+      (rejection-reason storage (:id row) "renaming or re-describing it"))
+    (when-let [fid (owner-fn-id storage entity-type row)]
+      (when (package-owned-fn? storage fid)
+        (rejection-reason storage fid "editing its bindings")))))
 
 
 (defn delete-rejection

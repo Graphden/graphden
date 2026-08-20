@@ -454,8 +454,13 @@ function renderSingleFnRow(line, levelInfo, ctx) {
         // Ownership (tenancy): Rename / Delete render only on a fn the principal
         // OWNS. A public / other-org fn stays read-only (Run / Extend / view
         // remain). Single-tenant + platform-tier → always owned (unchanged).
-        owned: (typeof graphdenIsFnOwned === 'function')
-          ? graphdenIsFnOwned(lineFnEntity) : true
+        // A package-synced fn is not "owned" in the editing sense either: the
+        // API refuses its rename and delete (403) and the next boot's sync
+        // would revert them — so those two stay hidden there as well.
+        owned: ((typeof graphdenIsFnOwned === 'function')
+          ? graphdenIsFnOwned(lineFnEntity) : true)
+          && !(typeof isPackageOwnedFn === 'function'
+               && isPackageOwnedFn(lineFn.fnId))
       });
     }
     // Parent-edit row (depth-1 of an editable card) — same toolbar

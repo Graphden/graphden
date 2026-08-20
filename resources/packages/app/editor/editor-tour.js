@@ -281,19 +281,44 @@ function _tourPosition() {
 
 // --- lifecycle ----------------------------------------------------------------
 
+// Is the step's target actually on screen? Same predicate `_tourPosition`
+// uses to decide between an anchored spotlight and a centered modal — a
+// zero-sized (collapsed rail) or off-screen element counts as invisible.
+function _tourTargetVisible(selector) {
+  const el = selector ? document.querySelector(selector) : null;
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0
+    && r.bottom > 0 && r.top < window.innerHeight
+    && r.right > 0 && r.left < window.innerWidth;
+}
+
+
 function _tourTick() {
   if (!_tourState) return;
   const step = _tourStep();
   if (!step) { _tourTeardown(); return; }
   // A sidebar-anchored step is unreachable while the Explorer is
   // collapsed (narrow viewports default to collapsed) — expand it once
-  // per step so the spotlight has something to point at.
-  if (step.target && !document.querySelector(step.target)
+  // per step so the spotlight has something to point at. "Unreachable"
+  // is not only ABSENT: a collapsed Explorer can keep its input in the
+  // DOM at zero size, which left the step centered with no spotlight
+  // while the text said "click in the Explorer".
+  if (step.target && _tourState._expandedFor !== _tourState.step
       && document.body.classList.contains('sidebar-collapsed')
-      && _tourState._expandedFor !== _tourState.step
+      && !_tourTargetVisible(step.target)
       && typeof toggleCollapsed === 'function') {
     _tourState._expandedFor = _tourState.step;
     try { toggleCollapsed(false); } catch (_) { /* stay collapsed */ }
+  }
+  // Still out of view (a long namespace list, a short window)? Bring it
+  // in — a spotlight below the fold is the same dead end.
+  if (step.target && _tourState._scrolledFor !== _tourState.step) {
+    const el = document.querySelector(step.target);
+    if (el && !_tourTargetVisible(step.target)) {
+      _tourState._scrolledFor = _tourState.step;
+      try { el.scrollIntoView({block: 'center', inline: 'nearest'}); } catch (_) { /* ignore */ }
+    }
   }
   _tourPosition();
   if (step.check && step.check.kind !== 'manual' && _tourCheckPasses(step.check)) {

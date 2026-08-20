@@ -42,8 +42,17 @@ async function hardCleanup(page) {
   // leave it orphaned outside the (deleted) tutorial ns, where the
   // ns-subtree walk below would miss it and the next run's create 409s.
   await retryingDelete(() => deleteFnByName(page, FN_NAME));
-  for (const nm of ['add-10', 'tutorial-json', 'tutorial-typed', 'branch-demo']) {
-    await retryingDelete(() => deleteFnByName(page, nm));
+  // CHILDREN BEFORE PARENTS, and twice: a crashed run can leave
+  // tutorial-b parented on tutorial-a (the pre-fix lesson-03 failure),
+  // and a fn that is still someone's parent refuses to delete (409). One
+  // ordered pass clears the normal case; the second pass collects
+  // whatever the first pass unblocked.
+  const leftovers = ['tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
+                     'tutorial-typed', 'tutorial-map', 'branch-demo'];
+  for (let pass = 0; pass < 2; pass++) {
+    for (const nm of leftovers) {
+      await retryingDelete(() => deleteFnByName(page, nm));
+    }
   }
   try {
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
@@ -138,8 +147,19 @@ async function filterAndSelect(page, filterText, fnName) {
 }
 
 
-async function extendViaRowActions(page, childName) {
+// `expectOwner` (optional) — the fn whose row the ⋯ must belong to. The
+// canvas re-renders asynchronously after a selection change, so clicking
+// the FIRST ⋯ can hit the previous card: in lesson 03 that silently
+// extended tutorial-a instead of str-upper, and the step's fn-parent
+// check (correctly) never passed.
+async function extendViaRowActions(page, childName, expectOwner) {
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
+  if (expectOwner) {
+    await page.waitForFunction((name) => {
+      const ov = document.querySelector('.node-overlay');
+      return !!ov && ov.textContent.trim().startsWith(name);
+    }, expectOwner, {timeout: 60000, polling: 200});
+  }
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
   await page.waitForFunction(() => !!document.querySelector(
     '.row-actions-popover [data-action="extend-fn"]'), null,
@@ -540,7 +560,7 @@ async function finishAndDelete(page) {
     await waitTourTitle(page, 'Find :add');
     await filterAndSelect(page, 'add', 'add');
     await waitTourTitle(page, 'Extend it');
-    await extendViaRowActions(page, 'add-10');
+    await extendViaRowActions(page, 'add-10', 'add');
     // The selection-gate step ("The editor opened add-10") auto-advances
     // once the editor re-selects the child — waiting for the NEXT title
     // therefore guarantees add-10 is selected, so the "+" click below
@@ -562,7 +582,7 @@ async function finishAndDelete(page) {
     await waitTourTitle(page, 'A free arg becomes a Run field');
     await runViaRowActions(page, '{"a": 1}');
     await waitTourTitle(page, 'Pin it in a child', 150000);
-    await extendViaRowActions(page, 'tutorial-json');
+    await extendViaRowActions(page, 'tutorial-json', 'to-json-string');
     // Selection gate again — "Bind :data in the child" only appears once
     // tutorial-json is the selected fn, so the "+" is the child's.
     await waitTourTitle(page, 'Bind :data in the child', 150000);
@@ -582,7 +602,7 @@ async function finishAndDelete(page) {
     await waitTourTitle(page, 'Read the chips', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 05 chips Next');
     await waitTourTitle(page, 'Extend it');
-    await extendViaRowActions(page, 'tutorial-typed');
+    await extendViaRowActions(page, 'tutorial-typed', 'str-len');
     // Selection gate — the "+" must be the CHILD's (see lesson 02's note).
     await waitTourTitle(page, 'Ask for a fn the slot cannot take', 150000);
     await pickIncompatFnRef(page, 'str-len');
@@ -596,6 +616,87 @@ async function finishAndDelete(page) {
     await finishAndDelete(page);
     console.log('  lesson 05: walked + cleaned');
 
+    // ---------- Lesson 03 — slots and bindings (two children, one slot) ----
+    await page.goto(BASE + '/?tutorial=03');
+    await waitTourTitle(page, 'One slot, many bindings', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 03 Next');
+    await waitTourTitle(page, 'Find str-upper');
+    await filterAndSelect(page, 'str-upper', 'str-upper');
+    await waitTourTitle(page, 'Make the first child', 150000);
+    await extendViaRowActions(page, 'tutorial-a', 'str-upper');
+    await waitTourTitle(page, 'Bind the inherited slot', 150000);
+    await bindFirstPlaceholder(page, 'alpha');
+    await waitTourTitle(page, 'Back to the parent', 150000);
+    await filterAndSelect(page, 'str-upper', 'str-upper');
+    await waitTourTitle(page, 'Make a second child', 150000);
+    await extendViaRowActions(page, 'tutorial-b', 'str-upper');
+    await waitTourTitle(page, 'Give it a different value', 150000);
+    await bindFirstPlaceholder(page, 'beta');
+    await waitTourTitle(page, 'One slot, two values', 150000);
+    // The point of the lesson, asserted over the API — NOT over `lookups`,
+    // which only holds the subtree of the currently selected fn (tutorial-b
+    // at this point, so tutorial-a's bindings simply aren't loaded).
+    const bindingsOf = async (name) => {
+      const found = await api(page, 'GET',
+        '/api/graph/entities?scope=search&q=' + name);
+      const fn = (found.fns || []).find((f) => f.name === name);
+      if (!fn) return [];
+      const sub = await api(page, 'GET',
+        '/api/graph/entities?scope=subtree&root-id=' + fn.id);
+      return (sub.bindings || [])
+        .filter((b) => b['fn-id'] === fn.id)
+        .map((b) => ({slot: b['slot-id'], value: b.value}));
+    };
+    const twoChildren = {a: await bindingsOf('tutorial-a'),
+                         b: await bindingsOf('tutorial-b')};
+    assert(twoChildren.a.length === 1 && twoChildren.b.length === 1,
+      'each child carries exactly one binding');
+    assert(twoChildren.a[0].slot === twoChildren.b[0].slot,
+      'both bindings point at the SAME inherited slot id');
+    assert(twoChildren.a[0].value === 'alpha' && twoChildren.b[0].value === 'beta',
+      'the two children hold independent values');
+    await finishAndDelete(page);
+    console.log('  lesson 03: walked + cleaned');
+
+    // ---------- Lesson 06 — higher-order functions ----------
+    await page.goto(BASE + '/?tutorial=06');
+    await waitTourTitle(page, 'A slot that wants a function', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 06 Next');
+    await waitTourTitle(page, 'Find map');
+    await filterAndSelect(page, 'map', 'map');
+    await waitTourTitle(page, 'Read the two slots', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 06 slots Next');
+    await waitTourTitle(page, 'Extend it');
+    await extendViaRowActions(page, 'tutorial-map', 'map');
+    await waitTourTitle(page, 'A callable slot offers no literal', 150000);
+    // Clicking the callable slot's "+" goes straight to the fn picker —
+    // no value form in between. That IS the lesson's claim.
+    await page.waitForSelector('.placeholder-binder', {timeout: 30000});
+    await page.evaluate(() => {
+      const binders = Array.from(document.querySelectorAll('.placeholder-binder'));
+      binders[0].click();
+    });
+    await waitTourTitle(page, 'Compatible means callable-shaped', 150000);
+    const pickerState = await page.evaluate(() => {
+      const pk = document.querySelector('.fn-picker-popover');
+      return {
+        expected: pk?.querySelector('.fn-picker-expected')?.textContent.trim(),
+        valueForms: document.querySelectorAll('.arg-value-edit-popover').length
+      };
+    });
+    assert(/item/.test(pickerState.expected || ''),
+      'picker states the callable shape (got: ' + pickerState.expected + ')');
+    assert(pickerState.valueForms === 0,
+      'a callable slot offered no literal value form');
+    await page.keyboard.press('Escape');
+    await waitTourTitle(page, 'See one wired up', 150000);
+    await filterAndSelect(page, 'stringify-map-keys', 'stringify-map-keys');
+    await waitTourTitle(page, 'Run it', 150000);
+    await runViaRowActions(page, '{"a": 1}');
+    await waitTourTitle(page, "That's a HOF", 150000);
+    await finishAndDelete(page);
+    console.log('  lesson 06: walked + cleaned');
+
     // ---------- Lesson 08 — branches (fork, edit, come back) ----------
     await page.goto(BASE + '/?tutorial=08');
     await waitTourTitle(page, 'Branches are views, not copies', 150000);
@@ -603,7 +704,7 @@ async function finishAndDelete(page) {
     await waitTourTitle(page, 'Find str-upper');
     await filterAndSelect(page, 'str-upper', 'str-upper');
     await waitTourTitle(page, 'Extend it', 150000);
-    await extendViaRowActions(page, 'branch-demo');
+    await extendViaRowActions(page, 'branch-demo', 'str-upper');
     await waitTourTitle(page, 'Give it a value on main', 150000);
     await bindFirstPlaceholder(page, 'main version');
     await waitTourTitle(page, 'Fork a branch', 150000);

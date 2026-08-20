@@ -126,6 +126,11 @@ violations still reject the save outright.)
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial={id})
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 1. Find `:str-len` in the editor. Click its `:string` slot
    chip. Note its declared type (`:text`).
 2. Create a descendant:

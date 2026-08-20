@@ -133,6 +133,11 @@ function createPlaceholderOverlay(node, container) {
   const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
   if (!editable) return;
+  // A package-synced fn's bindings are re-synced on every boot and the API
+  // refuses the write with a 403 — so don't offer a "+" that cannot land.
+  // Extend it into a child and the placeholder appears there instead.
+  if (typeof isPackageOwnedFn === 'function'
+      && isPackageOwnedFn(arg['fn-id'])) return;
 
   const isSeqAnchor = !!node.data('isSequenceAnchor');
   const seqFnId = node.data('sequenceFnId') || arg['fn-id'];

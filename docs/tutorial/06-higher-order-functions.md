@@ -188,6 +188,11 @@ in your base-fn impl and the dispatch picks the right behavior.
 
 ## Try it
 
+> Prefer to be shown? This lesson exists as a guided in-editor tour:
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial={id})
+> (no sign-up), or pick “Interactive tutorial” in the editor's
+> account menu.
+
 1. Find `:map` in the editor. Its `:func` slot's type chip says
    `[:fn {:item …} …]` — the `:item` is the structural marker
    that classifies `:map` as iterating.

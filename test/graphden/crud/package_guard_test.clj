@@ -77,6 +77,20 @@
                                            {:fn-id pkg-id})))
             "no second binding row was written")))
 
+    (testing "renaming / re-describing the package fn itself is refused"
+      (is (string? (pkg-guard/write-rejection storage :fn {:id pkg-id})))
+      (is (nil? (pkg-guard/write-rejection storage :fn {:id (:id user)})))
+      (let [result (entities/apply-update-core
+                     {:entity-type :fn
+                      :type-str "fn"
+                      :id-uuid pkg-id
+                      :form-data {}
+                      :entity-data {:name "pgx-renamed"}}
+                     {:storage storage})]
+        (is (string? (:error result)))
+        (is (= "pgx-guarded" (:name (sp/read-entity storage :fn pkg-id)))
+            "the package fn kept its name")))
+
     (testing "apply-update-core refuses touching the package binding"
       (let [result (entities/apply-update-core
                      {:entity-type :binding

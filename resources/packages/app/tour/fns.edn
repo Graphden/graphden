@@ -86,8 +86,20 @@
                :target "button.more-actions-trigger"
                :check {:kind "fn-parent" :name "add-10" :parent "add"}
                :creates {:type "fn" :name "add-10"}}
+              ;; Selection gate — auto-advances the instant the editor's
+              ;; post-extend re-select lands on the child. Without it the
+              ;; NEXT step's “+” spotlight can ring the PARENT's own
+              ;; placeholder while add is still the selected fn, and the
+              ;; click then appends the literal to :add itself — a write
+              ;; every descendant of :add inherits (2026-08-20 incident:
+              ;; that stray item broke the delete guard, /api/execute and
+              ;; URI parsing platform-wide until a package re-sync).
+              {:title "The editor opened add-10"
+               :body "The graph now shows your child fn add-10 with its parent add above it. The card's rows are inherited from the parent."
+               :target nil
+               :check {:kind "selected" :name "add-10"}}
               {:title "Seed the inherited slot"
-               :body "add-10 inherited add's :nums slot — a sequence. Click the “+” placeholder on :nums, choose “Append literal”, enter: 10 — then Save. The seed becomes the list's first item."
+               :body "add-10 inherited add's :nums slot — a sequence. On the add-10 card click the “+” placeholder on :nums, choose “Append literal”, enter: 10 — then Save. The seed becomes the list's first item."
                :target ".placeholder-binder"
                :check {:kind "binding-bound" :name "add-10" :slot "nums"}}
               {:title "Run the child"
@@ -114,10 +126,21 @@
                :target "button.more-actions-trigger"
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Pin it in a child"
-               :body "Now the other direction: click ⋯ again, choose “Extend”, name it tutorial-json, Save. On the new card click the “+” on :data, choose “Bind literal”, enter: {\"greeting\": \"hello\"} — Save."
+               :body "Now the other direction: click ⋯ again, choose “Extend”, name it tutorial-json — then Save. The editor opens your new child fn."
                :target "button.more-actions-trigger"
-               :check {:kind "binding-bound" :name "tutorial-json" :slot "data"}
+               :check {:kind "fn-parent" :name "tutorial-json" :parent "to-json-string"}
                :creates {:type "fn" :name "tutorial-json"}}
+              ;; Same selection gate as lesson 02 — binding :data before the
+              ;; child is selected would pin it on to-json-string ITSELF,
+              ;; hijacking every JSON response in the system.
+              {:title "Your template child"
+               :body "tutorial-json inherited the free :data slot from its parent — the “+” placeholder moved onto your card."
+               :target nil
+               :check {:kind "selected" :name "tutorial-json"}}
+              {:title "Bind :data in the child"
+               :body "On the tutorial-json card click the “+” on :data, choose “Bind literal”, enter: {\"greeting\": \"hello\"} — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-json" :slot "data"}}
               {:title "Bound beats free"
                :body "Run tutorial-json (⋯ → ▶ Run → Run): no fields this time — the binding closed the slot, so callers have nothing left to supply. Free args propagate UP until someone pins them."
                :target "button.more-actions-trigger"

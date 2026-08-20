@@ -59,6 +59,28 @@ async function hardCleanup(page) {
       await api(page, 'DELETE', '/api/entities/ns/' + ns.id);
     }
   } catch (_) { /* best-effort */ }
+  // A stray OWN binding on the package parents the lessons extend (:add /
+  // to-json-string) is the 2026-08-20 poisoning fingerprint — a "+" click
+  // that landed on the parent instead of the child. Package fns own no
+  // bindings, so ANY own binding here is damage; remove it so the rest of
+  // the e2e suite (and the next attempt) runs against a healthy stack.
+  try {
+    for (const parentName of ['add', 'to-json-string']) {
+      const found = await api(page, 'GET',
+        '/api/graph/entities?scope=search&q=' + parentName);
+      const parent = (found.fns || []).find(
+        (f) => f.name === parentName && !(f['parent-ids'] || []).length);
+      if (!parent) continue;
+      const sub = await api(page, 'GET',
+        '/api/graph/entities?scope=subtree&root-id=' + parent.id);
+      for (const b of (sub.bindings || [])) {
+        if (b['fn-id'] === parent.id) {
+          console.log('  ! stray binding on ' + parentName + ' — removing');
+          await api(page, 'DELETE', '/api/entities/binding/' + b.id);
+        }
+      }
+    }
+  } catch (_) { /* best-effort */ }
   // Leaked isolation branches: a run that dies between startTutorialIsolated
   // and "Delete branch & return" leaves a tutorial-NN-xxxx branch behind, and
   // each retry of the suite adds another. Sweep them so per-branch contexts
@@ -379,6 +401,10 @@ async function finishAndDelete(page) {
     await filterAndSelect(page, 'add', 'add');
     await waitTourTitle(page, 'Extend it');
     await extendViaRowActions(page, 'add-10');
+    // The selection-gate step ("The editor opened add-10") auto-advances
+    // once the editor re-selects the child — waiting for the NEXT title
+    // therefore guarantees add-10 is selected, so the "+" click below
+    // cannot land on :add's own placeholder (the 2026-08-20 poisoning).
     await waitTourTitle(page, 'Seed the inherited slot', 150000);
     await bindFirstPlaceholder(page, '10');
     await waitTourTitle(page, 'Run the child', 150000);
@@ -397,7 +423,9 @@ async function finishAndDelete(page) {
     await runViaRowActions(page, '{"a": 1}');
     await waitTourTitle(page, 'Pin it in a child', 150000);
     await extendViaRowActions(page, 'tutorial-json');
-    await page.waitForTimeout(2500); // extend re-selects the child
+    // Selection gate again — "Bind :data in the child" only appears once
+    // tutorial-json is the selected fn, so the "+" is the child's.
+    await waitTourTitle(page, 'Bind :data in the child', 150000);
     await bindFirstPlaceholder(page, '{"greeting": "hello"}');
     await waitTourTitle(page, 'Bound beats free', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 04 step-5 Next');

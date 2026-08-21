@@ -625,6 +625,28 @@ async function startTutorialIsolated(lessonId) {
   return true;
 }
 
+// `:requires` values that are NOT capabilities. Each names a condition the
+// editor can already answer for itself, plus the words to say when it fails.
+const REQUIRE_SIGNALS = {
+  // The dedicated tier (or a platform / single-tenant instance) — services run
+  // on an executor the org owns, which lower plans don't get.
+  services: {
+    test: () => typeof window.gdServicesManageable === 'function'
+             && window.gdServicesManageable(),
+    phrase: 'the dedicated plan (or your own instance)',
+    short: 'the dedicated plan',
+  },
+  // Anything that only exists once there ARE organizations: the org chip, the
+  // per-org editor address, membership.
+  org: {
+    test: () => typeof window.graphdenTenancyActive === 'function'
+             && window.graphdenTenancyActive(),
+    phrase: 'an organization workspace',
+    short: 'an organization',
+  },
+};
+
+
 // Lesson picker — the shell-menu entry point once there is more than one
 // lesson. Centered dialog listing every lesson from /api/tour.
 async function openTutorialMenu() {
@@ -662,26 +684,32 @@ async function openTutorialMenu() {
       head.textContent = chapter;
       list.appendChild(head);
     }
-    // `:requires` names the CAPABILITY the lesson's steps need (the org
-    // lessons drive panels only an owner/admin can open). Offering one to a
-    // reader who cannot complete it is a dead end, so it stays listed —
-    // seeing what exists is the point of a catalogue — but disabled, with
-    // the reason on the row rather than hidden in a tooltip.
+    // `:requires` names what the lesson's steps need. Usually that is a
+    // CAPABILITY (the org lessons drive panels only an owner/admin can open);
+    // a few needs aren't capabilities at all — services are a PLAN tier, and
+    // the cross-org lesson only makes sense inside an organization — so those
+    // resolve through named signals instead. Offering a lesson to a reader who
+    // cannot complete it is a dead end, so it stays listed — seeing what
+    // exists is the point of a catalogue — but disabled, with the reason on
+    // the row rather than hidden in a tooltip.
     const need = lesson.requires;
+    const signal = REQUIRE_SIGNALS[need];
     const allowed = !need
-                 || (typeof window.graphdenHasCap === 'function'
-                     && window.graphdenHasCap(need));
+                 || (signal
+                     ? signal.test()
+                     : (typeof window.graphdenHasCap === 'function'
+                        && window.graphdenHasCap(need)));
+    const needPhrase = signal ? signal.phrase : ('the ' + need + ' capability');
     const btn = _tourBtn(
       lesson.id + ' · ' + (lesson.title || ''), 'gd-tour-btn-primary',
       () => { if (allowed) startTutorialIsolated(lesson.id); });
     if (!allowed) {
       btn.classList.add('gd-tour-btn-locked');
       btn.disabled = true;
-      btn.title = 'Needs the ' + need + ' capability — run it in an'
-        + ' organization workspace you own.';
+      btn.title = 'Needs ' + needPhrase + ' — this session does not have it.';
       const note = document.createElement('span');
       note.className = 'gd-tour-lesson-note';
-      note.textContent = ' — needs ' + need;
+      note.textContent = ' — needs ' + (signal ? signal.short : need);
       btn.appendChild(note);
     }
     list.appendChild(btn);

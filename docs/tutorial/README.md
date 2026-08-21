@@ -31,18 +31,18 @@
 | 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written · ▶ interactive |
 | 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written · ▶ interactive |
 | 09 | [Executing a fn — free-arg form, history, cancel](09-executing-a-fn.md) | ✅ written · ▶ interactive |
-| 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written |
+| 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written · ▶ interactive |
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
 | 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written · ▶ interactive |
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
-| 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
+| 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written · ▶ interactive |
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |
 | 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written · ▶ interactive |
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written · ▶ interactive |
 | 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
 | 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written |
 | 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written · ▶ interactive |
-| 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written |
+| 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written · ▶ interactive |
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |
 | 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written · ▶ interactive |
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
@@ -65,11 +65,14 @@ The picker lists the tours in TEACHING order, grouped into chapters
 numbering above is the written lesson's id, which stays the deep link
 (`?tutorial=13`) and is deliberately not the tour's reading order.
 
-The organization tours drive panels only an org owner/admin can open, so
-they declare the capability they need (`:requires`). Anywhere that
-capability is absent — the public demo, a self-hosted instance with no
-tenancy addon — the picker still lists them, disabled, with the reason on
-the row.
+The organization tours drive surfaces not every session has, so they
+declare what they need (`:requires`) — a capability (`manage-users`,
+`publish-packages`, …), or a named condition: the services tour needs the
+**dedicated plan** (services run on an executor the org owns), the
+cross-org tour needs organizations to exist at all. Anywhere the condition
+fails — the public demo, a free-plan org, a self-hosted instance with no
+tenancy addon — the picker still lists the lesson, disabled, with the
+reason on the row.
 
 
 Lesson 25 will cover the Operate → Assets panel — editing the

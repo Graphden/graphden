@@ -41,10 +41,15 @@
 ;;   :creates       — {:type "ns"|"fn" :name N} — tracked for the end-of-tour
 ;;                    cleanup offer (soft-deletes, nothing is lost).
 ;;
-;; A lesson may also carry `:requires "<capability>"` — the org lessons drive
-;; panels only an owner/admin can open. The picker still LISTS such a lesson
-;; (seeing what exists is the point of a catalogue) but renders it disabled,
-;; with the reason on the row, wherever the session lacks that capability.
+;; A lesson may also carry `:requires "<what it needs>"`. The picker still
+;; LISTS such a lesson (seeing what exists is the point of a catalogue) but
+;; renders it disabled, with the reason on the row, wherever the session
+;; cannot complete it. Two kinds of value:
+;;   - a CAPABILITY name (`manage-users`, `manage-grants`, `manage-apps`,
+;;     `publish-packages`) — checked against the caps header;
+;;   - a named SIGNAL for needs that aren't capabilities at all
+;;     (`REQUIRE_SIGNALS` in editor-tour.js): `services` = the dedicated plan
+;;     (or a platform / self-host instance), `org` = organizations exist here.
 ;;
 ;; SELECTION GATE (2026-08-20, hard-won): a step that says "click the +"
 ;; MUST be preceded by a `selected`-checked step naming the fn that owns
@@ -843,6 +848,117 @@
               {:title "That's publishing"
                :body "Open the app's host in a new tab and your page is there — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request. The written lesson 20 covers custom domains and the request shape a handler receives. Click Finish to clean up or keep the app."
                :target "[data-apps-panel]"
+               :check {:kind "manual"}}]}
+            {:id "14"
+             :chapter "Your organization"
+             :requires "publish-packages"
+             :title "Packages"
+             :steps
+             [{:title "Sharing more than one fn"
+               :body "A package is a namespace frozen at a version and put in the registry. Installing one is a PIN — a row saying “this branch uses hello 1.0.0” — not a copy, so an update is a pin change and a rollback is the same move backwards."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "A namespace to publish"
+               :body "At the bottom of the Explorer click “New namespace” and type exactly: mycorp — a package is published from a namespace, so it needs one of its own."
+               :target ".create-root-ns-btn"
+               :check {:kind "ns-exists" :name "mycorp"}
+               :creates {:type "ns" :name "mycorp"}}
+              {:title "Put a function in it"
+               :body "Hover the “mycorp” row, click its “+”, choose “New graph…”, type exactly: greet — and press Enter. One fn is enough to publish."
+               :target ".ns-header[data-ns-path=\"mycorp\"]"
+               :check {:kind "fn-exists" :name "greet"}
+               :creates {:type "fn" :name "greet"}}
+              {:title "Give it a parent"
+               :body "On the greet card click “set parent…”, type const and pick core.logic.const. A package ships fn-defs; this one is the smallest possible."
+               :target ".reparent-strip"
+               :check {:kind "fn-parent" :name "greet" :parent "const"}}
+              {:title "Publish the namespace"
+               :body "Hover the “mycorp” row again and click ⬆. Package name: mycorp-hello, version: 1.0.0 — then Publish. (In an organization the release is private to it unless you tick “Public”.)"
+               :target ".ns-header[data-ns-path=\"mycorp\"] .ns-publish-btn"
+               :check {:kind "dom" :selector "#gd-nspub-result.packages-fork-ok"}}
+              {:title "Install your own package"
+               :body "Close the dialog, then open the “packages” chip in the bar above the canvas. Under “+ Install a package” your mycorp-hello 1.0.0 is listed — click Install. The pin appears in the table at the top."
+               :target "#gd-pkg-chip"
+               :check {:kind "dom" :selector "[data-packages-panel] .packages-uninstall"}}
+              {:title "A pin, not a copy"
+               :body "The installed row carries a version box and ↑: type another version and press it to move the pin — that is what an update and a rollback both are. “Fork” is the other door: it copies the fns in so you can edit them, and the pin is gone."
+               :target "[data-packages-panel]"
+               :check {:kind "manual"}}
+              {:title "Uninstall"
+               :body "Click × on the installed row and confirm. The pin disappears; the published version stays in the registry, where anyone in the org can install it again."
+               :target "[data-packages-panel] .packages-uninstall"
+               :check {:kind "dom-absent" :selector "[data-packages-panel] .packages-uninstall"}}
+              {:title "That's distribution"
+               :body "Publish freezes, install pins, fork copies. The written lessons 11 and 14 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click Finish to clean up."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "21"
+             :chapter "Your organization"
+             :requires "org"
+             :title "Across organizations"
+             :steps
+             [{:title "Where your editor lives"
+               :body "Your organization's editor has its own address — one subdomain per org. Apps live on a different domain entirely (lesson 20), so your public site never shares an origin with your editing session."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Read your own address"
+               :body "Look at the address bar. On a graphden cloud you are on YOUR organization's subdomain — one per org — and that is where you sign in and edit. Apps sit on a separate domain, so nothing you publish shares an origin with this session."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "One session per organization"
+               :body "Because each org's editor is its own origin, it carries its own login. Belonging to two orgs means signing in on two addresses — no session travels between them, so a tab open on one org can never read the other's data."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "The switcher — if you have one"
+               :body "Look at the bar above the canvas. If your account belongs to more than one organization, a chip there names the current one and lists the others; picking one navigates to that org's address, where its own session takes over. If you see no such chip, that IS the answer: you belong to exactly one org, so there is nothing to switch between."
+               :target "#gd-ctxbar"
+               :check {:kind "manual"}}
+              {:title "How you join a second one"
+               :body "Not by signing up again — signup only ever makes a NEW org. Someone in the other org grants your account a capability there (lesson 17); membership is exactly “holds a grant in that org”, so the moment they do, that org appears for you."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "That's the map"
+               :body "Editors on one domain, one subdomain per org; apps on another, one subdomain per app; your own domain on top of an app when you want it. Nothing nested, nothing to configure. The written lesson 21 walks the same map from the landing inwards. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "10"
+             :chapter "Your organization"
+             :requires "services"
+             :title "Services"
+             :steps
+             [{:title "Fns that keep running"
+               :body "Executing a fn answers once. A SERVICE is a row that says “keep this fn running” — a web server, a cron loop — and a reconciler makes reality match it: starts what should run, restarts what died, stops what you disabled."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "A fn to point it at"
+               :body "Type const in the Explorer filter and click the const row, then ⋯ → “Extend” and name it tutorial-daemon — Save. (A service that actually RUNS needs a fn declaring the :process effect, like :http-server or :schedule; we are going to look at the row itself, not start one.)"
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "fn-parent" :name "tutorial-daemon" :parent "const"}
+               :creates {:type "fn" :name "tutorial-daemon"}}
+              ;; Selection gate — the ⚙ must belong to the child.
+              {:title "tutorial-daemon is open"
+               :body "The gear on a card's ⋯ menu is where a fn becomes a service. It is a per-fn setting, not a deploy screen."
+               :target nil
+               :check {:kind "selected" :name "tutorial-daemon"}}
+              {:title "Open the service settings"
+               :body "Click ⋯ on the card, then the ⚙ button."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".service-popover"}}
+              {:title "Create it — switched OFF"
+               :body "UNTICK “Enabled”, leave the restart policy on Always, and click “Create service”. A disabled row is the desired state “this exists but should not be running”, which is exactly what you want for a fn that has no :process work to do."
+               :target ".service-popover"
+               :check {:kind "manual"}}
+              {:title "What the row means"
+               :body "Enabled decides whether the reconciler starts it. Restart policy decides what happens when it exits — always, only on failure, never. The row is scoped to your organization and to the branch you are on, so the same fn can run on dev and prod at once without a second definition."
+               :target ".service-popover"
+               :check {:kind "manual"}}
+              {:title "Remove it"
+               :body "Click “Delete service” in the same popover. Deleting the row is how you stop a service for good — the fn itself is untouched."
+               :target ".service-popover"
+               :check {:kind "manual"}}
+              {:title "That's supervision"
+               :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 10 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click Finish to clean up."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

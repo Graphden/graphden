@@ -237,6 +237,19 @@ const {
     assert(locked.disabled, 'it is disabled where the capability is missing');
     assert(/needs manage-users/.test(locked.text),
       'the row says what it needs (got: ' + locked.text + ')');
+    // A `:requires` value can also be a named CONDITION rather than a
+    // capability. On this stack there is no tenancy addon, so the cross-org
+    // lesson must read as needing an organization — and say so in those
+    // words, not as a capability name.
+    const orgLocked = await page.evaluate(() => {
+      const list = document.querySelector('.gd-tour-lesson-list');
+      const row = Array.from(list.children).find((c) => /^21 ·/.test(c.textContent.trim()));
+      return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
+    });
+    assert(orgLocked, 'lesson 21 is listed');
+    assert(orgLocked.disabled, 'it is disabled without organizations');
+    assert(/needs an organization/.test(orgLocked.text),
+      'the row names the CONDITION, not a capability (got: ' + orgLocked.text + ')');
     console.log('  picker: org lessons listed + locked');
 
     console.log('PASS');

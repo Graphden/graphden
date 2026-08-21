@@ -557,3 +557,10 @@ window.getServiceForFnId = getServiceForFnId;
 window.serviceBadgeState = serviceBadgeState;
 window.loadServicesEager = loadServicesEager;
 window.refreshServicesCache = refreshServicesCache;
+
+// May this session manage services at all? The dedicated tier can (own
+// cgroup-limited pod); a free / network tenant cannot, and the platform or a
+// single-tenant self-host always can. Exported because the tutorial gates its
+// services lesson on it — a lesson nobody on this plan can finish is worse
+// than one that says so up front.
+window.gdServicesManageable = () => !isRealTenant() || tenantServiceMode();

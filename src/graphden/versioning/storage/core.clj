@@ -846,16 +846,28 @@
     [this entity-name data-seq]
     (if-not (res/versioned-entity? entity-name)
       (sp/upsert-entities base-storage entity-name data-seq)
-      ;; For versioned: batch check existence in BASE storage (no version resolution),
-      ;; then create/update accordingly
-      (let [ids (keep :id data-seq)
-            ;; Check existence in base-storage directly - O(n) not O(n × versions)
-            ;; We only need to know if identity record exists, not resolve versions
-            existing-ids (if (seq ids)
-                           (set (keys (sp/read-entities base-storage entity-name (vec ids))))
-                           #{})
+      ;; For versioned: split on what this BRANCH can actually see, then
+      ;; create/update accordingly.
+      ;;
+      ;; Existence has to be measured on the RESOLVED view, not on the
+      ;; identity row. An identity row outlives its content — delete
+      ;; tombstones the version and leaves the identity behind, and ids are
+      ;; deterministic — so a re-sync of the same (namespace, name) found the
+      ;; identity, routed to `update-entities`, and that threw "Entities not
+      ;; found" because no version resolves. Installing a package whose
+      ;; materialised fns had been deleted answered 404 for exactly this
+      ;; reason. `create-entities` already handles a live identity (it
+      ;; diffs the identity fields and writes a fresh version row), so the
+      ;; revive path is simply "create".
+      (let [ids (vec (keep :id data-seq))
+            live-ids (if (seq ids)
+                       (set (keys (res/resolve-entities-batch
+                                    base-storage entity-name
+                                    (vals (sp/read-entities base-storage entity-name ids))
+                                    branch-id)))
+                       #{})
             {to-update true to-create false}
-            (group-by #(contains? existing-ids (:id %)) data-seq)]
+            (group-by #(contains? live-ids (:id %)) data-seq)]
         ;; Batch create new records
         (when (seq to-create)
           (sp/create-entities this entity-name to-create))

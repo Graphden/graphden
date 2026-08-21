@@ -230,6 +230,18 @@ function closeNsPublishPopover() {
   if (activeNsPublishPop) { activeNsPublishPop.remove(); activeNsPublishPop = null; }
   const s = document.getElementById('gd-nspub-scrim');
   if (s) s.remove();
+  document.removeEventListener('keydown', _nsPublishOnKey);
+}
+
+// Escape closes the publish dialog. Every other dialog in the editor answers
+// to that key; without it here the dialog stayed open and the keystroke fell
+// through to whatever else listens — the tutorial overlay, which ended the
+// lesson mid-step.
+function _nsPublishOnKey(e) {
+  if (e.key === 'Escape' && activeNsPublishPop) {
+    e.stopPropagation();
+    closeNsPublishPopover();
+  }
 }
 
 // Per-namespace publish popover (packages spec §3). Pre-fills `ns-root` = the
@@ -279,6 +291,7 @@ function openNsPublishPopover(anchorEl, nsPath) {
   pop.style.top = (r.bottom + 6) + 'px';
   document.body.appendChild(pop);
   activeNsPublishPop = pop;
+  document.addEventListener('keydown', _nsPublishOnKey);
 
   const resultEl = pop.querySelector('#gd-nspub-result');
   const goBtn = pop.querySelector('#gd-nspub-go');

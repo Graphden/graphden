@@ -748,6 +748,43 @@
                :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The written lesson 08 covers protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
                :target nil
                :check {:kind "manual"}}]}
+            {:id "25"
+             :chapter "The editor"
+             :requires "assets"
+             :title "Editing the editor"
+             :steps
+             [{:title "The editor is served from the graph too"
+               :body "Every file this interface is made of — its JavaScript, its CSS — is served by the same instance you are editing in. An OVERRIDE is a row that shadows one of them by path, per branch, revertible. On a shared cloud that would be a cross-tenant XSS surface, so it exists only on your own deployment — this one."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open Assets"
+               :body "Click your avatar → “Organization” → “Assets”. Every servable frontend file is listed with a chip: baseline means the shipped file is serving, override means yours is."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"assets\"]:not([hidden])"}}
+              {:title "Open the stylesheet"
+               :body "Find packages/app/editor/editor-styles.css in the list and click its “edit”. The file opens in a code editor — the same one a :js-source slot gets."
+               :target "[data-section=\"assets\"] .gd-asset-edit-btn"
+               :check {:kind "dom" :selector ".gd-asset-save-btn"}}
+              {:title "Change something you will notice"
+               :body "Scroll to the very end of the file and append exactly:  .gd-tour-title { letter-spacing: 0.08em; }  — then click “Save override”. The file's chip flips from baseline to override."
+               :target ".gd-asset-save-btn"
+               :check {:kind "dom" :selector ".gd-asset-chip-override"}}
+              {:title "Reload to run it"
+               :body "Saving rolled the ?v= hash on every asset URL, so the page you are on is still running the OLD css. Reload the tab — the tour comes back where you left it — and look at this title: it is letter-spaced now, because the editor is serving your file."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "See exactly what you changed"
+               :body "Click “edit” on that row again and press “Diff vs baseline”. The override is a row, not a patch: the shipped file is untouched underneath, which is what makes the next step total."
+               :target ".gd-asset-diff-btn"
+               :check {:kind "manual"}}
+              {:title "Put it back"
+               :body "Click “Revert to baseline” and confirm. The row is deleted, the shipped file serves again, and the chip reads baseline — reload once more to run it."
+               :target ".gd-asset-revert-btn"
+               :check {:kind "dom-absent" :selector ".gd-asset-chip-override"}}
+              {:title "What this is for"
+               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 25 covers the ?v= hash and when NOT to override. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
             {:id "16"
              :chapter "Your organization"
              :requires "manage-users"
@@ -875,11 +912,13 @@
               {:title "Publish the namespace"
                :body "Hover the “mycorp” row again and click ⬆. Package name: mycorp-hello, version: 1.0.0 — then Publish. (In an organization the release is private to it unless you tick “Public”.)"
                :target ".ns-header[data-ns-path=\"mycorp\"] .ns-publish-btn"
-               :check {:kind "dom" :selector "#gd-nspub-result.packages-fork-ok"}}
+               :check {:kind "dom" :selector "#gd-nspub-result.packages-fork-ok"}
+               :creates {:type "package-version" :name "mycorp-hello"}}
               {:title "Install your own package"
                :body "Close the dialog, then open the “packages” chip in the bar above the canvas. Under “+ Install a package” your mycorp-hello 1.0.0 is listed — click Install. The pin appears in the table at the top."
                :target "#gd-pkg-chip"
-               :check {:kind "dom" :selector "[data-packages-panel] .packages-uninstall"}}
+               :check {:kind "dom" :selector "[data-packages-panel] .packages-uninstall"}
+               :creates {:type "ns" :name "mycorp@1-0-0"}}
               {:title "A pin, not a copy"
                :body "The installed row carries a version box and ↑: type another version and press it to move the pin — that is what an update and a rollback both are. “Fork” is the other door: it copies the fns in so you can edit them, and the pin is gone."
                :target "[data-packages-panel]"
@@ -930,14 +969,27 @@
                :body "Executing a fn answers once. A SERVICE is a row that says “keep this fn running” — a web server, a cron loop — and a reconciler makes reality match it: starts what should run, restarts what died, stops what you disabled."
                :target nil
                :check {:kind "manual"}}
-              {:title "A fn to point it at"
-               :body "Type const in the Explorer filter and click the const row, then ⋯ → “Extend” and name it tutorial-daemon — Save. (A service that actually RUNS needs a fn declaring the :process effect, like :http-server or :schedule; we are going to look at the row itself, not start one.)"
+              {:title "A thunk to run"
+               :body "Type const in the Explorer filter and click the const row, then \u22ef \u2192 \u201cExtend\u201d and name it tutorial-tick \u2014 Save. This is the work the service will keep doing; the smallest possible stand-in for a listener or a cron loop."
                :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "fn-parent" :name "tutorial-daemon" :parent "const"}
+               :check {:kind "fn-parent" :name "tutorial-tick" :parent "const"}
+               :creates {:type "fn" :name "tutorial-tick"}}
+              {:title "Give it something to return"
+               :body "On the tutorial-tick card click the \u201c+\u201d on value, choose \u201cBind literal\u201d and type exactly: \"tick\" \u2014 with the quotes, because the slot's type is :any and the editor reads it as JSON. A service has no caller to pass arguments in, so a fn with free args can never become one."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-tick" :slot "value"}}
+              {:title "Wrap it in a future"
+               :body "Clear the filter, type future, click the future row, then \u22ef \u2192 \u201cExtend\u201d and name it tutorial-daemon. :future is the fn that declares the :process effect \u2014 the marker for \u201cspawns supervised background work\u201d. Without it in the parent chain the server refuses to make a service, by design."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "fn-parent" :name "tutorial-daemon" :parent "future"}
                :creates {:type "fn" :name "tutorial-daemon"}}
-              ;; Selection gate — the ⚙ must belong to the child.
+              {:title "Point it at the thunk"
+               :body "On the tutorial-daemon card click the \u201c+\u201d on body and pick tutorial-tick. body is a callable slot, so the picker opens straight away \u2014 a literal cannot go there \u2014 and the ref is passed in as the daemon's body instead of being executed here. The fn now has no free arguments AND carries :process: the two conditions for a service."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-daemon" :slot "body"}}
+              ;; Selection gate \u2014 the \u2699 must belong to the daemon.
               {:title "tutorial-daemon is open"
-               :body "The gear on a card's ⋯ menu is where a fn becomes a service. It is a per-fn setting, not a deploy screen."
+               :body "The gear on a card's \u22ef menu is where a fn becomes a service. It is a per-fn setting, not a deploy screen."
                :target nil
                :check {:kind "selected" :name "tutorial-daemon"}}
               {:title "Open the service settings"
@@ -945,7 +997,7 @@
                :target "button.more-actions-trigger"
                :check {:kind "dom" :selector ".service-popover"}}
               {:title "Create it — switched OFF"
-               :body "UNTICK “Enabled”, leave the restart policy on Always, and click “Create service”. A disabled row is the desired state “this exists but should not be running”, which is exactly what you want for a fn that has no :process work to do."
+               :body "UNTICK “Enabled”, leave the restart policy on Always, and click “Create service”. The popover closes as soon as the row is written — a disabled row is the desired state “this exists but should not be running”, worth writing on purpose, and what keeps this tour from spawning a daemon on your instance."
                :target ".service-popover"
                :check {:kind "manual"}}
               {:title "What the row means"
@@ -953,7 +1005,7 @@
                :target ".service-popover"
                :check {:kind "manual"}}
               {:title "Remove it"
-               :body "Click “Delete service” in the same popover. Deleting the row is how you stop a service for good — the fn itself is untouched."
+               :body "Open ⋯ → ⚙ once more: the popover now reads “Service: :tutorial-daemon” and carries the row’s state. Click “Delete service”. Deleting the row is how you stop a service for good — the fn itself is untouched."
                :target ".service-popover"
                :check {:kind "manual"}}
               {:title "That's supervision"
@@ -1016,43 +1068,6 @@
                :check {:kind "manual"}}
               {:title "Reading your own tier"
                :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 18 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click Finish."
-               :target nil
-               :check {:kind "manual"}}]}
-            {:id "25"
-             :chapter "The editor"
-             :requires "assets"
-             :title "Editing the editor"
-             :steps
-             [{:title "The editor is served from the graph too"
-               :body "Every file this interface is made of — its JavaScript, its CSS — is served by the same instance you are editing in. An OVERRIDE is a row that shadows one of them by path, per branch, revertible. On a shared cloud that would be a cross-tenant XSS surface, so it exists only on your own deployment — this one."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Open Assets"
-               :body "Click your avatar → “Organization” → “Assets”. Every servable frontend file is listed with a chip: baseline means the shipped file is serving, override means yours is."
-               :target ".auth-avatar"
-               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"assets\"]:not([hidden])"}}
-              {:title "Open the stylesheet"
-               :body "Find packages/app/editor/editor-styles.css in the list and click its “edit”. The file opens in a code editor — the same one a :js-source slot gets."
-               :target "[data-section=\"assets\"] .gd-asset-edit-btn"
-               :check {:kind "dom" :selector ".gd-asset-save-btn"}}
-              {:title "Change something you will notice"
-               :body "Scroll to the very end of the file and append exactly:  .gd-tour-title { letter-spacing: 0.08em; }  — then click “Save override”. The file's chip flips from baseline to override."
-               :target ".gd-asset-save-btn"
-               :check {:kind "dom" :selector ".gd-asset-chip-override"}}
-              {:title "Reload to run it"
-               :body "Saving rolled the ?v= hash on every asset URL, so the page you are on is still running the OLD css. Reload the tab — the tour comes back where you left it — and look at this title: it is letter-spaced now, because the editor is serving your file."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "See exactly what you changed"
-               :body "Click “edit” on that row again and press “Diff vs baseline”. The override is a row, not a patch: the shipped file is untouched underneath, which is what makes the next step total."
-               :target ".gd-asset-diff-btn"
-               :check {:kind "manual"}}
-              {:title "Put it back"
-               :body "Click “Revert to baseline” and confirm. The row is deleted, the shipped file serves again, and the chip reads baseline — reload once more to run it."
-               :target ".gd-asset-revert-btn"
-               :check {:kind "dom-absent" :selector ".gd-asset-chip-override"}}
-              {:title "What this is for"
-               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 25 covers the ?v= hash and when NOT to override. Click Finish."
                :target nil
                :check {:kind "manual"}}]}]}}}
 

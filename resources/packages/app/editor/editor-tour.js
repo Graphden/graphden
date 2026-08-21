@@ -420,6 +420,25 @@ async function _tourDeleteCreated() {
     if (!id) continue;
     try { await authMutate('DELETE', API.api_entities_type_id('fn', id)); } catch (_) {}
   }
+  // A published package-version outlives the namespace it was cut from —
+  // and once the namespace is deleted, installing that version answers 404
+  // ("entities not found"). A lesson that publishes therefore has to
+  // withdraw its release too, or it leaves a broken row in the registry
+  // every time someone takes the tour.
+  for (const c of created) {
+    if (c.type !== 'package-version') continue;
+    try {
+      const r = await authFetch(API.api_packages);
+      const rows = await r.json();
+      for (const row of (Array.isArray(rows) ? rows : (rows.packages || []))) {
+        if (row?.name !== c.name) continue;
+        await authFetch(API.api_packages_withdraw
+                        + '?name=' + encodeURIComponent(row.name)
+                        + '&version=' + encodeURIComponent(row.version),
+                        {method: 'DELETE'});
+      }
+    } catch (_) { /* best-effort — the ns delete below still runs */ }
+  }
   for (const c of created) {
     if (c.type !== 'ns') continue;
     // The lesson created this namespace through the editor, so the client
@@ -433,6 +452,24 @@ async function _tourDeleteCreated() {
         && (graphData.namespaces || []).find((n) => n.name === c.name)) || null;
     }
     if (ns) {
+      // A namespace the lesson caused to exist can hold rows the lesson did
+      // not create by hand — installing a package materialises its fns under
+      // `<ns>@<version>`. Clear the contents first, or the delete 409s on a
+      // non-empty namespace and the copy is left behind.
+      try {
+        // `scope=namespace` is the one that lists a NAMESPACE's rows;
+        // `subtree` takes a FN id and answers empty for a namespace.
+        const sub = await authFetch(API.api_graph_entities
+                                    + '?scope=namespace&namespace-id=' + ns.id);
+        const payload = await sub.json();
+        for (const f of (payload.fns || [])) {
+          if (f['namespace-id'] === ns.id) {
+            try {
+              await authMutate('DELETE', API.api_entities_type_id('fn', f.id));
+            } catch (_) { /* another row may still reference it */ }
+          }
+        }
+      } catch (_) { /* best-effort — the delete below reports the truth */ }
       try { await authMutate('DELETE', API.api_entities_type_id('ns', ns.id)); } catch (_) {}
     }
   }
@@ -526,8 +563,27 @@ function _tourTeardown() {
   document.removeEventListener('keydown', _tourOnKey);
 }
 
+// Escape ends the tour — but ONLY when it is the topmost thing on screen.
+// Every dialog the lessons ask the reader to open (the publish popover, the
+// fn picker, a bind form, the row-actions menu) treats Escape as "close me",
+// and ending the whole lesson because someone dismissed a dialog is a trap:
+// the step said "click ⬆, fill it in, close it", and closing it the obvious
+// way threw the tour away. Let the dialog have the key; the tour ends on the
+// next Escape, when nothing else is open.
+const TOUR_ESCAPE_OWNERS = [
+  '#gd-nspub-pop',
+  '.fn-picker-popover',
+  '.arg-value-edit-popover',
+  '.row-actions-popover',
+  '.create-menu',
+  '.inline-input',
+  '#gd-asset-editor .gd-asset-diff',
+].join(', ');
+
 function _tourOnKey(e) {
-  if (e.key === 'Escape' && _tourState) _tourEnd();
+  if (e.key !== 'Escape' || !_tourState) return;
+  if (document.querySelector(TOUR_ESCAPE_OWNERS)) return;
+  _tourEnd();
 }
 
 async function _tourFetchLessons() {
@@ -630,6 +686,7 @@ async function startTutorialIsolated(lessonId) {
 const REQUIRE_SIGNALS = {
   // The dedicated tier (or a platform / single-tenant instance) — services run
   // on an executor the org owns, which lower plans don't get.
+  //
   services: {
     test: () => typeof window.gdServicesManageable === 'function'
              && window.gdServicesManageable(),

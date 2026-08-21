@@ -485,6 +485,13 @@ UUIDs (AD-2). No symbolic-ref column.
 - `POST /api/packages/fork` — copy-on-write into the user's namespace (§ 4.5).
 - `GET /api/packages/installed` — this branch's pins (for the editor).
 - `GET /api/packages/:name/:version` — full bundle (export / self-hosted pull) — shipped.
+- `DELETE /api/packages/withdraw?name=&version=` — withdraw a published
+  version — shipped. A release is immutable, not eternal: publishing the wrong
+  namespace or the wrong number used to be permanent. Refused with **409
+  `still-installed`** while any branch pins the package (a pin resolves through
+  the version row), **404 `no-such-version`** when the pair is unknown. The
+  materialised `<ns-root>@<version>` copy is NOT removed — it is ordinary graph
+  content by then, deleted like any other namespace.
 
 **Editor (shipped):** a **Build-surface "packages" context-bar chip**
 (`#gd-pkg-chip`, sibling of the workspace/branch chips) opens a browse/install

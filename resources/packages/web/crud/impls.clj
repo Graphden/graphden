@@ -374,6 +374,24 @@
   (types/subtype? candidate expected))
 
 
+(defbase fn-type?-fn
+  "Atomic library boundary over `types/fn-type?` — true iff the type
+   expression is a callable shape (`[:fn args ret]` / `[:fn args ret
+   effects]`). The candidate filter branches on it: a callable slot
+   admits by SIGNATURE, every other slot by return type."
+  [type]
+  (boolean (types/fn-type? type)))
+
+
+(defbase fn-signature
+  "Assemble a candidate's callable shape — `[:fn args ret effects]` —
+   from the three rich-type fields. A fn-ref bound into a callable
+   slot IS this signature (the executor hof-wraps the ref), so this is
+   what the slot's subtype check has to compare against."
+  [args return effects]
+  [:fn (or args {}) return (or effects #{})])
+
+
 (defbase describe-type-mismatch-fn
   "Atomic library boundary over `types-api/describe-mismatch` —
    one-line human-readable explanation of why `candidate` ⊄ `expected`.
@@ -765,6 +783,8 @@
    :to-set to-set-fn
    :value-kinds value-kinds
    :subtype? subtype?-fn
+   :fn-type? fn-type?-fn
+   :fn-signature fn-signature
    :describe-type-mismatch describe-type-mismatch-fn
    :classify-literal classify-literal
    :diff-value-against-type diff-value-against-type

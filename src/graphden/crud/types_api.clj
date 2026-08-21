@@ -570,13 +570,25 @@
   [parsed ctx]
   (let [{:keys [expected allowed-effects name-prefix]} parsed
         registry-snapshot (rich-types-with-type-rows ctx)
+        ;; A fn-typed slot (`[:fn args ret effects]`, e.g. `:future`'s
+        ;; `:body`) does not receive the candidate's RESULT — the executor
+        ;; hof-wraps the ref and the callable itself is the value. So the
+        ;; admissible set is "signature ⊆ slot", which is what
+        ;; `check-binding!` enforces on write. Comparing `return` against the
+        ;; slot instead (the pre-fix behaviour) answered "Compatible · 0" for
+        ;; every ordinary fn — the picker hid legal binds behind "Other" and
+        ;; made the reader override its own diagnostic to make one.
+        fn-slot? (types/fn-type? expected)
         candidates
         (->> registry-snapshot
              (keep (fn [[fn-name {:keys [return args effects type-row?]}]]
                      (let [eff-set (or effects #{})
                            name-str (some-> fn-name name)]
                        (when (and (not type-row?) ; type-rows aren't callable producers
-                                  (types/subtype? return expected)
+                                  (if fn-slot?
+                                    (types/subtype? [:fn (or args {}) return eff-set]
+                                                    expected)
+                                    (types/subtype? return expected))
                                   (or (nil? allowed-effects)
                                       (every? allowed-effects eff-set))
                                   (or (nil? name-prefix)

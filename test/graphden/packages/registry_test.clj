@@ -10,7 +10,8 @@
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.versioning.storage.core :as vcore]))
 
 
 (def ^:dynamic *bootstrap* nil)
@@ -91,6 +92,43 @@
                                               {:pkg-name "app.contact-demo" :pkg-version "9.9.9"})]
           (is (false? (:ok r)))
           (is (= "not-found" (:reason r))))))))
+
+
+(deftest rematerialize-after-deleting-the-materialised-fns
+  ;; Uninstalling leaves the materialised `<ns>@<version>` copy behind by
+  ;; design, and a user can delete those rows like any others. Re-installing
+  ;; then re-materialises over ids that are DETERMINISTIC per (namespace,
+  ;; name) — the identity rows come back, the versions don't — and the batch
+  ;; upsert used to classify that as an update, so `update-entities` threw
+  ;; "Entities not found" and every later install of that package 404'd.
+  (let [{:keys [ctx storage all-name->id]} *bootstrap*
+        export-id (get all-name->id :export-namespace)
+        publish-id (get all-name->id :publish-package)
+        materialize-id (get all-name->id :materialize-package-version)
+        bundle (exec/execute-with-named-args ctx export-id {:root "app.contact-demo"})]
+    (exec/execute-with-named-args ctx publish-id
+                                  {:pkg-name "revive-demo" :pkg-version "1.0.0"
+                                   :bundle bundle})
+    (exec/execute-with-named-args ctx materialize-id
+                                  {:pkg-name "revive-demo" :pkg-version "1.0.0"})
+    (let [vns (first (sp/query-entities storage :ns {:name "contact-demo@1-0-0"}))
+          fns (sp/query-entities storage :fn {:namespace-id (:id vns)})]
+      (is (seq fns) "precondition: the copy is there")
+      ;; The USER-facing delete (what /api/entities/fn does) tombstones the
+      ;; version and keeps the identity row — that asymmetry is the whole
+      ;; bug: a hard delete would drop the identity and the re-sync would
+      ;; simply create it again.
+      (binding [vcore/*tombstone-delete?* true]
+        (doseq [f fns] (sp/delete-entity storage :fn (:id f))))
+      (is (empty? (sp/query-entities storage :fn {:namespace-id (:id vns)}))
+          "precondition: the copy is gone")
+      (testing "re-materialising the same version succeeds instead of 404-ing"
+        (let [r (exec/execute-with-named-args ctx materialize-id
+                                              {:pkg-name "revive-demo" :pkg-version "1.0.0"})]
+          (is (true? (:ok r)))
+          (is (pos? (:materialized r)))))
+      (testing "and the fns are visible again"
+        (is (seq (sp/query-entities storage :fn {:namespace-id (:id vns)})))))))
 
 
 (deftest version-qualified-ns-respects-dot-boundaries

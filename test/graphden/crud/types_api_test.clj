@@ -10,6 +10,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.types-api :as ta]
     [graphden.executor.context :as ctx]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
@@ -402,6 +403,45 @@
                     {:body {:expected "any" :name-prefix "zzz-no-such"}} c)]
           (is (true? (:ok res)))
           (is (zero? (:count res)))))
+
+      ;; A fn-typed slot receives the CALLABLE, not its result — so
+      ;; admissibility is "candidate signature ⊆ slot", the rule
+      ;; `check-binding!` already applies on write. Comparing the candidate's
+      ;; RETURN against the slot (the pre-fix behaviour) answered zero for
+      ;; every ordinary fn: the picker read "Compatible · 0" while that very
+      ;; bind succeeded through "Other" → "Pick anyway".
+      (binding [registry/*rich-types-override* (atom {})]
+        (registry/record-rich-types-raw! :tick     {:return :text :args {} :effects #{}})
+        (registry/record-rich-types-raw! :counter  {:return :int  :args {} :effects #{}})
+        (registry/record-rich-types-raw! :greeter  {:return :text :args {:who :text} :effects #{}})
+        (registry/record-rich-types-raw! :producer {:return [:fn {} :text] :args {} :effects #{}})
+        (testing "a zero-arity callable slot admits ordinary fns"
+          (let [res (ta/apply-types-candidates {:expected [:fn {} :any]} c)
+                names (set (map :name (:candidates res)))]
+            (is (true? (:ok res)))
+            (is (contains? names :tick)
+                "a plain `() → text` fn belongs in a `() → any` slot")
+            (is (contains? names :greeter)
+                "so does one with free args — hof-wrap captures them")
+            (is (contains? names :producer)
+                "and a callable-producing fn still qualifies")))
+
+        (testing "the callable slot's return type still filters"
+          (let [names (set (map :name (:candidates
+                                        (ta/apply-types-candidates
+                                          {:expected [:fn {} :text]} c))))]
+            (is (contains? names :tick))
+            (is (not (contains? names :counter))
+                "`() → text` rejects a fn returning :int")))
+
+        (testing "a 1-arg callable slot checks the argument contravariantly"
+          (let [names (set (map :name (:candidates
+                                        (ta/apply-types-candidates
+                                          {:expected [:fn {:who :text} :text]} c))))]
+            (is (contains? names :greeter)
+                "the single-arg callee matches a single-arg slot")
+            (is (not (contains? names :counter))
+                "a fn returning :int is still out"))))
       (finally (sp/close storage)))))
 
 

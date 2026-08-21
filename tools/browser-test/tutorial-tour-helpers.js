@@ -42,23 +42,42 @@ async function hardCleanup(page) {
   // and a fn that is still someone's parent refuses to delete (409). One
   // ordered pass clears the normal case; the second pass collects
   // whatever the first pass unblocked.
+  // A service row pins its fn: `tutorial-daemon` refuses to delete while
+  // lesson 10's row still points at it, so the row goes first.
+  try {
+    const svcs = await api(page, 'GET', '/api/services');
+    for (const s of (svcs.services || [])) {
+      if ((s['fn-name'] || '').startsWith('tutorial-')) {
+        await api(page, 'DELETE', '/api/entities/service/' + s.id);
+      }
+    }
+  } catch (_) { /* best-effort */ }
   const leftovers = ['tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
                      'tutorial-card', 'tutorial-button', 'tutorial-script',
-                     'tutorial-renamed', 'tutorial-point'];
+                     'tutorial-renamed', 'tutorial-point', 'tutorial-daemon',
+                     'tutorial-tick'];
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));
     }
   }
+  // Lesson 14's pin has to go before its namespaces: uninstall leaves the
+  // MATERIALISED `mycorp@1-0-0` copy behind by design, and deleting `greet`
+  // by name (as this sweep once did) gutted that copy — the next install
+  // then answered 404 "Entities not found" for a package that looked fine
+  // in the registry.
+  try {
+    await api(page, 'DELETE', '/api/packages/uninstall?name=mycorp-hello');
+  } catch (_) { /* not installed */ }
   try {
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
-    for (const nsName of [NS_NAME, 'tests']) {
+    for (const nsName of [NS_NAME, 'tests', 'mycorp', 'mycorp@1-0-0']) {
     const ns = (tree.namespaces || []).find((n) => n.name === nsName);
     if (ns) {
       const sub = await api(
-        page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + ns.id);
+        page, 'GET', '/api/graph/entities?scope=namespace&namespace-id=' + ns.id);
       for (const f of (sub.fns || [])) {
         if (f['namespace-id'] === ns.id) {
           await api(page, 'DELETE', '/api/entities/fn/' + f.id);
@@ -66,6 +85,19 @@ async function hardCleanup(page) {
       }
       await api(page, 'DELETE', '/api/entities/ns/' + ns.id);
     }
+    }
+  } catch (_) { /* best-effort */ }
+  // A published package-version whose namespace is gone answers 404 on
+  // install ("entities not found"), so a crashed lesson-14 run would poison
+  // the next one. The tour withdraws its own release; this is the belt.
+  try {
+    const rows = await api(page, 'GET', '/api/packages');
+    for (const row of (Array.isArray(rows) ? rows : (rows.packages || []))) {
+      if ((row?.name || '').startsWith('mycorp')) {
+        await api(page, 'DELETE', '/api/packages/withdraw?name='
+                  + encodeURIComponent(row.name)
+                  + '&version=' + encodeURIComponent(row.version));
+      }
     }
   } catch (_) { /* best-effort */ }
   // A stray OWN binding on the package parents the lessons extend (:add /
@@ -510,6 +542,12 @@ async function runWithEffectAck(page, formValue) {
 async function finishAndDelete(page) {
   assert(await clickTourButton(page, 'Finish'), 'Finish button');
   await waitTourTitle(page, 'Clean up tutorial items?');
+  // The cleanup prompt's title lands one render before its buttons — clicking
+  // on the title alone raced the button into existence on a loaded stack.
+  await page.waitForFunction(() => Array.from(
+    document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
+    .some((b) => b.textContent.trim() === 'Delete them'),
+  null, {timeout: 20000, polling: 150});
   assert(await clickTourButton(page, 'Delete them'), 'Delete them button');
   await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
     null, {timeout: 20000, polling: 200});
@@ -523,10 +561,16 @@ async function finishAndDelete(page) {
 async function bindFnRefPlaceholder(page, fnName) {
   await page.waitForSelector('.placeholder-binder', {timeout: 30000});
   await page.evaluate(() => document.querySelector('.placeholder-binder').click());
-  await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
-    .some((b) => b.textContent.trim() === 'Bind fn-ref'),
-  null, {timeout: 15000, polling: 100});
+  // Two shapes: a scalar slot offers the literal/fn-ref choice, while a
+  // CALLABLE slot (`[:fn …]`, e.g. :future's :body) cannot take a literal
+  // at all and opens the picker straight away. Accept whichever appears.
+  await page.waitForFunction(() => {
+    return !!document.querySelector('.fn-picker-popover')
+      || Array.from(document.querySelectorAll('button'))
+        .some((b) => b.textContent.trim() === 'Bind fn-ref');
+  }, null, {timeout: 15000, polling: 100});
   await page.evaluate(() => {
+    if (document.querySelector('.fn-picker-popover')) return;
     Array.from(document.querySelectorAll('button'))
       .find((b) => b.textContent.trim() === 'Bind fn-ref').click();
   });

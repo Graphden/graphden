@@ -418,6 +418,18 @@
           :candidate {:type :type-expression :description "The candidate (binding-side) type expression."}}
    :return-type :bool}
 
+  {:name :fn-type?
+   :description "True iff the type expression is a callable shape (`[:fn args ret]` / `[:fn args ret effects]`). Lets a graph branch on \"is this slot expecting a function?\" without reimplementing the shape test."
+   :args {:type {:type :type-expression :description "Type expression to test."}}
+   :return-type :bool}
+
+  {:name :fn-signature
+   :description "`[:fn args ret effects]` — a candidate fn's own callable shape, assembled from its rich-type fields. A fn-ref bound into a callable slot IS this signature (the executor hof-wraps the ref), so this is what a callable slot's subtype check compares."
+   :args {:args {:type :keyword-map :description "The candidate's `{arg-name → type}` map."}
+          :return {:type :type-expression :description "The candidate's return type."}
+          :effects {:type :any :description "The candidate's effect set."}}
+   :return-type :type-expression}
+
   {:name :describe-type-mismatch
    :description "One-line human-readable explanation of why `candidate` ⊄ `expected`. Used by the editor's type-picker tooltip."
    :args {:expected {:type :type-expression :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
@@ -683,10 +695,31 @@
   {:name :_types-candidates-not-type-row?
    :parent :not :args {:value :_types-candidates-type-row?}}
 
+  ;; A CALLABLE slot (`[:fn …]`, e.g. `:future`'s `:body`) never receives
+  ;; the candidate's result — the executor hof-wraps the ref and the
+  ;; callable itself is the value. So admissibility is "signature ⊆ slot",
+  ;; the rule `check-binding!` applies on write. Comparing the RETURN there
+  ;; answered "Compatible · 0" for every ordinary fn, hiding legal binds
+  ;; behind "Other" and teaching readers to override the diagnostic.
+  {:name :_types-candidates-expected-callable?
+   :parent :fn-type?
+   :args {:type {:as :expected}}}
+
+  {:name :_types-candidates-signature
+   :parent :fn-signature
+   :args {:args :_types-candidates-args
+          :return :_types-candidates-return
+          :effects :_types-candidates-apply-effects-raw}}
+
   {:name :_types-candidates-subtype-ok?
-   :parent :subtype?
-   :args {:expected {:as :expected}
-          :candidate :_types-candidates-return}}
+   :parent :if
+   :args {:test :_types-candidates-expected-callable?
+          :then {:parent :subtype?
+                 :args {:expected {:as :expected}
+                        :candidate :_types-candidates-signature}}
+          :else {:parent :subtype?
+                 :args {:expected {:as :expected}
+                        :candidate :_types-candidates-return}}}}
 
   {:name :_types-candidates-effects-ok?
    :description "True iff allowed-effects is nil (no filter) OR every effect on the row is in allowed-effects."

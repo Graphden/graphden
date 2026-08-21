@@ -1548,6 +1548,38 @@
       (finally (sp/close base)))))
 
 
+(deftest upsert-after-delete-revives-instead-of-throwing-test
+  ;; Deleting tombstones the VERSION and leaves the identity row behind, and
+  ;; package ids are deterministic per (namespace, name) — so a re-sync hands
+  ;; `upsert-entities` an id whose identity exists and whose content does not.
+  ;; Classifying that as an update sent it to `update-entities`, which
+  ;; resolves versions and threw "Entities not found": installing a package
+  ;; whose materialised fns had been deleted answered 404 forever after.
+  ;; Upsert means create-or-update, so the deleted row is re-created.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [created (sp/create-entity v :fn {:name "revive-me" :parent-ids []
+                                             :return-type-fn-id nil})
+            fn-id (:id created)]
+        ;; The USER-facing delete — what `/api/entities/fn/<id>` performs:
+        ;; tombstone the version, KEEP the identity row. A hard delete drops
+        ;; the identity and the next write just creates it again, so only
+        ;; this shape reaches the bug.
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity v :fn fn-id))
+        (testing "precondition: gone from the versioned view, identity kept"
+          (is (nil? (sp/read-entity v :fn fn-id)))
+          (is (seq (sp/query-entities base :fn {:id fn-id}))))
+        (testing "upsert re-creates it instead of throwing :not-found"
+          (sp/upsert-entities v :fn [{:id fn-id :name "revive-me" :parent-ids []
+                                      :return-type-fn-id nil}])
+          (let [row (sp/read-entity v :fn fn-id)]
+            (is (some? row) "the fn is visible again")
+            (is (= "revive-me" (:name row))))))
+      (finally (sp/close base)))))
+
+
 (deftest singular-update-onto-versionless-identity-is-not-found-test
   ;; The asymmetry with the batch path above is deliberate and pinned here:
   ;; singular `update-entity` resolves through the VERSION-gated

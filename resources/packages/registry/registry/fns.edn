@@ -632,6 +632,95 @@
    :args {:path "/packages/:name/:version" :handler :fetch-package-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; DELETE /api/packages/withdraw?name=<pkg>&version=<v> — withdraw a
+  ;; published version.
+  ;;
+  ;; A release is immutable, not eternal: publishing the wrong namespace, or
+  ;; the wrong version number, used to be permanent, and a version whose
+  ;; source namespace was later deleted stays in the registry answering 404
+  ;; to every install. Withdrawing is refused while ANY branch still pins the
+  ;; package — a pin resolves through the version row, so removing it under a
+  ;; live install would break that branch's graph.
+  ;; ---------------------------------------------------------------------
+  {:name :_wd-name
+   :parent :to-str
+   :args {:value {:parent :query-param
+                  :args {:request {:as :request} :param-name {:value "name"}}}}}
+
+  {:name :_wd-version
+   :parent :to-str
+   :args {:value {:parent :query-param
+                  :args {:request {:as :request} :param-name {:value "version"}}}}}
+
+  {:name :_wd-where-name
+   :parent :assoc-empty
+   :args {:key {:value :name} :value :_wd-name}}
+
+  {:name :_wd-where
+   :parent :assoc
+   :args {:map :_wd-where-name :key {:value :version} :value :_wd-version}}
+
+  {:name :_wd-row
+   :parent :first
+   :args {:coll {:parent :query-entities
+                 :args {:entity-type {:value "package-version"} :where :_wd-where}}}}
+
+  {:name :_wd-missing?
+   :parent :nil? :args {:value :_wd-row}}
+
+  ;; Pins are per-branch rows keyed by package NAME — any branch counts, so
+  ;; the lookup deliberately drops the branch filter the install path uses.
+  {:name :_wd-pins
+   :parent :query-entities
+   :args {:entity-type {:value "package-install"}
+          :where {:parent :assoc-empty
+                  :args {:key {:value :package-name} :value :_wd-name}}}}
+
+  {:name :_wd-pinned?
+   :parent :not :args {:value {:parent :empty? :args {:coll :_wd-pins}}}}
+
+  {:name :_wd-do-delete
+   :parent :delete-entity
+   :args {:entity-type {:value "package-version"}
+          :id {:parent :get :args {:coll :_wd-row :key {:value :id} :default nil}}}}
+
+  {:name :_wd-ok-envelope
+   :parent :assoc
+   :args {:map {:parent :assoc-empty
+                :args {:key {:value :ok} :value {:value true}}}
+          :key {:value :withdrawn} :value :_wd-name}}
+
+  {:name :_wd-ok
+   :description "Delete the row, THEN answer — `:do` forces the order so a caller that re-reads the registry immediately sees the withdrawal."
+   :parent :do
+   :args {:steps [:_wd-do-delete
+                  {:parent :json-envelope-response :args {:envelope :_wd-ok-envelope}}]}}
+
+  {:name :_wd-err-missing
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "no-such-version" :http-status 404}}}}
+
+  {:name :_wd-err-pinned
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "still-installed" :http-status 409}}}}
+
+  {:name :_wd-result
+   :parent :cond
+   :args {:clauses [:_wd-missing? :_wd-err-missing
+                    :_wd-pinned?  :_wd-err-pinned
+                    {:value true} :_wd-ok]}}
+
+  {:name :withdraw-package-handler
+   :lambda-params [:request]
+   :description "Ring handler for DELETE /api/packages/withdraw — deletes the `(name, version)` :package-version row unless some branch still pins the package."
+   :parent :_wd-result}
+
+  {:name :api-packages-withdraw
+   :description "DELETE /api/packages/withdraw?name=<pkg>&version=<v> — withdraw a published version. 409 while any branch pins it, 404 when the version is unknown. Auth-required."
+   :parent :delete
+   :args {:path "/packages/withdraw" :handler :withdraw-package-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; GET /api/export/graph — whole-graph export as an EDN bundle: the
   ;; cloud→self-hosted "download my whole project" migration artifact. EDN
   ;; (not JSON) so fn-def keywords round-trip faithfully; read straight from
@@ -2210,6 +2299,7 @@
                   :api-packages-fork
                   :api-packages-installed
                   :api-packages-uninstall
+                  :api-packages-withdraw
                   :api-packages-panel-install
                   :api-packages-panel-update
                   :api-packages-panel-fork

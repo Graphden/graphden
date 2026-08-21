@@ -656,3 +656,18 @@
   if (pkgChip) pkgChip.addEventListener('click', gdOpenPkgPop);
   gdRevealPkgChip();
 })();
+
+// Escape closes the topmost context-bar popover (`.gd-pop`: workspace,
+// packages, publish, branch-policy). Each of them already closes on its scrim
+// click, and each owns a different close function — so route the key through
+// the scrim rather than teaching this handler four APIs. Without it Escape
+// did nothing there while every other popover in the editor answered it, and
+// during the interactive tutorial it reached the tour instead and ended the
+// lesson. `preventDefault` marks the key consumed (see graphden-popover.js).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const scrims = document.querySelectorAll('.gd-pop-scrim');
+  if (!scrims.length) return;
+  e.preventDefault();
+  scrims[scrims.length - 1].click();
+});

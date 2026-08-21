@@ -325,6 +325,70 @@ const {
     });
     console.log('  picker: resume + filter + done marks, list scrolls, Cancel pinned');
 
+    // ---------- Escape belongs to whatever is on TOP ----------
+    // Every lesson tells the reader to open something — a picker, a panel, a
+    // dialog — and Escape is how people close things. The tour also ends on
+    // Escape, so "dismissed the panel" must not read as "quit the lesson".
+    // It regressed once already: the Packages panel closes through the shared
+    // popover helper and was missing from the tour's list of dismissible
+    // surfaces, so closing it killed lesson 14 mid-walk.
+    await page.goto(BASE + '/?tutorial=14');
+    await waitTourTitle(page, 'Sharing more than one fn', 150000);
+    await page.waitForSelector('#gd-pkg-chip', {timeout: 30000});
+    await page.evaluate(() => document.getElementById('gd-pkg-chip').click());
+    await page.waitForSelector('[data-packages-panel]', {timeout: 30000});
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('#gd-pkg-pop'),
+      null, {timeout: 10000, polling: 200});
+    assert(await tourTitle(page) === 'Sharing more than one fn',
+      'the tour survives closing a panel with Escape (got: ' + await tourTitle(page) + ')');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+      null, {timeout: 15000, polling: 200});
+    console.log('  escape: closes the panel first, ends the tour only when alone');
+
+    // ---------- On a phone the tour is a bottom sheet ----------
+    // A 360px popover on a 390px screen lands on the Explorer, which is where
+    // the early lessons tell the reader to click — lesson 01 dead-ended at
+    // "click +" because + was underneath it. Checked here at BOTH sizes in
+    // one process; the whole suite can also be run at a phone viewport with
+    // GRAPHDEN_VIEWPORT=390x844.
+    const desktop = page.viewportSize();
+    await page.setViewportSize({width: 390, height: 844});
+    await page.goto(BASE + '/?tutorial=01');
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
+    const phone = await page.evaluate(() => {
+      const pop = document.querySelector('#gd-tour-pop');
+      const r = pop.getBoundingClientRect();
+      const list = document.querySelector('#entity-list')?.getBoundingClientRect();
+      return {
+        sheet: pop.classList.contains('gd-tour-sheet'),
+        fullWidth: Math.round(r.width) === window.innerWidth,
+        atBottom: Math.abs(r.bottom - window.innerHeight) <= 1,
+        leavesRoom: !!list && r.top > list.top,
+        reservesScroll: getComputedStyle(document.querySelector('#side-menu'))
+          .paddingBottom !== '0px',
+      };
+    });
+    assert(phone.sheet && phone.fullWidth && phone.atBottom,
+      'the step docks to the bottom edge, full width (got: ' + JSON.stringify(phone) + ')');
+    assert(phone.leavesRoom, 'and leaves the panel the lesson points at visible');
+    assert(phone.reservesScroll,
+      'the Explorer reserves the sheet height so a row under it can scroll clear');
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 15000});
+    assert(await page.evaluate(() =>
+      document.querySelector('#gd-tour-pop').classList.contains('gd-tour-sheet')),
+      'the catalogue is a sheet too');
+    await page.setViewportSize(desktop);
+    await page.goto(BASE + '/?tutorial=01');
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
+    assert(!await page.evaluate(() =>
+      document.querySelector('#gd-tour-pop').classList.contains('gd-tour-sheet')),
+      'and a desktop window keeps the anchored popover');
+    await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
+    console.log('  mobile: step + catalogue dock as a sheet, desktop unchanged');
+
     console.log('PASS');
   } catch (err) {
     failed = true;

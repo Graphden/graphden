@@ -79,7 +79,6 @@ function makeCtx(world) {
   };
   const ctx = vm.createContext({
     console,
-    _tourState: {created: w.created || []},
     graphData: {namespaces: w.namespaces},
     initGraph: () => Promise.resolve(),
     _tourFindFn: (name) => w.fns.find((f) => f.name === name) || null,
@@ -162,11 +161,10 @@ const tests = [
                      {type: 'package-version', name: 'mycorp-hello'},
                      {type: 'ns', name: 'mycorp@1-0-0'}];
     const {ctx, calls} = makeCtx({
-      created,
       namespaces: [{id: 'ns-1', name: 'mycorp'}, {id: 'ns-2', name: 'mycorp@1-0-0'}],
       packages: [{name: 'mycorp-hello', version: '1.0.0'}],
     });
-    const {failed} = await ctx._tourDeleteCreated();
+    const {failed} = await ctx._tourDeleteCreated(created);
     assert(failed.length === 0, 'a clean pass reports nothing');
     const unpin = calls.findIndex((c) => c.includes('/packages/uninstall'));
     const withdraw = calls.findIndex((c) => c.includes('/packages/withdraw'));
@@ -178,12 +176,12 @@ const tests = [
   }),
 
   test('a namespace is emptied before it is deleted', async () => {
+    const created = [{type: 'ns', name: 'mycorp'}];
     const {ctx, calls} = makeCtx({
-      created: [{type: 'ns', name: 'mycorp'}],
       namespaces: [{id: 'ns-1', name: 'mycorp'}],
       fns: [FN('installed-copy', 'ns-1')],
     });
-    await ctx._tourDeleteCreated();
+    await ctx._tourDeleteCreated(created);
     const child = calls.indexOf('DELETE /api/entities/fn/id-installed-copy');
     const parent = calls.indexOf('DELETE /api/entities/ns/ns-1');
     assert(child >= 0, 'the contents the install materialised are removed');
@@ -191,23 +189,23 @@ const tests = [
   }),
 
   test('a refused namespace delete is reported', async () => {
+    const created = [{type: 'ns', name: 'mycorp'}];
     const {ctx} = makeCtx({
-      created: [{type: 'ns', name: 'mycorp'}],
       namespaces: [{id: 'ns-1', name: 'mycorp'}],
       refuse: (m, u) => m === 'DELETE' && u.includes('/entities/ns/'),
     });
-    const {failed} = await ctx._tourDeleteCreated();
+    const {failed} = await ctx._tourDeleteCreated(created);
     assert(failed.length === 1 && failed[0].name === 'mycorp',
            'the reader is told it stayed (got: ' + JSON.stringify(failed) + ')');
   }),
 
   test('one row that refuses twice is named once', async () => {
+    const created = [{type: 'package-version', name: 'mycorp-hello'}];
     const {ctx} = makeCtx({
-      created: [{type: 'package-version', name: 'mycorp-hello'}],
       packages: [{name: 'mycorp-hello', version: '1.0.0'}],
       refuse: (m, u) => u.includes('/packages/'),
     });
-    const {failed} = await ctx._tourDeleteCreated();
+    const {failed} = await ctx._tourDeleteCreated(created);
     assert(failed.length === 1,
            'the unpin AND the withdraw both refused, but it is one package'
            + ' (got: ' + JSON.stringify(failed) + ')');
@@ -244,6 +242,25 @@ const tests = [
     const {ctx} = makeCtx({});
     const out = await ctx._tourSurvivors([{type: 'future-thing', name: 'x'}]);
     assert(out.length === 1, 'the delete pass reports what happens to it');
+  }),
+
+
+  test('the pass deletes what it is GIVEN, with no tour state at all', async () => {
+    // The end-of-tour dialog runs long after the tour stopped: the last step
+    // moves the index past the end, the very next poll tick tore the tour
+    // down, and the dialog — still awaiting its survivors read — then
+    // rendered over a null state. Reading `_tourState` here meant deleting
+    // nothing and reporting "Tutorial items deleted". Reproduced on the stack
+    // (600ms poll vs a ~1.5s read); the engine now stops the poll first AND
+    // hands the list over, so this module never reads tour state at all.
+    const created = [{type: 'fn', name: 'tutorial-a'}];
+    const {ctx, calls} = makeCtx({fns: [FN('tutorial-a')]});
+    assert(typeof ctx._tourState === 'undefined',
+           'the module does not read tour state (it is not even defined here)');
+    const {failed} = await ctx._tourDeleteCreated(created);
+    assert(failed.length === 0, 'nothing refused');
+    assert(calls.includes('DELETE /api/entities/fn/id-tutorial-a'),
+           'the row the lesson made was actually deleted (got: ' + calls.join(' | ') + ')');
   }),
 
 ];

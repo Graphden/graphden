@@ -133,16 +133,67 @@ function _tourRenderStep() {
   _tourPosition();
 }
 
+// A phone has no room BESIDE anything. The 360px popover on a 390px screen
+// lands on top of the panel the step is pointing at, and the reader cannot
+// reach the control the text just named — lesson 01 dead-ends at "click +",
+// because + is under the popover. Below this width the popover docks to the
+// bottom edge as a sheet (CSS owns that geometry) and the spotlight keeps
+// pointing at the target above it.
+function _tourNarrow() {
+  return window.innerWidth <= 700;
+}
+
+// The sheet covers the bottom of a fixed-height scroll panel, and a row under
+// it cannot be scrolled up because the panel has nothing below to scroll to.
+// Reserve the sheet's height at the bottom of the panels a lesson points at,
+// so `scrollIntoView` has somewhere to go. Reset to 0 when the sheet is gone.
+function _tourReserveForSheet(px) {
+  const root = document.documentElement;
+  if (px > 0) {
+    root.style.setProperty('--gd-tour-sheet-h', px + 'px');
+    document.body.classList.add('gd-tour-sheet-open');
+  } else {
+    root.style.removeProperty('--gd-tour-sheet-h');
+    document.body.classList.remove('gd-tour-sheet-open');
+  }
+}
+
+// Is the target hidden UNDER the sheet? On a phone that is as unreachable as
+// below the fold, and the fix is the same one: scroll it into view.
+function _tourUnderSheet(selector) {
+  const el = selector ? document.querySelector(selector) : null;
+  if (!el || !_tourEls?.pop.classList.contains('gd-tour-visible')) return false;
+  const r = el.getBoundingClientRect();
+  const sheet = _tourEls.pop.getBoundingClientRect();
+  return r.bottom > sheet.top && r.top < sheet.bottom
+    && r.right > sheet.left && r.left < sheet.right;
+}
+
 function _tourPosition() {
   if (!_tourEls || !_tourState) return;
   const step = _tourStep();
   const { spot, pop } = _tourEls;
+  const narrow = _tourNarrow();
+  pop.classList.toggle('gd-tour-sheet', narrow);
+  _tourReserveForSheet(narrow && pop.classList.contains('gd-tour-visible')
+                       ? pop.offsetHeight : 0);
   const target = step?.target ? document.querySelector(step.target) : null;
   const rect = target ? target.getBoundingClientRect() : null;
   const visible = rect && rect.width > 0 && rect.height > 0
     && rect.bottom > 0 && rect.top < window.innerHeight;
 
-  if (visible) {
+  if (visible && narrow) {
+    // Spotlight still anchors; the sheet's own geometry is in the stylesheet.
+    const pad = 6;
+    spot.style.left = (rect.left - pad) + 'px';
+    spot.style.top = (rect.top - pad) + 'px';
+    spot.style.width = (rect.width + pad * 2) + 'px';
+    spot.style.height = (rect.height + pad * 2) + 'px';
+    spot.classList.add('gd-tour-visible');
+    pop.classList.remove('gd-tour-centered');
+    pop.style.left = '';
+    pop.style.top = '';
+  } else if (visible) {
     const pad = 6;
     spot.style.left = (rect.left - pad) + 'px';
     spot.style.top = (rect.top - pad) + 'px';
@@ -216,11 +267,12 @@ function _tourTick() {
     _tourState._expandedFor = _tourState.step;
     try { toggleCollapsed(false); } catch (_) { /* stay collapsed */ }
   }
-  // Still out of view (a long namespace list, a short window)? Bring it
-  // in — a spotlight below the fold is the same dead end.
+  // Still out of view (a long namespace list, a short window, or — on a
+  // phone — under the sheet)? Bring it in: a spotlight the reader cannot
+  // reach is the same dead end whichever edge hides it.
   if (step.target && _tourState._scrolledFor !== _tourState.step) {
     const el = document.querySelector(step.target);
-    if (el && !_tourTargetVisible(step.target)) {
+    if (el && (!_tourTargetVisible(step.target) || _tourUnderSheet(step.target))) {
       _tourState._scrolledFor = _tourState.step;
       try { el.scrollIntoView({block: 'center', inline: 'nearest'}); } catch (_) { /* ignore */ }
     }
@@ -263,6 +315,23 @@ function _tourBack() {
   _tourRenderStep();
 }
 
+// What makes a RENDERED step live: the poll that advances it and the key
+// handler that ends it. Re-rendering alone produced a step that said
+// "Advances automatically when done" while nothing polled — the state a
+// reader reached by pausing and then dismissing the catalogue.
+function _tourArm() {
+  if (!_tourTimer) _tourTimer = setInterval(_tourTick, TOUR_TICK_MS);
+  document.removeEventListener('keydown', _tourOnKey);
+  document.addEventListener('keydown', _tourOnKey);
+}
+
+// Show a tour that is still in memory but no longer running.
+function _tourResume() {
+  if (!_tourState) { _tourTeardown(); return; }
+  _tourRenderStep();
+  _tourArm();
+}
+
 // Stop showing steps, keep the state. `maybeStartTutorial` resumes it on the
 // next load, and the catalogue offers "Continue …" right away.
 function _tourPause() {
@@ -272,6 +341,7 @@ function _tourPause() {
     _tourEls.spot.classList.remove('gd-tour-visible');
     _tourEls.pop.classList.remove('gd-tour-visible');
   }
+  _tourReserveForSheet(0);
   document.removeEventListener('keydown', _tourOnKey);
   if (typeof gdToast === 'function') {
     gdToast(_tourCopy('paused', 'Lesson {lesson} paused — continue it from the'
@@ -290,6 +360,18 @@ function _tourCopy(key, fallback, vars) {
 }
 
 async function _tourEnd() {
+  // STOP THE POLL FIRST, before any await. The last `_tourAdvance` moves the
+  // step index past the end, so the very next tick sees no step and tears the
+  // tour down — including `_tourState`. That fired while this function was
+  // awaiting the survivors fetch, and the outcome was the worst kind: the
+  // dialog rendered anyway, one tick later, over a null state, so "Delete
+  // them" deleted NOTHING and still reported "Tutorial items deleted".
+  // (Reproduced on the stack: 600ms poll vs a ~1.5s survivors read.)
+  if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
+  // Read what the lesson made ONCE, here — the dialog's buttons run much
+  // later, and nothing else may be holding the state by then.
+  const created = (_tourState?.created) || [];
+
   // Branch-isolated run (org mode): the WHOLE lesson lives on a tour
   // branch, so the cleanup offer is one decision — delete the branch
   // (full rollback, returns to main) or keep it.
@@ -306,7 +388,7 @@ async function _tourEnd() {
         try {
           // Children first — a fork the lesson itself made (lesson 08) would
           // otherwise block its parent's delete.
-          await _tourDeleteCreatedBranches();
+          await _tourDeleteCreatedBranches(created);
           const r = await authFetch(API.api_branches_ref(branch), { method: 'DELETE' });
           ok = !!r?.ok;
         } catch (_) { ok = false; }
@@ -325,7 +407,7 @@ async function _tourEnd() {
   // makes this async, so the dialog is rendered from the resolved list —
   // a type the deleter knows and this list does not is a row the reader is
   // never told about (that is how a published version went unmentioned).
-  const survivors = await _tourSurvivors((_tourState?.created) || []);
+  const survivors = await _tourSurvivors(created);
   if (!survivors.length) { _tourTeardown(); return; }
 
   const listOf = (rows) => rows.map((c) => c.type + ' “' + c.name + '”').join(', ');
@@ -336,7 +418,7 @@ async function _tourEnd() {
                     + ' explore? (Deletes are soft.)',
                     { items: listOf(survivors) }),
     primary: [_tourCopy('cleanup-confirm', 'Delete them'), async () => {
-      const { failed } = await _tourDeleteCreated();
+      const { failed } = await _tourDeleteCreated(created);
       _tourTeardown();
       _tourReport(!failed.length,
                   failed.length
@@ -357,6 +439,9 @@ function _tourDialog({ title, body, primary, quiet }) {
   spot.classList.remove('gd-tour-visible');
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible', 'gd-tour-centered');
+  // Same rule as a step: on a phone this is a bottom sheet, not a 360px box
+  // floating in a 390px window.
+  pop.classList.toggle('gd-tour-sheet', _tourNarrow());
   const titleEl = document.createElement('div');
   titleEl.className = 'gd-tour-title';
   titleEl.textContent = title;
@@ -381,6 +466,7 @@ function _tourReport(ok, message) {
 
 function _tourTeardown() {
   _tourState = null;
+  _tourReserveForSheet(0);
   _tourSaveState();
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
   if (_tourEls) {
@@ -392,12 +478,20 @@ function _tourTeardown() {
 }
 
 // Escape ends the tour — but ONLY when it is the topmost thing on screen.
-// Every dialog the lessons ask the reader to open (the publish popover, the
-// fn picker, a bind form, the row-actions menu) treats Escape as "close me",
-// and ending the whole lesson because someone dismissed a dialog is a trap:
-// the step said "click ⬆, fill it in, close it", and closing it the obvious
-// way threw the tour away. Let the dialog have the key; the tour ends on the
-// next Escape, when nothing else is open.
+// Every dialog the lessons ask the reader to open treats Escape as "close
+// me", and ending the whole lesson because someone dismissed a dialog is a
+// trap: the step said "click ⬆, fill it in, close it", and closing it the
+// obvious way threw the tour away.
+//
+// The rule is now "was this key already consumed?" — every handler that
+// closes something on Escape calls `preventDefault` to say so (Escape has no
+// default action, so the call means exactly that and nothing else). The old
+// rule was a LIST of dismissible selectors, and a list of other people's
+// surfaces goes stale: the Packages panel shipped through the shared popover
+// helper, was never added, and closing it killed the tour mid-lesson 14.
+//
+// The list survives as a belt for surfaces that close WITHOUT a keydown
+// handler of their own (a menu that closes on blur, an inline input).
 const TOUR_ESCAPE_OWNERS = [
   '#gd-nspub-pop',
   '.fn-picker-popover',
@@ -405,11 +499,13 @@ const TOUR_ESCAPE_OWNERS = [
   '.row-actions-popover',
   '.create-menu',
   '.inline-input',
+  '.gd-pop',                        // context-bar popovers (packages, workspace)
   '#gd-asset-editor .gd-asset-diff',
 ].join(', ');
 
 function _tourOnKey(e) {
   if (e.key !== 'Escape' || !_tourState) return;
+  if (e.defaultPrevented) return;
   if (document.querySelector(TOUR_ESCAPE_OWNERS)) return;
   _tourEnd();
 }
@@ -447,8 +543,7 @@ async function startTutorial(lessonId, resumeStep, resumeCreated) {
   _tourSaveState();
   _tourEnsureEls();
   _tourRenderStep();
-  if (!_tourTimer) _tourTimer = setInterval(_tourTick, TOUR_TICK_MS);
-  document.addEventListener('keydown', _tourOnKey);
+  _tourArm();
   return true;
 }
 

@@ -276,6 +276,7 @@ function ensureRowActionsDismissHandler() {
     if (e.key !== 'Escape') return;
     if (!rowActionsPopoverEl || rowActionsPopoverEl.style.display === 'none') return;
     e.stopPropagation();
+    e.preventDefault();   // consumed — see graphden-popover.js
     rowActionsPopoverSticky = false;
     const anchor = rowActionsPopoverAnchor;
     rowActionsPopoverAnchor = null;

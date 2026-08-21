@@ -24,6 +24,7 @@ function ensureBranchDiffModal() {
   _branchDiffModal = el;
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !el.classList.contains('hidden')) {
+      e.preventDefault();   // consumed — see graphden-popover.js
       closeBranchDiffModal();
     }
   });

@@ -77,10 +77,9 @@ async function _tourDeleted(call) {
   } catch (_) { return false; }
 }
 
-async function _tourDeleteCreatedBranches() {
-  const created = (_tourState?.created) || [];
+async function _tourDeleteCreatedBranches(created) {
   const failed = [];
-  for (const c of created) {
+  for (const c of (created || [])) {
     if (c.type !== 'branch') continue;
     const ok = await _tourDeleted(
       () => authFetch(API.api_branches_ref(c.name), { method: 'DELETE' }));
@@ -206,10 +205,13 @@ async function _tourDeleteNamespaces(created) {
 
 // Delete everything the lesson created, in dependency order, and return what
 // refused: `{failed: [{type, name}, …]}`. The caller decides what to say.
-async function _tourDeleteCreated() {
-  const created = (_tourState?.created) || [];
+// `created` is passed IN, not read from `_tourState`: the dialog that calls
+// this runs long after the tour stopped, and reading a state something else
+// may have cleared turned "delete what the lesson made" into "delete nothing,
+// report success".
+async function _tourDeleteCreated(created) {
   const raw = [
-    ...await _tourDeleteCreatedBranches(),
+    ...await _tourDeleteCreatedBranches(created),
     ...await _tourDeleteFns(created),      // fns first — a namespace deletes once empty
     ...await _tourRemovePackages(created),   // unpin, then withdraw
     ...await _tourDeleteNamespaces(created),

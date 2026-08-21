@@ -80,6 +80,10 @@ async function openTutorialMenu() {
   spot.classList.remove('gd-tour-visible');
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible', 'gd-tour-centered');
+  // On a phone the catalogue is a bottom sheet like every other tour surface
+  // — `_tourPosition` sets this while a lesson RUNS, and the catalogue can be
+  // opened without one.
+  pop.classList.toggle('gd-tour-sheet', _tourNarrow());
   // Opened MID-LESSON the popover still carries the last step's anchored
   // position as inline styles, which beat the centered class — the catalogue
   // then hangs off wherever that step's target was, and its capped height runs
@@ -187,10 +191,9 @@ async function openTutorialMenu() {
   // scrolls off the bottom is no way out.
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot gd-tour-picker-foot';
-  foot.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => {
-    if (_tourState) _tourRenderStep();
-    else _tourTeardown();
-  }));
+  // Dismissing the catalogue returns to the tour it covered — ARMED. A bare
+  // re-render left a step that polled nothing and ignored Escape.
+  foot.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => _tourResume()));
   pop.appendChild(foot);
 
   filter.addEventListener('input', () => render(filter.value));

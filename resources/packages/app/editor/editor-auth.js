@@ -297,7 +297,8 @@ async function mountAuthPopoverFields() {
   });
   document.getElementById('auth-password-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAuth();
-    if (e.key === 'Escape') closeAuthPopover();
+    // `preventDefault` MARKS Escape as consumed — see graphden-popover.js.
+    if (e.key === 'Escape') { e.preventDefault(); closeAuthPopover(); }
   });
   // Tenant-only elements exist ONLY when the tenancy addon's shadowing
   // partial served the form — the core admin-password variant has none, so
@@ -305,11 +306,11 @@ async function mountAuthPopoverFields() {
   // the whole mount on single-tenant).
   document.getElementById('auth-username-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAuth();
-    if (e.key === 'Escape') closeAuthPopover();
+    if (e.key === 'Escape') { e.preventDefault(); closeAuthPopover(); }
   });
   document.getElementById('auth-org-input')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAuth();
-    if (e.key === 'Escape') closeAuthPopover();
+    if (e.key === 'Escape') { e.preventDefault(); closeAuthPopover(); }
   });
   document.getElementById('auth-mode-toggle')?.addEventListener('click', (e) => {
     e.stopPropagation();

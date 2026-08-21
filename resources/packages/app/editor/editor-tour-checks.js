@@ -142,5 +142,3 @@ function _tourCheckPasses(check) {
     }
   } catch (_) { return false; }
 }
-
-// --- overlay elements --------------------------------------------------------

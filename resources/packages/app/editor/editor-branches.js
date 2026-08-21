@@ -388,7 +388,15 @@ function initBranchSelector() {
     closeBranchPopover();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeBranchPopover();
+    if (e.key !== 'Escape') return;
+    // Only when the popover is actually OPEN: this is a document-level
+    // handler, and marking every Escape as consumed (or calling close on
+    // one) makes the key useless for whatever else is listening — the
+    // interactive tutorial ends on Escape and stopped being able to.
+    const popover = document.getElementById('branch-popover');
+    if (!popover || popover.classList.contains('hidden')) return;
+    e.preventDefault();
+    closeBranchPopover();
   });
 }
 

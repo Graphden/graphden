@@ -379,6 +379,7 @@ function ensureIconReasonPopover() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!iconReasonPopoverEl || iconReasonPopoverEl.style.display === 'none') return;
+    e.preventDefault();   // consumed — see graphden-popover.js
     hideIconReasonPopover();
   });
   return el;

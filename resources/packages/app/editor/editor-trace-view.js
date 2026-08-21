@@ -73,7 +73,7 @@ function closeTraceView() {
 
 function _traceViewOnKey(e) {
   if (!_traceViewPanelEl) return;
-  if (e.key === 'Escape') { closeTraceView(); return; }
+  if (e.key === 'Escape') { e.preventDefault(); closeTraceView(); return; }
   // Arrow stepping only while focus is inside the panel — the canvas
   // and inputs keep their own arrow-key behaviour.
   if (!_traceViewPanelEl.contains(document.activeElement)) return;

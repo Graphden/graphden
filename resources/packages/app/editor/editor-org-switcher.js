@@ -63,7 +63,9 @@ async function initOrgSwitcher() {
     popover.classList.add('hidden');
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') popover.classList.add('hidden');
+    if (e.key !== 'Escape' || popover.classList.contains('hidden')) return;
+    e.preventDefault();   // consumed only when there was something to close
+    popover.classList.add('hidden');
   });
 }
 

@@ -54,6 +54,14 @@ function installPopoverDismiss({ getEl, getAnchor, isVisible, onDismiss }) {
     onDismiss();
   }, true);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && getEl() && isVisible()) onDismiss();
+    if (e.key !== 'Escape' || !getEl() || !isVisible()) return;
+    onDismiss();
+    // Escape has no default action — this MARKS the key as consumed. The
+    // interactive tutorial ends on Escape, and "the reader dismissed the
+    // popover the lesson told them to open" must not read as "the reader
+    // quit". A selector list of every dismissible surface was the previous
+    // answer and it went stale the moment a new popover shipped: closing the
+    // Packages panel killed the tour mid-lesson.
+    e.preventDefault();
   });
 }

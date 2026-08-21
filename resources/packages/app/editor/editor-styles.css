@@ -6303,6 +6303,53 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   flex-direction: column;
 }
 
+/* ---- Phone: the tour is a bottom sheet ----------------------------------
+   A 360px popover on a 390px screen sits on top of the Explorer — which is
+   where every early lesson tells the reader to click. Docking it to the
+   bottom edge keeps the target half of the screen free, and the engine
+   scrolls a target that ends up under the sheet back into view. The
+   catalogue gets the same treatment: a centered 360px panel with a scrolling
+   list reads as a cramped box on a phone and as a sheet everywhere else. */
+#gd-tour-pop.gd-tour-sheet,
+#gd-tour-pop.gd-tour-visible.gd-tour-sheet.gd-tour-centered {
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 52vh;
+  transform: none;
+  border-radius: 12px 12px 0 0;
+  border-bottom: none;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  /* Clear of a phone's home indicator / browser chrome. */
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+}
+
+/* While the sheet is up, the panels a lesson points at get its height as
+   bottom padding — otherwise a row under the sheet cannot be scrolled clear
+   of it: the Explorer is exactly viewport-tall, so there is nothing below to
+   scroll to (lesson 05's "New namespace" button, at the bottom of the list,
+   was simply unreachable). */
+body.gd-tour-sheet-open #side-menu {
+  padding-bottom: var(--gd-tour-sheet-h, 0);
+}
+
+/* Inside a sheet the actions are the thing a thumb reaches for: full-width
+   rows, and a touch target that is not a 29px desktop button. */
+@media (pointer: coarse) {
+  #gd-tour-pop .gd-tour-btn {
+    min-height: 40px;
+    padding: 9px 14px;
+  }
+  #gd-tour-pop .gd-tour-foot {
+    flex-wrap: wrap;
+  }
+}
+
 .gd-tour-head {
   display: flex;
   align-items: center;

@@ -94,7 +94,17 @@ async function newContext(chromium) {
       '--in-process-gpu',
     ],
   });
-  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  // A guard can run the SAME lesson walk at a phone viewport:
+  // `GRAPHDEN_VIEWPORT=390x844 node edit-tutorial-tour.test.js`. The desktop
+  // size stays the default — this exists so a mobile pass is one env var, not
+  // a forked suite.
+  const vp = (process.env.GRAPHDEN_VIEWPORT || '1400x900')
+    .split('x').map((n) => parseInt(n, 10));
+  const ctx = await browser.newContext({
+    viewport: { width: vp[0] || 1400, height: vp[1] || 900 },
+    hasTouch: !!process.env.GRAPHDEN_VIEWPORT,
+    isMobile: false,
+  });
   await ctx.addInitScript((auth) => {
     // about:blank has no origin → localStorage access throws. The
     // navigation to localhost runs the init script again on a real

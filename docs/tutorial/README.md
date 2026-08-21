@@ -41,7 +41,7 @@
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written · ▶ interactive |
 | 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
 | 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written |
-| 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written |
+| 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written · ▶ interactive |
 | 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written |
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |
 | 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written · ▶ interactive |

@@ -61,9 +61,11 @@ In the Apps panel, the **Add app** form asks for two things:
    flat namespace, so `shop` is claimed by whoever takes it first
    (like a project name on a deployment host). Pick something
    specific to you.
-2. the **fn it serves** — the handler fn (its id, copyable from any
-   fn card). This is the fn graphden executes on every request to
-   the app.
+2. the **fn it serves** — the handler fn, written the way you read
+   it in the editor: `checkout`, or `shop.checkout` when that bare
+   name exists in more than one namespace. (An id works too, if you
+   have one to hand.) This is the fn graphden executes on every
+   request to the app.
 
 Submit, and the row appears. That's the whole deployment: no build
 step, no container, no restart — the app is live the instant the

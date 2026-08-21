@@ -804,6 +804,45 @@
               {:title "That's authorization"
                :body "Per-namespace capabilities, one table, no roles required — though Roles exist when you want to name a bundle of them. The written lesson 17 covers the org-management axis (manage-users, manage-grants …), which is separate from namespace capabilities. Click Finish."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "20"
+             :chapter "Your organization"
+             :requires "manage-apps"
+             :title "Apps"
+             :steps
+             [{:title "Serving the graph to the public"
+               :body "So far everything you built ran when YOU ran it. An app is the other direction: a public host, and the fn that answers every request to it. No deploy, no container — the fn already exists."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Something to serve"
+               :body "Type const in the Explorer filter and click the const row — the primitive that returns its :value unchanged. A handler is any fn returning a response map, so :const is enough to publish."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "const"}}
+              {:title "Make it yours"
+               :body "Click ⋯ on the const row, choose “Extend”, name it tutorial-page — then Save."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-page" :parent "const"}
+               :creates {:type "fn" :name "tutorial-page"}}
+              ;; Selection gate — the bind must land on the child.
+              {:title "tutorial-page is open"
+               :body "It inherited :value. Bound to a Ring response map, this fn IS a web page — the same shape lesson 01 returned, now with a content type."
+               :target nil
+               :check {:kind "selected" :name "tutorial-page"}}
+              {:title "Answer like a web server"
+               :body "Click the “+” on :value, choose “Bind literal”, and enter exactly: {\"status\": 200, \"headers\": {\"Content-Type\": \"text/html\"}, \"body\": \"<h1>Hello from my app</h1>\"} — then Save."
+               :target ".placeholder-binder"
+               :check {:kind "binding-bound" :name "tutorial-page" :slot "value"}}
+              {:title "Open Apps"
+               :body "Avatar → “Organization” → “Apps”. The table lists every app this org serves: its subdomain label, and the fn behind it."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"apps\"]:not([hidden])"}}
+              {:title "Publish it"
+               :body "In the form: subdomain tutorial, and for the fn type its NAME — tutorial-page (an id works too; qualify the name as ns.name if it isn't unique). Click “+ Add app”. The row appears, and the app is live immediately — the host answers from the graph as it stands."
+               :target "[data-apps-panel] form"
+               :check {:kind "manual"}}
+              {:title "That's publishing"
+               :body "Open the app's host in a new tab and your page is there — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request. The written lesson 20 covers custom domains and the request shape a handler receives. Click Finish to clean up or keep the app."
+               :target "[data-apps-panel]"
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

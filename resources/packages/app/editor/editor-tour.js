@@ -636,6 +636,15 @@ const REQUIRE_SIGNALS = {
     phrase: 'the dedicated plan (or your own instance)',
     short: 'the dedicated plan',
   },
+  // The Assets panel edits the frontend every session on the instance loads,
+  // so it exists only on a single-tenant deployment — under the cloud tenancy
+  // addon it is hidden and its writes are platform-only.
+  assets: {
+    test: () => !(typeof window.graphdenTenancyActive === 'function'
+                  && window.graphdenTenancyActive()),
+    phrase: 'a single-tenant instance (your own deployment)',
+    short: 'your own instance',
+  },
   // Anything that only exists once there ARE organizations: the org chip, the
   // per-org editor address, membership.
   org: {

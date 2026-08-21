@@ -1017,6 +1017,43 @@
               {:title "Reading your own tier"
                :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 18 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click Finish."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "25"
+             :chapter "The editor"
+             :requires "assets"
+             :title "Editing the editor"
+             :steps
+             [{:title "The editor is served from the graph too"
+               :body "Every file this interface is made of — its JavaScript, its CSS — is served by the same instance you are editing in. An OVERRIDE is a row that shadows one of them by path, per branch, revertible. On a shared cloud that would be a cross-tenant XSS surface, so it exists only on your own deployment — this one."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open Assets"
+               :body "Click your avatar → “Organization” → “Assets”. Every servable frontend file is listed with a chip: baseline means the shipped file is serving, override means yours is."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"assets\"]:not([hidden])"}}
+              {:title "Open the stylesheet"
+               :body "Find packages/app/editor/editor-styles.css in the list and click its “edit”. The file opens in a code editor — the same one a :js-source slot gets."
+               :target "[data-section=\"assets\"] .gd-asset-edit-btn"
+               :check {:kind "dom" :selector ".gd-asset-save-btn"}}
+              {:title "Change something you will notice"
+               :body "Scroll to the very end of the file and append exactly:  .gd-tour-title { letter-spacing: 0.08em; }  — then click “Save override”. The file's chip flips from baseline to override."
+               :target ".gd-asset-save-btn"
+               :check {:kind "dom" :selector ".gd-asset-chip-override"}}
+              {:title "Reload to run it"
+               :body "Saving rolled the ?v= hash on every asset URL, so the page you are on is still running the OLD css. Reload the tab — the tour comes back where you left it — and look at this title: it is letter-spaced now, because the editor is serving your file."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "See exactly what you changed"
+               :body "Click “edit” on that row again and press “Diff vs baseline”. The override is a row, not a patch: the shipped file is untouched underneath, which is what makes the next step total."
+               :target ".gd-asset-diff-btn"
+               :check {:kind "manual"}}
+              {:title "Put it back"
+               :body "Click “Revert to baseline” and confirm. The row is deleted, the shipped file serves again, and the chip reads baseline — reload once more to run it."
+               :target ".gd-asset-revert-btn"
+               :check {:kind "dom-absent" :selector ".gd-asset-chip-override"}}
+              {:title "What this is for"
+               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 25 covers the ?v= hash and when NOT to override. Click Finish."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

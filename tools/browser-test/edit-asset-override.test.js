@@ -147,7 +147,15 @@ async function revertViaApi(page) {
     await page.click('#gd-asset-editor .gd-asset-diff-btn');
     await page.waitForSelector('#gd-asset-editor .gd-asset-diff .cm-mergeView, #gd-asset-editor .gd-asset-diff .cm-editor',
                                {timeout: 15000});
-    assert(true, 'diff MergeView opened');
+    // CodeMirror renders only the visible lines. The marker is the LAST
+    // line of a 4000-line file, so it is in the DOM only if the view
+    // opened scrolled to the first difference — which is the whole point
+    // of pressing "Diff vs baseline" on a file this size.
+    await page.waitForFunction((marker) => {
+      const pane = document.querySelector('#gd-asset-editor .gd-asset-diff');
+      return !!pane && pane.textContent.includes(marker);
+    }, MARKER, {timeout: 10000});
+    assert(true, 'diff MergeView opened scrolled to the change');
     await page.click('#gd-asset-editor .gd-asset-diff-btn'); // toggle back
     await page.waitForFunction(
       () => !document.querySelector('#gd-asset-editor .gd-asset-diff'), {timeout: 5000});

@@ -250,7 +250,19 @@ const {
     assert(orgLocked.disabled, 'it is disabled without organizations');
     assert(/needs an organization/.test(orgLocked.text),
       'the row names the CONDITION, not a capability (got: ' + orgLocked.text + ')');
-    console.log('  picker: org lessons listed + locked');
+    // The mirror case: a condition that HOLDS here. This stack is
+    // single-tenant, so the Assets panel exists and lesson 25 must be
+    // OFFERED, not locked — an inverted `assets` signal would hide the
+    // lesson from the only sessions that can run it.
+    const assetsLesson = await page.evaluate(() => {
+      const list = document.querySelector('.gd-tour-lesson-list');
+      const row = Array.from(list.children).find((c) => /^25 ·/.test(c.textContent.trim()));
+      return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
+    });
+    assert(assetsLesson, 'lesson 25 is listed');
+    assert(!assetsLesson.disabled,
+      'lesson 25 is offered on a single-tenant stack (got: ' + assetsLesson.text + ')');
+    console.log('  picker: org lessons locked, the assets lesson offered');
 
     console.log('PASS');
   } catch (err) {

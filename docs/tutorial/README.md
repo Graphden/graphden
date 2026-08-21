@@ -46,7 +46,7 @@
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |
 | 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written · ▶ interactive |
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
-| 25 | Editing the editor: asset overrides | ⏳ planned |
+| 25 | [Editing the editor: asset overrides](25-asset-overrides.md) | ✅ written · ▶ interactive |
 | 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written · ▶ interactive |
 | 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written · ▶ interactive |
 
@@ -69,18 +69,18 @@ The organization tours drive surfaces not every session has, so they
 declare what they need (`:requires`) — a capability (`manage-users`,
 `publish-packages`, …), or a named condition: the services tour needs the
 **dedicated plan** (services run on an executor the org owns), the
-cross-org tour needs organizations to exist at all. Anywhere the condition
+cross-org tour needs organizations to exist at all, and the
+asset-override tour needs a single-tenant instance. Anywhere the condition
 fails — the public demo, a free-plan org, a self-hosted instance with no
 tenancy addon — the picker still lists the lesson, disabled, with the
 reason on the row.
 
 
-Lesson 25 will cover the Operate → Assets panel — editing the
-editor's own JS/CSS in place (save / revert / diff), the rolling
-`?v=` hash, and the JS syntax gate. It stays ⏳ planned until it can
-be written self-host-only (the panel is hidden and its writes are
-platform-only under the cloud tenancy addon, so the paste-into-the-
-editor steps only verify on a single-tenant instance).
+Lesson 25 is written **self-host-only** and its tour declares that
+(`:requires "assets"`): the Assets panel is hidden under the cloud
+tenancy addon and its writes are platform-only, because an editable
+shared frontend would be a stored-XSS surface across tenants. On a
+single-tenant instance both halves apply as written.
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

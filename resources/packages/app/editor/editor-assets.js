@@ -94,7 +94,7 @@ document.addEventListener('click', async (e) => {
   const holder = document.createElement('div');
   holder.className = 'gd-asset-diff';
   const ro = window.CM.EditorView.editable.of(false);
-  new window.CM.MergeView({
+  const mv = new window.CM.MergeView({
     a: { doc: baseline, extensions: [ro] },
     b: { doc: current, extensions: [ro] },
     parent: holder,
@@ -102,4 +102,23 @@ document.addEventListener('click', async (e) => {
   form.style.display = 'none';
   form.insertAdjacentElement('afterend', holder);
   btn.textContent = 'Back to edit';
+  // These files run to thousands of lines and a typical override is one
+  // rule at the very end — opening the merge view at line 1 shows the
+  // user nothing. Scroll both panes to the first line that differs.
+  gdAssetScrollToFirstDiff(mv, baseline, current);
 });
+
+function gdAssetScrollToFirstDiff(mv, baseline, current) {
+  if (baseline === current) return;
+  const a = baseline.split('\n');
+  const b = current.split('\n');
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  for (const view of [mv?.a, mv?.b]) {
+    if (!view) continue;
+    const line = view.state.doc.line(Math.min(i + 1, view.state.doc.lines));
+    view.dispatch({
+      effects: window.CM.EditorView.scrollIntoView(line.from, { y: 'center' }),
+    });
+  }
+}

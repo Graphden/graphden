@@ -155,13 +155,18 @@ async function cleanup(page) {
     // Phase C: Escape dismisses; aria-expanded flips back.
     // ===================================================================
     await page.keyboard.press('Escape');
+    // 20s, like the open wait above. This used to be 3s — a dismissal that
+    // takes four seconds is still a dismissal, and under the e2e stack's GC
+    // pressure it regularly wasn't done inside three: this file is 4th on the
+    // gate's historical flake list (9 flakes), and the gate counts a flake as
+    // a failure. The assertion still fails if the popover never closes.
     await page.waitForFunction(
       () => {
         const p = document.querySelector('.provenance-popover');
         return !p || !p.classList.contains('visible');
       },
       null,
-      {timeout: 3000, polling: 50});
+      {timeout: 20000, polling: 100});
     const dismissed = await page.evaluate(() => {
       const pop = document.querySelector('.provenance-popover');
       const badge = document.querySelector('.arg-type-provenance');

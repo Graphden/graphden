@@ -544,10 +544,13 @@ async function finishAndDelete(page) {
   await waitTourTitle(page, 'Clean up tutorial items?');
   // The cleanup prompt's title lands one render before its buttons — clicking
   // on the title alone raced the button into existence on a loaded stack.
+  // The deadline matches the other tour waits (the gate's shared stack can
+  // stall a render well past 20s), and either wording counts: an isolated
+  // lesson offers "Delete branch & return" instead.
   await page.waitForFunction(() => Array.from(
     document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
-    .some((b) => b.textContent.trim() === 'Delete them'),
-  null, {timeout: 20000, polling: 150});
+    .some((b) => /^(Delete them|Delete branch & return)$/.test(b.textContent.trim())),
+  null, {timeout: 120000, polling: 150});
   assert(await clickTourButton(page, 'Delete them'), 'Delete them button');
   await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
     null, {timeout: 20000, polling: 200});

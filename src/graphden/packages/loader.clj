@@ -58,19 +58,45 @@
 ;; EDN Loading
 ;; =============================================================================
 
+(defn- parse-edn
+  "Parses EDN off an open reader, re-throwing a malformed-EDN failure
+   carrying the resource `path` — the raw reader error names neither
+   the file nor a line, so a stray brace in one of ~40 package files
+   was previously an un-locatable boot crash.
+
+   Split out from `read-resource-edn` so the failure path is testable
+   from a string: stubbing `io/resource` to reach it would redefine a
+   global every other test's package loading reads through."
+  [path rdr]
+  (try
+    (edn/read {:readers wire/wire-readers} rdr)
+    (catch Exception e
+      (throw (ex-info (str "Failed to parse EDN in " path ": " (ex-message e))
+                      {:type :package-error/edn-parse
+                       :path path}
+                      e)))))
+
+
 (defn- read-resource-edn
   "Reads and parses EDN from a classpath resource. `#graphden/ref`
-   wire refs (records.wire) decode back to their keywords.
-
-   A malformed-EDN failure is re-thrown carrying the offending resource
-   `path` — the raw reader error names neither the file nor a line, so
-   a stray brace in one of ~40 package files was previously an
-   un-locatable boot crash."
+   wire refs (records.wire) decode back to their keywords."
   [path]
   (when-let [resource (io/resource path)]
     (with-open [rdr (java.io.PushbackReader. (io/reader resource))]
+      (parse-edn path rdr))))
+
+
+(defn- parse-edn-with-meta
+  "Parses EDN from `source` with line/column metadata attached to every
+   collection, re-throwing a malformed-EDN failure with the resource
+   `path` — tools.reader tracks a line/col but not the file, so without
+   it a bad `fns.edn` is an anonymous boot crash. Same string-testable
+   split as `parse-edn`."
+  [path source]
+  (let [rdr (treader-types/source-logging-push-back-reader source)]
+    (binding [treader/*data-readers* wire/wire-readers]
       (try
-        (edn/read {:readers wire/wire-readers} rdr)
+        (treader/read {:eof nil} rdr)
         (catch Exception e
           (throw (ex-info (str "Failed to parse EDN in " path ": " (ex-message e))
                           {:type :package-error/edn-parse
@@ -91,18 +117,7 @@
    the same as hand-authored EDN."
   [path]
   (when-let [resource (io/resource path)]
-    (let [rdr (treader-types/source-logging-push-back-reader (slurp resource))]
-      (binding [treader/*data-readers* wire/wire-readers]
-        (try
-          (treader/read {:eof nil} rdr)
-          (catch Exception e
-            ;; tools.reader tracks a line/col but not the file — surface
-            ;; the resource `path` so a malformed `fns.edn` is locatable
-            ;; instead of an anonymous boot crash.
-            (throw (ex-info (str "Failed to parse EDN in " path ": " (ex-message e))
-                            {:type :package-error/edn-parse
-                             :path path}
-                            e))))))))
+    (parse-edn-with-meta path (slurp resource))))
 
 
 (defn- load-package-meta

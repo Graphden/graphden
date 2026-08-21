@@ -1,7 +1,6 @@
 (ns graphden.packages.loader-test
   "Tests for package loader."
   (:require
-    [clojure.java.io :as io]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.packages.loader :as loader]
     [graphden.storage.protocol.core]
@@ -125,22 +124,38 @@
     (is (nil? (#'loader/read-resource-edn "nonexistent/path.edn")))))
 
 
+;; The parse step is exercised directly, on a string. Reaching it by
+;; stubbing `io/resource` needs `with-redefs`, which swaps the var's ROOT
+;; binding — every test loading packages on another thread meanwhile reads
+;; the stub and dies parsing "{:a 1 :b}" as, say, core/variants/fns.edn.
+;; That aborted a whole gate run once; the seam exists so it can't again.
 (deftest edn-parse-error-names-the-file-test
   (testing "a malformed EDN resource surfaces its path in the thrown
             error — the raw reader message names neither file nor line"
-    (let [bad (java.io.File/createTempFile "bad" ".edn")]
-      (spit bad "{:a 1 :b}")  ; odd number of map entries → parse error
-      (try
-        (with-redefs [io/resource
-                      (fn [_] (java.net.URI/.toURL (java.io.File/.toURI bad)))]
-          (let [ex (try (#'loader/read-resource-edn "packages/x/oops.edn")
-                        nil
-                        (catch clojure.lang.ExceptionInfo e e))]
-            (is (some? ex) "a malformed EDN throws")
-            (is (= :package-error/edn-parse (:type (ex-data ex))))
-            (is (= "packages/x/oops.edn" (:path (ex-data ex))))
-            (is (re-find #"packages/x/oops\.edn" (ex-message ex)))))
-        (finally (java.io.File/.delete bad))))))
+    (let [ex (try (#'loader/parse-edn "packages/x/oops.edn"
+                                      ;; odd number of map entries
+                                      (java.io.PushbackReader.
+                                        (java.io.StringReader. "{:a 1 :b}")))
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (some? ex) "a malformed EDN throws")
+      (is (= :package-error/edn-parse (:type (ex-data ex))))
+      (is (= "packages/x/oops.edn" (:path (ex-data ex))))
+      (is (re-find #"packages/x/oops\.edn" (ex-message ex)))))
+
+  (testing "the position-tracking reader (fns.edn) names it too"
+    (let [ex (try (#'loader/parse-edn-with-meta "packages/x/fns.edn" "{:a 1 :b}")
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (some? ex) "a malformed fns.edn throws")
+      (is (= :package-error/edn-parse (:type (ex-data ex))))
+      (is (= "packages/x/fns.edn" (:path (ex-data ex))))))
+
+  (testing "a well-formed source still reads, with line/col metadata"
+    (let [parsed (#'loader/parse-edn-with-meta "packages/x/fns.edn"
+                                               "{:fns [{:name :ok}]}")]
+      (is (= {:fns [{:name :ok}]} parsed))
+      (is (= 1 (:line (meta parsed)))))))
 
 
 ;; =============================================================================

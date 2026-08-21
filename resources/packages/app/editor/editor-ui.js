@@ -129,20 +129,24 @@ async function selectFnByName(name, updateHistory = true) {
 
 let _gdToastEl = null;
 let _gdToastTimer = null;
-function gdToast(message) {
+// `kind` is 'error' for a notice the reader must not miss: it is styled as a
+// failure and stays twice as long, because such a message names something
+// that did NOT happen and usually what to do about it.
+function gdToast(message, kind) {
   if (!_gdToastEl) {
     _gdToastEl = document.createElement('div');
-    _gdToastEl.className = 'gd-toast';
-    _gdToastEl.setAttribute('role', 'status');
     _gdToastEl.setAttribute('aria-live', 'polite');
     document.body.appendChild(_gdToastEl);
   }
+  const failure = kind === 'error';
+  _gdToastEl.className = 'gd-toast' + (failure ? ' gd-toast-error' : '');
+  _gdToastEl.setAttribute('role', failure ? 'alert' : 'status');
   _gdToastEl.textContent = message;
   _gdToastEl.classList.add('gd-toast-visible');
   if (_gdToastTimer) clearTimeout(_gdToastTimer);
   _gdToastTimer = setTimeout(() => {
     _gdToastEl.classList.remove('gd-toast-visible');
-  }, 3500);
+  }, failure ? 8000 : 3500);
 }
 window.gdToast = gdToast;
 

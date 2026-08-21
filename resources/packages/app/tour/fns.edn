@@ -68,7 +68,25 @@
    :description "Every interactive lesson — `{:lessons [{:id :title :steps […]}]}`. Content parallels docs/tutorial lessons; keep both in sync when a lesson's flow changes."
    :parent :const
    :args {:value
-          {:lessons
+          {;; The end-of-tour prompts. They are lesson prose like any other —
+           ;; the only reason they used to sit in the client was that they are
+           ;; not attached to a step. Editable here, so a deployment can
+           ;; reword what it promises about deletion without a rebuild.
+           :copy
+           {:cleanup-title "Clean up tutorial items?"
+            :cleanup-body "The tour created: {items}. Delete them, or keep them to explore? (Deletes are soft — nothing is lost for good.)"
+            :cleanup-confirm "Delete them"
+            :cleanup-keep "Keep & close"
+            :cleanup-done "Tutorial items deleted"
+            :cleanup-failed "Kept: {items} — the server refused; delete by hand or check the error log"
+            :branch-title "Delete the tutorial branch?"
+            :branch-body "This lesson ran on its own branch “{branch}”. Deleting it removes everything the lesson created and returns you to main — the full rollback. Keeping it lets you continue exploring on the branch."
+            :branch-confirm "Delete branch & return"
+            :branch-keep "Keep branch"
+            :branch-done "Tutorial branch deleted"
+            :branch-failed "Branch “{branch}” could not be deleted — it is still there"
+            :paused "Lesson {lesson} paused — continue it from the account menu"}
+           :lessons
            [{:id "01"
              :chapter "Basics"
              :title "Your first function"

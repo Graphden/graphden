@@ -150,7 +150,10 @@
                   ;; hook (maybeStartTutorial) exists for main's
                   ;; DOMContentLoaded, and in the same lexical scope as
                   ;; graphData/lookups (its checks read them bare).
+                  "packages/app/editor/editor-tour-checks.js"
+                  "packages/app/editor/editor-tour-cleanup.js"
                   "packages/app/editor/editor-tour.js"
+                  "packages/app/editor/editor-tour-picker.js"
                   "packages/app/editor/editor-main.js"]}}
 
   ;; Raw concatenation of every editor module — still contains the

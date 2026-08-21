@@ -3822,6 +3822,17 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   transform: translateX(-50%) translateY(0);
 }
 
+/* A toast that names something which did NOT happen — the cleanup that was
+   refused, the branch that is still there. Reads as a failure, not as a
+   receipt, and `gdToast(msg, 'error')` also keeps it up longer. */
+.gd-toast-error {
+  background: var(--error-fg);
+  color: var(--gd-paper);
+  max-width: min(520px, 82vw);
+  text-align: left;
+  line-height: 1.45;
+}
+
 /* "internal N" — the per-namespace collapse for `_`-private and
    anonymous fns in the explorer tree (editor-sidebar.js). Styled as a
    quiet meta-row, not a fn row. */
@@ -6280,8 +6291,16 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 }
 #gd-tour-pop.gd-tour-visible { display: block; }
 #gd-tour-pop.gd-tour-centered {
-  left: 50%; top: 20%;
+  left: 50%; top: 10%;
   transform: translateX(-50%);
+  /* The catalogue is 25 lessons + 5 chapter headings — taller than a laptop
+     viewport. Cap the panel and let the LIST scroll inside it, so the filter
+     above and Cancel below stay put. */
+  max-height: 80vh;
+}
+#gd-tour-pop.gd-tour-visible.gd-tour-centered {
+  display: flex;
+  flex-direction: column;
 }
 
 .gd-tour-head {
@@ -6347,11 +6366,66 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   color: var(--muted-fg);
 }
 .gd-tour-btn-quiet:hover { color: var(--fg); background: var(--hover-bg); }
+/* NOT a `.gd-tour-foot` — it was styled as one for the flex + gap, and
+   inherited that class's `justify-content: flex-end`, which makes an
+   overflowing COLUMN spill past its start edge where no scrollbar can reach
+   it (the rows read as squashed and the list refused to scroll). */
 .gd-tour-lesson-list {
+  display: flex;
   flex-direction: column;
   align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  /* The one scrolling region: `min-height: 0` is what lets a flex child
+     shrink below its content and actually scroll. */
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* The list is a flex COLUMN, so its rows would otherwise shrink to fit the
+   capped panel instead of overflowing it — 25 lessons squeezed to 29px each,
+   never scrolling. Rows keep their height; the list scrolls. */
+.gd-tour-lesson-list > * { flex-shrink: 0; }
+
+/* Cancel — outside the scroller, so it is reachable at any scroll position. */
+.gd-tour-picker-foot {
+  flex-shrink: 0;
+  margin-top: 4px;
 }
 .gd-tour-lesson-list .gd-tour-btn { text-align: left; }
+
+/* The catalogue's own controls. A 25-lesson list needs a way in (filter), a
+   way back to where you stopped (resume) and a way to see what you have
+   already read (done) — without any of them the list is a wall. */
+.gd-tour-filter {
+  width: 100%;
+  margin: 10px 0 2px;
+  padding: 6px 9px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.gd-tour-filter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.gd-tour-btn-resume {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  text-align: left;
+}
+
+/* Read already — still offered (re-reading is normal), just not the thing
+   the eye should land on first. */
+.gd-tour-btn-done {
+  opacity: 0.72;
+}
 
 /* Chapter heading in the lesson picker — a quiet label, not a control:
    it must group the buttons under it without competing with them. */
@@ -6373,7 +6447,12 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   opacity: 0.55;
 }
 
+/* The row note (“✓ done”, “— needs an organization”) sits INSIDE an
+   accent-filled button, where a grey `--muted-fg` is barely legible. Inherit
+   the button's own foreground and step it back with opacity instead — quiet
+   on any background the row can have. */
 .gd-tour-lesson-note {
-  color: var(--muted-fg);
+  color: inherit;
+  opacity: 0.85;
   font-style: italic;
 }

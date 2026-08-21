@@ -21,7 +21,8 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* form-req json-req uniq]]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.web.errors :as errors]))
 
 
 ;; ============================================================================
@@ -546,6 +547,80 @@
             resp  (via-seq-append (json-req (str "/api/sequence/append/" (:id plain))
                                             {:value 1}))]
         (is (= 404 (:status resp)))))))
+
+
+(deftest sequence-append-malformed-body-does-not-wedge-the-slot-test
+  ;; A body carrying none of `:ref` / `:ref-name` / `:value` used to be parsed
+  ;; AFTER the host `:list-append` binding was materialised, so the throw left
+  ;; an empty binding on the slot — and the next, well-formed, append collided
+  ;; with it on the per-branch uniqueness check (`find-sequence-binding` reads
+  ;; the graph cache, which the aborted write never invalidated). The slot was
+  ;; un-appendable until the process restarted. One bad request, permanent.
+  (let [storage (:storage *graph*)
+        host (setup/create-base-fn! storage (uniq "wedge-host"))
+        slot (setup/create-slot! storage "items" :sequence)
+        _    (setup/attach-slot! storage (:id host) (:id slot) 0)
+        _    (ctx/invalidate-graph-cache! (:ctx *graph*) #{(:id host)})
+        uri  (str "/api/sequence/append/" (:id host))]
+    (testing "the malformed body is REJECTED — and the rejection reaches the caller"
+      ;; The handler throws; `wrap-error-boundary` at the top of the app chain
+      ;; turns the throw into a status + body. This harness invokes the graph
+      ;; fn WITHOUT that wrap, so assert both halves: the ex-data the handler
+      ;; raises, and what the boundary makes of it.
+      (let [data (try (via-seq-append (json-req uri {:nonsense 1}))
+                      nil
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= :sequence-op/invalid-body (:type data))
+            "the body is rejected as invalid, not swallowed")
+        (is (= 400 (errors/status-for (:type data)))
+            "an unmapped `:sequence-op/*` family would answer 500")
+        (is (str/includes? (:message (errors/safe-error-body
+                                       (:type data)
+                                       "Sequence op body requires :ref, :ref-name, or :value"))
+                           ":ref, :ref-name, or :value")
+            "the message survives the boundary — it tells the caller what to fix")))
+
+    (testing "no host binding was left behind"
+      (is (empty? (sp/query-entities storage :binding
+                                     {:fn-id (:id host) :slot-id (:id slot)}))
+          "the rejected request wrote nothing"))
+
+    (testing "the slot still accepts a well-formed append"
+      (let [resp (via-seq-append (json-req uri {:value 7}))
+            bind (first (sp/query-entities storage :binding
+                                           {:fn-id (:id host) :slot-id (:id slot)}))]
+        (is (= 200 (:status resp)))
+        (is (some? bind) "the host binding materialised on the GOOD request")
+        (is (= [7] (mapv :value (sp/query-entities storage :binding-list-item
+                                                   {:binding-id (:id bind)}))))))))
+
+
+(deftest sequence-append-recovers-from-an-orphan-host-binding-test
+  ;; Forward recovery for an installation that already carries the orphan the
+  ;; bug above created: `find-sequence-binding` answers from the graph cache,
+  ;; so a binding written outside its last refresh reads as absent and a blind
+  ;; create dies on the uniqueness check — a 500 the caller cannot clear.
+  ;; Writing the row through `sp/create-entity` (bypassing CRUD invalidation)
+  ;; reproduces exactly that state.
+  (let [storage (:storage *graph*)
+        host (setup/create-base-fn! storage (uniq "orphan-host"))
+        slot (setup/create-slot! storage "items" :sequence)
+        _    (setup/attach-slot! storage (:id host) (:id slot) 0)
+        _    (ctx/invalidate-graph-cache! (:ctx *graph*) #{(:id host)})
+        orphan (sp/create-entity storage :binding
+                                 {:id (random-uuid)
+                                  :fn-id (:id host)
+                                  :slot-id (:id slot)
+                                  :list-append true})
+        resp (via-seq-append (json-req (str "/api/sequence/append/" (:id host))
+                                       {:value 5}))]
+    (is (= 200 (:status resp))
+        "the append reuses the orphan instead of colliding with it")
+    (is (= 1 (count (sp/query-entities storage :binding
+                                       {:fn-id (:id host) :slot-id (:id slot)})))
+        "and no second host binding was created")
+    (is (= [5] (mapv :value (sp/query-entities storage :binding-list-item
+                                               {:binding-id (:id orphan)}))))))
 
 
 ;; ============================================================================

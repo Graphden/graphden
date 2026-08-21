@@ -22,13 +22,6 @@ let _tourState = null;   // {lessonId, step, created: [{type,name}]}
 let _tourTimer = null;
 let _tourEls = null;     // {spot, pop}
 
-function _tourCurrentBranch() {
-  // editor-branches keeps its branch getter module-private; the URL param
-  // IS the branch context (switchToBranch round-trips through it).
-  try { return new URLSearchParams(window.location.search).get('branch'); }
-  catch (_) { return null; }
-}
-
 function _tourSaveState() {
   try {
     if (_tourState) localStorage.setItem(TOUR_STORE_KEY, JSON.stringify(_tourState));
@@ -53,132 +46,6 @@ function _tourStep() {
   if (!lesson) return null;
   return (lesson.steps || [])[_tourState.step] || null;
 }
-
-// --- checks -----------------------------------------------------------------
-// Declarative check → predicate over the editor's lexical graph state.
-// graphData/lookups are script-scope globals (NOT window.*) — this module is
-// concatenated into the same bundle, so the bare identifiers resolve.
-
-function _tourFindFn(name) {
-  if (typeof lookups !== 'undefined' && lookups && lookups.fnMap) {
-    for (const f of lookups.fnMap.values()) if (f && f.name === name) return f;
-  }
-  if (typeof graphData !== 'undefined' && graphData && graphData.fns) {
-    return graphData.fns.find((f) => f.name === name) || null;
-  }
-  return null;
-}
-
-function _tourCheckPasses(check) {
-  if (!check || check.kind === 'manual') return false;
-  try {
-    switch (check.kind) {
-      case 'ns-exists':
-        // ROOT namespaces only: `name` is the SEGMENT, not the path, so a
-        // nested ns elsewhere (the cloud's landing.tutorial lesson pages)
-        // must not false-pass the "create a namespace" step.
-        return typeof graphData !== 'undefined' && !!graphData
-          && (graphData.namespaces || []).some(
-            (n) => n.name === check.name && !n['parent-id']);
-      case 'fn-exists':
-        return !!_tourFindFn(check.name);
-      case 'fn-parent': {
-        const fn = _tourFindFn(check.name);
-        if (!fn) return false;
-        const parents = fn['parent-ids'] || [];
-        if (!parents.length) return false;
-        // If the parent row isn't in the lazy cache yet, accept any parent —
-        // the lesson's instruction was followed structurally.
-        return parents.some((pid) => {
-          const p = lookups?.fnMap ? lookups.fnMap.get(pid) : null;
-          return p ? p.name === check.parent : true;
-        });
-      }
-      case 'binding-bound': {
-        // The slot row belongs to the PARENT (slots are inherited);
-        // the binding row belongs to the checked fn — so walk the fn's
-        // bindings and resolve each slot's name, never slotByFnAndName
-        // (which is keyed by the slot-OWNING fn).
-        const fn = _tourFindFn(check.name);
-        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
-        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
-        return list.some((b) => {
-          const s = lookups.slotMap?.get(b['slot-id']);
-          if (!s || s.name !== check.slot) return false;
-          if (b.value != null || b['ref-fn-id']) return true;
-          // Sequence slots: the binding row itself carries no value —
-          // the content lives in binding-list-item rows.
-          const items = lookups.itemsByBinding?.get(b.id) || [];
-          return items.length > 0;
-        });
-      }
-      case 'selected': {
-        if (typeof selectedFnId === 'undefined' || !selectedFnId) return false;
-        const sel = lookups?.fnMap ? lookups.fnMap.get(selectedFnId) : null;
-        return !!(sel && sel.name === check.name);
-      }
-      case 'on-branch': {
-        // Branch context IS the URL param; switching reloads the page and
-        // the tour resumes from localStorage, so this check re-evaluates on
-        // the OTHER side of the reload — which is exactly what it asserts.
-        // "main" also matches the no-param (default-branch) case.
-        const cur = _tourCurrentBranch();
-        return check.name === 'main' ? (!cur || cur === 'main')
-                                     : cur === check.name;
-      }
-      case 'arg-named': {
-        // "an arg on the canvas now carries THIS name" — the completion
-        // signal for a rename. Neither `binding-bound` nor `bindings-count`
-        // can see one: a rename-only binding has no value, no ref and no
-        // items, and the client lookups don't carry it either — the new
-        // name reaches the client as the layout's edge label. So read the
-        // label: the check then passes exactly when the user can SEE the
-        // rename, which is what the step asked for.
-        return Array.from(document.querySelectorAll('.edge-label-overlay span'))
-          .some((sp) => sp.textContent.trim() === check.arg);
-      }
-      case 'bindings-count': {
-        // "at least N of this fn's slots are bound" — order-independent,
-        // which is what a step asking for two sibling slots needs: the
-        // canvas decides which placeholder sits where, and a lesson must
-        // not depend on that.
-        const fn = _tourFindFn(check.name);
-        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
-        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
-        const bound = list.filter((b) => {
-          if (b.value != null || b['ref-fn-id']) return true;
-          const items = lookups.itemsByBinding?.get(b.id) || [];
-          return items.length > 0;
-        });
-        return bound.length >= (check.count || 1);
-      }
-      case 'binding-value': {
-        // binding-bound, but the literal must equal `check.value`. Compared
-        // as TEXT: a JSON literal round-trips through jsonb, so 42 can come
-        // back as a number or a string depending on the slot's type.
-        const fn = _tourFindFn(check.name);
-        if (!fn || typeof lookups === 'undefined' || !lookups) return false;
-        const list = (lookups.bindingsByFn?.get(fn.id)) || [];
-        return list.some((b) => {
-          const s = lookups.slotMap?.get(b['slot-id']);
-          return !!(s && s.name === check.slot
-                    && b.value != null
-                    && String(b.value) === String(check.value));
-        });
-      }
-      case 'dom':
-        return !!document.querySelector(check.selector);
-      case 'dom-absent':
-        // The inverse of `dom` — completes when something DISAPPEARS (a
-        // type-error badge cleared by the fixing edit).
-        return !document.querySelector(check.selector);
-      default:
-        return false;
-    }
-  } catch (_) { return false; }
-}
-
-// --- overlay elements --------------------------------------------------------
 
 function _tourEnsureEls() {
   if (_tourEls) return _tourEls;
@@ -218,9 +85,14 @@ function _tourRenderStep() {
   progress.className = 'gd-tour-progress';
   progress.textContent = 'Lesson ' + lesson.id + ' · step '
     + (_tourState.step + 1) + '/' + lesson.steps.length;
-  const close = _tourBtn('End tour', 'gd-tour-btn-quiet', () => _tourEnd());
+  // Two ways out, and they are different promises. "Pause" keeps everything
+  // and simply stops showing steps — the state is already in localStorage, so
+  // the catalogue offers to continue. "End tour" is the one that asks about
+  // deleting what the lesson made. Before this, the only exit was the second,
+  // which made stepping away look like a decision about your data.
   head.appendChild(progress);
-  head.appendChild(close);
+  head.appendChild(_tourBtn('Pause', 'gd-tour-btn-quiet', () => _tourPause()));
+  head.appendChild(_tourBtn('End tour', 'gd-tour-btn-quiet', () => _tourEnd()));
 
   const title = document.createElement('div');
   title.className = 'gd-tour-title';
@@ -232,6 +104,13 @@ function _tourRenderStep() {
 
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot';
+  // A reader who skipped a step, or simply wants to re-read the one before,
+  // had no way back: the tour only ever moved forward. Going back never
+  // un-does anything — the step's own check decides whether it is satisfied,
+  // and an already-done step passes again immediately.
+  if (_tourState.step > 0) {
+    foot.appendChild(_tourBtn('Back', 'gd-tour-btn-quiet', () => _tourBack()));
+  }
   const isManual = !step.check || step.check.kind === 'manual';
   if (isManual) {
     const last = _tourState.step >= lesson.steps.length - 1;
@@ -364,191 +243,140 @@ function _tourAdvance(skipped) {
   }
   _tourState.step += 1;
   _tourSaveState();
-  if (_tourState.step >= lesson.steps.length) _tourEnd();
-  else _tourRenderStep();
-}
-
-async function _tourDeleteCreatedBranches() {
-  // Branches the LESSON created (lesson 08 forks one by hand). Deleted
-  // before anything else: a branch with children refuses to delete, so a
-  // lesson-made fork must go before the isolation branch it forked from.
-  for (const c of (_tourState?.created) || []) {
-    if (c.type !== 'branch') continue;
-    try {
-      await authFetch(API.api_branches_ref(c.name), { method: 'DELETE' });
-    } catch (_) { /* already gone / refused — reported by the branch list */ }
+  if (_tourState.step >= lesson.steps.length) {
+    // Reaching the last step IS finishing it, whatever the reader decides
+    // about the rows afterwards — the catalogue's ✓ marks reading, not
+    // cleanup.
+    if (typeof _tourMarkDone === 'function') _tourMarkDone(lesson.id);
+    _tourEnd();
+  } else {
+    _tourRenderStep();
   }
 }
 
-async function _tourDeleteCreated() {
-  const created = (_tourState?.created) || [];
-  await _tourDeleteCreatedBranches();
-  // fns first — a namespace only deletes once empty.
-  //
-  // NEWEST FIRST. A lesson that builds a chain creates the target before
-  // the fn that points at it (lesson 15: the cell, then the swap that
-  // writes to it; lesson 27: the inner fn, then the outer one), and the
-  // server refuses to delete a fn something still references — correctly.
-  // Deleting in creation order therefore left the FIRST fn of every chain
-  // behind; anything that still refuses is retried once below.
-  const fns = created.filter((c) => c.type === 'fn').reverse();
-  // Resolve through the SEARCH endpoint, not the lexical graph: the client
-  // only holds the SELECTED fn's subtree, so a fn the lesson created earlier
-  // can be absent from it by cleanup time — and an absent row reads as
-  // "already gone", which is how the first fn of every chain survived.
-  const idOf = async (name) => {
-    try {
-      const r = await authFetch(API.api_graph_entities
-        + '?scope=search&q=' + encodeURIComponent(name));
-      const payload = await r.json();
-      return (payload.fns || []).find((f) => f.name === name)?.id || null;
-    } catch (_) { return null; }
-  };
-  const retry = [];
-  for (const c of fns) {
-    const id = await idOf(c.name);
-    if (!id) continue;
-    try {
-      await authMutate('DELETE', API.api_entities_type_id('fn', id));
-    } catch (_) { retry.push(c); }
-  }
-  // Only what actually refused goes round again, so the happy path pays for
-  // one pass — the namespace delete waits behind this loop and the user
-  // (and the guard) waits on the namespace.
-  for (const c of retry) {
-    const id = await idOf(c.name);
-    if (!id) continue;
-    try { await authMutate('DELETE', API.api_entities_type_id('fn', id)); } catch (_) {}
-  }
-  // A published package-version outlives the namespace it was cut from —
-  // and once the namespace is deleted, installing that version answers 404
-  // ("entities not found"). A lesson that publishes therefore has to
-  // withdraw its release too, or it leaves a broken row in the registry
-  // every time someone takes the tour.
-  for (const c of created) {
-    if (c.type !== 'package-version') continue;
-    try {
-      const r = await authFetch(API.api_packages);
-      const rows = await r.json();
-      for (const row of (Array.isArray(rows) ? rows : (rows.packages || []))) {
-        if (row?.name !== c.name) continue;
-        await authFetch(API.api_packages_withdraw
-                        + '?name=' + encodeURIComponent(row.name)
-                        + '&version=' + encodeURIComponent(row.version),
-                        {method: 'DELETE'});
-      }
-    } catch (_) { /* best-effort — the ns delete below still runs */ }
-  }
-  for (const c of created) {
-    if (c.type !== 'ns') continue;
-    // The lesson created this namespace through the editor, so the client
-    // already holds it — a full `initGraph()` just to learn one id costs
-    // seconds on a large graph. Refresh only if it somehow isn't there.
-    let ns = (typeof graphData !== 'undefined' && graphData
-      && (graphData.namespaces || []).find((n) => n.name === c.name)) || null;
-    if (!ns && typeof initGraph === 'function') {
-      try { await initGraph(); } catch (_) {}
-      ns = (typeof graphData !== 'undefined' && graphData
-        && (graphData.namespaces || []).find((n) => n.name === c.name)) || null;
-    }
-    if (ns) {
-      // A namespace the lesson caused to exist can hold rows the lesson did
-      // not create by hand — installing a package materialises its fns under
-      // `<ns>@<version>`. Clear the contents first, or the delete 409s on a
-      // non-empty namespace and the copy is left behind.
-      try {
-        // `scope=namespace` is the one that lists a NAMESPACE's rows;
-        // `subtree` takes a FN id and answers empty for a namespace.
-        const sub = await authFetch(API.api_graph_entities
-                                    + '?scope=namespace&namespace-id=' + ns.id);
-        const payload = await sub.json();
-        for (const f of (payload.fns || [])) {
-          if (f['namespace-id'] === ns.id) {
-            try {
-              await authMutate('DELETE', API.api_entities_type_id('fn', f.id));
-            } catch (_) { /* another row may still reference it */ }
-          }
-        }
-      } catch (_) { /* best-effort — the delete below reports the truth */ }
-      try { await authMutate('DELETE', API.api_entities_type_id('ns', ns.id)); } catch (_) {}
-    }
-  }
-  if (typeof initGraph === 'function') { try { await initGraph(); } catch (_) {} }
-  if (typeof gdToast === 'function') gdToast('Tutorial items deleted');
+// Step back one. The checks are stateless predicates over the graph, so a
+// re-entered step re-evaluates on the next tick; nothing is rolled back.
+function _tourBack() {
+  if (!_tourState || _tourState.step <= 0) return;
+  _tourState.step -= 1;
+  _tourSaveState();
+  _tourRenderStep();
 }
 
-function _tourEnd() {
+// Stop showing steps, keep the state. `maybeStartTutorial` resumes it on the
+// next load, and the catalogue offers "Continue …" right away.
+function _tourPause() {
+  const lesson = _tourLesson();
+  if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
+  if (_tourEls) {
+    _tourEls.spot.classList.remove('gd-tour-visible');
+    _tourEls.pop.classList.remove('gd-tour-visible');
+  }
+  document.removeEventListener('keydown', _tourOnKey);
+  if (typeof gdToast === 'function') {
+    gdToast(_tourCopy('paused', 'Lesson {lesson} paused — continue it from the'
+                      + ' account menu', { lesson: lesson ? lesson.id : '' }));
+  }
+}
+
+// Prose for the end-of-tour prompts comes from the same payload the steps do
+// (`:copy` in app.tour/_tour-lessons) — the only reason it ever lived here is
+// that it hangs off no single step. `{placeholder}` slots are filled by the
+// caller.
+function _tourCopy(key, fallback, vars) {
+  const raw = _tourLessons?.copy?.[key] || fallback;
+  return Object.entries(vars || {}).reduce(
+    (text, [k, v]) => text.split('{' + k + '}').join(v), raw);
+}
+
+async function _tourEnd() {
   // Branch-isolated run (org mode): the WHOLE lesson lives on a tour
   // branch, so the cleanup offer is one decision — delete the branch
   // (full rollback, returns to main) or keep it.
   if (_tourState?.branch && _tourCurrentBranch() === _tourState.branch) {
     const branch = _tourState.branch;
-    const { spot, pop } = _tourEnsureEls();
-    spot.classList.remove('gd-tour-visible');
-    pop.replaceChildren();
-    pop.classList.add('gd-tour-visible', 'gd-tour-centered');
-    const title = document.createElement('div');
-    title.className = 'gd-tour-title';
-    title.textContent = 'Delete the tutorial branch?';
-    const body = document.createElement('div');
-    body.className = 'gd-tour-body';
-    body.textContent = 'This lesson ran on its own branch “' + branch
-      + '”. Deleting it removes everything the lesson created and returns'
-      + ' you to main — the full rollback. Keeping it lets you continue'
-      + ' exploring on the branch.';
-    const foot = document.createElement('div');
-    foot.className = 'gd-tour-foot';
-    foot.appendChild(_tourBtn('Delete branch & return', 'gd-tour-btn-primary', async () => {
-      try {
-        // Children first — a fork the lesson itself made (lesson 08) would
-        // otherwise block its parent's delete.
-        await _tourDeleteCreatedBranches();
-        await authFetch(API.api_branches_ref(branch), { method: 'DELETE' });
-      } catch (_) { /* branch stays; still return to main */ }
-      _tourTeardown();
-      if (typeof switchToBranch === 'function') switchToBranch(null);
-    }));
-    foot.appendChild(_tourBtn('Keep branch', 'gd-tour-btn-quiet', () => _tourTeardown()));
-    pop.appendChild(title);
-    pop.appendChild(body);
-    pop.appendChild(foot);
+    _tourDialog({
+      title: _tourCopy('branch-title', 'Delete the tutorial branch?'),
+      body: _tourCopy('branch-body',
+                      'This lesson ran on its own branch “{branch}”. Deleting it'
+                      + ' removes everything the lesson created and returns you'
+                      + ' to main.', { branch }),
+      primary: [_tourCopy('branch-confirm', 'Delete branch & return'), async () => {
+        let ok = true;
+        try {
+          // Children first — a fork the lesson itself made (lesson 08) would
+          // otherwise block its parent's delete.
+          await _tourDeleteCreatedBranches();
+          const r = await authFetch(API.api_branches_ref(branch), { method: 'DELETE' });
+          ok = !!r?.ok;
+        } catch (_) { ok = false; }
+        _tourTeardown();
+        if (typeof switchToBranch === 'function') switchToBranch(null);
+        _tourReport(ok, ok ? _tourCopy('branch-done', 'Tutorial branch deleted')
+                           : _tourCopy('branch-failed',
+                                       'Branch “{branch}” could not be deleted', { branch }));
+      }],
+      quiet: [_tourCopy('branch-keep', 'Keep branch'), () => _tourTeardown()],
+    });
     return;
   }
-  const created = (_tourState?.created) || [];
-  const existing = created.filter((c) => {
-    // A branch isn't in graphData (it's a routing context, not a graph
-    // row) — offer it unconditionally; the delete is idempotent.
-    if (c.type === 'branch') return true;
-    if (c.type === 'fn') return !!_tourFindFn(c.name);
-    return typeof graphData !== 'undefined' && graphData
-      && (graphData.namespaces || []).some((n) => n.name === c.name);
-  });
-  if (!existing.length) { _tourTeardown(); return; }
 
-  // Cleanup offer — reuse the popover as a small centered dialog.
+  // Which of the lesson's creations are still around? Asking the registry
+  // makes this async, so the dialog is rendered from the resolved list —
+  // a type the deleter knows and this list does not is a row the reader is
+  // never told about (that is how a published version went unmentioned).
+  const survivors = await _tourSurvivors((_tourState?.created) || []);
+  if (!survivors.length) { _tourTeardown(); return; }
+
+  const listOf = (rows) => rows.map((c) => c.type + ' “' + c.name + '”').join(', ');
+  _tourDialog({
+    title: _tourCopy('cleanup-title', 'Clean up tutorial items?'),
+    body: _tourCopy('cleanup-body',
+                    'The tour created: {items}. Delete them, or keep them to'
+                    + ' explore? (Deletes are soft.)',
+                    { items: listOf(survivors) }),
+    primary: [_tourCopy('cleanup-confirm', 'Delete them'), async () => {
+      const { failed } = await _tourDeleteCreated();
+      _tourTeardown();
+      _tourReport(!failed.length,
+                  failed.length
+                    ? _tourCopy('cleanup-failed',
+                                'Kept: {items} — the server refused',
+                                { items: listOf(failed) })
+                    : _tourCopy('cleanup-done', 'Tutorial items deleted'));
+    }],
+    quiet: [_tourCopy('cleanup-keep', 'Keep & close'), () => _tourTeardown()],
+  });
+}
+
+// The popover doubles as a small centered dialog: title, body, one primary
+// and one quiet action. Three end-of-tour prompts built the same DOM by hand
+// before this.
+function _tourDialog({ title, body, primary, quiet }) {
   const { spot, pop } = _tourEnsureEls();
   spot.classList.remove('gd-tour-visible');
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible', 'gd-tour-centered');
-
-  const title = document.createElement('div');
-  title.className = 'gd-tour-title';
-  title.textContent = 'Clean up tutorial items?';
-  const body = document.createElement('div');
-  body.className = 'gd-tour-body';
-  body.textContent = 'The tour created: '
-    + existing.map((c) => c.type + ' “' + c.name + '”').join(', ')
-    + '. Delete them, or keep them to explore? (Deletes are soft — nothing is lost for good.)';
+  const titleEl = document.createElement('div');
+  titleEl.className = 'gd-tour-title';
+  titleEl.textContent = title;
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'gd-tour-body';
+  bodyEl.textContent = body;
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot';
-  foot.appendChild(_tourBtn('Delete them', 'gd-tour-btn-primary', async () => {
-    await _tourDeleteCreated();
-    _tourTeardown();
-  }));
-  foot.appendChild(_tourBtn('Keep & close', 'gd-tour-btn-quiet', () => _tourTeardown()));
-  pop.appendChild(title);
-  pop.appendChild(body);
+  foot.appendChild(_tourBtn(primary[0], 'gd-tour-btn-primary', primary[1]));
+  if (quiet) foot.appendChild(_tourBtn(quiet[0], 'gd-tour-btn-quiet', quiet[1]));
+  pop.appendChild(titleEl);
+  pop.appendChild(bodyEl);
   pop.appendChild(foot);
+}
+
+// Say what actually happened. Every delete here is best-effort, so an
+// unconditional success toast over swallowed failures is a lie the reader
+// only discovers later, by finding the rows still in their graph.
+function _tourReport(ok, message) {
+  if (typeof gdToast === 'function') gdToast(message, ok ? undefined : 'error');
 }
 
 function _tourTeardown() {
@@ -681,113 +509,7 @@ async function startTutorialIsolated(lessonId) {
   return true;
 }
 
-// `:requires` values that are NOT capabilities. Each names a condition the
-// editor can already answer for itself, plus the words to say when it fails.
-const REQUIRE_SIGNALS = {
-  // The dedicated tier (or a platform / single-tenant instance) — services run
-  // on an executor the org owns, which lower plans don't get.
-  //
-  services: {
-    test: () => typeof window.gdServicesManageable === 'function'
-             && window.gdServicesManageable(),
-    phrase: 'the dedicated plan (or your own instance)',
-    short: 'the dedicated plan',
-  },
-  // The Assets panel edits the frontend every session on the instance loads,
-  // so it exists only on a single-tenant deployment — under the cloud tenancy
-  // addon it is hidden and its writes are platform-only.
-  assets: {
-    test: () => !(typeof window.graphdenTenancyActive === 'function'
-                  && window.graphdenTenancyActive()),
-    phrase: 'a single-tenant instance (your own deployment)',
-    short: 'your own instance',
-  },
-  // Anything that only exists once there ARE organizations: the org chip, the
-  // per-org editor address, membership.
-  org: {
-    test: () => typeof window.graphdenTenancyActive === 'function'
-             && window.graphdenTenancyActive(),
-    phrase: 'an organization workspace',
-    short: 'an organization',
-  },
-};
-
-
-// Lesson picker — the shell-menu entry point once there is more than one
-// lesson. Centered dialog listing every lesson from /api/tour.
-async function openTutorialMenu() {
-  const lessons = await _tourFetchLessons();
-  if (!lessons || !(lessons.lessons || []).length) {
-    if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
-    return;
-  }
-  const { spot, pop } = _tourEnsureEls();
-  spot.classList.remove('gd-tour-visible');
-  pop.replaceChildren();
-  pop.classList.add('gd-tour-visible', 'gd-tour-centered');
-  const title = document.createElement('div');
-  title.className = 'gd-tour-title';
-  title.textContent = 'Interactive tutorial';
-  const body = document.createElement('div');
-  body.className = 'gd-tour-body';
-  body.textContent = 'Pick a lesson. In an organization workspace the'
-    + ' lesson runs on its own branch, so ending it can roll everything'
-    + ' back in one step.';
-  pop.appendChild(title);
-  pop.appendChild(body);
-  const list = document.createElement('div');
-  list.className = 'gd-tour-foot gd-tour-lesson-list';
-  // Lessons arrive in TEACHING order, grouped by `:chapter` — a flat wall of
-  // fifteen buttons told the reader nothing about where to start. The heading
-  // is emitted when the chapter changes, so the graph's order is the only
-  // ordering authority (no sort here).
-  let chapter = null;
-  for (const lesson of lessons.lessons) {
-    if (lesson.chapter && lesson.chapter !== chapter) {
-      chapter = lesson.chapter;
-      const head = document.createElement('div');
-      head.className = 'gd-tour-chapter';
-      head.textContent = chapter;
-      list.appendChild(head);
-    }
-    // `:requires` names what the lesson's steps need. Usually that is a
-    // CAPABILITY (the org lessons drive panels only an owner/admin can open);
-    // a few needs aren't capabilities at all — services are a PLAN tier, and
-    // the cross-org lesson only makes sense inside an organization — so those
-    // resolve through named signals instead. Offering a lesson to a reader who
-    // cannot complete it is a dead end, so it stays listed — seeing what
-    // exists is the point of a catalogue — but disabled, with the reason on
-    // the row rather than hidden in a tooltip.
-    const need = lesson.requires;
-    const signal = REQUIRE_SIGNALS[need];
-    const allowed = !need
-                 || (signal
-                     ? signal.test()
-                     : (typeof window.graphdenHasCap === 'function'
-                        && window.graphdenHasCap(need)));
-    const needPhrase = signal ? signal.phrase : ('the ' + need + ' capability');
-    const btn = _tourBtn(
-      lesson.id + ' · ' + (lesson.title || ''), 'gd-tour-btn-primary',
-      () => { if (allowed) startTutorialIsolated(lesson.id); });
-    if (!allowed) {
-      btn.classList.add('gd-tour-btn-locked');
-      btn.disabled = true;
-      btn.title = 'Needs ' + needPhrase + ' — this session does not have it.';
-      const note = document.createElement('span');
-      note.className = 'gd-tour-lesson-note';
-      note.textContent = ' — needs ' + (signal ? signal.short : need);
-      btn.appendChild(note);
-    }
-    list.appendChild(btn);
-  }
-  list.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => {
-    if (_tourState) _tourRenderStep();
-    else _tourTeardown();
-  }));
-  pop.appendChild(list);
-}
 
 window.startTutorial = startTutorial;
 window.startTutorialIsolated = startTutorialIsolated;
-window.openTutorialMenu = openTutorialMenu;
 window.maybeStartTutorial = maybeStartTutorial;

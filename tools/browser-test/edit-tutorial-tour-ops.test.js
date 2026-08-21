@@ -264,6 +264,67 @@ const {
       'lesson 25 is offered on a single-tenant stack (got: ' + assetsLesson.text + ')');
     console.log('  picker: org lessons locked, the assets lesson offered');
 
+    // ---------- The catalogue as a catalogue ----------
+    // Twenty-five lessons in five chapters is taller than a laptop viewport.
+    // Three affordances make it usable — resume, filter, done marks — and each
+    // has already broken once in a way no lesson walk would notice: the panel
+    // ran off the bottom with its Cancel unreachable (a flex column that
+    // squeezed its rows instead of scrolling), and opened mid-lesson it kept
+    // the previous step's anchored position.
+    const shape = await page.evaluate(async () => {
+      localStorage.setItem('graphden.tour.done', JSON.stringify(['01']));
+      localStorage.setItem('graphden.tour',
+        JSON.stringify({lessonId: '03', step: 2, created: []}));
+      location.reload();
+    });
+    await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
+      null, {timeout: 60000});
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 30000});
+    const cat = await page.evaluate(() => {
+      const pop = document.querySelector('#gd-tour-pop');
+      const list = document.querySelector('.gd-tour-lesson-list');
+      const foot = document.querySelector('.gd-tour-picker-foot');
+      const r = pop.getBoundingClientRect();
+      const fr = foot.getBoundingClientRect();
+      const filter = document.querySelector('.gd-tour-filter');
+      filter.value = 'branch';
+      filter.dispatchEvent(new Event('input'));
+      // Chapter headings are children too — count the lesson ROWS.
+      const filtered = Array.from(list.children)
+        .filter((c) => c.tagName === 'BUTTON')
+        .map((c) => c.textContent.trim());
+      filter.value = '';
+      filter.dispatchEvent(new Event('input'));
+      const done = Array.from(list.children)
+        .find((c) => /^01 ·/.test(c.textContent.trim()));
+      return {
+        resume: document.querySelector('.gd-tour-btn-resume')?.textContent.trim() || null,
+        fitsViewport: r.top >= 0 && r.bottom <= window.innerHeight,
+        listScrolls: list.scrollHeight > list.clientHeight + 4,
+        cancelReachable: fr.bottom <= window.innerHeight && fr.top >= 0,
+        filtered,
+        doneMarked: !!done && /done/.test(done.textContent),
+        chapters: Array.from(document.querySelectorAll('.gd-tour-chapter'))
+          .map((c) => c.textContent.trim()),
+      };
+    });
+    assert(/^Continue 03 · Slots and bindings — step 3\//.test(cat.resume || ''),
+      'a paused lesson resumes from where it stopped (got: ' + cat.resume + ')');
+    assert(cat.fitsViewport, 'the catalogue fits the window');
+    assert(cat.listScrolls, 'and the LIST scrolls rather than squeezing its rows');
+    assert(cat.cancelReachable, 'Cancel stays reachable at any scroll position');
+    assert(cat.filtered.length === 1 && /^08 · Branches/.test(cat.filtered[0]),
+      'the filter narrows to one lesson (got: ' + JSON.stringify(cat.filtered) + ')');
+    assert(cat.doneMarked, 'a finished lesson is marked done');
+    assert(cat.chapters.length === new Set(cat.chapters).size,
+      'each chapter heading appears once (got: ' + cat.chapters.join(', ') + ')');
+    await page.evaluate(() => {
+      localStorage.removeItem('graphden.tour.done');
+      localStorage.removeItem('graphden.tour');
+    });
+    console.log('  picker: resume + filter + done marks, list scrolls, Cancel pinned');
+
     console.log('PASS');
   } catch (err) {
     failed = true;

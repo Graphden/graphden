@@ -62,7 +62,7 @@
     :encode-unreadable-kws :equal? :error-boundary-wrap
     :error-http-status :every? :ex-data :execute-trace-rows
     :ex-info :extract-entity-params
-    :filter :filter-xf :find-first :first :fix :flatten
+    :filter :filter-xf :find-first :fn-signature :fn-type? :first :fix :flatten
     :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
     :free-arg-slot-map :free-memory :future :get :get-entity
@@ -137,7 +137,7 @@
     :call-noargs :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
-    :first :flatten :form-decode :get :get-in :gt
+    :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
     :gte :group-by :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str

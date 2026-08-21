@@ -783,8 +783,11 @@
    :to-set to-set-fn
    :value-kinds value-kinds
    :subtype? subtype?-fn
-   :fn-type? fn-type?-fn
-   :fn-signature fn-signature
+   ;; Both read whatever the caller hands them and fold it into the answer
+   ;; (a predicate over it, a vector containing it), so they carry the taint
+   ;; flag like every other content-touching primitive — docs/SECRETS.md § T3.
+   :fn-type? {:impl fn-type?-fn :taint-propagate? true}
+   :fn-signature {:impl fn-signature :taint-propagate? true}
    :describe-type-mismatch describe-type-mismatch-fn
    :classify-literal classify-literal
    :diff-value-against-type diff-value-against-type

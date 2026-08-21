@@ -7,6 +7,12 @@
 // the deleter but not to the reporter is a row the reader is never told about
 // (and, when it is a lesson's ONLY creation, never offered to delete).
 //
+// The e2e guards carry their own sweep (`hardCleanup` in
+// tutorial-tour-helpers.js) — deliberately, as a belt for a run that crashes
+// mid-lesson and never reaches this pass at all. It is allowed to be blunter
+// (it deletes known tutorial names outright); what it must NOT be is smarter,
+// so anything learned there about ORDER belongs here too.
+//
 // Deletion reports what it could not do. Every call here is best-effort — a
 // fn another row still references refuses, a registry can be unreachable —
 // and an unconditional "deleted" toast over swallowed failures is a lie the
@@ -34,14 +40,15 @@ async function _tourSurvivors(created) {
         // the delete is idempotent.
         out.push(c);
         break;
+      // Both resolve through the SERVER, like the delete pass: the client
+      // holds only the selected subtree (and, right after a reload, nothing
+      // at all), so a lexical miss means "not loaded here", not "gone" — and
+      // a row missing from this report is never offered for deletion.
       case 'fn':
-        if (_tourFindFn(c.name)) out.push(c);
+        if (_tourFindFn(c.name) || await _tourFnIdByName(c.name)) out.push(c);
         break;
       case 'ns':
-        if (typeof graphData !== 'undefined' && graphData
-            && (graphData.namespaces || []).some((n) => n.name === c.name)) {
-          out.push(c);
-        }
+        if (await _tourNsByName(c.name)) out.push(c);
         break;
       case 'package-version':
         if ((await _tourPublishedVersions(c.name)).length) out.push(c);
@@ -57,14 +64,27 @@ async function _tourSurvivors(created) {
 
 // --- deletion ---------------------------------------------------------------
 
+// `authFetch` / `authMutate` RESOLVE on 4xx — they hand back the Response.
+// A bare `try { await authMutate(…) } catch` therefore only ever sees a
+// network error, and the refusals that actually happen here (409: the fn is
+// still someone's parent; 409: the namespace is not empty) counted as
+// success. Every delete goes through this, so a refusal is reported.
+async function _tourDeleted(call) {
+  try {
+    const r = await call();
+    // A Response-less resolve (a stub, a future change) counts as done.
+    return r?.ok !== false;
+  } catch (_) { return false; }
+}
+
 async function _tourDeleteCreatedBranches() {
   const created = (_tourState?.created) || [];
   const failed = [];
   for (const c of created) {
     if (c.type !== 'branch') continue;
-    try {
-      await authFetch(API.api_branches_ref(c.name), { method: 'DELETE' });
-    } catch (_) { failed.push(c); }
+    const ok = await _tourDeleted(
+      () => authFetch(API.api_branches_ref(c.name), { method: 'DELETE' }));
+    if (!ok) failed.push(c);
   }
   return failed;
 }
@@ -93,15 +113,17 @@ async function _tourDeleteFns(created) {
   for (const c of fns) {
     const id = await _tourFnIdByName(c.name);
     if (!id) continue;
-    try { await authMutate('DELETE', API.api_entities_type_id('fn', id)); }
-    catch (_) { retry.push(c); }
+    const ok = await _tourDeleted(
+      () => authMutate('DELETE', API.api_entities_type_id('fn', id)));
+    if (!ok) retry.push(c);
   }
   const failed = [];
   for (const c of retry) {
     const id = await _tourFnIdByName(c.name);
     if (!id) continue;
-    try { await authMutate('DELETE', API.api_entities_type_id('fn', id)); }
-    catch (_) { failed.push(c); }
+    const ok = await _tourDeleted(
+      () => authMutate('DELETE', API.api_entities_type_id('fn', id)));
+    if (!ok) failed.push(c);
   }
   return failed;
 }
@@ -110,37 +132,54 @@ async function _tourDeleteFns(created) {
 // namespace is gone, installing the version answers 404. A lesson that
 // publishes therefore withdraws its own release, or it leaves a broken row in
 // the registry every time someone takes the tour.
-async function _tourWithdrawVersions(created) {
+//
+// The PIN goes first. Installing materialises the package under
+// `<ns>@<version>`, and the namespace pass below deletes that copy — a pin
+// left pointing at gutted entities is the exact state that makes the next
+// install answer 404 for a package the registry still lists as fine. Ending a
+// lesson half-way (published and installed, but not yet uninstalled by hand)
+// is the ordinary way to reach it.
+async function _tourRemovePackages(created) {
   const failed = [];
   for (const c of created) {
     if (c.type !== 'package-version') continue;
+    // Idempotent: answers `{removed: false}` when nothing was pinned.
+    const unpinned = await _tourDeleted(
+      () => authFetch(API.api_packages_uninstall
+                      + '?name=' + encodeURIComponent(c.name), { method: 'DELETE' }));
+    if (!unpinned) failed.push(c);
     for (const row of await _tourPublishedVersions(c.name)) {
-      try {
-        const r = await authFetch(API.api_packages_withdraw
-                                  + '?name=' + encodeURIComponent(row.name)
-                                  + '&version=' + encodeURIComponent(row.version),
-                                  { method: 'DELETE' });
-        if (!r.ok) failed.push(c);
-      } catch (_) { failed.push(c); }
+      const gone = await _tourDeleted(
+        () => authFetch(API.api_packages_withdraw
+                        + '?name=' + encodeURIComponent(row.name)
+                        + '&version=' + encodeURIComponent(row.version),
+                        { method: 'DELETE' }));
+      if (!gone) failed.push(c);
     }
   }
   return failed;
+}
+
+// Resolve a namespace the same way `_tourFnIdByName` resolves a fn: through
+// the SERVER. The client's `graphData` is a view — it can be empty right after
+// a reload, and a lesson that ran before it populated would read as "already
+// gone" and leave the namespace behind for good.
+async function _tourNsByName(name) {
+  try {
+    const r = await authFetch(API.api_graph_entities + '?scope=tree');
+    const payload = await r.json();
+    return (payload.namespaces || []).find((n) => n.name === name) || null;
+  } catch (_) {
+    return (typeof graphData !== 'undefined' && graphData
+      && (graphData.namespaces || []).find((n) => n.name === name)) || null;
+  }
 }
 
 async function _tourDeleteNamespaces(created) {
   const failed = [];
   for (const c of created) {
     if (c.type !== 'ns') continue;
-    // The lesson created this namespace through the editor, so the client
-    // already holds it — a full `initGraph()` just to learn one id costs
-    // seconds on a large graph. Refresh only if it somehow isn't there.
-    let ns = (typeof graphData !== 'undefined' && graphData
-      && (graphData.namespaces || []).find((n) => n.name === c.name)) || null;
-    if (!ns && typeof initGraph === 'function') {
-      try { await initGraph(); } catch (_) { /* report via the delete below */ }
-      ns = (typeof graphData !== 'undefined' && graphData
-        && (graphData.namespaces || []).find((n) => n.name === c.name)) || null;
-    }
+    const ns = await _tourNsByName(c.name);
     if (!ns) continue;
     // A namespace the lesson caused to exist can hold rows the lesson did not
     // create by hand — installing a package materialises its fns under
@@ -153,12 +192,14 @@ async function _tourDeleteNamespaces(created) {
       const payload = await sub.json();
       for (const f of (payload.fns || [])) {
         if (f['namespace-id'] !== ns.id) continue;
-        try { await authMutate('DELETE', API.api_entities_type_id('fn', f.id)); }
-        catch (_) { /* another row may still reference it — the ns delete reports */ }
+        // Best-effort: another row may still reference it, and the namespace
+        // delete below is what reports the outcome either way.
+        await _tourDeleted(() => authMutate('DELETE', API.api_entities_type_id('fn', f.id)));
       }
     } catch (_) { /* best-effort — the delete below reports the truth */ }
-    try { await authMutate('DELETE', API.api_entities_type_id('ns', ns.id)); }
-    catch (_) { failed.push(c); }
+    const ok = await _tourDeleted(
+      () => authMutate('DELETE', API.api_entities_type_id('ns', ns.id)));
+    if (!ok) failed.push(c);
   }
   return failed;
 }
@@ -167,12 +208,21 @@ async function _tourDeleteNamespaces(created) {
 // refused: `{failed: [{type, name}, …]}`. The caller decides what to say.
 async function _tourDeleteCreated() {
   const created = (_tourState?.created) || [];
-  const failed = [
+  const raw = [
     ...await _tourDeleteCreatedBranches(),
     ...await _tourDeleteFns(created),      // fns first — a namespace deletes once empty
-    ...await _tourWithdrawVersions(created),
+    ...await _tourRemovePackages(created),   // unpin, then withdraw
     ...await _tourDeleteNamespaces(created),
   ];
+  // One row can refuse twice (an unpin AND a withdraw for the same package);
+  // the reader should read its name once.
+  const seen = new Set();
+  const failed = raw.filter((c) => {
+    const k = c.type + '\u0000' + c.name;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
   if (typeof initGraph === 'function') { try { await initGraph(); } catch (_) {} }
   return { failed };
 }

@@ -662,9 +662,29 @@ async function openTutorialMenu() {
       head.textContent = chapter;
       list.appendChild(head);
     }
-    list.appendChild(_tourBtn(
+    // `:requires` names the CAPABILITY the lesson's steps need (the org
+    // lessons drive panels only an owner/admin can open). Offering one to a
+    // reader who cannot complete it is a dead end, so it stays listed —
+    // seeing what exists is the point of a catalogue — but disabled, with
+    // the reason on the row rather than hidden in a tooltip.
+    const need = lesson.requires;
+    const allowed = !need
+                 || (typeof window.graphdenHasCap === 'function'
+                     && window.graphdenHasCap(need));
+    const btn = _tourBtn(
       lesson.id + ' · ' + (lesson.title || ''), 'gd-tour-btn-primary',
-      () => startTutorialIsolated(lesson.id)));
+      () => { if (allowed) startTutorialIsolated(lesson.id); });
+    if (!allowed) {
+      btn.classList.add('gd-tour-btn-locked');
+      btn.disabled = true;
+      btn.title = 'Needs the ' + need + ' capability — run it in an'
+        + ' organization workspace you own.';
+      const note = document.createElement('span');
+      note.className = 'gd-tour-lesson-note';
+      note.textContent = ' — needs ' + need;
+      btn.appendChild(note);
+    }
+    list.appendChild(btn);
   }
   list.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', () => {
     if (_tourState) _tourRenderStep();

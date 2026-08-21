@@ -41,6 +41,11 @@
 ;;   :creates       — {:type "ns"|"fn" :name N} — tracked for the end-of-tour
 ;;                    cleanup offer (soft-deletes, nothing is lost).
 ;;
+;; A lesson may also carry `:requires "<capability>"` — the org lessons drive
+;; panels only an owner/admin can open. The picker still LISTS such a lesson
+;; (seeing what exists is the point of a catalogue) but renders it disabled,
+;; with the reason on the row, wherever the session lacks that capability.
+;;
 ;; SELECTION GATE (2026-08-20, hard-won): a step that says "click the +"
 ;; MUST be preceded by a `selected`-checked step naming the fn that owns
 ;; that +. Without it the spotlight can ring the PARENT's placeholder while
@@ -736,6 +741,68 @@
                :check {:kind "manual"}}
               {:title "That's branching"
                :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The written lesson 08 covers protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "16"
+             :chapter "Your organization"
+             :requires "manage-users"
+             :title "Members"
+             :steps
+             [{:title "An organization is people"
+               :body "Everything you have built so far lived in ONE workspace — yours. An organization adds the second half: who else may open it, and what they may touch. You own this one, so you decide both."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open the Organization surface"
+               :body "Click your avatar (top right) and choose “Organization”. It is a settings surface with one section list: Members, Grants, Roles, and the operational panels."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-nav button[data-section=\"users\"]"}}
+              {:title "Members"
+               :body "Click “Members”. The table lists everyone in the org — you are the owner, which is the one role nobody can take away except by transferring it."
+               :target "#gd-operate-nav button[data-section=\"users\"]"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"users\"]:not([hidden])"}}
+              {:title "Invite someone"
+               :body "In the field at the bottom type any address you can receive mail at — a plus-alias of your own works (you+teammate@…) — and click Invite. The row appears immediately, marked invited."
+               :target "[data-users-panel] form[hx-post=\"/api/org-members\"]"
+               :check {:kind "dom" :selector "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"}}
+              {:title "What an invite actually is"
+               :body "No invite entity was created. The row is a GRANT keyed by the email instead of an account id, dormant until that person first signs in — at which point it is rewritten into a real membership. One table, two states, nothing to expire or garbage-collect."
+               :target "[data-users-panel]"
+               :check {:kind "manual"}}
+              {:title "Take it back"
+               :body "Click the × on the invited row and confirm. Removing a member deletes their grants in THIS org only — their account, and any other org they belong to, are untouched."
+               :target "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"
+               :check {:kind "dom-absent" :selector "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"}}
+              {:title "That's membership"
+               :body "Invite by email, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 16 covers roles and the owner-only actions."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "17"
+             :chapter "Your organization"
+             :requires "manage-grants"
+             :title "Grants"
+             :steps
+             [{:title "Membership is the door, grants are the rooms"
+               :body "Being in the org gets someone in. A grant says what they may do and WHERE: a capability (read, write, execute, admin …) on a namespace. A grant on “acme” covers “acme.billing” too — scope is by prefix."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open Grants"
+               :body "Avatar → “Organization” → “Grants”. The table is every grant in this org: subject, capability, namespace. Your own admin row is there — that is what makes you the owner in practice."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"grants\"]:not([hidden])"}}
+              {:title "Grant a namespace"
+               :body "In the form: put an email in Subject (the teammate you invited, or your own address), pick read as the capability, type examples as the namespace — then “+ Add grant”. The new row appears in the table."
+               :target "[data-grants-panel] form"
+               :check {:kind "manual"}}
+              {:title "Read the row you just wrote"
+               :body "Subject shows the person's email; capability and namespace show the reach. write and admin SUBSUME the narrower ones — a write grant needs no separate read. And if that email has no account yet, the row waits for them exactly like an invite does."
+               :target "[data-grants-panel]"
+               :check {:kind "manual"}}
+              {:title "Revoke it"
+               :body "Click the × on that row and confirm. Access is the grant row: delete it and the capability is gone on the next request — there is no cache to wait out."
+               :target "[data-grants-panel] .grant-delete"
+               :check {:kind "manual"}}
+              {:title "That's authorization"
+               :body "Per-namespace capabilities, one table, no roles required — though Roles exist when you want to name a bundle of them. The written lesson 17 covers the org-management axis (manage-users, manage-grants …), which is separate from namespace capabilities. Click Finish."
                :target nil
                :check {:kind "manual"}}]}]}}}
 

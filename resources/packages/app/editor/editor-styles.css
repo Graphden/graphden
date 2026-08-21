@@ -6365,3 +6365,15 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
 }
 
 .gd-tour-chapter:first-child { margin-top: 0; }
+
+/* A lesson this session cannot complete (`:requires` capability missing):
+   still listed — the catalogue is the point — but visibly inert. */
+.gd-tour-btn-locked {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.gd-tour-lesson-note {
+  color: var(--muted-fg);
+  font-style: italic;
+}

@@ -213,6 +213,32 @@ const {
       console.log('  branch isolation: skipped (GRAPHDEN_TOUR_BRANCH_E2E=1 runs it)');
     }
 
+    // ---------- picker: a lesson this session cannot run is LOCKED --------
+    // The org lessons drive panels that need `manage-users` / `manage-grants`.
+    // On this stack (no tenancy addon) the capability probe is absent, so the
+    // picker must list them disabled with the reason on the row — a catalogue
+    // entry, not a dead end.
+    await page.goto(BASE + '/');
+    await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
+      null, {timeout: 60000, polling: 200});
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 20000});
+    const locked = await page.evaluate(() => {
+      const list = document.querySelector('.gd-tour-lesson-list');
+      const row = Array.from(list.children).find((c) => /^16 ·/.test(c.textContent.trim()));
+      return row ? {text: row.textContent.trim(), disabled: row.disabled === true,
+                    chapter: !!Array.from(list.children).find(
+                      (c) => c.className.includes('gd-tour-chapter')
+                          && c.textContent.trim() === 'Your organization')}
+                 : null;
+    });
+    assert(locked, 'lesson 16 is listed in the picker');
+    assert(locked.chapter, 'its chapter heading is rendered');
+    assert(locked.disabled, 'it is disabled where the capability is missing');
+    assert(/needs manage-users/.test(locked.text),
+      'the row says what it needs (got: ' + locked.text + ')');
+    console.log('  picker: org lessons listed + locked');
+
     console.log('PASS');
   } catch (err) {
     failed = true;

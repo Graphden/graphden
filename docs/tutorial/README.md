@@ -37,8 +37,8 @@
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written |
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |
-| 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written |
-| 17 | [Grants — who may touch what](17-grants.md) | ✅ written |
+| 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written · ▶ interactive |
+| 17 | [Grants — who may touch what](17-grants.md) | ✅ written · ▶ interactive |
 | 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
 | 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written |
 | 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written |
@@ -61,9 +61,15 @@ keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
 
 The picker lists the tours in TEACHING order, grouped into chapters
-(Basics → Composing → Running it → The editor) — the numbering above is
-the written lesson's id, which stays the deep link (`?tutorial=13`) and
-is deliberately not the tour's reading order.
+(Basics → Composing → Running it → The editor → Your organization) — the
+numbering above is the written lesson's id, which stays the deep link
+(`?tutorial=13`) and is deliberately not the tour's reading order.
+
+The organization tours drive panels only an org owner/admin can open, so
+they declare the capability they need (`:requires`). Anywhere that
+capability is absent — the public demo, a self-hosted instance with no
+tenancy addon — the picker still lists them, disabled, with the reason on
+the row.
 
 
 Lesson 25 will cover the Operate → Assets panel — editing the

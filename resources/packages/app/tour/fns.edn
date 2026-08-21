@@ -959,6 +959,64 @@
               {:title "That's supervision"
                :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 10 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click Finish to clean up."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "19"
+             :chapter "Your organization"
+             :requires "org"
+             :title "Your account"
+             :steps
+             [{:title "The account is you, the org is the workspace"
+               :body "Two different things sit behind one sign-in. Your ACCOUNT is a person — an email, how you sign in, your second factor. An organization is a workspace that account has access to. Deleting a membership never touches an account; changing your password never touches an org."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open Settings"
+               :body "Click your avatar (top right) and choose “Settings”. Below the appearance controls sits your account card — the same page as /account, folded into the editor."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-acct-idents"}}
+              {:title "How you sign in"
+               :body "“Sign-in methods” lists what is attached to this account — a password, and any social provider you linked. Adding a second method is how you avoid being locked out by one; removing the last one is refused."
+               :target "#gd-acct-idents"
+               :check {:kind "manual"}}
+              {:title "Two-factor"
+               :body "Below it, “Two-factor authentication”. Enrolling asks an authenticator app to scan a secret and then proves it with one code — worth doing on a real account, and skippable here since it needs your phone."
+               :target "#gd-acct-tfa"
+               :check {:kind "manual"}}
+              {:title "A token for machines"
+               :body "“API tokens” are how anything that is not a browser reaches your graph: the MCP endpoint, a CLI, CI. Create one now — pick a short lifetime, leave the scopes as they come — and note that the value is shown ONCE, at creation."
+               :target "#gd-acct-tok-sec"
+               :check {:kind "manual"}}
+              {:title "A token can only narrow you"
+               :body "It never grants more than the account holds: its rights are your grants INTERSECTED with the scopes you ticked, and management surfaces (members, grants, orgs) are browser-only whatever you tick. Revoke the one you just made with its “Revoke” button — a revoked token stops working on the next request."
+               :target "#gd-acct-toks"
+               :check {:kind "manual"}}
+              {:title "Leaving"
+               :body "The avatar menu's “Sign out” ends this session; “Sign out everywhere” ends every session of this account on every device — the move to make if a laptop goes missing. The written lesson 19 covers signing up, email verification and password reset, which happen before you ever reach this editor. Click Finish."
+               :target ".auth-avatar"
+               :check {:kind "manual"}}]}
+            {:id "18"
+             :chapter "Your organization"
+             :requires "org"
+             :title "Plans and limits"
+             :steps
+             [{:title "What a plan actually decides"
+               :body "A tier is not a feature list — it is a set of CEILINGS and one switch. How many fns you may hold, how many list items, how fast you may call, whether your fns may reach the network, and whether you get an executor of your own (which is what makes always-on services possible)."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Where usage shows"
+               :body "Open your avatar → “Organization” → “Monitoring”. Runs, failures and average duration for the window you pick — counts and durations only, never arguments or results."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"stats\"]:not([hidden])"}}
+              {:title "The fn ceiling"
+               :body "Back on the canvas, a capped plan shows a small “fns: N / cap” badge above the Explorer's list — the heads-up before the cap, not after. An uncapped plan (dedicated, or your own instance) shows nothing there, which is itself the answer."
+               :target "#entity-list"
+               :check {:kind "manual"}}
+              {:title "What happens at the ceiling"
+               :body "Writes past the fn cap are refused with a 429 and a message naming the limit; calls past the rate window get the same status for the rest of that minute. Nothing is deleted and nothing degrades quietly — you are told, and the next tier lifts the number."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Reading your own tier"
+               :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 18 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click Finish."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   {:name :_tour-json

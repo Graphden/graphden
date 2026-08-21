@@ -39,8 +39,8 @@
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |
 | 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written · ▶ interactive |
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written · ▶ interactive |
-| 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written |
-| 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written |
+| 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written · ▶ interactive |
+| 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written · ▶ interactive |
 | 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written · ▶ interactive |
 | 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written · ▶ interactive |
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |

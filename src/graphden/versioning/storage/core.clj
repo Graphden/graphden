@@ -329,6 +329,38 @@
           res/entity-config)))
 
 
+(defn- revive-or-update!
+  "The update half of `upsert-entities`, with the resurrection case.
+
+   An identity row outlives its content: delete tombstones the VERSION
+   and leaves the identity behind, and package ids are deterministic
+   per (namespace, name) — so a re-sync of a deleted fn hands us an id
+   whose identity exists and whose content does not. `update-entities`
+   resolves versions and throws `:not-found` for exactly those ids;
+   upsert means create-or-update, so they are re-created instead.
+   (Re-installing a package whose materialised fns had been deleted
+   answered 404 forever otherwise.)
+
+   The existence probe upstream stays the cheap identity read — this
+   path costs nothing unless the write actually hit a tombstone, and
+   `update-entities` has already done the resolve by the time it
+   reports which ids are missing."
+  [storage entity-name to-update]
+  (try
+    (sp/update-entities storage entity-name to-update)
+    (catch clojure.lang.ExceptionInfo e
+      (let [{:keys [type missing-ids]} (ex-data e)
+            missing (set missing-ids)]
+        (if (and (= :not-found type) (seq missing))
+          (let [{revive true survivors false}
+                (group-by #(contains? missing (:id %)) to-update)]
+            (when (seq revive)
+              (sp/create-entities storage entity-name revive))
+            (when (seq survivors)
+              (sp/update-entities storage entity-name survivors)))
+          (throw e))))))
+
+
 ;; === VersionedStorage Record ===
 
 (defrecord VersionedStorage
@@ -846,34 +878,23 @@
     [this entity-name data-seq]
     (if-not (res/versioned-entity? entity-name)
       (sp/upsert-entities base-storage entity-name data-seq)
-      ;; For versioned: split on what this BRANCH can actually see, then
-      ;; create/update accordingly.
-      ;;
-      ;; Existence has to be measured on the RESOLVED view, not on the
-      ;; identity row. An identity row outlives its content — delete
-      ;; tombstones the version and leaves the identity behind, and ids are
-      ;; deterministic — so a re-sync of the same (namespace, name) found the
-      ;; identity, routed to `update-entities`, and that threw "Entities not
-      ;; found" because no version resolves. Installing a package whose
-      ;; materialised fns had been deleted answered 404 for exactly this
-      ;; reason. `create-entities` already handles a live identity (it
-      ;; diffs the identity fields and writes a fresh version row), so the
-      ;; revive path is simply "create".
-      (let [ids (vec (keep :id data-seq))
-            live-ids (if (seq ids)
-                       (set (keys (res/resolve-entities-batch
-                                    base-storage entity-name
-                                    (vals (sp/read-entities base-storage entity-name ids))
-                                    branch-id)))
-                       #{})
+      ;; For versioned: batch check existence in BASE storage (no version
+      ;; resolution), then create/update accordingly. The identity probe is
+      ;; deliberately the cheap one — boot syncs thousands of fn-defs through
+      ;; here, and resolving every id's version chain up front turned the
+      ;; O(n) read into O(n × versions) and stalled startup.
+      (let [ids (keep :id data-seq)
+            existing-ids (if (seq ids)
+                           (set (keys (sp/read-entities base-storage entity-name (vec ids))))
+                           #{})
             {to-update true to-create false}
-            (group-by #(contains? live-ids (:id %)) data-seq)]
+            (group-by #(contains? existing-ids (:id %)) data-seq)]
         ;; Batch create new records
         (when (seq to-create)
           (sp/create-entities this entity-name to-create))
         ;; Batch update existing records
         (when (seq to-update)
-          (sp/update-entities this entity-name to-update))
+          (revive-or-update! this entity-name to-update))
         ;; Return all records
         (vec data-seq))))
 

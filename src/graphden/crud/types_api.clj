@@ -19,6 +19,7 @@
     [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tctx]
+    [graphden.types.check :as tcheck]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs])
   (:import
@@ -581,13 +582,13 @@
         fn-slot? (types/fn-type? expected)
         candidates
         (->> registry-snapshot
-             (keep (fn [[fn-name {:keys [return args effects type-row?]}]]
+             (keep (fn [[fn-name {:keys [return effects type-row?]}]]
                      (let [eff-set (or effects #{})
                            name-str (some-> fn-name name)]
                        (when (and (not type-row?) ; type-rows aren't callable producers
                                   (if fn-slot?
-                                    (types/subtype? [:fn (or args {}) return eff-set]
-                                                    expected)
+                                    (when-let [sig (tcheck/assemble-fn-type fn-name)]
+                                      (types/subtype? sig expected))
                                     (types/subtype? return expected))
                                   (or (nil? allowed-effects)
                                       (every? allowed-effects eff-set))
@@ -596,7 +597,7 @@
                                            (str/starts-with? name-str name-prefix))))
                          {:name fn-name
                           :return return
-                          :args (or args {})
+                          :args (or (:args (get registry-snapshot fn-name)) {})
                           :effects (vec (sort eff-set))}))))
              (sort-by (fn [c] (some-> c :name name))))]
     {:ok true

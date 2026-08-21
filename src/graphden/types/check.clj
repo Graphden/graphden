@@ -171,7 +171,7 @@
   (contains? #{:value-map :scalar :seq-vec} (binding-shape v)))
 
 
-(defn- assemble-fn-type
+(defn assemble-fn-type
   "Build a structural `[:fn args-map ret effects]` from a fn-name's
    registry entry — its REMAINING free args (including transitive
    ones lifted through every ref-binding) become the callable's
@@ -196,7 +196,16 @@
    meaning), which is wrong for a sub.
 
    Returns nil ONLY when the registry has no entry for the name yet —
-   the caller's `if-let` then defers the check entirely."
+   the caller's `if-let` then defers the check entirely.
+
+   PUBLIC because the editor's candidate list must ask the SAME
+   question the write path asks. `/api/types/candidates` filters a
+   fn-typed slot by \"is this candidate's signature a subtype of the
+   slot?\", and assembling that signature a second time (from the raw
+   registry `:args` / `:return`) silently diverged: it missed the
+   producer-of-callable case and the per-invocation
+   `:call-time-effects` subset, so the picker could disagree with
+   `check-binding!` about the very bind it was offering."
   [fn-name]
   (when-let [info (registry/rich-type-of fn-name)]
     (let [ret (or (:return info) :any)

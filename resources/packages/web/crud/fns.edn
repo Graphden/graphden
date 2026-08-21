@@ -424,11 +424,9 @@
    :return-type :bool}
 
   {:name :fn-signature
-   :description "`[:fn args ret effects]` — a candidate fn's own callable shape, assembled from its rich-type fields. A fn-ref bound into a callable slot IS this signature (the executor hof-wraps the ref), so this is what a callable slot's subtype check compares."
-   :args {:args {:type :keyword-map :description "The candidate's `{arg-name → type}` map."}
-          :return {:type :type-expression :description "The candidate's return type."}
-          :effects {:type :any :description "The candidate's effect set."}}
-   :return-type :type-expression}
+   :description "`[:fn args ret effects]` — the callable shape of the fn named `fn-name`, or nil when the registry has no entry. Single boundary over `types.check/assemble-fn-type`, the assembler the WRITE path (`check-binding!`) uses, so a callable slot's candidate list and its binding check answer the same question."
+   :args {:fn-name {:type :keyword-or-text :description "Name of the candidate fn."}}
+   :return-type [:union :null :type-expression]}
 
   {:name :describe-type-mismatch
    :description "One-line human-readable explanation of why `candidate` ⊄ `expected`. Used by the editor's type-picker tooltip."
@@ -707,16 +705,23 @@
 
   {:name :_types-candidates-signature
    :parent :fn-signature
-   :args {:args :_types-candidates-args
-          :return :_types-candidates-return
-          :effects :_types-candidates-apply-effects-raw}}
+   :args {:fn-name {:as :item}}}
+
+  ;; `:fn-signature` answers nil for a name the registry hasn't seen yet.
+  ;; `:subtype?`'s `:candidate` slot is a bare `:type-expression`, so the
+  ;; nullable form can't be handed to it — and a candidate with no signature
+  ;; must not pass anyway. `:any` is the right stand-in: it is NOT a subtype
+  ;; of any fn-type, so such a candidate falls out of the list.
+  {:name :_types-candidates-signature-or-any
+   :parent :coalesce
+   :args {:value :_types-candidates-signature :default {:value :any :literal? true}}}
 
   {:name :_types-candidates-subtype-ok?
    :parent :if
    :args {:test :_types-candidates-expected-callable?
           :then {:parent :subtype?
                  :args {:expected {:as :expected}
-                        :candidate :_types-candidates-signature}}
+                        :candidate :_types-candidates-signature-or-any}}
           :else {:parent :subtype?
                  :args {:expected {:as :expected}
                         :candidate :_types-candidates-return}}}}

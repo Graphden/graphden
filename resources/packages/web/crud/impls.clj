@@ -384,12 +384,19 @@
 
 
 (defbase fn-signature
-  "Assemble a candidate's callable shape — `[:fn args ret effects]` —
-   from the three rich-type fields. A fn-ref bound into a callable
-   slot IS this signature (the executor hof-wraps the ref), so this is
-   what the slot's subtype check has to compare against."
-  [args return effects]
-  [:fn (or args {}) return (or effects #{})])
+  "The callable shape of the fn named `fn-name` — `[:fn args ret
+   effects]`, or nil when the registry has no entry yet.
+
+   Atomic library boundary over `types.check/assemble-fn-type`: the
+   SAME assembler `check-binding!` uses on write. Assembling it a
+   second time from the raw registry fields looks equivalent and is
+   not — it misses the producer-of-callable case (a fn whose return is
+   itself a fn-type surfaces the INNER type) and the per-invocation
+   `:call-time-effects` subset HOF slots measure against — so the
+   picker would offer or refuse binds the write path judges the other
+   way."
+  [fn-name]
+  (tcheck/assemble-fn-type fn-name))
 
 
 (defbase describe-type-mismatch-fn

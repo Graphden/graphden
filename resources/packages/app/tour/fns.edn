@@ -288,8 +288,26 @@
                :body "Click ⋯ on the str-len value node (the one hanging under :string), choose × to remove the binding and confirm. The slot goes back to free — and the ⚠ disappears."
                :target ".type-error-badge"
                :check {:kind "dom-absent" :selector ".type-error-badge"}}
+              {:title "Types are things you MAKE, too"
+               :body "So far you only used types the packages ship; your own are the same kind of row. First CLEAR the Explorer filter (it still says str-len, and a filtered tree hides everything else). Then, if there is no “tutorial” namespace, click “New namespace” at the bottom and type exactly: tutorial — if it is already there, this step passes by itself."
+               :target ".create-root-ns-btn"
+               :check {:kind "ns-exists" :name "tutorial"}
+               :creates {:type "ns" :name "tutorial"}}
+              {:title "New type…"
+               :body "Hover the “tutorial” row, click its “+”, and choose “New type…”. The form opens on Refinement — click the Record tab: a record is a fixed set of named fields."
+               :target ".ns-header[data-ns-path=\"tutorial\"]"
+               :check {:kind "dom" :selector ".type-create-popover"}}
+              {:title "Describe the shape"
+               :body "Name it exactly: tutorial-point — then fill the two field rows: x of type int, and y of type int. Click Create."
+               :target ".type-create-popover"
+               :check {:kind "fn-exists" :name "tutorial-point"}
+               :creates {:type "fn" :name "tutorial-point"}}
+              {:title "A type is a fn row"
+               :body "The editor opened it like any other card, because that is what it is: a row with no impl and no parents, carrying a shape. Slots point AT rows like this one — which is why the checker could compare int against text a moment ago, with no separate type table anywhere."
+               :target nil
+               :check {:kind "selected" :name "tutorial-point"}}
               {:title "That's the type system"
-               :body "Slots carry types, the picker knows what fits, and a violation is a recorded diagnostic you can fix later. The written lesson 05 adds records, unions, variants, lists and [:secret T]. Click Finish to clean up or keep tutorial-typed."
+               :body "Slots carry types, the picker knows what fits, a violation is a recorded diagnostic you can fix later — and the types themselves are rows you author. The written lesson 05 adds unions, variants, lists and [:secret T]. Click Finish to clean up or keep what you made."
                :target nil
                :check {:kind "manual"}}]}
             {:id "06"

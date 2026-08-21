@@ -46,7 +46,7 @@ async function hardCleanup(page) {
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
                      'tutorial-card', 'tutorial-button', 'tutorial-script',
-                     'tutorial-renamed'];
+                     'tutorial-renamed', 'tutorial-point'];
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));
@@ -668,6 +668,51 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
 }
 
 
+// Create a RECORD type-row through the ns row's create menu: + → New type…
+// → Record tab → name + field pairs → Create. `fields` is [[name, type], …]
+// and must not exceed the two rows the form starts with (the lesson uses
+// exactly two; "+ add row" is the user's affordance for more).
+async function createRecordType(page, nsPath, typeName, fields) {
+  await page.waitForSelector('.ns-header[data-ns-path="' + nsPath + '"]',
+    {timeout: 30000});
+  await page.evaluate((path) => {
+    const h = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
+    h.querySelector('.ns-plus-btn').click();
+  }, nsPath);
+  await page.waitForSelector('.create-menu [data-type="type"]', {timeout: 15000});
+  await page.evaluate(() => {
+    document.querySelector('.create-menu [data-type="type"]').click();
+  });
+  await page.waitForSelector('.type-create-popover', {timeout: 15000});
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('.type-create-popover button'))
+      .find((b) => b.textContent.trim() === 'Record').click();
+  });
+  await page.waitForFunction(
+    () => document.querySelectorAll('.type-create-pair-key').length >= 2,
+    null, {timeout: 15000, polling: 100});
+  await page.evaluate(({name, pairs}) => {
+    const pop = document.querySelector('.type-create-popover');
+    const set = (el, v) => {
+      el.value = v;
+      el.dispatchEvent(new Event('input', {bubbles: true}));
+    };
+    set(pop.querySelector('input.type-create-input'), name);
+    const keys = Array.from(pop.querySelectorAll('.type-create-pair-key'));
+    const vals = Array.from(pop.querySelectorAll('.type-create-pair-val'));
+    pairs.forEach(([k, t], i) => { set(keys[i], k); set(vals[i], t); });
+    Array.from(pop.querySelectorAll('button'))
+      .find((b) => b.textContent.trim() === 'Create').click();
+  }, {name: typeName, pairs: fields});
+  // The popover element is a SINGLETON: on success it is emptied and
+  // hidden, not removed — waiting for the node to disappear waits forever.
+  await page.waitForFunction(() => {
+    const pop = document.querySelector('.type-create-popover');
+    return !pop || pop.textContent.trim() === '';
+  }, null, {timeout: 30000, polling: 150});
+}
+
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
@@ -677,4 +722,5 @@ module.exports = {
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, bindFnRefPlaceholder,
   bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
+  createRecordType,
 };

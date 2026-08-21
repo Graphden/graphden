@@ -18,7 +18,7 @@ const {
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
-  bindOptionalArgChip, appendFnRefViaChip,
+  bindOptionalArgChip, appendFnRefViaChip, createRecordType,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -54,7 +54,28 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 05 diagnostic Next');
     await waitTourTitle(page, 'Clear it');
     await removeUseSiteBinding(page, 'str-len');
+    // --- the "author your own type" arc ---
+    await waitTourTitle(page, 'Types are things you MAKE, too', 150000);
+    // The filter still holds `str-len` from earlier in this lesson, and a
+    // filtered tree hides every other row — including the namespace the
+    // next steps need. The step text tells the reader to clear it.
+    await page.fill('input[placeholder="Filter..."]', '');
+    await page.waitForTimeout(600);
+    await createRootNamespace(page, NS_NAME).catch(() => {});
+    await waitTourTitle(page, 'New type…', 150000);
+    await createRecordType(page, NS_NAME, 'tutorial-point',
+                           [['x', 'int'], ['y', 'int']]);
+    await waitTourTitle(page, 'A type is a fn row', 150000);
     await waitTourTitle(page, "That's the type system", 150000);
+    // A type-row is a fn row: no impl, no parents, classified `record`.
+    const typeFound = await api(page, 'GET',
+      '/api/graph/entities?scope=search&q=tutorial-point');
+    const typeFn = (typeFound.fns || []).find((f) => f.name === 'tutorial-point');
+    assert(typeFn, 'tutorial-point exists');
+    assert((typeFn['parent-ids'] || []).length === 0,
+      'a type-row has no parents');
+    assert(typeFn.role === 'record',
+      'the server classifies it as a record (got: ' + typeFn.role + ')');
     await finishAndDelete(page);
     console.log('  lesson 05: walked + cleaned');
 

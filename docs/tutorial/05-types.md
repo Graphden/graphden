@@ -282,8 +282,16 @@ The provenance ↳ badge shows where the type came from.
 
 ## Type UX in the editor
 
-Four affordances make the type system usable without ever
-typing a structural form by hand:
+Creating one comes first: hover a namespace row in the Explorer,
+click its `+`, choose **New type…**, and pick a kind — Refinement,
+Record, Union, Variant or List. Each kind gets the form it needs
+(field rows for a record, a condition builder for a refinement,
+branch rows for a union), plus an "Advanced (raw JSON)" escape
+for a shape the builders don't cover. What lands is a fn row with
+no impl and no parents — exactly what the sections above
+described, authored without writing a structural form by hand.
+
+Four more affordances make the type system usable day to day:
 
 **1. The compatible-type select.** Click an arg's type-chip on
 an editable card and the select lists ONLY the types that can

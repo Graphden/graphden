@@ -6,4 +6,10 @@
  ;; `:current-branch-chain`, …) defined under `storage/branches` +
  ;; `storage/versioned`.
  :dependencies ["core" "storage"]
- :modules ["http" "http-client" "vault" "sql" "reitit" "reitit-text" "html" "crud" "ring-adapter" "branch-router" "runtime" "components" "htmx" "sse" "response" "errors"]}
+ :modules ["http" "http-client" "vault" "sql" "reitit" "reitit-text" "html"
+           ;; One namespace ("web.crud"), seven modules — see
+           ;; `web/crud/fns.edn` for the layout. Order matters only for
+           ;; load determinism, not for reference resolution.
+           "crud" "crud-types" "crud-write" "crud-delete" "crud-seq"
+           "crud-parse" "crud-routes"
+           "ring-adapter" "branch-router" "runtime" "components" "htmx" "sse" "response" "errors"]}

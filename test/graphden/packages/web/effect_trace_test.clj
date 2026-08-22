@@ -34,6 +34,14 @@
                  'graphden.packages.web.crud.impls))
 
 
+(def ^:private crud-types-ns
+  ;; `web.crud` is one graph namespace spread over seven MODULE directories
+  ;; (see `web/crud/fns.edn`); `to-set` lives in the type-API one. The impls
+  ;; `ns` symbol follows the directory, so it loads by its own path.
+  (load-impls-ns "packages/web/crud-types/impls.clj"
+                 'graphden.packages.web.crud-types.impls))
+
+
 (def ^:private http-ns
   (load-impls-ns "packages/web/http/impls.clj"
                  'graphden.packages.web.http.impls))
@@ -142,7 +150,7 @@
     ;; `cached-or-load-graph` and now correctly records :db; using
     ;; it here was hiding the missing-record-effect bug across the
     ;; whole `_*-apply` family. `to-set-fn` is genuinely pure.)
-    (let [impl (unwrap crud-ns 'to-set-fn)
+    (let [impl (unwrap crud-types-ns 'to-set-fn)
           trace (atom #{})]
       (is (some? impl))
       (binding [cr/*effect-trace* trace]

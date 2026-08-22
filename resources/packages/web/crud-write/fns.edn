@@ -1,0 +1,922 @@
+;; Part of the `web.crud` namespace — see `web/crud/fns.edn` for the
+;; module layout and why the ids are unchanged.
+
+
+{:namespace "web.crud"
+ :description "Entity create / update: the parse → guard → apply pipeline, its rejection envelopes and the shared HTML error response."
+ :fns
+ [;; --- entity create / update pipeline primitives. The handlers
+  ;; themselves are `:if` graph fn-defs below; these base-fns are the
+  ;; parse / validate / apply stages. `_rejected?` + `_rejection-response`
+  ;; are shared by both create and update. ---
+  ;; --- :_create-parsed — graph composition over the
+  ;; `:extract-entity-params` primitive + body→form-data
+  ;; parsing + per-type-dispatch through `:cond` + `:try` to capture
+  ;; parse exceptions as `:parse-error`. NOTE: body slurp is implicit —
+  ;; `realize-body` in `web/http/impls.clj` has already coerced the
+  ;; InputStream to a String by the time any handler sees the request.
+  ;;
+  ;; Per-type dispatch: adding a new entity type means adding a
+  ;; new clause here AND a per-type `parse-<TYPE>-from-form` fn-def —
+  ;; both at the graph level, no Clojure rebuild.
+
+  {:name :_create-extracted
+   :parent :extract-entity-params
+   :args {:request {:as :request}}}
+
+  ;; Form-data: `:parse-form-body-kw` CHECKS
+  ;; `Content-Type: application/x-www-form-urlencoded` (returns `{}`
+  ;; otherwise) and keywordises keys. A bare `:parse-query-string`
+  ;; chain would parse ANY non-nil body regardless of CT, so
+  ;; `Content-Type: text/plain` with body `name=foo` would slip
+  ;; through guard #2 and create the entity with the parsed fields.
+
+  {:name :_create-form-data
+   :description "Form-data with keyword keys. `{}` when no body OR wrong content-type — guard #2 (`:_create-form-data-empty?`) catches both via `:empty?`."
+   :parent :parse-form-body-kw}
+
+  {:name :_create-base
+   :description "Static fields of the parsed shape — `:entity-type :type-str :form-data`. `:entity-data` / `:parse-error` get merged onto this if the per-type parser runs."
+   :parent :zipmap
+   :args {:keys [{:value :entity-type} {:value :type-str} {:value :form-data}]
+          :vals [{:parent :get
+                  :args {:coll :_create-extracted :key {:value :entity-type} :default nil}}
+                 {:parent :get
+                  :args {:coll :_create-extracted :key {:value :type-str} :default nil}}
+                 :_create-form-data]}}
+
+  ;; --- Per-type dispatch as a :cond chain. Lazy — only the matching
+  ;; parser runs per request. Each clause's body captures the cond's
+  ;; shared :form-data binding.
+  {:name :_create-entity-data-by-type
+   :description "Dispatch to the per-type parser based on `:type-str`."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a {:as :type-str} :b {:value "fn"}}}
+                    {:parent :parse-fn-from-form :args {:form-data {:as :form-data}}}
+                    {:parent :equal? :args {:a {:as :type-str} :b {:value "ns"}}}
+                    {:parent :parse-ns-from-form :args {:form-data {:as :form-data}}}
+                    {:parent :equal? :args {:a {:as :type-str} :b {:value "slot"}}}
+                    {:parent :parse-slot-from-form :args {:form-data {:as :form-data}}}
+                    {:parent :equal? :args {:a {:as :type-str} :b {:value "fn-slot"}}}
+                    {:parent :parse-fn-slot-from-form :args {:form-data {:as :form-data}}}
+                    {:parent :equal? :args {:a {:as :type-str} :b {:value "binding"}}}
+                    {:parent :parse-binding-from-form :args {:form-data {:as :form-data}}}
+                    {:parent :equal? :args {:a {:as :type-str} :b {:value "binding-list-item"}}}
+                    {:parent :parse-binding-list-item-from-form :args {:form-data {:as :form-data}}}
+                    {:parent :equal? :args {:a {:as :type-str} :b {:value "service"}}}
+                    {:parent :parse-service-from-form :args {:form-data {:as :form-data}}}
+                    {:value true}
+                    {:value nil}]}}
+
+  ;; --- :try-wrapped per-type call. On success returns the parsed
+  ;; entity-data; on throw, returns `{:parse-error <message>}` for
+  ;; downstream merge.
+
+  {:name :_create-entity-data-attempt
+   :description "0-arg `:try` body — invokes the per-type dispatch. Captures the cond shared-args (`:form-data`, `:type-str`) for inner clauses."
+   :parent :_create-entity-data-by-type
+   :args {:form-data {:as :form-data}
+          :type-str {:as :type-str}}}
+
+  {:name :_create-parse-error-shape
+   :description "`:try` on-throw branch — surfaces the exception message as `:parse-error` text."
+   :parent :zipmap
+   :args {:keys [{:value :parse-error}]
+          :vals [{:parent :throwable-message :args {:ex {:as :exception}}}]}}
+
+  {:name :_create-entity-data-or-error
+   :description "Per-type parse attempt wrapped in `:try`. Success → entity-data map; throw → `{:parse-error msg}`."
+   :parent :try
+   :args {:body :_create-entity-data-attempt
+          :on-throw :_create-parse-error-shape
+          :form-data :_create-form-data
+          :type-str {:parent :get :args {:coll :_create-extracted :key {:value :type-str} :default nil}}}}
+
+  ;; --- Merge layers: on success → `{base + :entity-data <result>}`;
+  ;; on throw → `{base + :parse-error <message>}`; when entity-type or
+  ;; form-data missing → just `base`.
+
+  {:name :_create-can-dispatch?
+   :description "Only run the per-type parser when both entity-type AND form-data are present."
+   :parent :and
+   :args {:values [{:parent :some?
+                    :args {:value {:parent :get
+                                   :args {:coll :_create-extracted
+                                          :key {:value :entity-type}
+                                          :default nil}}}}
+                   {:parent :some? :args {:value :_create-form-data}}]}}
+
+  {:name :_create-dispatched-merge
+   :description "When :try succeeded, `:_create-entity-data-or-error` is the entity-data map; merge under `:entity-data`. When :try caught, it's `{:parse-error msg}` — `:merge` adds that key directly."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll :_create-entity-data-or-error
+                        :key {:value :parse-error}}}
+          :then {:parent :merge
+                 :args {:maps [:_create-base :_create-entity-data-or-error]}}
+          :else {:parent :merge
+                 :args {:maps [:_create-base
+                               {:parent :zipmap
+                                :args {:keys [{:value :entity-data}]
+                                       :vals [:_create-entity-data-or-error]}}]}}}}
+
+  {:name :_create-parsed
+   :description "Stage 1 of create — URI entity-type + form-decoded body routed through the per-type parser. `{:entity-type :type-str :form-data :entity-data :parse-error}`."
+   :parent :if
+   :args {:test :_create-can-dispatch?
+          :then :_create-dispatched-merge
+          :else :_create-base}
+   :return-type :_create-parsed-shape}
+
+  ;; --- C22: stage 2 of create as a graph `:cond`.
+  ;; Same shape as C19/C20/C21 but with eight guards covering every
+  ;; entity-type create can land on (ns / fn / slot / fn-slot / binding
+  ;; / binding-list-item / service). Each `:_create-…-rej` base-fn
+  ;; returns `{:reason …}` on rejection or nil; the matching `…-rej?`
+  ;; fn-def is just `:some?` over that. The `:cond` short-circuits, so
+  ;; only the work for the FIRST firing guard runs (call-cache means
+  ;; even a guard whose result feeds both predicate and result lane
+  ;; computes once). ---
+
+  ;; --- Guards 1–3. Graph-composed with no new base-fns — `:if`
+  ;; over a `:nil?` / `:some?` predicate + `:zipmap` reason envelope.
+  ;; The `:_*-rej?` predicates stay as `:some?` over the graph result
+  ;; for cond-readability; result-cache dedupes the underlying eval.
+
+  {:name :_parsed-entity-type
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}
+
+  {:name :_parsed-type-str
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :type-str} :default nil}}
+
+  {:name :_parsed-form-data
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :form-data} :default nil}}
+
+  {:name :_create-parsed-parse-error
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :parse-error} :default nil}}
+
+  ;; --- Guard 1: unknown entity type
+  {:name :_create-entity-type-nil?
+   :parent :nil?
+   :args {:value :_parsed-entity-type}}
+
+  {:name :_create-entity-type-suffix
+   :description "': <type-str>' when the URI segment was supplied, else empty string. Lets the rejection cite the offending segment without leaking the literal `nil`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_parsed-type-str}}
+          :then {:parent :str
+                 :args {:parts [{:value ": "} :_parsed-type-str]}}
+          :else {:value ""}}}
+
+  {:name :_create-entity-type-reason
+   :parent :str
+   :args {:parts [{:value "Unknown entity type"} :_create-entity-type-suffix]}}
+
+  {:name :_create-entity-type-rej-data
+   :parent :zipmap
+   :args {:keys [{:value :reason}] :vals [:_create-entity-type-reason]}}
+
+  {:name :_create-entity-type-rej
+   :description "Guard 1 — URI segment didn't resolve to a known entity type. `{:reason \"Unknown entity type[: <segment>]\"}` or nil."
+   :parent :if
+   :args {:test :_create-entity-type-nil?
+          :then :_create-entity-type-rej-data
+          :else nil}}
+
+  {:name :_create-entity-type-rej?
+   :description "True when guard 1 fired (`:some?` over `:_create-entity-type-rej`)."
+   :parent :some?
+   :args {:value :_create-entity-type-rej}}
+
+  ;; --- Guard 2: empty / non-form body. `:empty?` catches both
+  ;; the truly missing case (form-data = nil — no body / wrong
+  ;; content-type) AND the empty-map case (form-data = `{}` — a bare
+  ;; `:nil?` guard would let an empty body through and let the
+  ;; downstream apply create entities with zero fields).
+  {:name :_create-form-data-empty?
+   :parent :empty?
+   :args {:coll :_parsed-form-data}}
+
+  {:name :_create-form-data-rej-data
+   :parent :const
+   :args {:value {:reason "Request body is empty (expected url-encoded form fields)"}}}
+
+  {:name :_create-form-data-rej
+   :description "Guard 2 — request body wasn't url-encoded form data (missing OR empty). Static reason."
+   :parent :if
+   :args {:test :_create-form-data-empty?
+          :then :_create-form-data-rej-data
+          :else nil}}
+
+  {:name :_create-form-data-rej?
+   :description "True when guard 2 fired."
+   :parent :some?
+   :args {:value :_create-form-data-rej}}
+
+  ;; --- Guard 3: per-type parser surfaced a 400-grade error
+  {:name :_create-parse-error-some?
+   :parent :some?
+   :args {:value :_create-parsed-parse-error}}
+
+  {:name :_create-parse-error-rej-data
+   :description "Passes the parser message verbatim as `:reason`."
+   :parent :zipmap
+   :args {:keys [{:value :reason}] :vals [:_create-parsed-parse-error]}}
+
+  {:name :_create-parse-error-rej
+   :description "Guard 3 — per-type parser surfaced a 400-grade error (bad UUID / malformed JSON / etc.). Reason is the parser message verbatim."
+   :parent :if
+   :args {:test :_create-parse-error-some?
+          :then :_create-parse-error-rej-data
+          :else nil}}
+
+  {:name :_create-parse-error-rej?
+   :description "True when guard 3 fired."
+   :parent :some?
+   :args {:value :_create-parse-error-rej}}
+
+  ;; --- Guard 4: `:fn-slot` creates only — a composed fn
+  ;; can only own slots that rename an inherited one. Pure graph
+  ;; composition over `:get-entity` (the existing read-by-id+type
+  ;; primitive). The DB reads are gated behind a lazy `:and` so that
+  ;; non-fn-slot creates short-circuit before any storage hit.
+
+  {:name :_create-fn-slot-fn-id
+   :parent :get
+   :args {:coll :_parsed-entity-data :key {:value :fn-id} :default nil}}
+
+  {:name :_create-fn-slot-slot-id
+   :parent :get
+   :args {:coll :_parsed-entity-data :key {:value :slot-id} :default nil}}
+
+  {:name :_create-fn-slot-fn-row
+   :description "Owner fn row (the fn being given a slot). Read lazily — `:_create-fn-slot-rename-fires?`'s outer `:and` short-circuits non-fn-slot creates before this evaluates."
+   :parent :get-entity
+   :return-type :nullable-fn-row-shape
+   :args {:entity-type {:value "fn"} :id :_create-fn-slot-fn-id}}
+
+  {:name :_create-fn-slot-slot-row
+   :description "Slot row being attached. Read lazily — see `:_create-fn-slot-fn-row`."
+   :parent :get-entity
+   :return-type [:union :null :slot-row-shape]
+   :args {:entity-type {:value "slot"} :id :_create-fn-slot-slot-id}}
+
+  {:name :_create-fn-slot-fn-row-name
+   :parent :get
+   :args {:coll :_create-fn-slot-fn-row :key {:value :name} :default nil}}
+
+  {:name :_create-fn-slot-fn-row-parent-ids
+   :parent :get
+   :args {:coll :_create-fn-slot-fn-row :key {:value :parent-ids} :default nil}}
+
+  {:name :_create-fn-slot-slot-row-source-slot-id
+   :parent :get
+   :args {:coll :_create-fn-slot-slot-row :key {:value :source-slot-id} :default nil}}
+
+  {:name :_create-fn-slot-is-fn-slot-create?
+   :description "Lazy short-circuit guard — only fire DB reads + checks when this is actually a `:fn-slot` create."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
+                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "fn-slot"}}}]}}
+
+  {:name :_create-fn-slot-violation?
+   :description "Both rows resolved AND the fn is composed AND the slot isn't a rename. Each clause is lazy via `:and`."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_create-fn-slot-fn-row}}
+                   {:parent :some? :args {:value :_create-fn-slot-slot-row}}
+                   {:parent :not :args {:value {:parent :empty? :args {:coll :_create-fn-slot-fn-row-parent-ids}}}}
+                   {:parent :nil? :args {:value :_create-fn-slot-slot-row-source-slot-id}}]}}
+
+  {:name :_create-fn-slot-rename-fires?
+   :parent :and
+   :args {:values [:_create-fn-slot-is-fn-slot-create?
+                   :_create-fn-slot-violation?]}}
+
+  {:name :_create-fn-slot-rename-reason
+   :description "`Composed fn \":foo\" can only own slots that rename an inherited slot ...`"
+   :parent :str
+   :args {:parts [{:value "Composed fn "}
+                  {:parent :pr-str :args {:value :_create-fn-slot-fn-row-name}}
+                  {:value " can only own slots that rename an inherited slot (set :source-slot-id). To add a new arg create a new fn-def with this one as parent."}]}}
+
+  {:name :_create-fn-slot-rename-rej-data
+   :parent :zipmap
+   :args {:keys [{:value :reason}] :vals [:_create-fn-slot-rename-reason]}}
+
+  {:name :_create-fn-slot-rename-rej
+   :description "Guard 4 (fn-slot creates only) — a composed fn (`parent-ids` non-empty) may only own a slot that renames an inherited one (`:source-slot-id` set). Direct HTTP-CRUD requests are the only path that lands here; internal flows bypass via `sp/create-entity`."
+   :parent :if
+   :args {:test :_create-fn-slot-rename-fires?
+          :then :_create-fn-slot-rename-rej-data
+          :else nil}}
+
+  {:name :_create-fn-slot-rename-rej?
+   :description "True when guard 4 fired."
+   :parent :some?
+   :args {:value :_create-fn-slot-rename-rej}}
+
+  ;; --- Guard 5: `:service` creates only — refuse if the
+  ;; target fn has any free-arg slot. Pure graph composition over the
+  ;; `:free-arg-slot-map` primitive; admins can vary the
+  ;; "permissive" / "strict" definition by composing a different free-
+  ;; arg-filter at the graph layer (e.g. allow optional slots).
+
+  {:name :_parsed-entity-data
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :entity-data} :default nil}}
+
+  {:name :_create-svc-fn-id
+   :description "`:fn-id` from the create payload (only meaningful for service creates)."
+   :parent :get
+   :args {:coll :_parsed-entity-data :key {:value :fn-id} :default nil}}
+
+  {:name :_create-is-service-create?
+   :description "True iff this request creates a `:service` row AND carries a target `:fn-id`."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_parsed-entity-data}}
+                   {:parent :equal? :args {:a :_parsed-type-str :b {:value "service"}}}
+                   {:parent :some? :args {:value :_create-svc-fn-id}}]}}
+
+  {:name :_create-svc-free-args
+   :description "`{name → slot-id}` of the target fn's free args that would BLOCK starting it as a service. Uses `:service-blocking-free-args` (not the full `:free-arg-slot-map`), so a listener/whole-app fn whose free args are all per-request callback args isn't falsely rejected, while a genuinely unstartable fn still is."
+   :parent :service-blocking-free-args
+   :args {:fn-id :_create-svc-fn-id}}
+
+  {:name :_create-svc-free-keys
+   :parent :keys
+   :args {:map :_create-svc-free-args}}
+
+  {:name :_create-svc-has-free-args?
+   :description "True iff the target fn has at least one free-arg slot."
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_create-svc-free-keys}}}}
+
+  {:name :_create-svc-free-args-fires?
+   :parent :and
+   :args {:values [:_create-is-service-create? :_create-svc-has-free-args?]}}
+
+  {:name :_create-svc-free-args-reason
+   :description "`Cannot make a :service for a fn that has free args: [:foo :bar]. Create a derived fn-def...`"
+   :parent :str
+   :args {:parts [{:value "Cannot make a :service for a fn that has free args: "}
+                  {:parent :vec :args {:coll :_create-svc-free-keys}}
+                  {:value ". Create a derived fn-def that binds them, then declare a :service for the derived fn."}]}}
+
+  {:name :_create-service-free-args-rej-data
+   :parent :zipmap
+   :args {:keys [{:value :reason}] :vals [:_create-svc-free-args-reason]}}
+
+  {:name :_create-service-free-args-rej
+   :description "Guard 5 (`:service` creates only) — refuse if the target fn has any free arg slot. The supervisor invokes the service with empty args; a free slot would crash at startup."
+   :parent :if
+   :args {:test :_create-svc-free-args-fires?
+          :then :_create-service-free-args-rej-data
+          :else nil}}
+
+  {:name :_create-service-free-args-rej?
+   :description "True when guard 5 fired."
+   :parent :some?
+   :args {:value :_create-service-free-args-rej}}
+
+  ;; --- :chain-has-process-effect? — atomic graph-traversal primitive.
+  ;; True iff `fn-id` or any ancestor declares the `:process` effect.
+  ;; The BFS itself has cycle-tracking shared state (§3.3 carve-out)
+  ;; and stays inside the Clojure primitive. False for nil fn-id.
+  {:name :chain-has-process-effect?
+   :description "True iff `fn-id` or any ancestor (via `parent-ids`) declares the `:process` effect in its rich-type entry. False for nil fn-id."
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil short-circuits to false."}}
+   :return-type :bool
+   :effects #{:db}}
+
+  ;; --- Guard 6: `:service` creates only — refuse if the
+  ;; target fn doesn't declare the `:process` effect (directly or via
+  ;; an ancestor). Pure graph composition over `:chain-has-process-
+  ;; effect?` + `:get-entity` for the fn-name citation.
+
+  {:name :_create-svc-no-proc-has-process?
+   :description "Lazy DB lookup; gated by the outer `:and` so it only fires for `:service` creates."
+   :parent :chain-has-process-effect?
+   :args {:fn-id :_create-svc-fn-id}}
+
+  {:name :_create-svc-no-proc-fires?
+   :parent :and
+   :args {:values [:_create-is-service-create?
+                   {:parent :not :args {:value :_create-svc-no-proc-has-process?}}]}}
+
+  ;; For the dynamic message we cite the fn's NAME, not the id.
+  {:name :_create-svc-fn-row
+   :description "Used solely for `(pr-str (:name fn-row))` in the rejection message; lazy via the outer `:if`'s short-circuit."
+   :parent :get-entity
+   :return-type :nullable-fn-row-shape
+   :args {:entity-type {:value "fn"} :id :_create-svc-fn-id}}
+
+  {:name :_create-svc-fn-row-name
+   :parent :get
+   :args {:coll :_create-svc-fn-row :key {:value :name} :default nil}}
+
+  {:name :_create-svc-no-proc-reason
+   :description "`Cannot make a :service for fn \":foo\" — neither it nor any ancestor declares the :process effect ...`"
+   :parent :str
+   :args {:parts [{:value "Cannot make a :service for fn "}
+                  {:parent :pr-str :args {:value :_create-svc-fn-row-name}}
+                  {:value " — neither it nor any ancestor declares the :process effect. :service is reserved for fns that spawn supervised background work (long-running listeners, scheduled loops, etc.). Either add `:effects #{:process …}` to the fn-def if it really does spawn a background process, or wrap a one-shot fn in :schedule to get cron-style execution."}]}}
+
+  {:name :_create-service-no-process-rej-data
+   :parent :zipmap
+   :args {:keys [{:value :reason}] :vals [:_create-svc-no-proc-reason]}}
+
+  {:name :_create-service-no-process-rej
+   :description "Guard 6 (`:service` creates only) — `:service` is reserved for fns whose own (or any ancestor's) declared effects include `:process`. The chain walk lets composed fn-defs with a missing rich-type entry still pass when an ancestor declares the effect."
+   :parent :if
+   :args {:test :_create-svc-no-proc-fires?
+          :then :_create-service-no-process-rej-data
+          :else nil}}
+
+  {:name :_create-service-no-process-rej?
+   :description "True when guard 6 fired."
+   :parent :some?
+   :args {:value :_create-service-no-process-rej}}
+
+  {:name :_create-write-rej
+   :description "Guard 7 — generic cycle / MI / value-override / `:list-closed` write-time checks via `:write-rej`. Reuses the same primitive `:_update-validation` does. Server-only enforcement: editor pre-runs the cycle / MI subset, other API consumers don't."
+   :parent :write-rej
+   :args {:entity-type :_parsed-type-str
+          :entity-data :_parsed-entity-data}}
+
+  {:name :_create-write-rej?
+   :description "True when guard 7 fired."
+   :parent :some?
+   :args {:value :_create-write-rej}}
+
+  {:name :_create-validation
+   :description "Stage 2 of create — seven STRUCTURAL write-time guards wired as a flat `:cond`. Returns the rejection `{:reason …}` from the first matching guard, or `nil` (`{:value nil}` clause) when the create may proceed. Error-tolerance Phase 2: the former guard 8 (pre-write binding TYPE-check) is gone — type validity is no longer a write gate; the post-write `type-check-fn-after-mutation!` inside `:try-apply-create` records failures as per-branch diagnostics and the response carries them as `:type-warnings`."
+   :parent :cond
+   :args {:clauses [:_create-entity-type-rej?        :_create-entity-type-rej
+                    :_create-form-data-rej?          :_create-form-data-rej
+                    :_create-parse-error-rej?        :_create-parse-error-rej
+                    :_create-fn-slot-rename-rej?     :_create-fn-slot-rename-rej
+                    :_create-service-free-args-rej?  :_create-service-free-args-rej
+                    :_create-service-no-process-rej? :_create-service-no-process-rej
+                    :_create-write-rej?              :_create-write-rej
+                    {:value true}                    {:value nil}]
+          :parsed :_create-parsed}}
+
+  ;; Success branch of POST /api/entities/:type as graph composition.
+  ;; The §3.3 transactional unit
+  ;; (`sp/create-entity` + rename-slot + post-check + rollback)
+  ;; lives inside the `:try-apply-create` primitive — its body and
+  ;; rollback share a row-id that can't be split across graph nodes
+  ;; without risking a stale-id read. Everything else — error
+  ;; dispatch, invalidate, NOTIFY, response envelope — is composed
+  ;; here.
+  {:name :_create-apply
+   :description "Stage 3 of create — atomic-create-with-rollback + invalidate + notify + 200, or 400 with the error message."
+   :parent :if
+   :args {:test :_create-apply-error?
+          :then :_create-apply-err-response
+          :else :_create-apply-success
+          :result :_create-apply-result}}
+
+  {:name :_create-apply-result
+   :description "Outcome of the atomic create unit. `{:created <id>}` on success (plus `:type-warnings [<diagnostic> …]` when the write landed but the owning fn now fails the aggregate type-check — error-tolerance Phase 2 keeps the row and records a per-branch diagnostic), `{:error <human-msg>}` on capability-rej / write-failure."
+   :parent :try-apply-create
+   :args {:entity-type :_apply-entity-type-str
+          :entity-data :_parsed-entity-data
+          :type-str :_parsed-type-str
+          :form-data :_parsed-form-data}}
+
+  {:name :_apply-entity-type-str
+   :parent :name
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}}}
+
+  {:name :_create-apply-error?
+   :parent :some?
+   :args {:value :_apply-error-msg}}
+
+  {:name :_apply-error-msg
+   :parent :get
+   :args {:coll {:as :result} :key {:value :error} :default nil}}
+
+  {:name :_create-apply-created-id
+   :parent :get
+   :args {:coll {:as :result} :key {:value :created} :default nil}}
+
+  {:name :_create-apply-err-response
+   :description "Error response for the create pipeline — status comes from the result's :http-status (central web.errors mapping: 409 name/position collisions, 403 capability, 500 storage-internal) with 400 as the malformed-input default."
+   :parent :html-error-response
+   :args {:status {:parent :coalesce
+                   :args {:value {:parent :get
+                                  :args {:coll {:as :result}
+                                         ;; :literal? — the keyword
+                                         ;; collides with the
+                                         ;; :http-status TYPE-ROW name
+                                         ;; and would parse as a
+                                         ;; fn-ref, excluding half the
+                                         ;; app from compile (no impl
+                                         ;; on a type-row).
+                                         :key {:value :http-status
+                                               :literal? true}
+                                         :default nil}}
+                          :default 400}}
+          :reason :_apply-error-msg}}
+
+  ;; Success: invalidate cache → emit NOTIFY → 200 response. `:do :steps`
+  ;; sequences the side effects left-to-right.
+  {:name :_create-apply-success
+   :parent :do
+   :args {:steps [:_create-apply-do-invalidate
+                  :_create-apply-do-notify
+                  :_create-apply-ok-response]}}
+
+  ;; Payload for invalidate / notify: the just-created id assoc'd back
+  ;; into the original entity-data so seed-derivation sees the row's
+  ;; FKs (binding-list-item needs `:binding-id`).
+  {:name :_create-apply-success-payload
+   :parent :assoc
+   :args {:map :_parsed-entity-data
+          :key {:value :id}
+          :value :_create-apply-created-id}}
+
+  {:name :_create-apply-do-invalidate
+   :parent :invalidate-after-write
+   :args {:entity-type :_apply-entity-type-str
+          :entity-data :_create-apply-success-payload}}
+
+  {:name :_create-apply-do-notify
+   :parent :notify-after-write
+   :args {:entity-type :_apply-entity-type-str
+          :op {:value "write"}
+          :entity-data :_create-apply-success-payload}}
+
+  ;; 200 response. Legacy HTML body when the write is fully clean;
+  ;; when the atomic unit reports `:type-warnings` (error-tolerance
+  ;; Phase 2 — row kept, type-check failed, diagnostic recorded) the
+  ;; body switches to JSON `{message, type-warnings}` so API clients
+  ;; get the structured diagnostics. Additive: status stays 200 and
+  ;; body-ignoring clients (the editor checks `r.ok` only) are
+  ;; unaffected.
+  {:name :_create-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_create-apply-ok-response
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_create-apply-type-warnings}}
+          :then :_create-apply-ok-warn-response
+          :else {:value {:status 200 :body "<p>Entity created successfully</p>"}}}}
+
+  {:name :_create-apply-ok-warn-response
+   :description "200 JSON success-with-warnings envelope — `{\"message\": \"Entity created successfully\", \"type-warnings\": [...]}`."
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 {:parent :to-json-string
+                  :args {:data {:parent :zipmap
+                                :args {:keys [{:value :message} {:value :type-warnings}]
+                                       :vals [{:value "Entity created successfully"}
+                                              :_create-apply-type-warnings]}}}}]}}
+
+  ;; --- :_update-parsed. Mirrors :_create-parsed plus
+  ;; (a) `:id-str` + `:id-uuid` from the URI, (b) `:pre-existing` row
+  ;; pre-read (so validation can build the merged post-write view +
+  ;; the response can name the affected row even when form-data omits
+  ;; immutable FK fields).
+
+  {:name :_update-id-str
+   :parent :get
+   :args {:coll :_create-extracted :key {:value :id-str} :default nil}}
+
+  {:name :_update-id-uuid
+   :parent :parse-uuid
+   :args {:string :_update-id-str}}
+
+  ;; Pre-existing row read — guarded by entity-type + id-uuid both
+  ;; present. When entity-type is nil OR id-uuid didn't parse, return
+  ;; nil without touching storage.
+  {:name :_update-pre-existing-fetched
+   :description "Read the pre-existing row by type + id. Only executed under the `:_update-pre-existing` `:if`-guard that asserts both are non-nil, so the `:type` overrides on the bindings strip the nullable surface from `:_create-extracted.get` / `:parse-uuid` — without them the type-checker correctly rejects nullable values flowing into `:get-entity`'s strict slots. The return-type stays the unrefined `:nullable-keyword-map` from `:get-entity` — at this site the entity-type is dynamic (parsed from form body) so we can't pin a specific entity-shape alias without lying about non-`:fn` callers."
+   :parent :get-entity
+   :args {:entity-type {:parent :get
+                        :type :text
+                        :args {:coll :_create-extracted
+                               :key {:value :type-str}
+                               :default nil}}
+          :id {:ref :_update-id-uuid :type :uuid}}}
+
+  {:name :_update-pre-existing
+   :description "Pre-read of the existing row when entity-type AND id-uuid are both resolved; nil otherwise. The return-type stays the unrefined `:nullable-keyword-map` because the entity-type is dynamic (parsed from request body) — see `:_update-pre-existing-fetched` for the same rationale."
+   :parent :if
+   :args {:test {:parent :and
+                 :args {:values [{:parent :some?
+                                  :args {:value {:parent :get
+                                                 :args {:coll :_create-extracted
+                                                        :key {:value :entity-type}
+                                                        :default nil}}}}
+                                 {:parent :some? :args {:value :_update-id-uuid}}]}}
+          :then :_update-pre-existing-fetched
+          :else nil}}
+
+  ;; Update-side base — `:_create-base` extended with id-str, id-uuid,
+  ;; pre-existing.
+  {:name :_update-base
+   :parent :zipmap
+   :args {:keys [{:value :entity-type} {:value :type-str} {:value :id-str}
+                 {:value :id-uuid} {:value :form-data} {:value :pre-existing}]
+          :vals [{:parent :get
+                  :args {:coll :_create-extracted :key {:value :entity-type} :default nil}}
+                 {:parent :get
+                  :args {:coll :_create-extracted :key {:value :type-str} :default nil}}
+                 :_update-id-str
+                 :_update-id-uuid
+                 :_create-form-data
+                 :_update-pre-existing]}}
+
+  ;; Update dispatch gate — entity-type AND id-str AND form-data.
+  {:name :_update-can-dispatch?
+   :parent :and
+   :args {:values [{:parent :some?
+                    :args {:value {:parent :get
+                                   :args {:coll :_create-extracted
+                                          :key {:value :entity-type}
+                                          :default nil}}}}
+                   {:parent :some? :args {:value :_update-id-str}}
+                   {:parent :some? :args {:value :_create-form-data}}]}}
+
+  ;; Reuse the create-side per-type :try result. Same dispatch, same
+  ;; parse-error shape.
+  {:name :_update-dispatched-merge
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll :_create-entity-data-or-error
+                        :key {:value :parse-error}}}
+          :then {:parent :merge
+                 :args {:maps [:_update-base :_create-entity-data-or-error]}}
+          :else {:parent :merge
+                 :args {:maps [:_update-base
+                               {:parent :zipmap
+                                :args {:keys [{:value :entity-data}]
+                                       :vals [:_create-entity-data-or-error]}}]}}}}
+
+  {:name :_update-parsed
+   :description "Stage 1 of update — like `:_create-parsed` plus the `:id` segment and a pre-read of the existing row."
+   :parent :if
+   :args {:test :_update-can-dispatch?
+          :then :_update-dispatched-merge
+          :else :_update-base}
+   :return-type :_update-parsed-shape}
+
+  ;; --- :write-rej / :type-check-binding-rej — atomic §3.1 boundaries
+  ;; over the §3.3 validators. `:write-rej` is the STRUCTURAL gate
+  ;; both create + update chains still block on;
+  ;; `:type-check-binding-rej` is no longer wired as a blocking guard
+  ;; (error-tolerance Phase 2) but stays available as an on-demand
+  ;; pre-flight validator any graph composition can call.
+  {:name :write-rej
+   :description "Stage-2 write-time validation for create/update flows. Returns `{:reason …}` rejection or nil."
+   :args {:entity-type {:type :text :description "Canonical entity-name as text (`fn`, `slot`, `binding`, …)."}
+          :entity-data {:type :nullable-keyword-map :description "Entity row to validate (the merged post-write view on update). Nullable at type level; validation upstream guarantees non-null at runtime."}}
+   :return-type :_rejection-shape
+   :effects #{:db}}
+
+  {:name :type-check-binding-rej
+   :description "On-demand single-binding type validator. nil on success, `{:reason <message>}` on a type mismatch (never throws for a mismatch). Error-tolerance Phase 2 unhooked it from the create/update `:cond` chains — binding writes proceed and the post-write aggregate check records diagnostics instead; compose this fn where a verdict WITHOUT a write is wanted (pre-flight validation)."
+   :args {:entity-data {:type :nullable-keyword-map :description "Binding row to type-check. Nullable at type level."}
+          :id {:type :nullable-uuid :description "Existing binding id (UPDATE) or nil (CREATE)."}}
+   :return-type :_rejection-shape
+   :effects #{:db}}
+
+  ;; --- Stage 2 of update. A `:cond` whose first three
+  ;; guards REUSE the create-side rej-builders (`_create-entity-type-
+  ;; rej`/`-form-data-rej`/`-parse-error-rej`) since both `_create-
+  ;; parsed-shape` and `_update-parsed-shape` carry the same
+  ;; `:entity-type` / `:type-str` / `:form-data` / `:parse-error`
+  ;; fields. A `:_update-id-str-nil?` guard handles the URI-id-
+  ;; required case unique to update.
+  ;;
+  ;; The `:else` branch builds the merged-data (pre-existing +
+  ;; entity-data + {:id id-uuid}) and runs write-rej — the structural
+  ;; gate. Error-tolerance Phase 2 removed the blocking pre-write
+  ;; binding type-check from this chain: a type-breaking update lands
+  ;; and the post-write check inside `:try-apply-update` records the
+  ;; failure as a per-branch diagnostic + `:type-warnings` on the
+  ;; response.
+
+  {:name :_update-parsed-id-str
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :id-str} :default nil}}
+
+  {:name :_update-parsed-id-uuid
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :id-uuid} :default nil}}
+
+  {:name :_update-parsed-pre-existing
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :pre-existing} :default nil}}
+
+  ;; --- Guard: id-str missing in the URI.
+  {:name :_update-id-str-nil?
+   :parent :nil?
+   :args {:value :_update-parsed-id-str}}
+
+  {:name :_update-err-id-required
+   :parent :const
+   :args {:value {:reason "Missing entity id in URI"}}}
+
+  ;; --- :else branch — merged-data → write-rej → optional binding-type-rej.
+  {:name :_update-id-as-map
+   :description "`{:id <id-uuid>}` fragment to inject into the merged view so write-time validators see the canonical id."
+   :parent :zipmap
+   :args {:keys [{:value :id}] :vals [:_update-parsed-id-uuid]}}
+
+  {:name :_update-merged-data
+   :description "`(merge pre-existing entity-data {:id id-uuid})` — the post-write picture that write-time validators check."
+   :parent :merge
+   :args {:maps [:_update-parsed-pre-existing
+                 :_parsed-entity-data
+                 :_update-id-as-map]}}
+
+  {:name :_update-write-rej-result
+   :description "Generic write-time check against the merged view. nil when entity-data was empty (no actual update)."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_parsed-entity-data}}
+          :then {:parent :write-rej
+                 :args {:entity-type :_parsed-type-str
+                        :entity-data :_update-merged-data}}
+          :else nil}}
+
+  {:name :_update-validation
+   :description "Stage 2 of update — `:cond` over the 4 simple guards (3 of which reuse the create-side rej-builders) then the tail `write-rej` structural check against the merged post-write view. Returns the first rejection `{:reason …}` or nil. Error-tolerance Phase 2: the former binding-type-rej tail is gone — type validity no longer gates the write."
+   :parent :cond
+   :args {:clauses [:_create-entity-type-rej?        :_create-entity-type-rej
+                    :_update-id-str-nil?             :_update-err-id-required
+                    :_create-form-data-rej?          :_create-form-data-rej
+                    :_create-parse-error-rej?        :_create-parse-error-rej
+                    {:value true}                    :_update-write-rej-result]
+          :parsed :_update-parsed}}
+
+  ;; Success branch of PUT /api/entities/:type/:id as graph composition.
+  ;; `:try-apply-update` is the atomic write unit (sp/update-entity +
+  ;; rename-slot + post-write type-check for binding-shaped updates —
+  ;; non-blocking since error-tolerance Phase 2: failures are recorded
+  ;; as per-branch diagnostics and surfaced as `:type-warnings`, never
+  ;; rolled back).
+  {:name :_update-apply
+   :description "Stage 3 of update — atomic update + invalidate + notify + 200, or 400 with the error message."
+   :parent :if
+   :args {:test :_update-apply-error?
+          :then :_update-apply-err-response
+          :else :_update-apply-success
+          :result :_update-apply-result}}
+
+  {:name :_update-apply-result
+   :description "Outcome of the atomic update unit. `{:updated <id>}` on success (plus `:type-warnings [<diagnostic> …]` when a binding-shaped write landed but the owning fn now fails the aggregate type-check), `{:error <msg>}` on write failure."
+   :parent :try-apply-update
+   :args {:entity-type :_apply-entity-type-str
+          :id-uuid :_update-apply-id-uuid
+          :entity-data :_parsed-entity-data
+          :type-str :_parsed-type-str
+          :form-data :_parsed-form-data}}
+
+  {:name :_update-apply-id-uuid
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :id-uuid} :default nil}}
+
+  {:name :_update-apply-pre-existing
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :pre-existing} :default nil}}
+
+  {:name :_update-apply-error?
+   :parent :some?
+   :args {:value :_apply-error-msg}}
+
+  {:name :_update-apply-err-response
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason :_apply-error-msg}}
+
+  {:name :_update-apply-success
+   :parent :do
+   :args {:steps [:_update-apply-do-invalidate
+                  :_update-apply-do-notify
+                  :_update-apply-ok-response]}}
+
+  ;; Invalidate / notify payload: pre-existing row merged with entity-data
+  ;; merged with `{:id id-uuid}`, so seed-derivation sees both the
+  ;; pre-update FKs and any updated FKs.
+  {:name :_update-apply-success-payload
+   :parent :merge
+   :args {:maps [:_update-apply-pre-existing
+                 :_parsed-entity-data
+                 :_update-apply-success-id-only]}}
+
+  {:name :_update-apply-success-id-only
+   :parent :zipmap
+   :args {:keys [{:value :id}]
+          :vals [:_update-apply-id-uuid]}}
+
+  {:name :_update-apply-do-invalidate
+   :parent :invalidate-after-write
+   :args {:entity-type :_apply-entity-type-str
+          :entity-data :_update-apply-success-payload}}
+
+  {:name :_update-apply-do-notify
+   :parent :notify-after-write
+   :args {:entity-type :_apply-entity-type-str
+          :op {:value "write"}
+          :entity-data :_update-apply-success-payload}}
+
+  ;; 200 response — same warning-aware split as the create side:
+  ;; legacy HTML body when clean, JSON `{message, type-warnings}` when
+  ;; the kept write carries recorded type diagnostics.
+  {:name :_update-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_update-apply-ok-response
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_update-apply-type-warnings}}
+          :then :_update-apply-ok-warn-response
+          :else {:value {:status 200 :body "<p>Entity updated successfully</p>"}}}}
+
+  {:name :_update-apply-ok-warn-response
+   :description "200 JSON success-with-warnings envelope — `{\"message\": \"Entity updated successfully\", \"type-warnings\": [...]}`."
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 {:parent :to-json-string
+                  :args {:data {:parent :zipmap
+                                :args {:keys [{:value :message} {:value :type-warnings}]
+                                       :vals [{:value "Entity updated successfully"}
+                                              :_update-apply-type-warnings]}}}}]}}
+
+  {:name :_rejected?
+   :description "True when a `validate-*` stage produced a rejection. `:some? :validation`."
+   :parent :some?
+   :args {:value {:as :validation}}}
+
+  ;; --- C25: `:_rejection-response` was a `defbase` whose body was
+  ;; literally `{:status 400 :body (str "<p class=\"error\">"
+  ;; (:reason validation) "</p>")}`. Pure composition: `:get` + `:str`
+  ;; + `:assoc`. Now expressed in the graph so a user wanting a
+  ;; different status, different HTML wrapper, JSON body, etc. can
+  ;; vary it by composing differently without admin help. ---
+
+  {:name :_rejection-reason
+   :description "Pull the `:reason` text out of a `validate-*` rejection map."
+   :parent :get
+   :args {:coll {:as :validation :type :_rejection-shape
+                 :description "The `{:reason …}` rejection map."}
+          :key {:value :reason}}}
+
+  {:name :_rejection-response-body
+   :description "Wrap the rejection reason in a `<p class=\"error\">` paragraph — the HTML body of the 400."
+   :parent :str
+   :args {:parts [{:value "<p class=\"error\">"}
+                  :_rejection-reason
+                  {:value "</p>"}]}}
+
+  {:name :_rejection-response
+   :description "Render a `validate-*` rejection as a 400 partial Ring response. Pure graph composition over `:assoc` + `:str` + `:get` — the free arg `:validation` propagates up from `:_rejection-reason`."
+   :parent :assoc
+   :args {:map {:value {:status 400}}
+          :key {:value :body}
+          :value :_rejection-response-body}
+   :return-type :_partial-response-shape}
+
+  ;; --- :html-error-response — reusable Ring-response builder with
+  ;; canonical `<p class=\"error\">…</p>` body. Free args: `:status`
+  ;; (any 4xx/5xx int) and `:reason` (text). Descendants with
+  ;; `:reason {:as :their-shared-arg}` get the env-translation via
+  ;; `build-ref-renames` — now traverses ref-target chains so the
+  ;; rename whose source lives on `:_html-error-body` (reached via
+  ;; `:html-error-response.value` ref) is picked up correctly. See
+  ;; `compile/renames.clj :: build-ref-renames` and
+  ;; `feedback_capture_through_parent_chain.md`.
+
+  {:name :_html-error-body
+   :description "Wrap `:reason` in `<p class=\"error\">…</p>` for the response body."
+   :parent :str
+   :args {:parts [{:value "<p class=\"error\">"}
+                  {:as :reason :type :text :description "Human-readable error reason for the 4xx/5xx response body."}
+                  {:value "</p>"}]}}
+
+  {:name :html-error-response
+   :description "Build a Ring partial response with `<p class=\"error\">…</p>` body and `text/html; charset=utf-8` content-type. Owns `:status` and `:reason` as explicit free pins — concrete error responses inherit them via parent-ids and bind them to specific values."
+   :parent :assoc
+   :args {:map {:parent :zipmap
+                :args {:keys [{:value :status} {:value :headers}]
+                       :vals [{:as :status :type :int :description "HTTP status code (e.g. 400, 409, 500)."}
+                              {:value {"Content-Type" "text/html; charset=utf-8"}}]}}
+          :key {:value :body}
+          :value :_html-error-body
+          :status {:type :int
+                   :description "HTTP status code (e.g. 400, 409, 500). Flows into the response's `:status` field."}
+          :reason {:type :text
+                   :description "Human-readable failure reason — rendered inside the `<p class=\"error\">…</p>` body."}}
+   :return-type {:status :int :headers :text-map :body :text}}]}

@@ -22,6 +22,7 @@
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
     [graphden.test-infra.schemas :as schemas]
+    [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -51,15 +52,45 @@
        :router (br/create-router base-ctx "echo-1")})))
 
 
+(defn- invalidation-path
+  "Which invalidation path the last `set-value!` actually took, as a
+   string for a failure message.
+
+   This exists because of a gate flake that has never reproduced: `main
+   sees its own edit` read the PRE-write value once, and seven clean
+   full-suite runs (one with the failing seed) plus six runs of this ns
+   paired with the only other unit ns that builds an `echo-x` graph did
+   not bring it back. Two mechanisms were checked and RULED OUT — the
+   epoch heal cannot clobber a delta (`rebuild!` holds the invalidation
+   lock across read → compile → swap, and the optimistic path is
+   epoch-guarded), and the compile cache keys on the binding rows, so
+   values 1 and 2 cannot share an entry.
+
+   What is left is the fallback in `invalidate-graph-cache!`: with no
+   `:compile-deps` index it FULL-CLEARS, and a full clear on a warm
+   holder keeps serving the stale registry while a background rebuild
+   runs — which is exactly the observed symptom. So the next occurrence
+   should say whether the delta ran, instead of starting this over."
+  [ctx before]
+  (let [d (counters/delta-since before)]
+    (str "deps-index " (if (some-> (:compile-deps ctx) deref some?) "present" "ABSENT")
+         ", full-clears " (get d :registry/invalidate-full 0)
+         ", rebuilds " (get d :registry/rebuild 0)
+         ", epoch-heals " (get d :epoch/heal 0))))
+
+
 (defn- set-value!
   "Rewrite `echo-1`'s bound value on `storage`'s branch, then invalidate
-   exactly the way `crud.entities/invalidate!` does."
-  [{:keys [storage base-ctx router fn-id]} write-storage write-ctx v]
-  (let [binding-id (:id (first (sp/query-entities write-storage :binding {:fn-id fn-id})))]
+   exactly the way `crud.entities/invalidate!` does. Returns a
+   diagnostic string describing which invalidation path ran — see
+   `invalidation-path`."
+  [{:keys [router fn-id]} write-storage write-ctx v]
+  (let [binding-id (:id (first (sp/query-entities write-storage :binding {:fn-id fn-id})))
+        before (counters/snapshot)]
     (sp/update-entity write-storage :binding binding-id {:value v :value-present true})
     (ectx/invalidate-graph-cache! write-ctx #{fn-id})
     (br/invalidate-affected-ctxs! router (vs/current-branch-id write-storage) #{fn-id})
-    (when (= write-storage storage) base-ctx)))
+    (invalidation-path write-ctx before)))
 
 
 (deftest main-edit-reaches-cached-inheriting-branch-test
@@ -71,10 +102,9 @@
           (is (= 1 (cr/execute branch-ctx fn-id {})))
           (is (= 1 (cr/execute base-ctx fn-id {}))))
 
-        (set-value! f storage base-ctx 2)
-
-        (testing "main sees its own edit"
-          (is (= 2 (cr/execute base-ctx fn-id {}))))
+        (let [path (set-value! f storage base-ctx 2)]
+          (testing "main sees its own edit"
+            (is (= 2 (cr/execute base-ctx fn-id {})) path)))
         (testing "the cached branch recompiles — it has no rows of its own to override with"
           (is (= 2 (cr/execute branch-ctx fn-id {})))))
       (finally (sp/close raw)))))

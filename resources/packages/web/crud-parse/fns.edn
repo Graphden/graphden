@@ -1,0 +1,839 @@
+;; Part of the `web.crud` namespace — see `web/crud/fns.edn` for the
+;; module layout and why the ids are unchanged.
+
+
+{:namespace "web.crud"
+ :description "Request-body parsing, form and JSON, and the per-entity `parse-*-from-form` fragment merges."
+ :fns
+ [;; --- :parse-form-body / :parse-json-body.
+  ;; Pure graph composition over existing primitives — :get + :get-in
+  ;; + :and + :some? + :str-contains? + :parse-query-string /
+  ;; :parse-json. Admins extend the content-type allowlist or swap
+  ;; the parser by editing fragment fn-defs in the graph.
+
+  {:name :_request-body
+   :parent :get
+   :args {:coll {:as :request} :key {:value :body} :default nil}}
+
+  {:name :_request-content-type
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :headers} {:value "content-type"}]
+          :default ""}}
+
+  ;; --- :parse-form-body — `application/x-www-form-urlencoded`.
+
+  {:name :_form-body?
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_request-body}}
+                   {:parent :str-contains?
+                    :args {:string :_request-content-type
+                           :substring {:value "application/x-www-form-urlencoded"}}}]}}
+
+  {:name :form-decode
+   :description "Decode an `application/x-www-form-urlencoded` string into a `{string string}` map (ring.util.codec). Library boundary — unlike the graph-composed `:parse-query-string` (query strings are short), a form BODY can be hundreds of KB and must not run through the regex-`:split` input cap."
+   :args {:string {:type :nullable-text :description "Raw form-encoded body; nil reads as empty."}}
+   :return-type :text-map
+   :effects #{}}
+
+  {:name :parse-form-body
+   :description "Parse an `application/x-www-form-urlencoded` request body into a `{key value}` map. Empty map when body is missing OR content-type doesn't match."
+   :parent :if
+   :args {:test :_form-body?
+          :then {:parent :form-decode
+                 :args {:string :_request-body}}
+          :else {:value {}}}}
+
+  ;; --- :parse-form-body-kw — same, but KEYWORD-keyed. Handlers that
+  ;; read fields with keyword keys (`:get {:key {:value :field}}`) MUST
+  ;; use this: the raw `:parse-form-body` yields STRING keys, so a
+  ;; keyword-key read silently falls to its `:default` and every field
+  ;; collapses. Decoded entity rows are keyword-keyed, so this keeps the
+  ;; form seam consistent with the read seam.
+
+  {:name :_form-body-kw-callback
+   :description "HOF callback — `:str-to-keyword` of the `:value` HOF-iteration key."
+   :parent :str-to-keyword
+   :args {:string {:as :value}}}
+
+  {:name :parse-form-body-kw
+   :description "Parse an `application/x-www-form-urlencoded` request body into a `{keyword value}` map. Empty map when body missing or content-type doesn't match. Keyword-keyed variant of `:parse-form-body`."
+   :parent :update-keys
+   :args {:m :parse-form-body
+          :f :_form-body-kw-callback}}
+
+  ;; --- :parse-json-body — `application/json`. nil when missing or
+  ;; content-type doesn't match.
+
+  {:name :_json-body?
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_request-body}}
+                   {:parent :str-contains?
+                    :args {:string :_request-content-type
+                           :substring {:value "application/json"}}}]}}
+
+  {:name :parse-json-body
+   :description "Parse a JSON request body into a Clojure value (keywordizing string keys). nil when body is missing OR content-type doesn't match."
+   :parent :if
+   :args {:test :_json-body?
+          :then {:parent :parse-json
+                 :args {:string :_request-body :keywordize {:value true}}}
+          :else nil}}
+
+  {:name :str-to-uuid
+   :description "Coerce a string to `java.util.UUID`. Throws on malformed input."
+   :args {:string {:type :text :description "UUID in canonical 8-4-4-4-12 form."}}
+   :return-type :uuid}
+
+  ;; Form data parsing helpers
+  ;; --- :resolve-type-fn-id / :parse-constraint — atomic primitives
+  ;; over the fn-create form's complex coercions. resolve-type-fn-id
+  ;; bridges the editor's two-shape `:return-type`/`:base-fn-id`/
+  ;; `:element-fn-id` field (UUID-or-name). parse-constraint runs a
+  ;; recursive keyword-restore walk over the JSON-encoded constraint
+  ;; vector — the recursion is the §3.3 invariant (no atomic graph
+  ;; counterpart without `:fix`).
+  {:name :resolve-type-fn-id
+   :description "Resolve a type-row reference (UUID string OR fn name) to its fn-id. nil on blank input; throws `:crud/unknown-type-ref` when a name doesn't match."
+   :args {:v {:type :text :description "Form value — UUID string or type-row fn name."}}
+   :return-type :nullable-uuid
+   :effects #{:db}}
+
+  {:name :parse-constraint
+   :description "JSON-parse + recursive keyword-restore for the `:constraint` form field. nil on blank input."
+   :args {:raw {:type :text :description "Raw JSON-encoded constraint string from the form."}}
+   :return-type :jsonb}
+
+  ;; --- :parse-fn-from-form. The heavy lifter: 10 fields
+  ;; with the broadest coercion surface in the CRUD form set.
+  ;; Simple fragments (same pattern as the other parsers):
+  ;;   :name, :namespace-id (empty-as-clear), :description.
+  ;; Fragments using the type-resolve primitives:
+  ;;   :return-type → :return-type-fn-id (via :resolve-type-fn-id),
+  ;;   :base-fn-id, :element-fn-id (both via :resolve-type-fn-id when
+  ;;   non-blank),
+  ;;   :constraint (via :parse-constraint).
+  ;; Special-shape fragments:
+  ;;   :parent-id — non-blank-only assoc (no `contains?` check —
+  ;;     assoc-when-non-blank).
+  ;;   :parent-ids — comma-separated UUID list → vec of UUIDs.
+  ;;   :expects-effects — comma-separated bare effect names → vec,
+  ;;     with literal "[]" / "null" handling.
+
+  {:name :_form-name-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :name}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :name}]
+                        :vals [{:parent :to-str
+                                :args {:value {:parent :get
+                                               :args {:coll {:as :form-data}
+                                                      :key {:value :name}
+                                                      :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-form-parent-id-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :parent-id} :default nil}}
+
+  {:name :_parse-fn-form-parent-id-fragment
+   :description "Assoc :parent-id ONLY when non-blank (no `contains?` check). Different from the ns parser."
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-fn-form-parent-id-raw}}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :parent-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string :_parse-fn-form-parent-id-raw}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-form-namespace-id-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :namespace-id} :default nil}}
+
+  {:name :_parse-fn-form-namespace-id-coerced
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-fn-form-namespace-id-raw}}}}
+          :then {:parent :parse-uuid
+                 :args {:string :_parse-fn-form-namespace-id-raw}}
+          :else nil}}
+
+  {:name :_parse-fn-form-namespace-id-fragment
+   :description "Empty-as-clear — `:namespace-id` is present in result when form has key (so nil clears the column on update)."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :namespace-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :namespace-id}]
+                        :vals [:_parse-fn-form-namespace-id-coerced]}}
+          :else {:value {}}}}
+
+  {:name :_form-description-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :description}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :description}]
+                        :vals [{:parent :get
+                                :args {:coll {:as :form-data}
+                                       :key {:value :description}
+                                       :default nil}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-form-return-type-fragment
+   :description "`:return-type` form field → `:return-type-fn-id` storage column via `:resolve-type-fn-id`."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :return-type}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :return-type-fn-id}]
+                        :vals [{:parent :resolve-type-fn-id
+                                :args {:v {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :return-type}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  ;; --- parent-ids: comma-sep UUID list, empty → [].
+  {:name :_parse-fn-form-parent-ids-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :parent-ids} :default nil}}
+
+  {:name :_parse-fn-form-pid-trim-item
+   :description "Per-item trim — HOF callback for the parent-ids CSV split."
+   :parent :str-trim
+   :args {:string {:as :item}}}
+
+  {:name :_parse-fn-form-pid-trimmed
+   :parent :map
+   :args {:func :_parse-fn-form-pid-trim-item
+          :coll {:parent :str-split
+                 :args {:string :_parse-fn-form-parent-ids-raw
+                        :separator {:value ","}
+                        :limit nil}}}}
+
+  {:name :_parse-fn-form-pid-parse-uuid
+   :description "Per-item UUID parse — HOF callback."
+   :parent :parse-uuid
+   :args {:string {:as :item}}}
+
+  {:name :_parse-fn-form-parent-ids-coerced
+   :description "Parsed parent-ids vec — `[]` on blank input; otherwise the parsed UUID list."
+   :parent :if
+   :args {:test {:parent :blank?
+                 :args {:string :_parse-fn-form-parent-ids-raw}}
+          :then {:value []}
+          :else {:parent :vec
+                 :args {:coll {:parent :map
+                               :args {:func :_parse-fn-form-pid-parse-uuid
+                                      :coll :_parse-fn-form-pid-trimmed}}}}}}
+
+  {:name :_parse-fn-form-parent-ids-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :parent-ids}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :parent-ids}]
+                        :vals [:_parse-fn-form-parent-ids-coerced]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-form-base-fn-id-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :base-fn-id} :default nil}}
+
+  {:name :_parse-fn-form-base-fn-id-coerced
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-fn-form-base-fn-id-raw}}}}
+          :then {:parent :resolve-type-fn-id
+                 :args {:v :_parse-fn-form-base-fn-id-raw}}
+          :else nil}}
+
+  {:name :_parse-fn-form-base-fn-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :base-fn-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :base-fn-id}]
+                        :vals [:_parse-fn-form-base-fn-id-coerced]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-form-element-fn-id-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :element-fn-id} :default nil}}
+
+  {:name :_parse-fn-form-element-fn-id-coerced
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-fn-form-element-fn-id-raw}}}}
+          :then {:parent :resolve-type-fn-id
+                 :args {:v :_parse-fn-form-element-fn-id-raw}}
+          :else nil}}
+
+  {:name :_parse-fn-form-element-fn-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :element-fn-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :element-fn-id}]
+                        :vals [:_parse-fn-form-element-fn-id-coerced]}}
+          :else {:value {}}}}
+
+  ;; --- expects-effects: comma-sep + literal "null"/"[]" handling.
+  {:name :_parse-fn-form-effects-raw
+   :parent :to-str
+   :args {:value {:parent :get
+                  :args {:coll {:as :form-data}
+                         :key {:value :expects-effects}
+                         :default nil}}}}
+
+  {:name :_parse-fn-form-effects-strip-colon
+   :description "Per-item leading-colon strip — `:foo` → `foo`. HOF callback."
+   :parent :if
+   :args {:test {:parent :str-starts-with?
+                 :args {:string {:as :item} :prefix {:value ":"}}}
+          :then {:parent :subs
+                 :args {:string {:as :item} :start {:value 1}}}
+          :else {:as :item}}}
+
+  {:name :_parse-fn-form-effects-trimmed-items
+   :parent :map
+   :args {:func :_parse-fn-form-pid-trim-item
+          :coll {:parent :str-split
+                 :args {:string :_parse-fn-form-effects-raw
+                        :separator {:value ","}
+                        :limit nil}}}}
+
+  {:name :_parse-fn-form-effects-non-blank
+   :parent :filter
+   :args {:pred :non-blank?
+          :coll :_parse-fn-form-effects-trimmed-items}}
+
+  {:name :_parse-fn-form-effects-parsed
+   :description "Parsed effects vec — `nil` on blank/`\"null\"`, `[]` on literal `\"[]\"`, otherwise the CSV-derived vec with leading-colons stripped."
+   :parent :cond
+   :args {:clauses [{:parent :or
+                     :args {:values [{:parent :blank?
+                                      :args {:string :_parse-fn-form-effects-raw}}
+                                     {:parent :equal?
+                                      :args {:a :_parse-fn-form-effects-raw
+                                             :b {:value "null"}}}]}}
+                    {:value nil}
+                    {:parent :equal?
+                     :args {:a :_parse-fn-form-effects-raw :b {:value "[]"}}}
+                    {:value []}
+                    {:value true}
+                    {:parent :vec
+                     :args {:coll {:parent :map
+                                   :args {:func :_parse-fn-form-effects-strip-colon
+                                          :coll :_parse-fn-form-effects-non-blank}}}}]}}
+
+  {:name :_parse-fn-form-expects-effects-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :expects-effects}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :expects-effects}]
+                        :vals [:_parse-fn-form-effects-parsed]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-form-constraint-fragment
+   :description "Parse the JSON-encoded constraint vector via the new `:parse-constraint` primitive (recursive keyword-restore)."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :constraint}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :constraint}]
+                        :vals [{:parent :parse-constraint
+                                :args {:raw {:parent :get
+                                             :args {:coll {:as :form-data}
+                                                    :key {:value :constraint}
+                                                    :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :parse-fn-from-form
+   :description "Extract a fn entity's field map from a parsed form-data map. 10 fields: name + parent-id + namespace-id + description + return-type → return-type-fn-id + parent-ids (CSV-of-UUIDs) + base-fn-id + element-fn-id + expects-effects (CSV-of-bare-names with `null`/`[]` literals) + constraint (JSON + recursive keyword-restore)."
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_form-name-fragment
+                 :_parse-fn-form-parent-id-fragment
+                 :_parse-fn-form-namespace-id-fragment
+                 :_form-description-fragment
+                 :_parse-fn-form-return-type-fragment
+                 :_parse-fn-form-parent-ids-fragment
+                 :_parse-fn-form-base-fn-id-fragment
+                 :_parse-fn-form-element-fn-id-fragment
+                 :_parse-fn-form-expects-effects-fragment
+                 :_parse-fn-form-constraint-fragment]
+          :form-data {:type :_form-data-shape
+                      :description "Parsed application/x-www-form-urlencoded form-data map (`{field-name field-value}`). Each per-field fragment looks up its key here."}}}
+
+  ;; --- :parse-ns-from-form — graph composition via :merge of per-field
+  ;; fragments — each fragment is `{:if :contains? then {field val}
+  ;; else {}}`. Admins extending the form (adding a `:tags`
+  ;; field, a custom `:slug`, …) edit the fragment list instead
+  ;; of Clojure.
+
+  {:name :_parse-ns-form-parent-id-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :parent-id} :default nil}}
+
+  {:name :_parse-ns-form-parent-id-fragment
+   :description "`{:parent-id <uuid>}` when form-data's `:parent-id` is non-blank; else `{}`. Empty-as-clear is OUT of band — the create/update path interprets a missing key as 'no change'."
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-ns-form-parent-id-raw}}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :parent-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string :_parse-ns-form-parent-id-raw}}]}}
+          :else {:value {}}}}
+
+  {:name :parse-ns-from-form
+   :description "Extract a namespace entity's field map from a parsed form-data map. `:name` (string) is required; `:parent-id` and `:description` are optional. The form is the body of `POST /api/entities/ns` from the editor's `+` menu."
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_form-name-fragment
+                 :_parse-ns-form-parent-id-fragment
+                 :_form-description-fragment]
+          :form-data {:type :_form-data-shape
+                      :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
+
+  ;; --- :parse-slot-from-form. Same per-field-fragment
+  ;; pattern. 4 fields: `:name` (str), `:type-fn-id` (uuid via
+  ;; `:parse-uuid`), `:description` (pass-through), `:required` (bool
+  ;; via `:equal? "true"`).
+
+  {:name :_parse-slot-form-type-fn-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :type-fn-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :type-fn-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :type-fn-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-slot-form-required-fragment
+   :description "`{:required (= \"true\" v)}` when form-data contains `:required`."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :required}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :required}]
+                        :vals [{:parent :equal?
+                                :args {:a {:value "true"}
+                                       :b {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :required}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :parse-slot-from-form
+   :description "Extract a slot entity's field map from a parsed form-data map. `:name` (string) is required on create; `:type-fn-id` (UUID), `:description`, `:required` are optional."
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_form-name-fragment
+                 :_parse-slot-form-type-fn-id-fragment
+                 :_form-description-fragment
+                 :_parse-slot-form-required-fragment]
+          :form-data {:type :_form-data-shape
+                      :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
+
+  ;; --- :parse-fn-slot-from-form. Same per-field-fragment
+  ;; pattern as `:parse-ns-from-form`. 3 fields: `:fn-id`, `:slot-id`
+  ;; (UUIDs via `:parse-uuid`), `:position` (int via `:parse-int`).
+
+  {:name :_form-fn-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :fn-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :fn-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :fn-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-slot-form-slot-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :slot-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :slot-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :slot-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-fn-slot-form-position-fragment
+   :description "`{:position (parse-int …)}` when form-data contains `:position`; else `{}`. `:parse-int` (Long/parseLong) throws NumberFormatException on non-numeric input — same semantics as `Integer/parseInt`; downstream catches reach the parse-error guard."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :position}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :position}]
+                        :vals [{:parent :parse-int
+                                :args {:s {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :position}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :parse-fn-slot-from-form
+   :description "Extract a fn-slot junction's field map. `:fn-id` and `:slot-id` (UUIDs) are required; `:position` (int) is optional and defaults to 0."
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_form-fn-id-fragment
+                 :_parse-fn-slot-form-slot-id-fragment
+                 :_parse-fn-slot-form-position-fragment]
+          :form-data {:type :_form-data-shape
+                      :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
+
+  ;; --- :parse-binding-from-form. Same per-field-fragment
+  ;; pattern; 11 fields. Coercions: `:parse-uuid` for *-id fields,
+  ;; `:parse-json`-when-non-blank for `:value`, `:str-to-keyword`-when-
+  ;; pass-through for `:description`,
+  ;; `:equal? "true"` for the three boolean flags, and a nullable
+  ;; "true"-bool for `:required`.
+
+  {:name :_parse-bnd-form-slot-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :slot-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :slot-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :slot-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bnd-form-value-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :value} :default nil}}
+
+  {:name :_parse-bnd-form-value-parsed
+   :description "JSON-parse when non-blank; nil otherwise. Empty-as-clear."
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-bnd-form-value-raw}}}}
+          :then {:parent :parse-json
+                 :args {:string :_parse-bnd-form-value-raw
+                        :keywordize {:value true}}}
+          :else nil}}
+
+  {:name :_parse-bnd-form-value-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :value}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :value}]
+                        :vals [:_parse-bnd-form-value-parsed]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bnd-form-ref-fn-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :ref-fn-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :ref-fn-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :ref-fn-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bnd-form-type-override-fn-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :type-override-fn-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :type-override-fn-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :type-override-fn-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bnd-form-list-append-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :list-append}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :list-append}]
+                        :vals [{:parent :equal?
+                                :args {:a {:value "true"}
+                                       :b {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :list-append}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bnd-form-list-closed-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :list-closed}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :list-closed}]
+                        :vals [{:parent :equal?
+                                :args {:a {:value "true"}
+                                       :b {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :list-closed}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bnd-form-required-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :required} :default nil}}
+
+  {:name :_parse-bnd-form-required-coerced
+   :description "`(= \"true\" v)` when non-blank; nil clears the column."
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-bnd-form-required-raw}}}}
+          :then {:parent :equal?
+                 :args {:a {:value "true"}
+                        :b :_parse-bnd-form-required-raw}}
+          :else nil}}
+
+  {:name :_parse-bnd-form-required-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :required}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :required}]
+                        :vals [:_parse-bnd-form-required-coerced]}}
+          :else {:value {}}}}
+
+  {:name :parse-binding-from-form
+   :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:list-append`/`:list-closed` (bool). Empty form values clear the corresponding column. (`:override-kind` is retired — an unknown-field write rejects at storage.)"
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_form-fn-id-fragment
+                 :_parse-bnd-form-slot-id-fragment
+                 :_parse-bnd-form-value-fragment
+                 :_parse-bnd-form-ref-fn-id-fragment
+                 :_parse-bnd-form-type-override-fn-id-fragment
+                 :_form-description-fragment
+                 :_parse-bnd-form-list-append-fragment
+                 :_parse-bnd-form-list-closed-fragment
+                 :_parse-bnd-form-required-fragment]
+          :form-data {:type :_form-data-shape
+                      :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
+
+  ;; --- :parse-binding-list-item-from-form. Same pattern.
+  ;; 5 fields: `:binding-id` + `:ref-fn-id` (UUIDs), `:position` (int),
+  ;; `:value` (JSON-parsed, nil when blank), `:literal` (bool from
+  ;; `(equal? "true" v)`).
+
+  {:name :_parse-bli-form-binding-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :binding-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :binding-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :binding-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bli-form-position-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :position}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :position}]
+                        :vals [{:parent :parse-int
+                                :args {:s {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :position}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bli-form-value-raw
+   :parent :get
+   :args {:coll {:as :form-data} :key {:value :value} :default nil}}
+
+  {:name :_parse-bli-form-value-parsed
+   :description "JSON-parse the raw `:value` when non-blank; nil otherwise."
+   :parent :if
+   :args {:test {:parent :not
+                 :args {:value {:parent :blank?
+                                :args {:string :_parse-bli-form-value-raw}}}}
+          :then {:parent :parse-json
+                 :args {:string :_parse-bli-form-value-raw
+                        :keywordize {:value true}}}
+          :else nil}}
+
+  {:name :_parse-bli-form-value-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :value}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :value}]
+                        :vals [:_parse-bli-form-value-parsed]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bli-form-ref-fn-id-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :ref-fn-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :ref-fn-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :ref-fn-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-bli-form-literal-fragment
+   :description "`{:literal (= \"true\" raw)}` when form-data contains `:literal`; else `{}`. The `:equal?` check encodes `(= \"true\" value)` — anything else (\"false\", \"1\", missing) reads as false."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :literal}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :literal}]
+                        :vals [{:parent :equal?
+                                :args {:a {:value "true"}
+                                       :b {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :literal}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :parse-binding-list-item-from-form
+   :description "Extract a binding-list-item field map. `:binding-id` (UUID) and `:position` (int) are required for create. The item carries either a `:value` (JSON literal) or a `:ref-fn-id` (UUID), plus an optional `:literal` boolean (true marks a keyword literal)."
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_parse-bli-form-binding-id-fragment
+                 :_parse-bli-form-position-fragment
+                 :_parse-bli-form-value-fragment
+                 :_parse-bli-form-ref-fn-id-fragment
+                 :_parse-bli-form-literal-fragment]
+          :form-data {:type :_form-data-shape
+                      :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
+
+  ;; --- :parse-service-from-form. Same fragment-merge shape as the
+  ;; other parsers. 5 fields:
+  ;;   :fn-id          UUID  — required (the fn this service runs)
+  ;;   :enabled?       bool  — "true"/"false" → bool via `:equal? "true"`
+  ;;   :restart-policy enum  — :always / :on-failure / :never via
+  ;;                           `:str-to-keyword` on the raw form value
+  ;;   :cardinality    enum  — :singleton / :per-pod, same coercion
+  ;;   :branch-id      UUID  — optional, scopes the run to a branch
+  ;;
+  ;; The fragment list is CLOSED: a field absent from it is silently
+  ;; dropped by the merge, so every new `:service` column needs its
+  ;; fragment here or the entity API can't write it.
+  ;;
+  ;; Wired into `:_create-entity-data-by-type` so `POST /api/entities/
+  ;; service` reaches the regular validation chain (free-args guard,
+  ;; `:process`-effect guard, write-rej) instead of being rejected
+  ;; up-front by the parser-dispatch's `nil` fall-through with the
+  ;; opaque "data must be a map" message.
+
+  {:name :_parse-svc-form-enabled-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :enabled?}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :enabled?}]
+                        :vals [{:parent :equal?
+                                :args {:a {:value "true"}
+                                       :b {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :enabled?}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-svc-form-restart-policy-fragment
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :restart-policy}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :restart-policy}]
+                        :vals [{:parent :str-to-keyword
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :restart-policy}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-svc-form-cardinality-fragment
+   :description "Optional `:cardinality` form-field — `:singleton` (advisory-lock-gated, one pod cluster-wide), `:per-pod` (every pod runs its own copy; what an `:http-server` listener needs), or `:pool` (up to `:pool-size` pods, coordinated by N advisory-lock slots). Absent ⇒ the column stays nil, which the reconciler reads as `:singleton`. Same `:str-to-keyword` coercion as `:restart-policy`."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :cardinality}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :cardinality}]
+                        :vals [{:parent :str-to-keyword
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :cardinality}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-svc-form-pool-size-fragment
+   :description "Optional `:pool-size` form-field (int) — how many pods a `:pool` service runs on. Parsed via `:parse-int`; ignored by the reconciler for non-`:pool` cardinalities. Absent / blank ⇒ the column stays nil (a `:pool` row with nil size degrades to a singleton)."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :pool-size}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :pool-size}]
+                        :vals [{:parent :parse-int
+                                :args {:s {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :pool-size}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-svc-form-branch-id-fragment
+   :description "Optional `:branch-id` form-field. When the admin picks a branch in the editor's service popover, the value lands here as a UUID string; `:parse-uuid` collapses empty / malformed input to nil so the row falls back to the no-branch-id behavior in the reconciler."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :branch-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :branch-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :branch-id}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :parse-service-from-form
+   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:cardinality` (`:singleton` / `:per-pod` / `:pool`, optional) says how many pods run it at once; `:pool-size` (int, optional) is the pod count for `:pool`; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_form-fn-id-fragment
+                 :_parse-svc-form-enabled-fragment
+                 :_parse-svc-form-restart-policy-fragment
+                 :_parse-svc-form-cardinality-fragment
+                 :_parse-svc-form-pool-size-fragment
+                 :_parse-svc-form-branch-id-fragment]
+          :form-data {:type :_form-data-shape
+                      :description "Parsed form-data map; each per-field fragment looks up its key here."}}}]}

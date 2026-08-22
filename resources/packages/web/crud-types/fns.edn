@@ -1,0 +1,833 @@
+;; Part of the `web.crud` namespace — see `web/crud/fns.edn` for the
+;; module layout and why the ids are unchanged.
+
+
+{:namespace "web.crud"
+ :description "The type API — `:json-to-type`, subtype / mismatch, compatible + candidates — and the record / list type-row compound stages."
+ :fns
+ [;; --- type-API handler primitives. The handlers themselves are `:if`
+  ;; graph fn-defs below; these base-fns are the parse / validate /
+  ;; apply stages. `validate-*` returns the `{:ok false :error}`
+  ;; rejection response directly (or nil), so the `:if`'s `:then` branch
+  ;; is the validation result itself; `_rejected?` is shared with the
+  ;; entity create/update + type-row handlers. ---
+  ;; --- :json-to-type — atomic boundary over `types-api/json->type`.
+  {:name :json-to-type
+   :description "Decode the JSON wire-shape of a type expression back to its Clojure AST. Strings become keywords (except inside refinement constraints, where literal-string predicates like `[:not= \"\"]` stay strings — `:non-empty-text` depends on this)."
+   :args {:json {:type :jsonb :description "JSON-decoded value (post-cheshire) — string / vector / map / scalar."}}
+   :return-type :type-expression}
+
+  {:name :_types-compatible-parsed
+   :description "Stage 1 of types-compatible — JSON body → `{:expected :candidate}`, each decoded from the wire shape produced by `/api/types`."
+   :parent :zipmap
+   :args {:keys [{:value :expected} {:value :candidate}]
+          :vals [{:parent :json-to-type
+                  :args {:json {:parent :get
+                                :args {:coll :_parsed-body
+                                       :key {:value :expected}
+                                       :default nil}}}}
+                 {:parent :json-to-type
+                  :args {:json {:parent :get
+                                :args {:coll :_parsed-body
+                                       :key {:value :candidate}
+                                       :default nil}}}}]}
+   :return-type :_types-compatible-parsed-shape}
+
+  {:name :_types-compatible-validation
+   :description "Stage 2 of types-compatible — guards (both `expected` and `candidate` present). Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :parent :cond
+   :args {:clauses
+          [{:parent :nil? :args {:value {:parent :get
+                                         :args {:coll {:as :parsed :type :_types-compatible-parsed-shape
+                                                       :description "Output of `:_types-compatible-parsed`."}
+                                                :key {:value :expected}
+                                                :default nil}}}}
+           {:parent :const :args {:value {:ok false :error "Request body must include 'expected'"}}}
+           {:parent :nil? :args {:value {:parent :get
+                                         :args {:coll {:as :parsed}
+                                                :key {:value :candidate}
+                                                :default nil}}}}
+           {:parent :const :args {:value {:ok false :error "Request body must include 'candidate'"}}}
+           {:value true} {:value nil}]}}
+
+  ;; --- :subtype? + :describe-type-mismatch — atomic library
+  ;; boundaries. The dispatch logic + structural recursion live in
+  ;; `types/core` (§3.3 invariant); admins can vary the response shape
+  ;; by reparenting the per-row composition below.
+  {:name :subtype?
+   :description "True iff `candidate` is a subtype of `expected` under graphden's type hierarchy (refinement / list / union / record / fn-shape recursion in `types/core`)."
+   :args {:expected {:type :type-expression :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
+          :candidate {:type :type-expression :description "The candidate (binding-side) type expression."}}
+   :return-type :bool}
+
+  {:name :fn-type?
+   :description "True iff the type expression is a callable shape (`[:fn args ret]` / `[:fn args ret effects]`). Lets a graph branch on \"is this slot expecting a function?\" without reimplementing the shape test."
+   :args {:type {:type :type-expression :description "Type expression to test."}}
+   :return-type :bool}
+
+  {:name :fn-signature
+   :description "`[:fn args ret effects]` — the callable shape of the fn named `fn-name`, or nil when the registry has no entry. Single boundary over `types.check/assemble-fn-type`, the assembler the WRITE path (`check-binding!`) uses, so a callable slot's candidate list and its binding check answer the same question."
+   :args {:fn-name {:type :keyword-or-text :description "Name of the candidate fn."}}
+   :return-type [:union :null :type-expression]}
+
+  {:name :describe-type-mismatch
+   :description "One-line human-readable explanation of why `candidate` ⊄ `expected`. Used by the editor's type-picker tooltip."
+   :args {:expected {:type :type-expression :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
+          :candidate {:type :type-expression :description "The candidate (binding-side) type expression."}}
+   :return-type :text}
+
+  {:name :classify-literal
+   :description "Infer the structural type expression of a literal Clojure value — `:text`, `:int`, `:bool`, `:keyword`, `:uuid`, `:null`, `[:list T]`, or a record-shape `{k T}` for keyword-keyed maps. nil for shapes the classifier can't decide (caller falls back to `:any`)."
+   :args {:value {:type :any :description "Literal value to classify (binding's `:value`, list-item's `:value`, etc.)."}}
+   :return-type :type-expression}
+
+  {:name :diff-value-against-type
+   :description "Leaf-level disagreements between `value` and `expected` — `[{:path :expected :actual}, …]`, empty when the value satisfies the type. Used by the mismatch-explainer popover to point users at the EXACT failing field / element."
+   :args {:value {:type :any :description "Literal value to diff against the expected type."}
+          :expected {:type :type-expression :description "Expected type expression — atomic, vector (`[:list T]`, `[:map K V]`, `[:tuple …]`, `[:union …]`, `[:refine base constraint]`), or record (`{k T …}`)."}}
+   :return-type [:list {:path :text :expected :type-expression :actual :any}]}
+
+  {:name :closed-enum-of
+   :description "Returns `{:base :members}` when `expected` resolves to a closed-enum refinement (`[:refine base [:in [members]]]`). Members are sorted + colon-prefixed for `:keyword`-based enums. nil for any other shape (caller suppresses the section)."
+   :args {:expected {:type :type-expression
+                     :description "Type expression to test for the closed-enum shape."}}
+   :return-type [:union :null {:base :type-expression
+                               :members [:list {:value :text :label :text}]}]}
+
+  {:name :fn-type-bound-effects
+   :description "Vec of effect-name strings (without leading colon) when `expected` is a `[:fn args ret eff]` with CONCRETE `eff` (not `:any`); nil otherwise. Used by the provenance popover to surface the slot-level effect constraint server-side."
+   :args {:expected {:type :type-expression
+                     :description "Type expression to test for the fn-type shape with a bound effect set."}}
+   :return-type [:union :null [:list :text]]}
+
+  {:name :rich-type-of-name
+   :description "Full rich-types registry entry for the named fn — one registry lookup; nil for nil / unknown names."
+   :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
+   :return-type :nullable-keyword-map}
+
+  {:name :rule-owner-of-name
+   :description "`{:name :fn-id}` of the base-fn whose `:return-type-rule` computed the named fn's return type — the canonical `registry/root-base-fn-name` walk over `:primary-parent`, iff that root carries a rule; `:fn-id` is the registry entry's own id (no name→id graph query). nil for unknown names, base-fns, and rule-less chains. Used by `/partials/return-type-rule`; the layout strip-facts annotation uses the name-only registry walk."
+   :args {:fn-name {:type :nullable-text :required false :description "Fn name; keywordized at the boundary."}}
+   :return-type [:union :null {:name :text :fn-id :uuid}]}
+
+  {:name :declarable-effect-categories
+   :description "Sorted declarable effect-category names — the canonical `types.check/known-effect-categories` set (what sync accepts). Roster of `/partials/expects-effects-form`'s checkboxes."
+   :args {}
+   :return-type [:list :text]}
+
+  {:name :type-name-kinds
+   :description "Sorted `{:name :kind}` rows for the editor's type-name datalist — named type-rows classified via `compute-fn-role` plus the bare primitives. Backs `/partials/type-name-datalist`."
+   :args {}
+   :return-type [:list {:name :text :kind :text}]
+   :effects #{:db}}
+
+  {:name :compatible-type-names
+   :description "`type-name-kinds` rows filtered to the names that can legally narrow `expected` — one alias-aware `subtype?` sweep. Backs `/partials/compatible-type-options` (replaces the editor's per-name /api/types/compatible fan-out)."
+   :args {:expected {:type :type-expression :description "Type expression candidates must be subtypes of."}}
+   :return-type [:list {:name :text :kind :text}]
+   :effects #{:db}}
+
+  ;; fn-id → row → name → registry entry → :return, all graph-visible.
+  {:name :_rrof-fn-id-nil?
+   :parent :nil?
+   :args {:value {:as :fn-id}}}
+
+  ;; Runs only in the non-nil branch of the `:if` below; `:assert-some`
+  ;; narrows the nullable free arg to `:uuid` for `:get-entity`.
+  {:name :_rrof-id-narrowed
+   :parent :assert-some
+   :args {:value {:as :fn-id :type :nullable-uuid}}}
+
+  {:name :_rrof-row
+   :parent :get-entity
+   :args {:entity-type {:value "fn"} :id {:ref :_rrof-id-narrowed :type :uuid}}}
+
+  {:name :_rrof-name
+   :parent :get
+   :args {:coll :_rrof-row :key {:value :name} :default nil}}
+
+  {:name :_rrof-entry
+   :parent :rich-type-of-name
+   :args {:fn-name {:ref :_rrof-name :type :nullable-text}}}
+
+  {:name :_rrof-return
+   :parent :get
+   :args {:coll :_rrof-entry :key {:value :return} :default nil}}
+
+  {:name :_rrof-resolved
+   :parent :if
+   :args {:test :_rrof-fn-id-nil?
+          :then {:value nil}
+          :else :_rrof-return}}
+
+  ;; `:const` wrapper carries the author `:type` assertion — the
+  ;; declared contract of the old base-fn (nil flows through consumers
+  ;; that already handled it).
+  {:name :rich-return-of-fn
+   :description "Rich-types registry view of the named fn's `:return` field. Pure graph composition: `:get-entity` fn-row → `:get :name` → `:rich-type-of-name` → `:get :return`. nil for nil fn-id / anonymous / unregistered / unknown fns. Used by the fn-picker incompat-explainer partial."
+   :parent :const
+   :args {:value {:ref :_rrof-resolved :type :type-expression}}
+   :return-type :type-expression}
+
+  ;; --- :_types-compatible-apply — pure graph composition over
+  ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.
+  ;; Admins can vary the response shape (e.g. add `:expected-kind`,
+  ;; rename `:reason` to `:why`) without touching Clojure.
+
+  {:name :_types-compatible-parsed-expected
+   :parent :get :args {:coll {:as :parsed} :key {:value :expected} :default nil}}
+
+  {:name :_types-compatible-parsed-candidate
+   :parent :get :args {:coll {:as :parsed} :key {:value :candidate} :default nil}}
+
+  {:name :_types-compatible-ok?
+   :description "Stage 3a — single library call to the subtype predicate."
+   :parent :subtype?
+   :args {:expected :_types-compatible-parsed-expected
+          :candidate :_types-compatible-parsed-candidate}}
+
+  {:name :_types-compatible-reason
+   :description "Stage 3b — one-line mismatch explanation; only forced on the `:not-ok` branch via `:if`'s laziness."
+   :parent :describe-type-mismatch
+   :args {:expected :_types-compatible-parsed-expected
+          :candidate :_types-compatible-parsed-candidate}}
+
+  {:name :_types-compatible-ok-shape
+   :description "Stage 3c-ok — `{:ok true :expected :candidate}` envelope."
+   :parent :zipmap
+   :return-type {:ok :bool
+                 :expected :type-expression
+                 :candidate :type-expression}
+   :args {:keys [{:value :ok} {:value :expected} {:value :candidate}]
+          :vals [{:value true}
+                 :_types-compatible-parsed-expected
+                 :_types-compatible-parsed-candidate]}}
+
+  {:name :_types-compatible-not-ok-shape
+   :description "Stage 3c-not-ok — `{:ok false :expected :candidate :reason}` envelope."
+   :parent :zipmap
+   :return-type {:ok :bool
+                 :expected :type-expression
+                 :candidate :type-expression
+                 :reason :text}
+   :args {:keys [{:value :ok} {:value :expected} {:value :candidate} {:value :reason}]
+          :vals [{:value false}
+                 :_types-compatible-parsed-expected
+                 :_types-compatible-parsed-candidate
+                 :_types-compatible-reason]}}
+
+  {:name :_types-compatible-apply
+   :description "Stage 3 of types-compatible — the single-pair subtype check between an `expected` (slot-side) and `candidate` (binding-side) type. Returns `{:ok :expected :candidate :reason?}`. Reached only after validation passes. Pure graph composition over `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope `:zipmap`. Computed return is opaque `:jsonb` because both `:if` branches were declared `:jsonb` to keep the case-style unify cheap."
+   :parent :if
+   :args {:test :_types-compatible-ok?
+          :then :_types-compatible-ok-shape
+          :else :_types-compatible-not-ok-shape}}
+
+  ;; --- :to-set — atomic boundary over `clojure.core/set`. Used to
+  ;; turn the wire's effect list into a containment predicate.
+  {:name :to-set
+   :description "Coerce a sequence into a Clojure set. Useful when the result is consumed as a containment predicate (`every? the-set xs`) — vector/list would silently mis-behave there."
+   :args {:coll {:type [:list a] :description "Source sequence."}}
+   :return-type [:list a]}
+
+  {:name :_types-candidates-effects-raw
+   :description "Stage 1b — the raw `:effects` list off the JSON body (vector of strings), or nil when omitted."
+   :parent :get
+   :args {:coll :_parsed-body :key {:value :effects} :default nil}}
+
+  {:name :_types-candidates-effect-to-keyword
+   :description "HOF callback per effect-list item — `:str-to-keyword` keeps already-keyword values intact (`(keyword :kw)` is identity)."
+   :parent :str-to-keyword
+   :args {:string {:as :item}}}
+
+  {:name :_types-candidates-effects-kws
+   :description "Keywordized effect list (`[\"db\" \"io\"]` → `[:db :io]`)."
+   :parent :map
+   :args {:func :_types-candidates-effect-to-keyword
+          :coll :_types-candidates-effects-raw}}
+
+  {:name :_types-candidates-allowed-effects
+   :description "The allowed-effects set when `:effects` was supplied, nil otherwise — preserves the original `(when-let [effs …] (set …))` semantics. Downstream `:_types-candidates-apply` consumes it as `(every? allowed-effects eff-set)` — set semantics are required."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_types-candidates-effects-raw}}
+          :then {:parent :to-set :args {:coll :_types-candidates-effects-kws}}
+          :else {:value nil}}}
+
+  {:name :_types-candidates-name-prefix-raw
+   :parent :get
+   :args {:coll :_parsed-body :key {:value :name-prefix} :default nil}}
+
+  {:name :_types-candidates-name-prefix
+   :description "Stringified `:name-prefix`, or nil when absent. Preserves the original `(some-> raw str)` shape — `:to-str` of nil would have surfaced as the empty string instead of nil."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_types-candidates-name-prefix-raw}}
+          :then {:parent :to-str :args {:value :_types-candidates-name-prefix-raw}}
+          :else {:value nil}}}
+
+  {:name :_types-candidates-parsed
+   :description "Stage 1 of types-candidates — JSON body → `{:expected :allowed-effects :name-prefix}`."
+   :parent :zipmap
+   :args {:keys [{:value :expected} {:value :allowed-effects} {:value :name-prefix}]
+          :vals [{:parent :json-to-type
+                  :args {:json {:parent :get
+                                :args {:coll :_parsed-body
+                                       :key {:value :expected}
+                                       :default nil}}}}
+                 :_types-candidates-allowed-effects
+                 :_types-candidates-name-prefix]}
+   :return-type :_types-candidates-parsed-shape}
+
+  {:name :_types-candidates-validation
+   :description "Stage 2 of types-candidates — guards `expected` present. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :parent :if
+   :args {:test {:parent :nil? :args {:value {:parent :get
+                                              :args {:coll {:as :parsed :type :_types-candidates-parsed-shape
+                                                            :description "Output of `:_types-candidates-parsed`."}
+                                                     :key {:value :expected}
+                                                     :default nil}}}}
+          :then {:parent :const :args {:value {:ok false :error "Request body must include 'expected'"}}}
+          :else {:value nil}}}
+
+  ;; --- _types-candidates-apply. Mirrors
+  ;; `types-api/apply-types-candidates`: snapshot registry → filter by
+  ;; (not-type-row, subtype, effect-subset, name-prefix) → reshape
+  ;; per-row → sort by name → envelope. Closure-captured `:parsed`
+  ;; carries the 3 filter dimensions into the per-row HOF.
+
+  {:name :_types-candidates-snapshot
+   :description "Augmented rich-types snapshot — base-fns + composed fn-defs + storage type-rows. Single source of truth for /api/types and /api/types/candidates."
+   :parent :all-rich-types
+   :args {}}
+
+  {:name :_types-candidates-fn-names
+   :parent :keys
+   :args {:map :_types-candidates-snapshot}}
+
+  ;; --- Closure-captured filter dimensions extracted from `:parsed` ---
+  {:name :_types-candidates-apply-expected
+   :parent :get :args {:coll {:as :parsed} :key {:value :expected} :default nil}}
+
+  {:name :_types-candidates-apply-allowed-effects
+   :parent :get :args {:coll {:as :parsed} :key {:value :allowed-effects} :default nil}}
+
+  {:name :_types-candidates-apply-name-prefix
+   :parent :get :args {:coll {:as :parsed} :key {:value :name-prefix} :default nil}}
+
+  ;; --- Per-row predicates + reshape. `:item` is one fn-name keyword;
+  ;; `:snapshot` (closure-captured) is the augmented rich-types map.
+
+  {:name :_types-candidates-info
+   :parent :get :args {:coll {:as :snapshot} :key {:as :item} :default nil}}
+
+  {:name :_types-candidates-return
+   :parent :get :args {:coll :_types-candidates-info :key {:value :return} :default nil}}
+
+  {:name :_types-candidates-args
+   :parent :get :args {:coll :_types-candidates-info :key {:value :args} :default {}}}
+
+  {:name :_types-candidates-apply-effects-raw
+   :parent :get :args {:coll :_types-candidates-info :key {:value :effects} :default #{}}}
+
+  {:name :_types-candidates-type-row?
+   :parent :get :args {:coll :_types-candidates-info :key {:value :type-row?} :default false}}
+
+  ;; --- 4 filter predicates ---
+  {:name :_types-candidates-not-type-row?
+   :parent :not :args {:value :_types-candidates-type-row?}}
+
+  ;; A CALLABLE slot (`[:fn …]`, e.g. `:future`'s `:body`) never receives
+  ;; the candidate's result — the executor hof-wraps the ref and the
+  ;; callable itself is the value. So admissibility is "signature ⊆ slot",
+  ;; the rule `check-binding!` applies on write. Comparing the RETURN there
+  ;; answered "Compatible · 0" for every ordinary fn, hiding legal binds
+  ;; behind "Other" and teaching readers to override the diagnostic.
+  {:name :_types-candidates-expected-callable?
+   :parent :fn-type?
+   :args {:type {:as :expected}}}
+
+  {:name :_types-candidates-signature
+   :parent :fn-signature
+   :args {:fn-name {:as :item}}}
+
+  ;; `:fn-signature` answers nil for a name the registry hasn't seen yet.
+  ;; `:subtype?`'s `:candidate` slot is a bare `:type-expression`, so the
+  ;; nullable form can't be handed to it — and a candidate with no signature
+  ;; must not pass anyway. `:any` is the right stand-in: it is NOT a subtype
+  ;; of any fn-type, so such a candidate falls out of the list.
+  {:name :_types-candidates-signature-or-any
+   :parent :coalesce
+   :args {:value :_types-candidates-signature :default {:value :any :literal? true}}}
+
+  {:name :_types-candidates-subtype-ok?
+   :parent :if
+   :args {:test :_types-candidates-expected-callable?
+          :then {:parent :subtype?
+                 :args {:expected {:as :expected}
+                        :candidate :_types-candidates-signature-or-any}}
+          :else {:parent :subtype?
+                 :args {:expected {:as :expected}
+                        :candidate :_types-candidates-return}}}}
+
+  {:name :_types-candidates-effects-ok?
+   :description "True iff allowed-effects is nil (no filter) OR every effect on the row is in allowed-effects."
+   :parent :or
+   :args {:values [{:parent :nil? :args {:value {:as :allowed-effects}}}
+                   {:parent :every?
+                    :args {:pred {:as :allowed-effects}
+                           :coll :_types-candidates-apply-effects-raw}}]}}
+
+  {:name :_types-candidates-name-str
+   :description "The registry stores fn-names as KEYWORDS. `:keyword-to-str` returns the bare name (no leading colon) so prefix matching against `\"my-fn\"` works as the user expects; `:to-str` would emit `\":my-fn\"` and break the predicate."
+   :parent :keyword-to-str
+   :args {:keyword {:as :item}}}
+
+  {:name :_types-candidates-name-prefix-ok?
+   :description "True iff name-prefix is nil OR the fn name starts with it."
+   :parent :or
+   :args {:values [{:parent :nil? :args {:value {:as :name-prefix}}}
+                   {:parent :str-starts-with?
+                    :args {:string :_types-candidates-name-str
+                           :prefix {:as :name-prefix}}}]}}
+
+  {:name :_types-candidates-row-ok?
+   :description "CHEAP FILTERS FIRST. `:and` short-circuits, so the order here is
+                 the query plan. `:_types-candidates-subtype-ok?` is a recursive
+                 walk of the type hierarchy (refinement / list / union / record /
+                 fn-shape); the other three are a map lookup and two string /
+                 set comparisons. Running the expensive one first meant every fn
+                 in the registry was type-checked before the prefix the user had
+                 already typed threw it away — the endpoint's cost was O(whole
+                 graph) even when the answer was a single fn. Measured: identical
+                 ~0.11 s whether the prefix matched 57 candidates or 1, and 45 s
+                 under concurrent load, which is what timed out the e2e type
+                 tests and got written off as GC pauses."
+   :parent :and
+   :args {:values [:_types-candidates-not-type-row?
+                   :_types-candidates-name-prefix-ok?
+                   :_types-candidates-effects-ok?
+                   :_types-candidates-subtype-ok?]}}
+
+  ;; --- Per-row candidate shape (when matched) ---
+  {:name :_types-candidates-effects-vec
+   :description "Sort the effect set into a vector for stable JSON output (mirrors `(vec (sort eff-set))`)."
+   :parent :vec
+   :args {:coll {:parent :sort :args {:coll :_types-candidates-apply-effects-raw}}}}
+
+  {:name :_types-candidates-row
+   :parent :zipmap
+   :args {:keys [{:value :name} {:value :return} {:value :args} {:value :effects}]
+          :vals [{:as :item}
+                 :_types-candidates-return
+                 :_types-candidates-args
+                 :_types-candidates-effects-vec]}}
+
+  {:name :_types-candidates-row-or-nil
+   :description "HOF callback per fn-name — return the reshaped candidate map when filters pass, nil otherwise."
+   :parent :if
+   :args {:test :_types-candidates-row-ok?
+          :then :_types-candidates-row
+          :else {:value nil}}}
+
+  ;; --- Narrow the SCAN, not just the result ---
+  {:name :_types-candidates-names
+   :description "The name list the scan actually walks, prefix-filtered FIRST.
+
+                 The prefix predicate needs only the name — not the snapshot,
+                 not the type — so it can run before any per-fn work at all.
+                 Previously it ran INSIDE the per-row callback, so every fn in
+                 the registry was looked up, reshaped and type-checked before a
+                 string comparison threw it away. The endpoint cost O(whole
+                 graph) even when the user had typed a prefix that matched one
+                 fn — and the picker in the editor almost always has one.
+
+                 With this, the common path is O(matching names). The no-prefix
+                 path (picker opened cold) is unchanged and still walks the
+                 registry: that one wants an index, which is a separate change."
+   :parent :filter
+   :args {:pred :_types-candidates-name-prefix-ok?
+          :coll :_types-candidates-fn-names
+          :name-prefix :_types-candidates-apply-name-prefix}}
+
+  ;; --- Map + filter-nil + sort + envelope ---
+  {:name :_types-candidates-mapped
+   :parent :map
+   :args {:func :_types-candidates-row-or-nil
+          :coll :_types-candidates-names
+          :snapshot :_types-candidates-snapshot
+          :expected :_types-candidates-apply-expected
+          :allowed-effects :_types-candidates-apply-allowed-effects
+          :name-prefix :_types-candidates-apply-name-prefix}}
+
+  {:name :_types-candidates-filtered
+   :parent :filter
+   :args {:pred :some? :coll :_types-candidates-mapped}}
+
+  {:name :_types-candidates-sort-key
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+
+  {:name :_types-candidates-sorted
+   :parent :sort-by
+   :args {:key-fn :_types-candidates-sort-key :coll :_types-candidates-filtered}}
+
+  {:name :_types-candidates-count
+   :parent :count
+   :args {:coll :_types-candidates-sorted}}
+
+  {:name :_types-candidates-apply
+   :description "Stage 3 of types-candidates — enumerate every fn whose return type is a subtype of `expected`, narrowed by the optional allowed-effect set / name-prefix. Returns `{:ok :expected :count :candidates}` sorted alphabetically. Pure graph composition over `:all-rich-types` snapshot + per-row predicate chain + `:filter :some?` + `:sort-by` + `:zipmap` envelope."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :expected} {:value :count} {:value :candidates}]
+          :vals [{:value true}
+                 :_types-candidates-apply-expected
+                 :_types-candidates-count
+                 {:parent :vec :args {:coll :_types-candidates-sorted}}]}}
+
+  {:name :_types-usages-parsed
+   :description "Stage 1 of types-usages — JSON body → `{:target-id}` (the `type-fn-id` coerced to a UUID, or nil when absent / malformed). The `:to-str → :parse-uuid` chain preserves the original `(when type-fn-id (try uuid-parse (catch _ nil)))` shape — `:to-str` of nil is `\"\"`, `:parse-uuid` of `\"\"` is nil, so missing keys still collapse to a nil target-id."
+   :parent :zipmap
+   :args {:keys [{:value :target-id}]
+          :vals [{:parent :parse-uuid
+                  :args {:string {:parent :to-str
+                                  :args {:value {:parent :get
+                                                 :args {:coll :_parsed-body
+                                                        :key {:value :type-fn-id}
+                                                        :default nil}}}}}}]}
+   :return-type :_types-usages-parsed-shape}
+
+  {:name :_types-usages-validation
+   :description "Stage 2 of types-usages — guards a valid `type-fn-id`. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :parent :if
+   :args {:test {:parent :nil? :args {:value {:parent :get
+                                              :args {:coll {:as :parsed :type :_types-usages-parsed-shape
+                                                            :description "Output of `:_types-usages-parsed`."}
+                                                     :key {:value :target-id}
+                                                     :default nil}}}}
+          :then {:parent :const :args {:value {:ok false :error "Request body must include valid 'type-fn-id'"}}}
+          :else {:value nil}}}
+
+  {:name :_types-usages-apply
+   :description "Stage 3 of types-usages — walk the graph for every reference to the target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}` where each usage's `kind ∈ {:base-of :element-of :return-of :slot-of :binding-of :union-branch :variant-branch}`. Reached only after validation passes."
+   :args {:parsed {:type :_types-usages-parsed-shape :description "Output of `:_types-usages-parsed`."}}
+   :return-type :_types-usages-result-shape
+   :effects #{:db}}
+
+  ;; --- type-row compound handler primitives. The handlers themselves
+  ;; are `:if` graph fn-defs below; these base-fns are the parse /
+  ;; validate / apply stages. `validate-*` returns the `{:ok false
+  ;; :error}` rejection response directly (or nil), so the `:if`'s
+  ;; `:then` branch is the validation result itself; `_rejected?` is
+  ;; shared with the entity create/update handlers. ---
+  {:name :_type-form-name-raw
+   :parent :get
+   :args {:coll :_parsed-body :key {:value :name} :default nil}}
+
+  {:name :_type-form-ns-id-raw
+   :parent :get
+   :args {:coll :_parsed-body :key {:value :namespace-id} :default nil}}
+
+  {:name :_create-record-type-parsed
+   :description "Stage 1 of create-record-type — JSON body → `{:name :ns-id :description :fields}`."
+   :parent :zipmap
+   :args {:keys [{:value :name} {:value :ns-id} {:value :description} {:value :fields}]
+          :vals [{:parent :if
+                  :args {:test {:parent :some? :args {:value :_type-form-name-raw}}
+                         :then {:parent :to-str :args {:value :_type-form-name-raw}}
+                         :else {:value nil}}}
+                 {:parent :parse-uuid
+                  :args {:string {:parent :to-str :args {:value :_type-form-ns-id-raw}}}}
+                 {:parent :get :args {:coll :_parsed-body :key {:value :description} :default nil}}
+                 {:parent :vec
+                  :args {:coll {:parent :get
+                                :args {:coll :_parsed-body :key {:value :fields} :default {:value []}}}}}]}
+   :return-type :_create-record-type-parsed-shape}
+
+  ;; --- C19: stage 2 of create-record-type as a graph `:cond`. Was a
+  ;; Clojure base-fn delegating to a since-removed
+  ;; `validate-create-record-type` helper; now decomposed into per-field
+  ;; extractors + predicates + static
+  ;; error responses, glued by a flat `:cond`. The 400-rejection
+  ;; literals live in `:_create-record-type-err-*` consts (skill §4
+  ;; "Content → fn-defs, not impls"). The `:cond` is lazy, so each
+  ;; predicate's `:_create-record-type-parsed` lookup runs at most once
+  ;; per call (shared via the cond's `:parsed` bind). ---
+
+  {:name :_create-record-type-parsed-name
+   :description "Pull the `:name` field out of `:_create-record-type-parsed`'s output. Shared by the blank-name guard and (potentially) the success response."
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :name}}}
+
+  {:name :_create-record-type-parsed-fields
+   :description "Pull the `:fields` vector out of `:_create-record-type-parsed`'s output."
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :fields}}}
+
+  {:name :_create-record-type-name-blank?
+   :description "True when the parsed `:name` is nil / empty / whitespace-only."
+   :parent :blank?
+   :args {:string :_create-record-type-parsed-name}}
+
+  {:name :_create-record-type-fields-empty?
+   :description "True when the parsed `:fields` vector is empty (a record needs at least one field)."
+   :parent :empty?
+   :args {:coll :_create-record-type-parsed-fields}}
+
+  {:name :_create-record-type-validation
+   :description "Stage 2 of create-record-type — guards (blank name, empty field list) wired as a flat `:cond`. Returns the `{:ok false :error}` rejection response from the first matching predicate, or `nil` when the request is well-formed (the `{:value true}` clause)."
+   :parent :cond
+   :args {:clauses [:_create-record-type-name-blank?    :_err-name-required
+                    :_create-record-type-fields-empty?  :_err-fields-required
+                    {:value true}                       {:value nil}]
+          :parsed :_create-record-type-parsed}}
+
+  ;; Same `:try` + shared-`:atom` journal
+  ;; pattern as `:_update-record-type-apply` below. Body throws on
+  ;; storage / type-resolve failure; on-throw replays the journal in
+  ;; reverse. The `:journal` extra arg at the `:try`-call site is the
+  ;; mechanism that hands the SAME atom instance to both body and
+  ;; on-throw via wrap-time capture.
+
+  {:name :_apply-create-record-type-body
+   :description "Phases 1-3 + invalidate + success of create-record-type-apply. Mutates `:journal` for rollback hints; throws on storage/type-resolve failure (caught by `:try`)."
+   :args {:parsed {:type :_create-record-type-parsed-shape :description "Output of `:_create-record-type-parsed`."}
+          :journal {:type :any :description "Shared rollback-journal atom (captured from `:_create-record-type-apply`'s `:journal` binding at wrap time)."}}
+   :return-type :_type-row-result-shape
+   :effects #{:db}}
+
+  {:name :_apply-create-record-type-rollback
+   :description "`:try`'s on-throw branch for create-record-type AND create-list-type. Derefs `:journal` and replays entries in reverse. Returns the `{:ok false :error :data}` shape."
+   :args {:journal {:type :any :description "Shared rollback-journal atom."}
+          :exception {:type :any :description "Caught Exception, provided by `:try` at call time."}}
+   :return-type :_error-result-shape
+   :effects #{:db}}
+
+  {:name :_apply-create-record-type-journal
+   :description "Fresh atom-of-vector for create-record-type's rollback log. Body/on-throw share this instance via the `:journal` binding at `:_create-record-type-apply`'s `:try`-call site."
+   :parent :atom
+   :args {:initial-value {:value []}}}
+
+  {:name :_create-record-type-apply
+   :description "Stage 3 of create-record-type — `:try` over a shared `:atom` journal. Body runs phases 1-3 + invalidate + success; on-throw replays the journal in reverse. Returns `{:ok true :id :name}` on success or `{:ok false :error :data}` on rollback."
+   :parent :try
+   :args {:body :_apply-create-record-type-body
+          :on-throw :_apply-create-record-type-rollback
+          :journal :_apply-create-record-type-journal
+          :parsed {:as :parsed}}}
+
+  {:name :_create-list-type-parsed
+   :description "Stage 1 of create-list-type — JSON body → `{:name :ns-id :description :element-ref}`."
+   :parent :zipmap
+   :args {:keys [{:value :name} {:value :ns-id} {:value :description} {:value :element-ref}]
+          :vals [{:parent :if
+                  :args {:test {:parent :some? :args {:value :_type-form-name-raw}}
+                         :then {:parent :to-str :args {:value :_type-form-name-raw}}
+                         :else {:value nil}}}
+                 {:parent :parse-uuid
+                  :args {:string {:parent :to-str :args {:value :_type-form-ns-id-raw}}}}
+                 {:parent :get :args {:coll :_parsed-body :key {:value :description} :default nil}}
+                 {:parent :get :args {:coll :_parsed-body :key {:value :element-type} :default nil}}]}
+   :return-type :_create-list-type-parsed-shape}
+
+  ;; --- stage 2 of create-list-type as a graph `:cond`.
+  ;; Same shape as the sibling record-type stage 2 — `:blank?` + `:nil?`
+  ;; guards, static error consts, flat :cond. Same skill §4 rationale. ---
+
+  {:name :_create-list-type-parsed-name
+   :description "Pull the `:name` field out of `:_create-list-type-parsed`'s output."
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :name}}}
+
+  {:name :_create-list-type-parsed-element-ref
+   :description "Pull the `:element-ref` field out of `:_create-list-type-parsed`'s output."
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :element-ref}}}
+
+  {:name :_create-list-type-name-blank?
+   :description "True when the parsed `:name` is nil / empty / whitespace-only."
+   :parent :blank?
+   :args {:string :_create-list-type-parsed-name}}
+
+  {:name :_create-list-type-element-ref-nil?
+   :description "True when the parsed `:element-ref` is missing (nil)."
+   :parent :nil?
+   :args {:value :_create-list-type-parsed-element-ref}}
+
+  {:name :_create-list-type-err-element-required
+   :description "Static 400 rejection payload — element-type missing."
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "element-type required"}}}
+
+  {:name :_create-list-type-validation
+   :description "Stage 2 of create-list-type — guards (blank name, missing element-type) via flat `:cond`. Returns the rejection response from the first matching predicate, or `nil` when well-formed."
+   :parent :cond
+   :args {:clauses [:_create-list-type-name-blank?         :_err-name-required
+                    :_create-list-type-element-ref-nil?    :_create-list-type-err-element-required
+                    {:value true}                          {:value nil}]
+          :parsed :_create-list-type-parsed}}
+
+  ;; `:try` + shared `:atom` journal. The
+  ;; on-throw reuses the type-row-rollback defbase since the
+  ;; rollback logic is type-agnostic (replay journal in reverse).
+  {:name :_apply-create-list-type-body
+   :description "Phases 1-3 + invalidate + success of create-list-type-apply. Mutates `:journal`; throws on storage/type-resolve failure."
+   :args {:parsed {:type :_create-list-type-parsed-shape :description "Output of `:_create-list-type-parsed`."}
+          :journal {:type :any :description "Shared rollback-journal atom."}}
+   :return-type :_type-row-result-shape
+   :effects #{:db}}
+
+  {:name :_apply-create-list-type-journal
+   :description "Fresh atom-of-vector for create-list-type's rollback log."
+   :parent :atom
+   :args {:initial-value {:value []}}}
+
+  {:name :_create-list-type-apply
+   :description "Stage 3 of create-list-type — `:try` over a shared `:atom` journal. Body runs phases 1-3 + invalidate + success; on-throw replays the journal in reverse via the shared `:_apply-create-record-type-rollback` defbase. Returns `{:ok true :id :name}` on success or `{:ok false :error :data}` on rollback."
+   :parent :try
+   :args {:body :_apply-create-list-type-body
+          :on-throw :_apply-create-record-type-rollback
+          :journal :_apply-create-list-type-journal
+          :parsed {:as :parsed}}}
+
+  {:name :_update-record-type-parsed
+   :description "Stage 1 of update-record-type — JSON body → `{:fn-id :name :has-description? :description :fields}`. `:has-description?` distinguishes a submitted-nil description (clear) from an absent key (leave untouched)."
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :name} {:value :has-description?} {:value :description} {:value :fields}]
+          :vals [{:parent :parse-uuid
+                  :args {:string {:parent :to-str :args {:value {:parent :get
+                                                                 :args {:coll :_parsed-body :key {:value :id} :default nil}}}}}}
+                 {:parent :if
+                  :args {:test {:parent :some? :args {:value :_type-form-name-raw}}
+                         :then {:parent :to-str :args {:value :_type-form-name-raw}}
+                         :else {:value nil}}}
+                 {:parent :contains?
+                  :args {:coll :_parsed-body :key {:value :description}}}
+                 {:parent :get :args {:coll :_parsed-body :key {:value :description} :default nil}}
+                 {:parent :vec
+                  :args {:coll {:parent :get
+                                :args {:coll :_parsed-body :key {:value :fields} :default {:value []}}}}}]}
+   :return-type :_update-record-type-parsed-shape}
+
+  ;; --- C21: stage 2 of update-record-type as a graph `:cond`.
+  ;; Same shape as the record/list-type stage-2 guards with one new
+  ;; wrinkle — the third guard reads storage (`:list-entities`) to
+  ;; confirm the target fn-row exists. Dynamic-error builder
+  ;; (`_update-record-type-err-not-found`) stays as a 1-line base-fn
+  ;; (same pattern as `_delete-secret-err-in-use` etc.) so the error message can
+  ;; cite the absent fn-id without an assoc-chain of intermediate
+  ;; fn-defs. ---
+
+  {:name :_update-record-type-parsed-fn-id
+   :description "Pull the `:fn-id` field out of `:_update-record-type-parsed`'s output."
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :fn-id}}}
+
+  {:name :_update-record-type-parsed-fields
+   :description "Pull the `:fields` vector out of `:_update-record-type-parsed`'s output."
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :fields}}}
+
+  {:name :_update-record-type-fn-id-nil?
+   :description "True when the parsed `:fn-id` is missing (not a valid UUID)."
+   :parent :nil?
+   :args {:value :_update-record-type-parsed-fn-id}}
+
+  {:name :_update-record-type-fields-empty?
+   :description "True when the parsed `:fields` vector is empty."
+   :parent :empty?
+   :args {:coll :_update-record-type-parsed-fields}}
+
+  {:name :_update-record-type-where
+   :description "Build the `{:id <fn-id>}` filter for the storage lookup. `:assoc-empty` writes the single field into a fresh map."
+   :parent :assoc-empty
+   :args {:key {:value :id} :value :_update-record-type-parsed-fn-id}}
+
+  ;; `:id`-only IN-clause pushes into the identity SQL.
+  ;; `:resolve-fn-rows` then overlays version data on the (at most one)
+  ;; identity row matching the id.
+  {:name :_update-record-type-fn-rows
+   :description "Look up the target fn row by parsed fn-id. Empty when the row doesn't exist."
+   :parent :resolve-fn-rows
+   :args {:identities :_update-record-type-fn-identities
+          :branch-chain :current-branch-chain}}
+
+  {:name :_update-record-type-fn-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "fn"}
+          :where :_update-record-type-where}}
+
+  {:name :_update-record-type-fn-row
+   :description "First (and only) fn row from the lookup — nil when none."
+   :parent :first
+   :args {:coll :_update-record-type-fn-rows}}
+
+  {:name :_update-record-type-fn-not-found?
+   :description "True when the storage lookup didn't find a fn row with the parsed fn-id."
+   :parent :nil?
+   :args {:value :_update-record-type-fn-row}}
+
+  {:name :_update-record-type-err-id-required
+   :description "Static 400 rejection — id missing or not a UUID."
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "id required (UUID)"}}}
+
+  {:name :_update-record-type-err-not-found
+   :description "Dynamic error builder — cites the parsed fn-id of the row that didn't exist. `:return-type` pinned to keep the parent cond's union of precise record shapes."
+   :parent :zipmap
+   :return-type :_error-result-shape
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["fn "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :fn-id}
+                                         :default nil}}
+                                 " not found"]}}]}}
+
+  {:name :_update-record-type-validation
+   :description "Stage 2 of update-record-type — guards (missing id, empty field list, fn-row not found) wired as a flat `:cond`. The third clause reads storage (`:list-entities`) lazily — runs only when the first two guards passed."
+   :parent :cond
+   :args {:clauses [:_update-record-type-fn-id-nil?     :_update-record-type-err-id-required
+                    :_update-record-type-fields-empty?  :_err-fields-required
+                    :_update-record-type-fn-not-found?  :_update-record-type-err-not-found
+                    {:value true}                       {:value nil}]
+          :parsed :_update-record-type-parsed}}
+
+  ;; --- Stage 3 of update-record-type — journalled txn split for graph.
+  ;; Was one 141-line Clojure defn; now a `:try` (core.system) over an
+  ;; `:atom` (core.concurrency) journal so the try/catch boundary,
+  ;; rollback log, and success/failure split are visible at the graph
+  ;; level. The atom value is resolved ONCE at `:try`'s call cache and
+  ;; passed as a free arg to BOTH `:body` and `:on-throw` — so phases
+  ;; and rollback see the same instance. Phases 2-5 + invalidate +
+  ;; success live inside `:_apply-update-record-type-body` (one Clojure
+  ;; helper — atomic-or-rolled-back is one concept per skill §3 §1);
+  ;; cleanup lives inside `:_apply-update-record-type-rollback`. ---
+
+  {:name :_apply-update-record-type-journal
+   :description "Fresh atom-of-vector to collect rollback entries. Referenced from `:_update-record-type-apply` at the `:try`-call site (extra `:journal` binding); body and on-throw both see the same instance via wrap-time-capture."
+   :parent :atom
+   :args {:initial-value {:value []}}}
+
+  {:name :_apply-update-record-type-body
+   :description "Phases 2-5 + invalidate + success of update-record-type-apply. Mutates `:journal` for rollback hints; throws on storage/type-resolve failure (caught by `:try`)."
+   :args {:parsed {:type :_update-record-type-parsed-shape :description "Output of `:_update-record-type-parsed`."}
+          :journal {:type :any :description "Shared rollback-journal atom (captured from `:_update-record-type-apply`'s `:journal` binding at wrap time)."}}
+   :return-type :_type-row-result-shape
+   :effects #{:db}}
+
+  {:name :_apply-update-record-type-rollback
+   :description "`:try`'s on-throw branch — derefs `:journal` and replays entries in reverse. Returns the partial 400 response carrying the exception's message + ex-data. Both `:journal` (captured) and `:exception` (call-time) come from `:try`'s environment."
+   :args {:journal {:type :any :description "Shared rollback-journal atom (captured from `:_update-record-type-apply`'s `:journal` binding)."}
+          :exception {:type :any :description "Caught Exception, provided by `:try` at call time as the single lambda-param."}}
+   :return-type :_error-result-shape
+   :effects #{:db}}
+
+  {:name :_update-record-type-apply
+   :description "Stage 3 of update-record-type — `:try` over a shared `:atom` journal. Body runs phases 2-5 + invalidate + success; on-throw runs rollback. Returns `{:ok true :id :name}` on success or `{:ok false :error :data}` on rollback. `:journal` is an extra binding at the `:try`-call site (synthetic slot owned by `:try`); HOF wrap-time-capture treats it as a captured env-binding for both `:body` and `:on-throw` callables, so they share one atom instance per request. Caveat: orphaned slots are NOT garbage-collected (slot rows are shared)."
+   :parent :try
+   :args {:body :_apply-update-record-type-body
+          :on-throw :_apply-update-record-type-rollback
+          :journal :_apply-update-record-type-journal
+          :parsed {:as :parsed}}}]}

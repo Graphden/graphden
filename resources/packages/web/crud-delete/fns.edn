@@ -1,0 +1,1006 @@
+;; Part of the `web.crud` namespace — see `web/crud/fns.edn` for the
+;; module layout and why the ids are unchanged.
+
+
+{:namespace "web.crud"
+ :description "Entity delete: the parsed shape, the reverse-reference scans (`_ref-owner` / `_resolver-owner` / list-item) and the fn / ns / secret delete chains."
+ :fns
+ [;; --- delete-entity primitives. The handler
+  ;; itself is the `:process-delete-entity` `:cond` graph fn-def below.
+  ;; Four rejection paths with mixed static / dynamic-reason 409s, plus
+  ;; the success path. The two dynamic-reason 409s share their reason
+  ;; via a separate "compute reason once" base-fn fed into BOTH the
+  ;; predicate and the error-builder.
+  ;; --- :extract-entity-params — atomic boundary. Pulls
+  ;; `{:type-str :id-str :entity-type}` from a Ring request with
+  ;; reitit `:path-params` preferred over URI parsing.
+  {:name :extract-entity-params
+   :description "Pull `{:type-str :id-str :entity-type}` from a Ring request — reitit `:path-params` preferred, URI fallback for the http-kit passthrough path."
+   :args {:request {:type :ring-request-shape}}
+   :return-type {:type-str :nullable-text :id-str :nullable-text :entity-type :nullable-keyword}}
+
+  ;; --- :query-param — atomic boundary. Pulls a named query-string
+  ;; parameter from a Ring request; tolerates both reitit-enriched
+  ;; `:query-params` (string OR keyword keys) AND raw `:query-string`.
+  {:name :query-param
+   :description "Read a named query-string parameter from a Ring request. Returns nil when absent."
+   :args {:request {:type :ring-request-shape}
+          :param-name {:type :text :description "Parameter name (e.g. `\"fn-id\"`)."}}
+   :return-type :nullable-text}
+
+  ;; --- :_delete-parsed — graph composition:
+  ;; `:extract-entity-params` + `:parse-uuid` of the id-str + `:zipmap`
+  ;; envelope. `:parse-uuid` already swallows bad UUIDs to nil, so no
+  ;; try/catch collapse is needed.
+  {:name :_delete-parsed-extracted
+   :parent :extract-entity-params
+   :args {:request {:as :request}}}
+
+  {:name :_delete-parsed
+   :description "Parse `DELETE /api/entities/:type/:id` into `{:entity-type <kw|nil> :id <uuid|nil>}`."
+   :parent :zipmap
+   :args {:keys [{:value :entity-type} {:value :id}]
+          :vals [{:parent :get
+                  :args {:coll :_delete-parsed-extracted
+                         :key {:value :entity-type}
+                         :default nil}}
+                 {:parent :parse-uuid
+                  :args {:string {:parent :get
+                                  :args {:coll :_delete-parsed-extracted
+                                         :key {:value :id-str}
+                                         :default nil}}}}]}
+   :return-type :_delete-parsed-shape}
+
+  {:name :_delete-request-invalid?
+   :description "Guard #1 — entity-type or id is missing / malformed in the URL. `:or [nil? :entity-type] [nil? :id]`."
+   :parent :or
+   :args {:values [{:parent :nil? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}}}
+                   {:parent :nil? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :id} :default nil}}}}]}}
+
+  ;; The secret-shape guard as a graph composition. Three parts:
+  ;;   1. entity-type = :fn AND id present (cheap gate)
+  ;;   2. resolve the target fn row by id
+  ;;   3. compare its `:parent-ids` against `[<secret-leaf-fn-id>]`
+  ;; The secret-leaf id is discovered via `:fn-names-with-tag` so
+  ;; admins can swap which tag carries "secret-shape" by editing
+  ;; `web/vault/fns.edn`'s `:tags` declaration — no Clojure rebuild.
+  {:name :_delete-fn-is-secret?
+   :description "Guard #2 — the targeted entity is a secret-shaped fn-def (`:vault-get` / `:secret-leaf`). Bounce to `DELETE /api/secrets/:fn-id` so OpenBao stays in sync."
+   :parent :and
+   :args {:values [:_delete-is-fn?
+                   :_delete-id-present?
+                   :_delete-target-has-secret-shape?]}}
+
+  {:name :_delete-target-id
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :id} :default nil}}
+
+  {:name :_delete-is-fn?
+   :parent :equal?
+   :args {:a :_parsed-entity-type :b {:value :fn}}}
+
+  {:name :_delete-id-present?
+   :parent :some?
+   :args {:value :_delete-target-id}}
+
+  {:name :_delete-target-fn-row
+   :parent :get-entity
+   :return-type :nullable-fn-row-shape
+   :args {:entity-type {:value "fn"} :id :_delete-target-id}}
+
+  {:name :_delete-target-parent-ids
+   :parent :get
+   :args {:coll :_delete-target-fn-row :key {:value :parent-ids} :default nil}}
+
+  {:name :_delete-target-has-secret-shape?
+   :description "True iff `parent-ids` is exactly `[<secret-leaf-fn-id>]` — pure secret, no MI siblings."
+   :parent :equal?
+   :args {:a :_delete-target-parent-ids
+          :b :_delete-secret-leaf-parent-vec}}
+
+  ;; Secret-leaf id discovered via `:fn-names-with-tag` so changing
+  ;; the "secret-shape" tag declaration in `web/vault/fns.edn` flows
+  ;; through here automatically.
+  {:name :_delete-secret-leaf-names
+   :parent :fn-names-with-tag
+   :args {:tag {:value "secret-shape"}}}
+
+  {:name :_delete-secret-leaf-name
+   :parent :first :args {:coll :_delete-secret-leaf-names}}
+
+  {:name :_delete-secret-leaf-rows
+   :parent :resolve-fn-rows
+   :args {:identities :_delete-secret-leaf-identities
+          :branch-chain :current-branch-chain}}
+
+  ;; Filter the fn identities by name in SQL — resolve ~1 row, not the
+  ;; whole fn table. An empty `:where` here scanned + version-resolved
+  ;; EVERY fn (thousands) just to find the one secret-leaf. `fn.name` is
+  ;; stable across versions (measured 0 divergence) so the identity filter
+  ;; is safe; the post-resolve `:_delete-secret-leaf-name-eq?` stays as a
+  ;; defensive exact match. The where is BUILT from the (dynamic, tag-
+  ;; derived) name value, never a free slot — so the Ring request can't
+  ;; leak into it.
+  {:name :_delete-secret-leaf-where
+   :parent :assoc-empty
+   :args {:key {:value :name} :value :_delete-secret-leaf-name}}
+
+  {:name :_delete-secret-leaf-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "fn"} :where :_delete-secret-leaf-where}}
+
+  {:name :_delete-secret-leaf-filtered
+   :parent :filter
+   :args {:pred :_delete-secret-leaf-name-eq?
+          :coll :_delete-secret-leaf-rows}}
+
+  {:name :_delete-secret-leaf-name-eq?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+          :b :_delete-secret-leaf-name}}
+
+  {:name :_delete-secret-leaf-row
+   :parent :first :args {:coll :_delete-secret-leaf-filtered}}
+
+  {:name :_delete-secret-leaf-id
+   :parent :get :args {:coll :_delete-secret-leaf-row :key {:value :id} :default nil}}
+
+  {:name :_delete-secret-leaf-parent-vec
+   :description "Single-element vec `[<secret-leaf-id>]` used as the comparison target for `:parent-ids`. nil id ⇒ `[nil]` which never matches a real `:parent-ids` row."
+   :parent :vec
+   :args {:coll [:_delete-secret-leaf-id]}}
+
+  ;; In-use reason as graph composition
+  ;; over three storage queries. Counts:
+  ;;   - parent-owners — fns whose `:parent-ids` ref the target
+  ;;   - ref-bindings  — bindings whose `:ref-fn-id` is the target
+  ;;   - ref-items     — binding-list-items whose `:ref-fn-id` is the target
+  ;; …then renders the human-readable 409 message (kept stable so
+  ;; the UI's toast text doesn't shift).
+  {:name :_delete-fn-in-use-reason
+   :description "Compute the human-readable reason when a fn-def delete is rejected for being referenced; nil otherwise. Shared by the predicate + the dynamic-reason error builder."
+   :parent :if
+   :args {:test :_delete-fn-in-use-gate?
+          :then :_delete-fn-in-use-conditional-message
+          :else {:value nil}}}
+
+  {:name :_delete-fn-in-use-gate?
+   :description "Cheap gate — short-circuit when target isn't a :fn delete with a present id."
+   :parent :and
+   :args {:values [:_delete-is-fn?
+                   :_delete-id-present?]}}
+
+  ;; Conditional final message.
+  {:name :_delete-fn-in-use-conditional-message
+   :parent :if
+   :args {:test :_delete-fn-has-dependents?
+          :then :_delete-fn-in-use-message
+          :else {:value nil}}}
+
+  ;; Three reverse-reference queries.
+  {:name :_delete-fn-parent-owners-all
+   :parent :query-ref-many-owners
+   :args {:entity-type {:value "fn"}
+          :ref-many-field {:value "parent-ids"}
+          :target-id :_delete-target-id}}
+
+  ;; Drop the target itself so a self-ref isn't counted as a dependent.
+  {:name :_delete-fn-parent-owners
+   :parent :filter
+   :args {:pred :_delete-fn-not-self?
+          :coll :_delete-fn-parent-owners-all}}
+
+  {:name :_delete-fn-not-self?
+   :parent :not
+   :args {:value {:parent :equal? :args {:a {:as :item} :b :_delete-target-id}}}}
+
+  {:name :_delete-fn-used-as-parent-count
+   :parent :count :args {:coll :_delete-fn-parent-owners}}
+
+  ;; =====================================================================
+  ;; Reusable version-aware reverse-ref (free arg :target-fn-id)
+  ;; =====================================================================
+  ;; `:ref-owner-bindings` / `:ref-owner-list-items` return the RESOLVED
+  ;; :binding / :binding-list-item rows whose :ref-fn-id is :target-fn-id.
+  ;; :ref-fn-id is version-data that can diverge from the identity row
+  ;; (measured 9/7272 bindings carry a branch-only ref), so candidate ids
+  ;; are gathered from BOTH the identity table (index on ref_fn_id) AND the
+  ;; version table (branch-level refs), then ONLY those are resolved +
+  ;; exact-matched — O(refs), not O(all rows). The :where is built from
+  ;; :target-fn-id (never a free slot) so the Ring request can't leak in.
+  ;; Consumers: web/crud DELETE-fn ref-check + app/secrets find-fn-usages.
+  {:name :_ref-owner-where
+   :parent :assoc-empty
+   :args {:key {:value :ref-fn-id}
+          :value {:as :target-fn-id :type :nullable-uuid
+                  :description "Fn-id whose referrers to find."}}}
+
+  {:name :_ref-owner-get-id
+   :parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_ref-owner-get-binding-id
+   :parent :get :args {:coll {:as :item} :key {:value :binding-id} :default nil}}
+
+  {:name :_ref-owner-get-item-id
+   :parent :get :args {:coll {:as :item} :key {:value :item-id} :default nil}}
+
+  {:name :_ref-owner-eq?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :ref-fn-id} :default nil}}
+          :b {:as :target-fn-id}}}
+
+  ;; --- binding variant ---
+  {:name :_ref-owner-bind-id-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-bind-id-ids
+   :parent :map :args {:func :_ref-owner-get-id :coll :_ref-owner-bind-id-rows}}
+
+  {:name :_ref-owner-bind-ver-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-version"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-bind-ver-ids
+   :parent :map :args {:func :_ref-owner-get-binding-id :coll :_ref-owner-bind-ver-rows}}
+
+  {:name :_ref-owner-bind-concat
+   :parent :concat :args {:colls [:_ref-owner-bind-id-ids :_ref-owner-bind-ver-ids]}}
+
+  {:name :_ref-owner-bind-distinct
+   :parent :distinct :args {:coll :_ref-owner-bind-concat}}
+
+  {:name :_ref-owner-bind-cand-ids
+   :parent :vec :args {:coll :_ref-owner-bind-distinct}}
+
+  {:name :_ref-owner-bind-empty?
+   :parent :empty? :args {:coll :_ref-owner-bind-cand-ids}}
+
+  {:name :_ref-owner-bind-cand-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_ref-owner-bind-cand-ids]}}}}
+
+  {:name :_ref-owner-bind-cand-resolved
+   :parent :resolve-binding-rows
+   :args {:identities :_ref-owner-bind-cand-identities :branch-chain :current-branch-chain}}
+
+  {:name :_ref-owner-bind-resolved
+   :parent :if
+   :args {:test :_ref-owner-bind-empty? :then {:value []} :else :_ref-owner-bind-cand-resolved}}
+
+  {:name :_ref-owner-bind-matched
+   :description "Resolved binding rows whose :ref-fn-id is the target — BEFORE the live-owner filter below."
+   :parent :filter
+   :args {:pred :_ref-owner-eq? :coll :_ref-owner-bind-resolved}}
+
+  ;; =====================================================================
+  ;; Live-owner filter — a reverse-ref answers WHO POINTED HERE, never
+  ;; WHO STILL EXISTS.
+  ;;
+  ;; Deletion is a TOMBSTONE, and deleting a fn does not tombstone the
+  ;; binding rows it owns. So a plain reverse-ref keeps reporting a dead
+  ;; fn's binding as a live dependent, and the delete gate built on it
+  ;; refused forever:
+  ;;
+  ;;     DELETE referrer -> 200
+  ;;     DELETE target   -> 409   "referenced by 1 binding"
+  ;;
+  ;; From then on NOBODY could delete that target — not the user in the
+  ;; editor, not a test cleaning up after itself; the leaked entities
+  ;; poisoned every later e2e file. Identical disease to the `:parent-ids`
+  ;; junction, fixed the same way there — see `query-ref-many-owners` in
+  ;; `versioning.storage.core`: ask the junction who pointed, then resolve
+  ;; those owners against this branch and keep the living.
+  ;; =====================================================================
+  {:name :_ref-owner-get-fn-id
+   :parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_owner-fn-ids-empty?
+   :parent :empty?
+   :args {:coll {:as :owner-fn-ids :type [:list :uuid]
+                 :description "Owner fn-ids to test for liveness on this branch."}}}
+
+  {:name :_owner-fn-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "fn"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [{:as :owner-fn-ids}]}}}}
+
+  {:name :_owner-fn-resolved-all
+   :parent :resolve-fn-rows
+   :args {:identities :_owner-fn-identities :branch-chain :current-branch-chain}}
+
+  {:name :_owner-fn-resolved
+   :parent :if
+   :args {:test :_owner-fn-ids-empty? :then {:value []} :else :_owner-fn-resolved-all}}
+
+  {:name :owner-live-fn-index
+   :description "`{fn-id → [row]}` over the `:owner-fn-ids` that STILL resolve live on this branch — tombstoned fns are absent. Membership index for the `:_owner-alive?` predicate."
+   :parent :group-by
+   :args {:key-fn :_ref-owner-get-id :coll :_owner-fn-resolved}}
+
+  {:name :_owner-alive?
+   :description "HOF pred over rows carrying `:fn-id` — true iff the owning fn is in `:owner-index`."
+   :parent :contains?
+   :args {:coll {:as :owner-index :type [:map :uuid :any]
+                 :description "Live-owner index from `:owner-live-fn-index`."}
+          :key :_ref-owner-get-fn-id}}
+
+  {:name :_ref-owner-bind-owner-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-fn-id
+                                      :coll :_ref-owner-bind-matched}}}}}}
+
+  {:name :_ref-owner-bind-owner-index
+   :parent :owner-live-fn-index
+   :args {:owner-fn-ids :_ref-owner-bind-owner-ids}}
+
+  {:name :ref-owner-bindings
+   :description "RESOLVED binding rows whose :ref-fn-id is :target-fn-id AND whose owning fn is still live on this branch (version-aware; see the section header)."
+   :parent :filter
+   :args {:pred :_owner-alive?
+          :coll :_ref-owner-bind-matched
+          :owner-index :_ref-owner-bind-owner-index}}
+
+  ;; --- resolver variant: bindings whose :resolver-fn-id is the target.
+  ;; A resolver runs at the owner's arg-resolution time, so deleting an
+  ;; in-use resolver breaks EXECUTION (fn-not-found at first force) —
+  ;; the delete gate must count these exactly like plain refs. Mirrors
+  ;; the binding variant above keyed on :resolver-fn-id.
+  {:name :_resolver-owner-where
+   :parent :assoc-empty
+   :args {:key {:value :resolver-fn-id}
+          :value {:as :target-fn-id :type :nullable-uuid
+                  :description "Fn-id whose resolver-consumers to find."}}}
+
+  {:name :_resolver-owner-bind-id-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"} :where :_resolver-owner-where}}
+
+  {:name :_resolver-owner-bind-id-ids
+   :parent :map :args {:func :_ref-owner-get-id :coll :_resolver-owner-bind-id-rows}}
+
+  {:name :_resolver-owner-bind-ver-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-version"} :where :_resolver-owner-where}}
+
+  {:name :_resolver-owner-bind-ver-ids
+   :parent :map :args {:func :_ref-owner-get-binding-id :coll :_resolver-owner-bind-ver-rows}}
+
+  {:name :_resolver-owner-bind-concat
+   :parent :concat :args {:colls [:_resolver-owner-bind-id-ids :_resolver-owner-bind-ver-ids]}}
+
+  {:name :_resolver-owner-bind-distinct
+   :parent :distinct :args {:coll :_resolver-owner-bind-concat}}
+
+  {:name :_resolver-owner-bind-cand-ids
+   :parent :vec :args {:coll :_resolver-owner-bind-distinct}}
+
+  {:name :_resolver-owner-bind-empty?
+   :parent :empty? :args {:coll :_resolver-owner-bind-cand-ids}}
+
+  {:name :_resolver-owner-bind-cand-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_resolver-owner-bind-cand-ids]}}}}
+
+  {:name :_resolver-owner-bind-cand-resolved
+   :parent :resolve-binding-rows
+   :args {:identities :_resolver-owner-bind-cand-identities :branch-chain :current-branch-chain}}
+
+  {:name :_resolver-owner-bind-resolved
+   :parent :if
+   :args {:test :_resolver-owner-bind-empty? :then {:value []} :else :_resolver-owner-bind-cand-resolved}}
+
+  {:name :_resolver-owner-eq?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :resolver-fn-id} :default nil}}
+          :b {:as :target-fn-id}}}
+
+  {:name :_resolver-owner-bind-matched
+   :parent :filter
+   :args {:pred :_resolver-owner-eq? :coll :_resolver-owner-bind-resolved}}
+
+  {:name :_resolver-owner-bind-owner-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-fn-id
+                                      :coll :_resolver-owner-bind-matched}}}}}}
+
+  {:name :_resolver-owner-bind-owner-index
+   :parent :owner-live-fn-index
+   :args {:owner-fn-ids :_resolver-owner-bind-owner-ids}}
+
+  {:name :resolver-owner-bindings
+   :description "RESOLVED binding rows whose :resolver-fn-id is :target-fn-id and whose owning fn is still live (version-aware; twin of :ref-owner-bindings)."
+   :parent :filter
+   :args {:pred :_owner-alive?
+          :coll :_resolver-owner-bind-matched
+          :owner-index :_resolver-owner-bind-owner-index}}
+
+  ;; --- list-item variant (FK to identity is :item-id) ---
+  {:name :_ref-owner-item-id-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-list-item"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-item-id-ids
+   :parent :map :args {:func :_ref-owner-get-id :coll :_ref-owner-item-id-rows}}
+
+  {:name :_ref-owner-item-ver-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-list-item-version"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-item-ver-ids
+   :parent :map :args {:func :_ref-owner-get-item-id :coll :_ref-owner-item-ver-rows}}
+
+  {:name :_ref-owner-item-concat
+   :parent :concat :args {:colls [:_ref-owner-item-id-ids :_ref-owner-item-ver-ids]}}
+
+  {:name :_ref-owner-item-distinct
+   :parent :distinct :args {:coll :_ref-owner-item-concat}}
+
+  {:name :_ref-owner-item-cand-ids
+   :parent :vec :args {:coll :_ref-owner-item-distinct}}
+
+  {:name :_ref-owner-item-empty?
+   :parent :empty? :args {:coll :_ref-owner-item-cand-ids}}
+
+  {:name :_ref-owner-item-cand-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-list-item"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_ref-owner-item-cand-ids]}}}}
+
+  {:name :_ref-owner-item-cand-resolved
+   :parent :resolve-binding-list-item-rows
+   :args {:identities :_ref-owner-item-cand-identities :branch-chain :current-branch-chain}}
+
+  {:name :_ref-owner-item-resolved
+   :parent :if
+   :args {:test :_ref-owner-item-empty? :then {:value []} :else :_ref-owner-item-cand-resolved}}
+
+  {:name :_ref-owner-item-matched
+   :parent :filter
+   :args {:pred :_ref-owner-eq? :coll :_ref-owner-item-resolved}}
+
+  ;; A list item's owner is a BINDING, and that binding's owner is a fn —
+  ;; so the item survives the live-owner filter only if BOTH still resolve.
+  ;; (A tombstoned binding drops out at resolution; a binding orphaned by
+  ;; its fn's deletion needs the fn-index check, same as above.)
+  {:name :_ref-owner-item-owner-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-binding-id
+                                      :coll :_ref-owner-item-matched}}}}}}
+
+  {:name :_ref-owner-item-owner-empty?
+   :parent :empty? :args {:coll :_ref-owner-item-owner-ids}}
+
+  {:name :_ref-owner-item-owner-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_ref-owner-item-owner-ids]}}}}
+
+  {:name :_ref-owner-item-owner-resolved-all
+   :parent :resolve-binding-rows
+   :args {:identities :_ref-owner-item-owner-identities :branch-chain :current-branch-chain}}
+
+  {:name :_ref-owner-item-owner-resolved
+   :parent :if
+   :args {:test :_ref-owner-item-owner-empty?
+          :then {:value []} :else :_ref-owner-item-owner-resolved-all}}
+
+  {:name :_ref-owner-item-owner-fn-ids
+   :parent :vec
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_ref-owner-get-fn-id
+                                      :coll :_ref-owner-item-owner-resolved}}}}}}
+
+  {:name :_ref-owner-item-owner-fn-index
+   :parent :owner-live-fn-index
+   :args {:owner-fn-ids :_ref-owner-item-owner-fn-ids}}
+
+  {:name :_ref-owner-item-owner-live
+   :parent :filter
+   :args {:pred :_owner-alive?
+          :coll :_ref-owner-item-owner-resolved
+          :owner-index :_ref-owner-item-owner-fn-index}}
+
+  {:name :_ref-owner-item-owner-index
+   :parent :group-by
+   :args {:key-fn :_ref-owner-get-id :coll :_ref-owner-item-owner-live}}
+
+  {:name :_item-owner-alive?
+   :description "HOF pred over list-item rows — true iff the owning binding is still live."
+   :parent :contains?
+   :args {:coll {:as :item-owner-index :type [:map :uuid :any]
+                 :description "Live owning-binding index."}
+          :key :_ref-owner-get-binding-id}}
+
+  {:name :ref-owner-list-items
+   :description "RESOLVED binding-list-item rows whose :ref-fn-id is :target-fn-id and whose owning binding (and its fn) are still live (version-aware)."
+   :parent :filter
+   :args {:pred :_item-owner-alive?
+          :coll :_ref-owner-item-matched
+          :item-owner-index :_ref-owner-item-owner-index}}
+
+  ;; Bindings referencing the delete target — the shared version-aware
+  ;; primitive, bound to this delete's target id.
+  {:name :_delete-fn-ref-bindings
+   :parent :ref-owner-bindings
+   :args {:target-fn-id :_delete-target-id}}
+
+  {:name :_delete-fn-ref-bindings-count
+   :parent :count :args {:coll :_delete-fn-ref-bindings}}
+
+  ;; List-items referencing the delete target — shared primitive.
+  {:name :_delete-fn-ref-items
+   :parent :ref-owner-list-items
+   :args {:target-fn-id :_delete-target-id}}
+
+  {:name :_delete-fn-ref-items-count
+   :parent :count :args {:coll :_delete-fn-ref-items}}
+
+  ;; Bindings consuming the target as their RESOLVER — execution
+  ;; breaks if it goes away, so they gate the delete like plain refs.
+  {:name :_delete-fn-resolver-bindings
+   :parent :resolver-owner-bindings
+   :args {:target-fn-id :_delete-target-id}}
+
+  {:name :_delete-fn-resolver-bindings-count
+   :parent :count :args {:coll :_delete-fn-resolver-bindings}}
+
+  {:name :_delete-fn-refs-total
+   :description "Sum of binding-ref + list-item-ref + resolver-consumer counts."
+   :parent :add
+   :args {:nums [:_delete-fn-ref-bindings-count :_delete-fn-ref-items-count
+                 :_delete-fn-resolver-bindings-count]}}
+
+  ;; Predicates over the counts.
+  {:name :_delete-fn-has-dependents?
+   :parent :or
+   :args {:values [:_delete-fn-has-parent-owners?
+                   :_delete-fn-has-refs?]}}
+
+  {:name :_delete-fn-has-parent-owners?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_delete-fn-parent-owners}}}}
+
+  {:name :_delete-fn-has-refs?
+   :parent :gt
+   :args {:nums [:_delete-fn-refs-total {:value 0}]}}
+
+  ;; Message build, e.g.:
+  ;;   "Graph is a parent of N other graph(s) and referenced by M binding(s) — remove the dependents first."
+  {:name :_delete-fn-in-use-message
+   :parent :str
+   :args {:parts ["Graph is "
+                  :_delete-fn-parent-clause
+                  :_delete-fn-and-clause
+                  :_delete-fn-refs-clause
+                  " — remove the dependents first."]}}
+
+  {:name :_delete-fn-parent-clause
+   :parent :if
+   :args {:test :_delete-fn-has-parent-owners?
+          :then :_delete-fn-parent-clause-text
+          :else {:value ""}}}
+
+  {:name :_delete-fn-parent-clause-text
+   :parent :str
+   :args {:parts ["a parent of "
+                  :_delete-fn-used-as-parent-count
+                  " other graph"
+                  :_delete-fn-parent-clause-plural]}}
+
+  {:name :_delete-fn-parent-clause-plural
+   :parent :if
+   :args {:test :_delete-fn-parent-multi?
+          :then {:value "s"} :else {:value ""}}}
+
+  {:name :_delete-fn-parent-multi?
+   :parent :gt
+   :args {:nums [:_delete-fn-used-as-parent-count {:value 1}]}}
+
+  {:name :_delete-fn-and-clause
+   :parent :if
+   :args {:test :_delete-fn-both-deps?
+          :then {:value " and "}
+          :else {:value ""}}}
+
+  {:name :_delete-fn-both-deps?
+   :parent :and
+   :args {:values [:_delete-fn-has-parent-owners?
+                   :_delete-fn-has-refs?]}}
+
+  {:name :_delete-fn-refs-clause
+   :parent :if
+   :args {:test :_delete-fn-has-refs?
+          :then :_delete-fn-refs-clause-text
+          :else {:value ""}}}
+
+  {:name :_delete-fn-refs-clause-text
+   :parent :str
+   :args {:parts ["referenced by "
+                  :_delete-fn-refs-total
+                  " binding"
+                  :_delete-fn-refs-clause-plural]}}
+
+  {:name :_delete-fn-refs-clause-plural
+   :parent :if
+   :args {:test :_delete-fn-refs-multi?
+          :then {:value "s"} :else {:value ""}}}
+
+  {:name :_delete-fn-refs-multi?
+   :parent :gt
+   :args {:nums [:_delete-fn-refs-total {:value 1}]}}
+
+  {:name :_delete-fn-in-use?
+   :description "Guard #3 — the fn-in-use reason is non-nil."
+   :parent :some?
+   :args {:value {:as :fn-in-use-reason}}}
+
+  {:name :_delete-err-fn-in-use
+   :description "Wrap the precomputed in-use reason in a 409 partial response. Reuses `:html-error-response`; the `:reason → :fn-in-use-reason` rename captures the cond's `:fn-in-use-reason` shared-arg."
+   :parent :html-error-response
+   :args {:status {:value 409}
+          :reason {:as :fn-in-use-reason}}}
+
+  ;; Ns-non-empty reason as pure graph
+  ;; composition. Counts child :ns + :fn rows under the target ns-id,
+  ;; builds a human-readable message with plurality, returns nil when
+  ;; the ns is empty (or when target isn't a :ns at all).
+  ;;
+  ;; Both child lookups are CROSS-BRANCH, because a namespace delete is
+  ;; global (the `ns` row is non-versioned). The child-`:ns` lookup is a
+  ;; raw `:pg-query` on the (non-versioned) `ns` table. The child-`:fn`
+  ;; lookup asks "is any fn in this ns live on ANY branch?" via a
+  ;; per-(fn,branch)-latest `DISTINCT ON` over `fn-version` (see
+  ;; `:_delete-ns-child-fns` below); a current-branch-only resolve would
+  ;; miss fns live on a sibling/child branch and orphan them.
+  {:name :_delete-ns-non-empty-reason
+   :description "Compute the human-readable reason when a namespace delete is rejected for being non-empty; nil otherwise."
+   :parent :if
+   :args {:test :_delete-ns-non-empty-gate?
+          :then :_delete-ns-non-empty-conditional-message
+          :else {:value nil}}}
+
+  {:name :_delete-ns-non-empty-gate?
+   :description "Cheap gate — short-circuit when target isn't a :ns delete with a present id."
+   :parent :and
+   :args {:values [:_delete-ns-target-is-ns?
+                   :_delete-id-present?]}}
+
+  {:name :_delete-ns-target-is-ns?
+   :parent :equal?
+   :args {:a :_parsed-entity-type :b {:value :ns}}}
+
+  ;; Conditional message: nil when no children, the human-readable
+  ;; string otherwise.
+  {:name :_delete-ns-non-empty-conditional-message
+   :parent :if
+   :args {:test :_delete-ns-has-children?
+          :then :_delete-ns-non-empty-message
+          :else {:value nil}}}
+
+  {:name :_delete-ns-has-children?
+   :parent :or
+   :args {:values [:_delete-ns-has-child-ns?
+                   :_delete-ns-has-child-fns?]}}
+
+  {:name :_delete-ns-has-child-ns?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_delete-ns-child-ns-rows}}}}
+
+  {:name :_delete-ns-has-child-fns?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_delete-ns-child-fns}}}}
+
+  ;; Counts (used by the message; cached once via shared refs).
+  {:name :_delete-ns-child-ns-count
+   :parent :count :args {:coll :_delete-ns-child-ns-rows}}
+
+  {:name :_delete-ns-child-fns-count
+   :parent :count :args {:coll :_delete-ns-child-fns}}
+
+  ;; `:ns` row lookup: non-versioned, raw pg-query.
+  {:name :_delete-ns-child-ns-rows
+   :parent :map
+   :args {:func :_delete-ns-child-ns-decode :coll :_delete-ns-child-ns-raw}}
+
+  {:name :_delete-ns-child-ns-raw
+   :parent :storage-query-call
+   :args {:arg :_delete-ns-child-ns-hsql}}
+
+  {:name :_delete-ns-child-ns-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :ns}}
+          :key {:value :where}
+          :value :_delete-ns-child-ns-hsql-where}}
+
+  {:name :_delete-ns-child-ns-hsql-where
+   :parent :vec
+   :args {:coll [{:value :=} {:value :parent-id} :_delete-target-id]}}
+
+  {:name :_delete-ns-child-ns-decode
+   :parent :decode-row
+   :return-type :ns-row-shape
+   :args {:row {:as :item} :entity-type {:value "ns"}}}
+
+  ;; `:fn` rows — CROSS-BRANCH liveness. A namespace delete is GLOBAL
+  ;; (the `ns` row is NON-versioned) and columnar `:ref` fields carry no
+  ;; DB-level FK, so a fn that is live on ANY branch — not only the
+  ;; current one — would be orphaned (dangling `:namespace-id`) by the
+  ;; delete. Resolving over `:current-branch-chain` alone (the old path)
+  ;; missed fns live on a sibling/child branch and let the delete through.
+  ;;
+  ;; Property that collapses "live on some branch?" to a single query:
+  ;; every branch carrying a version row is a valid tip of its own chain,
+  ;; and resolution over a tip's chain takes that branch's OWN latest
+  ;; version first. So a fn is live-somewhere iff SOME branch's latest
+  ;; (by `created-at`) version of it is not a tombstone. `DISTINCT ON
+  ;; (fn-id, branch-id) … ORDER BY … created-at DESC` yields that
+  ;; per-(fn,branch) latest; keep the live ones (nil `:deleted-at`),
+  ;; dedupe by fn-id. The candidate fn-id set is scoped in SQL by a
+  ;; `namespace-id` subquery over the (global) `:fn` identity table, so
+  ;; an empty namespace issues an empty `IN (…)` and blocks nothing.
+  {:name :_delete-ns-child-fns
+   :description "Distinct ids of fns in the target namespace that are live on at least one branch. Non-empty ⇒ deleting the (global, non-versioned) namespace would orphan a live fn on some branch."
+   :parent :distinct
+   :args {:coll :_delete-ns-live-fn-ids}}
+
+  {:name :_delete-ns-live-fn-ids
+   :parent :map
+   :args {:func :_delete-ns-fn-version-fn-id
+          :coll :_delete-ns-live-fn-versions}}
+
+  {:name :_delete-ns-fn-version-fn-id
+   :description "HOF map-fn: the `:fn-id` of a per-(fn,branch) latest version row."
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_delete-ns-live-fn-versions
+   :description "Per-(fn,branch) latest versions filtered to the live (non-tombstone) ones."
+   :parent :filter
+   :args {:pred :_delete-ns-fn-version-live?
+          :coll :_delete-ns-latest-fn-versions}}
+
+  {:name :_delete-ns-fn-version-live?
+   :description "HOF filter-pred: true when the version row is live (nil `:deleted-at`)."
+   :parent :nil?
+   :args {:value :_delete-ns-fn-version-deleted-at}}
+
+  {:name :_delete-ns-fn-version-deleted-at
+   :parent :get
+   :args {:coll {:as :item} :key {:value :deleted-at} :default nil}}
+
+  {:name :_delete-ns-latest-fn-versions
+   :parent :map
+   :args {:func :_delete-ns-fn-version-decode
+          :coll :_delete-ns-latest-fn-versions-raw}}
+
+  {:name :_delete-ns-fn-version-decode
+   :parent :decode-row
+   :return-type :fn-version-row-shape
+   :args {:row {:as :item} :entity-type {:value "fn-version"}}}
+
+  {:name :_delete-ns-latest-fn-versions-raw
+   :parent :pg-query
+   :args {:hsql :_delete-ns-latest-fn-versions-hsql}}
+
+  ;; DISTINCT ON (fn-id, branch-id) * FROM fn-version
+  ;;   WHERE fn-id IN (SELECT id FROM fn WHERE namespace-id = <target>)
+  ;;   ORDER BY fn-id, branch-id, created-at DESC
+  {:name :_delete-ns-latest-fn-versions-hsql
+   :parent :assoc
+   :args {:map {:value {:select-distinct-on [[:fn-id :branch-id] :*]
+                        :from :fn-version
+                        :order-by [:fn-id :branch-id [:created-at :desc]]}}
+          :key {:value :where}
+          :value :_delete-ns-latest-fn-versions-where}}
+
+  {:name :_delete-ns-latest-fn-versions-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :fn-id} :_delete-ns-child-fn-id-subquery]}}
+
+  {:name :_delete-ns-child-fn-id-subquery
+   :parent :assoc
+   :args {:map {:value {:select [:id] :from :fn}}
+          :key {:value :where}
+          :value :_delete-ns-child-fn-id-subquery-where}}
+
+  {:name :_delete-ns-child-fn-id-subquery-where
+   :parent :vec
+   :args {:coll [{:value :=} {:value :namespace-id} :_delete-target-id]}}
+
+  ;; Message build. Mirrors the original:
+  ;;   "Namespace contains <ns-clause><and><fns-clause> — remove the contents first."
+  ;; Each clause is "" when its count is zero so the join stays tidy.
+  {:name :_delete-ns-non-empty-message
+   :parent :str
+   :args {:parts ["Namespace contains "
+                  :_delete-ns-ns-clause
+                  :_delete-ns-and-clause
+                  :_delete-ns-fns-clause
+                  " — remove the contents first."]}}
+
+  {:name :_delete-ns-ns-clause
+   :parent :if
+   :args {:test :_delete-ns-has-child-ns?
+          :then :_delete-ns-ns-clause-text
+          :else {:value ""}}}
+
+  {:name :_delete-ns-ns-clause-text
+   :parent :str
+   :args {:parts [:_delete-ns-child-ns-count
+                  " sub-namespace"
+                  :_delete-ns-ns-clause-plural]}}
+
+  {:name :_delete-ns-ns-clause-plural
+   :parent :if
+   :args {:test :_delete-ns-ns-multi?
+          :then {:value "s"}
+          :else {:value ""}}}
+
+  {:name :_delete-ns-ns-multi?
+   :parent :gt
+   :args {:nums [:_delete-ns-child-ns-count {:value 1}]}}
+
+  {:name :_delete-ns-and-clause
+   :parent :if
+   :args {:test :_delete-ns-both-children?
+          :then {:value " and "}
+          :else {:value ""}}}
+
+  {:name :_delete-ns-both-children?
+   :parent :and
+   :args {:values [:_delete-ns-has-child-ns? :_delete-ns-has-child-fns?]}}
+
+  {:name :_delete-ns-fns-clause
+   :parent :if
+   :args {:test :_delete-ns-has-child-fns?
+          :then :_delete-ns-fns-clause-text
+          :else {:value ""}}}
+
+  {:name :_delete-ns-fns-clause-text
+   :parent :str
+   :args {:parts [:_delete-ns-child-fns-count
+                  " graph"
+                  :_delete-ns-fns-clause-plural]}}
+
+  {:name :_delete-ns-fns-clause-plural
+   :parent :if
+   :args {:test :_delete-ns-fns-multi?
+          :then {:value "s"}
+          :else {:value ""}}}
+
+  {:name :_delete-ns-fns-multi?
+   :parent :gt
+   :args {:nums [:_delete-ns-child-fns-count {:value 1}]}}
+
+  {:name :_delete-ns-non-empty?
+   :description "Guard #4 — the ns-non-empty reason is non-nil."
+   :parent :some?
+   :args {:value {:as :ns-non-empty-reason}}}
+
+  {:name :_delete-err-ns-non-empty
+   :description "Wrap the precomputed ns-non-empty reason in a 409 partial response. Reuses `:html-error-response`; the `:reason → :ns-non-empty-reason` rename captures the cond's `:ns-non-empty-reason` shared-arg."
+   :parent :html-error-response
+   :args {:status {:value 409}
+          :reason {:as :ns-non-empty-reason}}}
+
+  ;; Success branch of DELETE /api/entities/:type/:id as pure graph
+  ;; composition:
+  ;;   1. pre-read the existing row (404 if absent — guard against
+  ;;      silently-OK on a missing row, which previously misled the UI)
+  ;;   2. atomic `:delete-entity` via the existing CRUD wrap
+  ;;   3. entity-type-aware `:invalidate-after-write` for the delta-
+  ;;      invalidate seeds (handles fn / fn-slot / binding / binding-
+  ;;      list-item case dispatch internally)
+  ;;   4. entity-type-aware `:notify-after-write` for cross-pod NOTIFY
+  ;;   5. 200 OK response
+  ;;
+  ;; Steps 2-5 run via `:do :steps` so side effects fire left-to-right.
+  ;; The pre-read snapshot is bound once via `:_delete-apply-existing`
+  ;; and shared across the not-found-check + the invalidate-seed
+  ;; computation (which needs the row's FKs for binding-list-item).
+  {:name :_delete-apply
+   :description "Success branch — pre-read the snapshot for invalidate seeds where the row's foreign keys are needed (`:binding-list-item` and others), delete, invalidate, return 200."
+   :parent :if
+   :args {:test :_delete-apply-not-found?
+          :then :_delete-apply-err-not-found
+          :else :_delete-apply-success
+          :existing :_delete-apply-existing}}
+
+  {:name :_delete-apply-entity-type-str
+   :description "Bare-identifier text form of the entity-type — `:fn` becomes `\"fn\"`. Used by the storage-facing slots (`:get-entity`/`:delete-entity`/`:invalidate-after-write`/`:notify-after-write`) which keyword the text via `keyword`."
+   :parent :name
+   :args {:value :_parsed-entity-type}}
+
+  {:name :_delete-apply-existing
+   :description "Pre-read snapshot of the row about to be deleted. nil when no such row exists. The return-type stays the unrefined `:nullable-keyword-map` from `:get-entity` because the entity-type is dynamic (parsed from the URL) — every entity-type-shape alias would lie about non-matching callers."
+   :parent :get-entity
+   :args {:entity-type :_delete-apply-entity-type-str
+          :id :_delete-target-id}}
+
+  {:name :_delete-apply-not-found?
+   :parent :nil? :args {:value {:as :existing}}}
+
+  {:name :_delete-apply-err-not-found
+   :parent :html-error-response
+   :args {:status {:value 404}
+          :reason {:parent :str
+                   :args {:parts ["Entity not found: "
+                                  :_delete-apply-entity-type-str
+                                  " "
+                                  :_delete-target-id]}}}}
+
+  ;; delete → 200. The `:delete-entity` base-fn already deletes the row,
+  ;; invalidates the compiled registry (delta seed derived from the row's
+  ;; FKs), emits the cross-pod NOTIFY, and drops the rich-types entry for
+  ;; `:fn` — all in `crud.entities/delete-entity`. So the graph doesn't
+  ;; repeat invalidate / notify; it just delegates and returns 200.
+  {:name :_delete-apply-success
+   :parent :do
+   :args {:steps [:_delete-apply-do-delete
+                  :_apply-ok-empty-response]}}
+
+  {:name :_delete-apply-do-delete
+   :parent :delete-entity
+   :args {:entity-type :_delete-apply-entity-type-str
+          :id :_delete-target-id}}
+
+  {:name :_apply-ok-empty-response
+   :parent :const
+   :args {:value {:status 200 :body ""}}}
+
+  {:name :_delete-err-invalid-request
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 400 :body "<p class=\"error\">Invalid request</p>"}}}
+
+  {:name :_delete-err-secret-fn
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 409 :body "<p class=\"error\">Secret fn-defs must be deleted via DELETE /api/secrets/:fn-id (cleans up OpenBao alongside the row)</p>"}}}
+
+  ;; Package-guard clause pieces — mirror the fn-in-use pattern: the
+  ;; reason computes once as a shared cond arg, the predicate + error
+  ;; builder both consume it.
+  {:name :_delete-pkg-guard-reason
+   :parent :pkg-delete-guard-reason
+   :args {:entity-type :_delete-apply-entity-type-str
+          :row :_delete-apply-existing}}
+
+  {:name :_delete-pkg-guard?
+   :description "Guard — the delete would damage a package-synced fn."
+   :parent :some?
+   :args {:value {:as :pkg-guard-reason}}}
+
+  {:name :_delete-err-pkg-guard
+   :parent :html-error-response
+   :args {:status {:value 403}
+          :reason {:as :pkg-guard-reason}}}
+
+  {:name :process-delete-entity
+   :description "DELETE /api/entities/:type/:id — flat `:cond` of `[invalid-request? → 400, secret-fn? → 409, pkg-owned? → 403, fn-in-use? → 409, ns-non-empty? → 409, true → apply]`. `:cond` is lazy, so the delete + invalidate (and the secret-shape DB lookup) only run when every guard up to that point passes. `parsed`, `pkg-guard-reason`, `fn-in-use-reason`, `ns-non-empty-reason` are shared sub-results bound once at the `:cond` fn-def — the dynamic-reason error builders consume the same reason their predicate observed."
+   :parent :cond
+   :args {:clauses [:_delete-request-invalid? :_delete-err-invalid-request
+                    :_delete-fn-is-secret?    :_delete-err-secret-fn
+                    :_delete-pkg-guard?       :_delete-err-pkg-guard
+                    :_delete-fn-in-use?       :_delete-err-fn-in-use
+                    :_delete-ns-non-empty?    :_delete-err-ns-non-empty
+                    {:value true}             :_delete-apply]
+          :parsed :_delete-parsed
+          :pkg-guard-reason :_delete-pkg-guard-reason
+          :fn-in-use-reason :_delete-fn-in-use-reason
+          :ns-non-empty-reason :_delete-ns-non-empty-reason}}]}

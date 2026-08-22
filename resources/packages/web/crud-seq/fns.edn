@@ -1,0 +1,666 @@
+;; Part of the `web.crud` namespace — see `web/crud/fns.edn` for the
+;; module layout and why the ids are unchanged.
+
+
+{:namespace "web.crud"
+ :description "Sequence bindings — append / remove / update / move — plus the fn-effects tighten chain."
+ :fns
+ [;; Sequence operations: append/remove items of a sequence arg on any fn
+  ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
+
+  ;; --- sequence-append primitives. The handler
+  ;; itself is the `:process-sequence-append` `:cond` graph fn-def
+  ;; below; these are its atoms.
+  ;; URL = /api/sequence/append/:fn-id — :fn-id from `:path-params`
+  ;; when reitit's enrich-request ran, else the URI segment after
+  ;; "append/". Body is parsed JSON (nil when missing).
+  {:name :_seq-append-fn-id-from-path
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :path-params} {:value :fn-id}]
+          :default nil}}
+
+  {:name :_seq-append-fn-id-from-uri
+   :parent :uri-segment-after
+   :args {:marker {:value "append"}}}
+
+  {:name :_seq-append-fn-id-raw
+   :parent :coalesce
+   :args {:value :_seq-append-fn-id-from-path
+          :default :_seq-append-fn-id-from-uri}}
+
+  {:name :_seq-append-body
+   :parent :parse-json-body}
+
+  {:name :_seq-append-parsed
+   :description "Parse the URI + body of `POST /api/sequence/append/:fn-id` into `{:fn-id <uuid|nil> :body <map|nil>}`."
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :body}]
+          :vals [{:parent :parse-uuid :args {:string :_seq-append-fn-id-raw}}
+                 :_seq-append-body]}}
+
+  {:name :_seq-append-fn-id-invalid?
+   :description "Guard #1 — the fn-id path-segment didn't parse as a UUID."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}}}
+
+  {:name :_seq-append-body-invalid?
+   :description "Guard #2 — the request body didn't parse as JSON."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :body} :default nil}}}}
+
+  {:name :_seq-append-load-binding
+   :description "Read-only sequence-binding lookup. Returns the existing binding row, a synthetic placeholder (materialized by apply), or nil when the fn has no sequence slot. The synthetic placeholder carries extra non-canonical fields; the open `:binding-row-shape` admits supersets."
+   :args {:parsed {:type :_seq-append-parsed-shape}}
+   :return-type [:union :null :binding-row-shape]
+   :effects #{:db}}
+
+  {:name :_seq-append-no-seq-slot?
+   :description "Guard #3 — the target fn has no sequence-typed slot in its inheritance closure."
+   :parent :nil?
+   :args {:value {:as :seq-binding}}}
+
+  ;; §3.3 atomic write unit `:try-apply-seq-append` returns
+  ;; `{:created :position :fn-id}` or `{:error}`. Graph dispatches on
+  ;; the shape, runs delta-invalidate over the owner fn-id, and
+  ;; builds the 200 JSON response (or 400 with the pre-write rej).
+  {:name :_seq-append-apply
+   :description "Success branch — materializes a synthetic binding if needed, appends the item, invalidates caches. Either 200 (with JSON `{:item-id :position}`) or 400 with the write-rej reason."
+   :parent :if
+   :args {:test :_seq-append-apply-error?
+          :then :_seq-append-apply-err-response
+          :else :_seq-append-apply-success
+          :result :_seq-append-apply-result}}
+
+  {:name :_seq-append-apply-result
+   :parent :try-apply-seq-append
+   :args {:parsed {:as :parsed}
+          :seq-binding {:as :seq-binding}}}
+
+  {:name :_seq-append-apply-error?
+   :parent :some?
+   :args {:value :_apply-error-msg}}
+
+  {:name :_seq-append-apply-err-response
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason :_apply-error-msg}}
+
+  {:name :_seq-append-apply-success
+   :parent :do
+   :args {:steps [:_seq-append-apply-do-invalidate
+                  :_seq-append-apply-ok-response]}}
+
+  {:name :_seq-append-apply-do-invalidate
+   :parent :invalidate-graph-cache
+   :args {:seeds :_seq-append-apply-seeds}}
+
+  {:name :_seq-append-apply-seeds
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :result} :key {:value :fn-id} :default nil}}]}}
+
+  {:name :_seq-append-apply-ok-response
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 :_seq-append-apply-ok-body]}}
+
+  {:name :_seq-append-apply-ok-body
+   :description "JSON body `{:item-id :position}` rendered via `:to-json-string` over the result map — plus `:type-warnings` additively when the write landed but the owning fn now fails the aggregate type-check (error-tolerance Phase 3)."
+   :parent :to-json-string
+   :args {:data :_seq-append-apply-ok-body-chosen}}
+
+  {:name :_seq-append-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_seq-append-apply-ok-body-chosen
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_seq-append-apply-type-warnings}}
+          :then :_seq-append-apply-ok-body-warn
+          :else :_seq-append-apply-ok-body-data}}
+
+  {:name :_seq-append-apply-ok-body-data
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}]}}
+
+  {:name :_seq-append-apply-ok-body-warn
+   :description "Success-with-warnings body — `{:item-id :position :type-warnings [...]}` (row kept, diagnostic recorded per-branch)."
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position} {:value :type-warnings}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}
+                 :_seq-append-apply-type-warnings]}}
+
+  {:name :_seq-append-err-invalid-fn-id
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 400 :body "<p class=\"error\">Invalid fn-id</p>"}}}
+
+  {:name :_seq-append-err-no-seq-slot
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 404 :body "<p class=\"error\">Fn has no sequence slot</p>"}}}
+
+  {:name :process-sequence-append
+   :description "POST /api/sequence/append/:fn-id — append an item to a `:sequence`-typed arg. Validation guards + success path are a flat `:cond` — `[invalid-fn-id? → 400, invalid-body? → 400, no-seq-slot? → 404, true → apply]`. `:cond` is lazy, so the synthetic-binding materialization + the item write only run when every guard passes. `parsed` + `seq-binding` are shared sub-results bound once at the `:cond` fn-def."
+   :parent :cond
+   :args {:clauses [:_seq-append-fn-id-invalid?  :_seq-append-err-invalid-fn-id
+                    :_seq-append-body-invalid?   :_html-err-invalid-body
+                    :_seq-append-no-seq-slot?    :_seq-append-err-no-seq-slot
+                    {:value true}                :_seq-append-apply]
+          :parsed :_seq-append-parsed
+          :seq-binding :_seq-append-load-binding}}
+
+  ;; --- sequence-remove primitives. The handler
+  ;; itself is the `:process-sequence-remove` `:cond` graph fn-def
+  ;; below; these are its atoms.
+  ;; URL = /api/sequence/item/:item-id — :item-id from `:path-params`
+  ;; or the URI segment after "item/".
+  {:name :_seq-remove-item-id-from-path
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :path-params} {:value :item-id}]
+          :default nil}}
+
+  {:name :_seq-remove-item-id-from-uri
+   :parent :uri-segment-after
+   :args {:marker {:value "item"}}}
+
+  {:name :_seq-remove-item-id-raw
+   :parent :coalesce
+   :args {:value :_seq-remove-item-id-from-path
+          :default :_seq-remove-item-id-from-uri}}
+
+  {:name :_seq-remove-parsed
+   :description "Parse the URI path of `DELETE /api/sequence/item/:item-id` into `{:item-id <uuid|nil>}`."
+   :parent :zipmap
+   :args {:keys [{:value :item-id}]
+          :vals [{:parent :parse-uuid :args {:string :_seq-remove-item-id-raw}}]}}
+
+  {:name :_seq-remove-item-id-invalid?
+   :description "Guard #1 — the item-id path-segment didn't parse as a UUID."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
+
+  {:name :_seq-remove-load-item
+   :description "Read the binding-list-item row for the parsed item-id. Returns nil when the id is invalid (caught by guard #1) OR when no row matches."
+   :args {:parsed {:type {:item-id :uuid}}}
+   :return-type [:union :null :binding-list-item-row-shape]
+   :effects #{:db}}
+
+  {:name :pkg-delete-guard-reason
+   :description "Reason string when deleting `row` of `entity-type` would damage a PACKAGE-SYNCED fn — the fn row itself, or a binding-family row it owns. nil when the delete is fine. Package fns are declaratively re-synced on boot, so an API delete against one silently mutates every descendant until the next restart (the 2026-08-20 :add poisoning class). Shared by the generic entity-delete flow and sequence-remove."
+   :args {:entity-type {:type :text
+                        :description "Entity-type name (\"fn\", \"binding\", \"binding-list-item\", \"fn-slot\")."}
+          :row {:type :nullable-keyword-map
+                :description "The row about to be deleted (pre-read snapshot); nil short-circuits to nil."}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
+  {:name :_seq-remove-item-not-found?
+   :description "Guard #2 — no binding-list-item matches the parsed id."
+   :parent :nil?
+   :args {:value {:as :item}}}
+
+  ;; delete → 200. The `:delete-entity` base-fn invalidates the compiled
+  ;; registry itself — its own pre-read snapshot carries `:binding-id`, so
+  ;; seed derivation walks `:binding-id` → `:fn-id` for a delta — and emits
+  ;; the NOTIFY. So the graph just delegates and returns 200.
+  {:name :_seq-remove-apply
+   :description "Success branch — delete the row (base-fn invalidates + NOTIFYs), return 200."
+   :parent :do
+   :args {:steps [:_seq-remove-apply-do-delete
+                  :_apply-ok-empty-response]}}
+
+  {:name :_seq-remove-apply-do-delete
+   :parent :delete-entity
+   :args {:entity-type {:value "binding-list-item"}
+          ;; `:type :uuid` author-assertion — the validation guard
+          ;; upstream rejects the request when `:item-id` is missing
+          ;; or malformed, so by the time this fn runs the parsed
+          ;; UUID is non-null. (Phase #170 control-flow narrowing
+          ;; cannot eliminate this assertion because the inline
+          ;; `:get` here is a per-use-site anon, distinct from the
+          ;; one in the upstream `:nil?` guard.)
+          :id {:parent :get :type :uuid
+               :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
+
+  ;; Package-guard clause pieces for sequence-remove — same reason
+  ;; base-fn as the generic delete flow, applied to the loaded item.
+  {:name :_seq-remove-pkg-reason
+   :parent :pkg-delete-guard-reason
+   :args {:entity-type {:value "binding-list-item"}
+          :row {:as :item}}}
+
+  {:name :_seq-remove-pkg-blocked?
+   :description "Guard — the item belongs to a package-synced fn's chain."
+   :parent :some?
+   :args {:value {:as :pkg-reason}}}
+
+  {:name :_seq-remove-err-pkg
+   :parent :html-error-response
+   :args {:status {:value 403}
+          :reason {:as :pkg-reason}}}
+
+  {:name :process-sequence-remove
+   :description "DELETE /api/sequence/item/:item-id — remove one binding-list-item. The validation guards and the success path are a flat `:cond` — `[invalid-id? → 400, not-found? → 404, pkg-owned? → 403, true → apply]`. `:cond` is lazy, so the DB delete runs only when every guard passes. `parsed`, `item`, `pkg-reason` are shared sub-results bound once at the `:cond` fn-def."
+   :parent :cond
+   :args {:clauses [:_seq-remove-item-id-invalid?  :_html-err-invalid-item-id
+                    :_seq-remove-item-not-found?   :_html-err-item-not-found
+                    :_seq-remove-pkg-blocked?      :_seq-remove-err-pkg
+                    {:value true}                  :_seq-remove-apply]
+          :parsed :_seq-remove-parsed
+          :item :_seq-remove-load-item
+          :pkg-reason :_seq-remove-pkg-reason}}
+
+  ;; --- sequence-update primitives.
+  ;; Shares `:_seq-remove-item-id-raw` (same URL shape — both routes
+  ;; have :item-id at the same path position) with `:_seq-remove-parsed`.
+  {:name :_seq-update-body
+   :parent :parse-json-body}
+
+  {:name :_seq-update-parsed
+   :description "Parse `PUT /api/sequence/item/:item-id` into `{:item-id <uuid|nil> :body <map|nil>}`. Reuses `:_seq-remove-item-id-raw` for URL extraction."
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :body}]
+          :vals [{:parent :parse-uuid :args {:string :_seq-remove-item-id-raw}}
+                 :_seq-update-body]}}
+
+  {:name :_seq-update-item-id-invalid?
+   :description "Guard #1 — bad UUID in the path-segment."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
+
+  {:name :_seq-update-body-invalid?
+   :description "Guard #2 — the request body didn't parse as JSON."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :body} :default nil}}}}
+
+  {:name :_seq-update-load-item
+   :description "Read the binding-list-item row for the parsed id."
+   :args {:parsed {:type :_seq-update-parsed-shape}}
+   :return-type [:union :null :binding-list-item-row-shape]
+   :effects #{:db}}
+
+  {:name :_seq-update-item-not-found?
+   :description "Guard #3 — no binding-list-item matches the parsed id."
+   :parent :nil?
+   :args {:value {:as :item}}}
+
+  ;; Same pattern as seq-append.
+  {:name :_seq-update-apply
+   :description "Success branch — resolve body payload, run write-rej, update the row. Returns 200 or 400."
+   :parent :if
+   :args {:test :_seq-update-apply-error?
+          :then :_seq-update-apply-err-response
+          :else :_seq-update-apply-success
+          :result :_seq-update-apply-result}}
+
+  {:name :_seq-update-apply-result
+   :parent :try-apply-seq-update
+   :args {:parsed {:as :parsed}
+          :item {:as :item}}}
+
+  {:name :_seq-update-apply-error?
+   :parent :some?
+   :args {:value :_apply-error-msg}}
+
+  {:name :_seq-update-apply-err-response
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason :_apply-error-msg}}
+
+  {:name :_seq-update-apply-success
+   :parent :do
+   :args {:steps [:_seq-update-apply-do-invalidate
+                  :_seq-update-apply-ok-response]}}
+
+  ;; 200 response — legacy empty body when the write is fully clean;
+  ;; JSON `{message, type-warnings}` when the atomic unit reports
+  ;; `:type-warnings` (error-tolerance Phase 3 — mirrors the binding
+  ;; create/update envelopes).
+  {:name :_seq-update-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_seq-update-apply-ok-response
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_seq-update-apply-type-warnings}}
+          :then :_seq-update-apply-ok-warn-response
+          :else :_apply-ok-empty-response}}
+
+  {:name :_seq-update-apply-ok-warn-response
+   :description "200 JSON success-with-warnings envelope — `{\"message\": \"Sequence item updated\", \"type-warnings\": [...]}`."
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 {:parent :to-json-string
+                  :args {:data {:parent :zipmap
+                                :args {:keys [{:value :message} {:value :type-warnings}]
+                                       :vals [{:value "Sequence item updated"}
+                                              :_seq-update-apply-type-warnings]}}}}]}}
+
+  {:name :_seq-update-apply-do-invalidate
+   :parent :invalidate-after-write
+   :args {:entity-type {:value "binding-list-item"}
+          :entity-data {:as :item}}}
+
+  {:name :process-sequence-update
+   :description "PUT /api/sequence/item/:item-id — replace the value/ref of one existing binding-list-item. Validation guards + success path are a flat `:cond` — `[invalid-id? → 400, invalid-body? → 400, item-not-found? → 404, true → apply]`. `:cond` is lazy, so the DB update + write-rej payload-resolution only run when every guard passes."
+   :parent :cond
+   :args {:clauses [:_seq-update-item-id-invalid?  :_html-err-invalid-item-id
+                    :_seq-update-body-invalid?     :_html-err-invalid-body
+                    :_seq-update-item-not-found?   :_html-err-item-not-found
+                    {:value true}                  :_seq-update-apply]
+          :parsed :_seq-update-parsed
+          :item :_seq-update-load-item}}
+
+  ;; --- sequence-move primitives. The handler itself is the
+  ;; `:process-sequence-move` `:cond` graph fn-def below; these are
+  ;; its atoms. URL = POST /api/sequence/move/:item-id — the item-id
+  ;; from `:path-params` or the URI segment after "move". Body is
+  ;; `{"direction": "up"|"down"}`; the swap itself is the §3.3 atomic
+  ;; unit `:try-apply-seq-move` (three writes through a free temp
+  ;; position share invariants that can't split across graph nodes).
+  {:name :_seq-move-item-id-from-path
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :path-params} {:value :item-id}]
+          :default nil}}
+
+  {:name :_seq-move-item-id-from-uri
+   :parent :uri-segment-after
+   :args {:marker {:value "move"}}}
+
+  {:name :_seq-move-item-id-raw
+   :parent :coalesce
+   :args {:value :_seq-move-item-id-from-path
+          :default :_seq-move-item-id-from-uri}}
+
+  {:name :_seq-move-body
+   :parent :parse-json-body}
+
+  {:name :_seq-move-parsed
+   :description "Parse `POST /api/sequence/move/:item-id` into `{:item-id <uuid|nil> :body <map|nil>}`."
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :body}]
+          :vals [{:parent :parse-uuid :args {:string :_seq-move-item-id-raw}}
+                 :_seq-move-body]}}
+
+  {:name :_seq-move-item-id-invalid?
+   :description "Guard #1 — bad UUID in the path-segment."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
+
+  {:name :_seq-move-body-invalid?
+   :description "Guard #2 — the request body didn't parse as JSON."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :body} :default nil}}}}
+
+  {:name :_seq-move-load-item
+   :description "Read the binding-list-item row for the parsed id (shares the update-flow loader impl — same parsed shape)."
+   :args {:parsed {:type :_seq-update-parsed-shape}}
+   :return-type [:union :null :binding-list-item-row-shape]
+   :effects #{:db}}
+
+  {:name :_seq-move-item-not-found?
+   :description "Guard #3 — no binding-list-item matches the parsed id."
+   :parent :nil?
+   :args {:value {:as :item}}}
+
+  ;; Same shape-dispatch pattern as seq-append / seq-update.
+  {:name :_seq-move-apply
+   :description "Success branch — swap the item with its neighbour, invalidate, return 200 JSON `{item-id, position}` (or 400 with the reject reason)."
+   :parent :if
+   :args {:test :_seq-move-apply-error?
+          :then :_seq-move-apply-err-response
+          :else :_seq-move-apply-success
+          :result :_seq-move-apply-result}}
+
+  {:name :_seq-move-apply-result
+   :parent :try-apply-seq-move
+   :args {:parsed {:as :parsed}
+          :item {:as :item}}}
+
+  {:name :_seq-move-apply-error?
+   :parent :some?
+   :args {:value :_apply-error-msg}}
+
+  {:name :_seq-move-apply-err-response
+   :parent :html-error-response
+   :args {:status {:value 400}
+          :reason :_apply-error-msg}}
+
+  {:name :_seq-move-apply-success
+   :parent :do
+   :args {:steps [:_seq-move-apply-do-invalidate
+                  :_seq-move-apply-ok-response]}}
+
+  {:name :_seq-move-apply-do-invalidate
+   :parent :invalidate-after-write
+   :args {:entity-type {:value "binding-list-item"}
+          :entity-data {:as :item}}}
+
+  {:name :_seq-move-apply-ok-response
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 :_seq-move-apply-ok-body]}}
+
+  {:name :_seq-move-apply-ok-body
+   :description "JSON body `{:item-id :position}` — plus `:type-warnings` additively when the move landed but the owning fn now fails the aggregate type-check (order can matter, e.g. a nav-typed path)."
+   :parent :to-json-string
+   :args {:data :_seq-move-apply-ok-body-chosen}}
+
+  {:name :_seq-move-apply-type-warnings
+   :parent :get
+   :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
+
+  {:name :_seq-move-apply-ok-body-chosen
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_seq-move-apply-type-warnings}}
+          :then :_seq-move-apply-ok-body-warn
+          :else :_seq-move-apply-ok-body-data}}
+
+  {:name :_seq-move-apply-ok-body-data
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :moved} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}]}}
+
+  {:name :_seq-move-apply-ok-body-warn
+   :parent :zipmap
+   :args {:keys [{:value :item-id} {:value :position} {:value :type-warnings}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :moved} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :position} :default nil}}
+                 :_seq-move-apply-type-warnings]}}
+
+  {:name :process-sequence-move
+   :description "POST /api/sequence/move/:item-id — swap one binding-list-item with its up/down neighbour. Validation guards + success path are a flat `:cond` — `[invalid-id? → 400, invalid-body? → 400, item-not-found? → 404, true → apply]`. `:cond` is lazy, so the swap writes only run when every guard passes."
+   :parent :cond
+   :args {:clauses [:_seq-move-item-id-invalid?  :_html-err-invalid-item-id
+                    :_seq-move-body-invalid?     :_html-err-invalid-body
+                    :_seq-move-item-not-found?   :_html-err-item-not-found
+                    {:value true}                :_seq-move-apply]
+          :parsed :_seq-move-parsed
+          :item :_seq-move-load-item}}
+
+  ;; --- tighten-fn-effects primitives. The handler itself is a
+  ;; `:cond` graph fn-def (`:process-tighten-binding-effects` below);
+  ;; these are its parse / guard-predicate / apply primitives. ---
+  ;; --- :_tighten-parsed — graph composition:
+  ;;   - binding-id-str via :get-in path-params OR :uri-segment-after,
+  ;;     parsed via :parse-uuid (returns nil on bad input).
+  ;;   - body via :parse-json-body (already a defbase).
+  ;;   - effects-val / args-val / ret-val are :get'd from body.
+  ;;   - :delta is a :merge of per-field fragments (assoc-only-when-
+  ;;     :some?), same pattern as parse-*-from-form.
+  ;;   - final shape :zipmap'd.
+
+  {:name :_tighten-binding-id-from-path-params
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :path-params} {:value :binding-id}]
+          :default nil}}
+
+  {:name :_tighten-binding-id-from-uri
+   :parent :uri-segment-after
+   :args {:marker {:value "bindings"}}}
+
+  {:name :_tighten-binding-id-str
+   :parent :coalesce
+   :args {:value :_tighten-binding-id-from-path-params
+          :default :_tighten-binding-id-from-uri}}
+
+  {:name :_tighten-binding-id
+   :parent :parse-uuid
+   :args {:string :_tighten-binding-id-str}}
+
+  {:name :_tighten-body
+   :parent :parse-json-body
+   :args {:request {:as :request}}}
+
+  {:name :_tighten-effects-val
+   :parent :get
+   :args {:coll :_tighten-body :key {:value :effects} :default nil}}
+
+  {:name :_tighten-args-val
+   :parent :get
+   :args {:coll :_tighten-body :key {:value :args} :default nil}}
+
+  {:name :_tighten-ret-val
+   :parent :get
+   :args {:coll :_tighten-body :key {:value :ret} :default nil}}
+
+  ;; --- :delta = (cond-> {} (some? effects-val) (assoc :effects ...) …)
+  {:name :_tighten-delta-effects-fragment
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_tighten-effects-val}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :effects}] :vals [:_tighten-effects-val]}}
+          :else {:value {}}}}
+
+  {:name :_tighten-delta-args-fragment
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_tighten-args-val}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :args}] :vals [:_tighten-args-val]}}
+          :else {:value {}}}}
+
+  {:name :_tighten-delta-ret-fragment
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_tighten-ret-val}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :ret}] :vals [:_tighten-ret-val]}}
+          :else {:value {}}}}
+
+  {:name :_tighten-delta
+   :parent :merge
+   :args {:maps [{:value {}}
+                 :_tighten-delta-effects-fragment
+                 :_tighten-delta-args-fragment
+                 :_tighten-delta-ret-fragment]}}
+
+  {:name :_tighten-parsed
+   :description "Parse a tighten-fn-effects request into `{:binding-id :effects-val :args-val :ret-val :delta}` — no validation."
+   :parent :zipmap
+   :args {:keys [{:value :binding-id}
+                 {:value :effects-val}
+                 {:value :args-val}
+                 {:value :ret-val}
+                 {:value :delta}]
+          :vals [:_tighten-binding-id
+                 :_tighten-effects-val
+                 :_tighten-args-val
+                 :_tighten-ret-val
+                 :_tighten-delta]}}
+
+  {:name :_tighten-binding-id-invalid?
+   :description "Guard predicate — true when the request carries no valid binding-id."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :binding-id} :default nil}}}}
+
+  {:name :_tighten-effects-invalid?
+   :description "Guard predicate — true when `effects` is present but not a JSON array. `:and [some? :_effects-val] [not :is-a? :sequence :_effects-val]`."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :effects-val} :default nil}}}}
+                   {:parent :not
+                    :args {:value {:parent :is-a?
+                                   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :effects-val} :default nil}}
+                                          :type {:value :sequence}}}}}]}}
+
+  {:name :_tighten-args-invalid?
+   :description "Guard predicate — true when `args` is present but not a JSON object. `:and [some? :_args-val] [not :is-a? :map :_args-val]`."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :args-val} :default nil}}}}
+                   {:parent :not
+                    :args {:value {:parent :is-a?
+                                   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :args-val} :default nil}}
+                                          :type {:value :map}}}}}]}}
+
+  {:name :_tighten-delta-empty?
+   :description "Guard predicate — true when the body carried none of args / ret / effects. `:empty? (get parsed :delta)`."
+   :parent :empty?
+   :args {:coll {:parent :get :args {:coll {:as :parsed} :key {:value :delta} :default nil}}}}
+
+  ;; §3.3 atomic write unit `:try-apply-tighten` returns `{:status
+  ;; :reason :result}`. Graph dispatches on `:status`, runs delta-
+  ;; invalidate over the binding's owning fn-id, and builds the
+  ;; 200 JSON / 400 error response.
+  {:name :_tighten-apply
+   :description "Success branch — narrow the fn-typed binding's effective type to a 4-arity `[:fn args ret #{eff-set}]`, dedupe the anonymous constraint fn-row, write the binding's `:type-override-fn-id`, and return the partial Ring response."
+   :parent :if
+   :args {:test :_tighten-apply-ok?
+          :then :_tighten-apply-success
+          :else :_tighten-apply-err-response
+          :result :_tighten-apply-result}}
+
+  {:name :_tighten-apply-result
+   :parent :try-apply-tighten
+   :args {:parsed {:as :parsed}}}
+
+  {:name :_tighten-apply-status
+   :parent :get
+   :args {:coll {:as :result} :key {:value :status} :default nil}}
+
+  {:name :_tighten-apply-ok?
+   :parent :equal?
+   :args {:a :_tighten-apply-status :b {:value 200}}}
+
+  {:name :_tighten-apply-err-response
+   :parent :html-error-response
+   :args {:status :_tighten-apply-status
+          :reason {:parent :get :args {:coll {:as :result} :key {:value :reason} :default nil}}}}
+
+  {:name :_tighten-apply-success
+   :parent :do
+   :args {:steps [:_tighten-apply-do-invalidate
+                  :_tighten-apply-ok-response]}}
+
+  {:name :_tighten-apply-success-result
+   :parent :get
+   :args {:coll {:as :result} :key {:value :result} :default nil}}
+
+  {:name :_tighten-apply-do-invalidate
+   :parent :invalidate-after-write
+   :args {:entity-type {:value "binding"}
+          :entity-data :_tighten-apply-success-result}}
+
+  {:name :_tighten-apply-ok-response
+   :parent :zipmap
+   :args {:keys [{:value :status} {:value :headers} {:value :body}]
+          :vals [{:value 200}
+                 {:value {:Content-Type "application/json"}}
+                 {:parent :to-json-string :args {:data :_tighten-apply-success-result}}]}}
+
+  {:name :try-apply-tighten
+   :description "§3.3 core of tighten-fn-effects: narrows the fn-typed binding's effective type. Returns `{:status :reason :result}` — graph dispatches on `:status`. Error-tolerance Phase 2: when the post-write aggregate type-check fails the override is KEPT, the failure is recorded as a per-branch diagnostic, and `:result` carries `:type-warnings [<diagnostic> …]` in the 200 JSON body. The subtype-safety pre-checks (widening / bound-callable effect escape / non-fn slot) still return 400."
+   :args {:parsed {:type :_tighten-parsed-shape}}
+   :return-type :keyword-map
+   :effects #{:db}}]}

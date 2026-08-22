@@ -693,7 +693,9 @@
                       "tools/browser-test/run-edit-tests.sh"))}
 
   test-fleet-e2e
-  {:doc "Two-container fleet e2e (kaocha :container-e2e) — boots `graphden-executor:latest` TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and drives the cross-container control plane over real HTTP: /health, token-gated /internal/fleet/{status,cell/load}, shared graph, agreed placement view. Requires `bb rebuild` first so the image is present. ~4 min (two cold boots). Ryuk reaps the containers on JVM exit."
+  {:doc "Two-container fleet e2e (kaocha :container-e2e) — boots `graphden-executor:latest` (or `GD_IMAGE`) TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and drives the cross-container control plane over real HTTP: /health, token-gated /internal/fleet/{status,cell/load}, shared graph, agreed placement view. Requires `bb rebuild` first so the image is present. ~4 min (two cold boots). Ryuk reaps the containers on JVM exit.
+
+   THE LANDING GATE RUNS THIS, diff-scoped to the cross-pod control plane (`classify_changes` in dev/wtq/wt: fleet/, system/, storage/remote/, byo.clj, crac.clj, test/graphden/fleet/, Dockerfile*, docker-compose*, deps.edn, build.clj); skip it with `bb wt merge --no-fleet`. Before 2026-08-22 NOTHING called this task — not the gate, not GitHub CI — so the suite was owned and never executed."
    :task (do (assert-gate-only! "bb test-fleet-e2e")
              (clojure "-M:dev:test -m kaocha.runner :container-e2e"))}
 

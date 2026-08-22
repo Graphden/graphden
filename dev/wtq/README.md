@@ -74,7 +74,8 @@ bb wt claim <name> [task...]    # (agent-invoked) register feature/<name> + work
 bb wt list                      # every worktree: branch, ahead/behind develop, dirty, last RESULT
 bb wt status                    # queue lock holder + recent gate logs
 bb wt log <name>                # tail the latest gate log for a feature
-bb wt merge [--no-e2e] [--deploy]  # (agent, inside a worktree) queue -> gate -> land on develop
+bb wt merge [--no-e2e] [--no-fleet] [--deploy]
+                                # (agent, inside a worktree) queue -> gate -> land on develop
                                 #   --deploy also resets the develop DB schema on landing
 bb wt up                        # (agent, inside a worktree) build + run THIS branch on its own ports
 bb wt down                      # (agent, inside a worktree) stop it (keeps the DB volume)
@@ -105,6 +106,15 @@ bb wt start <name>                     # launch an agent inside an existing work
   committed.
 - `--no-e2e` is an escape hatch for changes with no runtime surface (docs,
   comments); it still runs lint + unit + integration.
+- **The two-container fleet e2e is in the gate** (since 2026-08-22) and is the
+  only suite that exercises what happens *between* pods: it boots the candidate
+  image twice over one Postgres and drives `/health`, the token-gated
+  `/internal/fleet/*`, the shared graph and the agreed placement view over real
+  HTTP. It is diff-scoped narrowly — `src/graphden/{fleet,system,storage/remote}`,
+  `byo.clj`, `crac.clj`, `test/graphden/fleet/**`, `Dockerfile*`,
+  `docker-compose*`, `deps.edn`, `build.clj` — and costs ~4 min of cold boots
+  when it runs. `--no-fleet` skips it. Before this it ran nowhere at all:
+  neither the gate nor GitHub CI called `bb test-fleet-e2e`.
 - **Coverage is NOT in the gate.** It has no fail-threshold and re-runs the unit
   suite `bb ci` already ran, so it could only fail where `bb ci` already had —
   ~18 minutes per landing for a number nobody reads at merge time. Measure it

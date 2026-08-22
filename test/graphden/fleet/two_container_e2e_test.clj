@@ -15,8 +15,19 @@
    - a graph write on A (a branch) is visible on B — the shared-DB cross-container
      path across two real JVMs.
 
-   Requires `graphden-executor:latest` (build via `bb rebuild`/`bb deploy`). ~2-3
-   min: two cold boots against a fresh PG. Ryuk reaps the containers on JVM exit."
+   WHERE IT RUNS. The landing gate calls `bb test-fleet-e2e` with the candidate
+   image (`GD_IMAGE`) whenever the diff touches the cross-pod control plane —
+   `src/graphden/{fleet,system,storage/remote}`, `byo.clj`, `crac.clj`, this
+   directory, `Dockerfile*`, `docker-compose*`, `deps.edn`, `build.clj` — see
+   `classify_changes` in `dev/wtq/wt`. Until 2026-08-22 it ran NOWHERE: the
+   suite existed, the bb task existed, and neither the gate nor GitHub CI ever
+   invoked it, so the only assertion the project owned about multi-pod
+   behaviour in real containers was never evaluated.
+
+   By hand: `bb rebuild` first (the default image is `graphden-executor:latest`,
+   overridable with `GD_IMAGE`), then `bb test-fleet-e2e` from the main
+   checkout. ~2-3 min: two cold boots against a fresh PG. Ryuk reaps the
+   containers on JVM exit."
   (:require
     [cheshire.core :as json]
     [clojure.test :refer [deftest is testing]]

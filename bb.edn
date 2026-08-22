@@ -404,7 +404,7 @@
                   "**/*.md")}
 
   trivy
-  {:doc "Supply-chain CVE + Dockerfile misconfig scan via Docker aquasec/trivy:0.70.0. Caches vulnerability DB in /tmp/trivy-cache. Three passes: (1) IaC misconfig, (2) npm-lockfile CVE, (3) JVM/deps.edn CVE via the resolved classpath jars."
+  {:doc "Supply-chain CVE + Dockerfile misconfig scan via Docker aquasec/trivy:0.70.0. Caches vulnerability DB in /tmp/trivy-cache. Three passes: (1) IaC misconfig, (2) npm-lockfile CVE incl. dev deps, (3) JVM/deps.edn CVE via the resolved classpath jars."
    :task (let [pwd (System/getenv "PWD")]
            (println "▶ trivy config (Dockerfile misconfig)")
            (p/shell "docker" "run" "--rm"
@@ -426,6 +426,14 @@
                     "-w" "/repo"
                     "aquasec/trivy:0.70.0"
                     "fs" "--severity" "HIGH,CRITICAL"
+                    ;; `dev: true` entries are SKIPPED by default, and every npm
+                    ;; package here is one — the root lockfile is the lint
+                    ;; toolchain, nothing in it ships. Without this flag the pass
+                    ;; scanned zero packages and reported a green that meant
+                    ;; "nothing looked at", which is how four CVEs (fast-uri,
+                    ;; js-yaml, nanoid, postcss — 2026-08-22) reached develop and
+                    ;; were caught by Dependabot instead of by the gate.
+                    "--include-dev-deps"
                     "--skip-dirs" "node_modules,target,.tools,.playwright-mcp,.git,.lsp"
                     "--exit-code" "1" "--quiet" ".")
            ;; JVM CVE scan. This is a tools.deps project — no `pom.xml`, no jars

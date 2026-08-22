@@ -302,5 +302,13 @@
               lookups (support/lookups-for storage)]
           (is (= [] (r/verify-cache-projection-frees-superset-of-deep-free!
                       lookups))
-              "counter-examples list must be empty"))
+              "counter-examples list must be empty")
+          (testing "and the two walkers still agree on the traversal they share"
+            ;; They have none of it in common as CODE — same inheritance +
+            ;; non-HOF ref + seq-item + env-binding walk, same HOF
+            ;; boundary, written twice because the coverage key differs.
+            ;; An edit to one that isn't mirrored surfaces here rather
+            ;; than as a runtime mis-dispatch.
+            (is (= [] (r/verify-entry-walker-covers-name-walker! lookups))
+                "every name the name-walker surfaces is reached by the entry-walker")))
         (finally (sp/close storage))))))

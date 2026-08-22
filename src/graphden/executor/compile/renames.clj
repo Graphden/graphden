@@ -279,6 +279,40 @@
           (:fn-map lookups))))
 
 
+(defn verify-entry-walker-covers-name-walker!
+  "Exhaustive drift check between the two free-arg walkers: for every
+   fn-id in `lookups`, every ext-name `deep-free-ext-names` surfaces must
+   also appear in `deep-free-ext-entries`.
+
+   The two share a TRAVERSAL — inheritance closure, non-HOF ref bindings,
+   seq items, env-binding refs, stopping at HOF boundaries — and differ
+   only in what they cover by (name vs slot-id) and what they emit. That
+   shared half has no shared code, so an edit to one walker's traversal
+   that is not mirrored in the other is invisible until something
+   mis-dispatches at runtime. It shows up here instead, as a fn whose
+   names the entries no longer reach.
+
+   One-way ON PURPOSE: coverage by slot-id can surface MORE than coverage
+   by name — two distinct slots sharing an ext-name both emit (the #104
+   case this walker exists for) — so `entries ⊇ names` is the invariant
+   and the converse is not.
+
+   Returns a vector of counter-examples, EMPTY when the invariant holds."
+  [lookups]
+  (vec
+    (keep (fn [[fid _]]
+            (let [names (set (deep-free-ext-names fid lookups))
+                  entry-names (into #{} (map :ext-name) (deep-free-ext-entries fid lookups))
+                  missing (set/difference names entry-names)]
+              (when (seq missing)
+                {:fn-id fid
+                 :fn-name (get-in lookups [:fn-map fid :name])
+                 :missing missing
+                 :names names
+                 :entry-names entry-names})))
+          (:fn-map lookups))))
+
+
 (defn- deep-free-ext-names*
   "Collect free-arg external names reachable from `fn-id`, walking
    across non-HOF ref bindings. `:is-fn` refs are a BOUNDARY — the

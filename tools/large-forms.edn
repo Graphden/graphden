@@ -65,7 +65,7 @@
 
   ;; ---- shared-state algorithms -----------------------------------------
   "graphden.executor.compile.renames/deep-free-ext-names*"
-  "one unit: a `walk` letfn threading a covered-set and a rename map; the recursion IS the function. Its slot-id-keyed twin below is a known parallel pair: same traversal, different coverage key — unifying them is open work, re-keying is not (rejected twice, see docs/RUNTIME_SLOT_ID_REFACTOR.md)"
+  "one unit: a `walk` letfn threading a covered-set and a rename map; the recursion IS the function. Its slot-id-keyed twin below is a parallel pair: same traversal, different coverage key. Unifying them is open work (re-keying is NOT — rejected twice, docs/RUNTIME_SLOT_ID_REFACTOR.md); until then `verify-entry-walker-covers-name-walker!` fails the build if one traversal is edited without the other"
   "graphden.executor.compile.renames/deep-free-ext-entries*"
   "one unit: the same walk with slot-id coverage — see deep-free-ext-names*"
   "graphden.executor.compile.renames/hof-lambda-params"

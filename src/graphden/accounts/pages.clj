@@ -7,67 +7,33 @@
    when no ctx is wired or the graph cannot render — the login page must
    survive a graph outage — so it must stay a working, dependency-free shell.
    Behavioural parity with the graph copies is pinned byte-for-byte by
-   `graphden.packages.app.auth-pages-test`; edit BOTH sides together.
+   `graphden.packages.app.auth-pages-test`; edit BOTH sides together —
+   but only the HTML structure lives twice now. The CSS and the page
+   scripts are read from the same classpath resources the graph copies
+   use (see `asset` below), so restyling happens in one place.
 
    The pages are plain HTML + inline CSS/JS that call the JSON `/auth/*`
    endpoints. No external assets (the only remote script is the optional
-   Telegram login widget).")
+   Telegram login widget)."
+  (:require
+    [clojure.java.io :as io]))
 
 
-(def ^:private brand-css
-  "
-  :root{--ink:#0D1117;--panel:#161B22;--line:#2A3038;--text:#E6EDF3;
-        --muted:#9AA7B4;--accent:#137C74;--accent-hi:#37C9BB;--danger:#E5534B;--radius:10px}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--ink);color:var(--text);
-       font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-       display:flex;min-height:100vh;justify-content:center;align-items:flex-start}
-  .wrap{width:100%;max-width:400px;padding:48px 20px}
-  .brand{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:28px}
-  .brand svg{width:34px;height:34px}
-  .brand b{font-size:20px;letter-spacing:.2px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
-  h1{font-size:18px;margin:0 0 4px}
-  p.sub{color:var(--muted);margin:0 0 20px;font-size:14px}
-  label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
-  input[type=email],input[type=password],input[type=text]{width:100%;padding:10px 12px;
-    background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:15px}
-  input:focus{outline:none;border-color:var(--accent-hi)}
-  button{cursor:pointer;font-size:15px;border-radius:8px;border:1px solid transparent}
-  .btn-primary{width:100%;margin-top:20px;padding:11px;background:var(--accent);color:#fff;font-weight:600}
-  .btn-primary:hover{filter:brightness(1.1)}
-  .brand svg{color:var(--accent-hi)}
-  .social{display:flex;flex-direction:column;gap:10px;margin-top:16px}
-  .btn-social{display:flex;align-items:center;justify-content:center;gap:10px;padding:11px;
-    background:var(--ink);border:1px solid var(--line);border-radius:8px;color:var(--text);
-    text-decoration:none;font-weight:500;font-size:15px}
-  .btn-social:hover{border-color:var(--accent-hi)}
-  .btn-social svg{width:18px;height:18px;flex:none}
-  .divider{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;margin:20px 0}
-  .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--line)}
-  .tabs{display:flex;gap:4px;margin-bottom:18px;background:var(--ink);padding:4px;border-radius:8px}
-  .tabs button{flex:1;padding:8px;background:transparent;color:var(--muted)}
-  .tabs button.on{background:var(--panel);color:var(--text);border:1px solid var(--line)}
-  .msg{margin-top:14px;font-size:13px;min-height:18px}
-  .msg.err{color:var(--danger)} .msg.ok{color:var(--accent-hi)}
-  .row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
-  .row:last-child{border-bottom:none}
-  .row .prov{font-weight:600;text-transform:capitalize}
-  .row .em{color:var(--muted);font-size:13px}
-  .btn-ghost{padding:6px 12px;background:transparent;border:1px solid var(--line);color:var(--muted)}
-  .btn-ghost:hover{border-color:var(--danger);color:var(--danger)}
-  .sec{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
-  .sec h2{font-size:14px;margin:0 0 10px}
-  code.secret{display:block;background:var(--ink);border:1px solid var(--line);border-radius:8px;
-    padding:10px;margin:10px 0;word-break:break-all;font-size:13px;color:var(--accent-hi)}
-  select{width:100%;padding:10px 12px;background:var(--ink);border:1px solid var(--line);
-    border-radius:8px;color:var(--text);font-size:15px}
-  select:focus{outline:none;border-color:var(--accent-hi)}
-  .scopes{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 0}
-  .scopes label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);
-    margin:0;cursor:pointer}
-  .scopes input{accent-color:var(--accent)}
-  a{color:var(--accent-hi)}")
+(defn- asset
+  "One of the auth surface's shipped assets, read off the CLASSPATH — the
+   same file the `app.auth-pages` graph copies pull through
+   `:read-resource`. These used to be string literals here, char-for-char
+   duplicates of the resource, kept in step only by
+   `packages.app.auth-pages-test`; reading the one file makes that half of
+   the parity structural. Still dependency-free: a jar resource is there
+   whether or not the graph can render."
+  [path]
+  (or (some-> (io/resource path) slurp) ""))
+
+
+(def ^:private brand-css (delay (asset "packages/app/auth-pages/auth.css")))
+(def ^:private login-js (delay (asset "packages/app/auth-pages/login.js")))
+(def ^:private reset-js (delay (asset "packages/app/auth-pages/reset.js")))
 
 
 (def ^:private lambda-svg
@@ -87,7 +53,7 @@
   [title body]
   (str "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-       "<title>" title " — Graphden</title><style>" brand-css "</style></head>"
+       "<title>" title " — Graphden</title><style>" @brand-css "</style></head>"
        "<body><div class='wrap'>"
        "<div class='brand'>" lambda-svg "<b>Graphden</b></div>"
        body
@@ -180,32 +146,7 @@
       "<a href='#' id='forgot' onclick='return forgot()'>Forgot password?</a></p></form>"
       (social-buttons enabled-providers telegram)
       "</div>"
-      "<script>"
-      "let signup=false,awaitCode=false;"
-      "function mode(s){signup=s;awaitCode=false;"
-      "document.getElementById('t-up').classList.toggle('on',s);"
-      "document.getElementById('t-in').classList.toggle('on',!s);"
-      "document.getElementById('hd').textContent=s?'Create your account':'Welcome back';"
-      "document.getElementById('sb').textContent=s?'Start building with Graphden.':'Sign in to your Graphden account.';"
-      "document.getElementById('go').textContent=s?'Create account':'Sign in';"
-      "document.getElementById('totp-wrap').style.display='none';"
-      "document.getElementById('password').setAttribute('autocomplete',s?'new-password':'current-password');}"
-      "function say(t,ok){let m=document.getElementById('msg');m.textContent=t;m.className='msg '+(ok?'ok':'err');}"
-      "async function post(u,b){let r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});return[r.status,await r.json().catch(()=>({}))];}"
-      "async function submitForm(e){e.preventDefault();"
-      "let email=document.getElementById('email').value,password=document.getElementById('password').value;"
-      "if(awaitCode){let[s,j]=await post('/auth/totp',{code:document.getElementById('code').value});"
-      "if(s===200){location.href='/';}else{say('Invalid code, try again.');}return false;}"
-      "let[s,j]=await post(signup?'/auth/signup':'/auth/login',{email,password});"
-      "if(s===200&&j.totp_required){awaitCode=true;document.getElementById('totp-wrap').style.display='block';"
-      "document.getElementById('go').textContent='Verify';say('Enter the 6-digit code from your authenticator.',true);return false;}"
-      "if(s===200){if(signup&&j.verification_sent){say('Account created — check your email to verify. Redirecting…',true);}"
-      "setTimeout(()=>location.href='/',700);return false;}"
-      "say(j.error==='email-taken'?'That email is already registered.':(signup?'Could not create account.':'Invalid email or password.'));return false;}"
-      "async function forgot(){let email=document.getElementById('email').value;"
-      "if(!email){say('Enter your email above first.');return false;}"
-      "await post('/auth/forgot',{email});say('If that address has an account, a reset link is on its way.',true);return false;}"
-      "</script>")))
+      "<script>" @login-js "</script>")))
 
 
 (defn account-page
@@ -318,13 +259,4 @@
       "<input type='password' id='password' required minlength='8' autocomplete='new-password'>"
       "<button class='btn-primary' type='submit'>Set password</button>"
       "<div class='msg' id='msg'></div></form></div>"
-      "<script>"
-      "function say(t,ok){let m=document.getElementById('msg');m.textContent=t;m.className='msg '+(ok?'ok':'err');}"
-      "async function doReset(e){e.preventDefault();"
-      "let token=new URLSearchParams(location.search).get('token');"
-      "let r=await fetch('/auth/reset',{method:'POST',headers:{'Content-Type':'application/json'},"
-      "body:JSON.stringify({token,password:document.getElementById('password').value})});"
-      "if(r.status===200){say('Password set — sign in with it now.',true);setTimeout(()=>location.href='/login',900);}"
-      "else{say('That link is invalid or expired — request a new one from the sign-in page.');}"
-      "return false;}"
-      "</script>")))
+      "<script>" @reset-js "</script>")))

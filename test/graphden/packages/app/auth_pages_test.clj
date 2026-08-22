@@ -5,7 +5,15 @@
    `graphden.accounts.{pages,email}` that serve during a graph outage.
    A drifting pair would flip the auth surface's look/copy depending on
    graph health — this pins the two sides together; edit both when
-   changing either. /account DIVERGES BY DESIGN (2026-08-15): the graph
+   changing either.
+
+   HOW MUCH is actually duplicated has shrunk: the CSS and the two page
+   scripts used to exist twice, char-for-char, and now both sides read
+   the same `packages/app/auth-pages/{auth.css,login.js,reset.js}` off
+   the classpath, so that half can no longer drift. What this test still
+   guards is the HTML STRUCTURE and the email copy — the graph assembles
+   them from `:str` parts, Clojure from `str`, and there is no shared
+   artifact for that short of a template language. /account DIVERGES BY DESIGN (2026-08-15): the graph
    page (editor always present alongside it) redirects into the editor's
    Settings → Account card, while the built-in fallback keeps the full
    standalone page for headless deployments."

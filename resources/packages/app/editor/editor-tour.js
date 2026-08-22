@@ -295,11 +295,13 @@ function _tourAdvance(skipped) {
   }
   _tourState.step += 1;
   _tourSaveState();
+  _tourCount('step', lesson.id, _tourState.step);
   if (_tourState.step >= lesson.steps.length) {
     // Reaching the last step IS finishing it, whatever the reader decides
     // about the rows afterwards — the catalogue's ✓ marks reading, not
     // cleanup.
     if (typeof _tourMarkDone === 'function') _tourMarkDone(lesson.id);
+    _tourCount('finished', lesson.id, _tourState.step);
     _tourEnd();
   } else {
     _tourRenderStep();
@@ -510,6 +512,27 @@ function _tourOnKey(e) {
   _tourEnd();
 }
 
+// --- the funnel ---------------------------------------------------------------
+// Three events per lesson — started, one per advance, finished — bumped into
+// the process counters `/metrics` already exposes. Twenty-five lessons and no
+// way to know where a reader stops was the gap; a Prometheus scrape turns
+// these into the series that answers it.
+//
+// Fire-and-forget by construction: a lesson must never wait on, or fail
+// because of, a metric. Nothing identifying is sent — a two-digit id, a step
+// index, one of three words.
+function _tourCount(event, lessonId, step) {
+  if (!lessonId || !(window.API && API.api_tour_progress)) return;
+  try {
+    authFetch(API.api_tour_progress, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lesson: lessonId, event, step: step || 0 }),
+    }).catch(() => {});
+  } catch (_) { /* a metric is not worth a broken step */ }
+}
+
+
 async function _tourFetchLessons() {
   if (_tourLessons) return _tourLessons;
   if (!(window.API && API.api_tour)) return null;
@@ -544,6 +567,9 @@ async function startTutorial(lessonId, resumeStep, resumeCreated) {
   _tourEnsureEls();
   _tourRenderStep();
   _tourArm();
+  // Resuming is not a new start: counting it would inflate the denominator
+  // every time a reader reloads mid-lesson.
+  if (!resumeStep) _tourCount('started', lesson.id, 0);
   return true;
 }
 

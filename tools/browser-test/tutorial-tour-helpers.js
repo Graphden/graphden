@@ -731,6 +731,13 @@ async function createRecordType(page, nsPath, typeName, fields) {
     document.querySelector('.create-menu [data-type="type"]').click();
   });
   await page.waitForSelector('.type-create-popover', {timeout: 15000});
+  // The lesson's step completes on this popover being OPEN, and the tour polls
+  // for it every 600ms. A guard that opens and submits it inside one frame
+  // never performs the step a reader takes seconds over — so hold it open past
+  // a tick. (Before `dom` checks measured visibility, this passed for the
+  // wrong reason: the popover is a SINGLETON that is emptied, not removed, so
+  // a presence check stayed true forever once it had opened ONCE.)
+  await page.waitForTimeout(1000);
   await page.evaluate(() => {
     Array.from(document.querySelectorAll('.type-create-popover button'))
       .find((b) => b.textContent.trim() === 'Record').click();

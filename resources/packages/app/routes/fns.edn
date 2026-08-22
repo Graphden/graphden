@@ -554,6 +554,11 @@
    :parent :get-route
    :args {:path "/tour" :handler :tour-lessons-handler}}
 
+  {:name :api-tour-progress
+   :description "POST /api/tour/progress — one tutorial-funnel event `{lesson, event, step}` → process counters read off `/metrics`. Open route for the same reason as `/api/tour`: the anonymous demo session is the population whose drop-off matters. Records nothing identifying."
+   :parent :post-route
+   :args {:path "/tour/progress" :handler :tour-progress-handler}}
+
   ;; --- /api/value-form — type-aware editor form for a binding/slot ---
 
   {:name :api-value-form
@@ -769,6 +774,7 @@
                   :api-value-kinds
                   :api-value-form
                   :api-tour
+                  :api-tour-progress
                   :api-execute
                   :api-execution-by-id
                   :api-execution-cancel

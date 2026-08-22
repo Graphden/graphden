@@ -21,6 +21,32 @@ delegate additionally gets the cross-org by-org rollup —
 `org-stats` / `org-totals` for tooling. See
 [EXECUTION.md § Usage rollups](EXECUTION.md).
 
+### Tutorial funnel (always on, aggregate only)
+
+The interactive tutorial posts three events per lesson to
+`POST /api/tour/progress` — `started`, one `step` per advance, and
+`finished` — which bump process counters and therefore ride out on
+`/metrics` and `/metrics/prometheus` with everything else:
+
+```
+graphden_counters_tour_started_01     # denominator
+graphden_counters_tour_step_01_3      # reached step 3
+graphden_counters_tour_finished_01    # numerator
+```
+
+A scrape is what makes them a funnel: the counters are process-local and
+reset with the JVM, while Prometheus keeps the series across restarts
+(`increase(...[7d])`). Without a scrape they still answer "since this
+process started".
+
+Nothing identifying is recorded — a two-digit lesson id, a step index,
+one of three words. No account, no session, no per-user path. The route
+is OPEN, because the landing demo's anonymous session is precisely the
+population whose drop-off is worth knowing, and both counter base-fns
+validate their input rather than trusting it: a caller cannot name a
+counter (the map is process-global and unbounded, so that would be a
+memory-growth vector).
+
 ## 2. Error log — recent failures viewer (always on)
 
 The editor's **Errors** sidebar section lists an org's recent failed

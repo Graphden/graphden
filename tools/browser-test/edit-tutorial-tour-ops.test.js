@@ -127,12 +127,29 @@ const {
     // The write itself triggers the auto-run — that IS the lesson's claim.
     await waitTourTitle(page, 'See it pass', 150000);
     // The step completes on the panel's green dot, so open the panel the
-    // way the lesson tells the reader to.
-    await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('button, a'))
-        .find((b) => /^tests$/i.test(b.textContent.trim()));
-      if (btn) btn.click();
+    // way the lesson tells the reader to: Operate → Tests. Matching a button
+    // whose text is "tests" hit the sidebar's NAMESPACE row instead, and the
+    // step passed anyway only because the mounted-but-hidden panel still
+    // matched a `dom` check — until `dom` started meaning VISIBLE, which is
+    // what the reader experiences.
+    await page.evaluate(() => { window.location.hash = '@organization'; });
+    await page.waitForSelector('#gd-operate-nav button[data-section="tests"]',
+                               {timeout: 30000});
+    // The nav re-renders as the surface opens, so a single click can land on
+    // a button whose handler is not bound yet — click until the panel is up.
+    const testsPanelUp = () => page.evaluate(() => {
+      const el = document.querySelector('#gd-operate-panels > [data-section="tests"]');
+      if (!el || el.hasAttribute('hidden')) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
     });
+    for (let attempt = 0; attempt < 10 && !(await testsPanelUp()); attempt++) {
+      await page.evaluate(() => {
+        document.querySelector('#gd-operate-nav button[data-section="tests"]')?.click();
+      });
+      await page.waitForTimeout(1000);
+    }
+    assert(await testsPanelUp(), 'Operate → Tests opened');
     // Auto-run is asynchronous (the write returns first) — poll rather than
     // read once.
     // `pending` is a status too — poll until the run REACHES a terminal
@@ -388,6 +405,27 @@ const {
       'and a desktop window keeps the anchored popover');
     await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
     console.log('  mobile: step + catalogue dock as a sheet, desktop unchanged');
+
+    // ---------- The funnel actually moves ----------
+    // 25 lessons and no way to know where a reader stops was the gap; the
+    // tour posts three events per lesson into the counters `/metrics`
+    // already exposes. A client that reports nothing looks exactly like a
+    // tutorial nobody runs, so assert the number moves.
+    const metricsBefore = await api(page, 'GET', '/metrics');
+    const startedBefore = metricsBefore?.counters?.['tour-started-01'] || 0;
+    await page.goto(BASE + '/?tutorial=01');
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
+    assert(await clickTourButton(page, 'Next'), 'funnel probe: first Next');
+    await page.waitForTimeout(1500);
+    const metricsAfter = await api(page, 'GET', '/metrics');
+    const startedAfter = metricsAfter?.counters?.['tour-started-01'] || 0;
+    const stepAfter = metricsAfter?.counters?.['tour-step-01-1'] || 0;
+    assert(startedAfter === startedBefore + 1,
+      'starting lesson 01 counted one start (' + startedBefore + ' → ' + startedAfter + ')');
+    assert(stepAfter >= 1,
+      'and the advance counted its step bucket (tour-step-01-1 = ' + stepAfter + ')');
+    await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
+    console.log('  funnel: started + step counters moved on /metrics');
 
     console.log('PASS');
   } catch (err) {

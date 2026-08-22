@@ -1096,4 +1096,87 @@
   {:name :tour-lessons-handler
    :description "GET /api/tour handler — the interactive-tutorial lesson scripts as JSON. Static teaching content, no data reads; open route (the demo's anonymous session must reach it)."
    :parent :json-ok-response
-   :args {:body :_tour-json}}]}
+   :args {:body :_tour-json}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/tour/progress — the funnel.
+  ;;
+  ;; 25 lessons, and until now nobody could say where a reader stops. Three
+  ;; events per lesson (`started`, one `step` per advance, `finished`) bump
+  ;; process counters, which `/metrics` and `/metrics/prometheus` already
+  ;; expose — so the durable series is the SCRAPE's, and this endpoint needs
+  ;; no storage, no rows and no retention policy of its own.
+  ;;
+  ;; Nothing identifying is sent: a two-digit lesson id, a step index, one of
+  ;; three words. The route is OPEN because the landing demo's anonymous
+  ;; session runs lesson 01 — which is exactly the population whose drop-off
+  ;; is worth knowing — and both base-fns validate their input rather than
+  ;; letting a caller name a counter (the map is process-global and unbounded).
+  ;; ---------------------------------------------------------------------
+
+  {:name :count-tour-event!
+   :description "Bump `:tour-<event>-<lesson>` in the process counters (`/metrics`). Answers the counter name, or nil when the input is not a two-digit lesson id + one of `started` / `step` / `finished` — the impl VALIDATES rather than trusting, because the route is open and the counters map is unbounded."
+   :args {:lesson {:type :any :description "Lesson id as the client sent it — untrusted JSON, coerced and matched against `\\d{2}`."}
+          :event {:type :any :description "One of `started` / `step` / `finished`; anything else counts nothing."}}
+   :return-type :nullable-text
+   :effects #{:io}}
+
+  {:name :count-tour-step!
+   :description "Bump `:tour-step-<lesson>-<n>` — the per-step bucket a drop-off is read off. nil for a non-lesson or an index outside 0..99."
+   :args {:lesson {:type :any :description "Untrusted lesson id — same validation as `:count-tour-event!`."}
+          :step {:type :any :description "Zero-based step index; parsed, and bounded to a lesson's possible length."}}
+   :return-type :nullable-text
+   :effects #{:io}}
+
+  {:name :_tour-progress-body
+   :parent :parse-json-body}
+
+  {:name :_tour-progress-lesson
+   :parent :get
+   :args {:coll :_tour-progress-body :key {:value :lesson} :default nil}}
+
+  {:name :_tour-progress-event
+   :parent :get
+   :args {:coll :_tour-progress-body :key {:value :event} :default nil}}
+
+  {:name :_tour-progress-step
+   :parent :get
+   :args {:coll :_tour-progress-body :key {:value :step} :default nil}}
+
+  {:name :_tour-progress-step?
+   :parent :equal?
+   :args {:a :_tour-progress-event :b {:value "step"}}}
+
+  {:name :_tour-progress-event-counted
+   :parent :count-tour-event!
+   :args {:lesson :_tour-progress-lesson :event :_tour-progress-event}}
+
+  {:name :_tour-progress-step-counted
+   :parent :count-tour-step!
+   :args {:lesson :_tour-progress-lesson :step :_tour-progress-step}}
+
+  {:name :_tour-progress-step-bucket
+   :description "The per-step bucket, only for an advance — `:if` keeps it lazy for the other two events."
+   :parent :if
+   :args {:test :_tour-progress-step?
+          :then :_tour-progress-step-counted
+          :else nil}}
+
+  {:name :_tour-progress-recorded
+   :description "Bump the per-step bucket (advances only) and then the lesson-level counter. The lesson-level one is LAST because `:do` answers with its final step, and that is the answer the response reports: a body that counted nothing must not read as ok."
+   :parent :do
+   :args {:steps [:_tour-progress-step-bucket
+                  :_tour-progress-event-counted]}}
+
+  {:name :_tour-progress-json
+   :parent :to-json-string
+   :args {:data {:parent :zipmap
+                 :args {:keys [{:value :ok}]
+                        :vals [{:parent :some?
+                                :args {:value :_tour-progress-recorded}}]}}}}
+
+  {:name :tour-progress-handler
+   :lambda-params [:request]
+   :description "POST /api/tour/progress handler — records one tutorial-funnel event. Answers `{ok:<counted?>}`; a body that is not a lesson id + a known event counts nothing and answers `{ok:false}` rather than erroring, because a stale client must never be able to fail a reader's lesson."
+   :parent :json-ok-response
+   :args {:body :_tour-progress-json}}]}

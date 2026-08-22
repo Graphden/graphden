@@ -13,12 +13,16 @@
 ;; `:_router/:routes :all`, and the `:all` fn-card is invisible from
 ;; web-server unless you navigate to it directly.
 ;;
-;; The browser-test `tools/browser-test/regression-sequence-fn-ref.test.js`
-;; pins this fix in place: it asserts that
-;; `:ex-regression-str-via-ref`'s graph has exactly the four expected
-;; edges (parts inheritance from str + the outgoing parts ref + the
-;; three item-edges below the list card), failing loudly if a future
-;; layout-pipeline change drops the ref edge again.
+;; These fn-defs are exercised by `compile-packages-test/regression-
+;; examples-test`, which pins the RUNTIME half (`:str` joins the three
+;; items into "abc").
+;;
+;; The LAYOUT half is pinned by `tools/browser-test/
+;; edit-regression-sequence-fn-ref.test.js`, which builds the same shape
+;; through the API rather than navigating here: `examples` is dev/test-only
+;; and absent from `graphden-executor`, so a browser test pointed at these
+;; names could never run in the e2e stack — and for a long time didn't run
+;; anywhere at all.
 
 
 {:namespace "examples.regression.sequence-fn-ref"

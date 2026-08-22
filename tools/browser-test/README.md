@@ -76,9 +76,11 @@ graph.
 - `contact-demo-smoke.js` — end-to-end smoke for the `/demo/contact`
   page (runtime + built-in `submit-form` handler). Run by hand:
   `node contact-demo-smoke.js`.
-- `regression-sequence-fn-ref.test.js` / `regression-migrate-on-fn-ref.test.js`
-  — need the dev/test-only `examples` package; deliberately outside the
-  `edit-*` glob. Run by hand against a demo stack with examples loaded.
+Nothing else. Every `*.test.js` here is `edit-`-prefixed and runs in
+`./run-edit-tests.sh` — a file outside that glob runs in no runner at all,
+which is how `regression-*.test.js` and `type-system-ui-*.test.js` sat dead
+until the 2026-08-22 test audit. If a new test cannot fit this suite, it
+belongs in `tools/runtime-test/` under `bb test-js`.
 
 ## Organization lessons (needs a tenancy stack)
 

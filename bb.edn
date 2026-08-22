@@ -626,7 +626,9 @@
                   "-M:dev:test -m kaocha.runner :unit")}
 
   test-js
-  {:doc "JS tests that need NO graphden stack — the shared client runtime (tools/runtime-test/*.test.js: node's vm, no browser at all). NOT the type-system UI helpers: they were filed here on the belief they needed no server, but they read editor globals inside a LOADED page. A running demo instance masked that locally; GitHub CI (no stack) exposed it. Moving them to the e2e runner was tried and reverted — they pass against a warm instance and against `bb wt up`, but failed inside the e2e stack for a reason not reproducible outside it (that suite is gate-only). They stay manual, as documented in CLAUDE.md, until someone can debug them IN the gate; see docs/LAUNCH_PLAN.md future reserve."
+  {:doc "JS tests that need NO graphden stack — tools/runtime-test/*.test.js, run under node's vm with no browser at all: the shared client runtime, and (since 2026-08-22) the editor's type helpers + the resolution-section renderer.
+
+   Those last two used to live in tools/browser-test as `type-system-ui-*.test.js`, driving a real chromium at a LOADED editor because they read editor globals. That put them in no runner at all — this task excluded them, run-edit-tests.sh's glob excluded them, so `shortTypeLabel(['list','text']) = '[text]'` was asserted nowhere. They now take their globals as fixtures (a 3-line `richTypes`, a `lookups` mock) and their DOM from `tools/runtime-test/mini-dom.js`, which is the smaller and more honest test anyway: the inputs are written down instead of being whatever the server shipped."
    :task (let [;; dir → glob. Same contract as run-edit-tests.sh: adding a file
                ;; takes a glob, never an edit here.
                groups {"tools/runtime-test" "*.test.js"}

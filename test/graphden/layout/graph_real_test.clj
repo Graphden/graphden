@@ -163,17 +163,45 @@
 
 
 (deftest layout-migrate-on-fn-ref-test
-  (testing "the migrate-on-fn-ref example fns lay out across expansion
-            depths — exercises build-graph-elements' migrated-binding
-            branches (a value bound on a ref-reached slot)"
-    (doseq [nm ["ex-outer" "_ex-pair-with-first" "_ex-pair-like"]]
-      (when-let [id (fn-id nm)]
-        (doseq [depth [1 2 3 4]]
-          (let [result (layout id {(str "fn-" id) {:full-depth depth
-                                                   :partial-fns #{}}})]
-            (is (seq (:nodes result)) (str nm " @" depth " produces nodes"))
-            (is (:valid (:validation result))
-                (str nm " @" depth " grid is valid"))))))))
+  ;; Substitution semantics: when a level-0 value-binding migrates to the
+  ;; fn-ref-reached descendant that actually consumes the slot, the literal
+  ;; lives at the DEEPEST consumer and nowhere else. The bug rendered it in
+  ;; BOTH places — in production, `text-error-router` showed :not-found /
+  ;; :method-not-allowed / :not-acceptable twice each.
+  ;;
+  ;; The production half of this invariant is
+  ;; `layout-router-default-handler-test` above ("no response binding sources
+  ;; from the root _router card"). This is the minimal shape:
+  ;; `_ex-pair-with-first` fixes :item1 = "first" and reaches its consumer
+  ;; `_ex-list-of-one` through the :coll fn-ref.
+  ;;
+  ;; It used to assert only "produces nodes" + "grid is valid" — both true of
+  ;; a layout that renders the literal twice. `tools/browser-test/
+  ;; regression-migrate-on-fn-ref.test.js` held the real assertion and could
+  ;; never run (the `examples` package is dev-only and absent from
+  ;; graphden-executor, so the e2e stack has no such graph); it was deleted
+  ;; 2026-08-22 and its assertion moved here, where the fixture DOES load
+  ;; `examples`.
+  (doseq [nm ["ex-outer" "_ex-pair-with-first" "_ex-pair-like" "_ex-wrap-pair"]]
+    (when-let [id (fn-id nm)]
+      (doseq [depth [0 1 2 3 4]]
+        (let [result (layout id {(str "fn-" id) {:full-depth depth
+                                                 :partial-fns #{}}})
+              overlays (->> (:nodes result)
+                            (filter #(str/starts-with? (str (:id (:data %))) "arg-"))
+                            (map #(:label (:data %))))
+              cards (->> (:nodes result)
+                         (filter #(= "fn" (:type (:data %))))
+                         (map #(:label (:data %))))]
+          (is (seq (:nodes result)) (str nm " @" depth " produces nodes"))
+          (is (:valid (:validation result))
+              (str nm " @" depth " grid is valid"))
+          (is (>= 1 (count (filter #{"\"first\""} overlays)))
+              (str nm " @" depth ": the migrated literal renders at its consumer "
+                   "and nowhere else — overlays=" (pr-str (vec overlays))))
+          (is (= (count cards) (count (distinct cards)))
+              (str nm " @" depth ": no fn-card is drawn twice — cards="
+                   (pr-str (vec cards)))))))))
 
 
 ;; ============================================================================

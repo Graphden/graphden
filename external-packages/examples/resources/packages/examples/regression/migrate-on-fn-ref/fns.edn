@@ -17,6 +17,13 @@
 ;;
 ;; This module reproduces the exact shape minimally: a 2-element
 ;; pair built via fn-ref-to-list-helper inheritance.
+;;
+;; PINNED BY `layout.graph-real-test/layout-migrate-on-fn-ref-test`, whose
+;; fixture loads this package: at every expansion depth the migrated literal
+;; renders at most once and no fn-card is drawn twice. It used to be pinned by
+;; `tools/browser-test/regression-migrate-on-fn-ref.test.js`, which could never
+;; run — `examples` is absent from `graphden-executor`, so the e2e stack has no
+;; such graph. Deleted 2026-08-22; the assertion moved to the Clojure test.
 
 
 {:namespace "examples.regression.migrate-on-fn-ref"

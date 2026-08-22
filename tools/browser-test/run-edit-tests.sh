@@ -25,25 +25,27 @@ cd "$(dirname "$0")" || exit 1
 
 # Resolve the test list once so adding new files only takes a glob.
 #
-# The `edit-` prefix is load-bearing, not decoration: widening this glob turns
-# the suite red. Two other groups of *.test.js live in this directory and
-# neither can run here.
+# EVERY *.test.js in this directory is `edit-`-prefixed and runs here. That is
+# new as of 2026-08-22: two other prefixes used to live alongside them, each
+# excluded from this glob for a good reason and consequently running NOWHERE —
+# not here, not in `bb test-js`, not in GitHub CI. An audit found both. If you
+# add a file whose name says it cannot run in this suite, you are adding a test
+# that will never execute; make it fit here, or make it fit `bb test-js`.
 #
-#   regression-*.test.js     drive fn-defs from `examples` — an EXTERNAL,
-#                            dev/test-only package wired in via an :extra-paths
-#                            entry on the :dev/:test aliases (deps.edn), and
-#                            deliberately off the prod resources path. This
-#                            suite boots `graphden-executor:latest`, which does
-#                            not carry it. Measured against a live stack:
-#                            /api/graph/entities?q=ex-regression returns
-#                            {"fns":[]}, and both tests time out waiting for a
-#                            graph that cannot exist there.
+#   regression-*.test.js     drove fn-defs from `examples`, a dev/test-only
+#                            package deliberately absent from
+#                            `graphden-executor` — so the graph they navigated
+#                            to could not exist in this stack. One was rewritten
+#                            to build its shape through the API
+#                            (edit-regression-sequence-fn-ref.test.js); the
+#                            other's assertion moved into
+#                            `layout.graph-real-test/layout-migrate-on-fn-ref-test`,
+#                            whose fixture DOES load `examples`.
 #
-#   type-system-ui-*.test.js need a chromium but no server — they eval editor
-#                            modules in a page and assert pure functions.
-#                            Running them here would pay for a whole stack to
-#                            use none of it. They have their own runner now:
-#                            `bb test-js`, ~15 s, wired into scripts/checks.edn.
+#   type-system-ui-*.test.js drove a chromium at a live editor to assert pure
+#                            functions. They now run under plain `node` over a
+#                            small DOM stub — tools/runtime-test/{type-helpers,
+#                            type-resolution-section}.test.js, in `bb test-js`.
 FILES=$(ls edit-*.test.js 2>/dev/null)
 if [ -z "$FILES" ]; then
   echo "no edit-*.test.js files found" >&2

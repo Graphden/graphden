@@ -329,20 +329,28 @@ node check-editor.js web-server root:1 router-fn:1
 
 **Expand spec format:** `node-name:level` (use `root` for selected function)
 
-The same directory also hosts e2e edit-flow tests (`edit-*.test.js`) and
-the type-system UI helper smoke tests, split by concern:
+The same directory hosts the e2e edit-flow suite. **Every `*.test.js` there is
+`edit-`-prefixed and runs in `./run-edit-tests.sh`** — a file that doesn't fit
+that glob runs nowhere, which is exactly how two groups of tests sat dead until
+the 2026-08-22 audit. Frontend logic that needs no stack goes in
+`tools/runtime-test/` instead, under `bb test-js`:
 
 ```bash
-# refinementChain, typeKindLabel (editor-type-expand-render.js),
-# closedEnumOf (editor-literal-types.js), formatTypeHumanReadable,
-# shortTypeLabel (editor-type-format.js) — pure type helpers.
-# No DOM construction asserted here.
-node type-system-ui-types.test.js
+# Pure type helpers — refinementChain, typeKindLabel, closedEnumOf,
+# formatTypeHumanReadable, shortTypeLabel. Editor modules loaded into a
+# node vm; the type registry is a fixture, not the server's.
+node tools/runtime-test/type-helpers.test.js
 
-# appendResolutionSection (incl. multi-override visualization +
-# onNavigate spy) — DOM rendering of the inline resolution section.
-node type-system-ui-resolution.test.js
+# appendResolutionSection — multi-override ✓/↳ markers + onNavigate
+# wiring, built against tools/runtime-test/mini-dom.js.
+node tools/runtime-test/type-resolution-section.test.js
 ```
+
+`mini-dom.js` is the shared stub: createElement/appendChild/classList/
+addEventListener plus `querySelectorAll` over `tag.a.b` selectors with
+descendant combinators. Reach for it whenever the thing under test only
+*builds* nodes; anything needing layout, CSS or real event bubbling belongs
+in the e2e suite.
 
 (The return-type-rule popover's prose table lives in the graph now —
 `:_rtr-narratives` in `app/editor-provenance/fns.edn`, covered by the Clojure

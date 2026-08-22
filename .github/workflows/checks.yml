@@ -330,10 +330,10 @@ jobs:
       - name: Compare against perf/budgets.edn
         run: bb perf
 
-  # The JS tests that need no graphden stack: the shared client runtime, run
-  # under node's `vm`. No browser, no server — so no chromium install here.
-  # (The type-system-ui tests moved to the e2e runner: they drive editor
-  # globals inside a LOADED page, which needs the stack.)
+  # The JS tests that need no graphden stack, run under node's `vm`: the shared
+  # client runtime, the editor's type helpers, and the resolution-section
+  # renderer over tools/runtime-test/mini-dom.js. No browser, no server — so no
+  # chromium install here.
   tests-js:
     name: tests-js (no-stack JS)
     runs-on: ubuntu-latest

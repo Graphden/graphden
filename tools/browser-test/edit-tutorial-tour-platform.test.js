@@ -22,6 +22,7 @@ const {
   extendViaRowActions, createRootNamespace, createFnInNamespace,
   setParentViaStrip, finishAndDelete, tourTitle, bindFirstPlaceholder,
   bindFnRefPlaceholder,
+  openOperateSection,
 } = require('./tutorial-tour-helpers');
 
 const ASSET_PATH = 'packages/app/editor/editor-styles.css';
@@ -211,10 +212,10 @@ async function revertAssetViaApi(page, base) {
     await waitTourTitle(page, 'The editor is served from the graph too', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 25 Next');
     await waitTourTitle(page, 'Open Assets');
-    await page.evaluate(() => {
-      gdShellSurface('operate');
-      document.querySelector('#gd-operate-nav button[data-section="assets"]')?.click();
-    });
+    // Through the account menu, with the retry the nav's re-render needs —
+    // the same helper five other lessons' walks use. The old one-shot
+    // `gdShellSurface('operate')` + single click raced at a phone viewport.
+    await openOperateSection(page, 'assets');
     await waitTourTitle(page, 'Open the stylesheet', 150000);
     await page.waitForSelector('[data-section="assets"] .gd-asset-row', {timeout: 20000});
     await page.evaluate((path) => {

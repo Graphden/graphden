@@ -75,7 +75,7 @@ create anything, effective on its next request. Restore by setting
 its real tier back. (Delete still works, so a frozen tenant can clean
 up its own data.)
 
-Operators also get a fourth surface, **Platform** (its avatar-menu entry appears
+Operators also get a fourth surface, **Platform** (its account-menu entry appears
 only for platform-tier principals): the cross-org registry of
 organizations and the platform-access delegation panel — the
 UI counterpart to the operator routes above, and the place where

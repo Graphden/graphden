@@ -370,7 +370,10 @@ const {
     // "click +" because + was underneath it. Checked here at BOTH sizes in
     // one process; the whole suite can also be run at a phone viewport with
     // GRAPHDEN_VIEWPORT=390x844.
-    const desktop = page.viewportSize();
+    // Explicit sizes on BOTH sides: this file also runs under
+    // GRAPHDEN_VIEWPORT=390x844, and "restore whatever we started at" then
+    // asserts desktop behaviour at a phone size.
+    const desktop = {width: 1400, height: 900};
     await page.setViewportSize({width: 390, height: 844});
     await page.goto(BASE + '/?tutorial=01');
     await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
@@ -405,6 +408,44 @@ const {
       'and a desktop window keeps the anchored popover');
     await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
     console.log('  mobile: step + catalogue dock as a sheet, desktop unchanged');
+
+    // ---------- A lens the reader left on must not dead-end a step ----------
+    // The Explorer's kind lens hides rows; a step waiting on a fn the lens
+    // hides waits forever, under a popover that says "advances
+    // automatically when done". Same trap the collapsed-Explorer arm
+    // already handles, and only discoverable by walking it as a person —
+    // a guard clicks rows by selector, hidden or not.
+    await page.goto(BASE + '/');
+    await page.waitForSelector('.kind-toggle', {timeout: 60000});
+    await page.evaluate(() => {
+      const tests = Array.from(document.querySelectorAll('.kind-toggle'))
+        .find((c) => /tests/.test(c.textContent));
+      tests.click();
+    });
+    await page.waitForFunction(() => {
+      const all = Array.from(document.querySelectorAll('.kind-toggle'))
+        .find((c) => /all/.test(c.textContent));
+      return all && all.getAttribute('aria-pressed') === 'false';
+    }, null, {timeout: 15000, polling: 200});
+    await page.goto(BASE + '/?tutorial=05');
+    await waitTourTitle(page, 'Types are fn-rows too', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lens probe: opening Next');
+    await waitTourTitle(page, 'Find str-len', 30000);
+    await page.fill('input[placeholder="Filter..."]', 'str-len');
+    await page.waitForFunction(() => {
+      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+        .find((e) => e.querySelector('.name')?.textContent.trim() === 'str-len');
+      return row && !row.hasAttribute('hidden');
+    }, null, {timeout: 30000, polling: 300});
+    const lensAfter = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('.kind-toggle'))
+        .find((c) => /all/.test(c.textContent));
+      return all.getAttribute('aria-pressed');
+    });
+    assert(lensAfter === 'true',
+      'the tour cleared the lens that was hiding the step\'s fn (all=' + lensAfter + ')');
+    await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
+    console.log('  lens: a kind lens hiding the step\'s fn is cleared, once');
 
     // ---------- The funnel actually moves ----------
     // 25 lessons and no way to know where a reader stops was the gap; the

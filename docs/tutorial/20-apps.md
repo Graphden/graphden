@@ -35,7 +35,7 @@ picks a handler by path, exactly like the editor itself does.
 ## The Apps panel
 
 On a cloud deployment (the tenancy addon is active) the editor's
-**Organization** surface (open it from your avatar's menu in the top bar) has an **Apps**
+**Organization** surface (open it from the account menu in the top bar) has an **Apps**
 section. It lists your org's apps and lets
 you add or remove them. Each row shows the app's live URL and a
 link to the fn it serves.

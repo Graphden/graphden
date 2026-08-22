@@ -87,7 +87,7 @@ redirects here). It holds:
   (the section appears on cloud/tenancy deployments).
 
 **Sign out** (this device, or everywhere at once) is in the same
-avatar menu.
+account menu.
 
 ## The same surface, self-hosted
 

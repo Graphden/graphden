@@ -4,6 +4,12 @@
 // answers three questions before it lists anything: where did I stop, what
 // have I already done, and which of these can this session even run.
 //
+// graph-first-exception: this list is a function of the graph payload the
+// engine already fetched AND two things only the browser knows — the reading
+// history in localStorage and the capability signals the session carries. A
+// server partial would have to be told the reader's own history to render
+// their own catalogue, which is worse on every axis including privacy.
+//
 // Completion lives in localStorage next to the in-flight tour state — it is a
 // reading history, personal to the browser, not graph data. `:requires` is the
 // gate: usually a capability, sometimes a named condition (a plan tier, an

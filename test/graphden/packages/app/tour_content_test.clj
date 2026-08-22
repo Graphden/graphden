@@ -212,3 +212,77 @@
       (is (contains? allowed ph)
           (str "copy key " k " uses placeholder {" ph "}, which no caller"
                " fills — it would print literally")))))
+
+
+;; ============================================================================
+;; The tour and the WRITTEN lessons are two halves of one thing
+;; ============================================================================
+
+(defn- written-lesson-ids
+  "Lesson ids with a file in `docs/tutorial/` (`NN-slug.md`)."
+  []
+  (into #{}
+        (keep #(second (re-matches #"(\d{2})-.*\.md" (java.io.File/.getName %))))
+        (file-seq (io/file "docs/tutorial"))))
+
+
+(defn- index-rows
+  "`{id → status-cell}` from the index table in docs/tutorial/README.md."
+  []
+  (into {}
+        (map (fn [[_ id status]] [id status]))
+        (re-seq #"(?m)^\|\s*(\d{2})\s*\|[^|]*\|\s*([^|]*?)\s*\|"
+                (slurp (io/file "docs/tutorial/README.md")))))
+
+
+(deftest every-tour-has-a-written-lesson
+  ;; The tour is the SHOWN half; the file is the read half, and each lesson's
+  ;; own last step points at the other one ("the written lesson NN covers…").
+  ;; A tour with no file leaves that pointer dangling, and a reader who
+  ;; prefers text with nothing to read.
+  (let [written (written-lesson-ids)]
+    (doseq [l (lessons)]
+      (is (contains? written (:id l))
+          (str "tour lesson " (:id l) " (\"" (:title l) "\") has no"
+               " docs/tutorial/" (:id l) "-*.md")))))
+
+
+(deftest the-index-marks-exactly-the-lessons-that-have-a-tour
+  ;; The ▶ column is how a reader decides whether to open the editor. It is
+  ;; hand-maintained, so it drifts silently in both directions: a new tour
+  ;; nobody advertises, or a ▶ pointing at a lesson whose tour was removed.
+  (let [toured (into #{} (map :id) (lessons))
+        rows (index-rows)]
+    (is (seq rows) "the index table parsed")
+    (doseq [[id status] rows]
+      (if (contains? toured id)
+        (is (str/includes? status "interactive")
+            (str "lesson " id " HAS a tour but the index does not say"
+                 " ▶ interactive (status: " (pr-str status) ")"))
+        (is (not (str/includes? status "interactive"))
+            (str "lesson " id " has NO tour but the index advertises one"
+                 " (status: " (pr-str status) ")"))))
+    (doseq [id toured]
+      (is (contains? rows id)
+          (str "tour lesson " id " is missing from the index table entirely")))))
+
+
+(deftest a-lesson-that-needs-a-capability-says-so-in-both-places
+  ;; `:requires` gates the tour; the written lesson has to warn too, or a
+  ;; reader on the wrong plan follows a walkthrough of a panel they cannot
+  ;; open. Cheap check: the file mentions the requirement.
+  (doseq [l (lessons)
+          :let [need (:requires l)]
+          :when need]
+    (let [f (first (filter #(re-matches (re-pattern (str (:id l) "-.*\\.md"))
+                                        (java.io.File/.getName %))
+                           (file-seq (io/file "docs/tutorial"))))
+          text (some-> f slurp)]
+      (is text (str "lesson " (:id l) " has a written file"))
+      (when text
+        (is (or (str/includes? text need)
+                (str/includes? text "organization")
+                (str/includes? text "tenancy")
+                (str/includes? text "self-host"))
+            (str "lesson " (:id l) " requires " (pr-str need)
+                 " but its written lesson never says what it needs"))))))

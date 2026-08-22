@@ -1,5 +1,10 @@
 // editor-tour-cleanup.js — undoing what a lesson made.
 //
+// graph-first-exception: no markup here at all. This is API orchestration
+// over the same endpoints the editor's own buttons call, in an order the
+// SERVER cannot choose for us (it depends on what this lesson created, in
+// which order, on this branch).
+//
 // A step declares `:creates {:type … :name …}`; the engine records those and
 // this file both REPORTS what still exists (the end-of-tour offer lists it)
 // and removes it on request. Four kinds exist today — `fn`, `ns`, `branch`

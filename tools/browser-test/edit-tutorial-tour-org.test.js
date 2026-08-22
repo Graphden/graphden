@@ -30,6 +30,7 @@ const {assert} = require('./edit-test-helpers');
 const {
   waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
   extendViaRowActions, bindFirstPlaceholder,
+  openOperateSection, openAccountSettings,
 } = require('./tutorial-tour-helpers');
 
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:8080';
@@ -89,46 +90,6 @@ function skip(reason) {
 
 
 // --- shared UI moves ---------------------------------------------------------
-
-// Avatar → "Organization" → the named section. The lessons say exactly this,
-// and four of them start with it.
-async function openOrgSection(page, section) {
-  await page.waitForSelector('.auth-avatar', {timeout: 30000});
-  await page.evaluate(() => document.querySelector('.auth-avatar').click());
-  await page.waitForSelector('.auth-menu-item', {timeout: 15000});
-  await page.evaluate(() => {
-    const item = Array.from(document.querySelectorAll('.auth-menu-item'))
-      .find((b) => /organization/i.test(b.textContent));
-    if (!item) throw new Error('no "Organization" item in the account menu');
-    item.click();
-  });
-  await page.waitForSelector('#gd-operate-nav button[data-section="' + section + '"]',
-                             {timeout: 30000});
-  await page.evaluate((s) => {
-    document.querySelector('#gd-operate-nav button[data-section="' + s + '"]').click();
-  }, section);
-  await page.waitForFunction((s) => {
-    const el = document.querySelector('#gd-operate-panels > [data-section="' + s + '"]');
-    if (!el || el.hasAttribute('hidden')) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  }, section, {timeout: 30000, polling: 200});
-}
-
-
-async function openSettings(page) {
-  await page.waitForSelector('.auth-avatar', {timeout: 30000});
-  await page.evaluate(() => document.querySelector('.auth-avatar').click());
-  await page.waitForSelector('.auth-menu-item', {timeout: 15000});
-  await page.evaluate(() => {
-    const item = Array.from(document.querySelectorAll('.auth-menu-item'))
-      .find((b) => /settings/i.test(b.textContent));
-    if (!item) throw new Error('no "Settings" item in the account menu');
-    item.click();
-  });
-  await page.waitForSelector('#gd-acct-idents', {timeout: 30000});
-}
-
 
 // Fill a panel form by field name and submit it — the panels are htmx, so the
 // swap that follows is what the lesson's check watches for.
@@ -193,7 +154,7 @@ async function lesson16(page) {
   // Step: open the Organization surface. It must NOT complete on the mounted
   // -but-hidden panels — that is exactly what a `dom` check used to do here.
   await waitTourTitle(page, 'Open the Organization surface', 30000);
-  await openOrgSection(page, 'users');
+  await openOperateSection(page, 'users');
   await waitTourTitle(page, 'Invite someone', 60000);
 
   await submitPanelForm(page, '[data-users-panel] form[hx-post="/api/org-members"]',
@@ -224,7 +185,7 @@ async function lesson17(page) {
   assert(await clickTourButton(page, 'Next'), 'lesson 17 opening Next');
 
   await waitTourTitle(page, 'Open Grants', 30000);
-  await openOrgSection(page, 'grants');
+  await openOperateSection(page, 'grants');
   await waitTourTitle(page, 'Grant a namespace', 60000);
 
   // The lesson's remaining steps are manual, but a guard that only clicks
@@ -276,7 +237,7 @@ async function lesson20(page) {
     '{"status": 200, "headers": {"Content-Type": "text/html"},'
     + ' "body": "<h1>Hello from my app</h1>"}');
   await waitTourTitle(page, 'Open Apps', 60000);
-  await openOrgSection(page, 'apps');
+  await openOperateSection(page, 'apps');
   await waitTourTitle(page, 'Publish it', 60000);
 
   // Manual step in the tour — performed here, because "the row appears and
@@ -320,7 +281,7 @@ async function lesson19(page) {
   await waitTourTitle(page, 'The account is you, the org is the workspace', 150000);
   assert(await clickTourButton(page, 'Next'), 'lesson 19 opening Next');
   await waitTourTitle(page, 'Open Settings', 30000);
-  await openSettings(page);
+  await openAccountSettings(page);
   await waitTourTitle(page, 'How you sign in', 60000);
   const surfaces = await page.evaluate(() => ({
     idents: !!document.querySelector('#gd-acct-idents'),
@@ -342,7 +303,7 @@ async function lesson18(page) {
   await waitTourTitle(page, 'What a plan actually decides', 150000);
   assert(await clickTourButton(page, 'Next'), 'lesson 18 opening Next');
   await waitTourTitle(page, 'Where usage shows', 30000);
-  await openOrgSection(page, 'stats');
+  await openOperateSection(page, 'stats');
   await waitTourTitle(page, 'The fn ceiling', 60000);
   // Two more prose steps, then the last one's button is Finish, not Next.
   await nextTimes(page, 2, 'lesson 18');
@@ -358,7 +319,7 @@ async function lesson31(page) {
   assert(await clickTourButton(page, 'Next'), 'lesson 31 opening Next');
 
   await waitTourTitle(page, 'Open Roles', 30000);
-  await openOrgSection(page, 'roles');
+  await openOperateSection(page, 'roles');
   await waitTourTitle(page, 'Create one', 60000);
 
   // The capabilities field is a hidden comma-joined input that the panel's

@@ -720,6 +720,68 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
 // → Record tab → name + field pairs → Create. `fields` is [[name, type], …]
 // and must not exceed the two rows the form starts with (the lesson uses
 // exactly two; "+ add row" is the user's affordance for more).
+// Avatar → “Organization” → <section> — the path SIX lessons now spell out
+// (16 Members, 17 Grants, 20 Apps, 29 Errors/Type errors, 31 Roles, 18
+// Monitoring). Two guards had their own copy and they had already drifted:
+// one skipped the account menu entirely by setting the hash, so the step the
+// lesson describes went unexercised; the other clicked the section once and
+// flaked, because the nav re-renders as the surface opens and a click can
+// land before its handler is bound. One helper, both behaviours.
+// The account button is an AVATAR chip in accounts mode and a LOCK icon on a
+// token deployment — same menu, different trigger. A helper (or a lesson)
+// that names only the avatar silently excludes every self-hosted instance,
+// which is exactly where lesson 25 lives.
+async function openAccountMenu(page) {
+  await page.waitForSelector('.auth-avatar, #auth-lock-btn', {timeout: 30000});
+  await page.evaluate(() => {
+    (document.querySelector('.auth-avatar')
+     || document.getElementById('auth-lock-btn')).click();
+  });
+  await page.waitForSelector('.auth-menu-item', {timeout: 15000});
+}
+
+
+async function openOperateSection(page, section) {
+  await openAccountMenu(page);
+  await page.evaluate(() => {
+    const item = Array.from(document.querySelectorAll('.auth-menu-item'))
+      .find((b) => /organization/i.test(b.textContent));
+    if (!item) throw new Error('no "Organization" item in the account menu');
+    item.click();
+  });
+  await page.waitForSelector('#gd-operate-nav button[data-section="' + section + '"]',
+                             {timeout: 30000});
+  const up = () => page.evaluate((s) => {
+    const el = document.querySelector('#gd-operate-panels > [data-section="' + s + '"]');
+    if (!el || el.hasAttribute('hidden')) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }, section);
+  for (let i = 0; i < 10 && !(await up()); i++) {
+    await page.evaluate((s) => {
+      document.querySelector('#gd-operate-nav button[data-section="' + s + '"]')?.click();
+    }, section);
+    await page.waitForTimeout(1000);
+  }
+  if (!await up()) {
+    throw new Error('Operate → ' + section + ' did not open');
+  }
+}
+
+
+// Avatar → “Settings” — the account surface lessons 19 and 29 point at.
+async function openAccountSettings(page) {
+  await openAccountMenu(page);
+  await page.evaluate(() => {
+    const item = Array.from(document.querySelectorAll('.auth-menu-item'))
+      .find((b) => /settings/i.test(b.textContent));
+    if (!item) throw new Error('no "Settings" item in the account menu');
+    item.click();
+  });
+  await page.waitForSelector('#gd-acct-idents', {timeout: 30000});
+}
+
+
 async function createRecordType(page, nsPath, typeName, fields) {
   await page.waitForSelector('.ns-header[data-ns-path="' + nsPath + '"]',
     {timeout: 30000});
@@ -777,5 +839,5 @@ module.exports = {
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, bindFnRefPlaceholder,
   bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
-  createRecordType,
+  createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
 };

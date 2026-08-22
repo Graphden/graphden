@@ -169,6 +169,20 @@ function _tourUnderSheet(selector) {
     && r.right > sheet.left && r.left < sheet.right;
 }
 
+// The panel a target sits in — the region the popover must not cover, since
+// the reader has to keep using it. Today that is the Explorer sidebar and the
+// operations surface; both are wide, scrolling regions whose contents ARE the
+// step's subject. Returns a DOMRect or null.
+function _tourPanelOf(target) {
+  if (!target) return null;
+  const panel = target.closest('#side-menu, #gd-operate-panels, #gd-shell-surface');
+  if (!panel) return null;
+  const r = panel.getBoundingClientRect();
+  // Only worth avoiding if it is actually a panel-sized region on screen.
+  return (r.width > 160 && r.height > 160) ? r : null;
+}
+
+
 function _tourPosition() {
   if (!_tourEls || !_tourState) return;
   const step = _tourStep();
@@ -204,7 +218,16 @@ function _tourPosition() {
     // Popover: right of the target when it fits, else below, else above.
     const pw = pop.offsetWidth || 360;
     const ph = pop.offsetHeight || 180;
-    let left = rect.right + 16;
+    // Clear of the PANEL the target lives in, not merely of the target. A
+    // step that rings the Explorer's filter box put the popover 16px to the
+    // right of a ~250px-wide input — i.e. straight over the list of results
+    // the same step tells the reader to click. Thirty-five steps across the
+    // tutorial anchor into that sidebar, and every guard walked them anyway
+    // because a guard clicks by selector; a person cannot. Where there is
+    // room, start after the panel.
+    const panel = _tourPanelOf(target);
+    let left = Math.max(rect.right + 16,
+                        panel ? panel.right + 16 : 0);
     let top = rect.top;
     if (left + pw > window.innerWidth - 12) {
       left = Math.min(Math.max(12, rect.left), window.innerWidth - pw - 12);
@@ -266,6 +289,20 @@ function _tourTick() {
       && typeof toggleCollapsed === 'function') {
     _tourState._expandedFor = _tourState.step;
     try { toggleCollapsed(false); } catch (_) { /* stay collapsed */ }
+  }
+  // A LENS the reader left on can hide the very fn the step names. The row
+  // is in the DOM, `hidden`, and the step's check will never pass — the
+  // popover just says "advances automatically when done" forever. Same dead
+  // end as a collapsed Explorer, same treatment: clear the lens once per
+  // step, and only when the fn this step is waiting for is the one hidden.
+  // (Lessons 22 / 23, where the lens IS the subject, name no fn in their
+  // checks, so they are untouched.)
+  if (_tourState._lensClearedFor !== _tourState.step) {
+    const wanted = step.check?.name;
+    if (wanted && typeof toggleKindLens === 'function' && _tourFnRowHidden(wanted)) {
+      _tourState._lensClearedFor = _tourState.step;
+      try { toggleKindLens('all'); } catch (_) { /* leave the lens alone */ }
+    }
   }
   // Still out of view (a long namespace list, a short window, or — on a
   // phone — under the sheet)? Bring it in: a spotlight the reader cannot

@@ -1,5 +1,10 @@
 // editor-tour-checks.js — the tour's step-completion predicates.
 //
+// graph-first-exception: every predicate here reads LIVE client state — the
+// lexical graph the editor rendered from, the current selection, the DOM, the
+// branch in the URL. There is nothing for a server to render; the step's
+// CONTENT (which check, with which argument) is graph data already.
+//
 // A lesson step carries a declarative `:check`; this file turns it into a
 // predicate over the editor's own state. Split out of editor-tour.js so the
 // vocabulary can be unit-tested without a browser (tools/runtime-test/
@@ -48,6 +53,20 @@ function _tourDomVisible(selector) {
   for (const el of document.querySelectorAll(selector)) {
     const r = el.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) return true;
+  }
+  return false;
+}
+
+
+// Is `name`'s Explorer row present but hidden by the kind lens? (A row that
+// is simply not rendered yet is NOT this case — that is the filter box's job,
+// and the step tells the reader to type there.)
+function _tourFnRowHidden(name) {
+  const list = document.getElementById('entity-list');
+  if (!list) return false;
+  for (const el of list.querySelectorAll('.entity-item')) {
+    const label = el.querySelector('.name');
+    if (label && label.textContent.trim() === name) return el.hasAttribute('hidden');
   }
   return false;
 }

@@ -723,8 +723,8 @@
                :target "button.more-actions-trigger"
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Open Errors"
-               :body "Avatar → “Organization” → “Errors”. The panel lists your org's failed runs from the last 7 days, newest first — the fn as a link, when it finished, and the message."
-               :target ".auth-avatar"
+               :body "Account button (top right) → “Organization” → “Errors”. The panel lists your org's failed runs from the last 7 days, newest first — the fn as a link, when it finished, and the message."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"errors\"]:not([hidden])"}}
               {:title "Read the row"
                :body "Your run is at the top. Expand “details” — the error DATA is there too, carrying the typed :validation-error/malformed-json a client would have received. Both were scrubbed when the row was written, not when it was shown, so nothing secret is waiting here."
@@ -853,8 +853,8 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open Assets"
-               :body "Click your avatar → “Organization” → “Assets”. Every servable frontend file is listed with a chip: baseline means the shipped file is serving, override means yours is."
-               :target ".auth-avatar"
+               :body "Account button (top right — a lock icon on a self-hosted instance) → “Organization” → “Assets”. Every servable frontend file is listed with a chip: baseline means the shipped file is serving, override means yours is."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"assets\"]:not([hidden])"}}
               {:title "Open the stylesheet"
                :body "Find packages/app/editor/editor-styles.css in the list and click its “edit”. The file opens in a code editor — the same one a :js-source slot gets."
@@ -931,8 +931,8 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open the Organization surface"
-               :body "Click your avatar (top right) and choose “Organization”. It is a settings surface with one section list: Members, Grants, Roles, and the operational panels."
-               :target ".auth-avatar"
+               :body "Click the account button in the top-right corner (your avatar, or a lock icon on a self-hosted instance) and choose “Organization”. It is a settings surface with one section list: Members, Grants, Roles, and the operational panels."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-operate-nav button[data-section=\"users\"]"}}
               {:title "Members"
                :body "Click “Members”. The table lists everyone in the org — you are the owner, which is the one role nobody can take away except by transferring it."
@@ -964,8 +964,8 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open Grants"
-               :body "Avatar → “Organization” → “Grants”. The table is every grant in this org: subject, capability, namespace. Your own admin row is there — that is what makes you the owner in practice."
-               :target ".auth-avatar"
+               :body "Account button (top right) → “Organization” → “Grants”. The table is every grant in this org: subject, capability, namespace. Your own admin row is there — that is what makes you the owner in practice."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"grants\"]:not([hidden])"}}
               {:title "Grant a namespace"
                :body "In the form: put an email in Subject (the teammate you invited, or your own address), pick read as the capability, type examples as the namespace — then “+ Add grant”. The new row appears in the table."
@@ -1011,8 +1011,8 @@
                :target ".placeholder-binder"
                :check {:kind "binding-bound" :name "tutorial-page" :slot "value"}}
               {:title "Open Apps"
-               :body "Avatar → “Organization” → “Apps”. The table lists every app this org serves: its subdomain label, and the fn behind it."
-               :target ".auth-avatar"
+               :body "Account button (top right) → “Organization” → “Apps”. The table lists every app this org serves: its subdomain label, and the fn behind it."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"apps\"]:not([hidden])"}}
               {:title "Publish it"
                :body "In the form: subdomain tutorial, and for the fn type its NAME — tutorial-page (an id works too; qualify the name as ns.name if it isn't unique). Click “+ Add app”. The row appears, and the app is live immediately — the host answers from the graph as it stands."
@@ -1077,8 +1077,8 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open Roles"
-               :body "Avatar → “Organization” → “Roles”. The panel is gated on manage-roles, which an org owner holds implicitly — that is what owning the org means."
-               :target ".auth-avatar"
+               :body "Account button (top right) → “Organization” → “Roles”. The panel is gated on manage-roles, which an org owner holds implicitly — that is what owning the org means."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"roles\"]:not([hidden])"}}
               {:title "Create one"
                :body "Name it support and tick manage-users, then Create. The checkboxes ARE the vocabulary — those five capabilities are the whole org-management axis, so there is no free-text field to get wrong."
@@ -1191,8 +1191,8 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open Settings"
-               :body "Click your avatar (top right) and choose “Settings”. Below the appearance controls sits your account card — the same page as /account, folded into the editor."
-               :target ".auth-avatar"
+               :body "Click the account button in the top-right corner and choose “Settings”. Below the appearance controls sits your account card — the same page as /account, folded into the editor."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-acct-idents"}}
               {:title "How you sign in"
                :body "“Sign-in methods” lists what is attached to this account — a password, and any social provider you linked. Adding a second method is how you avoid being locked out by one; removing the last one is refused."
@@ -1211,8 +1211,8 @@
                :target "#gd-acct-toks"
                :check {:kind "manual"}}
               {:title "Leaving"
-               :body "The avatar menu's “Sign out” ends this session; “Sign out everywhere” ends every session of this account on every device — the move to make if a laptop goes missing. The written lesson 19 covers signing up, email verification and password reset, which happen before you ever reach this editor. Click Finish."
-               :target ".auth-avatar"
+               :body "The account menu's “Sign out” ends this session; “Sign out everywhere” ends every session of this account on every device — the move to make if a laptop goes missing. The written lesson 19 covers signing up, email verification and password reset, which happen before you ever reach this editor. Click Finish."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "manual"}}]}
             {:id "18"
              :chapter "Your organization"
@@ -1224,8 +1224,8 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Where usage shows"
-               :body "Open your avatar → “Organization” → “Monitoring”. Runs, failures and average duration for the window you pick — counts and durations only, never arguments or results."
-               :target ".auth-avatar"
+               :body "Account button (top right) → “Organization” → “Monitoring”. Runs, failures and average duration for the window you pick — counts and durations only, never arguments or results."
+               :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"stats\"]:not([hidden])"}}
               {:title "The fn ceiling"
                :body "Back on the canvas, a capped plan shows a small “fns: N / cap” badge above the Explorer's list — the heads-up before the cap, not after. An uncapped plan (dedicated, or your own instance) shows nothing there, which is itself the answer."

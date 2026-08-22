@@ -211,6 +211,37 @@ test('arg-named reads the edge label — the rename has no other client trace', 
                  { kind: 'arg-named', arg: 'greeting' }) === false, 'label absent');
 });
 
+test('_tourFnRowHidden spots a row the LENS is hiding, not one absent', () => {
+  // The dead end this exists for: the fn is in the Explorer, `hidden` because
+  // the reader left the `tests` lens on, and the step's check waits forever
+  // while the popover says "advances automatically when done".
+  const rowSet = (name, hidden) => ({
+    querySelectorAll: () => [{
+      querySelector: () => ({ textContent: name }),
+      hasAttribute: (a) => a === 'hidden' && hidden,
+    }],
+  });
+  const probe = (state) => {
+    const ctx = vm.createContext({
+      console,
+      document: {
+        getElementById: () => state,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+      },
+      window: { location: { search: '' } },
+      URLSearchParams,
+    });
+    vm.runInContext(source, ctx);
+    return ctx._tourFnRowHidden('greet');
+  };
+  assert(probe(rowSet('greet', true)) === true, 'a hidden row reports hidden');
+  assert(probe(rowSet('greet', false)) === false, 'a visible row does not');
+  assert(probe(rowSet('other', true)) === false,
+         'a DIFFERENT fn being hidden is not this fn\'s problem');
+  assert(probe(null) === false, 'no Explorer at all → false, never a throw');
+});
+
 console.log(failures ? `\n✗ tour-checks: ${failures} failed, ${passes} passed`
                      : `\n✓ tour-checks: ${passes} assertions`);
 process.exit(failures ? 1 : 0);

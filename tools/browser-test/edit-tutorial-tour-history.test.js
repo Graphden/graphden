@@ -20,7 +20,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
-  extendViaRowActions, finishAndDelete,
+  extendViaRowActions, finishAndDelete, openOperateSection,
 } = require('./tutorial-tour-helpers');
 
 
@@ -110,29 +110,6 @@ async function openVersionHistory(page) {
 }
 
 
-// Operate → <section>, the way four lessons now tell the reader to.
-async function openOperateSection(page, section) {
-  await page.evaluate(() => { window.location.hash = '@organization'; });
-  await page.waitForSelector('#gd-operate-nav button[data-section="' + section + '"]',
-                             {timeout: 30000});
-  const up = () => page.evaluate((s) => {
-    const el = document.querySelector('#gd-operate-panels > [data-section="' + s + '"]');
-    if (!el || el.hasAttribute('hidden')) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
-  }, section);
-  // The nav re-renders as the surface opens, so one click can land before
-  // the handler is bound.
-  for (let i = 0; i < 10 && !(await up()); i++) {
-    await page.evaluate((s) => {
-      document.querySelector('#gd-operate-nav button[data-section="' + s + '"]')?.click();
-    }, section);
-    await page.waitForTimeout(1000);
-  }
-  assert(await up(), 'Operate → ' + section + ' opened');
-}
-
-
 (async () => {
   const {browser, page} = await newContext(chromium);
   page.on('console', (m) => {
@@ -192,9 +169,20 @@ async function openOperateSection(page, section) {
     assert(await clickTourButton(page, 'Next'), 'lesson 28 restored Next');
 
     await waitTourTitle(page, 'History is append-only', 30000);
+    // Re-open the popover and let the NEW row land: the restore's write and
+    // the popover's fetch are separate round trips, so a single read can
+    // catch the pre-restore list and report "nothing was appended" about a
+    // write that did happen.
     await openVersionHistory(page);
-    const after = await page.evaluate(() =>
-      document.querySelectorAll('.fn-versions-row').length);
+    let after = 0;
+    for (let i = 0; i < 10; i++) {
+      after = await page.evaluate(() =>
+        document.querySelectorAll('.fn-versions-row').length);
+      if (after > before) break;
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(1000);
+      await openVersionHistory(page);
+    }
     assert(after === before + 1,
       'the restore APPENDED a version rather than removing any ('
       + before + ' → ' + after + ')');

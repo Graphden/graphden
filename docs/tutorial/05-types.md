@@ -326,7 +326,7 @@ real names instead of trusting your memory.
 aggregate type-check fails still lands; the failure is recorded
 as a per-branch diagnostic. You see it as: the ⚠ badge on the
 fn-card's root row, the per-branch **Type errors** section on the
-**Organization** surface (open it from your avatar's menu) listing every
+**Organization** surface (open it from the account menu) listing every
 flagged fn (click-through to the fn), per-namespace
 ⚠ counts on the explorer tree rows, and a REFUSAL when you try to
 execute the fn (clear message naming the fn and the first error).

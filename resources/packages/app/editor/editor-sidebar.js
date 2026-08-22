@@ -856,6 +856,11 @@ function clearSearch() {
 // Lens-chip click (from the #kind-filters buttons). "all" clears the lens;
 // a kind chip toggles its membership; focusing down to the last selected
 // kind and clicking it again also returns to All. Persists + re-renders.
+// Exposed for the interactive tutorial: a step whose check names a fn the
+// reader's lens is hiding would otherwise wait forever on a row they cannot
+// see (editor-tour.js `_tourFnRowHidden`).
+window.toggleKindLens = (kind) => toggleKind(kind);
+
 function toggleKind(kind) {
   if (kind === 'all') lensKinds.clear();
   else if (lensKinds.has(kind)) lensKinds.delete(kind);

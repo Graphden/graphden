@@ -17,7 +17,16 @@
    lesson 01) and the counters map is process-global and unbounded, so a
    caller that could name its own key would be a memory-growth vector.
    Two digits, a three-value enum and a bounded step index can only ever
-   produce a bounded set of names."
+   produce a bounded set of names.
+
+   Why the checks are HERE and not graph composition (`:re-find?` +
+   `:contains?` in the route, over a `:count!` primitive that takes a
+   name): the bound has to hold for every caller of the base-fn, not
+   just for this route. The counters map is shared by every org on a
+   shard, so a fn-def any tenant AUTHOR composes could otherwise grow it
+   without limit. Keeping the key construction inside the boundary is
+   what makes the key space finite no matter who calls — the one case
+   where a base-fn legitimately holds policy."
   (:require
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]

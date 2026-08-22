@@ -78,7 +78,7 @@ Traces of manual runs cover fns you can call from the Run popover.
 For a **web handler** you usually want the real thing: the actual
 HTTP request, with its params and headers. That's the trap:
 
-1. Open **Operate → Debug** (avatar menu → Organization, or the
+1. Open **Operate → Debug** (account menu → Organization, or the
    `@organization` hash).
 2. Optionally type a path prefix (e.g. `/shop`) — empty catches the
    next request to any app path (the editor's own `/api/…` and

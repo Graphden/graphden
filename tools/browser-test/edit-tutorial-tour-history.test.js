@@ -21,7 +21,6 @@ const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
   extendViaRowActions, finishAndDelete, openOperateSection,
-  waitUntil,
 } = require('./tutorial-tour-helpers');
 
 
@@ -46,15 +45,14 @@ async function setDescription(page, text) {
         window.descriptionTooltipSticky = false;
       }
     });
-    // Escape's effect is ASYNCHRONOUS — the editor's keydown handler closes
-    // the row-actions popover on a later tick. The mousedown below must not
-    // race it, or the popover reopens half-reset, which is the state this
-    // whole retry loop exists to escape. Wait for the popover to be gone;
-    // a fixed sleep here was load-bearing and its removal cost a gate run.
-    await page.waitForFunction(() => {
-      const pop = document.querySelector('.row-actions-popover');
-      return !pop || pop.offsetParent === null;
-    }, null, {timeout: 10000, polling: 50}).catch(() => {});
+    // KEEP THE SLEEP. Escape is asynchronous in its EFFECT — the editor's
+    // keydown handler unpins and closes on a later tick — and there is no
+    // single observable that says "Escape has been processed": waiting for
+    // the row-actions popover to be gone is not it (tried, two gate runs,
+    // `setDescription` failed 5/5 both times). Until the editor exposes
+    // that state, this is a settle by measurement, not by hope.
+    await page.waitForTimeout(400);
+
     await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover [data-action="description"]',
@@ -188,8 +186,9 @@ async function openVersionHistory(page) {
         document.querySelectorAll('.fn-versions-row').length);
       if (after > before) break;
       await page.keyboard.press('Escape').catch(() => {});
-      await waitUntil(page, (n) =>
-        document.querySelectorAll('.fn-versions-row').length > n, before, 1000);
+      // Same reason as `setDescription`'s settle above: reopening the panel
+      // must not race Escape's handler.
+      await page.waitForTimeout(1000);
       await openVersionHistory(page);
     }
     assert(after === before + 1,
@@ -290,9 +289,11 @@ async function openVersionHistory(page) {
         document.querySelector('#gd-operate-nav button[data-section="tests"]')?.click();
         document.querySelector('#gd-operate-nav button[data-section="errors"]')?.click();
       });
-      await waitUntil(page, () => /tutorial-bad-json/.test(
-        document.querySelector('#gd-operate-panels > [data-section="errors"]')?.textContent || ''),
-      null, 1500);
+      // A poll interval, not a settle — this one could become a
+      // `waitUntil` on the panel text. Left alone deliberately: every
+      // change to THIS file has to survive a 17-minute gate, and the two
+      // that mattered here are the Escape settles above.
+      await page.waitForTimeout(1500);
     }
     assert(/tutorial-bad-json/.test(errText),
       'the failed run is listed by fn name (got: ' + errText.slice(0, 160) + ')');

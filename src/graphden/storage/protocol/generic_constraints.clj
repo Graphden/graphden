@@ -19,23 +19,32 @@
     [graphden.storage.protocol.core :as sp]))
 
 
-;; Operators / kind heads inside a constraint vector — must mirror
-;; the set in `crud.impls/constraint-op-keywords` so write-time and
-;; chain-walk views of "which keywords inside a constraint vector
-;; are type-row references" agree.
-(def ^:private constraint-op-keywords
+;; Operators / kind heads inside a constraint vector. The write-time
+;; check (`crud.validation`) and this chain walk MUST agree on "which
+;; keywords inside a constraint vector are type-row references", so
+;; there is exactly one set — it lives here, the lower layer, and CRUD
+;; reads it from here. A new constraint operator added to only one of
+;; two copies used to leave the cycle walker blind to half the
+;; references it should follow.
+(def constraint-op-keywords
   #{:union :variant :fn :refine :map :tuple :and :or :not
     :> :>= :< :<= := :not= :matches :in :exists :every})
 
 
-(defn- constraint-type-ref-names
-  "Walk a constraint vector and collect every keyword that could be
-   a type-row name (bare-name strings, minus the operators). Same
-   shape as the CRUD-side helper. Variant tag keywords that happen
-   to share a name with a type-row will over-include — that means
-   the cycle-walker may visit unrelated fns, but it never causes a
-   false positive on the cycle itself (visiting a fn only adds it
-   to the dependency closure, doesn't claim a cycle exists)."
+(defn constraint-type-ref-names
+  "Walk a constraint vector and collect every keyword nested anywhere
+   inside it as a bare-name string set, minus the operator heads in
+   `constraint-op-keywords`. Finds the type-row references hidden in
+   `[:union T1 T2 …]` / `[:variant :tag1 T1 …]` / `[:fn {…} T]` shapes
+   — those are stored as keywords, NOT FK columns, so an FK-only walker
+   misses them.
+
+   Deliberately over-inclusive: a variant TAG that happens to share a
+   name with a type-row is collected too. For the cycle walker that
+   only means visiting an unrelated fn (it widens the dependency
+   closure, it never claims a cycle that isn't there); for the
+   write-time check it can only over-reject, and under-rejection would
+   let real cycles through."
   [c]
   (let [walk (fn walk
                [x acc]

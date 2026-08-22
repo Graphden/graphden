@@ -49,29 +49,6 @@
 
 
 ;; ============================================================================
-;; constraint-type-ref-names — pure
-;; ============================================================================
-
-(deftest constraint-type-ref-names-test
-  (testing "union branches surface as bare-name strings, op head dropped"
-    (is (= #{"my-int" "my-text"}
-           (v/constraint-type-ref-names [:union :my-int :my-text]))))
-
-  (testing "refine — base name kept, atomic op + literal dropped"
-    (is (= #{"int"} (v/constraint-type-ref-names [:refine :int [:> 0]]))))
-
-  (testing "fn-type — names buried in the args-map and ret are found"
-    (is (= #{"my-arg-type" "my-ret"}
-           (v/constraint-type-ref-names [:fn {:req :my-arg-type} :my-ret]))))
-
-  (testing "compound of pure ops + numbers → empty set"
-    (is (= #{} (v/constraint-type-ref-names [:and [:> 0] [:< 10]]))))
-
-  (testing "nil / non-collection → empty set"
-    (is (= #{} (v/constraint-type-ref-names nil)))))
-
-
-;; ============================================================================
 ;; cycle-check-pair
 ;; ============================================================================
 

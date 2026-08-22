@@ -64,17 +64,18 @@
       (MessageDigest/isEqual (String/.getBytes a "UTF-8") (String/.getBytes b "UTF-8")))))
 
 
-(defn fixed-window-limiter
-  "A per-key fixed-window rate limiter: `(fn [key] → allowed?)`, at most
-   `max-attempts` per `window-ms`. In-memory (per process); denied attempts
+(defn per-key-fixed-window-limiter
+  "A per-key fixed-window rate limiter whose cap is supplied PER CALL:
+   `(fn [key max-attempts] → allowed?)`, so keys carrying different limits
+   can share one window state. In-memory (per process); denied attempts
    don't grow the window, and fully-idle keys are swept at most once per
    window so the map stays bounded by ACTIVE keys. Atomic test-and-record —
    a separate read-then-swap would let two concurrent attempts both pass
    under the cap."
-  [max-attempts window-ms]
+  [window-ms]
   (let [state (atom {})
         last-prune (atom 0)]
-    (fn [key]
+    (fn [key max-attempts]
       (let [now (System/currentTimeMillis)
             cutoff (- now window-ms)
             prune (fn [ts] (filterv #(> % cutoff) ts))]
@@ -93,3 +94,11 @@
                                                        (conj recent now)
                                                        recent)))))]
           (> (count (get new key)) (count (prune (get old key)))))))))
+
+
+(defn fixed-window-limiter
+  "The fixed-cap case of `per-key-fixed-window-limiter`: `(fn [key] →
+   allowed?)`, at most `max-attempts` per `window-ms` for every key."
+  [max-attempts window-ms]
+  (let [limiter (per-key-fixed-window-limiter window-ms)]
+    (fn [key] (limiter key max-attempts))))

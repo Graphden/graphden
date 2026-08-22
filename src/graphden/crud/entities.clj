@@ -13,6 +13,8 @@
     [clojure.set]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.entities.seq :as seq-ops]
+    [graphden.crud.entities.tighten :as tighten]
     [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
@@ -1712,83 +1714,24 @@
 ;; focused on the generic CRUD + record/list-type + delete chains.
 ;; External callers (notably `web/crud/impls.clj` and
 ;; `crud/entities_test.clj`) reach them via the historical
-;; `entities/<sym>` surface, so each public symbol is mirrored here
-;; as a thin defn that delegates to the sub-namespace's impl.
+;; `entities/<sym>` surface, so each public symbol is re-exported here
+;; as a Var — the same facade pattern `types.core` uses for
+;; `types.core.shapes`. New code can require the sub-ns directly.
 ;;
-;; `requiring-resolve` not a top-of-file require: the sub-nses
-;; themselves `(:require [graphden.crud.entities :as entities])` to
-;; call `entities/invalidate!` + `entities/html-error-response`, so a
-;; top-of-file require here would cycle. Resolve lazily — first
-;; invocation pays the require cost, subsequent calls hit the Var
-;; deref directly.
+;; These were 12 `requiring-resolve` wrappers when the sub-nses still
+;; required this one back; they don't any more, so the lazy resolve
+;; (and its per-call Var lookup on the write path) is gone.
 
-(defn find-sequence-binding
-  [ctx fn-id]
-  ((requiring-resolve 'graphden.crud.entities.seq/find-sequence-binding)
-   ctx fn-id))
+(def find-sequence-binding     seq-ops/find-sequence-binding)
+(def resolve-sequence-payload  seq-ops/resolve-sequence-payload)
+(def find-seq-append-binding   seq-ops/find-seq-append-binding)
+(def apply-seq-append-core     seq-ops/apply-seq-append-core)
+(def load-seq-remove-item      seq-ops/load-seq-remove-item)
+(def load-seq-update-item      seq-ops/load-seq-update-item)
+(def apply-seq-update-core     seq-ops/apply-seq-update-core)
+(def apply-seq-move-core       seq-ops/apply-seq-move-core)
 
-
-(defn resolve-sequence-payload
-  [storage body]
-  ((requiring-resolve 'graphden.crud.entities.seq/resolve-sequence-payload)
-   storage body))
-
-
-(defn find-seq-append-binding
-  [parsed ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/find-seq-append-binding)
-   parsed ctx))
-
-
-(defn apply-seq-append-core
-  [parsed seq-binding ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-append-core)
-   parsed seq-binding ctx))
-
-
-(defn load-seq-remove-item
-  [parsed ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/load-seq-remove-item)
-   parsed ctx))
-
-
-(defn load-seq-update-item
-  [parsed ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/load-seq-update-item)
-   parsed ctx))
-
-
-(defn apply-seq-update-core
-  [parsed item ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-update-core)
-   parsed item ctx))
-
-
-(defn apply-seq-move-core
-  [parsed item ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-move-core)
-   parsed item ctx))
-
-
-(defn commit-tighten!
-  [storage binding-id b new-c effects-vec]
-  ((requiring-resolve 'graphden.crud.entities.tighten/commit-tighten!)
-   storage binding-id b new-c effects-vec))
-
-
-(defn tighten-fn-type-impl!
-  [storage binding-id delta]
-  ((requiring-resolve 'graphden.crud.entities.tighten/tighten-fn-type-impl!)
-   storage binding-id delta))
-
-
-(defn tighten-effects-impl!
-  [storage binding-id effects-vec]
-  ((requiring-resolve 'graphden.crud.entities.tighten/tighten-effects-impl!)
-   storage binding-id effects-vec))
-
-
-(defn apply-tighten-core
-  [parsed ctx]
-  ((requiring-resolve 'graphden.crud.entities.tighten/apply-tighten-core)
-   parsed ctx))
+(def commit-tighten!           tighten/commit-tighten!)
+(def tighten-fn-type-impl!     tighten/tighten-fn-type-impl!)
+(def tighten-effects-impl!     tighten/tighten-effects-impl!)
+(def apply-tighten-core        tighten/apply-tighten-core)

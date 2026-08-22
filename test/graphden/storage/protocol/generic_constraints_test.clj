@@ -12,6 +12,29 @@
 (use-fixtures :once (setup/create-container-fixture))
 
 
+;; ============================================================================
+;; constraint-type-ref-names — pure
+;; ============================================================================
+
+(deftest constraint-type-ref-names-test
+  (testing "union branches surface as bare-name strings, op head dropped"
+    (is (= #{"my-int" "my-text"}
+           (gc/constraint-type-ref-names [:union :my-int :my-text]))))
+
+  (testing "refine — base name kept, atomic op + literal dropped"
+    (is (= #{"int"} (gc/constraint-type-ref-names [:refine :int [:> 0]]))))
+
+  (testing "fn-type — names buried in the args-map and ret are found"
+    (is (= #{"my-arg-type" "my-ret"}
+           (gc/constraint-type-ref-names [:fn {:req :my-arg-type} :my-ret]))))
+
+  (testing "compound of pure ops + numbers → empty set"
+    (is (= #{} (gc/constraint-type-ref-names [:and [:> 0] [:< 10]]))))
+
+  (testing "nil / non-collection → empty set"
+    (is (= #{} (gc/constraint-type-ref-names nil)))))
+
+
 (deftest validate-no-dependency-cycle-test
   (testing "a nil ref and two unrelated fns → nil (no cycle)"
     (let [storage (setup/create-test-storage)]

@@ -234,62 +234,22 @@
           args)))
 
 
-(defn resolve-slot-owner-strict
-  "Same as `resolve-slot-owner` but returns nil when no concrete
-   inheritance/ref hit is found. Used by recursive calls that must
-   NOT fall back to a primary-parent guess; the OUTER call applies
-   that fallback only once."
-  [composed-fn-name arg-name defs-by-name seen]
-  (when (and (not (contains? seen [composed-fn-name arg-name]))
-             (get defs-by-name composed-fn-name))
-    (let [seen' (conj seen [composed-fn-name arg-name])
-          chain (chain-of composed-fn-name defs-by-name)
-          inheritance-hit
-          (some (fn [name-in-chain]
-                  (let [ancestor (get defs-by-name name-in-chain)]
-                    (cond
-                      (contains? (type-row-arg-names ancestor) arg-name)
-                      [name-in-chain arg-name]
-
-                      ;; Passthrough rename `{:as X :ref Y}`: arg-name
-                      ;; is just being re-exposed from Y's tree. Recurse
-                      ;; into Y so the actual deepest owner wins.
-                      (rename-passthrough-ref ancestor arg-name)
-                      (resolve-slot-owner-strict
-                        (rename-passthrough-ref ancestor arg-name)
-                        arg-name defs-by-name seen')
-
-                      ;; Pure `{:as X}` rename (no ref) — this ancestor
-                      ;; owns the rename slot.
-                      (rename-target ancestor arg-name)
-                      [name-in-chain arg-name]
-
-                      :else nil)))
-                chain)]
-      (or inheritance-hit
-          ;; Walk ref-targets from FURTHEST ancestor (parent chain)
-          ;; INWARD. The slot is more likely to be defined on a base-fn
-          ;; that an ancestor refs into than on a deep ref-tree of the
-          ;; composed-def itself. E.g. `:_app-ring-response :args
-          ;; {:func :_router}` — :func is defined by `:invoke` which
-          ;; :router-ring-response (an ANCESTOR) refs through
-          ;; :router-result. Walking own ref-targets first would dive
-          ;; into the routes tree and hit some unrelated `:map`/`:reduce`
-          ;; fn-row's :func slot.
-          (some (fn [name-in-chain]
-                  (let [ancestor (get defs-by-name name-in-chain)]
-                    (some (fn [ref-name]
-                            (resolve-slot-owner-strict ref-name arg-name
-                                                       defs-by-name seen'))
-                          (ref-targets-of ancestor defs-by-name))))
-                (reverse chain))))))
+(declare resolve-slot-owner-strict)
 
 
 (defn- resolve-slot-owner-strict-inheritance
-  "Inheritance pass only — same as `resolve-slot-owner-strict`'s
-   first pass but without falling through to the ref-targets pass.
-   Used by `resolve-slot-owner` to collect inheritance + ref hits
-   independently for type-based disambiguation."
+  "Inheritance pass — walk the parent chain and return the ancestor
+   that OWNS `arg-name`, as `[owner-name arg-name]`, or nil.
+
+   Three ways an ancestor can own it: it declares the slot itself, it
+   exposes a pure `{:as X}` rename (the rename slot is ITS identity),
+   or it exposes a passthrough rename `{:as X :ref Y}` — in which case
+   `arg-name` is only being re-exposed from Y's tree, so recurse into Y
+   (full strict resolve, not just inheritance) and let the deepest real
+   owner win.
+
+   Separate from the ref pass because `resolve-slot-owner` needs the
+   two sets of candidates independently for type-based disambiguation."
   [composed-fn-name arg-name defs-by-name seen]
   (when (and (not (contains? seen [composed-fn-name arg-name]))
              (get defs-by-name composed-fn-name))
@@ -314,10 +274,16 @@
 
 
 (defn- resolve-slot-owner-strict-refs
-  "Ref-targets pass only — finds slot owners reachable via the
-   data-flow tree (`:ref` bindings, `:items [:fn-ref]`). Used by
-   `resolve-slot-owner` to collect candidates separately from
-   inheritance for type-based disambiguation."
+  "Ref-targets pass — finds slot owners reachable via the data-flow
+   tree (`:ref` bindings, `:items [:fn-ref]`), or nil.
+
+   Walked from the FURTHEST ancestor INWARD: the slot is more likely
+   defined on a base-fn an ancestor refs into than on a deep ref-tree of
+   the composed def itself. E.g. `:_app-ring-response :args {:func
+   :_router}` — `:func` is defined by `:invoke`, which
+   `:router-ring-response` (an ANCESTOR) refs through `:router-result`.
+   Walking own ref-targets first would dive into the routes tree and hit
+   some unrelated `:map` / `:reduce` fn-row's `:func` slot."
   [composed-fn-name arg-name defs-by-name seen]
   (when (and (not (contains? seen [composed-fn-name arg-name]))
              (get defs-by-name composed-fn-name))
@@ -330,6 +296,20 @@
                                                    defs-by-name seen'))
                       (ref-targets-of ancestor defs-by-name))))
             (reverse chain)))))
+
+
+(defn resolve-slot-owner-strict
+  "Same as `resolve-slot-owner` but returns nil when no concrete
+   inheritance/ref hit is found. Used by recursive calls that must
+   NOT fall back to a primary-parent guess; the OUTER call applies
+   that fallback only once.
+
+   Inheritance wins over the data-flow tree — see each pass for why."
+  [composed-fn-name arg-name defs-by-name seen]
+  (or (resolve-slot-owner-strict-inheritance composed-fn-name arg-name
+                                             defs-by-name seen)
+      (resolve-slot-owner-strict-refs composed-fn-name arg-name
+                                      defs-by-name seen)))
 
 
 (defn- value-return-type

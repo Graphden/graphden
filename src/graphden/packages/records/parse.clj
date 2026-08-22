@@ -1193,6 +1193,39 @@
                                                   (normalize-qualified-type-ref ret name->id module-ns)])))))
 
 
+(defn- build-name->id
+  "`{name → fn-id}` for every NAMED def, seeded with `extra` (names
+   known from prior syncs).
+
+   DUAL-keyed: each def lands under its bare name AND its
+   namespace-qualified form (`:core.strings/upper`), so a qualified ref
+   resolves through the same map + `contains?` fail-loud path as a bare
+   one — qualified refs don't depend on global name uniqueness
+   (per-ns migration stage 4, ADR-identity-model.md). The qualified key
+   is ALWAYS present: string ns paths as-is (incl. `@`-materialized,
+   constructible even though unprintable), ROOT (nil) ns as the empty-ns
+   spelling `(keyword \"\" name)`, so a `#graphden/ref \"/name\"` wire ref
+   resolves like any other qualified ref.
+
+   A bare name claimed by two namespaces resolves to `ambiguous-name`
+   under the bare key; its qualified keys still resolve."
+  [extra module-fn-defs]
+  (reduce
+    (fn [m fd]
+      (if-not (:name fd)
+        m
+        (let [id (ids/fn-id (:namespace fd) (:name fd))
+              bare (:name fd)
+              existing (get m bare)]
+          (-> (assoc m bare
+                     (if (and existing (not= existing id))
+                       ambiguous-name
+                       id))
+              (assoc (keyword (or (:namespace fd) "") (name bare)) id)))))
+    extra
+    module-fn-defs))
+
+
 (defn parse-module
   "Parse fn-defs into records. Two passes:
    1. Pre-compute `name->id` (deterministic UUIDs) and `defs-by-name`
@@ -1227,29 +1260,7 @@
          ;; The validation map is dual-keyed from the RAW named defs
          ;; (+ prior syncs) — synthetic anon names are never the
          ;; target of a qualified ref.
-         pre-name->id (reduce
-                        (fn [m fd]
-                          (if-not (:name fd)
-                            m
-                            (let [id (ids/fn-id (:namespace fd) (:name fd))
-                                  bare (:name fd)
-                                  existing (get m bare)]
-                              ;; Qualified key ALWAYS present: string ns
-                              ;; paths as-is (incl. `@`-materialized —
-                              ;; constructible even though unprintable),
-                              ;; ROOT (nil) ns as the empty-ns spelling
-                              ;; `(keyword "" name)`, so a `#graphden/ref
-                              ;; "/name"` wire ref resolves like any
-                              ;; other qualified ref.
-                              (-> (assoc m bare
-                                         (if (and existing (not= existing id))
-                                           ambiguous-name
-                                           id))
-                                  (assoc (keyword (or (:namespace fd) "")
-                                                  (name bare))
-                                         id)))))
-                        extra-name->id
-                        module-fn-defs)
+         pre-name->id (build-name->id extra-name->id module-fn-defs)
          module-fn-defs (mapv #(normalize-qualified-refs % pre-name->id) module-fn-defs)
          ;; Pre-pass: lift every inline `{:parent X :args Y}` map in
          ;; arg-value position into a synthetic `_anon-<hash>` fn-def
@@ -1257,36 +1268,11 @@
          ;; then sees a longer list with all the anons as ordinary
          ;; named composed fn-defs.
          module-fn-defs (expand-inline-anons-in-module module-fn-defs)
-         ;; Every named fn-def — including `:fn-type` declarations —
-         ;; gets a deterministic fn-id by `(:namespace, :name)`.
-         ;; `:fn-type` rows carry their structural shape in
-         ;; `:constraint` (see parse-fn-def), so they take the
-         ;; standard name→id path.
-         ;; DUAL-keyed: every named def lands under its bare name AND
-         ;; its namespace-qualified form (`:core.strings/upper`), so a
-         ;; qualified ref resolves through the same map + `contains?`
-         ;; fail-loud path as a bare one. Qualified refs don't depend
-         ;; on global name uniqueness — per-ns migration stage 4
-         ;; (ADR-identity-model.md).
-         name->id (reduce
-                    (fn [m fd]
-                      (if-not (:name fd)
-                        m
-                        (let [id (ids/fn-id (:namespace fd) (:name fd))
-                              bare (:name fd)
-                              existing (get m bare)]
-                          ;; Same always-qualified keying as
-                          ;; `pre-name->id` above (root ns = empty-ns
-                          ;; spelling).
-                          (-> (assoc m bare
-                                     (if (and existing (not= existing id))
-                                       ambiguous-name
-                                       id))
-                              (assoc (keyword (or (:namespace fd) "")
-                                              (name bare))
-                                     id)))))
-                    extra-name->id
-                    module-fn-defs)
+         ;; Rebuilt over the EXPANDED list, so the synthetic anons get
+         ;; ids too. `:fn-type` declarations take the same name→id path
+         ;; as any other named def — their structural shape rides in
+         ;; `:constraint` (see `parse-fn-def`), not in the id.
+         name->id (build-name->id extra-name->id module-fn-defs)
          defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name module-fn-defs))
          ;; Inline `[:fn args ret]` references buried in fn-defs'
          ;; type-bearing fields produce anonymous fn-rows that the

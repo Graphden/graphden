@@ -11,6 +11,7 @@
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]
     [graphden.web.route-shape :as route-shape]))
@@ -332,43 +333,9 @@
       nil)))
 
 
-;; Operators / kind heads inside a constraint vector that are NOT
-;; type-row references — used by `constraint-type-ref-names` to
-;; filter them out. Anything else that looks like a keyword is
-;; treated as a candidate type-row name. False positives (e.g. a
-;; variant tag that happens to share a name with an existing type)
-;; only over-reject; under-rejection would let cycles slip through.
-(def constraint-op-keywords
-  #{:union :variant :fn :refine :map :tuple :and :or :not
-    :> :>= :< :<= := :not= :matches :in :exists :every})
-
-
-(defn constraint-type-ref-names
-  "Walk a constraint vector and collect every keyword nested anywhere
-   inside it as a bare-name string set, minus the operator heads in
-   `constraint-op-keywords`. Used to find type-row references hidden
-   in `[:union T1 T2 …]` / `[:variant :tag1 T1 …]` / `[:fn {…} T]`
-   shapes — those are stored as keywords, NOT FK columns, so the
-   FK-only cycle walker misses them."
-  [c]
-  (let [walk (fn walk
-               [x acc]
-               (cond
-                 (keyword? x)
-                 (if (constraint-op-keywords x)
-                   acc
-                   (conj acc (name x)))
-                 (map? x)
-                 (reduce-kv (fn [a _k v] (walk v a)) acc x)
-                 (sequential? x)
-                 (reduce (fn [a el] (walk el a)) acc x)
-                 :else acc))]
-    (walk c #{})))
-
-
 (defn resolve-constraint-refs-to-ids
   "Batched name → fn-id resolution for the set of bare-name strings
-   produced by `constraint-type-ref-names`. Names that don't resolve
+   produced by `gc/constraint-type-ref-names`. Names that don't resolve
    (e.g. variant tags) are silently dropped. Empty input → empty set."
   [storage names]
   (if (empty? names)
@@ -401,7 +368,7 @@
           ;; as JSONB keywords, not UUID columns.
           constraint-refs (when-let [c (:constraint entity-data)]
                             (resolve-constraint-refs-to-ids
-                              storage (constraint-type-ref-names c)))]
+                              storage (gc/constraint-type-ref-names c)))]
       (or (some #(cycle-check-pair storage own-id %) parent-ids)
           (some #(cycle-check-pair storage own-id %) fk-refs)
           (some #(cycle-check-pair storage own-id %) constraint-refs)))

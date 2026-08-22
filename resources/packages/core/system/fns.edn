@@ -495,6 +495,14 @@
 
   ;; Load multiple resource files and concatenate with separator.
   ;; Pure composition over `:map :read-resource` + `:str-join`.
+  ;;
+  ;; NOTE (reachability audit): UNREFERENCED by first-party fn-defs —
+  ;; every editor/runtime bundle goes through the app tier's
+  ;; `:concat-resources-overridable` twin, which reads each path via
+  ;; `:read-resource-overridable`. This one stays DELIBERATELY: it is
+  ;; the plain-`core` bundling primitive for anyone composing without
+  ;; the override tier. Registered in `tools/graph-reachability.edn`
+  ;; so the audit reports it as held vocabulary, not as dead code.
   {:name :concat-resources
    :description "Read each path in `:paths` via `:read-resource` and join the contents with a separator (default `\\n\\n`). Used to bundle CSS/JS asset modules."
    :parent :str-join

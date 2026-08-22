@@ -1,0 +1,81 @@
+;; What `tools/reachability_audit.clj` cannot derive from the graph
+;; itself — the two reasons a LIVE fn-def looks unreachable to a
+;; structural walk.
+;;
+;; `:roots` doubles as the documentation of the Clojure -> graph
+;; boundary: every place `src/` runs a fn-def BY NAME through
+;; `executor/execute-by-name` instead of by id. Before this file the
+;; audit reported 53 "unreachable" fn-defs of which ~51 were entered
+;; from here — which made the report unreadable and hid the real
+;; candidates.
+;;
+;; `test/graphden/packages/graph_entry_points_test.clj` keeps every
+;; section honest: a listed name that stops resolving fails the build
+;; (a rename in `fns.edn` would otherwise only surface at runtime), and
+;; so does a NEW `execute-by-name` call site in a file this map does not
+;; account for.
+;;
+;; Add a file here the moment you make it call the graph by name.
+
+{;; file → the literal fn-def names it hands to `execute-by-name`.
+ :roots
+ {"src/graphden/system/init/exec.clj"
+  [;; The application router — built at boot for the URL-drift check and
+   ;; for the `window.API` route-path cache. The two OPTIONAL routers
+   ;; (`registry-router` / `mcp-router`) are named here too: they may be
+   ;; absent from the loaded package set, and `optional-router-if-present`
+   ;; probes for them rather than assuming.
+   :_router
+   :registry-router
+   :mcp-router]
+
+  "src/graphden/accounts/init.clj"
+  [;; Page + email renderers for the accounts module. The graph copies
+   ;; are the PRIMARY render path; `accounts.pages` / `accounts.email`
+   ;; are the graph-outage fallback (parity pinned by
+   ;; `packages.app.auth-pages-test`).
+   :auth-login-page
+   :auth-account-page
+   :auth-reset-page
+   :auth-verify-email
+   :auth-reset-email]
+
+  "src/graphden/crud/value_form.clj"
+  [;; Presentational shells for the value-form assembler — the recursion
+   ;; and type logic stay in Clojure, the wrappers live in `app.forms` so
+   ;; a deployment can restyle them in the editor.
+   :_form-record-group
+   :_form-record-field
+   :_form-union-select
+   :_form-union-branch
+   :_form-union-wrap]}
+
+ ;; Files that enter the graph by name but take the NAME FROM DATA, so
+ ;; there is no literal to pin. The names themselves are reachable
+ ;; through the graph registry fn-def that supplies them, which the
+ ;; audit's static walk already follows.
+ :data-driven
+ {"src/graphden/crud/value_form.clj"
+  "registry-supplied form-fn names (`:_value-form-registry`)"
+
+  "src/graphden/crud/value_repr.clj"
+  "registry-supplied repr names (`:_value-repr-registry`)"}
+
+ ;; The by-name API itself, plus pass-through wrappers and comments that
+ ;; merely mention it — nothing is entered from these.
+ :api-surface
+ #{"src/graphden/executor/compile_runtime.clj"
+   "src/graphden/executor/interface.clj"
+   "src/graphden/crud/fn_execution/lookup.clj"}
+
+ ;; Composed fn-defs that are DELIBERATELY unreferenced: starter
+ ;; vocabulary kept complete for whoever is composing in the editor,
+ ;; not leftovers. Each is user-facing (public name + `:description`),
+ ;; and the reason is recorded at the definition too.
+ :vocabulary
+ {:unauthorized-response "web.response keeps the status x content-type matrix complete"
+  :too-many-requests-response "web.response keeps the status x content-type matrix complete"
+  :text-unauthorized-response "web.response keeps the status x content-type matrix complete"
+  :text-too-many-requests-response "web.response keeps the status x content-type matrix complete"
+  :concat-resources "core.system bundling over plain :read-resource; the app tier composes the :concat-resources-overridable twin"
+  :_concat-resources-list "the :map step inside :concat-resources"}}

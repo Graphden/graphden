@@ -15,6 +15,7 @@
 ;;   left alone per skill §9.
 
 (require '[graphden.packages.loader :as pkg]
+         '[clojure.edn :as edn]
          '[clojure.java.io :as io]
          '[clojure.string :as str])
 
@@ -119,21 +120,28 @@
        (filter #(and (.isFile %) (str/ends-with? (.getName %) ".clj")))))
 
 
-(defn- collect-execute-by-name-roots
-  "Grep src/ for `(executor/execute-by-name … \"name-string\" …)`
-   call sites — those names are dynamic entry points the static
-   graph walk would otherwise miss (e.g. `_value-form-registry`,
-   resolved at runtime by `crud.value_form`)."
+(def ^:private registry-file
+  "Facts the structural walk can't derive — see the file's own header."
+  "tools/graph-reachability.edn")
+
+
+(defn- collect-entry-point-roots
+  "Read `tools/graph-reachability.edn` — the registry of fn-defs that
+   `src/` runs BY NAME. A grep can't find these reliably: the names live
+   in a lookup map several lines from the `execute-by-name` call
+   (`accounts/init.clj`), or reach it through a wrapper
+   (`value_form/render-template`). Left to the structural walk they read
+   as dead code — the whole `app.auth-pages` + `_form-*` surface did.
+
+   `graph_entry_points_test` fails the build when a listed name stops
+   resolving, or when a new by-name call site appears in a file the
+   registry doesn't account for, so this list can't quietly rot."
   [fn-defs-by-name]
-  (let [string->kw (into {} (keep (fn [k] [(name k) k]))
-                         (keys fn-defs-by-name))
-        pattern    #"execute-by-name[^\"]*\"([a-zA-Z_][a-zA-Z0-9_-]*)\""]
-    (into #{}
-          (mapcat (fn [f]
-                    (let [src (slurp f)]
-                      (keep (fn [[_ name-str]] (get string->kw name-str))
-                            (re-seq pattern src)))))
-          (find-clj-files "src/graphden"))))
+  (->> (:roots (edn/read-string (slurp registry-file)))
+       vals
+       (apply concat)
+       (filter #(contains? fn-defs-by-name %))
+       set))
 
 
 (defn- collect-test-roots
@@ -194,9 +202,10 @@
   ;; The FULL first-party set incl. the optional registry/mcp packages —
   ;; without them their fn-defs (and anything only they reference, e.g.
   ;; :fn-id-by-name) show as false-positive dead (round-3 audit gap).
-  ;; NOTE: fns executed BY NAME from src (execute-by-name — the
-  ;; auth-pages/value-form/_form-* templates) still look unreachable to
-  ;; this structural walk; grep before believing a "dead" verdict.
+  ;; fns executed BY NAME from src (the auth-pages / _form-* templates)
+  ;; are seeded from `tools/graph-reachability.edn` — a structural walk
+  ;; cannot see them, and without that registry ~51 of the 53 fn-defs
+  ;; this audit called dead were live.
   (let [packages (pkg/load-packages ["core" "storage" "web" "app-base" "app" "registry" "mcp" "examples"])
         base-fn-defs (:base-fn-defs packages)
         fn-defs (:fn-defs packages)
@@ -215,7 +224,7 @@
                                                  (:name fd))
                                         (:name fd))))
                                   fn-defs))
-        dynamic-roots (collect-execute-by-name-roots all-by-name)
+        dynamic-roots (collect-entry-point-roots all-by-name)
         test-roots (collect-test-roots all-by-name)
         docs-roots (collect-docs-roots all-by-name)
         roots (-> #{:web-server}
@@ -223,7 +232,7 @@
                   (into dynamic-roots)
                   (into test-roots)
                   (into docs-roots))
-        _ (println "Dynamic roots (from `execute-by-name` in src/):"
+        _ (println "Dynamic roots (from tools/graph-reachability.edn):"
                    dynamic-roots)
         _ (println "Test roots (from `:name :the-fn` in test/):"
                    test-roots)
@@ -232,7 +241,14 @@
         reachable (bfs-reachable all-by-name roots)
         composed (filter #(composed? (val %)) fn-def-by-name)
         type-rows (filter #(type-row? (val %)) fn-def-by-name)
-        unreachable-composed (remove #(reachable (key %)) composed)
+        ;; Starter vocabulary is unreferenced ON PURPOSE. Reported in
+        ;; its own group rather than dropped — a silent filter would
+        ;; read as "covered everything" the day one of these really
+        ;; does become a leftover.
+        vocabulary (:vocabulary (edn/read-string (slurp registry-file)))
+        unreachable (remove #(reachable (key %)) composed)
+        unreachable-composed (remove #(contains? vocabulary (key %)) unreachable)
+        held-vocabulary (filter #(contains? vocabulary (key %)) unreachable)
         unreachable-type-rows (remove #(reachable (key %)) type-rows)]
     (println "=== Reachability Audit ===")
     (println "Total base-fns:" (count base-by-name))
@@ -253,6 +269,13 @@
                        (str (:namespace fd))
                        (str (or (:parent fd)
                                 (some-> fd :parents pr-str))))))
+    (println)
+    (println "=== Unreferenced ON PURPOSE (starter vocabulary,"
+             "see tools/graph-reachability.edn):"
+             (count held-vocabulary)
+             "===")
+    (doseq [[name _] (sort-by key held-vocabulary)]
+      (println " " (format "%-50s  %s" (str name) (get vocabulary name))))
     (println)
     (println "=== Unreachable TYPE-ROWS (vocabulary, NOT dead):"
              (count unreachable-type-rows)

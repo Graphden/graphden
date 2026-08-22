@@ -524,6 +524,42 @@
                :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 15 covers :swap vs :reset and cache patterns. Click Finish to clean up or keep both."
                :target nil
                :check {:kind "manual"}}]}
+            {:id "30"
+             :chapter "Composing"
+             :title "Recursion"
+             :steps
+             [{:title "Loops, where cycles are forbidden"
+               :body "map and filter repeat over a sequence you already have. This is the other kind: repeat until a condition holds. A fn cannot call itself here — every cycle is rejected at write time — so recursion comes from a primitive instead."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find a real one"
+               :body "Type branch-chain in the Explorer filter and click the branch-chain row. This is not a toy: it walks a branch to its root, and every versioned read your editor makes resolves through it."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "branch-chain"}}
+              {:title "Its parent is :fix"
+               :body "Look at the card: the parent is fix — the recursion primitive. It takes a step (the body of the loop) and an input (where the first iteration starts), and it hands the step two call-site args: :input, the current value, and :self, a one-argument callable that re-enters the step."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Follow the step"
+               :body "Expand the card's :step slot to see _branch-chain-step. It is an :if — which is the whole shape: one arm returns a value, the other recurses. The base case comes first because :if is lazy, so the recursive arm is never forced once the walk is done."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "The recursive arm"
+               :body "The :else arm is an :invoke whose :func is {:as :self} — that is the self-reference, created at RUN time by fix's impl. No fn in the graph points at itself, so the cycle check never has to bend."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "State is one value"
+               :body ":self takes exactly one argument, so everything the next iteration needs travels in it — here a map of the chain built so far plus the branch to look at next. Two counters and an accumulator would be one map too."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "And if the base case never fires"
+               :body "The depth bound stops it: :recursion-error/max-depth-exceeded, a typed error naming the limit, not a blown stack. A walk over something arbitrarily deep still needs its own guard in the step."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "That's recursion"
+               :body "A step that receives :self, a base case that returns, a recursive arm that invokes. The written lesson 30 builds one from scratch — seven fn-defs that sum 1..n — and says when to reach for :reduce or a service instead. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
             {:id "09"
              :chapter "Running it"
              :title "Executing a fn"
@@ -665,6 +701,47 @@
                :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 27 adds the call-tree view and catching a live HTTP request. Click Finish to clean up or keep the two fns."
                :target nil
                :check {:kind "manual"}}]}
+            {:id "29"
+             :chapter "Running it"
+             :title "When something breaks"
+             :steps
+             [{:title "Two kinds of wrong"
+               :body "A failed RUN and a failed type-check are different events, and they have different lists. Errors holds runs that threw; Type errors holds edits the checker objected to but let through. This lesson visits both."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Something that fails"
+               :body "Type parse-json in the Explorer filter and click the parse-json row — it turns a JSON string into data, and it throws on anything that is not JSON."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "parse-json"}}
+              {:title "Make it yours"
+               :body "Click ⋯ on the row, choose “Extend”, name it tutorial-bad-json — then Save. Extending gives you a fn of your own to break; the package fn itself is read-only."
+               :target "button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-bad-json" :parent "parse-json"}
+               :creates {:type "fn" :name "tutorial-bad-json"}}
+              {:title "Break it on purpose"
+               :body "Click ⋯ → ▶ Run. Type not json at all into the string field, TICK “Save to history”, and Run. The result pane reads “Malformed JSON.” — an unticked run leaves no audit row, so ticking is what puts this failure on the list you are about to open."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".execute-result-host > *"}}
+              {:title "Open Errors"
+               :body "Avatar → “Organization” → “Errors”. The panel lists your org's failed runs from the last 7 days, newest first — the fn as a link, when it finished, and the message."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"errors\"]:not([hidden])"}}
+              {:title "Read the row"
+               :body "Your run is at the top. Expand “details” — the error DATA is there too, carrying the typed :validation-error/malformed-json a client would have received. Both were scrubbed when the row was written, not when it was shown, so nothing secret is waiting here."
+               :target ".error-log-list"
+               :check {:kind "manual"}}
+              {:title "Now a static mistake"
+               :body "Errors is about run time. The other panel is about WRITE time: bind a value the type-checker objects to and the write still lands, with a diagnostic attached. You saw one badge in lesson 05 — Type errors is the branch-wide list of them."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open Type errors"
+               :body "Same section list: click “Type errors”. Empty means nothing on this branch is mistyped right now — which is the normal state, and the reason this is a worklist rather than a wall."
+               :target "#gd-operate-nav button[data-section=\"type-errors\"]"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"type-errors\"]:not([hidden])"}}
+              {:title "What each panel answers"
+               :body "Errors: what broke, and when. Type errors: what does not fit, right now, on this branch. Monitoring next to them answers how often, and Debug answers why (lesson 27). Click Finish — the tour offers to delete tutorial-bad-json."
+               :target nil
+               :check {:kind "manual"}}]}
             {:id "23"
              :chapter "The editor"
              :title "Explorer and Inspector"
@@ -801,6 +878,47 @@
                :check {:kind "dom-absent" :selector ".gd-asset-chip-override"}}
               {:title "What this is for"
                :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 25 covers the ?v= hash and when NOT to override. Click Finish."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "28"
+             :chapter "The editor"
+             :title "Version history"
+             :steps
+             [{:title "Every edit writes a row"
+               :body "Editing a fn does not overwrite it. The fn's identity is one row; its name, description, return type and constraint live in VERSION rows — one per edit, per branch. That is what branches resolve through, and what this lesson reads back."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Something to edit"
+               :body "Type const in the Explorer filter and click the const row, then ⋯ → “Extend”, name it tutorial-versioned — a fn of your own to build a history on."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "fn-parent" :name "tutorial-versioned" :parent "const"}
+               :creates {:type "fn" :name "tutorial-versioned"}}
+              {:title "Give it a description"
+               :body "Click ⋯ on the tutorial-versioned row and choose i (Description). Type first draft and Save. That write appends a version row — the fn now has two."
+               :target "button.more-actions-trigger"
+               :check {:kind "manual"}}
+              {:title "And another"
+               :body "Do it once more: ⋯ → i, this time second draft, Save. Three version rows now — the create and two edits. Nothing was replaced."
+               :target "button.more-actions-trigger"
+               :check {:kind "manual"}}
+              {:title "Open the history"
+               :body "Click ⋯ and then ⌛ — version history. Every version row for this fn, newest first, ACROSS BRANCHES: each row names the branch it was written on, so a fn you edited on a fork shows both timelines here."
+               :target "button.more-actions-trigger"
+               :check {:kind "dom" :selector ".fn-versions-popover .fn-versions-row"}}
+              {:title "Restore the first draft"
+               :body "Click “restore” on the row that says first draft and confirm. Read the confirm text as you accept it: it writes a NEW version row carrying the historic fields. Nothing after it is deleted."
+               :target ".fn-versions-popover"
+               :check {:kind "manual"}}
+              {:title "History is append-only"
+               :body "Reopen ⌛. There are FOUR rows now — the restore is itself a version. That is what makes this button safe: restoring the row you were on before puts you back, and no state exists in which the button lost your work."
+               :target "button.more-actions-trigger"
+               :check {:kind "manual"}}
+              {:title "What restore does not touch"
+               :body "Only the fn's own fields travel: name, description, return type, constraint. Bindings have their OWN version rows (lesson 03), so a value you rebound stays rebound. Reverting those silently, from a fn-level button, would undo edits you never named."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "That's the timeline"
+               :body "Edits append, restores append, deletes append a tombstone. The written lesson 28 covers the per-version run history and how this reads on a branch. Click Finish."
                :target nil
                :check {:kind "manual"}}]}
             {:id "16"
@@ -948,6 +1066,39 @@
               {:title "That's distribution"
                :body "Publish freezes, install pins, fork copies. The written lessons 11 and 14 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click Finish to clean up."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "31"
+             :chapter "Your organization"
+             :requires "manage-roles"
+             :title "Roles"
+             :steps
+             [{:title "One bundle, several people"
+               :body "Lesson 17 covered grants — who may touch which namespace. This is the OTHER axis: who may administer the org. Those capabilities (manage-users, manage-grants, manage-roles, manage-apps, publish-packages) are bundled by a ROLE, so a policy lives in one row instead of being spread across three people."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open Roles"
+               :body "Avatar → “Organization” → “Roles”. The panel is gated on manage-roles, which an org owner holds implicitly — that is what owning the org means."
+               :target ".auth-avatar"
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"roles\"]:not([hidden])"}}
+              {:title "Create one"
+               :body "Name it support and tick manage-users, then Create. The checkboxes ARE the vocabulary — those five capabilities are the whole org-management axis, so there is no free-text field to get wrong."
+               :target "[data-roles-panel] form"
+               :check {:kind "manual"}}
+              {:title "Give it a member"
+               :body "The members cell is an editable list of usernames, prefilled with the current set. Type a member's username and submit. It is a SET, not an append: what you submit becomes the whole membership, so clearing a name removes that person from the role."
+               :target "[data-roles-panel]"
+               :check {:kind "manual"}}
+              {:title "What they can do now"
+               :body "That member's next request carries manage-users, so their account menu grows the Members panel — a surface that was not rendered for them a moment ago. The affordance and the permission are the same fact: nothing is hidden that would otherwise work."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "What a role is NOT"
+               :body "It does not grant namespace access — support with manage-users still cannot read acme.billing; that is a grant. It does not nest, and it means nothing in another org. Administering an org and reading its code are different powers on purpose."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Take it back"
+               :body "Delete the role with × on its row. The members keep their accounts, their org membership and every namespace grant they hold — only what the role conferred goes away. Click Finish."
+               :target "[data-roles-panel] .grant-delete"
                :check {:kind "manual"}}]}
             {:id "21"
              :chapter "Your organization"

@@ -46,7 +46,8 @@
 (def ^:private known-capabilities
   "Capabilities the tenancy addon grants; a `:requires` outside the
    signal set is looked up through `window.graphdenHasCap`."
-  #{"manage-users" "manage-grants" "manage-apps" "publish-packages"})
+  #{"manage-users" "manage-grants" "manage-roles" "manage-apps"
+    "publish-packages"})
 
 
 (defn- payload

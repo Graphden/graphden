@@ -239,6 +239,46 @@ const {
     await finishAndDelete(page);
     console.log('  lesson 13: walked + cleaned');
 
+    // ---------- Lesson 30 — recursion (a READING tour) ----------
+    // The only lesson that asks the reader to READ a fn rather than build
+    // one: `:fix` needs ~7 fn-defs, which is a written lesson, not twenty
+    // steps of clicking. What the tour must prove is that the fn it points
+    // at is really there and really recursive — a renamed step or a
+    // re-parented `:branch-chain` would leave the lesson describing a graph
+    // that no longer exists.
+    await page.goto(BASE + '/?tutorial=30');
+    await waitTourTitle(page, 'Loops, where cycles are forbidden', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 30 opening Next');
+    await waitTourTitle(page, 'Find a real one', 30000);
+    await filterAndSelect(page, 'branch-chain', 'branch-chain');
+    await waitTourTitle(page, 'Its parent is :fix', 150000);
+
+    const shape = await api(page, 'GET',
+      '/api/graph/entities?scope=search&q=branch-chain');
+    const chain = (shape.fns || []).find((f) => f.name === 'branch-chain');
+    assert(chain, 'the lesson\'s example fn exists');
+    const sub = await api(page, 'GET',
+      '/api/graph/entities?scope=subtree&root-id=' + chain.id);
+    const byId = new Map((sub.fns || []).map((f) => [f.id, f]));
+    const parents = (chain['parent-ids'] || []).map((id) => byId.get(id)?.name);
+    assert(parents.includes('fix'),
+      'branch-chain still inherits :fix (parents: ' + parents.join(', ') + ')');
+    const names = (sub.fns || []).map((f) => f.name);
+    assert(names.includes('_branch-chain-step'),
+      'its step fn is still in the closure');
+    assert(names.includes('_branch-chain-recurse'),
+      'and so is the arm that invokes :self — the recursion the lesson reads');
+
+    for (let i = 0; i < 5; i++) {
+      assert(await clickTourButton(page, 'Next'), 'lesson 30 Next #' + (i + 1));
+      await page.waitForTimeout(400);
+    }
+    await waitTourTitle(page, "That's recursion", 30000);
+    assert(await clickTourButton(page, 'Finish'), 'lesson 30 Finish');
+    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+      null, {timeout: 30000, polling: 200});
+    console.log('  lesson 30: walked (reading tour — :fix, its step, its :self arm)');
+
     console.log('PASS');
   } catch (err) {
     failed = true;

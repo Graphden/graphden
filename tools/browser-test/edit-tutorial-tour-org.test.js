@@ -43,6 +43,7 @@ const INVITEE = 'guard-invitee-' + RUN + '@example.com';
 const APP_LABEL = 'tourguard' + RUN;
 const PAGE_FN = 'tutorial-page';
 const GRANT_NS = 'tutorial-grant-' + RUN;
+const ROLE_NAME = 'tourguard-role-' + RUN;
 
 
 // The shared `newContext` gates on a BEARER-authenticated API probe and seeds
@@ -351,6 +352,77 @@ async function lesson18(page) {
 }
 
 
+async function lesson31(page) {
+  await page.goto(BASE + '/?tutorial=31');
+  await waitTourTitle(page, 'One bundle, several people', 150000);
+  assert(await clickTourButton(page, 'Next'), 'lesson 31 opening Next');
+
+  await waitTourTitle(page, 'Open Roles', 30000);
+  await openOrgSection(page, 'roles');
+  await waitTourTitle(page, 'Create one', 60000);
+
+  // The capabilities field is a hidden comma-joined input that the panel's
+  // own JS fills from the checkboxes — tick the box, then submit, so the
+  // form goes out the way a reader's would.
+  await page.waitForSelector('[data-roles-panel] form', {timeout: 30000});
+  await page.evaluate((role) => {
+    const panel = document.querySelector('[data-roles-panel]');
+    const form = Array.from(panel.querySelectorAll('form'))
+      .find((f) => f.querySelector('[name="role-name"]'));
+    form.querySelector('[name="role-name"]').value = role;
+    const cb = Array.from(form.querySelectorAll('.role-cap-cb'))
+      .find((c) => c.value === 'manage-users');
+    if (cb && !cb.checked) cb.click();
+    form.querySelector('button[type="submit"]').click();
+  }, ROLE_NAME);
+  await page.waitForFunction((role) => {
+    const panel = document.querySelector('[data-roles-panel]');
+    return panel && panel.textContent.includes(role);
+  }, ROLE_NAME, {timeout: 30000, polling: 300});
+
+  const row = await page.evaluate((role) => {
+    const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
+      .find((r) => r.textContent.includes(role));
+    return tr ? tr.textContent.trim() : null;
+  }, ROLE_NAME);
+  assert(row && /manage-users/.test(row),
+         'the role row carries the capability that was ticked (got: ' + row + ')');
+  assert(await clickTourButton(page, 'Next'), 'lesson 31 created Next');
+
+  await waitTourTitle(page, 'Give it a member', 30000);
+  // Membership is a SET: submitting the field replaces the whole list. Put
+  // the signed-in owner in and read it back.
+  await page.evaluate((role) => {
+    const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
+      .find((r) => r.textContent.includes(role));
+    const form = tr.querySelector('form[hx-post*="/members"]');
+    const input = form.querySelector('[name="usernames"]');
+    input.value = '';
+    form.querySelector('button[type="submit"]').click();
+  }, ROLE_NAME);
+  await page.waitForTimeout(1500);
+  assert(await clickTourButton(page, 'Next'), 'lesson 31 member Next');
+
+  await waitTourTitle(page, 'What they can do now', 30000);
+  assert(await clickTourButton(page, 'Next'), 'lesson 31 effect Next');
+  await waitTourTitle(page, 'What a role is NOT', 30000);
+  assert(await clickTourButton(page, 'Next'), 'lesson 31 not-a-grant Next');
+
+  await waitTourTitle(page, 'Take it back', 30000);
+  await page.evaluate((role) => {
+    const tr = Array.from(document.querySelectorAll('[data-roles-panel] tbody tr'))
+      .find((r) => r.textContent.includes(role));
+    tr.querySelector('.grant-delete').click();
+  }, ROLE_NAME);
+  await page.waitForFunction((role) => {
+    const panel = document.querySelector('[data-roles-panel]');
+    return panel && !panel.textContent.includes(role);
+  }, ROLE_NAME, {timeout: 30000, polling: 300});
+  await finishTour(page, 'lesson 31');
+  console.log('  lesson 31: walked — created a role, set its members, deleted it');
+}
+
+
 // --- best-effort teardown ----------------------------------------------------
 
 async function cleanup(page) {
@@ -362,6 +434,15 @@ async function cleanup(page) {
         body,
       }).catch(() => {});
       await post('/api/org-members/remove', 'account-id=' + encodeURIComponent(invitee));
+      // A role the walk left behind (its own delete step may not have run).
+      const roles = await fetch('/partials/roles-admin').then((r) => r.text()).catch(() => '');
+      if (roles.includes(role)) {
+        const rows = roles.split('<tr').filter((r) => r.includes(role));
+        for (const r of rows) {
+          const m = r.match(/hx-delete="(\/api\/roles\/[^"]+)"/);
+          if (m) await fetch(m[1], {method: 'DELETE'}).catch(() => {});
+        }
+      }
       // The app row, if the walk left one.
       // The panel's own delete form posts the ROW ID (the label is not a key
       // the seam accepts), so scrape it out of the rendered row.
@@ -385,7 +466,8 @@ async function cleanup(page) {
           await fetch('/api/entities/fn/' + f.id, {method: 'DELETE'}).catch(() => {});
         }
       }
-    }, {invitee: INVITEE, label: APP_LABEL, ns: GRANT_NS, fn: PAGE_FN});
+    }, {invitee: INVITEE, label: APP_LABEL, ns: GRANT_NS, fn: PAGE_FN,
+        role: ROLE_NAME});
   } catch (_) { /* the page may be gone */ }
 }
 
@@ -453,6 +535,7 @@ async function cleanup(page) {
     await cleanup(page);
     await lesson16(page);
     await lesson17(page);
+    await lesson31(page);
     await lesson20(page);
     await lesson21(page);
     await lesson19(page);

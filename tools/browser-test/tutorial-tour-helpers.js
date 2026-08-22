@@ -52,7 +52,8 @@ async function hardCleanup(page) {
       }
     }
   } catch (_) { /* best-effort */ }
-  const leftovers = ['tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
+  const leftovers = ['tutorial-versioned', 'tutorial-bad-json',
+                     'tutorial-b', 'tutorial-a', 'add-10', 'tutorial-json',
                      'tutorial-typed', 'tutorial-map', 'branch-demo',
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
                      'tutorial-card', 'tutorial-button', 'tutorial-script',

@@ -44,6 +44,7 @@ around it changes.
 | 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written · ▶ interactive |
 | 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
 | 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |
+| 30 | [Recursion: loops without cycles](30-recursion.md) | ✅ written · ▶ interactive |
 | 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
 
 ### Running it
@@ -54,6 +55,7 @@ around it changes.
 | 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written · ▶ interactive |
 | 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written · ▶ interactive |
 | 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written · ▶ interactive |
+| 29 | [When something breaks: the two error panels](29-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
 
 ### The editor
 
@@ -63,6 +65,7 @@ around it changes.
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |
 | 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written · ▶ interactive |
 | 25 | [Editing the editor: asset overrides](25-asset-overrides.md) | ✅ written · ▶ interactive |
+| 28 | [Version history: what changed, and going back](28-version-history.md) | ✅ written · ▶ interactive |
 
 ### Your organization
 
@@ -70,6 +73,7 @@ around it changes.
 |---|---|---|
 | 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written · ▶ interactive |
 | 17 | [Grants — who may touch what](17-grants.md) | ✅ written · ▶ interactive |
+| 31 | [Roles — capabilities as a bundle](31-roles.md) | ✅ written · ▶ interactive |
 | 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written · ▶ interactive |
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written · ▶ interactive |

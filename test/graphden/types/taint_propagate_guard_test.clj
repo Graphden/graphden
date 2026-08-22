@@ -50,6 +50,10 @@
     :classify-literal :closed-enum-of :coalesce :comp
     :compatible-type-names :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count
+    ;; The tutorial funnel — both bump a counter keyed by a VALIDATED
+    ;; lesson id / step index and answer the counter's own name. No caller
+    ;; content passes through, so no `:taint-propagate?`.
+    :count-tour-event! :count-tour-step!
     :counters-snapshot :create-branch! :create-entity :cron-fire-after
     :cron-parse :current-branch-id :current-branch-router
     ;; /api/debug/catch — trap admin (runtime state, no caller content).

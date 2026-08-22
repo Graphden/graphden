@@ -45,6 +45,7 @@
       (-> (mds/create-builder)
           (ds/add-entity :item "not-a-uuid" {:field {:uuid (uuid) :type :text}})
           (ds/build))
+      (is false "expected ds/build to throw on a non-uuid entity id")
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           (is (= :validation-error/type-mismatch (:type data)))

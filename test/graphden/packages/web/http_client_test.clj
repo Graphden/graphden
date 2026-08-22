@@ -119,13 +119,17 @@
   ;; :egress/blocked for every method, POST included.
   (doseq [m ["get" "post"]]
     (binding [cr/*allowed-effects* #{:network}]
-      (is (thrown? clojure.lang.ExceptionInfo
-            (call! {:method m :url "http://127.0.0.1:9/"})))
-      (try
-        (call! {:method m :url "http://127.0.0.1:9/"})
-        (catch clojure.lang.ExceptionInfo e
-          (is (= "egress" (some-> (ex-data e) :type namespace))
-              (str "method " m " → " (ex-data e))))))))
+      ;; ONE call, not two: the throw and its `:type` are the same fact, and a
+      ;; second attempt only doubles the connect the guard is supposed to
+      ;; prevent. `::no-throw` makes a silent return fail here rather than
+      ;; skipping the assertions below.
+      (let [ex (try (call! {:method m :url "http://127.0.0.1:9/"})
+                    ::no-throw
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (not= ::no-throw ex)
+            (str "method " m " must be blocked before it connects"))
+        (is (= "egress" (some-> ex ex-data :type namespace))
+            (str "method " m " → " (some-> ex ex-data)))))))
 
 
 ;; =============================================================================

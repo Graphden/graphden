@@ -234,16 +234,17 @@
 
 (deftest load-default-packages-test
   (testing "loads core, web, app packages"
-    ;; This may fail if packages don't exist, but will cover the function
-    (try
-      (let [result (loader/load-default-packages)]
-        (is (map? result))
-        (is (contains? result :base-fn-defs))
-        (is (contains? result :fn-defs))
-        (is (contains? result :packages)))
-      (catch clojure.lang.ExceptionInfo e
-        ;; If packages not found, that's expected in test environment
-        (is (re-find #"Package not found" (ex-message e)))))))
+    ;; The default set IS the product and is always on the classpath here, so a
+    ;; "Package not found" is a genuine regression — it used to be caught and
+    ;; asserted as an acceptable outcome, which made the whole test pass on a
+    ;; broken tree. Same reasoning as `resolve-dependencies-test` below.
+    (let [result (loader/load-default-packages)
+          pkgs (set (map :name (:packages result)))]
+      (is (contains? pkgs "core"))
+      (is (contains? pkgs "web"))
+      (is (contains? pkgs "app"))
+      (is (seq (:base-fn-defs result)) "the default set ships base-fns")
+      (is (seq (:fn-defs result)) "the default set ships fn-defs"))))
 
 
 ;; =============================================================================

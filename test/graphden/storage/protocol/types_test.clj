@@ -100,6 +100,7 @@
   (testing "exception contains correct data"
     (try
       (storage/check-type-change! :user :email :text :bool)
+      (is false "expected storage/check-type-change! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :destructive-change (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -126,6 +127,7 @@
   (testing "exception contains correct data"
     (try
       (storage/check-nullable-change! :user :email true false)
+      (is false "expected storage/check-nullable-change! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :destructive-change (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -151,6 +153,7 @@
   (testing "corrupted metadata exception has correct data"
     (try
       (storage/check-nullable-change! :user :name 42 true)
+      (is false "expected storage/check-nullable-change! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :metadata-error/corrupted (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -318,6 +321,7 @@
                               #{#uuid "00000000-0000-0000-0000-000000000001"}
                               #{}
                               (fn [_] :removed-field))
+      (is false "expected storage/check-removed! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :destructive-change (:type (ex-data e))))
         (is (= [:removed-field] (:removed (ex-data e))))))))

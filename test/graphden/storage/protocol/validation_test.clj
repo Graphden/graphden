@@ -54,6 +54,7 @@
       (storage/validate-required-fields! :user
                                          {:email {:type :text :nullable? false}}
                                          {:email nil})
+      (is false "expected storage/validate-required-fields! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :validation-error/required-field-missing (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -122,6 +123,7 @@
           data-seq [{:id dup-id} {:id dup-id}]]
       (try
         (storage/validate-no-duplicate-ids! :user data-seq)
+        (is false "expected storage/validate-no-duplicate-ids! to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= :validation-error/duplicate-ids (:type (ex-data e))))
           (is (= :user (:entity (ex-data e))))
@@ -164,6 +166,7 @@
   (testing "exception contains correct data"
     (try
       (storage/validate-data-is-map! :user [1 2 3])
+      (is false "expected storage/validate-data-is-map! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-data (:type (ex-data e))))
         (is (= :user (:entity-name (ex-data e))))
@@ -210,6 +213,7 @@
   (testing "exception contains correct data"
     (try
       (storage/validate-where-clause! [:bad :data])
+      (is false "expected storage/validate-where-clause! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-where-clause (:type (ex-data e))))
         (is (= [:bad :data] (:where (ex-data e))))
@@ -236,6 +240,7 @@
     (let [fn-id (random-uuid)]
       (try
         (storage/check-graph-iteration-limit! 10001 fn-id)
+        (is false "expected storage/check-graph-iteration-limit! to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= :execution-error/graph-too-large (:type (ex-data e))))
           (is (= fn-id (:fn-id (ex-data e))))

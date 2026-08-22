@@ -65,6 +65,7 @@
           helpers (->MockConstraintHelpers {fn-b #{fn-a}})]
       (try
         (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)
+        (is false "expected storage/validate-no-dependency-cycle-impl to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
           (is (= fn-a (:owner-fn-id (ex-data e))))
@@ -189,6 +190,7 @@
           helpers (->MockDependencyHelpers deps-map)]
       (try
         (storage/collect-dependency-chain helpers root)
+        (is false "expected storage/collect-dependency-chain to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/chain-too-deep (:type (ex-data e))))
           (is (= :dependency (:chain-type (ex-data e))))

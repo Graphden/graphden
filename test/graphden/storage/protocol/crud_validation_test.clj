@@ -98,6 +98,7 @@
   (testing "exception contains correct data"
     (try
       (storage/validate-where-clause! 123)
+      (is false "expected storage/validate-where-clause! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-where-clause (:type (ex-data e))))
         (is (= 123 (:where (ex-data e))))))))
@@ -138,6 +139,7 @@
         :user
         {:name {:type :text} :email {:type :text}}
         {:nonexistent "value"})
+      (is false "expected storage/validate-where-clause-fields! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :validation-error/unknown-field (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -223,6 +225,7 @@
         :user
         {:age {:type :int}}
         {:age "wrong"})
+      (is false "expected storage/validate-where-clause-types! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :validation-error/type-mismatch (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -381,6 +384,7 @@
   (testing "exception contains correct data"
     (try
       (storage/validate-entity-name! "not-keyword" "delete")
+      (is false "expected storage/validate-entity-name! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-entity-name (:type (ex-data e))))
         (is (= "not-keyword" (:entity-name (ex-data e))))
@@ -526,6 +530,7 @@
         :user
         {:email {:type :text}}
         {})
+      (is false "expected storage/validate-required-fields! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :validation-error/required-field-missing (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -564,6 +569,7 @@
         (storage/validate-no-duplicate-ids!
           :user
           [{:id dup-id} {:id dup-id}])
+        (is false "expected storage/validate-no-duplicate-ids! to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= :validation-error/duplicate-ids (:type (ex-data e))))
           (is (= :user (:entity (ex-data e))))
@@ -576,6 +582,7 @@
         (storage/validate-no-duplicate-ids!
           :user
           [{:id dup1} {:id dup1} {:id dup2} {:id dup2}])
+        (is false "expected storage/validate-no-duplicate-ids! to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= 2 (count (:duplicate-ids (ex-data e))))))))))
 
@@ -610,6 +617,7 @@
   (testing "exception contains data info"
     (try
       (storage/validate-data-is-map! :product [1 2 3])
+      (is false "expected storage/validate-data-is-map! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-data (:type (ex-data e))))
         (is (= :product (:entity-name (ex-data e))))
@@ -682,6 +690,7 @@
   (testing "exception data includes entity-name-type for non-keyword"
     (try
       (storage/validate-entity-name! 42 "query")
+      (is false "expected storage/validate-entity-name! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-entity-name (:type (ex-data e))))
         (is (= 42 (:entity-name (ex-data e))))
@@ -692,6 +701,7 @@
     (let [long-name (keyword (str "a" (str/join (repeat 64 "b"))))]
       (try
         (storage/validate-entity-name! long-name "create")
+        (is false "expected storage/validate-entity-name! to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= :invalid-entity-name (:type (ex-data e))))
           (is (= 65 (:length (ex-data e))))
@@ -920,6 +930,7 @@
         :user
         {:age {:type :int}}
         {:age "wrong"})
+      (is false "expected storage/validate-where-clause-types! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :validation-error/type-mismatch (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
@@ -996,6 +1007,7 @@
         :user
         {:z-field {:type :text} :a-field {:type :int}}
         {:bad-field "value"})
+      (is false "expected storage/validate-where-clause-fields! to throw")
       (catch clojure.lang.ExceptionInfo e
         (let [known (:known-fields (ex-data e))]
           (is (= [:a-field :z-field] known)))))))
@@ -1020,6 +1032,7 @@
   (testing "exception includes where-type"
     (try
       (storage/validate-where-clause! [1 2 3])
+      (is false "expected storage/validate-where-clause! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (some? (:where-type (ex-data e))))))))
 
@@ -1092,6 +1105,7 @@
         (storage/validate-no-duplicate-ids!
           :user
           [{:id dup-id} {:id dup-id} {:id dup-id}])
+        (is false "expected storage/validate-no-duplicate-ids! to throw")
         (catch clojure.lang.ExceptionInfo e
           (is (= 1 (count (:duplicate-ids (ex-data e)))))
           (is (= dup-id (first (:duplicate-ids (ex-data e))))))))))
@@ -1119,5 +1133,6 @@
   (testing "exception includes data-type"
     (try
       (storage/validate-data-is-map! :user "string")
+      (is false "expected storage/validate-data-is-map! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= String (:data-type (ex-data e))))))))

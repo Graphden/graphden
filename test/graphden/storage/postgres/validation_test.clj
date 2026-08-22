@@ -111,6 +111,7 @@
   (testing "error ex-data contains type instead of sensitive credentials info"
     (try
       (pg/create-storage {:username "testuser" :password "testpass"})
+      (is false "expected pg/create-storage to throw")
       (catch clojure.lang.ExceptionInfo e
         ;; Should NOT expose :username or :password in ex-data
         (is (= :config-error/missing-jdbc-url (:type (ex-data e))))

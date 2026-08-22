@@ -409,6 +409,7 @@
         :schema-error/invalid-type
         "Invalid type"
         {:expected :int :actual :string})
+      (is false "expected errors/throw-validation-error! to throw")
       (catch clojure.lang.ExceptionInfo e
         (is (= :schema-error/invalid-type (:type (ex-data e))))
         (is (= :int (:expected (ex-data e))))

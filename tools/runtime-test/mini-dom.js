@@ -22,20 +22,35 @@
 
 'use strict';
 
-const SELECTOR_RE = /^([a-zA-Z][\w-]*)?((?:\.[\w-]+)*)$/;
+// `tag.a.b[attr][attr="v"]` — the shapes the runtime's builders use.
+const SELECTOR_RE = /^([a-zA-Z][\w-]*)?((?:\.[\w-]+)*)((?:\[[^\]]+\])*)$/;
+const ATTR_RE = /\[([\w-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]/g;
 
 function parseSimple(sel) {
   const m = SELECTOR_RE.exec(sel);
   if (!m) throw new Error('mini-dom: unsupported selector fragment "' + sel + '"');
+  const attrs = [];
+  let a;
+  ATTR_RE.lastIndex = 0;
+  while ((a = ATTR_RE.exec(m[3] || '')) !== null) {
+    const value = a[2] !== undefined ? a[2] : (a[3] !== undefined ? a[3] : a[4]);
+    attrs.push({ name: a[1], value: value === undefined ? null : value });
+  }
   return {
     tag: m[1] ? m[1].toLowerCase() : null,
     classes: (m[2] || '').split('.').filter(Boolean),
+    attrs,
   };
 }
 
 function matches(node, part) {
   if (part.tag && node.tagName.toLowerCase() !== part.tag) return false;
-  return part.classes.every((c) => node.classList.contains(c));
+  if (!part.classes.every((c) => node.classList.contains(c))) return false;
+  return part.attrs.every(({ name, value }) => {
+    const got = node.getAttribute(name);
+    if (got === null) return false;
+    return value === null ? true : got === value;
+  });
 }
 
 function descendants(node, acc) {
@@ -99,6 +114,40 @@ class MiniElement {
   getAttribute(k) {
     return Object.prototype.hasOwnProperty.call(this.attributes, k)
       ? this.attributes[k] : null;
+  }
+
+  removeAttribute(k) { delete this.attributes[k]; }
+
+  // `hidden` is a reflected property in the real DOM: setting it must make
+  // `[hidden]` match, which is exactly what the form collector relies on to
+  // skip inactive union branches.
+  get hidden() { return this.getAttribute('hidden') !== null; }
+
+  set hidden(v) {
+    if (v) this.setAttribute('hidden', '');
+    else this.removeAttribute('hidden');
+  }
+
+  closest(selector) {
+    const parts = String(selector).trim().split(/\s+/).map(parseSimple);
+    if (parts.length !== 1) {
+      throw new Error('mini-dom: closest() takes one selector fragment');
+    }
+    let node = this;
+    while (node) {
+      if (node instanceof MiniElement && matches(node, parts[0])) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  contains(other) {
+    let node = other;
+    while (node) {
+      if (node === this) return true;
+      node = node.parentNode;
+    }
+    return false;
   }
 
   addEventListener(type, fn) {

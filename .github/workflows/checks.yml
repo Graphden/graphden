@@ -99,10 +99,21 @@ jobs:
           key: deps-${{ hashFiles('deps.edn') }}
           restore-keys: deps-
 
-      # Unit suite only. Integration + e2e need a built graphden-executor
-      # image and a live stack; the landing gate runs those on every merge,
-      # so paying ~19 min to duplicate them here (and failing on a docker
-      # image the runner cannot have) buys nothing.
+      # Unit suite only — a deliberate scope, and worth stating accurately.
+      #
+      # e2e genuinely CANNOT run here: it boots `graphden-executor:latest`,
+      # which this runner has no way to build cheaply. The `:integration`
+      # suite is different — it needs only testcontainers (postgres, and
+      # openbao for the vault client), both of which ubuntu-latest can run.
+      # It is left out because the landing gate runs it on every merge and
+      # duplicating ~15 min here buys nothing *while everything lands through
+      # the gate*.
+      #
+      # The consequence, recorded by the 2026-08-22 test audit so nobody has
+      # to rediscover it: ~24% of the suite — including every HTTP-level
+      # accounts test (login, logout, OAuth, Telegram, password reset, CSRF)
+      # — has exactly ONE execution point, the local gate. A release that
+      # goes around it runs none of them.
       - name: Run unit tests
         run: bb test-unit
 

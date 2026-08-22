@@ -1062,17 +1062,23 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
     fi
 
-    if [ "$NEED_INTEGRATION" = 1 ]; then
-      step "bb test-integration"
-      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
-    fi
-
+    # Visual goes here — after e2e, before integration. It is ~2.5 min against
+    # the same browser infrastructure e2e just used, and integration is ~6 min
+    # of JVM work that a pixel diff has nothing to do with: failing the cheap
+    # browser check first keeps the feedback loop short. (Learned the hard way:
+    # the landing that introduced this step had integration ahead of it, red on
+    # one assertion, and neither visual nor fleet ever ran.)
     if [ "$NEED_VISUAL" = 1 ]; then
       step "bb test-visual"
       # Pixel diff over 24 snapshots × 3 viewports against an isolated stack.
       # It can only run here because every baseline is instance-independent —
       # tools/visual-tests/run-visual.sh says what that costs to keep true.
       ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-visual ) || { echo "FAIL: visual"; return 1; }
+    fi
+
+    if [ "$NEED_INTEGRATION" = 1 ]; then
+      step "bb test-integration"
+      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
     fi
 
     if [ "$NEED_FLEET" = 1 ]; then

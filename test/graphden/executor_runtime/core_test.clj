@@ -331,9 +331,16 @@
           ;; behind them. Assert what asking for `core` must actually produce.
           (is (seq (:base-fn-defs packages)) "core ships base-fns")
           (is (seq (:fn-defs packages)) "core ships fn-defs")
-          (is (= ["core"] (mapv :name (:packages packages)))
-              (str "exactly the requested package, nothing pulled in besides: "
-                   (pr-str (mapv :name (:packages packages))))))
+          (let [loaded (set (map :name (:packages packages)))]
+            (is (contains? loaded "core") "the requested package is there")
+            ;; NOT `= #{"core"}`: `:app/packages` also loads the operator's
+            ;; EXTERNAL manifest (resources/executor-packages.edn — `mathx`
+            ;; today), which is the point of that seam. What must hold is that
+            ;; asking for `core` does not drag the first-party bundle in behind
+            ;; it, which is what a dependency-resolution regression would do.
+            (is (not-any? loaded ["web" "app" "app-base" "registry" "mcp"])
+                (str "asking for core pulled in a first-party bundle: "
+                     (pr-str (sort loaded))))))
         (finally
           (ig/halt! system))))))
 

@@ -184,34 +184,6 @@
       (is (true?  (env-truthy? {:a 1}))))))
 
 
-(deftest as-instant-test
-  (let [as-instant @#'graphden.system.init.cleanup/as-instant
-        target (java.time.Instant/parse "2026-05-21T12:00:00Z")]
-    (testing "nil → nil"
-      (is (nil? (as-instant nil))))
-
-    (testing "Instant pass-through"
-      (is (identical? target (as-instant target))))
-
-    (testing "java.util.Date → Instant via .toInstant"
-      (is (= target (as-instant (java.util.Date/from target)))))
-
-    (testing "java.sql.Timestamp → Instant via .toInstant"
-      ;; Same toInstant path as java.util.Date — sql.Timestamp extends Date.
-      (is (= target (as-instant (java.sql.Timestamp/from target)))))
-
-    (testing "ISO-8601 string → Instant"
-      (is (= target (as-instant "2026-05-21T12:00:00Z"))))
-
-    (testing "SQL-style string `YYYY-MM-DD HH:MM:SS` → Instant"
-      ;; This is the codec's `replace space with T + strip .0 + append Z`
-      ;; fallback path.
-      (is (= target (as-instant "2026-05-21 12:00:00"))))
-
-    (testing "SQL-style with trailing .0 fractional → Instant"
-      (is (= target (as-instant "2026-05-21 12:00:00.0"))))))
-
-
 (deftest compute-all-fn-name-ids-test
   (testing "extracts both base-fn-defs and fn-defs into one name→id map"
     ;; keep over `:base-fn-defs` destructures `[fn-name fn-def]` from

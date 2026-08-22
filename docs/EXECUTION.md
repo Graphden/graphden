@@ -248,9 +248,17 @@ Integrant component `:exec/cleanup-scheduler` runs a single
 | `:cancelled` | 7 days   | DELETE                                        |
 | `:pending` > 1 h | (zombie sweep) | Flip to `:cancelled` (NOT delete); next sweep applies the 7-day TTL |
 
-Implementation: `sweep-executions! storage now` (in
-`graphden.system.init.cleanup`). The `now` argument is injectable so tests
-can verify TTL behaviour without sleeping real time.
+Implementation: `sweep-executions! pool now` (in
+`graphden.crud.fn-execution.retention`; `graphden.system.init.cleanup` owns
+only the cadence). The `now` argument is injectable so tests can verify TTL
+behaviour without sleeping real time.
+
+The sweep is four set-based statements — zombie `UPDATE`, TTL `DELETE`, then
+two anti-join `DELETE`s that reclaim `:fn-execution-arg` /
+`:fn-execution-arg-item` rows whose parent is gone. Those child tables carry
+no foreign key (`:ref` fields become plain indexed UUID columns), so nothing
+else removes them; the anti-join also clears rows detached before this sweep
+existed.
 
 ## Usage rollups (`:usage-stat`)
 

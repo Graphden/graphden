@@ -29,6 +29,7 @@
     [graphden.crud.fn-execution.errors :as exec-errors]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
+    [graphden.crud.fn-execution.retention :as retention]
     [graphden.crud.fn-execution.stats :as exec-stats]
     [graphden.crud.test-runs :as test-runs]
     [graphden.executor.compile-eager :as ce]
@@ -41,7 +42,6 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
-    [graphden.system.init.cleanup :as cleanup]
     [graphden.tenancy.context :as tc]
     [graphden.test-infra.schemas :as schemas]
     [graphden.types.diagnostics :as diag]
@@ -960,7 +960,7 @@
 
 
 ;; ============================================================================
-;; sweep-executions! — TTL cleanup integrant component
+;; sweep-executions! — execution-log retention (TTL + zombie + orphans)
 ;; ============================================================================
 
 (defn- make-exec-row!
@@ -1012,7 +1012,7 @@
                                  (java.time.Instant/parse "2026-05-20T11:00:00Z")
                                  (java.time.Instant/parse "2026-05-20T11:00:01Z"))]
     (try
-      (cleanup/sweep-executions! storage now)
+      (retention/sweep-executions! (:pool @shared-storage) now)
       (is (nil? (sp/read-entity storage :fn-execution old-id))
           "succeeded row > 7d gone")
       (is (some? (sp/read-entity storage :fn-execution fresh-id))
@@ -1031,7 +1031,7 @@
                                  (java.time.Instant/parse "2026-05-10T11:00:00Z")
                                  (java.time.Instant/parse "2026-05-10T11:00:01Z"))]
     (try
-      (cleanup/sweep-executions! storage now)
+      (retention/sweep-executions! (:pool @shared-storage) now)
       (is (nil? (sp/read-entity storage :fn-execution old-id))
           "failed row > 30d gone")
       (is (some? (sp/read-entity storage :fn-execution fresh-id))
@@ -1059,7 +1059,7 @@
         (let [row (sp/read-entity storage :fn-execution (:id zombie-row))]
           (is (#{:pending "pending"} (:status row))
               (str "pre-sweep status = " (pr-str (:status row))))))
-      (cleanup/sweep-executions! storage now)
+      (retention/sweep-executions! (:pool @shared-storage) now)
       (testing "zombie pending → cancelled (NOT deleted)"
         (let [row (sp/read-entity storage :fn-execution (:id zombie-row))]
           (is (some? row) "row still exists")
@@ -1069,6 +1069,52 @@
         (let [row (sp/read-entity storage :fn-execution (:id fresh-row))]
           (is (#{:pending "pending"} (:status row)))))
       (finally nil))))
+
+
+(defn- ensure-slot!
+  "A real `:slot` row for arg rows to point at. Returns its id."
+  [storage]
+  (let [f (sp/create-entity storage :fn {:name (str "sweep-slot-fn-" (random-uuid))})]
+    (:id (sp/create-entity storage :slot
+                           {:name "xs" :type-fn-id (:id f)}))))
+
+
+(deftest sweep-reclaims-orphaned-arg-rows-test
+  ;; The child tables carry NO foreign key (`:ref` fields are plain
+  ;; indexed UUID columns), so deleting an execution leaves its arg /
+  ;; arg-item rows behind and nothing else in the system removes them.
+  ;; Both directions are pinned here: rows this sweep detaches, and rows
+  ;; an earlier sweep already orphaned.
+  (let [storage (create-full-storage)
+        pool (:pool @shared-storage)
+        vid (ensure-fn-version! storage)
+        slot-id (ensure-slot! storage)
+        now (java.time.Instant/parse "2026-05-21T12:00:00Z")
+        expired (make-exec-row! storage vid :succeeded
+                                (java.time.Instant/parse "2026-05-13T11:00:00Z")
+                                (java.time.Instant/parse "2026-05-13T11:00:01Z"))
+        fresh (make-exec-row! storage vid :succeeded
+                              (java.time.Instant/parse "2026-05-20T11:00:00Z")
+                              (java.time.Instant/parse "2026-05-20T11:00:01Z"))
+        count-of (fn [table]
+                   (-> (jdbc/execute-one! pool [(str "SELECT count(*) AS c FROM \"" table "\"")])
+                       vals first long))]
+    (persist/persist-args! storage expired {:xs [1 2 3]} {:xs slot-id})
+    (persist/persist-args! storage fresh {:xs [4 5]} {:xs slot-id})
+    (is (= 2 (count-of "fn_execution_arg")) "one arg row per execution")
+    (is (= 5 (count-of "fn_execution_arg_item")) "one item row per list element")
+
+    (retention/sweep-executions! pool now)
+    (testing "the expired execution's children go with it"
+      (is (= 1 (count-of "fn_execution_arg")))
+      (is (= 2 (count-of "fn_execution_arg_item"))))
+
+    (testing "children orphaned by an earlier sweep are reclaimed too"
+      ;; The pre-fix state: parent gone, children left behind.
+      (jdbc/execute-one! pool ["DELETE FROM \"fn_execution\" WHERE id = ?" fresh])
+      (retention/sweep-executions! pool now)
+      (is (zero? (count-of "fn_execution_arg")))
+      (is (zero? (count-of "fn_execution_arg_item"))))))
 
 
 ;; ============================================================================

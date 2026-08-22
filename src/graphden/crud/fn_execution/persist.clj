@@ -20,6 +20,7 @@
     [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
+    [graphden.storage.protocol.config :as storage-config]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
     [graphden.util.json-safe :as json-safe]
@@ -243,52 +244,72 @@
             (->> (mapv name)))))
 
 
+(defn- arg-row
+  "One `:fn-execution-arg` row for a supplied arg value. Three shapes
+   share one row: a ref carries its target in `:ref-fn-version-id`, a
+   list carries its content in child rows, and a literal (including a
+   map that isn't a ref) keeps `:value`.
+
+   The id is MINTED HERE rather than read back off the write, so the
+   whole batch — parent rows and their items — can be built before a
+   single statement goes out."
+  [storage execution-id slot-id v]
+  (let [ref? (ref-arg? v)
+        list? (sequential? v)]
+    {:id (random-uuid)
+     :execution-id execution-id
+     :slot-id slot-id
+     :value (when-not (or ref? list?) v)
+     :ref-fn-version-id (when ref? (resolve-ref-version-id storage v))}))
+
+
+(defn- item-rows
+  "`:fn-execution-arg-item` rows for a list-valued arg, in position
+   order. Same value-xor-ref rule as the parent row."
+  [storage arg-id v]
+  (into []
+        (map-indexed
+          (fn [idx item]
+            (let [ref? (ref-arg? item)]
+              {:execution-arg-id arg-id
+               :position idx
+               :value (when-not ref? item)
+               :ref-fn-version-id (when ref? (resolve-ref-version-id storage item))})))
+        v))
+
+
+(defn- create-all!
+  "Batch-create `rows` — one statement per chunk of the configured batch
+   ceiling. A thousand-element list argument costs a statement, not a
+   thousand of them; chunking keeps a pathological one under the
+   `*max-batch-size*` guard instead of throwing."
+  [storage entity-name rows]
+  (doseq [chunk (partition-all storage-config/*max-batch-size* rows)]
+    (sp/create-entities storage entity-name (vec chunk))))
+
+
 (defn persist-args!
   "Write one :fn-execution-arg row per supplied arg, with optional
    :fn-execution-arg-item rows for list-typed args. Args without a
    matching slot in `free-slots` are skipped silently — validation
-   should have caught those upstream."
+   should have caught those upstream.
+
+   Two batched writes total (parents, then items), so persistence cost
+   tracks the number of ARGS, not the number of list elements."
   [storage execution-id args free-slots]
-  (doseq [[k v] args
-          :let [slot-id (get free-slots (keyword k))]
-          :when slot-id]
-    (cond
-      ;; Single ref
-      (ref-arg? v)
-      (sp/create-entity storage :fn-execution-arg
-                        {:execution-id execution-id
-                         :slot-id slot-id
-                         :value nil
-                         :ref-fn-version-id (resolve-ref-version-id storage v)})
-
-      ;; List — create the arg row + per-item rows
-      (sequential? v)
-      (let [arg-row (sp/create-entity storage :fn-execution-arg
-                                      {:execution-id execution-id
-                                       :slot-id slot-id
-                                       :value nil
-                                       :ref-fn-version-id nil})]
-        (doseq [[idx item] (map-indexed vector v)]
-          (if (ref-arg? item)
-            (sp/create-entity storage :fn-execution-arg-item
-                              {:execution-arg-id (:id arg-row)
-                               :position idx
-                               :value nil
-                               :ref-fn-version-id (resolve-ref-version-id
-                                                    storage item)})
-            (sp/create-entity storage :fn-execution-arg-item
-                              {:execution-arg-id (:id arg-row)
-                               :position idx
-                               :value item
-                               :ref-fn-version-id nil}))))
-
-      ;; Literal scalar (or map that isn't a ref)
-      :else
-      (sp/create-entity storage :fn-execution-arg
-                        {:execution-id execution-id
-                         :slot-id slot-id
-                         :value v
-                         :ref-fn-version-id nil}))))
+  (let [prepared (into []
+                       (keep (fn [[k v]]
+                               (when-let [slot-id (get free-slots (keyword k))]
+                                 {:row (arg-row storage execution-id slot-id v)
+                                  :value v})))
+                       args)
+        items (into []
+                    (mapcat (fn [{:keys [row value]}]
+                              (when (sequential? value)
+                                (item-rows storage (:id row) value))))
+                    prepared)]
+    (create-all! storage :fn-execution-arg (mapv :row prepared))
+    (create-all! storage :fn-execution-arg-item items)))
 
 
 (defn create-pending-row!

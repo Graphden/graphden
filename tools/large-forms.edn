@@ -1,0 +1,126 @@
+;; Top-level forms of >= :threshold lines that stay whole, and why.
+;;
+;; The rule is "split it, or write down what holds it together". This is
+;; the second half. `test/graphden/large_forms_guard_test.clj` fails the
+;; build when a form grows past the threshold without an entry here, and
+;; again when an entry outlives its form — so the table can only shrink
+;; as code gets split, and a NEW long form gets decided while it is
+;; being written instead of at the next audit.
+;;
+;; An entry is not an excuse; it is a claim that a reader is better off
+;; with the form intact. Four kinds of claim recur:
+;;
+;;   dispatch table   a record / multimethod whose length is its member
+;;                    count, each member short
+;;   data table       a declaration (schema, routes, registry) that IS
+;;                    the data
+;;   relation         a decision table over cases whose COMPLETENESS is
+;;                    what the reader checks; per-case fns scatter it
+;;   one unit         a linear `let` pipeline, a shared-state algorithm,
+;;                    or an effect sequence inside one lock / transaction
+;;
+;; If you can name a PHASE inside one of these and lift it out without
+;; passing six arguments, the entry is wrong — split it and delete the line.
+
+{:threshold 100
+
+ :acknowledged
+ {;; ---- dispatch tables -------------------------------------------------
+  "graphden.versioning.storage.core/VersionedStorage"
+  "dispatch table: every method is a two-line versioned?-or-not fork; the versioned arms are named fns above it"
+  "graphden.storage.postgres.core/PostgresStorage"
+  "dispatch table: each protocol method delegates to postgres/{crud,ddl,graph} with the pool + field specs"
+  "graphden.schema.malli.core/MalliDataSchemaBuilder"
+  "dispatch table: one small map-update per builder method of the DataSchema protocol"
+  "graphden.storage.postgres.migration/make-postgres-callbacks"
+  "dispatch table: one short callback per migration hook, returned as one map"
+
+  ;; ---- data tables -----------------------------------------------------
+  "graphden.schema.graph.schema/extend-builder"
+  "data table: the graph entities and their field specs — the declaration IS the content"
+  "graphden.schema.executions.schema/extend-builder"
+  "data table: the execution-log entities, their fields and enum values"
+  "graphden.schema.versioned.schema/extend-builder"
+  "data table: the version-mirror entities derived per versioned base entity"
+  "graphden.accounts.routes/make-router"
+  "data table: the /auth/* route vector; each route is a handler plus its method and path"
+  "devtour/js"
+  "data table: the tour page's baked client script, a string literal"
+
+  ;; ---- relations: decision tables read for completeness ----------------
+  "graphden.types.core/subtype?"
+  "relation: the subtype decision table. Arms are 2-8 lines over one normalised pair; splitting per type-kind hides whether every kind is covered"
+  "graphden.types.core/unify"
+  "relation: the unification table, same shape and same completeness argument as subtype?"
+  "graphden.types.check.literals/diff-value-against-type"
+  "relation: literal-vs-type mismatch cases, one arm per type kind, all producing the same diff shape"
+  "graphden.types.check/check-one-binding"
+  "relation: the per-binding rejection cases; each arm is one rule from docs/TYPES.md"
+  "graphden.types.check/check-fn-def!"
+  "one unit: the per-fn-def check sequence — pre-pass validators and the inference body share one derived let (a previous split duplicated it instead)"
+  "graphden.packages.records.parse/map-arg-value->binding-fields"
+  "relation: one arm per authored arg-value shape (literal / ref / rename / list / inline anon), all producing binding fields"
+  "graphden.packages.records.types/resolve-type-ref"
+  "relation: one arm per `:type` spelling an author may write"
+
+  ;; ---- shared-state algorithms -----------------------------------------
+  "graphden.executor.compile.renames/deep-free-ext-names*"
+  "one unit: a `walk` letfn threading a covered-set and a rename map; the recursion IS the function. Its slot-id-keyed twin below is a known parallel pair: same traversal, different coverage key — unifying them is open work, re-keying is not (rejected twice, see docs/RUNTIME_SLOT_ID_REFACTOR.md)"
+  "graphden.executor.compile.renames/deep-free-ext-entries*"
+  "one unit: the same walk with slot-id coverage — see deep-free-ext-names*"
+  "graphden.executor.compile.renames/hof-lambda-params"
+  "one unit: the lambda-arity decision walks the same rename state as its caller and cannot see it from outside"
+  "graphden.layout.graph/process-expanded-fn-impl"
+  "one unit: mutually recursive with process-any-fn / process-fn over one shared `state` atom"
+  "graphden.layout.graph/process-any-fn"
+  "one unit: the dispatch half of that same mutual recursion"
+  "graphden.crud.fn-execution.lookup/free-args-via"
+  "one unit: a fixpoint over the inheritance + ref closure with its own seen-set"
+  "graphden.system.branch-router/dispatch*"
+  "one unit: one request's routing decision — the arms share the resolved branch, ctx and generation snapshot"
+
+  ;; ---- linear let pipelines --------------------------------------------
+  "graphden.executor.context/create-context"
+  "linear let: builds the ExecutionContext map; each binding names one field of it"
+  "graphden.executor.compile-eager/compile-fn"
+  "linear let: assembles one fn's runtime closure from its classified bindings, in the order the closure needs them"
+  "graphden.executor.compile-eager/arg-builder"
+  "linear let: one builder per binding kind, on the compile hot path; the arms share the classified binding"
+  "graphden.layout.core/layout-graph"
+  "linear let: the seven layout stages, each already a named call, threaded in order"
+  "graphden.layout.builder-helpers/collect-expanded-args"
+  "linear let: builds one node's arg rows from eight indexes, each binding named"
+  "graphden.layout.builder-helpers/collect-fn-args"
+  "linear let: the same for the unexpanded case"
+  "graphden.crud.type-check/reconstruct-fn-def"
+  "linear let: rebuilds an authored fn-def from stored rows, one field per binding"
+  "graphden.executor.registry.core/record-rich-types!"
+  "linear let: derives one registry entry (args, return, effects, markers) and writes it"
+
+  ;; ---- effect sequences that must not be split -------------------------
+  "graphden.versioning.storage.core/create-entity-versioned!"
+  "one unit: identity row + version row inside one transaction / advisory-lock scope"
+  "graphden.versioning.storage.core/delete-branch!"
+  "one unit: the branch teardown transaction — write, invalidate, best-effort service stop (decision recorded in its docstring)"
+  "graphden.packages.sync/sync-fn-entities-from-packages!"
+  "one unit: the sync write order (identities, slots, junctions, bindings, reconcile) is the correctness argument"
+  "graphden.packages.sync/reconcile-moved-identities*!"
+  "one unit: detect moves, repoint refs, remove the leftovers — a half-applied move is worse than none"
+  "graphden.packages.sync/register-type-aliases!"
+  "one unit: alias registration must complete before anything type-checks against it"
+  "graphden.executor.compile-runtime/register-type-aliases-from-db!"
+  "one unit: the boot-time twin of the above, over stored rows"
+  "graphden.executor.context/invalidate-graph-cache!"
+  "one unit: cache clear + epoch bump + delta seed, under the invalidation lock"
+  "graphden.executor.context/splice-graph-cache!"
+  "one unit: the in-place cache patch, same lock, same invariant"
+  "graphden.services.reconciler/reconcile-once!*"
+  "one unit: one reconcile tick under the reconcile monitor; the arms share the desired/actual diff"
+  "graphden.crud.entities.seq/apply-seq-append-core"
+  "one unit: synthetic-binding materialise + position compute + pre-reject share a binding id that cannot cross a node boundary without a race"
+  "graphden.crud.type-check/type-check-binding-direct!"
+  "one unit: the write-path check — resolve, check, record-or-clear the diagnostic, as one step"
+  "graphden.system.init.exec/ig/init-key :exec/context"
+  "one unit: the boot wiring of the execution context; every binding is one component it needs"
+  "graphden.packages.web.sse.impls/sse-stream"
+  "one unit: channel open, binding capture, tick schedule, changed-only dedupe, notify (un)registration and close share five atoms — a tick after close, an uncounted cap slot or a lingering callback is what splitting risks (the graph-side argument is in its docstring)"}}

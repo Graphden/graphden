@@ -8,6 +8,7 @@
    not a nicety: a caller must not be able to name a counter."
   (:require
     [clojure.java.io :as io]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.util.counters :as counters]))
 
@@ -26,6 +27,22 @@
                   (binding [*ns* (the-ns ns-sym)]
                     (doseq [f forms] (eval f)))
                   @(ns-resolve ns-sym 'impls)))))))
+
+
+(defn- tour-delta
+  "The `tour-*` slice of what changed since `before`.
+
+   The counters map is PROCESS-GLOBAL and the unit suite runs eight
+   namespaces at a time, so a raw `delta-since` also reports whatever a
+   sibling namespace bumped mid-assertion (`:compile/all-miss` is the one
+   that actually caught this out). Scoping to the prefix loses nothing:
+   the impl builds every key as `(str \"tour-\" …)`, so a counter a caller
+   managed to name would still land in this slice — which is the property
+   these tests exist to pin."
+  [before]
+  (into {}
+        (filter (fn [[k _]] (str/starts-with? (name k) "tour-")))
+        (counters/delta-since before)))
 
 
 (defn- count-event!
@@ -67,18 +84,18 @@
             (str "lesson " (pr-str bogus) " must not count"))
         (is (nil? (count-step! bogus 1))
             (str "lesson " (pr-str bogus) " must not count a step")))
-      (is (empty? (counters/delta-since before))
+      (is (empty? (tour-delta before))
           "and none of them left a key behind")))
 
   (testing "an event outside the three counts NOTHING"
     (let [before (counters/snapshot)]
       (doseq [bogus ["opened" "STARTED" "" nil "step " :step]]
         (is (nil? (count-event! "01" bogus))))
-      (is (empty? (counters/delta-since before)))))
+      (is (empty? (tour-delta before)))))
 
   (testing "a step index outside a lesson's possible length counts NOTHING"
     (let [before (counters/snapshot)]
       (doseq [bogus [-1 100 1000000 "abc" nil "1e9"]]
         (is (nil? (count-step! "01" bogus))
             (str "step " (pr-str bogus) " must not count")))
-      (is (empty? (counters/delta-since before))))))
+      (is (empty? (tour-delta before))))))

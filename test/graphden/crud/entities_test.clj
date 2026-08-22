@@ -15,10 +15,11 @@
    plugin's per-NS-thread `*rich-types-override*` atom (the `:once`
    `with-isolated-rich-types` fixture covers solo runs). The search
    cap is a thread-local `binding` of the now-dynamic
-   `entities/*default-search-limit*`."
+   `entity-list/*default-search-limit*`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.validation :as validation]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -440,7 +441,7 @@
           (is (false? (:truncated? dump)))))
       (testing "scope :search caps at the limit and flags :truncated?"
         ;; Bind the (dynamic) private cap low rather than seed 200+ rows.
-        (binding [entities/*default-search-limit* 1]
+        (binding [entity-list/*default-search-limit* 1]
           (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
             (is (= 1 (count (:fns dump))) "result capped at the limit")
             (is (true? (:truncated? dump)) "more matched than were returned"))))

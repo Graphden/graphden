@@ -268,7 +268,17 @@
      :say "The decorator record itself. It implements every storage protocol,
            delegating non-versioned entities straight to the base storage and
            intercepting versioned ones — reads resolve to a branch view, writes
-           append version rows. Grasp this structure before anything else here."}
+           append version rows. Every method is a two-line dispatch: read this
+           for the SHAPE, then follow the versioned arm into its own function.
+           Grasp this structure before anything else here."}
+    {:ns graphden.versioning.storage.core :defn create-entity-versioned!
+     :say "The versioned arm of a single create, and the write path worth
+           reading in full: identity row + version row, the identity-field diff
+           for when the deterministic id already exists, and the advisory-lock
+           branch that serialises the writes whose uniqueness is a per-branch
+           RESOLVED-VIEW property (fn names, list-item positions) rather than a
+           table constraint. `update-entity-versioned!` next to it tells the
+           same story for the append case."}
     {:ns graphden.versioning.storage.resolution :defn entity-config
      :say "The authoritative map of WHICH entities are versioned (fn / fn-slot
            / binding / binding-list-item) and how each splits across two tables:
@@ -501,11 +511,11 @@
            consult. It centralizes the cycle / MI-collision / terminal /
            list-closed / secret-path checks that can veto a mutation before it
            ever persists."}
-    {:ns graphden.crud.entities :defn apply-create-record-type-body
+    {:ns graphden.crud.entities.record-type :defn apply-create-record-type-body
      :say "A multi-row atomic write unit: fn-row + N slot-rows + N fn-slot
            junctions, appending each success to a shared `journal` atom. Shows
            how one logical create fans out into many graph rows."}
-    {:ns graphden.crud.entities :defn apply-create-rollback
+    {:ns graphden.crud.entities.record-type :defn apply-create-rollback
      :say "The `:try` on-throw partner: replay the `journal` in reverse,
            best-effort deleting each row. This is how atomicity is achieved here
            WITHOUT a DB transaction — the compensating half of the body above."}
@@ -528,7 +538,7 @@
            secret-involving failure is flagged `:secret? true` and NOT
            recorded — the caller rolls the write back and hard-rejects."
      :see [[:types "check-fn-def!"]]}
-    {:ns graphden.crud.entities :defn notify-after-write!
+    {:ns graphden.crud.entities.invalidation :defn notify-after-write!
      :say "The post-persist step: invalidate caches and broadcast a NOTIFY delta
            so sibling pods rebuild the affected fns. How a committed write becomes
            visible fleet-wide."}

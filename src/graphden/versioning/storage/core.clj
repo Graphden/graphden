@@ -363,6 +363,463 @@
 
 ;; === VersionedStorage Record ===
 
+(defn- create-entity-versioned!
+  "Create one versioned entity: identity row + version row."
+  [base-storage branch-id entity-name data]
+  ;; Versioned: create full record in base table + version record.
+  ;; When the identity row already exists (deterministic UUID re-sync),
+  ;; resolve the current version directly from `existing` instead of
+  ;; calling `resolve-entity` (which would re-fetch identity).
+  ;;
+  ;; `normalized` runs the same per-entity write-side rules the base
+  ;; `sp/create-entity` applies internally (notably `:binding`'s
+  ;; `:value-present true` when `:value` is present but the flag
+  ;; isn't). Without this, the BASE row gets `:value-present true`
+  ;; via the base-storage's own normalizer call, but the VERSION
+  ;; row was built off the un-normalized `data` map — every binding
+  ;; created here through CRUD landed in the version table with
+  ;; `:value-present nil`, and versioned reads (which overlay
+  ;; version-data over identity via `merge identity version`) then
+  ;; overwrote the base's `true` back to `nil`. Result: every freshly-
+  ;; created literal-bound arg disappeared from arg-overlays in the
+  ;; editor (the layout walker classifies `value-present=nil` as
+  ;; `:free`, no value-node).
+  (let [id (or (:id data) (random-uuid))
+        normalized (sp/standard-crud-normalize-data entity-name
+                                                    (assoc data :id id))
+        do-create!
+        (fn [st]
+          (uniq/check-list-item-position-collision! st branch-id entity-name normalized)
+          (uniq/check-fn-name-collision! st branch-id entity-name normalized)
+          (uniq/check-resource-override-path-collision! st branch-id entity-name normalized)
+          (let [existing (sp/read-entity st entity-name id)
+                base-row (strip-version-framework-cols entity-name normalized)]
+            (if existing
+              (apply-identity-field-diff!
+                st entity-name id base-row existing
+                (:version-data-fields (get res/entity-config entity-name)))
+              (sp/create-entity st entity-name base-row))
+            (let [{:keys [version-id-field version-data-fields]}
+                  (get res/entity-config entity-name)
+                  current-version (when existing
+                                    (res/resolve-version st entity-name id branch-id))
+                  current-data (when current-version
+                                 (select-keys (merge existing
+                                                     (dissoc current-version
+                                                             :id :branch-id :created-at
+                                                             version-id-field))
+                                              version-data-fields))
+                  new-data (select-keys normalized version-data-fields)]
+              (when (or (nil? current-version) (not= current-data new-data))
+                (create-version-record! st entity-name id branch-id normalized))))
+          normalized)
+        ;; A `:binding-list-item` append's collision check + version insert
+        ;; must be atomic w.r.t. concurrent appends to the SAME binding —
+        ;; otherwise two appends read the same used-positions, compute the
+        ;; same next position, and both insert there, corrupting the
+        ;; per-branch sequence order. (The `(binding,position)` UNIQUE index
+        ;; was dropped because uniqueness is a per-branch RESOLVED-VIEW
+        ;; property, not a base-table one.) Serialize on a per-binding
+        ;; `pg_advisory_xact_lock` (auto-released at commit/rollback): the
+        ;; loser then sees the committed position and its collision check
+        ;; fires loudly instead of silently double-inserting. Named-:fn
+        ;; creates ride the same mechanism keyed on (branch, ns, name) —
+        ;; their retired UNIQUE moved to check-fn-name-collision! too.
+        lock-key (or (when (and (= entity-name :binding-list-item)
+                                (:binding-id normalized))
+                       (str (:binding-id normalized)))
+                     (uniq/fn-name-lock-key branch-id entity-name normalized)
+                     (uniq/resource-override-path-lock-key branch-id entity-name normalized))]
+    (cond
+      (and lock-key (:pool base-storage))
+      ;; `:ignore` so any nested `with-transaction` in the create path
+      ;; (`crud/create-entity` opens one to write `:ref-many` junction rows —
+      ;; e.g. a `:fn`'s `:parent-ids`) runs INLINE on this connection instead
+      ;; of committing early. A nested commit would end THIS transaction and
+      ;; release the `pg_advisory_xact_lock` before the collision check +
+      ;; version insert finished, letting a racing same-name create slip
+      ;; through — the (branch, ns, name) serialization would silently break.
+      (binding [jdbc-tx/*nested-tx* :ignore]
+        (jdbc/with-transaction [tx (:pool base-storage)]
+                               (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
+                                                  lock-key])
+                               (do-create! (assoc base-storage :pool tx))))
+
+      ;; No lock key, but a pooled backend: still wrap the base-row +
+      ;; version-row pair in ONE transaction. Off the lock path the two
+      ;; inserts otherwise run on autocommit as separate statements, so a
+      ;; crash between them leaves a versionless GHOST identity — invisible
+      ;; to resolved reads, only healed later by the `ids-without-chain-
+      ;; version` force-a-version backstop. A plain `:binding` / `:fn-slot`
+      ;; create needs the same crash-atomicity the lock path already gives
+      ;; named-`:fn` / list-item writes, just without the advisory lock.
+      ;; `:ignore` for the same nested-`with-transaction` reason as above.
+      (:pool base-storage)
+      (binding [jdbc-tx/*nested-tx* :ignore]
+        (jdbc/with-transaction [tx (:pool base-storage)]
+                               (do-create! (assoc base-storage :pool tx))))
+
+      :else
+      (do-create! base-storage))))
+
+
+(defn- update-entity-versioned!
+  "Update one versioned entity: append a new version when the
+   version-controlled fields changed, write the non-versioned ones
+   straight through, serialize the collision-prone writes."
+  [base-storage branch-id entity-name id data]
+  ;; Versioned: append new version with merged data (if changed)
+  (let [current (res/resolve-entity base-storage entity-name id branch-id)]
+    (when-not current
+      (throw (ex-info "Entity not found"
+                      {:type :not-found
+                       :entity-name entity-name
+                       :id id})))
+    (let [merged (merge current data)
+          ;; Only compare version-controlled fields, not :id
+          {:keys [version-data-fields]} (get res/entity-config entity-name)
+          current-data (select-keys current version-data-fields)
+          merged-data (select-keys merged version-data-fields)
+          ;; Non-versioned fields (e.g. :ref-many junction fields like
+          ;; :parent-ids) live on the identity row / junction tables,
+          ;; not in the version table. Updates to those have to be
+          ;; flowed through to base storage explicitly — without this,
+          ;; PUTs that change ONLY non-versioned fields are silent
+          ;; no-ops because version-data-fields-only diffing returns
+          ;; equal and create-version-record! is skipped.
+          non-versioned-data (apply dissoc data version-data-fields)
+          ;; A rename / namespace-move can land on an occupied
+          ;; (ns, name) — same live-view rule as create. Only those two
+          ;; keys can introduce a collision, so other updates (the
+          ;; common case: description, effects, …) skip the check and
+          ;; its lock entirely.
+          name-write? (and (= :fn entity-name)
+                           (:name merged)
+                           (or (contains? data :name)
+                               (contains? data :namespace-id)))
+          ;; A :resource-override path RE-POINT can land on a path
+          ;; another live override holds — same live-view rule.
+          path-write? (and (= :resource-override entity-name)
+                           (:path merged)
+                           (contains? data :path))
+          ;; A `:binding-list-item` position / binding move can land on a
+          ;; (binding-id, position) another item already holds — the same
+          ;; live-view rule as create. Only those two keys can introduce a
+          ;; collision (mirrors `name-write?`), so other item updates
+          ;; (`:value`, `:ref-fn-id`, …) skip the check + lock. Its version
+          ;; insert must be serialized w.r.t. concurrent moves to the SAME
+          ;; binding, exactly as the create-append path is — otherwise two
+          ;; concurrent position updates both pass the check and both
+          ;; commit, corrupting the per-branch sequence order.
+          list-item-write? (and (= :binding-list-item entity-name)
+                                (:binding-id merged)
+                                (some? (:position merged))
+                                (or (contains? data :position)
+                                    (contains? data :binding-id)))
+          do-update!
+          (fn [st]
+            (when name-write?
+              (uniq/check-fn-name-collision! st branch-id entity-name
+                                             (assoc merged :id id)))
+            (when list-item-write?
+              (uniq/check-list-item-position-collision! st branch-id entity-name
+                                                        (assoc merged :id id)))
+            (when path-write?
+              (uniq/check-resource-override-path-collision!
+                st branch-id entity-name (assoc merged :id id)))
+            ;; Skip creating new version if data unchanged. (A
+            ;; versionless identity can't reach here at all — the
+            ;; `resolve-entity` above is version-gated and already threw
+            ;; not-found. The batch path, which the package sync uses,
+            ;; resolves identity-as-is and therefore needs the explicit
+            ;; versionless guard it carries.)
+            (when (not= current-data merged-data)
+              (create-version-record! st entity-name id branch-id merged))
+            ;; Apply non-versioned fields directly. base-storage's
+            ;; update-entity handles columnar identity columns AND
+            ;; ref-many junction replacement.
+            (when (seq non-versioned-data)
+              (sp/update-entity st entity-name id non-versioned-data))
+            merged)
+          ;; Serialize on (branch, ns, name) for a rename/move and on the
+          ;; owning binding for a list-item position move — the same
+          ;; per-binding `pg_advisory_xact_lock` the create-append uses.
+          lock-key (cond
+                     name-write? (uniq/fn-name-lock-key branch-id entity-name merged)
+                     list-item-write? (str (:binding-id merged))
+                     path-write? (uniq/resource-override-path-lock-key
+                                   branch-id entity-name merged))]
+      (if (and lock-key (:pool base-storage))
+        ;; `:ignore` — same reason as the create path: a nested
+        ;; `with-transaction` inside `do-update!` (crud/update-entity opens
+        ;; one to replace `:ref-many` junction rows) must run INLINE, not
+        ;; commit early and drop the advisory lock mid-update.
+        (binding [jdbc-tx/*nested-tx* :ignore]
+          (jdbc/with-transaction [tx (:pool base-storage)]
+                                 (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
+                                                    lock-key])
+                                 (do-update! (assoc base-storage :pool tx))))
+        (do-update! base-storage)))))
+
+
+(defn- hard-delete-entity!
+  "Hard delete (sync / rollback) of one entity. Returns true when this
+   branch had a version row to drop."
+  [base-storage branch-id entity-name id]
+  (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
+        all-versions (sp/query-entities base-storage version-entity
+                                        {version-id-field id})
+        own-versions (filterv #(= branch-id (:branch-id %)) all-versions)
+        purgeable (purgeable-identity-ids base-storage entity-name [id]
+                                          branch-id all-versions version-id-field)]
+    (when (seq own-versions)
+      (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
+    (when (seq purgeable)
+      (sp/delete-entity base-storage entity-name id))
+    (pos? (count own-versions))))
+
+
+(defn- create-entities-versioned!
+  "Batch create of a versioned entity: identity rows + version rows, in
+   one transaction."
+  [base-storage branch-id entity-name data-seq]
+  ;; Versioned: batch create base records + batch create version records
+  (let [data-with-ids (mapv (fn [data]
+                              (if (:id data) data (assoc data :id (random-uuid))))
+                            data-seq)
+        config (get res/entity-config entity-name)
+        ;; INTRA-batch duplicates (two items in the same batch sharing
+        ;; `(binding-id, position)`) both pass the against-storage check
+        ;; below — neither is committed yet — so reject them upfront
+        ;; (pure, no storage), keeping batch import from a broken landing.
+        _ (when (= :binding-list-item entity-name)
+            (let [by-key (group-by (juxt :binding-id :position) data-with-ids)
+                  dupe (some (fn [[k items]]
+                               (when (and (some? (first k))
+                                          (some? (second k))
+                                          (> (count items) 1))
+                                 [k items]))
+                             by-key)]
+              (when dupe
+                (throw (ex-info "Batch contains items with duplicate (binding-id, position)"
+                                {:type :constraint-violation/position-collision
+                                 :entity-name :binding-list-item
+                                 :binding-id (ffirst dupe)
+                                 :position (second (first dupe))
+                                 :colliding-item-ids (mapv :id (second dupe))})))))
+        ;; The base-row + version-row batch writes must land under ONE
+        ;; transaction (M3): off the lock path they otherwise ran on
+        ;; autocommit as separate statements, so a crash between them left
+        ;; versionless GHOST identities. The against-storage collision
+        ;; check + existence read run inside the same tx as the writes.
+        do-batch!
+        (fn [st]
+          ;; Position-collision check against storage, mirroring the
+          ;; singular create-entity.
+          (uniq/check-list-item-position-collisions! st branch-id
+                                                     entity-name data-with-ids)
+          (let [ids (mapv :id data-with-ids)
+                ;; Find which base records don't exist yet
+                existing-by-id (sp/read-entities st entity-name ids)
+                existing-ids (set (keys existing-by-id))
+                {existing-records true new-base-records false}
+                (group-by #(contains? existing-ids (:id %)) data-with-ids)]
+            ;; Batch create base records. Identity-plane INSERT: strip
+            ;; version-plane bookkeeping a caller may echo from a
+            ;; version-row read (the crud rollback replay re-creates
+            ;; captured pre-state rows) — the identity table has no
+            ;; such column. Rows whose identity already exists flow
+            ;; their identity-field diffs through update (guarded
+            ;; no-op when unchanged) instead of being silently
+            ;; write-once.
+            (when (seq new-base-records)
+              (sp/create-entities st entity-name
+                                  (mapv #(strip-version-framework-cols entity-name %)
+                                        new-base-records)))
+            (doseq [row existing-records]
+              (apply-identity-field-diff!
+                st entity-name (:id row)
+                (strip-version-framework-cols entity-name row)
+                (get existing-by-id (:id row))
+                (:version-data-fields config)))
+            ;; Prepare and batch create version records
+            (let [timestamp (now)
+                  version-records (mapv #(prepare-version-record config (:id %) branch-id
+                                                                 timestamp %)
+                                        data-with-ids)]
+              (sp/create-entities st (:version-entity config) version-records)))
+          data-with-ids)]
+    (if-let [pool (:pool base-storage)]
+      ;; `:ignore` so a nested `with-transaction` inside an inner write
+      ;; (a `:fn`'s `:parent-ids` ref-many junction replacement) runs
+      ;; INLINE rather than committing early and breaking the atomic
+      ;; boundary — same convention as the singular create + delete-branch.
+      (binding [jdbc-tx/*nested-tx* :ignore]
+        (jdbc/with-transaction [tx pool]
+                               (do-batch! (assoc base-storage :pool tx))))
+      (do-batch! base-storage))))
+
+
+(defn- update-entities-versioned!
+  "Batch update of a versioned entity: resolve current versions, append a
+   version row per CHANGED record, flow non-versioned fields through."
+  [base-storage branch-id entity-name data-seq]
+  ;; Batch update: resolve all current versions, compute diffs, batch create versions
+  (let [ids (mapv :id data-seq)
+        ;; Batch resolve current versions using efficient batch resolution
+        identity-records (vals (sp/read-entities base-storage entity-name ids))
+        current-versions (res/resolve-entities-batch base-storage entity-name
+                                                     identity-records branch-id)
+        current-by-id (into {} (map (fn [e] [(:id e) e])) (vals current-versions))
+        ;; Check all entities exist
+        missing-ids (remove #(contains? current-by-id %) ids)]
+    (when (seq missing-ids)
+      (throw (ex-info "Entities not found"
+                      {:type :not-found
+                       :entity-name entity-name
+                       :missing-ids (vec missing-ids)})))
+    ;; Position-collision check against storage, mirroring the singular
+    ;; update-entity. Uses the merged shape (current + incoming partial
+    ;; update) so a position-only update is checked against the rest of
+    ;; the binding's items on the chain.
+    (uniq/check-list-item-position-collisions!
+      base-storage branch-id entity-name
+      (vec (keep (fn [data]
+                   (let [id (:id data)
+                         current (get current-by-id id)]
+                     (when current (assoc (merge current data) :id id))))
+                 data-seq)))
+    ;; Compute merged versions and filter to only changed ones
+    (let [{:keys [version-entity version-data-fields] :as config}
+          (get res/entity-config entity-name)
+          timestamp (now)
+          ;; An identity row with NO version on the chain resolves to
+          ;; ITSELF (resolution/resolve-entities-batch's identity-as-is
+          ;; fallback), so a content-equal update diffs to nothing — and
+          ;; without a version row the READ path (`resolve-all-entities`,
+          ;; which lists only entities that have one) never returns it.
+          ;; Such remnants are real: item-ids are deterministic per
+          ;; (binding, position), so an older, longer list leaves identity
+          ;; rows that a later sync re-touches. Growing a package list
+          ;; through one silently dropped a route from the live demo's
+          ;; router (2026-07-20) while a fresh-DB run stayed green.
+          ;; So: force a version for any id that has none, whatever the
+          ;; diff. The hard-delete path now purges a sole-branch identity
+          ;; outright (see `delete-entities` :else), so this is the
+          ;; BACKSTOP for identities another branch still pins — and the
+          ;; probe is chain-scoped + merge-aware for exactly that case: a
+          ;; version living only on an unrelated branch must not satisfy
+          ;; THIS branch's visibility.
+          versionless-ids (res/ids-without-chain-version
+                            base-storage entity-name ids branch-id)
+          ;; Build version records for changed entities + versionless ones
+          version-records
+          (into []
+                (keep (fn [data]
+                        (let [id (:id data)
+                              current (get current-by-id id)
+                              merged (merge current data)
+                              current-data (select-keys current version-data-fields)
+                              merged-data (select-keys merged version-data-fields)]
+                          (when (or (not= current-data merged-data)
+                                    (contains? versionless-ids id))
+                            (prepare-version-record config id branch-id
+                                                    timestamp merged)))))
+                data-seq)]
+      ;; Batch create all version records
+      (when (seq version-records)
+        (sp/create-entities base-storage version-entity version-records))
+      ;; Ref-many junctions (notably fn `:parent-ids`) and other
+      ;; non-versioned columns live on the base identity row, not in
+      ;; a version record — the diff above only covers
+      ;; `version-data-fields`. Flow every non-versioned change
+      ;; through to base storage, whose singular `update-entity`
+      ;; merges with the existing row (filling NOT-NULL columns) and
+      ;; reconciles ref-many junctions. Without this a base-fn →
+      ;; composed-fn parent change is silently dropped. Mirrors the
+      ;; singular `update-entity` above; guarded so an unchanged
+      ;; re-sync stays a no-op.
+      (doseq [data data-seq
+              :let [id (:id data)
+                    non-versioned (apply dissoc data :id version-data-fields)
+                    current (get current-by-id id)]
+              :when (and (seq non-versioned)
+                         (not= non-versioned
+                               (select-keys current (keys non-versioned))))]
+        (sp/update-entity base-storage entity-name id non-versioned))
+      ;; Return merged data for all records (including unchanged)
+      (mapv (fn [data]
+              (merge (get current-by-id (:id data)) data))
+            data-seq))))
+
+
+(defn- hard-delete-entities!
+  "Batch hard delete (sync / rollback). Returns the count of ids that had
+   a version on this branch."
+  [base-storage branch-id entity-name ids]
+  ;; Batch hard delete: drop this branch's version rows, and — for
+  ;; ids no other branch retains a version of — the identity rows
+  ;; too (see `purgeable-identity-ids`; the singular `delete-entity`
+  ;; mirrors this).
+  (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
+        ;; Single WHERE IN query for ALL branches' versions — the
+        ;; current branch's are deleted, the others gate the
+        ;; identity purge.
+        all-versions (sp/query-entities base-storage version-entity
+                                        {version-id-field (vec ids)})
+        own-versions (filterv #(= branch-id (:branch-id %)) all-versions)
+        ;; Count unique entity-ids that had versions on this branch
+        ;; (return-value contract, unchanged)
+        deleted-entity-ids (into #{} (map version-id-field) own-versions)
+        purgeable (purgeable-identity-ids base-storage entity-name (vec ids)
+                                          branch-id all-versions version-id-field)]
+    (when (seq own-versions)
+      (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
+    (when (seq purgeable)
+      (sp/delete-entities base-storage entity-name purgeable))
+    (count deleted-entity-ids)))
+
+
+(defn- live-ref-many-owners
+  "Owners of `target-id` through the `field-name` junction, filtered to
+   the ones still ALIVE on this branch."
+  [base-storage branch-id entity-name field-name target-id]
+  ;; Junction tables are NOT versioned (the model versions :parent-ids only via
+  ;; fn re-creation, not a separate junction-version table), so the base query
+  ;; has to answer from the junction rows — and those name every owner that
+  ;; EVER pointed here, including owners this branch has since deleted.
+  ;;
+  ;; Deletion is a TOMBSTONE, not a row removal. Passing the base answer
+  ;; through therefore reported dead children as live dependents, and the
+  ;; delete guard built on this ("Graph is a parent of N other graph(s) —
+  ;; remove the dependents first") refused forever:
+  ;;
+  ;;     DELETE child  -> 200
+  ;;     DELETE parent -> 409   "is a parent of 1 other graph"
+  ;;
+  ;; A fn that ever had a child could not be deleted again, by anyone — the
+  ;; user in the editor, or a test cleaning up after itself. The e2e suite hit
+  ;; it every run: the leaked parents stayed in the graph and the NEXT test
+  ;; file failed on them, which is where the "flaky e2e" investigations all
+  ;; went, and why they never found anything.
+  ;;
+  ;; The junction is the right place to ask WHO pointed here. It is not the
+  ;; place to ask WHO STILL EXISTS. Resolve the owners against this branch and
+  ;; keep the living.
+  (let [owner-ids (sp/query-ref-many-owners base-storage entity-name
+                                            field-name target-id)]
+    (if (or (empty? owner-ids) (not (res/versioned-entity? entity-name)))
+      owner-ids
+      (let [identity-records (vals (sp/read-entities base-storage entity-name
+                                                     (vec owner-ids)))
+            alive (into #{}
+                        (map :id)
+                        (vals (res/resolve-entities-batch
+                                base-storage entity-name
+                                identity-records branch-id)))]
+        (filterv alive owner-ids)))))
+
+
 (defrecord VersionedStorage
   [base-storage branch-id]
 
@@ -412,101 +869,7 @@
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entity base-storage entity-name data)
-      ;; Versioned: create full record in base table + version record.
-      ;; When the identity row already exists (deterministic UUID re-sync),
-      ;; resolve the current version directly from `existing` instead of
-      ;; calling `resolve-entity` (which would re-fetch identity).
-      ;;
-      ;; `normalized` runs the same per-entity write-side rules the base
-      ;; `sp/create-entity` applies internally (notably `:binding`'s
-      ;; `:value-present true` when `:value` is present but the flag
-      ;; isn't). Without this, the BASE row gets `:value-present true`
-      ;; via the base-storage's own normalizer call, but the VERSION
-      ;; row was built off the un-normalized `data` map — every binding
-      ;; created here through CRUD landed in the version table with
-      ;; `:value-present nil`, and versioned reads (which overlay
-      ;; version-data over identity via `merge identity version`) then
-      ;; overwrote the base's `true` back to `nil`. Result: every freshly-
-      ;; created literal-bound arg disappeared from arg-overlays in the
-      ;; editor (the layout walker classifies `value-present=nil` as
-      ;; `:free`, no value-node).
-      (let [id (or (:id data) (random-uuid))
-            normalized (sp/standard-crud-normalize-data entity-name
-                                                        (assoc data :id id))
-            do-create!
-            (fn [st]
-              (uniq/check-list-item-position-collision! st branch-id entity-name normalized)
-              (uniq/check-fn-name-collision! st branch-id entity-name normalized)
-              (uniq/check-resource-override-path-collision! st branch-id entity-name normalized)
-              (let [existing (sp/read-entity st entity-name id)
-                    base-row (strip-version-framework-cols entity-name normalized)]
-                (if existing
-                  (apply-identity-field-diff!
-                    st entity-name id base-row existing
-                    (:version-data-fields (get res/entity-config entity-name)))
-                  (sp/create-entity st entity-name base-row))
-                (let [{:keys [version-id-field version-data-fields]}
-                      (get res/entity-config entity-name)
-                      current-version (when existing
-                                        (res/resolve-version st entity-name id branch-id))
-                      current-data (when current-version
-                                     (select-keys (merge existing
-                                                         (dissoc current-version
-                                                                 :id :branch-id :created-at
-                                                                 version-id-field))
-                                                  version-data-fields))
-                      new-data (select-keys normalized version-data-fields)]
-                  (when (or (nil? current-version) (not= current-data new-data))
-                    (create-version-record! st entity-name id branch-id normalized))))
-              normalized)
-            ;; A `:binding-list-item` append's collision check + version insert
-            ;; must be atomic w.r.t. concurrent appends to the SAME binding —
-            ;; otherwise two appends read the same used-positions, compute the
-            ;; same next position, and both insert there, corrupting the
-            ;; per-branch sequence order. (The `(binding,position)` UNIQUE index
-            ;; was dropped because uniqueness is a per-branch RESOLVED-VIEW
-            ;; property, not a base-table one.) Serialize on a per-binding
-            ;; `pg_advisory_xact_lock` (auto-released at commit/rollback): the
-            ;; loser then sees the committed position and its collision check
-            ;; fires loudly instead of silently double-inserting. Named-:fn
-            ;; creates ride the same mechanism keyed on (branch, ns, name) —
-            ;; their retired UNIQUE moved to check-fn-name-collision! too.
-            lock-key (or (when (and (= entity-name :binding-list-item)
-                                    (:binding-id normalized))
-                           (str (:binding-id normalized)))
-                         (uniq/fn-name-lock-key branch-id entity-name normalized)
-                         (uniq/resource-override-path-lock-key branch-id entity-name normalized))]
-        (cond
-          (and lock-key (:pool base-storage))
-          ;; `:ignore` so any nested `with-transaction` in the create path
-          ;; (`crud/create-entity` opens one to write `:ref-many` junction rows —
-          ;; e.g. a `:fn`'s `:parent-ids`) runs INLINE on this connection instead
-          ;; of committing early. A nested commit would end THIS transaction and
-          ;; release the `pg_advisory_xact_lock` before the collision check +
-          ;; version insert finished, letting a racing same-name create slip
-          ;; through — the (branch, ns, name) serialization would silently break.
-          (binding [jdbc-tx/*nested-tx* :ignore]
-            (jdbc/with-transaction [tx (:pool base-storage)]
-                                   (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                      lock-key])
-                                   (do-create! (assoc base-storage :pool tx))))
-
-          ;; No lock key, but a pooled backend: still wrap the base-row +
-          ;; version-row pair in ONE transaction. Off the lock path the two
-          ;; inserts otherwise run on autocommit as separate statements, so a
-          ;; crash between them leaves a versionless GHOST identity — invisible
-          ;; to resolved reads, only healed later by the `ids-without-chain-
-          ;; version` force-a-version backstop. A plain `:binding` / `:fn-slot`
-          ;; create needs the same crash-atomicity the lock path already gives
-          ;; named-`:fn` / list-item writes, just without the advisory lock.
-          ;; `:ignore` for the same nested-`with-transaction` reason as above.
-          (:pool base-storage)
-          (binding [jdbc-tx/*nested-tx* :ignore]
-            (jdbc/with-transaction [tx (:pool base-storage)]
-                                   (do-create! (assoc base-storage :pool tx))))
-
-          :else
-          (do-create! base-storage)))))
+      (create-entity-versioned! base-storage branch-id entity-name data)))
 
 
   (read-entity
@@ -521,98 +884,7 @@
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entity base-storage entity-name id data)
-      ;; Versioned: append new version with merged data (if changed)
-      (let [current (res/resolve-entity base-storage entity-name id branch-id)]
-        (when-not current
-          (throw (ex-info "Entity not found"
-                          {:type :not-found
-                           :entity-name entity-name
-                           :id id})))
-        (let [merged (merge current data)
-              ;; Only compare version-controlled fields, not :id
-              {:keys [version-data-fields]} (get res/entity-config entity-name)
-              current-data (select-keys current version-data-fields)
-              merged-data (select-keys merged version-data-fields)
-              ;; Non-versioned fields (e.g. :ref-many junction fields like
-              ;; :parent-ids) live on the identity row / junction tables,
-              ;; not in the version table. Updates to those have to be
-              ;; flowed through to base storage explicitly — without this,
-              ;; PUTs that change ONLY non-versioned fields are silent
-              ;; no-ops because version-data-fields-only diffing returns
-              ;; equal and create-version-record! is skipped.
-              non-versioned-data (apply dissoc data version-data-fields)
-              ;; A rename / namespace-move can land on an occupied
-              ;; (ns, name) — same live-view rule as create. Only those two
-              ;; keys can introduce a collision, so other updates (the
-              ;; common case: description, effects, …) skip the check and
-              ;; its lock entirely.
-              name-write? (and (= :fn entity-name)
-                               (:name merged)
-                               (or (contains? data :name)
-                                   (contains? data :namespace-id)))
-              ;; A :resource-override path RE-POINT can land on a path
-              ;; another live override holds — same live-view rule.
-              path-write? (and (= :resource-override entity-name)
-                               (:path merged)
-                               (contains? data :path))
-              ;; A `:binding-list-item` position / binding move can land on a
-              ;; (binding-id, position) another item already holds — the same
-              ;; live-view rule as create. Only those two keys can introduce a
-              ;; collision (mirrors `name-write?`), so other item updates
-              ;; (`:value`, `:ref-fn-id`, …) skip the check + lock. Its version
-              ;; insert must be serialized w.r.t. concurrent moves to the SAME
-              ;; binding, exactly as the create-append path is — otherwise two
-              ;; concurrent position updates both pass the check and both
-              ;; commit, corrupting the per-branch sequence order.
-              list-item-write? (and (= :binding-list-item entity-name)
-                                    (:binding-id merged)
-                                    (some? (:position merged))
-                                    (or (contains? data :position)
-                                        (contains? data :binding-id)))
-              do-update!
-              (fn [st]
-                (when name-write?
-                  (uniq/check-fn-name-collision! st branch-id entity-name
-                                                 (assoc merged :id id)))
-                (when list-item-write?
-                  (uniq/check-list-item-position-collision! st branch-id entity-name
-                                                            (assoc merged :id id)))
-                (when path-write?
-                  (uniq/check-resource-override-path-collision!
-                    st branch-id entity-name (assoc merged :id id)))
-                ;; Skip creating new version if data unchanged. (A
-                ;; versionless identity can't reach here at all — the
-                ;; `resolve-entity` above is version-gated and already threw
-                ;; not-found. The batch path, which the package sync uses,
-                ;; resolves identity-as-is and therefore needs the explicit
-                ;; versionless guard it carries.)
-                (when (not= current-data merged-data)
-                  (create-version-record! st entity-name id branch-id merged))
-                ;; Apply non-versioned fields directly. base-storage's
-                ;; update-entity handles columnar identity columns AND
-                ;; ref-many junction replacement.
-                (when (seq non-versioned-data)
-                  (sp/update-entity st entity-name id non-versioned-data))
-                merged)
-              ;; Serialize on (branch, ns, name) for a rename/move and on the
-              ;; owning binding for a list-item position move — the same
-              ;; per-binding `pg_advisory_xact_lock` the create-append uses.
-              lock-key (cond
-                         name-write? (uniq/fn-name-lock-key branch-id entity-name merged)
-                         list-item-write? (str (:binding-id merged))
-                         path-write? (uniq/resource-override-path-lock-key
-                                       branch-id entity-name merged))]
-          (if (and lock-key (:pool base-storage))
-            ;; `:ignore` — same reason as the create path: a nested
-            ;; `with-transaction` inside `do-update!` (crud/update-entity opens
-            ;; one to replace `:ref-many` junction rows) must run INLINE, not
-            ;; commit early and drop the advisory lock mid-update.
-            (binding [jdbc-tx/*nested-tx* :ignore]
-              (jdbc/with-transaction [tx (:pool base-storage)]
-                                     (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
-                                                        lock-key])
-                                     (do-update! (assoc base-storage :pool tx))))
-            (do-update! base-storage))))))
+      (update-entity-versioned! base-storage branch-id entity-name id data)))
 
 
   (delete-entity
@@ -631,17 +903,7 @@
       ;; identity row too, so no versionless ghost survives to swallow
       ;; a later re-mint of the same deterministic id.
       :else
-      (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
-            all-versions (sp/query-entities base-storage version-entity
-                                            {version-id-field id})
-            own-versions (filterv #(= branch-id (:branch-id %)) all-versions)
-            purgeable (purgeable-identity-ids base-storage entity-name [id]
-                                              branch-id all-versions version-id-field)]
-        (when (seq own-versions)
-          (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
-        (when (seq purgeable)
-          (sp/delete-entity base-storage entity-name id))
-        (pos? (count own-versions)))))
+      (hard-delete-entity! base-storage branch-id entity-name id)))
 
 
   (query-entities
@@ -694,81 +956,7 @@
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entities base-storage entity-name data-seq)
-      ;; Versioned: batch create base records + batch create version records
-      (let [data-with-ids (mapv (fn [data]
-                                  (if (:id data) data (assoc data :id (random-uuid))))
-                                data-seq)
-            config (get res/entity-config entity-name)
-            ;; INTRA-batch duplicates (two items in the same batch sharing
-            ;; `(binding-id, position)`) both pass the against-storage check
-            ;; below — neither is committed yet — so reject them upfront
-            ;; (pure, no storage), keeping batch import from a broken landing.
-            _ (when (= :binding-list-item entity-name)
-                (let [by-key (group-by (juxt :binding-id :position) data-with-ids)
-                      dupe (some (fn [[k items]]
-                                   (when (and (some? (first k))
-                                              (some? (second k))
-                                              (> (count items) 1))
-                                     [k items]))
-                                 by-key)]
-                  (when dupe
-                    (throw (ex-info "Batch contains items with duplicate (binding-id, position)"
-                                    {:type :constraint-violation/position-collision
-                                     :entity-name :binding-list-item
-                                     :binding-id (ffirst dupe)
-                                     :position (second (first dupe))
-                                     :colliding-item-ids (mapv :id (second dupe))})))))
-            ;; The base-row + version-row batch writes must land under ONE
-            ;; transaction (M3): off the lock path they otherwise ran on
-            ;; autocommit as separate statements, so a crash between them left
-            ;; versionless GHOST identities. The against-storage collision
-            ;; check + existence read run inside the same tx as the writes.
-            do-batch!
-            (fn [st]
-              ;; Position-collision check against storage, mirroring the
-              ;; singular create-entity.
-              (uniq/check-list-item-position-collisions! st branch-id
-                                                         entity-name data-with-ids)
-              (let [ids (mapv :id data-with-ids)
-                    ;; Find which base records don't exist yet
-                    existing-by-id (sp/read-entities st entity-name ids)
-                    existing-ids (set (keys existing-by-id))
-                    {existing-records true new-base-records false}
-                    (group-by #(contains? existing-ids (:id %)) data-with-ids)]
-                ;; Batch create base records. Identity-plane INSERT: strip
-                ;; version-plane bookkeeping a caller may echo from a
-                ;; version-row read (the crud rollback replay re-creates
-                ;; captured pre-state rows) — the identity table has no
-                ;; such column. Rows whose identity already exists flow
-                ;; their identity-field diffs through update (guarded
-                ;; no-op when unchanged) instead of being silently
-                ;; write-once.
-                (when (seq new-base-records)
-                  (sp/create-entities st entity-name
-                                      (mapv #(strip-version-framework-cols entity-name %)
-                                            new-base-records)))
-                (doseq [row existing-records]
-                  (apply-identity-field-diff!
-                    st entity-name (:id row)
-                    (strip-version-framework-cols entity-name row)
-                    (get existing-by-id (:id row))
-                    (:version-data-fields config)))
-                ;; Prepare and batch create version records
-                (let [timestamp (now)
-                      version-records (mapv #(prepare-version-record config (:id %) branch-id
-                                                                     timestamp %)
-                                            data-with-ids)]
-                  (sp/create-entities st (:version-entity config) version-records)))
-              data-with-ids)]
-        (if-let [pool (:pool base-storage)]
-          ;; `:ignore` so a nested `with-transaction` inside an inner write
-          ;; (a `:fn`'s `:parent-ids` ref-many junction replacement) runs
-          ;; INLINE rather than committing early and breaking the atomic
-          ;; boundary — same convention as the singular create + delete-branch.
-          (binding [jdbc-tx/*nested-tx* :ignore]
-            (jdbc/with-transaction [tx pool]
-                                   (do-batch! (assoc base-storage :pool tx))))
-          (do-batch! base-storage)))))
+      (create-entities-versioned! base-storage branch-id entity-name data-seq)))
 
 
   (read-entities
@@ -785,93 +973,7 @@
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entities base-storage entity-name data-seq)
-      ;; Batch update: resolve all current versions, compute diffs, batch create versions
-      (let [ids (mapv :id data-seq)
-            ;; Batch resolve current versions using efficient batch resolution
-            identity-records (vals (sp/read-entities base-storage entity-name ids))
-            current-versions (res/resolve-entities-batch base-storage entity-name
-                                                         identity-records branch-id)
-            current-by-id (into {} (map (fn [e] [(:id e) e])) (vals current-versions))
-            ;; Check all entities exist
-            missing-ids (remove #(contains? current-by-id %) ids)]
-        (when (seq missing-ids)
-          (throw (ex-info "Entities not found"
-                          {:type :not-found
-                           :entity-name entity-name
-                           :missing-ids (vec missing-ids)})))
-        ;; Position-collision check against storage, mirroring the singular
-        ;; update-entity. Uses the merged shape (current + incoming partial
-        ;; update) so a position-only update is checked against the rest of
-        ;; the binding's items on the chain.
-        (uniq/check-list-item-position-collisions!
-          base-storage branch-id entity-name
-          (vec (keep (fn [data]
-                       (let [id (:id data)
-                             current (get current-by-id id)]
-                         (when current (assoc (merge current data) :id id))))
-                     data-seq)))
-        ;; Compute merged versions and filter to only changed ones
-        (let [{:keys [version-entity version-data-fields] :as config}
-              (get res/entity-config entity-name)
-              timestamp (now)
-              ;; An identity row with NO version on the chain resolves to
-              ;; ITSELF (resolution/resolve-entities-batch's identity-as-is
-              ;; fallback), so a content-equal update diffs to nothing — and
-              ;; without a version row the READ path (`resolve-all-entities`,
-              ;; which lists only entities that have one) never returns it.
-              ;; Such remnants are real: item-ids are deterministic per
-              ;; (binding, position), so an older, longer list leaves identity
-              ;; rows that a later sync re-touches. Growing a package list
-              ;; through one silently dropped a route from the live demo's
-              ;; router (2026-07-20) while a fresh-DB run stayed green.
-              ;; So: force a version for any id that has none, whatever the
-              ;; diff. The hard-delete path now purges a sole-branch identity
-              ;; outright (see `delete-entities` :else), so this is the
-              ;; BACKSTOP for identities another branch still pins — and the
-              ;; probe is chain-scoped + merge-aware for exactly that case: a
-              ;; version living only on an unrelated branch must not satisfy
-              ;; THIS branch's visibility.
-              versionless-ids (res/ids-without-chain-version
-                                base-storage entity-name ids branch-id)
-              ;; Build version records for changed entities + versionless ones
-              version-records
-              (into []
-                    (keep (fn [data]
-                            (let [id (:id data)
-                                  current (get current-by-id id)
-                                  merged (merge current data)
-                                  current-data (select-keys current version-data-fields)
-                                  merged-data (select-keys merged version-data-fields)]
-                              (when (or (not= current-data merged-data)
-                                        (contains? versionless-ids id))
-                                (prepare-version-record config id branch-id
-                                                        timestamp merged)))))
-                    data-seq)]
-          ;; Batch create all version records
-          (when (seq version-records)
-            (sp/create-entities base-storage version-entity version-records))
-          ;; Ref-many junctions (notably fn `:parent-ids`) and other
-          ;; non-versioned columns live on the base identity row, not in
-          ;; a version record — the diff above only covers
-          ;; `version-data-fields`. Flow every non-versioned change
-          ;; through to base storage, whose singular `update-entity`
-          ;; merges with the existing row (filling NOT-NULL columns) and
-          ;; reconciles ref-many junctions. Without this a base-fn →
-          ;; composed-fn parent change is silently dropped. Mirrors the
-          ;; singular `update-entity` above; guarded so an unchanged
-          ;; re-sync stays a no-op.
-          (doseq [data data-seq
-                  :let [id (:id data)
-                        non-versioned (apply dissoc data :id version-data-fields)
-                        current (get current-by-id id)]
-                  :when (and (seq non-versioned)
-                             (not= non-versioned
-                                   (select-keys current (keys non-versioned))))]
-            (sp/update-entity base-storage entity-name id non-versioned))
-          ;; Return merged data for all records (including unchanged)
-          (mapv (fn [data]
-                  (merge (get current-by-id (:id data)) data))
-                data-seq)))))
+      (update-entities-versioned! base-storage branch-id entity-name data-seq)))
 
 
   (upsert-entities
@@ -910,65 +1012,12 @@
       (count (filterv #(tombstone-version! base-storage entity-name % branch-id) ids))
 
       :else
-      ;; Batch hard delete: drop this branch's version rows, and — for
-      ;; ids no other branch retains a version of — the identity rows
-      ;; too (see `purgeable-identity-ids`; the singular `delete-entity`
-      ;; mirrors this).
-      (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
-            ;; Single WHERE IN query for ALL branches' versions — the
-            ;; current branch's are deleted, the others gate the
-            ;; identity purge.
-            all-versions (sp/query-entities base-storage version-entity
-                                            {version-id-field (vec ids)})
-            own-versions (filterv #(= branch-id (:branch-id %)) all-versions)
-            ;; Count unique entity-ids that had versions on this branch
-            ;; (return-value contract, unchanged)
-            deleted-entity-ids (into #{} (map version-id-field) own-versions)
-            purgeable (purgeable-identity-ids base-storage entity-name (vec ids)
-                                              branch-id all-versions version-id-field)]
-        (when (seq own-versions)
-          (sp/delete-entities base-storage version-entity (mapv :id own-versions)))
-        (when (seq purgeable)
-          (sp/delete-entities base-storage entity-name purgeable))
-        (count deleted-entity-ids))))
+      (hard-delete-entities! base-storage branch-id entity-name ids)))
 
 
   (query-ref-many-owners
     [_ entity-name field-name target-id]
-    ;; Junction tables are NOT versioned (the model versions :parent-ids only via
-    ;; fn re-creation, not a separate junction-version table), so the base query
-    ;; has to answer from the junction rows — and those name every owner that
-    ;; EVER pointed here, including owners this branch has since deleted.
-    ;;
-    ;; Deletion is a TOMBSTONE, not a row removal. Passing the base answer
-    ;; through therefore reported dead children as live dependents, and the
-    ;; delete guard built on this ("Graph is a parent of N other graph(s) —
-    ;; remove the dependents first") refused forever:
-    ;;
-    ;;     DELETE child  -> 200
-    ;;     DELETE parent -> 409   "is a parent of 1 other graph"
-    ;;
-    ;; A fn that ever had a child could not be deleted again, by anyone — the
-    ;; user in the editor, or a test cleaning up after itself. The e2e suite hit
-    ;; it every run: the leaked parents stayed in the graph and the NEXT test
-    ;; file failed on them, which is where the "flaky e2e" investigations all
-    ;; went, and why they never found anything.
-    ;;
-    ;; The junction is the right place to ask WHO pointed here. It is not the
-    ;; place to ask WHO STILL EXISTS. Resolve the owners against this branch and
-    ;; keep the living.
-    (let [owner-ids (sp/query-ref-many-owners base-storage entity-name
-                                              field-name target-id)]
-      (if (or (empty? owner-ids) (not (res/versioned-entity? entity-name)))
-        owner-ids
-        (let [identity-records (vals (sp/read-entities base-storage entity-name
-                                                       (vec owner-ids)))
-              alive (into #{}
-                          (map :id)
-                          (vals (res/resolve-entities-batch
-                                  base-storage entity-name
-                                  identity-records branch-id)))]
-          (filterv alive owner-ids)))))
+    (live-ref-many-owners base-storage branch-id entity-name field-name target-id))
 
 
   sp/GraphConstraints

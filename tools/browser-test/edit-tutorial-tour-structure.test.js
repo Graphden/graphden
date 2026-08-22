@@ -19,6 +19,7 @@ const {
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
   bindOptionalArgChip, appendFnRefViaChip, createRecordType,
+  clickTourAdvance,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -60,7 +61,13 @@ const {
     // filtered tree hides every other row — including the namespace the
     // next steps need. The step text tells the reader to clear it.
     await page.fill('input[placeholder="Filter..."]', '');
-    await page.waitForTimeout(600);
+    // The filter is debounced; the next steps need the unfiltered tree back,
+    // so wait for rows beyond the single filtered match to be visible again
+    // rather than for 600ms.
+    await page.waitForFunction(() => Array.from(
+      document.querySelectorAll('#entity-list .entity-item'))
+      .filter((e) => !e.hasAttribute('hidden')).length > 1,
+    null, {timeout: 30000, polling: 100});
     await createRootNamespace(page, NS_NAME).catch(() => {});
     await waitTourTitle(page, 'New type…', 150000);
     await createRecordType(page, NS_NAME, 'tutorial-point',
@@ -270,8 +277,7 @@ const {
       'and so is the arm that invokes :self — the recursion the lesson reads');
 
     for (let i = 0; i < 5; i++) {
-      assert(await clickTourButton(page, 'Next'), 'lesson 30 Next #' + (i + 1));
-      await page.waitForTimeout(400);
+      assert(await clickTourAdvance(page, 'Next'), 'lesson 30 Next #' + (i + 1));
     }
     await waitTourTitle(page, "That's recursion", 30000);
     assert(await clickTourButton(page, 'Finish'), 'lesson 30 Finish');

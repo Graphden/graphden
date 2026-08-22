@@ -31,6 +31,7 @@ const {
   waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
   extendViaRowActions, bindFirstPlaceholder,
   openOperateSection, openAccountSettings,
+  clickTourAdvance,
 } = require('./tutorial-tour-helpers');
 
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:8080';
@@ -112,8 +113,7 @@ async function submitPanelForm(page, formSelector, fields) {
 // Advance through N manual steps, asserting each button was there.
 async function nextTimes(page, n, label) {
   for (let i = 0; i < n; i++) {
-    assert(await clickTourButton(page, 'Next'), label + ' Next #' + (i + 1));
-    await page.waitForTimeout(400);
+    assert(await clickTourAdvance(page, 'Next'), label + ' Next #' + (i + 1));
   }
 }
 
@@ -361,8 +361,13 @@ async function lesson31(page) {
     input.value = '';
     form.querySelector('button[type="submit"]').click();
   }, ROLE_NAME);
-  await page.waitForTimeout(1500);
-  assert(await clickTourButton(page, 'Next'), 'lesson 31 member Next');
+  // The submit is an htmx post; wait for the tour to offer its Next again
+  // rather than guessing how long the swap takes.
+  await page.waitForFunction(() => Array.from(
+    document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
+    .some((b) => b.textContent.trim() === 'Next'),
+  null, {timeout: 30000, polling: 100});
+  assert(await clickTourAdvance(page, 'Next'), 'lesson 31 member Next');
 
   await waitTourTitle(page, 'What they can do now', 30000);
   assert(await clickTourButton(page, 'Next'), 'lesson 31 effect Next');

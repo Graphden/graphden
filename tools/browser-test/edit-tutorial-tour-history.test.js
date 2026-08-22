@@ -21,6 +21,7 @@ const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
   extendViaRowActions, finishAndDelete, openOperateSection,
+  waitUntil,
 } = require('./tutorial-tour-helpers');
 
 
@@ -45,8 +46,6 @@ async function setDescription(page, text) {
         window.descriptionTooltipSticky = false;
       }
     });
-    await page.waitForTimeout(400);
-
     await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover [data-action="description"]',
@@ -180,7 +179,8 @@ async function openVersionHistory(page) {
         document.querySelectorAll('.fn-versions-row').length);
       if (after > before) break;
       await page.keyboard.press('Escape').catch(() => {});
-      await page.waitForTimeout(1000);
+      await waitUntil(page, (n) =>
+        document.querySelectorAll('.fn-versions-row').length > n, before, 1000);
       await openVersionHistory(page);
     }
     assert(after === before + 1,
@@ -281,7 +281,9 @@ async function openVersionHistory(page) {
         document.querySelector('#gd-operate-nav button[data-section="tests"]')?.click();
         document.querySelector('#gd-operate-nav button[data-section="errors"]')?.click();
       });
-      await page.waitForTimeout(1500);
+      await waitUntil(page, () => /tutorial-bad-json/.test(
+        document.querySelector('#gd-operate-panels > [data-section="errors"]')?.textContent || ''),
+      null, 1500);
     }
     assert(/tutorial-bad-json/.test(errText),
       'the failed run is listed by fn name (got: ' + errText.slice(0, 160) + ')');

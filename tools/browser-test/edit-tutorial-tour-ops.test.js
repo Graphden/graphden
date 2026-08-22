@@ -18,6 +18,7 @@ const {
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
+  waitUntil,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -147,7 +148,12 @@ const {
       await page.evaluate(() => {
         document.querySelector('#gd-operate-nav button[data-section="tests"]')?.click();
       });
-      await page.waitForTimeout(1000);
+      await waitUntil(page, () => {
+        const el = document.querySelector('#gd-operate-panels > [data-section="tests"]');
+        if (!el || el.hasAttribute('hidden')) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }, null, 1000);
     }
     assert(await testsPanelUp(), 'Operate → Tests opened');
     // Auto-run is asynchronous (the write returns first) — poll rather than
@@ -457,8 +463,15 @@ const {
     await page.goto(BASE + '/?tutorial=01');
     await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
     assert(await clickTourButton(page, 'Next'), 'funnel probe: first Next');
-    await page.waitForTimeout(1500);
-    const metricsAfter = await api(page, 'GET', '/metrics');
+    // Both counter POSTs are fire-and-forget from the page; poll /metrics
+    // until they land instead of betting 1.5s that they have.
+    let metricsAfter = null;
+    for (const deadline = Date.now() + 30000; Date.now() < deadline;) {
+      metricsAfter = await api(page, 'GET', '/metrics');
+      if ((metricsAfter?.counters?.['tour-started-01'] || 0) > startedBefore
+          && (metricsAfter?.counters?.['tour-step-01-1'] || 0) >= 1) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     const startedAfter = metricsAfter?.counters?.['tour-started-01'] || 0;
     const stepAfter = metricsAfter?.counters?.['tour-step-01-1'] || 0;
     assert(startedAfter === startedBefore + 1,

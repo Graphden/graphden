@@ -180,7 +180,10 @@ async function newContext(chromium) {
   // most ~30s during a cold-start window, ~500ms otherwise.
   await waitForServerHealthy();
   await page.goto(BASE + '/');
-  await page.waitForTimeout(300);
+  // Wait for the editor shell to exist rather than for a fixed slice of
+  // time: on the loaded gate stack 300ms was sometimes short, and every
+  // test in the suite starts here.
+  await page.waitForSelector('#entity-list', {timeout: 30000});
   return { browser, page };
 }
 

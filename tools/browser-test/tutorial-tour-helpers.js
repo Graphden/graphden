@@ -173,9 +173,59 @@ function clickTourButton(page, label) {
 }
 
 
+// Poll `fn` (a page-side predicate) until it is true or `ms` elapse; returns
+// whether it became true. Replaces the "click, then sleep a second before
+// re-checking" shape in the panel-open retry loops below and in the tests:
+// the success path now exits as soon as the panel is up instead of always
+// paying the full interval, and the failure path is unchanged.
+async function waitUntil(page, fn, arg, ms) {
+  const deadline = Date.now() + (ms || 1000);
+  for (;;) {
+    if (await page.evaluate(fn, arg)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+
+function tourProgress(page) {
+  return page.evaluate(() => {
+    const p = document.querySelector('#gd-tour-pop .gd-tour-progress');
+    return p ? p.textContent.trim() : null;
+  });
+}
+
+
+// Click a tour button and wait for the popover to ACTUALLY move on. The
+// header's step counter ("Lesson 31 · step 4/9") is the observable; a
+// finished lesson swaps the step popover for a centered dialog with no
+// counter, which counts as advancing too.
+//
+// This replaces the fixed 400-1500 ms sleeps that used to follow a Next: they
+// were guesses at this same event, and on the loaded gate stack they were
+// sometimes short — the next assertion then read the PREVIOUS step, which is
+// exactly the class of "e2e flake" that costs a whole gate run.
+async function clickTourAdvance(page, label, timeoutMs) {
+  const before = await tourProgress(page);
+  if (!(await clickTourButton(page, label))) return false;
+  await page.waitForFunction((prev) => {
+    const p = document.querySelector('#gd-tour-pop .gd-tour-progress');
+    return !p || p.textContent.trim() !== prev;
+  }, before, {timeout: timeoutMs || 60000, polling: 100});
+  return true;
+}
+
+
 async function filterAndSelect(page, filterText, fnName) {
   await page.fill('input[placeholder="Filter..."]', filterText);
-  await page.waitForTimeout(900);
+  // The filter is debounced and server-side; wait for the row to actually
+  // be in the tree rather than for a fixed slice of time. Same observable
+  // the lens probe in `edit-tutorial-tour-ops` waits on.
+  await page.waitForFunction((name) => {
+    const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+      .find((e) => e.querySelector('.name')?.textContent.trim() === name);
+    return row && !row.hasAttribute('hidden');
+  }, fnName, {timeout: 30000, polling: 100});
   await page.evaluate(async (name) => { await selectFnByName(name); }, fnName);
 }
 
@@ -290,12 +340,17 @@ async function pickIncompatFnRef(page, fnName) {
   });
   await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
   await page.fill('.fn-picker-popover input', fnName);
-  await page.waitForTimeout(1200);
-  // The incompatible candidates hide behind a collapsed "Other · N" header.
+  // The incompatible candidates hide behind a collapsed "Other · N" header,
+  // which only appears once the typed filter's candidates have loaded. The
+  // click below used to be a silent no-op when it fired too early, and the
+  // failure surfaced one line later as a missing `.fn-picker-row-incompat`.
+  await page.waitForFunction(() => Array.from(
+    document.querySelectorAll('.fn-picker-section-header'))
+    .some((h) => /Other/.test(h.textContent)),
+  null, {timeout: 30000, polling: 100});
   await page.evaluate(() => {
-    const hdr = Array.from(document.querySelectorAll('.fn-picker-section-header'))
-      .find((h) => /Other/.test(h.textContent));
-    if (hdr) hdr.click();
+    Array.from(document.querySelectorAll('.fn-picker-section-header'))
+      .find((h) => /Other/.test(h.textContent)).click();
   });
   await page.waitForSelector('.fn-picker-row-incompat', {timeout: 10000});
   await page.evaluate(() => document.querySelector('.fn-picker-row-incompat').click());
@@ -691,7 +746,10 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
   // node: the editor holds a singleton reference to that element, so
   // deleting it leaves every later ⋯ click with nothing to open.
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
+  await page.waitForFunction(() => {
+    const pop = document.querySelector('.row-actions-popover');
+    return !pop || pop.offsetParent === null;
+  }, null, {timeout: 10000, polling: 50});
   await page.evaluate((name) => {
     Array.from(document.querySelectorAll('.edge-label-overlay span'))
       .find((sp) => sp.textContent.trim() === name
@@ -761,7 +819,12 @@ async function openOperateSection(page, section) {
     await page.evaluate((s) => {
       document.querySelector('#gd-operate-nav button[data-section="' + s + '"]')?.click();
     }, section);
-    await page.waitForTimeout(1000);
+    await waitUntil(page, (s) => {
+      const el = document.querySelector('#gd-operate-panels > [data-section="' + s + '"]');
+      if (!el || el.hasAttribute('hidden')) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }, section, 1000);
   }
   if (!await up()) {
     throw new Error('Operate → ' + section + ' did not open');
@@ -800,6 +863,10 @@ async function createRecordType(page, nsPath, typeName, fields) {
   // a tick. (Before `dom` checks measured visibility, this passed for the
   // wrong reason: the popover is a SINGLETON that is emptied, not removed, so
   // a presence check stayed true forever once it had opened ONCE.)
+  //
+  // This one sleep is a CONTRACT, not a settle: it exists to be slower than
+  // the tour's own 600ms poll. There is no faster observable to wait for —
+  // waiting for the step to be satisfied is precisely what it enables.
   await page.waitForTimeout(1000);
   await page.evaluate(() => {
     Array.from(document.querySelectorAll('.type-create-popover button'))
@@ -833,6 +900,7 @@ async function createRecordType(page, nsPath, typeName, fields) {
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, waitTourTitle, clickTourButton,
+  waitUntil, tourProgress, clickTourAdvance,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,

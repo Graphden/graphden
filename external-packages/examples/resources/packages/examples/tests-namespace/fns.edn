@@ -1,0 +1,84 @@
+;; The `tests` namespace convention, as fn-defs — the authoring path
+;; docs/TESTS.md describes, actually written down somewhere.
+;;
+;; Everything ELSE about the test feature had coverage: `test-runs`'
+;; runnability gate, the autorun's reverse closure, discovery /
+;; run / status through `fn-execution-test`. What did not was a real
+;; `:assert` / `:assert-eq` COMPOSITION being discovered and run —
+;; those tests register Clojure impls directly and never build the
+;; graph shape a user would. So the vocabulary was tested as an impl
+;; and the runner was tested with fake tests, and the two never met.
+;;
+;; `graphden.crud.tests-namespace-graph-test` bootstraps this package
+;; and runs these through the real runner — discovery, pass, fail,
+;; not-runnable, and the operands on `:error-data`. It is also the
+;; smallest readable answer to "what does a test look like?", which is
+;; what docs/tutorial/26-tests.md asks a reader to build by hand.
+;;
+;; The namespace is `examples.tests`: discovery matches the SEGMENT
+;; `tests`, so `examples.tests` counts and `examples.tests-namespace`
+;; (the directory name) would not.
+
+{:namespace "examples.tests"
+ :description "Worked `tests`-namespace examples — the :assert / :assert-eq vocabulary as real fn-defs. Dev/test-only, like the rest of `examples`."
+ :fns
+ ;; `_`-prefixed = scaffolding. A tests namespace needs helpers like
+ ;; any other, and the runner must not mistake them for tests.
+ [{:name :_ex-t-two-plus-three
+   :description "Subject under test: 2 + 3. Private — the runner skips `_`-prefixed fns."
+   :parent :add
+   :args {:nums [{:value 2} {:value 3}]}}
+
+  {:name :_ex-t-greeting
+   :description "Subject under test: \"hello \" + \"world\"."
+   :parent :str
+   :args {:parts [{:value "hello "} {:value "world"}]}}
+
+  {:name :_ex-t-empty-list
+   :description "Subject under test: the empty list."
+   :parent :list
+   :args {:items []}}
+
+  ;; --- The tests themselves. A test PASSES when it runs without
+  ;; throwing, so the assertion IS the fn.
+
+  {:name :addition-sums-its-arguments
+   :description "2 + 3 = 5. The canonical shape: `:assert-eq` over a helper that computes, with the expected value as a literal."
+   :parent :assert-eq
+   :args {:actual :_ex-t-two-plus-three
+          :expected 5}}
+
+  {:name :str-concatenates-its-parts
+   :description "`:str` joins its `parts` in order."
+   :parent :assert-eq
+   :args {:actual :_ex-t-greeting
+          :expected "hello world"}}
+
+  {:name :empty-list-is-empty
+   :description "`:assert` over a predicate — the other half of the vocabulary. Passes on any truthy value."
+   :parent :assert
+   :args {:value :_ex-t-list-is-empty}}
+
+  {:name :_ex-t-list-is-empty
+   :description "Predicate under test: is the empty list empty?"
+   :parent :empty?
+   :args {:coll :_ex-t-empty-list}}
+
+  ;; A test with an UNBOUND arg is `not-runnable`, not `failed` — the
+  ;; runner executes with `{}` and reports which args blocked it.
+  ;; Worth one example, because the distinction is the thing people
+  ;; get wrong when a test suddenly stops reporting.
+  {:name :needs-an-argument-so-cannot-run
+   :description "Deliberately leaves `expected` free. The runner reports `not-runnable` and names the arg — it does NOT count as a failure."
+   :parent :assert-eq
+   :args {:actual :_ex-t-two-plus-three}}
+
+  ;; And one that fails, on purpose. Without it nobody ever sees what
+  ;; a red test looks like, and the failure path — assertion message,
+  ;; operands on `:error-data`, `failed` status — goes unexercised
+  ;; outside a unit test that fakes the throw.
+  {:name :intentionally-failing-example
+   :description "FAILS ON PURPOSE. Shows what a red test looks like in the Tests panel and pins the failure path: `:execution-error/assertion-failed` with both operands in the error data. Never 'fix' this one."
+   :parent :assert-eq
+   :args {:actual :_ex-t-two-plus-three
+          :expected 6}}]}

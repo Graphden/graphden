@@ -25,6 +25,7 @@
            "schedule-cron"
            "recipe-mini-app"
            "local-fns-pattern"
+           "tests-namespace"
            "regression/sequence-fn-ref"
            "regression/migrate-on-fn-ref"
            "recursion"]}

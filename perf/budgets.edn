@@ -47,15 +47,33 @@
        :create-fn
        {:max 20,
         :why
-        "Creating one :fn costs 20 round trips, steady-state — it runs first, so it pays the compile reads for the suite. 19→20 (2026-07-25): the graph-epoch bump — one nextval BEFORE every graph-shaped write, the freshness self-heal's write half (storage.postgres.graph-epoch); deliberate. A further jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."}},
+        "Creating one :fn costs 20 round trips, steady-state — it runs first, so it pays the compile reads for the suite. 19→20 (2026-07-25): the graph-epoch bump — one nextval BEFORE every graph-shaped write, the freshness self-heal's write half (storage.postgres.graph-epoch); deliberate. A further jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."},
+       :list-secrets
+       {:max 5,
+        :why
+        "GET /api/secrets — 5 round trips, and INDEPENDENT of how big the graph is. This endpoint used to scan the fn graph looking for :secret-leaf descendants (~9x) until the filter moved into SQL; that regression's shape is a count that grows with the package bundle. Added 2026-08-22: the fix was quantified in scenarios_test's own docstring and had no reading of its own, so nothing would have noticed it coming back."},
+       :graph-layout
+       {:max 0,
+        :why
+        "POST /api/graph/layout — every card expansion in the editor, and steady-state it costs ZERO round trips: the layout reads the graph the compile cache already holds. A budget of 0 is the strictest one in this file and the cheapest to reason about — the FIRST query this endpoint issues is the regression, no factor to argue about. If it fires, a caching change started re-reading the graph per expansion."}},
  :trend
  #:trend{:graph-entities-tree
-         {:units 29.26,
+         {:units 36.81,
           :band 2.0,
           :why
           "The sidebar's first paint got materially slower relative to a round trip. It issues only ONE query, so anything here is compile/serialisation work, not the database."},
          :create-fn
-         {:units 2009.28,
+         {:units 592.21,
           :band 2.0,
           :why
-          "Creating one :fn costs thousands of round trips' worth of time against only 20 actual queries — the time is in the compile, not the SQL, exactly as PERF_NOTES describes (477 ms of 918 ms re-reading the graph). A jump here means the compile path regressed."}}}
+          "Creating one :fn costs thousands of round trips' worth of time against only 20 actual queries — the time is in the compile, not the SQL, exactly as PERF_NOTES describes (477 ms of 918 ms re-reading the graph). A jump here means the compile path regressed."},
+         :list-secrets
+         {:units 340.0,
+          :band 2.0,
+          :why
+          "Five queries' worth of SQL against hundreds of round trips' worth of time — like create-fn, the cost is the graph read behind the handler, not the database. A jump here with the query count unmoved means the work moved into Clojure."},
+         :graph-layout
+         {:units 2.09,
+          :band 2.0,
+          :why
+          "One expansion, zero queries, ~2 round trips' worth of time: the layout pipeline over an already-cached graph. This is the one number in the file that is pure compute, so it is the one that would notice the layout pipeline getting algorithmically worse."}}}

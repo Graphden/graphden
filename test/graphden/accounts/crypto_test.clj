@@ -147,11 +147,11 @@
         done (CountDownLatch. threads)
         wins (atom 0)]
     (dotimes [_ threads]
-      (.start (Thread. ^Runnable
-               (fn []
-                 (CountDownLatch/.await start)
-                 (when (allow? "shared-key") (swap! wins inc))
-                 (CountDownLatch/.countDown done)))))
+      (Thread/.start (Thread. ^Runnable
+                      (fn []
+                        (CountDownLatch/.await start)
+                        (when (allow? "shared-key") (swap! wins inc))
+                        (CountDownLatch/.countDown done)))))
     (CountDownLatch/.countDown start)
     (is (true? (CountDownLatch/.await done 30 TimeUnit/SECONDS))
         "all racing threads finished")

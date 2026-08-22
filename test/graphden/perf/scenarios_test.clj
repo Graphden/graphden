@@ -13,6 +13,13 @@
    was watching it — the wall-clock reading that finally exposed the problem
    arrived months later, attached to a complaint.
 
+   For a while this file named three such regressions and measured two: the
+   `list-secrets` scenario below was added by the 2026-08-22 test audit, which
+   noticed that the one endpoint whose fix is quantified in the docstring
+   (~9x) had no reading of its own. The layout scenario joins it because
+   `POST /api/graph/layout` is what every card expansion in the editor costs,
+   and nothing was watching that either.
+
    Kept out of `:unit` and `:integration` by `^:perf`: they exist to write
    numbers into `perf/runs/perf.edn`, not to assert behaviour, and a failing
    budget should send you to `bb perf`, not to a red test suite."
@@ -114,3 +121,46 @@
       (is (= 200 (:status result))
           "the write must succeed, or its query count means nothing")
       (is (pos? queries)))))
+
+
+(deftest ^:perf list-secrets-sql-cost
+  (testing "GET /api/secrets — the endpoint that used to scan the graph"
+    ;; The docstring's ~9x. Filtering moved into SQL; a change that walks the
+    ;; fn graph again to find `:secret-leaf` descendants shows up here as a
+    ;; query count proportional to the graph, long before anyone notices the
+    ;; page got slow. Reading a graph with no secrets in it is fine for that:
+    ;; a scan costs the same whether it finds anything or not, which is the
+    ;; whole point of the regression.
+    (let [{:keys [queries result]}
+          (record! :sql/list-secrets
+                   #(setup/via-graph *graph* :list-secrets-handler
+                                     {:uri "/api/secrets"
+                                      :request-method :get}))]
+      (is (= 200 (:status result))
+          "the read must succeed, or its query count means nothing")
+      (is (pos? queries)))))
+
+
+(deftest ^:perf graph-layout-sql-cost
+  (testing "POST /api/graph/layout — what one card expansion costs"
+    ;; Every expand click in the editor is this call, and steady-state it
+    ;; costs ZERO round trips: the layout reads the graph the compile cache
+    ;; already holds. That zero is the interesting number, not a measurement
+    ;; failure — this is the scenario whose budget can be `:max 0`, so a
+    ;; caching change that reverts to re-reading the graph per expansion is
+    ;; caught by the FIRST query it issues rather than by a factor.
+    ;;
+    ;; Hence no `(pos? queries)` guard here, unlike its neighbours. The
+    ;; "pg_stat_statements isn't seeing this DB" failure mode it exists to
+    ;; catch is covered by the three scenarios above; adding it here would
+    ;; make the file unable to express a legitimate zero.
+    (let [root-id (get (:all-name->id *graph*) :web-server)
+          {:keys [result]}
+          (record! :sql/graph-layout
+                   #(setup/via-graph *graph* :_layout-api-handler
+                                     {:uri "/api/graph/layout"
+                                      :request-method :post
+                                      :body (str "{\"fn-id\":\"" root-id "\"}")
+                                      :headers {"content-type" "application/json"}}))]
+      (is (= 200 (:status result))
+          "the layout must succeed, or its query count means nothing"))))

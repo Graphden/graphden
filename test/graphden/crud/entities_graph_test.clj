@@ -5,7 +5,8 @@
    actually reaches, not the Clojure helpers.
 
    These tests bootstrap the full `[core web app]` package set once
-   per JVM (via `setup/bootstrap-crud-graph!`) and invoke
+   per JVM (via `gh/graph-fixture`, which clones the GOLDEN template —
+   ~100 ms — rather than re-running the full sync) and invoke
    `:process-create-entity` &c. through `cr/execute`, the same code
    path the `:create-entity-handler` Ring handler reaches in
    production. Storage is shared across deftests in this ns — each

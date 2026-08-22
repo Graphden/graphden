@@ -3,7 +3,13 @@
    the `app` package — the headless path a git-dep consumer takes when it wants
    the executor + storage primitives but not the editor / default web-server.
    Proves the primitives load + sync and the executor evaluates a fn with
-   `:package-names [\"core\" \"storage\" \"web\"]`."
+   `:package-names [\"core\" \"storage\" \"web\"]`.
+
+   The one place a FULL `bootstrap-crud-graph!` is right rather than the
+   golden clone: the golden template is baked from `[core web app]`, and
+   what this test asserts is precisely that a DIFFERENT package set loads
+   and syncs on its own. Cloning a pre-built graph would skip the thing
+   under test."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]

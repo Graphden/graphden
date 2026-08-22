@@ -10,12 +10,6 @@
 
 ;; === Storage Implementation Helpers tests ===
 
-(deftest create-rw-lock-test
-  (testing "creates ReentrantReadWriteLock"
-    (let [lock (storage/create-rw-lock)]
-      (is (instance? java.util.concurrent.locks.ReentrantReadWriteLock lock)))))
-
-
 (deftest standard-crud-validations!-test
   (testing "passes for valid data"
     (is (nil? (storage/standard-crud-validations! :user {:name "test"} nil)))

@@ -63,35 +63,17 @@
       (is (= "Original error" (ex-message (ex-cause err)))))))
 
 
-(deftest validate-no-dependency-cycle-impl-test
-  (testing "nil ref-fn-id doesn't throw"
-    (let [helpers (->MockConstraintHelpers {})]
-      (is (nil? (storage/validate-no-dependency-cycle-impl helpers (random-uuid) nil)))))
-
-  (testing "no cycle in dependencies doesn't throw"
-    (let [fn-a (random-uuid)
-          fn-b (random-uuid)
-          ;; fn-b depends on nothing special, fn-a not in its chain
-          helpers (->MockConstraintHelpers {fn-b #{fn-b}})]
-      (is (nil? (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)))))
-
-  (testing "cycle in dependencies throws"
-    (let [fn-a (random-uuid)
-          fn-b (random-uuid)
-          ;; fn-b already depends on fn-a
-          helpers (->MockConstraintHelpers {fn-b #{fn-a fn-b}})]
-      (is (thrown-with-msg?
-            clojure.lang.ExceptionInfo
-            #"Reference would create dependency cycle"
-            (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)))))
-
-  (testing "exception contains correct data"
-    (let [fn-a (random-uuid)
-          fn-b (random-uuid)
-          helpers (->MockConstraintHelpers {fn-b #{fn-a fn-b}})]
-      (try
-        (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
-          (is (= fn-a (:owner-fn-id (ex-data e))))
-          (is (= fn-b (:ref-fn-id (ex-data e)))))))))
+(deftest dependency-cycle-exception-payload-test
+  ;; The cycle CONTRACT (nil ref, self-reference, chain detection) is
+  ;; `constraints-test`'s subject and was duplicated here; what belongs
+  ;; with the error helpers is the shape of what it throws.
+  (let [fn-a (random-uuid)
+        fn-b (random-uuid)
+        helpers (->MockConstraintHelpers {fn-b #{fn-a fn-b}})]
+    (try
+      (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)
+      (is false "expected a cycle rejection")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
+        (is (= fn-a (:owner-fn-id (ex-data e))))
+        (is (= fn-b (:ref-fn-id (ex-data e))))))))

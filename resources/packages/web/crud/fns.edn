@@ -1,6 +1,19 @@
 ;; Storage CRUD base functions for web UI.
 ;; Impls that need storage access read it from `ctx` in their body
 ;; (see resources/packages/web/crud/impls.clj).
+;;
+;; SIZE (asked twice now, so recorded here): this is the largest module
+;; in the graph — ~675 fn-defs, most of them `_`-prefixed atoms of one
+;; handler triple (parse / validate / apply) each. It reads as clusters,
+;; not as a flat list: ~80 `;; ---` section headers mark them, and the
+;; long-prefix families (`_seq-*`, `_delete-ns-*`, `_ref-owner-*`,
+;; `_parse-*`, `_create-*`) are contiguous.
+;;
+;; It stays ONE namespace. A fn-id is `uuid5(namespace, name)`, so
+;; splitting `web.crud` into sub-namespaces re-mints 675 ids and rewrites
+;; every stored binding, version row and install that points at them —
+;; a data migration, in exchange for a shorter file. If it is ever split,
+;; do it for a reason that survives that cost.
 
 
 {:namespace "web.crud"

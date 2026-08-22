@@ -11,7 +11,8 @@
    went through the package decomposition.
 
    These tests bootstrap the full `[core web app]` package set once
-   per JVM (gh/via `setup/bootstrap-crud-graph!`) against a fresh
+   per JVM (via `gh/graph-fixture`, which clones the GOLDEN template —
+   ~100 ms — rather than re-running the full sync) against a fresh
    VERSIONED storage and invoke each handler through `cr/execute`,
    the same code path the `:list-branches-handler` Ring handler
    reaches in production. Each deftest opens a fresh storage so

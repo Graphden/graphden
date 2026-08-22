@@ -278,29 +278,195 @@
             (swap! status assoc check-name :passed)))))))
 
 
+(defn- report-skips!
+  "Print what this run is NOT doing. Skipped checks are REPORTED, never
+   silently dropped — a green scoped run must read as scoped in the log."
+  [scoped manual since]
+  (when (seq scoped)
+    (println (str yellow "⊘ out of scope" reset " (--since " since
+                  ", per scripts/checks.edn :relevant): "
+                  (str/join " " (map :name scoped)))))
+  (when (seq manual)
+    (println (str yellow "⊘ MANUALLY SKIPPED" reset " (--skip): "
+                  (str/join " " (map :name manual))
+                  " — this run is PARTIAL by operator choice"))))
+
+
+(defn- status-line
+  "The one-row progress line, clamped to `cols`:
+
+     +3 ⚠1 ✗1 ◐3 │ ✗ cljstyle │ ◐ tests biome … │ 12.3s
+     └counter────┘ └failed────┘ └running greedy┘ └time┘
+
+   The counter shows each non-zero category once. Failed names ALWAYS
+   fit — they are what the reader cares about; running names are added
+   greedily within whatever budget is left and truncated with `…`.
+
+   Pure: takes the status snapshot and returns the string, so the
+   fitting logic can be read (and reasoned about) without a terminal."
+  [checks statuses elapsed-s cols]
+  (let [sep " │ "
+        elapsed-part (str sep (format "%.1fs" elapsed-s))
+        n-of (fn [pred] (count (filter #(pred (val %)) statuses)))
+        n-passed (n-of #(= :passed %))
+        n-warn (n-of #(= :warning %))
+        n-failed (n-of #{:failed :timeout})
+        n-running (n-of #(= :running %))
+        names-with (fn [pred]
+                     (mapv :name (filter #(pred (get statuses (:name %))) checks)))
+        failed-names (names-with #{:failed :timeout})
+        running-names (names-with #(= :running %))
+        counter (str/join " "
+                          (cond-> []
+                            (pos? n-passed) (conj (str green "+" n-passed reset))
+                            (pos? n-warn) (conj (str yellow "⚠" n-warn reset))
+                            (pos? n-failed) (conj (str red "✗" n-failed reset))
+                            (pos? n-running) (conj (str yellow "◐" n-running reset))))
+        failed-part (when (seq failed-names)
+                      (str sep red "✗" reset " " (str/join " " failed-names)))
+        running-marker (str sep yellow "◐" reset " ")
+        fixed-len (+ (visible-len counter)
+                     (visible-len (or failed-part ""))
+                     (visible-len elapsed-part))
+        running-budget (- (dec cols) fixed-len (visible-len running-marker))
+        ;; Greedy fit; reserve 2 cols for " …" until we know whether
+        ;; overflow occurs.
+        [fitted overflow?]
+        (if (and (seq running-names) (pos? running-budget))
+          (loop [acc "" remaining running-names]
+            (if (empty? remaining)
+              [acc false]
+              (let [nm (first remaining)
+                    candidate (if (empty? acc) nm (str acc " " nm))]
+                (if (<= (+ (count candidate) 2) running-budget)
+                  (recur candidate (next remaining))
+                  [acc (seq acc)]))))
+          ["" false])
+        running-part (when (seq fitted)
+                       (str running-marker fitted (when overflow? " …")))]
+    (str counter (or failed-part "") (or running-part "") elapsed-part)))
+
+
+(defn- run-waves!
+  "Three waves, fail-fast.
+
+   The lint / commit / info checks run in parallel first (~1 min); the
+   unit suite (`:test`, ~3 min) runs ONLY if they all pass. A formatting
+   slip should not cost the unit suite — the exact waste that prompted
+   this. When `--groups` selects no `:test` check (e.g. `bb lint`), the
+   later waves are empty and this is just a lint run.
+
+   `:post-test` is a third wave because it READS what the test wave
+   wrote: `bb perf` compares `perf/runs/*.edn`, which the suites emit as
+   they run. In the test wave it would race them and grade the previous
+   run's numbers — passing on a regression it never saw. A red suite
+   also makes the perf report meaningless (half the scenarios may not
+   have run, so every count reads low and every budget passes), so it is
+   skipped rather than reported as a reassuring lie."
+  [checks status results failed]
+  (let [wave (fn [cs]
+               (doseq [f (mapv (fn [c] (future (run-check c status results failed))) cs)]
+                 @f))
+        by-group (group-by :group checks)
+        test-checks (:test by-group)
+        post-checks (:post-test by-group)
+        pre-checks (remove #(#{:test :post-test} (:group %)) checks)
+        skip-all! (fn [cs] (doseq [c cs] (swap! status assoc (:name c) :skipped)))]
+    (wave pre-checks)
+    (if @failed
+      (skip-all! (concat test-checks post-checks))
+      (do (wave test-checks)
+          (if @failed
+            (skip-all! post-checks)
+            (wave post-checks))))))
+
+
+(defn- print-check-result!
+  "One check's verdict line, plus its output when it did not pass."
+  [c status results since]
+  (let [check-name (:name c)
+        r (get results check-name)
+        s (get status check-name)
+        ms (:duration-ms r)
+        ;; A check that runs at 80%+ of its ceiling is not passing, it is
+        ;; about to start timing out — on a busier host, or after the next
+        ;; change. That is the moment to say so, not the run after it flips
+        ;; red. `checks.edn` calls its timeouts "measured on an idle box";
+        ;; this is what tells you when a box stopped being idle enough.
+        near-ceiling? (and ms (:timeout c) (>= ms (* 0.8 (:timeout c))))]
+    (println (str (status-char s) " " bold check-name reset
+                  (case s
+                    :passed (str " " green "PASSED" reset)
+                    :failed (str " " red "FAILED" reset)
+                    :timeout (str " " red "TIMED OUT" reset)
+                    :warning (str " " yellow "WARNINGS" reset)
+                    :skipped (str " " yellow "SKIPPED" reset " (lint failed first)")
+                    :scoped (str " " yellow "SKIPPED" reset " (out of scope — no relevant files changed since " since ")")
+                    :manual-skip (str " " yellow "SKIPPED" reset " (--skip: operator choice)")
+                    "")
+                  (when ms (format "  %.1fs" (/ ms 1000.0)))
+                  (when near-ceiling?
+                    (str " " yellow "(" (format "%.0f%%" (* 100.0 (/ ms (double (:timeout c)))))
+                         " of its " (format "%.0fs" (/ (:timeout c) 1000.0)) " ceiling)" reset))))
+    (when (#{:failed :warning :timeout} s)
+      (println)
+      (println (:output r))
+      (println))))
+
+
+(defn- print-report!
+  "The results block: every check in REGISTRY order, skipped ones
+   included, so a scoped run's report still lists what it did NOT do."
+  [checks scoped manual status results since]
+  (println)
+  (println (str bold "═══════════════════════════════════════════════════════════════" reset))
+  (println (str bold "                         CI RESULTS" reset))
+  (println (str bold "═══════════════════════════════════════════════════════════════" reset))
+  (println)
+  (let [order (into {} (map-indexed (fn [i c] [(:name c) i]) registry))]
+    (doseq [c (sort-by (comp order :name) (concat checks scoped manual))]
+      (print-check-result! c status results since))))
+
+
+(defn- print-verdict!
+  "The last line, which is what a reader trusts. A scoped or partial
+   pass must SAY so."
+  [checks scoped manual status failed? elapsed-s]
+  (let [passed-count (count (filter (fn [c] (= :passed (get status (:name c)))) checks))
+        ;; Skipped (unit suite gated off by a lint failure) is not "failed"
+        ;; per-se, but it wasn't run — exclude it from the denominator so
+        ;; the count reflects what actually executed.
+        total-count (count (remove (fn [c] (= :skipped (get status (:name c)))) checks))
+        scope-note (str (when (seq scoped) (str "; " (count scoped) " out of scope"))
+                        (when (seq manual) (str "; " (count manual) " SKIPPED by --skip")))]
+    (println)
+    (if failed?
+      (do (println (str red bold "✗ CI FAILED" reset
+                        " (" passed-count "/" total-count
+                        " checks passed in " (format "%.1fs" elapsed-s) scope-note ")"))
+          (System/exit 1))
+      (println (str green bold "✓ CI PASSED" reset
+                    " (" total-count "/" total-count
+                    " checks passed in " (format "%.1fs" elapsed-s) scope-note ")")))))
+
+
 (defn run-ci
+  "Select the checks, run them in waves behind a live progress line,
+   report. Coverage lives in `bb coverage` — `bb ci` runs the plain
+   tests suite for speed."
   []
   (let [;; The check set + its metadata (bb task, timeout, group, relevant
         ;; paths) come from the registry in `scripts/checks.edn`; `--groups`
         ;; narrows it, `--since` diff-scopes it, `--skip` force-skips.
         {checks :run scoped :scoped manual :manual since :since}
         (select-checks *command-line-args*)
-        ;; Skipped checks are REPORTED, never silently dropped — a green
-        ;; scoped run must read as scoped in the log.
-        _ (when (seq scoped)
-            (println (str yellow "⊘ out of scope" reset " (--since " since
-                          ", per scripts/checks.edn :relevant): "
-                          (str/join " " (map :name scoped)))))
-        _ (when (seq manual)
-            (println (str yellow "⊘ MANUALLY SKIPPED" reset " (--skip): "
-                          (str/join " " (map :name manual))
-                          " — this run is PARTIAL by operator choice")))
         ;; The host-wide lock exists to keep two testcontainer stacks off one
         ;; Docker daemon — so it is only needed when the unit suite runs. A
         ;; lint-only run (`bb lint`, `bb lint-clj`) skips it and never waits on a
         ;; gate's `bb ci`.
         needs-lock? (some #(= :test (:group %)) checks)
-        lock-handle (when needs-lock? (acquire-lock!))]
+        lock-handle (do (report-skips! scoped manual since)
+                        (when needs-lock? (acquire-lock!)))]
     (.addShutdownHook
       (Runtime/getRuntime)
       (Thread.
@@ -309,189 +475,31 @@
           (kill-live-procs!)
           (when lock-handle (release-lock! lock-handle)))))
     (try
-      (let [;; Status tracking
-            status (atom (merge (into {} (map (fn [c] [(:name c) :running]) checks))
+      (let [status (atom (merge (into {} (map (fn [c] [(:name c) :running]) checks))
                                 (into {} (map (fn [c] [(:name c) :scoped]) scoped))
                                 (into {} (map (fn [c] [(:name c) :manual-skip]) manual))))
             results (atom {})
             failed (atom false)
             start-time (System/currentTimeMillis)
-
-            ;; Progress display. The status line is rendered every
-            ;; 200 ms and is clamped to a single terminal row — no
-            ;; row-tracking / cursor-up, so we can never overshoot
-            ;; above the start of the status output and erase the
-            ;; user's terminal scrollback.
-            ;;
-            ;; Format:
-            ;;   +3 ⚠1 ✗1 ◐3 │ ✗ cljstyle │ ◐ tests biome … │ 12.3s
-            ;;   └counter────┘ └failed────┘ └running greedy┘ └time┘
-            ;;
-            ;; Counter shows each non-zero category once. Failed names
-            ;; always fit (the user cares about them most); running
-            ;; names are added greedily within the remaining budget,
-            ;; truncated with `…` when they don't all fit.
+            elapsed-s #(/ (- (System/currentTimeMillis) start-time) 1000.0)
+            ;; The status line is re-rendered every 200 ms into a SINGLE
+            ;; terminal row — no row-tracking / cursor-up, so we can never
+            ;; overshoot above the start of the status output and erase the
+            ;; user's scrollback.
             cols (terminal-cols)
-            sep " │ "
-            print-status
-            (fn []
-              (let [elapsed-s (/ (- (System/currentTimeMillis) start-time) 1000.0)
-                    elapsed-part (str sep (format "%.1fs" elapsed-s))
-                    statuses @status
-                    n-passed (count (filter #(= :passed (val %)) statuses))
-                    n-warn (count (filter #(= :warning (val %)) statuses))
-                    n-failed (count (filter #(#{:failed :timeout} (val %)) statuses))
-                    n-running (count (filter #(= :running (val %)) statuses))
-                    failed-names (->> checks
-                                      (filter #(#{:failed :timeout} (get statuses (:name %))))
-                                      (mapv :name))
-                    running-names (->> checks
-                                       (filter #(= :running (get statuses (:name %))))
-                                       (mapv :name))
-                    counter (str/join " "
-                                      (cond-> []
-                                        (pos? n-passed) (conj (str green "+" n-passed reset))
-                                        (pos? n-warn) (conj (str yellow "⚠" n-warn reset))
-                                        (pos? n-failed) (conj (str red "✗" n-failed reset))
-                                        (pos? n-running) (conj (str yellow "◐" n-running reset))))
-                    failed-part (when (seq failed-names)
-                                  (str sep red "✗" reset " " (str/join " " failed-names)))
-                    running-marker (str sep yellow "◐" reset " ")
-                    cols-budget (dec cols)
-                    fixed-len (+ (visible-len counter)
-                                 (visible-len (or failed-part ""))
-                                 (visible-len elapsed-part))
-                    running-budget (- cols-budget fixed-len (visible-len running-marker))
-                    ;; Greedy fit running names; reserve 2 cols for " …"
-                    ;; until we know whether overflow occurs.
-                    [fitted overflow?]
-                    (if (and (seq running-names) (pos? running-budget))
-                      (loop [acc "" remaining running-names]
-                        (if (empty? remaining)
-                          [acc false]
-                          (let [nm (first remaining)
-                                candidate (if (empty? acc) nm (str acc " " nm))]
-                            (if (<= (+ (count candidate) 2) running-budget)
-                              (recur candidate (next remaining))
-                              [acc (seq acc)]))))
-                      ["" false])
-                    running-part (when (seq fitted)
-                                   (str running-marker fitted (when overflow? " …")))
-                    line (str counter
-                              (or failed-part "")
-                              (or running-part "")
-                              elapsed-part)]
-                (print (str "\r\033[2K" line))
-                (flush)))
-
-            ;; Progress display thread
             progress-running (atom true)
             progress-thread (future
                               (while @progress-running
-                                (print-status)
+                                (print (str "\r\033[2K"
+                                            (status-line checks @status (elapsed-s) cols)))
+                                (flush)
                                 (Thread/sleep 200)))]
-
-        ;; Three waves, fail-fast: the lint/commit/info checks run in parallel
-        ;; first (~1 min); the unit suite (:test, ~3 min) runs ONLY if they all
-        ;; pass. A formatting slip should not cost the unit suite — the exact
-        ;; waste that prompted this. When `--groups` selects no :test check (e.g.
-        ;; `bb lint`), the later waves are empty and this is just a lint run.
-        ;;
-        ;; `:post-test` is a third wave because it READS what the test wave
-        ;; wrote: `bb perf` compares perf/runs/*.edn, which the suites emit as
-        ;; they run. In the test wave it would race them and grade the previous
-        ;; run's numbers — passing on a regression it never saw.
-        (let [wave (fn [cs] (doseq [f (mapv (fn [c] (future (run-check c status results failed))) cs)] @f))
-              by-group (group-by :group checks)
-              test-checks (:test by-group)
-              post-checks (:post-test by-group)
-              pre-checks (remove #(#{:test :post-test} (:group %)) checks)]
-          (wave pre-checks)
-          (if @failed
-            (doseq [c (concat test-checks post-checks)]
-              (swap! status assoc (:name c) :skipped))
-            (do
-              (wave test-checks)
-              ;; A red suite makes the perf report meaningless — half the
-              ;; scenarios may not have run, so every count reads low and every
-              ;; budget passes. Skip rather than report a reassuring lie.
-              (if @failed
-                (doseq [c post-checks] (swap! status assoc (:name c) :skipped))
-                (wave post-checks))))
-
-          ;; Stop progress display
-          (reset! progress-running false)
-          @progress-thread
-          (println))                ; Final newline
-
-        ;; Show results
-        (println)
-        (println (str bold "═══════════════════════════════════════════════════════════════" reset))
-        (println (str bold "                         CI RESULTS" reset))
-        (println (str bold "═══════════════════════════════════════════════════════════════" reset))
-        (println)
-
-        ;; Show each check result — skipped ones included, in registry order,
-        ;; so a scoped run's report still lists what it did NOT do.
-        (doseq [c (let [order (into {} (map-indexed (fn [i c] [(:name c) i]) registry))]
-                    (sort-by (comp order :name) (concat checks scoped manual)))]
-          (let [check-name (:name c)
-                r (get @results check-name)
-                s (get @status check-name)
-                ms (:duration-ms r)
-                ;; A check that runs at 80%+ of its ceiling is not passing, it is
-                ;; about to start timing out — on a busier host, or after the next
-                ;; change. That is the moment to say so, not the run after it flips
-                ;; red. `checks.edn` calls its timeouts "measured on an idle box";
-                ;; this is what tells you when a box stopped being idle enough.
-                near-ceiling? (and ms (:timeout c) (>= ms (* 0.8 (:timeout c))))]
-            (println (str (status-char s) " " bold check-name reset
-                          (case s
-                            :passed (str " " green "PASSED" reset)
-                            :failed (str " " red "FAILED" reset)
-                            :timeout (str " " red "TIMED OUT" reset)
-                            :warning (str " " yellow "WARNINGS" reset)
-                            :skipped (str " " yellow "SKIPPED" reset " (lint failed first)")
-                            :scoped (str " " yellow "SKIPPED" reset " (out of scope — no relevant files changed since " since ")")
-                            :manual-skip (str " " yellow "SKIPPED" reset " (--skip: operator choice)")
-                            "")
-                          (when ms (format "  %.1fs" (/ ms 1000.0)))
-                          (when near-ceiling?
-                            (str " " yellow "(" (format "%.0f%%" (* 100.0 (/ ms (double (:timeout c)))))
-                                 " of its " (format "%.0fs" (/ (:timeout c) 1000.0)) " ceiling)" reset))))
-
-            ;; Show output for failures/warnings/timeouts
-            (when (#{:failed :warning :timeout} s)
-              (println)
-              (println (:output r))
-              (println))))
-
-        ;; Coverage lives in `bb coverage` — bb ci runs the plain
-        ;; tests suite for speed.
-
-        ;; Final summary
-        (let [elapsed (/ (- (System/currentTimeMillis) start-time) 1000.0)
-              passed-count (count (filter (fn [c] (= :passed (get @status (:name c)))) checks))
-              ;; Skipped (unit suite gated off by a lint failure) is not "failed"
-              ;; per-se, but it wasn't run — exclude it from the denominator so
-              ;; the count reflects what actually executed.
-              total-count (count (remove (fn [c] (= :skipped (get @status (:name c)))) checks))
-              ;; A scoped/partial pass must SAY so on its verdict line — the
-              ;; gate log's last words are what a reader trusts.
-              scope-note (str (when (seq scoped)
-                                (str "; " (count scoped) " out of scope"))
-                              (when (seq manual)
-                                (str "; " (count manual) " SKIPPED by --skip")))]
-          (println)
-          (if @failed
-            (do
-              (println (str red bold "✗ CI FAILED" reset
-                            " (" passed-count "/" total-count
-                            " checks passed in " (format "%.1fs" elapsed) scope-note ")"))
-              (System/exit 1))
-            (println (str green bold "✓ CI PASSED" reset
-                          " (" total-count "/" total-count
-                          " checks passed in " (format "%.1fs" elapsed) scope-note ")")))))
+        (run-waves! checks status results failed)
+        (reset! progress-running false)
+        @progress-thread
+        (println)                     ; close the progress row
+        (print-report! checks scoped manual @status @results since)
+        (print-verdict! checks scoped manual @status @failed (elapsed-s)))
       (finally
         (when lock-handle (release-lock! lock-handle))))))
 

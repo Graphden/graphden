@@ -1,0 +1,74 @@
+;; The OPEN-CORE SEAM: every var the private `graphden-tenancy` addon
+;; reaches in this repo, by namespace.
+;;
+;; Why it needs a guard of its own. Most of these have no caller in
+;; graphden — they exist FOR the addon. So a refactor here can drop one
+;; and the whole monorepo suite stays green; the break surfaces later, in
+;; a repo this CI cannot see. That is not hypothetical: splitting
+;; `crud/entities.clj` moved `view-impl-filter` into `crud.entities.list`
+;; and re-exported its neighbours but not it, and the first sign was the
+;; addon failing to compile against the landed graphden.
+;;
+;; `test/graphden/open_core_seam_test.clj` resolves every symbol below. A
+;; rename or a move without a re-export fails the build HERE, where the
+;; change is being made.
+;;
+;; Generated from the addon's own requires (alias-qualified var reads;
+;; namespaced KEYWORDS like `:auth/multi-tenant-provider` are excluded —
+;; they name an init-key, not a var). Regenerate when the addon starts
+;; using something new: an unlisted var is not an error, it just is not
+;; protected yet.
+
+{
+ graphden.accounts.core
+ [account-of create-account! mint-preview-token! mint-session! normalize-email
+  parse-scopes preview-grant-by-token]
+ graphden.accounts.crypto
+ [fixed-window-limiter per-key-fixed-window-limiter sha256-hex]
+ graphden.accounts.provider
+ [cookie-value session-cookie]
+ graphden.auth.provider
+ [AuthProvider authenticate extract-bearer]
+ graphden.clients.egress
+ [egress-rate-limiter jdbc-host max-response-bytes platform-db-host?]
+ graphden.crud.entities
+ [strip-impl-of view-impl-filter]
+ graphden.crud.fn-execution
+ [query-param]
+ graphden.crud.fn-execution.persist
+ [current-execution-pool]
+ graphden.crud.request
+ [parse-uuid-or-clear read-json-body]
+ graphden.crud.type-check
+ [with-org-alias-view*]
+ graphden.executor.compile-runtime
+ [*allowed-effects* *cancel-check* *scrub-internal-errors?* cloud-allowed-effects-for
+  cloud-allowed-effects-resolver cloud-request-allowed-effects default-cloud-allowed-effects
+  defer-handler-call-cache execute execute-by-name free-arg-ext-names
+  org-in-shard? register-conveyed-var! run-service-scoped run-with-timeout
+  service-execution-scope]
+ graphden.executor.interface
+ [make-single-arg-callable]
+ graphden.schema.protocol.protocol
+ [add-constraint add-entity retire-field]
+ graphden.storage.postgres.util
+ [ident->sql]
+ graphden.storage.protocol.core
+ [ConstraintHelpers ExecutionGraph GraphConstraints Storage StorageBatchCRUD
+  StorageCRUD StorageErrorClassifier StorageIntrospection StorageValueCodec
+  classify-error close collect-dependency-chain create-entities create-entity
+  current-entities current-enum-values current-enums current-fields
+  decode-row decode-value delete-entities delete-entity encode-row
+  encode-value initialize query-entities query-latest-per-group query-ref-many-owners
+  read-entities read-entity resolve-execution-graph schema-metadata
+  update-entities update-entity upsert-entities validate-no-dependency-cycle!
+  wrap-error]
+ graphden.system.api-routes-js
+ [rebuild-window-api!]
+ graphden.system.branch-router
+ [ctx-for current-router extract-branch-ref resolve-branch-id]
+ graphden.system.route-collection
+ [install-router! remove-router!]
+ graphden.versioning.storage.core
+ [current-branch-id]
+}

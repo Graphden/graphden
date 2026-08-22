@@ -666,6 +666,12 @@
 (def notify-after-write!       inval/notify-after-write!)
 
 (def strip-impl-of             entity-list/strip-impl-of)
+
+
+;; The atom itself, not a copy — the tenancy addon `reset!`s this seam by
+;; the historical `entities/` name at boot (`authz/install-view-impl-filter!`)
+;; and clears it on halt.
+(def view-impl-filter          entity-list/view-impl-filter)
 (def apply-view-impl-filter    entity-list/apply-view-impl-filter)
 (def list-all-graph-entities   entity-list/list-all-graph-entities)
 

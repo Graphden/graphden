@@ -26,6 +26,15 @@ model). Cloud vs self-hosted is a **mode, not code**: one binary; "cloud" =
 addon wired + restriction policy. A self-hoster who wants multi-user installs
 the same addon — they are not "cloud".
 
+**What holds the seam in place.** Most of the vars the addon reaches here
+have no caller in this repo — they exist *for* the addon — so a rename or a
+move can pass every graphden test and only break at pin-bump time, in a repo
+this CI cannot see. `tools/open-core-seam.edn` lists every var the addon
+reaches (generated from its own requires) and
+`test/graphden/open_core_seam_test.clj` resolves each one, so the break
+lands where the change is made. It proves the NAME resolves, not the
+contract — an arity or semantic change still needs the addon's own suite.
+
 The seams, in wiring order:
 
 ## Context

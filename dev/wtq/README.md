@@ -74,7 +74,7 @@ bb wt claim <name> [task...]    # (agent-invoked) register feature/<name> + work
 bb wt list                      # every worktree: branch, ahead/behind develop, dirty, last RESULT
 bb wt status                    # queue lock holder + recent gate logs
 bb wt log <name>                # tail the latest gate log for a feature
-bb wt merge [--no-e2e] [--no-fleet] [--deploy]
+bb wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy]
                                 # (agent, inside a worktree) queue -> gate -> land on develop
                                 #   --deploy also resets the develop DB schema on landing
 bb wt up                        # (agent, inside a worktree) build + run THIS branch on its own ports
@@ -106,6 +106,17 @@ bb wt start <name>                     # launch an agent inside an existing work
   committed.
 - `--no-e2e` is an escape hatch for changes with no runtime surface (docs,
   comments); it still runs lint + unit + integration.
+- **The visual-regression suite is in the gate** (since 2026-08-22), diff-scoped
+  to what a screenshot can see — packages' `.js` / `.css` / `.html` / `.svg`,
+  `app/**/fns.edn` (where the hiccup lives) and `tools/visual-tests/**`. It runs
+  against an isolated stack, which is only meaningful because every baseline is
+  instance-INDEPENDENT: re-capturing all 24 against a fresh stack returned 9 of
+  the 12 PNGs byte-identical to baselines taken months earlier on the demo box,
+  and the 3 that differed were the sidebar scenario photographing whatever
+  namespaces the instance held. It filters to `core.` now. Adding a scenario
+  that depends on instance DATA will pass locally and red the gate —
+  `tools/visual-tests/run-visual.sh` explains the rule. `--no-visual` skips it;
+  `bb visual` / `bb visual-update` remain the human loop.
 - **The two-container fleet e2e is in the gate** (since 2026-08-22) and is the
   only suite that exercises what happens *between* pods: it boots the candidate
   image twice over one Postgres and drives `/health`, the token-gated

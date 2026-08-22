@@ -270,18 +270,26 @@ test.describe('Editor — visual baselines', () => {
     // to have happened before the screenshot, or the expansion state races
     // the screenshot (the residual ~0.03-0.05 flake this file carried).
     await page.waitForSelector('#side-menu .selected', {timeout: 10000});
-    // Expand the "core" namespace SPECIFICALLY. This used to click the
-    // first `.ns-arrow.collapsed` ("we don't care WHICH") — but which
-    // namespace comes first collapsed varies with viewport and demo-DB
-    // state, and an `anon-*` namespace full of uuid-named fns once won
-    // the race, so the snapshot compared unstable content. `core` is
-    // package-defined: always present, stable children.
-    const arrow = page.locator(
-      '.ns-header[data-ns-path="core"] .ns-arrow.collapsed');
-    if (await arrow.count()) {
-      await arrow.click();
-      await page.waitForTimeout(150);
-    }
+    // FILTER to `core.` before snapshotting. Without this the snapshot is a
+    // picture of whatever namespaces the instance happens to hold — and that
+    // made this the one baseline in the file that could not survive a change
+    // of instance. Measured 2026-08-22: 22 of 24 snapshots matched against a
+    // fresh isolated stack; the two that failed were this one at the iPad
+    // viewports, by 6% of pixels, entirely in the namespace LIST above the
+    // fold. `core.*` is package-defined, so the filtered tree is identical on
+    // a fresh stack and on a demo box six months deep in user fns — which is
+    // what lets `bb visual` run in the landing gate at all.
+    //
+    // An earlier attempt at the same problem expanded `core` specifically
+    // (rather than "the first collapsed namespace", which an `anon-*` full of
+    // uuid-named fns once won). That fixed WHICH subtree was open and left
+    // everything above it variable.
+    await page.fill('#search-input', 'core.');
+    await page.waitForFunction(
+      () => Array.from(document.querySelectorAll('#entity-list [data-ns-path]'))
+              .every((n) => n.hidden || n.getAttribute('data-ns-path').startsWith('core')),
+      null, {timeout: 5000});
+    await page.evaluate(() => new Promise(requestAnimationFrame));
     // Crop to the sidebar so this snapshot is small + stable. The
     // graph canvas can shift by a pixel between runs and would
     // otherwise dominate the diff.

@@ -225,8 +225,11 @@ bb biome        # Lint editor JS (resources/packages/app/editor/**/*.js)
 bb biome-fix    # Apply safe biome autofixes
 bb stylelint    # Lint editor CSS — enforces design tokens for color/background/fill/stroke
 bb stylelint-fix # Apply safe stylelint autofixes
-bb visual       # Playwright visual-regression diff against committed baselines
+bb visual       # Playwright visual-regression diff against a running editor you pick
 bb visual-update # Refresh visual baselines after intentional UI changes
+                #   Baselines must be INSTANCE-INDEPENDENT — the landing gate runs
+                #   the same suite against a fresh isolated stack (`bb test-visual`),
+                #   so a snapshot of whatever data your box happens to hold reds it.
 bb devtour      # Regenerate the developer code-tour docs/devtour/index.html from tour.edn
 bb devtour-check # (in bb ci) fail if a tour anchor broke or index.html drifted
 

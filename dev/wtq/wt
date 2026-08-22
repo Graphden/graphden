@@ -30,7 +30,7 @@
 #   wt start <name>        launch an autonomous agent inside an existing worktree
 #   wt task  <name>        print the feature's task spec
 #   wt list                show every worktree, branch, ahead/behind, dirty, result
-#   wt merge [--no-e2e] [--no-fleet] [--deploy]
+#   wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy]
 #                                  (inside a worktree) queue + gate + land on develop
 #                          --deploy: also reset the develop DB schema on landing
 #   wt up                  (inside a worktree) build + run THIS branch on its own
@@ -230,9 +230,9 @@ governance_drift() {
 # and the gate is itself the script executing — that IS its test. Putting app
 # code there would mean adding it to a classpath, i.e. touching deps.edn or
 # build.clj, which lands in "everything else" and runs the lot.
-classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET / CHANGED_N
+classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET / NEED_VISUAL / CHANGED_N
   local wt="$1" f
-  NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; CHANGED_N=0
+  NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; NEED_VISUAL=0; CHANGED_N=0
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     CHANGED_N=$((CHANGED_N + 1))
@@ -249,6 +249,16 @@ classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET 
       src/graphden/byo.clj|src/graphden/crac.clj|\
       test/graphden/fleet/*|Dockerfile*|docker-compose*|deps.edn|build.clj)
                                       NEED_FLEET=1 ;;
+    esac
+    # A screenshot can only see the rendered surface: the editor's own assets
+    # and the hiccup that app/** fns.edn builds. Everything else changes no
+    # pixels, and paying ~2.5 min of stack + snapshots for it would train
+    # people to skip the step.
+    case "$f" in
+      resources/packages/*.js|resources/packages/*.css|\
+      resources/packages/*.html|resources/packages/*.svg|\
+      resources/packages/app/*fns.edn|tools/visual-tests/*)
+                                      NEED_VISUAL=1 ;;
     esac
   done < <(git -C "$wt" diff --name-only "$TARGET..HEAD")
 }
@@ -862,7 +872,7 @@ stop_sampler() {
 }
 
 run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
-  local wt="$1" no_e2e="$2" deploy="$3" no_fleet="$4"
+  local wt="$1" no_e2e="$2" deploy="$3" no_fleet="$4" no_visual="$5"
   local built_candidate=0
   # The heavy suites refuse to run in a worktree unless this is set: they boot
   # the canonical image and saturate the machine, so only the gate — which holds
@@ -977,6 +987,7 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     classify_changes "$wt"
     [ "$no_e2e" = "1" ] && NEED_E2E=0     # explicit override still wins
     [ "$no_fleet" = "1" ] && NEED_FLEET=0
+    [ "$no_visual" = "1" ] && NEED_VISUAL=0
     echo "  $CHANGED_N file(s) changed vs $TARGET"
     if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
     else echo "  integration: SKIPPED — nothing outside docs / browser-only assets changed"; fi
@@ -986,6 +997,9 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     if [ "$no_fleet" = "1" ]; then echo "  fleet e2e:   SKIPPED — --no-fleet"
     elif [ "$NEED_FLEET" = 1 ]; then echo "  fleet e2e:   RUN"
     else echo "  fleet e2e:   SKIPPED — nothing touching the cross-pod control plane"; fi
+    if [ "$no_visual" = "1" ]; then echo "  visual:      SKIPPED — --no-visual"
+    elif [ "$NEED_VISUAL" = 1 ]; then echo "  visual:      RUN"
+    else echo "  visual:      SKIPPED — no rendered surface changed"; fi
     echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
     echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
@@ -997,7 +1011,8 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       ( cd "$wt" && bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
     fi
 
-    if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ]; then
+    if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
+       && [ "$NEED_VISUAL" = 0 ]; then
       step "no runtime surface changed — skipping image build + suites"
       echo "ok"
     else
@@ -1050,6 +1065,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     if [ "$NEED_INTEGRATION" = 1 ]; then
       step "bb test-integration"
       ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
+    fi
+
+    if [ "$NEED_VISUAL" = 1 ]; then
+      step "bb test-visual"
+      # Pixel diff over 24 snapshots × 3 viewports against an isolated stack.
+      # It can only run here because every baseline is instance-independent —
+      # tools/visual-tests/run-visual.sh says what that costs to keep true.
+      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-visual ) || { echo "FAIL: visual"; return 1; }
     fi
 
     if [ "$NEED_FLEET" = 1 ]; then
@@ -1147,13 +1170,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 }
 
 cmd_merge() {
-  local no_e2e=0 deploy=0 no_fleet=0
+  local no_e2e=0 deploy=0 no_fleet=0 no_visual=0
   for a in "$@"; do
     case "$a" in
       --no-e2e) no_e2e=1 ;;
       --no-fleet) no_fleet=1 ;;
+      --no-visual) no_visual=1 ;;
       --deploy) deploy=1 ;;   # branch changes the schema: reset the target DB on landing
-      *) die "unknown flag '$a' (wt merge [--no-e2e] [--no-fleet] [--deploy])" ;;
+      *) die "unknown flag '$a' (wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy])" ;;
     esac
   done
   local wt; wt="$(git rev-parse --show-toplevel)"
@@ -1196,7 +1220,7 @@ cmd_merge() {
   ok "Acquired queue lock — running gate."
 
   local rc=0
-  run_gate "$wt" "$no_e2e" "$deploy" "$no_fleet" || rc=$?
+  run_gate "$wt" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" || rc=$?
   : > "$HOLDER"
   flock -u 9 || true      # release for the next in line
 

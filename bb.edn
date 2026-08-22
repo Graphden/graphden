@@ -694,6 +694,16 @@
              (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
                       "tools/browser-test/run-edit-tests.sh"))}
 
+  test-visual
+  {:doc "Visual-regression suite against an ISOLATED ephemeral stack (same `graphden.dev.e2e-stack` the Playwright e2e uses), so a pixel diff can run without a human-chosen instance. ~2.5 min: ~2 min for the stack, ~25 s for 24 snapshots across three viewports. Requires `bb rebuild` first so the image is present.
+
+   THE LANDING GATE RUNS THIS when the diff touches a surface a screenshot can see (`classify_changes` in dev/wtq/wt: packages' .js/.css/.html/.svg, app fns.edn, tools/visual-tests). Before 2026-08-22 the visual baselines were refreshed only when somebody remembered — no CI, no gate. That was safe to fix only once every baseline was instance-independent; see tools/visual-tests/run-visual.sh.
+
+   Human loop is unchanged: `bb visual` / `bb visual-update` against a running editor you pick."
+   :task (do (assert-gate-only! "bb test-visual")
+             (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
+                      "tools/visual-tests/run-visual.sh"))}
+
   test-fleet-e2e
   {:doc "Two-container fleet e2e (kaocha :container-e2e) — boots `graphden-executor:latest` (or `GD_IMAGE`) TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and drives the cross-container control plane over real HTTP: /health, token-gated /internal/fleet/{status,cell/load}, shared graph, agreed placement view. Requires `bb rebuild` first so the image is present. ~4 min (two cold boots). Ryuk reaps the containers on JVM exit.
 

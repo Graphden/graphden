@@ -17,14 +17,14 @@
   (graph/build-schema (mds/create-builder)))
 
 
-(deftest entities-test
+(deftest graph-schema-entities-test
   (testing "schema contains the six core entities of the slot/binding model plus the asset-override row"
     (is (= #{:ns :fn :slot :fn-slot :binding :binding-list-item
              :resource-override}
            (set (ds/entities schema))))))
 
 
-(deftest enums-test
+(deftest graph-schema-enums-test
   (testing "schema contains value-kind and override-kind enums"
     (let [enums (ds/enums schema)]
       (is (contains? enums :value-kind))

@@ -152,7 +152,7 @@
 ;; start! with component-keys tests
 ;; =============================================================================
 
-(deftest start-with-component-keys-test
+(deftest start-with-component-keys-synthetic-config-test
   (testing "start! accepts optional component-keys parameter"
     (let [read-cfg (fn [_] {::probe {:tag :a} ::other {:tag :b}})]
       (binding [sys/read-config read-cfg]

@@ -240,34 +240,6 @@
 
 ;; === with-query-timeout tests ===
 ;; Note: with-query-timeout is defined in util.clj, not in core.clj
-
-(deftest with-query-timeout-validation-test
-  (testing "rejects non-positive timeout"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Query timeout must be a positive integer"
-          (util/with-query-timeout 0 #(identity :result))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Query timeout must be a positive integer"
-          (util/with-query-timeout -1000 #(identity :result)))))
-
-  (testing "rejects timeout below minimum (1000ms)"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Query timeout must be at least 1000ms"
-          (util/with-query-timeout 500 #(identity :result))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Query timeout must be at least 1000ms"
-          (util/with-query-timeout 999 #(identity :result)))))
-
-  (testing "accepts valid timeout at minimum"
-    (is (= :result (util/with-query-timeout 1000 #(identity :result)))))
-
-  (testing "accepts valid timeout above minimum"
-    (is (= :result (util/with-query-timeout 60000 #(identity :result))))))
-
-
-;; === PostgresStorage error classifier tests ===
-;; Tests the StorageErrorClassifier protocol implementation on PostgresStorage
-
 (defn- make-sql-exception
   "Creates a SQLException with the given SQL state code."
   [sql-state]
@@ -367,3 +339,8 @@
   (testing "query-canceled?"
     (is (util/query-canceled? (make-sql-exception "57014")))
     (is (not (util/query-canceled? (make-sql-exception "23505"))))))
+
+
+;; `with-query-timeout`'s validation table (positive, >= 1000 ms) belongs to
+;; `protocol.config`, which defines it, and is pinned by `config-test`.
+;; `postgres.util` only re-exports the var; `util-test` asserts THAT, once.

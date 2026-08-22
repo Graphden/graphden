@@ -60,10 +60,37 @@
   (testing "returns function result"
     (is (= 42 (cfg/with-query-timeout 5000 #(+ 40 2)))))
 
-  (testing "validates timeout"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Query timeout must be at least"
-          (cfg/with-query-timeout 100 #(identity 1))))))
+  (testing "the whole validation table — this is the only place it lives"
+    ;; `postgres.util` / `postgres.core` re-export this fn, and each of their
+    ;; test files used to re-assert these same four rejections. One home.
+    (doseq [bad [0 -1000]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"must be a positive integer"
+            (cfg/with-query-timeout bad (constantly :ok)))
+          (str bad " is not a timeout")))
+    (doseq [small [100 500 999]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Query timeout must be at least 1000ms"
+            (cfg/with-query-timeout small (constantly :ok)))
+          (str small "ms is below the floor")))
+    (is (= :ok (cfg/with-query-timeout 1000 (constantly :ok)))
+        "1000ms — the floor itself — is accepted")
+    (is (= :ok (cfg/with-query-timeout 60000 (constantly :ok)))))
+
+  (testing "nesting restores the OUTER value, not the default"
+    (cfg/with-query-timeout
+      100000
+      (fn []
+        (is (= 100000 cfg/*query-timeout-ms*))
+        (cfg/with-query-timeout 200000 #(is (= 200000 cfg/*query-timeout-ms*)))
+        (is (= 100000 cfg/*query-timeout-ms*)))))
+
+  (testing "the previous timeout comes back afterwards"
+    ;; A leaked binding silently changes the timeout for every later query on
+    ;; this thread.
+    (let [original cfg/*query-timeout-ms*]
+      (cfg/with-query-timeout 10000 (constantly :noop))
+      (is (= original cfg/*query-timeout-ms*)))))
 
 
 (deftest get-query-timeout-seconds-test
@@ -106,7 +133,12 @@
       (cfg/with-regex-limits {:max-input-length 999}
                              #(do
                                 (is (= original-pattern cfg/*max-regex-length*))
-                                (is (= 999 cfg/*max-regex-input-length*)))))))
+                                (is (= 999 cfg/*max-regex-input-length*))))))
+
+  (testing "the previous limits come back afterwards"
+    (let [original cfg/*max-regex-length*]
+      (cfg/with-regex-limits {:max-pattern-length 10} (constantly :noop))
+      (is (= original cfg/*max-regex-length*)))))
 
 
 ;; === Lazy sequence limits tests ===

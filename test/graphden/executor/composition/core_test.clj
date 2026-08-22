@@ -60,6 +60,10 @@
     (is (nil? (parsing/parse-fn-ref [1 2 3])))
     (is (nil? (parsing/parse-fn-ref {:a 1}))))
 
+  (testing "returns nil for keywords that are not valid identifiers"
+    (is (nil? (parsing/parse-fn-ref :>)))
+    (is (nil? (parsing/parse-fn-ref :123-starts-with-digit))))
+
   (testing "returns nil for keywords with invalid names"
     (is (nil? (parsing/parse-fn-ref :>)))
     (is (nil? (parsing/parse-fn-ref :+)))

@@ -86,19 +86,38 @@
  ;; you ask about.
  ;;
  ;;   integration   4841 s fixture vs  966 s assertions across 71 NSes    ~5:1
- ;;   unit           341 s fixture vs  607 s assertions across 165 NSes   ~1:1.8
+ ;;   unit           114 s fixture vs  520 s assertions across 198 NSes   ~1:4.6
  ;;
- ;; (2026-08-07 gate run, post fixture-diet landing. Earlier: 3210/335/69
- ;; and 237/306/158.) So the old conclusion — the fixture is the target,
- ;; per-test tuning is noise — holds for INTEGRATION and is wrong for UNIT,
- ;; which is not fixture-dominated at all. The 360:1 was one namespace's
- ;; numbers generalised to a suite. Concentration, not smear, is still the
- ;; pattern — which is precisely why the top-25 is worth printing — but
- ;; read the big integration fixture numbers carefully: they are largely
+ ;; (integration: 2026-08-07 gate run. unit: 2026-08-22, 1777 deftests, 160 s
+ ;; wall at parallelism 8. Earlier unit readings: 341/607/165, and before the
+ ;; fixture diet 3210/335/69.) So the old conclusion — the fixture is the
+ ;; target, per-test tuning is noise — holds for INTEGRATION and is wrong for
+ ;; UNIT, which is not fixture-dominated at all and has got less so.
+ ;;
+ ;; Read the big integration fixture numbers carefully: they are largely
  ;; LOCK-WAIT on the two shared per-package-set warm-up chains (golden
  ;; bootstrap → cached sweep → first compile, once per JVM × set), not
  ;; per-NS work. See memory `project_test_fixture_economics` and
  ;; test-infra.shared-bootstrap.
+ ;;
+ ;; WHERE THE UNIT SUITE'S WALL-CLOCK ACTUALLY IS (2026-08-22 audit). At
+ ;; parallelism 8, 160 s of wall over 520 s of assertions means the run is
+ ;; bounded by its longest single namespace, and two of them are most of it:
+ ;;
+ ;;   packages.registry-test   91 s   (24 tests; each install/fork/materialise
+ ;;                                    recompiles the graph — that IS the subject)
+ ;;   packages.export-test     77 s
+ ;;   everything else         <=31 s
+ ;;
+ ;; So: work aimed at making this suite faster only pays inside those two.
+ ;; The tempting target — the handful of namespaces whose fixture dwarfs their
+ ;; assertions (7.4 s of setup for 0.5 s of checks, and five like it) — is a
+ ;; measurement artifact of the design working: that cost is the per-NS logical
+ ;; DB clone that buys parallel isolation, they all share the sanctioned
+ ;; `[core web app]` golden, and removing every one of them would not move the
+ ;; wall by a second because they run inside registry-test's shadow. Check a
+ ;; namespace's `packages` vector before accepting its cost; do not chase the
+ ;; clone.
  ;;
  ;; Numbers here are per-thread and overlap under `:kaocha/parallelism`; they
  ;; rank namespaces, they do not sum to wall-clock. See docs/PERF_BUDGETS.md.

@@ -302,71 +302,20 @@
 
 
 ;; === Redaction Tests ===
-
-(deftest redact-sensitive-map-test
-  (testing "redacts sensitive keys in map"
-    (let [result (redaction/redact-sensitive-map {:password "secret" :username "john"})]
-      (is (= "[REDACTED]" (:password result)))
-      (is (= "john" (:username result)))))
-
-  (testing "handles empty map"
-    (is (= {} (redaction/redact-sensitive-map {}))))
-
-  (testing "handles nil"
-    (is (nil? (redaction/redact-sensitive-map nil))))
-
-  (testing "redacts multiple sensitive fields"
-    (let [result (redaction/redact-sensitive-map {:password "x" :api-key "y" :token "z" :name "john"})]
-      (is (= "[REDACTED]" (:password result)))
-      (is (= "[REDACTED]" (:api-key result)))
-      (is (= "[REDACTED]" (:token result)))
-      (is (= "john" (:name result))))))
-
-
-(deftest redact-sensitive-deep-test
-  (testing "redacts nested sensitive values"
-    (let [data {:config {:database {:password "secret"
-                                    :host "localhost"}}}
-          result (redaction/redact-sensitive-deep data)]
-      (is (= "[REDACTED]" (get-in result [:config :database :password])))
-      (is (= "localhost" (get-in result [:config :database :host])))))
-
-  (testing "handles vectors with maps"
-    (let [data {:users [{:name "john" :api-key "key1"}
-                        {:name "jane" :api-key "key2"}]}
-          result (redaction/redact-sensitive-deep data)]
-      (is (= "john" (get-in result [:users 0 :name])))
-      (is (= "[REDACTED]" (get-in result [:users 0 :api-key])))
-      (is (= "[REDACTED]" (get-in result [:users 1 :api-key])))))
-
-  (testing "handles primitives"
-    (is (= "hello" (redaction/redact-sensitive-deep "hello")))
-    (is (= 123 (redaction/redact-sensitive-deep 123)))
-    (is (nil? (redaction/redact-sensitive-deep nil))))
-
-  (testing "handles sets"
-    (let [result (redaction/redact-sensitive-deep #{1 2 3})]
-      (is (set? result))
-      (is (= #{1 2 3} result))))
-
-  (testing "handles mixed collections"
-    (let [data {:items [1 "two" {:secret "hidden"}]}
-          result (redaction/redact-sensitive-deep data)]
-      (is (= 1 (get-in result [:items 0])))
-      (is (= "two" (get-in result [:items 1])))
-      (is (= "[REDACTED]" (get-in result [:items 2 :secret]))))))
-
-
-;; === Storage Error Types Tests ===
-
 (deftest storage-error-types-test
-  (testing "contains expected error types"
-    (is (contains? errors/storage-error-types :unique-violation))
-    (is (contains? errors/storage-error-types :foreign-key-violation))
-    (is (contains? errors/storage-error-types :not-null-violation))
-    (is (contains? errors/storage-error-types :connection-error))
-    (is (contains? errors/storage-error-types :system-error/query-timeout))
-    (is (contains? errors/storage-error-types :table-not-found))))
+  (testing "every classification the SQL error mapper can produce is declared"
+    (is (set? errors/storage-error-types))
+    (is (every? #(contains? errors/storage-error-types %)
+                [:unique-violation :foreign-key-violation :not-null-violation
+                 :check-constraint-violation :table-not-found :connection-error
+                 :system-error/query-timeout :parse-error :unknown-sql-error])
+        (str "missing: "
+             (pr-str (remove errors/storage-error-types
+                             [:unique-violation :foreign-key-violation
+                              :not-null-violation :check-constraint-violation
+                              :table-not-found :connection-error
+                              :system-error/query-timeout :parse-error
+                              :unknown-sql-error]))))))
 
 
 ;; === Validation Error Factory Tests ===
@@ -496,3 +445,9 @@
   (testing "handles keyword with empty name"
     ;; This is an edge case - empty keyword name
     (is (not (redaction/sensitive-field? (keyword ""))))))
+
+
+;; Redaction lives in `protocol.redaction` and is pinned by `redact-test`,
+;; which also covers the sensitive-field REGISTRY the redactors consult.
+;; This file used to carry a second, name-colliding copy of both — dropped
+;; by the 2026-08-22 test audit.

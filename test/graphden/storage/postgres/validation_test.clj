@@ -195,67 +195,6 @@
 
 
 ;; === Utility function tests ===
-
-(deftest kw->snake-case-test
-  (testing "converts kebab-case to snake_case"
-    (is (= "foo_bar" (util/kw->snake-case :foo-bar)))
-    (is (= "foo_bar_baz" (util/kw->snake-case :foo-bar-baz))))
-
-  (testing "handles already snake_case"
-    (is (= "foo_bar" (util/kw->snake-case :foo_bar))))
-
-  (testing "handles simple keywords"
-    (is (= "foo" (util/kw->snake-case :foo)))
-    (is (= "x" (util/kw->snake-case :x)))))
-
-
-(deftest check-snake-case-collisions-test
-  (testing "detects collision between kebab and snake case"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Snake_case naming collision"
-          (util/check-snake-case-collisions! {:context "test"} [:foo-bar :foo_bar]))))
-
-  (testing "allows non-colliding names"
-    (is (nil? (util/check-snake-case-collisions! {:context "test"} [:foo :bar :baz])))
-    (is (nil? (util/check-snake-case-collisions! {:context "test"} [:foo-bar :baz-qux]))))
-
-  (testing "empty and single-element collections pass"
-    (is (nil? (util/check-snake-case-collisions! {:context "test"} [])))
-    (is (nil? (util/check-snake-case-collisions! {:context "test"} [:foo])))))
-
-
-(deftest ident->sql-test
-  (testing "wraps identifier in double quotes"
-    (is (= "\"foo\"" (util/ident->sql :foo)))
-    (is (= "\"foo_bar\"" (util/ident->sql :foo-bar)))
-    (is (= "\"user\"" (util/ident->sql :user)))))
-
-
-(deftest field-type->pg-test
-  (testing "maps basic types"
-    (is (= "UUID" (util/field-type->pg {:type :uuid})))
-    (is (= "TEXT" (util/field-type->pg {:type :text})))
-    (is (= "BIGINT" (util/field-type->pg {:type :int})))
-    (is (= "BOOLEAN" (util/field-type->pg {:type :bool})))
-    (is (= "NUMERIC" (util/field-type->pg {:type :numeric})))
-    (is (= "TIMESTAMPTZ" (util/field-type->pg {:type :timestamptz})))
-    (is (= "JSONB" (util/field-type->pg {:type :jsonb})))
-    (is (= "BYTEA" (util/field-type->pg {:type :bytes}))))
-
-  (testing "maps ref to UUID"
-    (is (= "UUID" (util/field-type->pg {:type :ref :ref-entity :user}))))
-
-  (testing "maps union to JSONB"
-    (is (= "JSONB" (util/field-type->pg {:type :union :union-types [:foo :bar]}))))
-
-  (testing "maps enum to quoted identifier"
-    (is (= "\"status\"" (util/field-type->pg {:type :enum :enum-name :status})))
-    (is (= "\"user_role\"" (util/field-type->pg {:type :enum :enum-name :user-role}))))
-
-  (testing "falls back to TEXT for unknown types"
-    (is (= "TEXT" (util/field-type->pg {:type :unknown})))))
-
-
 (deftest enum-value-conversion-test
   (testing "enum-value->sql converts to snake_case"
     (is (= "active" (util/enum-value->sql :active)))
@@ -281,22 +220,8 @@
 
 ;; === with-query-timeout validation tests ===
 
-(deftest with-query-timeout-validation-test
-  (testing "timeout must be positive integer"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"must be a positive integer"
-          (pg/with-query-timeout 0 (constantly :ok))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"must be a positive integer"
-          (pg/with-query-timeout -1000 (constantly :ok)))))
 
-  (testing "timeout must be at least 1000ms"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"must be at least 1000ms"
-          (pg/with-query-timeout 500 (constantly :ok))))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"must be at least 1000ms"
-          (pg/with-query-timeout 999 (constantly :ok)))))
-
-  (testing "1000ms is valid minimum"
-    (is (= 42 (pg/with-query-timeout 1000 #(+ 40 2))))))
+;; This namespace boots a real PostgreSQL container. Five pure unit tests
+;; used to sit here paying for it and duplicating `util-test` /
+;; `protocol.naming-test` / `protocol.config-test` under colliding names;
+;; the 2026-08-22 audit moved them out. What stays needs the database.

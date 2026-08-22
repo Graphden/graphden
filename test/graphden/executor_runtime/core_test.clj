@@ -326,10 +326,14 @@
           system (ig/init config [:app/packages])]
       (try
         (let [packages (:app/packages system)]
-          (is (map? packages))
-          (is (contains? packages :base-fn-defs))
-          (is (contains? packages :fn-defs))
-          (is (contains? packages :packages)))
+          ;; `contains?` alone passes on an empty result — a loader that
+          ;; silently found no modules returns exactly these keys with nothing
+          ;; behind them. Assert what asking for `core` must actually produce.
+          (is (seq (:base-fn-defs packages)) "core ships base-fns")
+          (is (seq (:fn-defs packages)) "core ships fn-defs")
+          (is (= ["core"] (mapv :name (:packages packages)))
+              (str "exactly the requested package, nothing pulled in besides: "
+                   (pr-str (mapv :name (:packages packages))))))
         (finally
           (ig/halt! system))))))
 

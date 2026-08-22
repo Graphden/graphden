@@ -7,7 +7,7 @@
    - fn: parent-id=nil for base-fn, parent-id set for composed fn
    - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is]]
     [graphden.storage.protocol.core :as storage]))
 
 
@@ -24,45 +24,6 @@
 
 
 ;; === Error helpers tests ===
-
-(deftest make-error-context-test
-  (testing "creates error context with required fields"
-    (let [ctx (storage/make-error-context :test-error :create "Test message" {:entity :user})]
-      (is (= :test-error (:type ctx)))
-      (is (= :create (:operation ctx)))
-      (is (= "Test message" (:message ctx)))
-      (is (= :user (:entity ctx)))))
-
-  (testing "merges additional context"
-    (let [ctx (storage/make-error-context :error-type :read "msg" {:id 123 :extra "data"})]
-      (is (= :error-type (:type ctx)))
-      (is (= :read (:operation ctx)))
-      (is (= 123 (:id ctx)))
-      (is (= "data" (:extra ctx))))))
-
-
-(deftest make-storage-error-test
-  (testing "creates storage error without cause"
-    (let [err (storage/make-storage-error :test-error :create "Test message" {:entity :user})]
-      (is (instance? clojure.lang.ExceptionInfo err))
-      (is (= "Test message" (ex-message err)))
-      (is (= :test-error (:type (ex-data err))))
-      (is (= :create (:operation (ex-data err))))
-      (is (= :user (:entity (ex-data err))))
-      (is (nil? (ex-cause err)))))
-
-  (testing "creates storage error with cause"
-    (let [cause (ex-info "Original error" {:original true})
-          err (storage/make-storage-error :wrapped-error :update "Wrapped" {:id 42} cause)]
-      (is (instance? clojure.lang.ExceptionInfo err))
-      (is (= "Wrapped" (ex-message err)))
-      (is (= :wrapped-error (:type (ex-data err))))
-      (is (= :update (:operation (ex-data err))))
-      (is (= 42 (:id (ex-data err))))
-      (is (= cause (ex-cause err)))
-      (is (= "Original error" (ex-message (ex-cause err)))))))
-
-
 (deftest dependency-cycle-exception-payload-test
   ;; The cycle CONTRACT (nil ref, self-reference, chain detection) is
   ;; `constraints-test`'s subject and was duplicated here; what belongs
@@ -77,3 +38,9 @@
         (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
         (is (= fn-a (:owner-fn-id (ex-data e))))
         (is (= fn-b (:ref-fn-id (ex-data e))))))))
+
+
+;; The two constructors belong to `protocol.errors` and are pinned by
+;; `errors-test`, which asserts the same shapes with different literals.
+;; What is unique here is the ConstraintHelpers-backed dependency-cycle
+;; payload, which needs the mock above.

@@ -437,46 +437,6 @@
 ;; ============================================================================
 ;; apply-rename-aliases — pure runtime; map + alias-vector in, map out.
 ;; ============================================================================
-
-(deftest apply-rename-aliases-test
-  (testing "empty aliases — input passes through untouched (the common case)"
-    (is (= {:a 1 :b 2} (r/apply-rename-aliases {:a 1 :b 2} []))))
-
-  (testing "rename-name present, chain-name absent — copies value into chain-name"
-    (is (= {:item 10 :branch-row 10}
-           (r/apply-rename-aliases {:item 10}
-                                   [{:chain-name :branch-row :rename-name :item}]))))
-
-  (testing "chain-name already supplied by caller — caller value wins, no overwrite"
-    (is (= {:item 10 :branch-row 99}
-           (r/apply-rename-aliases {:item 10 :branch-row 99}
-                                   [{:chain-name :branch-row :rename-name :item}]))
-        "explicit caller-supplied binding outranks the alias copy"))
-
-  (testing "rename-name absent — alias is a no-op"
-    (is (= {:other 5}
-           (r/apply-rename-aliases {:other 5}
-                                   [{:chain-name :chain :rename-name :rename}]))))
-
-  (testing "multiple aliases each applied independently"
-    (is (= {:item 1 :other 2 :branch-row 1 :coll 2}
-           (r/apply-rename-aliases {:item 1 :other 2}
-                                   [{:chain-name :branch-row :rename-name :item}
-                                    {:chain-name :coll :rename-name :other}])))))
-
-
-;; ============================================================================
-;; compute-rename-aliases — picks up own rename-slots whose source-
-;; slot-id points OUTSIDE the root slot set. Two coverage shapes:
-;; (1) fn with NO own rename-slots → empty vec (early-exit branch);
-;; (2) own rename-slot whose source IS a root slot → filtered out by
-;;     the `:when (not (contains? root-ids src))` guard.
-;; The "outside the root set" alias path is exercised through the
-;; integration `:_list-branches-as-json-item` chain on the production
-;; graph — synthesising it here would require building a multi-hop
-;; source chain by hand, which the existing integration paths cover.
-;; ============================================================================
-
 (deftest compute-rename-aliases-empty-when-no-own-rename-slots
   (let [storage (setup/create-test-storage)]
     (try
@@ -510,3 +470,8 @@
         (is (= [] (r/compute-rename-aliases (:id f-fn) (support/lookups-for storage)))
             "rename whose source is F's own root-slot — no chain alias"))
       (finally (sp/close storage)))))
+
+
+;; `apply-rename-aliases` is a pure function and `renames-pure-test` exists
+;; to pin exactly that; the copy here asserted the same five cases with
+;; different literals under the same deftest name.

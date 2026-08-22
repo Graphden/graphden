@@ -35,30 +35,6 @@
 
 
 ;; === with-query-timeout tests ===
-
-(deftest with-query-timeout-test
-  (testing "with-query-timeout function changes timeout value (in milliseconds)"
-    (is (= 30000 sp/*query-timeout-ms*) "Default should be 30000 ms")
-    (pg/with-query-timeout 60000
-                           (fn []
-                             (is (= 60000 sp/*query-timeout-ms*) "Should be 60000 inside function")))
-    (is (= 30000 sp/*query-timeout-ms*) "Should restore to 30000 after function"))
-
-  (testing "with-query-timeout returns body result"
-    (is (= 42 (pg/with-query-timeout 10000 #(+ 40 2)))))
-
-  (testing "nested with-query-timeout works correctly"
-    (pg/with-query-timeout 100000
-                           (fn []
-                             (is (= 100000 sp/*query-timeout-ms*))
-                             (pg/with-query-timeout 200000
-                                                    (fn []
-                                                      (is (= 200000 sp/*query-timeout-ms*))))
-                             (is (= 100000 sp/*query-timeout-ms*))))))
-
-
-;; === Pool tests ===
-
 (deftest close-pool-idempotency-test
   (testing "close-pool with nil pool returns true (no-op)"
     (is (true? (pg/close-pool nil))))
@@ -435,3 +411,7 @@
           (is (= [{:entity :test-entity :field :email}] (:created (:fields changes)))))
         (finally
           (sp/close storage))))))
+
+
+;; `with-query-timeout`'s binding semantics — including nesting and
+;; restoration — are pinned by `protocol.config-test`, which owns the fn.

@@ -22,6 +22,8 @@
       (is (= u (g/try-parse-uuid u)))
       (is (= u (g/try-parse-uuid (str u)))))
     (is (nil? (g/try-parse-uuid "not-a-uuid")))
+    (is (nil? (g/try-parse-uuid "12345")) "a shorter-than-a-uuid string")
+    (is (nil? (g/try-parse-uuid "")))
     (is (nil? (g/try-parse-uuid 42)))
     (is (nil? (g/try-parse-uuid nil)))))
 
@@ -32,14 +34,23 @@
 
 (deftest check-graph-iteration-limit-test
   (testing "a count under the limit passes; near the limit warns but passes"
+    (is (nil? (g/check-graph-iteration-limit! 0 (random-uuid))))
     (is (nil? (g/check-graph-iteration-limit! 100 (random-uuid))))
     ;; 8500 is in [80% .. 100%) of the 10000 default → WARN, no throw
-    (is (nil? (g/check-graph-iteration-limit! 8500 (random-uuid)))))
+    (is (nil? (g/check-graph-iteration-limit! 8500 (random-uuid))))
+    (is (nil? (g/check-graph-iteration-limit! g/*max-graph-iterations* (random-uuid)))
+        "the limit itself is allowed — the guard is > not >="))
 
-  (testing "a count over the limit throws :execution-error/graph-too-large"
-    (let [ex (try (g/check-graph-iteration-limit! 20000 (random-uuid))
-                  (catch clojure.lang.ExceptionInfo e e))]
-      (is (= :execution-error/graph-too-large (:type (ex-data ex))))))
+  (testing "a count over the limit throws, carrying what a caller needs to act"
+    (let [fn-id (random-uuid)
+          ex (try (g/check-graph-iteration-limit! 20000 fn-id)
+                  (catch clojure.lang.ExceptionInfo e e))
+          data (ex-data ex)]
+      (is (= :execution-error/graph-too-large (:type data)))
+      (is (= fn-id (:fn-id data)) "which fn blew the budget")
+      (is (= g/*max-graph-iterations* (:max-iterations data)))
+      (is (= 20000 (:iteration-count data)))
+      (is (re-find #"exceeded maximum iterations" (ex-message ex)))))
 
   (testing "with-max-graph-iterations rebinds the limit for the body"
     (is (= 5 (g/with-max-graph-iterations 5 (fn [] g/*max-graph-iterations*))))
@@ -47,6 +58,57 @@
                                  (fn []
                                    (is (thrown? clojure.lang.ExceptionInfo
                                          (g/check-graph-iteration-limit! 6 (random-uuid))))))))
+
+
+(deftest check-graph-iteration-limit-boundaries-test
+  ;; The guard has three regions — pass, warn-but-pass, throw — and only the
+  ;; edges between them are interesting. Driven under a limit of 100 so the
+  ;; percentages are readable.
+  (let [fn-id (random-uuid)]
+    (g/with-max-graph-iterations
+      100
+      (fn []
+        (is (nil? (g/check-graph-iteration-limit! 79 fn-id)) "below the warn threshold")
+        (is (nil? (g/check-graph-iteration-limit! 80 fn-id)) "at 80% — warns, passes")
+        (is (nil? (g/check-graph-iteration-limit! 99 fn-id)))
+        (is (nil? (g/check-graph-iteration-limit! 100 fn-id)) "exactly at the limit")
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"exceeded maximum iterations"
+              (g/check-graph-iteration-limit! 101 fn-id))
+            "one over"))))
+
+  (testing "the arithmetic holds at both extremes of the limit"
+    (let [fn-id (random-uuid)]
+      (g/with-max-graph-iterations 1 (fn []
+                                       (is (nil? (g/check-graph-iteration-limit! 0 fn-id)))
+                                       (is (nil? (g/check-graph-iteration-limit! 1 fn-id)))
+                                       (is (thrown? clojure.lang.ExceptionInfo
+                                             (g/check-graph-iteration-limit! 2 fn-id)))))
+      (g/with-max-graph-iterations
+        1000000
+        (fn [] (is (nil? (g/check-graph-iteration-limit! 999999 fn-id))))))))
+
+
+(deftest with-max-graph-iterations-restores-the-binding-test
+  (testing "the body's value is returned"
+    (is (= 42 (g/with-max-graph-iterations 50000 #(+ 40 2)))))
+
+  (testing "a raised limit lets through what the default rejects"
+    (let [fn-id (random-uuid)]
+      (is (thrown? clojure.lang.ExceptionInfo
+            (g/check-graph-iteration-limit! 15000 fn-id)))
+      (is (nil? (g/with-max-graph-iterations
+                  20000 #(g/check-graph-iteration-limit! 15000 fn-id))))))
+
+  (testing "the previous limit comes back — on the normal path AND on a throw"
+    ;; A leaked binding is the failure that matters here: it would silently
+    ;; raise the ceiling for every later caller on this thread.
+    (let [original g/*max-graph-iterations*]
+      (g/with-max-graph-iterations 50000 (constantly :done))
+      (is (= original g/*max-graph-iterations*))
+      (try (g/with-max-graph-iterations 50000 #(throw (ex-info "boom" {})))
+           (catch clojure.lang.ExceptionInfo _ nil))
+      (is (= original g/*max-graph-iterations*)))))
 
 
 ;; ============================================================================

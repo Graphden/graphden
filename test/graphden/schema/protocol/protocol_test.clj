@@ -360,7 +360,7 @@
       (ds/build)))
 
 
-(deftest entities-test
+(deftest protocol-entities-test
   (testing "entities returns all entity names"
     (let [entities (set (ds/entities test-schema))]
       (is (= #{:account :profile} entities))))
@@ -373,7 +373,7 @@
     (is (nil? (ds/entity-uuid test-schema :unknown)))))
 
 
-(deftest entity-fields-test
+(deftest protocol-entity-fields-test
   (testing "entity-fields returns field definitions"
     (let [fields (ds/entity-fields test-schema :account)]
       (is (map? fields))
@@ -384,7 +384,7 @@
     (is (nil? (ds/entity-fields test-schema :unknown)))))
 
 
-(deftest enums-test
+(deftest protocol-enums-test
   (testing "enums returns all enum definitions"
     (let [enums (ds/enums test-schema)]
       (is (map? enums))

@@ -173,26 +173,6 @@
 
 
 ;; === Test internal parsing functions via core namespace ===
-
-(deftest parse-fn-ref-test
-  (testing "parses :fn-name as fn reference"
-    (is (= :my-fn (parsing/parse-fn-ref :my-fn))))
-
-  (testing "parses valid identifier keywords"
-    (is (= :handler (parsing/parse-fn-ref :handler)))
-    (is (= :my-fn-123 (parsing/parse-fn-ref :my-fn-123))))
-
-  (testing "returns nil for non-fn refs"
-    (is (nil? (parsing/parse-fn-ref "not-a-keyword")))
-    (is (nil? (parsing/parse-fn-ref 123))))
-
-  (testing "returns nil for invalid identifiers"
-    (is (nil? (parsing/parse-fn-ref :>)))
-    (is (nil? (parsing/parse-fn-ref :123-starts-with-digit)))))
-
-
-;; === extract-dependencies edge case tests ===
-
 (deftest extract-dependencies-test
   (testing "extracts dependencies from fn-def args"
     (let [fn-def {:name :my-fn
@@ -230,34 +210,6 @@
 
 
 ;; === topological-sort edge cases ===
-
-(deftest topological-sort-edge-cases-test
-  (testing "handles single element"
-    (let [fn-defs [{:name :single :parent :base}]
-          sorted (deps/topological-sort fn-defs)]
-      (is (= [:single] (mapv :name sorted)))))
-
-  (testing "handles independent elements (no dependencies)"
-    (let [fn-defs [{:name :a :parent :base}
-                   {:name :b :parent :base}
-                   {:name :c :parent :base}]
-          sorted (deps/topological-sort fn-defs)]
-      ;; Order doesn't matter for independent elements
-      (is (= #{:a :b :c} (set (mapv :name sorted))))))
-
-  (testing "throws on self-reference cycle"
-    (let [fn-defs [{:name :self-ref :parent :base :args {:x :self-ref}}]]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-            (deps/topological-sort fn-defs)))))
-
-  (testing "throws on three-way cycle"
-    (let [fn-defs [{:name :a :parent :base :args {:x :b}}
-                   {:name :b :parent :base :args {:x :c}}
-                   {:name :c :parent :base :args {:x :a}}]]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-            (deps/topological-sort fn-defs))))))
-
-
 (deftest validation-edge-cases-test
   (testing "throws on non-keyword name"
     (let [storage (create-test-storage)]
@@ -345,3 +297,10 @@
 ;; `unresolved-arg-error-test` removed — binding a non-existent slot
 ;; name silently no-ops in the new model (sync doesn't track which
 ;; slot names a fn defines vs. which are caller free args).
+
+
+;; `parse-fn-ref` and `topological-sort` live in `composition.parsing` and
+;; `composition.deps`; their edge cases are pinned by `core-test` and
+;; `deps-test`. This file used to carry a second copy of each under the same
+;; deftest name — the cases those copies had and the originals did not were
+;; merged there by the 2026-08-22 audit.

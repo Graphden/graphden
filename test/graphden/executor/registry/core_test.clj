@@ -240,7 +240,7 @@
         (is (= user-impl (synthesised-impl-for {:impl user-impl})))))))
 
 
-(deftest register-base-fns-test
+(deftest register-base-fns-accepts-type-rows-test
   (testing "registering a mix of base-fns and type-rows does not throw"
     (is (nil? (reg/register-base-fns!
                 {:rbf-base {:impl (fn [_ _] 1) :return-type :int}

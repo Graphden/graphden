@@ -39,27 +39,15 @@
 
 
 ;; === storage-error-types tests ===
-
-(deftest storage-error-types-test
-  (testing "contains all expected error types"
-    (is (contains? storage/storage-error-types :unique-violation))
-    (is (contains? storage/storage-error-types :foreign-key-violation))
-    (is (contains? storage/storage-error-types :not-null-violation))
-    (is (contains? storage/storage-error-types :check-constraint-violation))
-    (is (contains? storage/storage-error-types :table-not-found))
-    (is (contains? storage/storage-error-types :connection-error))
-    (is (contains? storage/storage-error-types :system-error/query-timeout))
-    (is (contains? storage/storage-error-types :parse-error))
-    (is (contains? storage/storage-error-types :unknown-sql-error)))
-
-  (testing "is a set"
-    (is (set? storage/storage-error-types))))
-
-
-;; === StorageErrorClassifier protocol tests ===
-
 (deftest storage-error-classifier-protocol-test
   (testing "StorageErrorClassifier protocol is defined"
     (is (some? storage/StorageErrorClassifier))
     (is (contains? (:sigs storage/StorageErrorClassifier) :classify-error))
     (is (contains? (:sigs storage/StorageErrorClassifier) :wrap-error))))
+
+
+;; `storage-error-types` belongs to `protocol.errors` and is pinned by
+;; `errors-test`. The copy that used to live here tested the same set
+;; through the facade under the same deftest name, so a failure pointed at
+;; the wrong file. Its two extra members (:parse-error, :unknown-sql-error)
+;; and the `set?` check moved there.

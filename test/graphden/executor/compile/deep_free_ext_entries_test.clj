@@ -119,7 +119,7 @@
         (finally (sp/close storage))))))
 
 
-(deftest hof-ref-is-a-boundary-test
+(deftest hof-ref-is-a-boundary-for-deep-frees-test
   ;; Mirrors renames-test's `hof-ref-is-a-boundary-test` — the new
   ;; walker honors the same `:is-fn` HOF boundary.
   (testing ":is-fn ref binding stops the entries-walker from descending"

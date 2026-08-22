@@ -12,13 +12,13 @@
     [graphden.schema.protocol.protocol :as ds]))
 
 
-(deftest entities-test
+(deftest malli-entities-test
   (testing "schema contains only fn and arg entities (2-entity model)"
     (let [entities (set (ds/entities example-schema))]
       (is (= #{:fn :arg} entities)))))
 
 
-(deftest enums-test
+(deftest malli-enums-test
   (testing "schema contains value-kind enum with all types including :any and :fn"
     (let [enums (ds/enums example-schema)]
       (is (contains? enums :value-kind))
@@ -28,7 +28,7 @@
              (set (keys (:values (get enums :value-kind)))))))))
 
 
-(deftest entity-fields-test
+(deftest malli-entity-fields-test
   (testing "fn has expected fields for 2-entity schema"
     (let [fields (ds/entity-fields example-schema :fn)]
       (is (= :text (get-in fields [:name :type])))

@@ -8,7 +8,7 @@
 
 ;; === Entity name validation tests ===
 
-(deftest validate-entity-name-test
+(deftest storage-validate-entity-name-test
   (testing "valid entity names pass validation"
     (is (nil? (storage/validate-entity-name! :user "test")))
     (is (nil? (storage/validate-entity-name! :fn "test")))

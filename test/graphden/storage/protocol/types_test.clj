@@ -10,20 +10,6 @@
     [graphden.storage.protocol.core :as storage]))
 
 
-(deftest types-equivalent?-test
-  (testing "uuid and ref are equivalent"
-    (is (storage/types-equivalent? :uuid :ref))
-    (is (storage/types-equivalent? :ref :uuid)))
-
-  (testing "jsonb and union are equivalent"
-    (is (storage/types-equivalent? :jsonb :union))
-    (is (storage/types-equivalent? :union :jsonb)))
-
-  (testing "non-equivalent types return nil"
-    (is (nil? (storage/types-equivalent? :text :int)))
-    (is (nil? (storage/types-equivalent? :uuid :text)))))
-
-
 (deftest safe-type-change?-test
   (testing "same type is always safe"
     (is (storage/safe-type-change? :int :int))
@@ -458,3 +444,8 @@
           old-metadata {:enum-values {#uuid "00000000-0000-0000-0000-000000000002" {:enum :status :value :active}}}
           changes (storage/compute-enum-value-changes old-metadata schema)]
       (is (= [{:enum :status :value :inactive}] (:created changes))))))
+
+
+;; `types-equivalent?` is defined in `schema.fields.types` and pinned by
+;; `schema.fields.types-test`, which covers more of its table than the copy
+;; that used to sit here (`:sequence`, `:text`/`:keyword`).

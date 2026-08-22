@@ -62,6 +62,19 @@
   (testing "empty input → empty"
     (is (= [] (order []))))
 
+  (testing "a single element, and independent elements, pass straight through"
+    (is (= [:single] (mapv :name (deps/topological-sort [{:name :single :parent :base}]))))
+    (is (= #{:a :b :c}
+           (set (mapv :name (deps/topological-sort [{:name :a :parent :base}
+                                                    {:name :b :parent :base}
+                                                    {:name :c :parent :base}]))))
+        "order is unconstrained between independents; membership is not"))
+
+  (testing "a self-reference is a cycle"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
+          (deps/topological-sort [{:name :self-ref :parent :base
+                                   :args {:x :self-ref}}]))))
+
   (testing "a dependency cycle throws :fn-composition/circular-dependency"
     (let [ex (try (deps/topological-sort [{:name :a :parent :b}
                                           {:name :b :parent :a}])

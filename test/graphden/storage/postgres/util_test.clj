@@ -11,30 +11,6 @@
 
 
 ;; === Configuration Tests ===
-
-(deftest get-query-timeout-seconds-test
-  (testing "returns timeout from sp/*query-timeout-ms* converted to seconds"
-    ;; Default is 30000ms = 30 seconds
-    (let [result (util/get-query-timeout-seconds)]
-      (is (integer? result))
-      (is (pos? result))
-      (is (= 30 result))))
-
-  (testing "respects custom timeout via with-query-timeout"
-    ;; `sp/*query-timeout-ms*` and `config/*query-timeout-ms*` are
-    ;; SEPARATE dynamic vars (both protocol re-export and config
-    ;; declare their own); production code threads both via
-    ;; `sp/with-query-timeout` which is the only safe path.
-    ;; Direct `(binding [sp/*query-timeout-ms* …])` leaves
-    ;; `config/*query-timeout-ms*` at its default — pre-fix this
-    ;; test relied on the (pre-consolidation) duplicate `util`
-    ;; impl reading sp's var directly.
-    (sp/with-query-timeout 60000
-                           #(is (= 60 (util/get-query-timeout-seconds))))))
-
-
-;; === Helper to create SQLException with specific state ===
-
 (defn- make-sql-exception
   "Creates a SQLException with the given SQL state code."
   [sql-state]
@@ -140,19 +116,6 @@
 
 
 ;; === Type Mapping Tests ===
-
-(deftest kw->snake-case-test
-  (testing "converts kebab-case to snake_case"
-    (is (= "foo_bar" (util/kw->snake-case :foo-bar)))
-    (is (= "my_field_name" (util/kw->snake-case :my-field-name))))
-
-  (testing "leaves already snake_case unchanged"
-    (is (= "foo_bar" (util/kw->snake-case :foo_bar))))
-
-  (testing "handles single word"
-    (is (= "foo" (util/kw->snake-case :foo)))))
-
-
 (deftest ident->sql-test
   (testing "converts keyword to quoted SQL identifier"
     (is (= "\"foo_bar\"" (util/ident->sql :foo-bar)))
@@ -182,28 +145,6 @@
 
   (testing "defaults unknown types to TEXT"
     (is (= "TEXT" (util/field-type->pg {:type :unknown-type})))))
-
-
-(deftest check-snake-case-collisions!-test
-  (testing "does not throw when no collisions"
-    (is (nil? (util/check-snake-case-collisions! {} [:foo :bar :baz])))
-    (is (nil? (util/check-snake-case-collisions! {} [:foo-bar :baz-qux]))))
-
-  (testing "throws when collision detected"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Snake_case naming collision detected"
-          (util/check-snake-case-collisions! {:context :test} [:foo-bar :foo_bar]))))
-
-  (testing "includes collision details in exception"
-    (try
-      (util/check-snake-case-collisions! {:entity :user} [:my-field :my_field])
-      (is false "should have thrown")
-      (catch clojure.lang.ExceptionInfo e
-        (let [data (ex-data e)]
-          (is (= :user (:entity data)))
-          (is (= 1 (count (:collisions data))))
-          (is (= "my_field" (-> data :collisions first :snake-case)))
-          (is (= #{:my-field :my_field} (set (-> data :collisions first :originals)))))))))
 
 
 (deftest validate-sql-identifier!-test
@@ -384,3 +325,28 @@
     ;; Standard types should still work
     (is (= "UUID" (util/field-type->pg {:type :uuid})))
     (is (= "TEXT" (util/field-type->pg {:type :text})))))
+
+
+;; =============================================================================
+;; Re-export contract
+;; =============================================================================
+;;
+;; `postgres.util` re-exports several `protocol.*` helpers so the postgres
+;; backend can reach them under one alias. Their BEHAVIOUR is pinned once, in
+;; the test of the namespace that defines each one — `protocol.config-test`,
+;; `protocol.naming-test`. Copies used to live here under the same deftest
+;; names; a failure then pointed at whichever file the runner happened to name,
+;; and a semantic change had to be edited in three places.
+;;
+;; What is genuinely this file's to assert is the WIRING: that the alias still
+;; resolves to the same function. One assertion each, and it fails the moment
+;; someone forks a re-export into a second implementation.
+
+(deftest re-exports-resolve-to-the-protocol-implementations-test
+  (is (identical? sp/with-query-timeout util/with-query-timeout)
+      ":with-query-timeout is protocol.config's, not a fork")
+  (is (identical? sp/kw->snake-case util/kw->snake-case))
+  (is (identical? sp/check-snake-case-collisions! util/check-snake-case-collisions!))
+  (testing "get-query-timeout-seconds wraps rather than aliases, so check behaviour"
+    (is (= (sp/with-query-timeout 5000 sp/get-query-timeout-seconds)
+           (sp/with-query-timeout 5000 util/get-query-timeout-seconds)))))

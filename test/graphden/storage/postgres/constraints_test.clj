@@ -19,7 +19,7 @@
 
 
 ^:integration
-(deftest ^:integration validate-no-dependency-cycle-test
+(deftest ^:integration pg-validate-no-dependency-cycle-test
   (testing "allows non-cyclic reference"
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
@@ -85,7 +85,10 @@
 
 ;; === GraphConstraints contract tests ===
 
-^:integration
+;; This deftest LOOKS assertion-free and is not: `run-graph-constraints-tests`
+;; carries the whole GraphConstraints contract and runs it against the pg
+;; backend. (The stray bare `^:integration` that used to sit on this line
+;; attached to nothing — the deftest's own metadata is what the runner reads.)
 (deftest ^:integration graph-constraints-contract-test
   (contract/run-graph-constraints-tests
     setup/create-test-storage

@@ -1,5 +1,9 @@
-(ns graphden.catch-assert-guard-test
-  "Mechanical guard against the one test shape that fails silently.
+(ns graphden.test-hygiene-guard-test
+  "Mechanical rules about the TESTS themselves, enforced by reading them.
+
+   Two rules today, both from the 2026-08-22 test audit.
+
+   ## 1. An asserting `catch` must be insured against a silent no-throw
 
    ```clojure
    (try
@@ -35,10 +39,25 @@
      (is (= :required-field-missing (:type (ex-data ex)))))
    ```
 
-   This test reads every file under `test/` and fails when a `try` whose
-   `catch` clauses contain `(is …)` has no such insurance in its body.
    Reader-based, not line-based: a `(is` inside a docstring or a comment
-   must not count either way."
+   must not count either way.
+
+   ## 2. A `deftest` name is unique across the suite
+
+   `clojure.test` allows two namespaces to define the same test name, and
+   the audit found 36 groups that did — mostly a helper pinned once where
+   it is DEFINED and again through a facade that re-exports it. The cost is
+   not the duplicated seconds; it is that a failure report names the test,
+   the reader opens the wrong file, and a semantic change has to be found
+   in two or three places. The rule that removed them: pin a function in
+   the test file of the namespace that DEFINES it, and let a re-export get
+   an identity assertion rather than a copy of the behaviour.
+
+   Where two tests genuinely have different subjects and collided by
+   coincidence (`entities-test` over three different schema builders), the
+   fix was a name that says which. There is deliberately NO allowlist here:
+   an exception ledger for this rule would be longer than the renames it
+   would save."
   (:require
     [clojure.java.io :as io]
     [clojure.string :as str]
@@ -119,6 +138,33 @@
              (pr-str (vec offenders))))))
 
 
+(defn- deftest-names
+  "`{name [file …]}` over every `(deftest …)` in the suite. Line-based on
+   purpose: a name is what a failure report prints, and that is what the
+   line says. Metadata in the name position (`^:integration`) is skipped."
+  []
+  (reduce
+    (fn [acc f]
+      (reduce (fn [acc' line]
+                (if-let [[_ nm] (re-find #"^\(deftest\s+(?:\^[^\s]+\s+)*([^\s]+)" line)]
+                  (update acc' nm (fnil conj []) (java.io.File/.getPath f))
+                  acc'))
+              acc
+              (str/split-lines (slurp f))))
+    {}
+    (test-sources)))
+
+
+(deftest every-deftest-name-is-unique-test
+  (let [dups (into (sorted-map) (filter (comp #(> % 1) count val)) (deftest-names))]
+    (is (empty? dups)
+        (str "deftest name(s) defined in more than one namespace. A failure "
+             "report names the test, so a duplicate sends the reader to the "
+             "wrong file. Pin a function where it is DEFINED and give the "
+             "re-export an identity assertion; if the subjects genuinely "
+             "differ, name them so: " (pr-str dups)))))
+
+
 (deftest the-guard-actually-reads-the-suite-test
   ;; A guard that silently scanned nothing would report a clean suite
   ;; forever. Pin both halves: files are found, and their forms parse.
@@ -128,5 +174,7 @@
     (is (some #(str/ends-with? (java.io.File/.getPath %)
                                "storage/protocol/crud_validation_test.clj")
               files))
-    (is (< 5 (count (forms (io/file "test/graphden/catch_assert_guard_test.clj"))))
-        "this very file must parse through the same reader path")))
+    (is (< 5 (count (forms (io/file "test/graphden/test_hygiene_guard_test.clj"))))
+        "this very file must parse through the same reader path")
+    (is (< 1500 (count (deftest-names)))
+        "the suite has ~2400 deftests — finding far fewer means the name scan broke")))

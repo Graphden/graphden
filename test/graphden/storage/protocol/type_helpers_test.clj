@@ -77,26 +77,7 @@
 
 ;; === validate-where-clause-fields! tests ===
 
-(deftest validate-where-clause-fields!-test
-  (testing "passes for known fields"
-    (let [fields {:name {:type :text} :age {:type :int}}]
-      (is (nil? (storage/validate-where-clause-fields! :user fields {:name "test"})))))
 
-  (testing "passes for empty where clause"
-    (is (nil? (storage/validate-where-clause-fields! :user {:name {:type :text}} {}))))
-
-  (testing "throws for unknown field"
-    (let [fields {:name {:type :text}}]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Unknown field"
-            (storage/validate-where-clause-fields! :user fields {:unknown "value"})))))
-
-  (testing "exception contains correct data"
-    (let [fields {:name {:type :text}}]
-      (try
-        (storage/validate-where-clause-fields! :user fields {:bad-field 123})
-        (is false "Should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :validation-error/unknown-field (:type (ex-data e))))
-          (is (= :user (:entity (ex-data e))))
-          (is (= :bad-field (:field (ex-data e)))))))))
+;; `validate-where-clause-fields!` lives in `protocol.crud-validation` and is
+;; pinned by `crud-validation-test`, which covers considerably more of its
+;; behaviour than the copy that used to sit here.

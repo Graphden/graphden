@@ -40,23 +40,6 @@
 
 ;; === traverse-bfs tests ===
 
-(deftest traverse-bfs-test
-  (testing "traverses graph and returns visited nodes"
-    (let [graph {:a #{:b :c}
-                 :b #{:d}
-                 :c #{:d}
-                 :d #{}}
-          get-neighbors (fn [node] (get graph node #{}))]
-      ;; traverse-bfs returns set of visited nodes
-      (is (= #{:a :b :c :d} (storage/traverse-bfs :a get-neighbors)))))
 
-  (testing "returns set with just start node if no neighbors"
-    (is (= #{:x} (storage/traverse-bfs :x (constantly #{})))))
-
-  (testing "handles cycles in graph"
-    (let [graph {:a #{:b}
-                 :b #{:c}
-                 :c #{:a}}  ; cycle back to :a
-          get-neighbors (fn [node] (get graph node #{}))]
-      ;; Should visit each node exactly once despite cycle
-      (is (= #{:a :b :c} (storage/traverse-bfs :a get-neighbors))))))
+;; `traverse-bfs` is a `protocol.graph` utility, not a naming one — it is
+;; pinned by `graph-test` alongside the rest of that namespace.

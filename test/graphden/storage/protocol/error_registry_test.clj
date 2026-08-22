@@ -48,19 +48,7 @@
                                         {:category :validation})))))
 
 
-(deftest error-categories-test
-  (testing "contains expected categories"
-    (is (contains? storage/error-categories :constraint))
-    (is (contains? storage/error-categories :validation))
-    (is (contains? storage/error-categories :config))
-    (is (contains? storage/error-categories :connection))
-    (is (contains? storage/error-categories :execution))
-    (is (contains? storage/error-categories :batch))
-    (is (contains? storage/error-categories :unknown))))
-
-
-(deftest error-severities-test
-  (testing "contains expected severities"
-    (is (contains? storage/error-severities :error))
-    (is (contains? storage/error-severities :warning))
-    (is (contains? storage/error-severities :info))))
+;; The category / severity VOCABULARIES belong to `protocol.errors` and are
+;; pinned by `errors-test`. What is unique here is the REGISTRY — that a
+;; downstream app can register its own error type and have the accessors
+;; honour it — so that is all this file keeps.

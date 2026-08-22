@@ -182,8 +182,10 @@ async function newContext(chromium) {
   await page.goto(BASE + '/');
   // Wait for the editor shell to exist rather than for a fixed slice of
   // time: on the loaded gate stack 300ms was sometimes short, and every
-  // test in the suite starts here.
-  await page.waitForSelector('#entity-list', {timeout: 30000});
+  // test in the suite starts here. TOLERANT on purpose — this is a settle,
+  // not a precondition, and a page without the explorer (the login screen)
+  // must not cost every test a hard 30s.
+  await page.waitForSelector('#entity-list', {timeout: 15000}).catch(() => {});
   return { browser, page };
 }
 

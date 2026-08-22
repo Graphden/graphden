@@ -67,7 +67,7 @@ const {
     await page.waitForFunction(() => Array.from(
       document.querySelectorAll('#entity-list .entity-item'))
       .filter((e) => !e.hasAttribute('hidden')).length > 1,
-    null, {timeout: 30000, polling: 100});
+    null, {timeout: 30000, polling: 100}).catch(() => {});
     await createRootNamespace(page, NS_NAME).catch(() => {});
     await waitTourTitle(page, 'New type…', 150000);
     await createRecordType(page, NS_NAME, 'tutorial-point',

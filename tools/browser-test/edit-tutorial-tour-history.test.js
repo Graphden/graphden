@@ -46,6 +46,15 @@ async function setDescription(page, text) {
         window.descriptionTooltipSticky = false;
       }
     });
+    // Escape's effect is ASYNCHRONOUS — the editor's keydown handler closes
+    // the row-actions popover on a later tick. The mousedown below must not
+    // race it, or the popover reopens half-reset, which is the state this
+    // whole retry loop exists to escape. Wait for the popover to be gone;
+    // a fixed sleep here was load-bearing and its removal cost a gate run.
+    await page.waitForFunction(() => {
+      const pop = document.querySelector('.row-actions-popover');
+      return !pop || pop.offsetParent === null;
+    }, null, {timeout: 10000, polling: 50}).catch(() => {});
     await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover [data-action="description"]',

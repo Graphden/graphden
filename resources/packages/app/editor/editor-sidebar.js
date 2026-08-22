@@ -1121,6 +1121,95 @@ function revealFnInTree(fnId) {
   }
 }
 
+// Mount the Operate / Platform panes: Grants, Members, Roles, Organizations,
+// Platform access, Packages, Monitoring, Apps, Errors, Type errors, Tests,
+// Debug, Assets. Each builder is a global from its own module and each
+// returns null when it doesn't apply, so a section opts out by being absent
+// rather than by being listed somewhere.
+//
+// Redesign 2026-08: these mount into the OPERATE surface
+// (#gd-operate-panels), not the explorer, so the sidebar stays a clean
+// namespace browser — `fallbackList` is used only when the operate pane
+// isn't on the page. Cross-org / platform panels go to the separate
+// PLATFORM surface; everything else (org RBAC + the org's operational
+// panels) to Organization.
+//
+// Lifted out of `updateEntityList`, which had ninety lines of this in the
+// middle of building the namespace tree — two surfaces, one function.
+function mountOpsSections(fallbackList, searchMode) {
+  if (searchMode) return;
+  const opsPane = document.getElementById('gd-operate-panels');
+  const opsNav = document.getElementById('gd-operate-nav');
+  const platPane = document.getElementById('gd-platform-panels');
+  const platNav = document.getElementById('gd-platform-nav');
+  const opsHost = opsPane || fallbackList;
+  const opsNavHost = opsPane ? opsNav : null;
+  const platHost = platPane || opsHost;
+  const platNavHost = platPane ? platNav : opsNavHost;
+  if (opsHost !== fallbackList) {
+    opsPane.innerHTML = '';
+    if (opsNavHost) opsNavHost.innerHTML = '';
+  }
+  if (platHost !== opsHost && platHost !== fallbackList) {
+    platPane.innerHTML = '';
+    if (platNavHost && platNavHost !== opsNavHost) platNavHost.innerHTML = '';
+  }
+  if (typeof buildGrantsAdminSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'grants', buildGrantsAdminSection);
+  }
+  if (typeof buildUsersAdminSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'users', buildUsersAdminSection);
+  }
+  if (typeof buildRolesAdminSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'roles', buildRolesAdminSection);
+  }
+  if (typeof buildOrgsAdminSection === 'function') {
+    // Cross-org registry → Platform surface.
+    mountAdminSection(platHost, platNavHost, 'orgs', buildOrgsAdminSection);
+  }
+  if (typeof buildPlatformAccessSection === 'function') {
+    // Platform-access delegation → Platform surface (manage-platform-access).
+    mountAdminSection(platHost, platNavHost, 'platform-access', buildPlatformAccessSection);
+  }
+  // Packages (install/browse) live on the BUILD surface via the #gd-pkg-chip
+  // context-bar chip → popover (editor-shell.js) — install is a build act.
+  // What DOES belong here is the read-mostly GOVERNANCE view (packages spec
+  // §4): catalog of what the org published, who may publish, install audit.
+  mountAdminSection(opsHost, opsNavHost, 'packages', buildPackagesGovernanceSection);
+  if (typeof buildStatsSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'stats', buildStatsSection);
+  }
+  if (typeof buildAppsSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'apps', buildAppsSection);
+  }
+  if (typeof buildErrorsSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'errors', buildErrorsSection);
+  }
+  if (typeof buildTypeErrorsSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'type-errors', buildTypeErrorsSection);
+  }
+  if (typeof buildTestsSection === 'function') {
+    mountAdminSection(opsHost, opsNavHost, 'tests', buildTestsSection);
+  }
+  if (typeof buildDebugSection === 'function') {
+    // «Catch next request» trap + last-captured trace (editor-debug.js).
+    mountAdminSection(opsHost, opsNavHost, 'debug', buildDebugSection);
+  }
+  if (typeof buildAssetsSection === 'function') {
+    // Frontend-asset overrides — self-host only (the builder returns null
+    // under an active tenancy addon; writes there are system-only).
+    mountAdminSection(opsHost, opsNavHost, 'assets', buildAssetsSection);
+  }
+  // Select the first section on each surface so a pane is always showing.
+  if (opsNavHost?.firstElementChild) {
+    activateOpSection(opsNavHost, opsHost, opsNavHost.firstElementChild.dataset.section);
+  }
+  if (platNavHost && platNavHost !== opsNavHost && platNavHost.firstElementChild) {
+    activateOpSection(platNavHost, platHost, platNavHost.firstElementChild.dataset.section);
+  }
+}
+
+
 function updateEntityList(data) {
   const list = document.getElementById('entity-list');
   list.innerHTML = '';
@@ -1149,86 +1238,7 @@ function updateEntityList(data) {
     ? buildNsTree({ namespaces: data.namespaces, fns: _searchResults || [] })
     : buildNsTree(data);
 
-  // Admin / ops sections (Grants / Users / Packages / Stats / Errors / …) —
-  // hidden while searching, each returns null unless applicable. Redesign
-  // 2026-08: these mount into the OPERATE surface (#gd-operate-panels), not the
-  // explorer, so the sidebar stays a clean namespace browser. Falls back to the
-  // explorer list if the operate pane isn't present.
-  const opsPane = document.getElementById('gd-operate-panels');
-  const opsNav = document.getElementById('gd-operate-nav');
-  const platPane = document.getElementById('gd-platform-panels');
-  const platNav = document.getElementById('gd-platform-nav');
-  const opsHost = opsPane || list;
-  const opsNavHost = opsPane ? opsNav : null;
-  // Cross-org / platform panels mount into the separate PLATFORM surface;
-  // everything else (org RBAC + the org's operational panels) into Organization.
-  const platHost = platPane || opsHost;
-  const platNavHost = platPane ? platNav : opsNavHost;
-  if (!searchMode && opsHost !== list) {
-    opsPane.innerHTML = '';
-    if (opsNavHost) opsNavHost.innerHTML = '';
-  }
-  if (!searchMode && platHost !== opsHost && platHost !== list) {
-    platPane.innerHTML = '';
-    if (platNavHost && platNavHost !== opsNavHost) platNavHost.innerHTML = '';
-  }
-  if (!searchMode && typeof buildGrantsAdminSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'grants', buildGrantsAdminSection);
-  }
-  if (!searchMode && typeof buildUsersAdminSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'users', buildUsersAdminSection);
-  }
-  if (!searchMode && typeof buildRolesAdminSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'roles', buildRolesAdminSection);
-  }
-  if (!searchMode && typeof buildOrgsAdminSection === 'function') {
-    // Cross-org registry → Platform surface.
-    mountAdminSection(platHost, platNavHost, 'orgs', buildOrgsAdminSection);
-  }
-  if (!searchMode && typeof buildPlatformAccessSection === 'function') {
-    // Platform-access delegation → Platform surface (manage-platform-access).
-    mountAdminSection(platHost, platNavHost, 'platform-access', buildPlatformAccessSection);
-  }
-  // Packages (install/browse) live on the BUILD surface via the #gd-pkg-chip
-  // context-bar chip → popover (editor-shell.js) — install is a build act.
-  // What DOES belong here is the read-mostly GOVERNANCE view (packages spec
-  // §4): catalog of what the org published, who may publish, install audit.
-  if (!searchMode) {
-    mountAdminSection(opsHost, opsNavHost, 'packages', buildPackagesGovernanceSection);
-  }
-  if (!searchMode && typeof buildStatsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'stats', buildStatsSection);
-  }
-  if (!searchMode && typeof buildAppsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'apps', buildAppsSection);
-  }
-  if (!searchMode && typeof buildErrorsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'errors', buildErrorsSection);
-  }
-  if (!searchMode && typeof buildTypeErrorsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'type-errors', buildTypeErrorsSection);
-  }
-  if (!searchMode && typeof buildTestsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'tests', buildTestsSection);
-  }
-  if (!searchMode && typeof buildDebugSection === 'function') {
-    // «Catch next request» trap + last-captured trace (editor-debug.js).
-    mountAdminSection(opsHost, opsNavHost, 'debug', buildDebugSection);
-  }
-  if (!searchMode && typeof buildAssetsSection === 'function') {
-    // Frontend-asset overrides — self-host only (the builder returns null
-    // under an active tenancy addon; writes there are system-only).
-    mountAdminSection(opsHost, opsNavHost, 'assets', buildAssetsSection);
-  }
-  // Select the first section on each surface so a pane is always showing.
-  if (!searchMode) {
-    if (opsNavHost?.firstElementChild) {
-      activateOpSection(opsNavHost, opsHost, opsNavHost.firstElementChild.dataset.section);
-    }
-    if (platNavHost && platNavHost !== opsNavHost && platNavHost.firstElementChild) {
-      activateOpSection(platNavHost, platHost, platNavHost.firstElementChild.dataset.section);
-    }
-  }
+  mountOpsSections(list, searchMode);
 
   // Top-level namespaces (sorted). Lens visibility is a `hidden` overlay set
   // inside renderNsNode (not a structural skip here), so a lens toggle flips in

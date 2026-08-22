@@ -66,6 +66,117 @@
     (http-kit/send! ch frame close?)))
 
 
+(defn- open-stream
+  "The mutable state one open stream owns, in one place. Every helper
+   below takes it, so the lifecycle reads as named steps instead of a
+   nest of closures over five atoms.
+
+   `render` is captured with `bound-fn*`: the OPENING REQUEST's dynamic
+   bindings — org confinement, the effect gate, cooperative cancel — must
+   travel to the scheduler thread, where none of them would otherwise
+   exist."
+  [render interval lifetime listener]
+  {:state (atom {:prev nil :task nil :callback nil})
+   :wake-pending (atom false)
+   :closed? (atom false)
+   :listener listener
+   :deadline (+ (System/currentTimeMillis) lifetime)
+   :render (bound-fn* (fn [] (str (cr/with-fresh-call-cache render))))
+   ;; A spinning fragment costs its own tick, not a scheduler thread.
+   :tick-budget (min (long interval) 10000)})
+
+
+(defn- cleanup!
+  "Idempotent teardown — reached from httpkit's on-close AND from a
+   failed frame send (a silently-dead socket is only DETECTED on write;
+   without this a dead stream's callback + task + cap slot linger until
+   httpkit notices)."
+  [{:keys [state closed? listener]}]
+  (when (compare-and-set! closed? false true)
+    (swap! live-streams dec)
+    (when-let [cb (:callback @state)]
+      (pg-notify/unregister! listener cb))
+    (when-let [t (:task @state)]
+      (ScheduledFuture/.cancel t false))))
+
+
+(defn- tick!
+  "Render once and push the frame IF IT CHANGED. Past the lifetime, close
+   instead — the browser's EventSource reconnects, so a long-lived page
+   keeps updating through bounded stream generations.
+
+   Each tick is wall-clock-bounded on the shared execution pool: a
+   timeout, a handler error or pool saturation SKIPS the tick and keeps
+   the stream, because all three are transient."
+  [{:keys [closed? deadline render tick-budget state] :as stream} ch]
+  (when-not @closed?
+    (try
+      (if (> (System/currentTimeMillis) deadline)
+        (do (send! ch "event: close\ndata: lifetime\n\n" true)
+            (cleanup! stream))
+        (let [html (cr/run-with-timeout
+                     tick-budget
+                     render
+                     ;; requiring-resolve (not an ns-level require):
+                     ;; pulling the crud tree in at impls EVAL time runs a
+                     ;; heavy compile inside the loader's eval-load lock —
+                     ;; resolved once at the first tick instead.
+                     ((requiring-resolve
+                        'graphden.crud.fn-execution.persist/current-execution-pool)))]
+          (when (string? html)
+            (let [h (hash html)]
+              (when (not= h (:prev @state))
+                (swap! state assoc :prev h)
+                (when-not (send! ch (sse-frame html) false)
+                  (cleanup! stream)))))))
+      (catch Exception _
+        (try (send! ch "event: close\ndata: error\n\n" true)
+             (catch Exception _ nil))
+        (cleanup! stream)))))
+
+
+(defn- wake!
+  "One debounced tick per event BURST: the first event in a window
+   schedules, the rest coalesce into it."
+  [{:keys [wake-pending] :as stream} ch]
+  (when (compare-and-set! wake-pending false true)
+    (^[Runnable long TimeUnit] ScheduledExecutorService/.schedule
+     @scheduler
+     (fn []
+       (reset! wake-pending false)
+       (tick! stream ch))
+     200 TimeUnit/MILLISECONDS)))
+
+
+(defn- start!
+  "Count the stream against the cap, send the SSE headers, render once,
+   then arm the two wake sources: the NOTIFY callback (when a listener is
+   wired) and the fixed-rate tick."
+  [{:keys [state listener closed?] :as stream} interval ch]
+  (swap! live-streams inc)
+  (send! ch {:status 200
+             :headers {"Content-Type" "text/event-stream"
+                       "Cache-Control" "no-cache"
+                       "X-Accel-Buffering" "no"}}
+         false)
+  (tick! stream ch)
+  (when listener
+    (swap! state assoc :callback
+           (pg-notify/register! listener (fn [_event] (wake! stream ch)))))
+  (swap! state assoc :task
+         (ScheduledExecutorService/.scheduleAtFixedRate
+           @scheduler
+           (fn [] (tick! stream ch))
+           interval interval TimeUnit/MILLISECONDS))
+  ;; A close can race the two assignments above — `cleanup!` then saw nil
+  ;; task/callback; sweep them now that they exist.
+  (when @closed?
+    (when-let [cb (:callback @state)]
+      (pg-notify/unregister! listener cb))
+    (when-let [t (:task @state)]
+      (ScheduledFuture/.cancel t false))))
+
+
 (defbase sse-stream
   "Open a Server-Sent-Events stream on this request and push the
    0-arg `render` callable's HTML whenever it CHANGES, re-executing it
@@ -117,100 +228,17 @@
   ;; whatever the fragment actually does is still plan-gated per tick.
   (cr/record-effect! :time)
   (let [interval (max 1000 (long interval-ms))
-        lifetime (min (* 30 60 1000) (long max-lifetime-ms))
-        deadline (+ (System/currentTimeMillis) lifetime)
-        listener (when wake-on-writes (:notify-listener ctx))]
+        lifetime (min (* 30 60 1000) (long max-lifetime-ms))]
     (if (>= (long @live-streams) (long (max-streams)))
       {:status 503
        :headers {"Content-Type" "text/plain" "Retry-After" "10"}
        :body "SSE stream capacity reached - retry shortly"}
-      (let [state (atom {:prev nil :task nil :callback nil})
-            wake-pending (atom false)
-            closed? (atom false)
-            ;; Capture the OPENING REQUEST's dynamic bindings (org
-            ;; confinement, effect gate, cancel check) into the render
-            ;; thunk — ticks run on the scheduler/pool, where none of
-            ;; those bindings would otherwise exist.
-            captured-render (bound-fn* (fn [] (str (cr/with-fresh-call-cache render))))
-            tick-budget (min (long interval) 10000)
-            ;; Idempotent teardown — reached from httpkit's on-close AND
-            ;; from a failed frame send (a silently-dead socket is only
-            ;; DETECTED on write; without this a dead stream's callback +
-            ;; task + cap slot linger until httpkit notices).
-            cleanup! (fn []
-                       (when (compare-and-set! closed? false true)
-                         (swap! live-streams dec)
-                         (when-let [cb (:callback @state)]
-                           (pg-notify/unregister! listener cb))
-                         (when-let [t (:task @state)]
-                           (ScheduledFuture/.cancel t false))))
-            tick! (fn [ch]
-                    (when-not @closed?
-                      (try
-                        (if (> (System/currentTimeMillis) deadline)
-                          (do (send! ch "event: close\ndata: lifetime\n\n" true)
-                              (cleanup!))
-                          (let [html (cr/run-with-timeout
-                                       tick-budget
-                                       captured-render
-                                       ;; requiring-resolve (not an ns-level
-                                       ;; require): pulling the crud tree in
-                                       ;; at impls EVAL time runs a heavy
-                                       ;; compile inside the loader's
-                                       ;; eval-load lock — resolved once at
-                                       ;; the first tick instead.
-                                       ((requiring-resolve
-                                          'graphden.crud.fn-execution.persist/current-execution-pool)))]
-                            ;; Timeout / handler error / pool saturation →
-                            ;; skip this tick, keep the stream (transient).
-                            (when (string? html)
-                              (let [h (hash html)]
-                                (when (not= h (:prev @state))
-                                  (swap! state assoc :prev h)
-                                  (when-not (send! ch (sse-frame html) false)
-                                    (cleanup!)))))))
-                        (catch Exception _
-                          (try (send! ch "event: close\ndata: error\n\n" true)
-                               (catch Exception _ nil))
-                          (cleanup!)))))
-            ;; One debounced tick per event BURST: the first event in a
-            ;; window schedules, the rest coalesce into it.
-            wake! (fn [ch]
-                    (when (compare-and-set! wake-pending false true)
-                      (^[Runnable long TimeUnit] ScheduledExecutorService/.schedule
-                       @scheduler
-                       (fn []
-                         (reset! wake-pending false)
-                         (tick! ch))
-                       200 TimeUnit/MILLISECONDS)))]
+      (let [stream (open-stream render interval lifetime
+                                (when wake-on-writes (:notify-listener ctx)))]
         (http-kit/as-channel
           request
-          {:on-open (fn [ch]
-                      (swap! live-streams inc)
-                      (send! ch {:status 200
-                                 :headers {"Content-Type" "text/event-stream"
-                                           "Cache-Control" "no-cache"
-                                           "X-Accel-Buffering" "no"}}
-                             false)
-                      (tick! ch)
-                      (when listener
-                        (swap! state assoc :callback
-                               (pg-notify/register! listener
-                                                    (fn [_event] (wake! ch)))))
-                      (swap! state assoc :task
-                             (ScheduledExecutorService/.scheduleAtFixedRate
-                               @scheduler
-                               (fn [] (tick! ch))
-                               interval interval TimeUnit/MILLISECONDS))
-                      ;; A close can race the assignments above —
-                      ;; `cleanup!` then saw nil task/callback; sweep
-                      ;; them now that they exist.
-                      (when @closed?
-                        (when-let [cb (:callback @state)]
-                          (pg-notify/unregister! listener cb))
-                        (when-let [t (:task @state)]
-                          (ScheduledFuture/.cancel t false))))
-           :on-close (fn [_ch _status] (cleanup!))})))))
+          {:on-open (fn [ch] (start! stream interval ch))
+           :on-close (fn [_ch _status] (cleanup! stream))})))))
 
 
 ;; The package loader pairs each base-fn declared in `fns.edn` with its

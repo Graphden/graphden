@@ -65,9 +65,9 @@
 
   ;; ---- shared-state algorithms -----------------------------------------
   "graphden.executor.compile.renames/deep-free-ext-names*"
-  "one unit: a `walk` letfn threading a covered-set and a rename map; the recursion IS the function. Its slot-id-keyed twin below is a parallel pair: same traversal, different coverage key. Unifying them is open work (re-keying is NOT — rejected twice, docs/RUNTIME_SLOT_ID_REFACTOR.md); until then `verify-entry-walker-covers-name-walker!` fails the build if one traversal is edited without the other"
+  "one unit: a `walk` letfn threading a covered-set and a rename map; the recursion IS the function. NOT to be merged with its slot-id-keyed twin below, measured: 35% shared code lines, and the largest divergence is 45 lines vs 20 at the top — they are two algorithms that agree on a traversal, not one with a swapped key. Merging would mean first making them behaviourally identical in the compiler hot path. `verify-entry-walker-covers-name-walker!` guards the half they DO share"
   "graphden.executor.compile.renames/deep-free-ext-entries*"
-  "one unit: the same walk with slot-id coverage — see deep-free-ext-names*"
+  "one unit: the slot-id-coverage twin — see deep-free-ext-names* for why the two stay separate"
   "graphden.executor.compile.renames/hof-lambda-params"
   "one unit: the lambda-arity decision walks the same rename state as its caller and cannot see it from outside"
   "graphden.layout.graph/process-expanded-fn-impl"
@@ -121,6 +121,4 @@
   "graphden.crud.type-check/type-check-binding-direct!"
   "one unit: the write-path check — resolve, check, record-or-clear the diagnostic, as one step"
   "graphden.system.init.exec/ig/init-key :exec/context"
-  "one unit: the boot wiring of the execution context; every binding is one component it needs"
-  "graphden.packages.web.sse.impls/sse-stream"
-  "one unit: channel open, binding capture, tick schedule, changed-only dedupe, notify (un)registration and close share five atoms — a tick after close, an uncounted cap slot or a lingering callback is what splitting risks (the graph-side argument is in its docstring)"}}
+  "one unit: the boot wiring of the execution context; every binding is one component it needs"}}

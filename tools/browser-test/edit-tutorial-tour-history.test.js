@@ -20,7 +20,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, tourTitle, filterAndSelect,
-  extendViaRowActions, finishAndDelete, openOperateSection,
+  extendViaRowActions, finishAndDelete, openOperateSection, waitUntil,
 } = require('./tutorial-tour-helpers');
 
 
@@ -289,11 +289,11 @@ async function openVersionHistory(page) {
         document.querySelector('#gd-operate-nav button[data-section="tests"]')?.click();
         document.querySelector('#gd-operate-nav button[data-section="errors"]')?.click();
       });
-      // A poll interval, not a settle — this one could become a
-      // `waitUntil` on the panel text. Left alone deliberately: every
-      // change to THIS file has to survive a 17-minute gate, and the two
-      // that mattered here are the Escape settles above.
-      await page.waitForTimeout(1500);
+      // A poll INTERVAL, not a settle (no Escape in this loop): exit as
+      // soon as the panel shows the row instead of always paying 1.5s.
+      await waitUntil(page, () => /tutorial-bad-json/.test(
+        document.querySelector('#gd-operate-panels > [data-section="errors"]')?.textContent || ''),
+      null, 1500);
     }
     assert(/tutorial-bad-json/.test(errText),
       'the failed run is listed by fn name (got: ' + errText.slice(0, 160) + ')');

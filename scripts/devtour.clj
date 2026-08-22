@@ -96,13 +96,107 @@
         (recur (z/right zloc) (cond-> hits hit (conj hit)))))))
 
 
+;; --- JS anchor resolution --------------------------------------------------
+;;
+;; The editor frontend is ~25k lines of plain ES modules concatenated into one
+;; bundle — no build step, no imports. It is half the product a newcomer
+;; touches, so it is toured too, with the same symbol-anchored contract as the
+;; Clojure side: name a declaration, the generator bakes its real source.
+
+(defn- js-decl-re
+  "Regex matching the line that DECLARES `sym` in a JS module: a function
+   declaration or a const/let/var binding, at any indentation (several
+   editor modules wrap their body in an IIFE)."
+  [sym]
+  (let [n (java.util.regex.Pattern/quote (str sym))]
+    (re-pattern (str "^[ \\t]*(?:(?:async[ \\t]+)?function[ \\t]+" n "[ \\t]*\\("
+                     "|(?:const|let|var)[ \\t]+" n "[ \\t]*=)"))))
+
+
+(defn- regex-position?
+  "Heuristic: at `i` (a `/` in code state), does a REGEX literal start here
+   rather than a division? True when the previous significant character can
+   only precede an expression."
+  [^String src ^long i]
+  (let [prev (loop [j (dec i)]
+               (cond (neg? j) nil
+                     (Character/isWhitespace (.charAt src j)) (recur (dec j))
+                     :else (.charAt src j)))]
+    (or (nil? prev) (contains? (set "(,=:[!&|?{};+-*%^~<>") prev))))
+
+
+(defn- js-form-end
+  "Index (exclusive) of the end of the JS declaration starting at `start`.
+   Scans forward tracking string / template / comment / regex state and
+   bracket depth; the form ends at the `;` or newline where depth is back to
+   zero. Throws at EOF — a mis-scan fails the build rather than baking a
+   truncated form."
+  [^String src ^long start]
+  (let [n (.length src)]
+    (loop [i start, state :code, depth 0, opened? false]
+      (when (>= i n)
+        (throw (ex-info "JS anchor: unbalanced form (hit EOF)" {:start start})))
+      (let [c (.charAt src i)
+            nxt (when (< (inc i) n) (.charAt src (inc i)))]
+        (case state
+          :line-comment (recur (inc i) (if (= c \newline) :code state) depth opened?)
+          :block-comment (if (and (= c \*) (= nxt \/))
+                           (recur (+ i 2) :code depth opened?)
+                           (recur (inc i) state depth opened?))
+          (:sq :dq :tpl :regex)
+          (cond
+            (= c \\) (recur (+ i 2) state depth opened?)
+            (and (= state :sq) (= c \')) (recur (inc i) :code depth opened?)
+            (and (= state :dq) (= c \")) (recur (inc i) :code depth opened?)
+            (and (= state :tpl) (= c \`)) (recur (inc i) :code depth opened?)
+            (and (= state :regex) (= c \/)) (recur (inc i) :code depth opened?)
+            :else (recur (inc i) state depth opened?))
+          :code
+          (cond
+            (and (= c \/) (= nxt \/)) (recur (+ i 2) :line-comment depth opened?)
+            (and (= c \/) (= nxt \*)) (recur (+ i 2) :block-comment depth opened?)
+            (and (= c \/) (regex-position? src i)) (recur (inc i) :regex depth opened?)
+            (= c \') (recur (inc i) :sq depth opened?)
+            (= c \") (recur (inc i) :dq depth opened?)
+            (= c \`) (recur (inc i) :tpl depth opened?)
+            (contains? #{\( \[ \{} c) (recur (inc i) state (inc depth) true)
+            (contains? #{\) \] \}} c) (recur (inc i) state (dec depth) opened?)
+            (and (zero? depth) (= c \;)) (inc i)
+            (and (zero? depth) opened? (= c \newline)) i
+            :else (recur (inc i) state depth opened?)))))))
+
+
+(defn- find-js-decl
+  "Locate the declaration of `sym` in a JS source. Returns {:code :line} or
+   throws on 0 / >1 matches — the same uniqueness contract the Clojure
+   anchors carry."
+  [^String src sym file]
+  (let [re (js-decl-re sym)
+        lines (str/split-lines src)
+        ;; offset of each line's first char
+        offsets (reductions + 0 (map #(inc (count %)) lines))
+        hits (for [[idx line off] (map vector (range) lines offsets)
+                   :when (re-find re line)]
+               {:line (inc idx)
+                :code (subs src off (js-form-end src off))})]
+    (case (count hits)
+      1 (first hits)
+      0 (throw (ex-info (str "anchor not found: " sym " in " file) {:sym sym :file file}))
+      (throw (ex-info (str "anchor ambiguous: " sym " appears " (count hits)
+                           "x in " file " — rename or split the form")
+                      {:sym sym :file file :count (count hits)})))))
+
+
 (defn- resolve-anchor
   "Resolve one step's anchor to baked source, or throw. The anchor is
    {:defn sym} plus EITHER :ns (a src/ namespace, munged to a path) OR :file
-   (an explicit repo-relative .clj path — used for package impls under
-   resources/packages/, which have namespaces but do not live under src/).
+   (an explicit repo-relative path — used for package impls under
+   resources/packages/, which have namespaces but do not live under src/,
+   and for the editor's `.js` modules).
    For a defmethod, set :defn to the method symbol and :dispatch to its
-   dispatch value; the step is then labelled by the dispatch's name."
+   dispatch value; the step is then labelled by the dispatch's name.
+   A `.js` :file resolves through the JS declaration scanner instead of
+   rewrite-clj; :dispatch is meaningless there."
   [{ns-sym :ns sym :defn file :file dispatch :dispatch}]
   (when-not sym
     (throw (ex-info "step needs :defn" {:ns ns-sym :file file})))
@@ -115,8 +209,15 @@
       (throw (ex-info "step needs :ns or :file" {:defn sym})))
     (when-not (fs/exists? path)
       (throw (ex-info (str "anchor file missing: " path) {:defn sym})))
-    (-> (find-form (slurp path) sym dispatch path)
-        (assoc :file path :ns (str (or ns-sym path)) :defn label))))
+    (let [js? (str/ends-with? path ".js")]
+      (when (and js? dispatch)
+        (throw (ex-info (str ":dispatch is Clojure-only, not valid for " path)
+                        {:defn sym})))
+      (-> (if js?
+            (find-js-decl (slurp path) sym path)
+            (find-form (slurp path) sym dispatch path))
+          (assoc :file path :ns (str (or ns-sym path)) :defn label
+                 :lang (if js? "js" "clj"))))))
 
 
 ;; --- model -----------------------------------------------------------------
@@ -319,6 +420,32 @@ function md(src){
   }).join('');
 }
 
+// minimal JS tokeniser — strings, comments, keywords. Line-scoped like the
+// Clojure one: good enough to read, never claims to parse.
+const JS_KW = new RegExp('\\\\b(async|await|break|case|catch|class|const|continue|'+
+  'default|delete|do|else|export|extends|finally|for|function|if|import|in|'+
+  'instanceof|let|new|of|return|super|switch|this|throw|try|typeof|var|void|'+
+  'while|yield|null|undefined|true|false)\\\\b','g');
+
+function hlJs(line){
+  let out='', i=0;
+  while(i<line.length){
+    const c=line[i];
+    if(c==='/'&&line[i+1]==='/'){ out+='<span class=tok-cmt>'+esc(line.slice(i))+'</span>'; break; }
+    if(c==='*'&&/^\\s*\\*/.test(line)&&i===line.search(/\\S/)){
+      out+='<span class=tok-cmt>'+esc(line.slice(i))+'</span>'; break; }
+    if(c==='\"'||c===\"'\"||c==='`'){ let j=i+1;
+      while(j<line.length){ if(line[j]==='\\\\'){j+=2;continue;} if(line[j]===c){j++;break;} j++; }
+      out+='<span class=tok-str>'+esc(line.slice(i,j))+'</span>'; i=j; continue; }
+    let j=i+1;
+    while(j<line.length && line[j]!=='\"' && line[j]!==\"'\" && line[j]!=='`'
+          && !(line[j]==='/'&&line[j+1]==='/')) j++;
+    out+=esc(line.slice(i,j)).replace(JS_KW,m=>'<span class=tok-kw>'+m+'</span>');
+    i=j;
+  }
+  return out;
+}
+
 // minimal Clojure tokeniser -> highlighted HTML for one line
 function hl(line){
   let out='', i=0;
@@ -338,11 +465,12 @@ function hl(line){
 
 function codeBlock(step){
   const lines = step.code.split('\\n');
+  const paint = step.lang==='js' ? hlJs : hl;
   const rows = lines.map((ln,k)=>{
     const n = step.line + k;
     const head = k===0 ? ' head' : '';
     return '<div class=\"ln'+head+'\"><span class=g>'+n+
-      '</span><span class=c>'+hl(ln)+'</span></div>';
+      '</span><span class=c>'+paint(ln)+'</span></div>';
   }).join('');
   return '<div class=file>'+esc(step.file)+' — <b>'+esc(step.defn)+
     '</b></div><pre class=code>'+rows+'</pre>';
@@ -393,8 +521,13 @@ function go(gi, push){
 }
 
 function paint(){
-  document.querySelectorAll('.steps li').forEach(li=>
-    li.classList.toggle('on', +li.dataset.gi===cur));
+  document.querySelectorAll('.steps li').forEach(li=>{
+    const on = +li.dataset.gi===cur;
+    li.classList.toggle('on', on);
+    // The spine is long enough that walking it with Next scrolls the current
+    // step out of the map entirely — keep the highlight in view.
+    if(on) li.scrollIntoView({block:'nearest'});
+  });
   document.getElementById('pos').textContent =
     cur<0 ? '' : ('step '+(cur+1)+' / '+SPINE.length);
   document.getElementById('prev').disabled = cur<=0;

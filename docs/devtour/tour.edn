@@ -17,16 +17,28 @@
   (left). Read them roughly top-to-bottom: each block's `after:` line names
   what it assumes you have already seen. Start with the **Executor** — it is
   the spine everything else hangs off — then follow the dependency order:
-  Storage, then Branches, Types, CRUD, Packages, Web, Layout, Services,
-  Platform seams, Accounts. (The Platform block tours the in-repo seams and
-  hardening; the multi-tenant / cloud POLICY layer itself is in the private
-  graphden-tenancy repo — the open-core split — plugging into the
-  `graphden.tenancy.context` seam kept here.)
+  Storage, then Branches, Types, CRUD, Packages, Boot, Web, Layout, the
+  Editor frontend, Services, Platform seams, Accounts. (The Platform block
+  tours the in-repo seams and hardening; the multi-tenant / cloud POLICY
+  layer itself is in the private graphden-tenancy repo — the open-core
+  split — plugging into the `graphden.tenancy.context` seam kept here.)
+
+  Two blocks are worth knowing about before you need them. **Boot** answers
+  'what actually happens when the process starts', which is the fastest way
+  to see how the other blocks are wired together — read it early if you are
+  more comfortable starting from a running system than from a hot path. The
+  **Editor frontend** block tours JavaScript rather than Clojure; it is baked
+  and drift-checked exactly like the rest.
 
   Every step shows you the **actual source** of one function, pulled straight
   from the file it lives in. When a step points you at code in another block,
   use the *see also* chips — **Back** always returns you along the path you
-  actually walked."
+  actually walked.
+
+  This tour is about the code, not the workflow. For how to BUILD and test it
+  — `bb ci`, the linters, the isolated worktrees and the serialized merge
+  queue — read [CLAUDE.md](../../CLAUDE.md) and
+  [dev/wtq/AGENT.md](../../dev/wtq/AGENT.md)."
 
  :blocks
  [{:id :executor
@@ -199,6 +211,15 @@
            types (`:ref`, `:enum`, `:union`). Rows are shaped by this vocabulary
            before storage ever sees them — so read it before the row-storage
            code below."}
+    {:ns graphden.schema.malli.core :defn MalliDataSchema
+     :say "…and its ONE implementation. The record is an immutable bag of maps
+           (`entities-map`, `enums-map`, `entity-uuids-map`,
+           `retired-fields-map`) with every protocol method a lookup into
+           them — which is the point: a schema is data a builder assembled,
+           not code. `create-builder` at the bottom of the file is what the
+           `:db/schema` component calls, and the `extend-builder` fns below
+           are how each subsystem contributes its entities to it."
+     :see [[:boot "postgres"]]}
     {:ns graphden.schema.graph.schema :defn extend-builder
      :say "Where the graph model is actually declared: the `ns` / `fn` / `slot`
            / `binding` / `binding-list-item` entities and the `:ref` edges
@@ -237,6 +258,16 @@
            delegates to the Postgres resolver instead of the generic BFS —
            showing how a backend overrides the default path when it can do
            better."}
+    {:ns graphden.storage.postgres.migration :defn do-initialize
+     :say "Nobody hand-writes DDL here: the schema of the previous steps is
+           DATA, and this diffs it against the metadata table to emit exactly
+           the changes needed — first-init or migration, all in one
+           transaction. Read the docstring for the fleet property that makes
+           it safe: a transaction-scoped advisory lock taken BEFORE the state
+           read, so N pods booting against one database serialize, and the
+           second one computes a no-op instead of re-planning against
+           pre-DDL state. This is why a graphden upgrade needs no DB reset
+           (docs/OPERATIONS.md)."}
     {:ns graphden.storage.postgres.graph :defn reachable-fns-sql
      :say "The `WITH RECURSIVE` CTE that walks every outgoing edge from the
            seed fn in one statement and returns the reachable `fn.id` set. This
@@ -479,7 +510,23 @@
      :say "The whole-graph sweep entry point: fold `check-fn-def!` over
            topologically-ordered fn-defs so each def's computed rich-type is
            registered before its dependents read it. This is how the entire graph
-           is checked end to end."}]}
+           is checked end to end."}
+    {:ns graphden.executor.registry.core :defn record-rich-types!
+     :say "Where the sweep's answers are KEPT. The rich-types registry is the
+           in-memory `{fn → {:return :args :effects …}}` snapshot every
+           downstream consumer reads: the compiler's HOF-wrap decision, the
+           executor's effect gate, secret redaction on persist, the editor's
+           type chips. Aliases resolve to their structural body here, so
+           everyone downstream sees one canonical shape."
+     :see [[:executor "compile-all"] [:web "api-rich-types"]]}
+    {:ns graphden.executor.registry.core :defn rich-type-of-id
+     :say "…and how it is READ — by fn **id**, not name. Names are
+           per-namespace labels and may repeat; ids cannot
+           (docs/adr/ADR-identity-model.md, enforced in CI by
+           `id_resolution_guard_test`). The `:by-name` index survives only for
+           base-fns and legacy call sites. Before you key any new registry or
+           dispatch by name, read the ADR — this is the mistake it exists to
+           stop."}]}
 
   {:id :crud
    :title "CRUD & the write path"
@@ -577,6 +624,17 @@
            request + response persisted as a standard `:fn-execution` row —
            so a live handler run replays through the same call-tree UI as a
            traced `/api/execute`."}
+    {:ns graphden.crud.secrets :defn create-secret
+     :say "The write path that must not leak (docs/SECRETS.md): one
+           `POST /api/secrets` atomically creates the OpenBao value, its
+           custom-metadata, and the graphden fn-row + path-binding — with a
+           vault-delete rollback if the graph half fails. The secret VALUE
+           never enters the graph; only the path does, on a `:secret-leaf`
+           child the executor auto-derefs through the ctx's vault handle.
+           Note the shape: this public defn is thin orchestration over the
+           same per-stage helpers the `:cond` in `app/secrets/fns.edn`
+           consumes, so the Clojure and the graph path can never diverge."
+     :see [[:types "taint-with-secret-if-tainted"]]}
     {:ns graphden.crud.test-runs :defn run-tests!
      :say "The tests subsystem (docs/TESTS.md) rides everything above: a test
            is a fn in a `tests`-segment namespace, executed through
@@ -660,6 +718,18 @@
            live fn rows under."
      :see [[:executor "sync-fns-to-storage!"]]}
 
+    {:ns graphden.packages.sync :defn sync-fn-entities-from-packages!
+     :say "The other half of every boot, and the one the loader hands off to:
+           sync composed fn-defs to storage, heal namespace-moved identities,
+           seed each fn-def's rich-type, then run the topological type-check
+           sweep. Read the two long comments — the batch-size binding (a
+           fresh-DB boot writes >10k fn rows past the guard meant for USER
+           writes) and `:skip-type-check?` (~15s of sweep the test bootstrap
+           may opt out of, production never does). This is declarative sync:
+           the packages on disk are the desired state, storage is reconciled
+           toward it."
+     :see [[:types "check-all-defs!"] [:versioning "repoint-refs!"]]}
+
     ;; --- Export & distribution: the loader's inverse -------------------
     {:ns graphden.packages.export :defn records->fn-defs
      :say "The loader's INVERSE: typed graph records back to fns.edn-shaped
@@ -705,13 +775,106 @@
            `:package-install` pin; update/rollback rewrites refs between
            versions; fork copies copy-on-write with no pin."}]}
 
-  {:id :web
-   :title "Web & the editor"
+  {:id :boot
+   :title "Boot & lifecycle"
    :status :toured
-   :summary "HTTP routing, the graph-native page/partial runtime, and the
-             editor frontend."
-   :paths ["resources/packages/web/" "resources/packages/app/editor/"]
-   :after [:packages]
+   :summary "How the process starts: the Integrant component graph, the Aero
+             config + addon manifest, and the router seams installed at boot."
+   :paths ["src/graphden/executor_runtime/" "src/graphden/system/"]
+   :after [:storage :packages]
+   :steps
+   [{:ns graphden.executor-runtime.core :defn -main
+     :say "**Where the JVM starts.** Four lines that say what a graphden
+           process IS: boot the Integrant system, install a shutdown hook,
+           optionally open an nREPL (`GRAPHDEN_NREPL_PORT` — the door the
+           `clojure` MCP tools come through), then park forever. Nothing
+           here serves HTTP; the web server is a `:service` row the
+           reconciler starts, several components down."
+     :see [[:boot "boot!"] [:services "reconcile-once!"]]}
+
+    {:ns graphden.executor-runtime.core :defn boot!
+     :say "Start, or HALT the partial system and exit non-zero. Integrant does
+           NOT auto-halt when an init-key throws, and several components have
+           already spawned non-daemon threads by then — without this the JVM
+           stays half-alive with no shutdown hook and `/health` can pass on a
+           boot that actually failed. The partial system rides in the ex-info's
+           `:system` key. Read the docstring: it is the incident this function
+           exists for."}
+
+    {:ns graphden.system.config :defn read-config
+     :say "Configuration is data: Aero reads `system-<profile>.edn`
+           (`:dev` / `:test` / `:prod`) with `#ig/ref` and `#var` reader tags
+           registered above, then deep-merges any ADDON config fragments named
+           in `GRAPHDEN_ADDON_CONFIGS`. That merge is the open-core seam
+           (docs/TENANCY_SEAM.md § Addon config manifest) — the private tenancy
+           addon REDEFINES core keys and ADDS its own without a single edit to
+           this repo. With no addons the merge is a no-op."
+     :see [[:platform "platform-tier?"]]}
+
+    {:ns graphden.system.interface :defn start!
+     :say "`(ig/init (read-config profile))` — that is the whole system
+           lifecycle. The component graph and its dependency edges are
+           documented in `graphden.system.core`'s docstring, which exists
+           only to `:require` the seven `init.*` namespaces for their
+           `defmethod` side effects, so every `ig/init-key` is registered
+           before this call. The next four steps walk that graph in
+           dependency order."}
+
+    {:ns graphden.system.init.storage :defn ig/init-key :dispatch :db/postgres
+     :say "The first component with a socket (`:db/schema` before it is pure —
+           it is the `create-builder` + `extend-builder` chain from the
+           storage block): open the Postgres pool, run
+           `initialize-with-cleanup!` against that schema, seed traits. Note
+           `:datasource-wrap` — a `DataSource → DataSource` fn the tenancy
+           addon supplies so every connection carries `graphden.current_org`
+           for row-level security. Absent in core: a plain pool. `:db/versioned`
+           wraps this one in the versioning decorator."
+     :see [[:versioning "wrap-with-versioning"]]}
+
+    {:ns graphden.system.init.packages :defn ig/init-key :dispatch :app/packages
+     :say "Load the package set — core + web + app, plus the addon's
+           `:extra-package-names` (the fns-channel seam) and any external
+           Type-2 packages from the operator manifest. Its two siblings just
+           below, `:exec/base-fns` and `:exec/fn-entities`, are thin shells
+           over `graphden.packages.sync` — this is where **the graph gets its
+           content** on every boot."
+     :see [[:packages "load-packages"] [:packages "sync-fn-entities-from-packages!"]]}
+
+    {:ns graphden.system.init.exec :defn ig/init-key :dispatch :exec/context
+     :say "Assembles the one `ExecutionContext` the whole process runs
+           against, and it reads as a list of the seams core exposes:
+           auth-provider, request-scope, execute-guard, vault client,
+           notify-emitter, fleet forward-hop, and `:compile-storage` — the
+           privileged org-agnostic handle `rebuild!` reads the graph
+           STRUCTURE through, while data reads stay org-scoped. In
+           single-tenant every one of these is the default and the `cond->`
+           tail is a no-op."
+     :see [[:executor "create-context"]]}
+
+    {:ns graphden.system.init.exec :defn ig/init-key :dispatch :exec/compiled-registry
+     :say "Two lines with a ~50s cost: compile every fn in the graph into a
+           closure BEFORE the first request. This is the eager half of the
+           executor's compile-once story — after this key, `registry` in the
+           hot path is a warm holder read, never a cold compile."
+     :see [[:executor "rebuild!"] [:executor "registry"]]}
+
+    {:ns graphden.system.route-collection :defn dispatch-first
+     :say "The last boot-time seam. Optional subsystems (the `registry`
+           package, `/mcp`) and the tenancy addon each install a
+           `:router-or-nil` Ring callable here under a distinct key; the core
+           handler chain tries them in turn and falls through to the app
+           router on `nil`. With nothing installed the collection is `{}`,
+           this short-circuits, and single-tenant behaviour is byte-for-byte
+           unchanged — the shape every seam in this codebase aims for."}]}
+
+  {:id :web
+   :title "Web — routing & the page runtime"
+   :status :toured
+   :summary "HTTP from socket to response body: routing, middleware as graph
+             fns, the hiccup page runtime, and the APIs the editor reads."
+   :paths ["resources/packages/web/" "resources/packages/mcp/"
+           "src/graphden/crud/types_api.clj"]
+   :after [:packages :boot]
    :steps
    [{:file "resources/packages/web/http/impls.clj" :defn http-server
      :say "The http-kit wrapper base-fn: `run-server` spins the listener thread
@@ -762,7 +925,8 @@
            (`resources/packages/app/editor/*.js`) binds on click — alongside the `hx-*`
            attrs whose server-rendered `/partials/*` fragments now carry
            logic that once lived in that JS. Where a user's
-           page becomes a concrete hiccup tree."}
+           page becomes a concrete hiccup tree."
+     :see [[:editor "bindActionDispatch"] [:editor "loadPartial"]]}
     {:file "resources/packages/web/html/impls.clj" :defn h-raw
      :say "Wraps a string in a hiccup `RawString` so inline script / style bodies
            (like the editor's bundled JS / CSS) render verbatim instead of being
@@ -797,7 +961,18 @@
            client consumer — the return-type-rule popover is a server
            partial now, and the layout strip facts read the raw registry
            directly. How the type-checker's registry reaches the browser as
-           a lean payload."}]}
+           a lean payload."}
+    {:file "resources/packages/mcp/mcp/impls.clj" :defn sync-fn-defs-branch!
+     :say "The web layer has a second client: an AI. The optional `mcp`
+           package serves `/mcp` (JSON-RPC) through the same per-branch
+           router, and this is its only write primitive — sync fn-defs into a
+           branch, then delta-invalidate THAT branch's registry, not the
+           request's own (the AI writes to `ai/…` while its POST rides main).
+           The key design point is in the docstring: writes go through the
+           very `sync-fns-to-storage!` the package loader uses, so a
+           proposal from an AI meets the same cycle / collision / type
+           constraints as a human's `fns.edn`."
+     :see [[:executor "sync-fns-to-storage!"] [:boot "dispatch-first"]]}]}
 
   {:id :layout
    :title "Layout — the editor's graph view"
@@ -838,6 +1013,123 @@
            replaced three hand-written client mirrors of the same walks;
            the client renders facts, it doesn't re-derive them."
      :see [[:versioning "effective-branch-local?"]]}]}
+
+  {:id :editor
+   :title "Editor frontend — the browser half"
+   :status :toured
+   :summary "The ~25k lines of plain ES that draw the graph, bind the edits
+             and mount the server's partials. No build step, no framework."
+   :paths ["resources/packages/app/editor/" "resources/packages/web/runtime/"]
+   :after [:web :layout]
+   :steps
+   [{:file "resources/packages/app/editor/editor-main.js" :defn initGraph
+     :say "**Start here for anything you can click.** The editor is ~75 plain
+           `.js` files concatenated into one bundle in a fixed order (no
+           imports, no build step — the per-module map is in
+           [docs/EDITOR_MODULES.md](../EDITOR_MODULES.md)), and this is the
+           boot. Note the shape of the fetches: the namespace TREE goes out
+           alone first, because its status answers the auth question for
+           everyone — only a non-401 fires the three secondary loads. Fn
+           leaves and per-fn slots/bindings arrive lazily; a 401 sends the
+           user to sign in rather than into a red fatal banner."
+     :see [[:editor "authFetch"]]}
+
+    {:file "resources/packages/app/editor/editor-data.js" :defn buildLookups
+     :say "The client mirror of the compile layer's `build-lookups`: the same
+           raw fn / slot / fn-slot / binding / list-item rows, indexed into
+           the O(1) Maps every render path reads (`fnMap`, `slotByFnAndName`,
+           `bindingByFnSlot`, `itemsByBinding`, the namespace-path map). Every
+           comment here is a fixed O(N×M) scan — this function runs on every
+           mutation, so it is where client-side graph work gets slow."
+     :see [[:executor "build-lookups"]]}
+
+    {:file "resources/packages/app/editor/editor-graph-model.js" :defn graph
+     :say "The graph itself: two Maps plus two adjacency indexes and an
+           `animating` flag. This is *all* that remained of cytoscape when it
+           was removed — the library had been reduced to a node/edge store and
+           a position tween, so it became this file. `window.graphView` is the
+           surface Playwright tests wait on (`ready()`, `animating()`), which
+           is why the browser-test suite never needed rewriting."}
+
+    {:file "resources/packages/app/editor/editor-layout.js" :defn fetchBackendLayout
+     :say "The client does NOT lay the graph out. It POSTs the selected root
+           plus the per-node expansion spec to `/api/graph/layout` and gets
+           back nodes, edges and a `nodeId → {x, y, row, col}` map. This is
+           the wire crossing into the previous block: the server owns grid
+           topology, the client owns pixels."
+     :see [[:layout "build-graph-elements"] [:layout "compute-layout-matrix"]]}
+
+    {:file "resources/packages/app/editor/editor-render.js" :defn renderGraph
+     :say "One render cycle, and the reason it is not a one-liner: prime the
+           selected fn's subtree, capture an ANCHOR node before the await so
+           the canvas doesn't jump under the cursor, fetch the layout, diff it
+           against the live graph, then re-measure — card heights are only
+           known after the overlays exist, so the server's grid is corrected
+           against measured DOM and the nodes settle onto the result."}
+
+    {:file "resources/packages/app/editor/editor-overlay-fn.js" :defn createFnOverlay
+     :say "A node is not drawn — it is an absolutely-positioned HTML card
+           riding the layer transform (edges are SVG; everything else is
+           DOM). This builds one fn card: the inheritance levels from
+           `parent-ids`, the use-site header when the card is an expanded
+           child rather than the navigation root, and a row per slot. The
+           slot/binding model of the very first block, made clickable."
+     :see [[:layout "derive-fn-slot-views"]]}
+
+    {:file "resources/packages/web/runtime/graphden-runtime.js" :defn bindActionDispatch
+     :say "The pivot from client logic to server-rendered HTML. ONE delegated
+           listener per host resolves `data-action=\"…\"` against a registry
+           filled by `registerActionHandler`, so a fragment the server just
+           rendered becomes interactive with no per-fragment wiring. This file
+           is platform-shared: it is bundled into the editor AND served
+           standalone at `/assets/graphden-runtime.js`, so user-composed pages
+           get the same dispatch. Read the bind-once comment — without it a
+           reused singleton popover fires `delete-fn` N times on the Nth open."
+     :see [[:web "hiccup-element"]]}
+
+    {:file "resources/packages/web/runtime/graphden-runtime.js" :defn loadPartial
+     :say "Fetch an HTML partial, swap it into a host, re-bind the dispatcher.
+           That is the whole `/partials/*` client contract
+           ([docs/PARTIALS.md](../PARTIALS.md)) — the migration path by which
+           popovers that used to be hand-built DOM became graph-native
+           fn-defs. The supersession token is the subtle part: two concurrent
+           loads into one host must let the LATEST call win, not the fastest
+           response."}
+
+    {:file "resources/packages/app/editor/editor-row-actions.js" :defn loadRowActionsContent
+     :say "The migration in the concrete: the `⋯` row menu is a server partial
+           in four contexts, and the client only builds the query string,
+           caches the returned HTML per URL, and recomputes the one state that
+           MUST be fresh (add-MI compatibility, against current `lookups`) —
+           see [docs/EDITOR_ROW_ACTIONS.md](../EDITOR_ROW_ACTIONS.md) for why
+           this popover moved and the others stayed JS."}
+
+    {:file "resources/packages/app/editor/editor-edit-modes.js" :defn enterArgValueEditMode
+     :say "How an edit actually happens. The control is not chosen here: the
+           client POSTs the slot to `/api/value-form` and the graph's
+           value-form registry answers with hiccup naming a widget — the
+           editor routes on `data-form-widget` and knows no type tags at all.
+           Note `onSaved`: a value change alters binding rows, so `lookups` is
+           stale and the handler re-fetches rather than re-rendering."
+     :see [[:crud "render-repr"]]}
+
+    {:file "resources/packages/app/editor/editor-auth.js" :defn authFetch
+     :say "Every mutating call in the editor goes through this. It is 12 lines
+           and worth all of them: a 401 clears the stored credential and
+           re-opens the sign-in popover in place. The trap to internalize
+           before you write editor code — `authFetch` and `authMutate`
+           **resolve** on 4xx, they do not throw. A caller that only wraps
+           them in `try/catch` counts a rejected write as a success."}
+
+    {:file "resources/packages/app/editor/editor-tour.js" :defn _tourTick
+     :say "Closing the loop back to the user tutorial: the in-editor guided
+           lessons are graph content (`app.tour/_tour-lessons`, served at
+           `GET /api/tour`) and this file is only the engine that interprets
+           them. Each tick clears the reader-state traps that make a lesson
+           unfinishable — a collapsed Explorer, a kind lens hiding the very fn
+           the step names, a target scrolled out of view — then polls the
+           step's declarative check and advances. A tour that can dead-end is
+           worse than no tour, which is what every guard here is paying for."}]}
 
   {:id :services
    :title "Services & the fleet"
@@ -951,6 +1243,23 @@
            link-local / cloud-metadata targets. Pair it with `validating-dns`
            below in the same file — the connect-time re-check that closes the
            DNS-rebind TOCTOU."}
+    {:ns graphden.web.hiccup-sanitize :defn sanitize-hiccup
+     :say "An allowlist walk over an EDN hiccup tree — permitted tags,
+           permitted attrs, a depth cap and a node budget, returning nil for
+           'no representable output'. This is the gate on every path where
+           GRAPH-authored markup reaches the editor's own DOM: typed value
+           representations, component previews, server partials rendering
+           user content. Anything not on the list collapses to escaped text
+           rather than being rejected loudly — the sanitizer's job is to make
+           the surface safe, not to argue with the author."
+     :see [[:crud "render-repr"]]}
+    {:ns graphden.util.counters :defn count!
+     :say "Observability starts smaller than you expect: a process-global,
+           monotonic `{event → long}` atom. Everything in docs/MONITORING.md —
+           the usage rollups, the Prometheus scrape, the alerter's window
+           below — is a diff of two `snapshot`s of this map. Monotonic on
+           purpose: readers diff rather than reset, so two of them can never
+           invalidate each other's window."}
     {:ns graphden.monitoring.alerts :defn decide
      :say "The built-in alerter's pure policy: given the last window's counters
            and the previous state, decide fire / resolve / stay quiet. All the
@@ -961,6 +1270,14 @@
            invalidation events out to subscribed external executors so a BYO
            executor's compiled registry stays fresh without polling. The
            freshness half of the BYO story."}
+    {:ns graphden.storage.remote.core :defn RemoteStorage
+     :say "The read side of BYO: a `StorageCRUD` leaf whose rows are an ATOM
+           of `{entity → [row …]}` fetched from the hub over HTTP, with every
+           write arm throwing `read-only!`. The customer's executor compiles
+           and runs the same graph while the hub stays the only writer —
+           and `refresh!` swaps in a fresh bundle without rebuilding the
+           record, which is what the SSE relay below triggers."
+     :see [[:storage "StorageCRUD"]]}
     {:ns graphden.byo :defn start-byo!
      :say "The customer-hosted executor assembly: RemoteStorage over HTTP as the
            read-only graph source, the SSE source for invalidation, and a direct

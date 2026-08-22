@@ -21,8 +21,14 @@ docs/devtour/index.html
 Blocks are listed left, roughly in reading order; each block's `after:` line
 names what it assumes you have already seen. Start with the **Executor** (the
 spine everything else hangs off), then follow the dependency order: Storage,
-Branches, Types, CRUD, Packages, Web, Layout, Services, Platform seams,
-Accounts.
+Branches, Types, CRUD, Packages, Boot, Web, Layout, Editor frontend, Services,
+Platform seams, Accounts.
+
+**Boot & lifecycle** is the block to jump to early if you would rather start
+from a running process than from a hot path — it walks `-main` → the Integrant
+component graph → the router seams, which is the shortest route to seeing how
+the other blocks are wired together. **Editor frontend** tours JavaScript
+rather than Clojure, on the same anchor-and-bake contract.
 
 ## How it works
 
@@ -56,6 +62,14 @@ symbol equals `:defn`. Two variants:
 - **`:dispatch`** — anchor a `defmethod` by its dispatch value; the step is
   then labelled by the dispatch's name:
   `{:ns graphden.tenancy.addon :defn ig/init-key :dispatch :tenancy/request-scope …}`.
+- **A `.js` `:file`** — the editor frontend is toured on the same contract.
+  A JS anchor matches a top-level `function name(` / `async function name(` /
+  `const|let|var name =` declaration at any indentation (several modules wrap
+  their body in an IIFE), and the generator scans forward through
+  strings / template literals / comments / regex literals to the matching close:
+  `{:file "resources/packages/app/editor/editor-main.js" :defn initGraph …}`.
+  `:dispatch` is Clojure-only and is rejected on a `.js` anchor. A form the
+  scanner cannot balance is a hard error, never a truncated bake.
 
 An anchor that matches no form, or more than one (an ambiguous name / dispatch),
 is a hard error — add `:dispatch`, split, or rename. Steps are identified

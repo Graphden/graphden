@@ -81,8 +81,12 @@
   ;; a rename/move of a toured form there must re-run devtour-check —
   ;; otherwise the anchor drifts and lands green on a diff that only
   ;; touched impls.clj, reddening the next innocent PR.
+  ;; …and so is the editor frontend (`.js` anchors, the `:editor` block), so a
+  ;; renamed / edited toured JS function must re-run the check for the same
+  ;; reason.
   :relevant ["^docs/devtour/" "^src/" "^scripts/devtour\\.clj$"
-             "^resources/packages/.*impls\\.clj$"]}
+             "^resources/packages/.*impls\\.clj$"
+             "^resources/packages/.*\\.js$"]}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}
  {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec
   ;; Three passes (see the `trivy` bb task): (1) `config .` — RECURSIVE IaC

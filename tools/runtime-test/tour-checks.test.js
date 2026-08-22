@@ -45,10 +45,19 @@ function checkIn(state, check) {
     URLSearchParams,
     document: {
       querySelector: (sel) => (domHits[sel] ? {} : null),
-      querySelectorAll: (sel) =>
-        (sel === '.edge-label-overlay span'
-          ? labels.map((t) => ({ textContent: t }))
-          : []),
+      // A `dom` check measures its matches — `state.dom[sel]` is `true` for a
+      // visible element and `'hidden'` for one that is in the document at
+      // zero size (a mounted-but-closed surface, which is how the editor
+      // keeps its Organization panels).
+      querySelectorAll: (sel) => {
+        if (sel === '.edge-label-overlay span') {
+          return labels.map((t) => ({ textContent: t }));
+        }
+        const hit = domHits[sel];
+        if (!hit) return [];
+        const size = hit === 'hidden' ? 0 : 10;
+        return [{ getBoundingClientRect: () => ({ width: size, height: size }) }];
+      },
     },
   });
   vm.runInContext(source, ctx);
@@ -182,6 +191,17 @@ test('dom / dom-absent are each other\'s inverse', () => {
   assert(checkIn({}, { kind: 'dom', selector: '.thing' }) === false, 'dom misses it');
   assert(checkIn({}, { kind: 'dom-absent', selector: '.thing' }) === true,
          'dom-absent passes on an empty page');
+});
+
+test('dom means VISIBLE — a mounted-but-hidden surface is not "open"', () => {
+  // The editor keeps the Organization panels mounted from boot. Matching on
+  // presence alone completed lesson 16's "open the Organization surface"
+  // before the reader touched anything, and the tour walked on without them.
+  const hidden = { dom: { '#gd-operate-nav button': 'hidden' } };
+  assert(checkIn(hidden, { kind: 'dom', selector: '#gd-operate-nav button' }) === false,
+         'a zero-sized match does not count as shown');
+  assert(checkIn(hidden, { kind: 'dom-absent', selector: '#gd-operate-nav button' }) === true,
+         'and for the reader it is absent — which is what dom-absent means');
 });
 
 test('arg-named reads the edge label — the rename has no other client trace', () => {

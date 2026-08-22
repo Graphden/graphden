@@ -546,8 +546,8 @@ function buildCreateRow(indent) {
         // graph card immediately. Without this, only the sidebar
         // refreshes and the canvas keeps showing whatever was there
         // (or nothing) — reads as a hang.
-        if (createType === 'fn' && typeof selectFnByName === 'function') {
-          selectFnByName(name);
+        if (createType === 'fn' && typeof selectJustCreatedFn === 'function') {
+          selectJustCreatedFn(name);
         }
       } else {
         throw new Error(await extractResponseError(response));

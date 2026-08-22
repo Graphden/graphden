@@ -34,6 +34,25 @@ function _tourFindFn(name) {
   return null;
 }
 
+// A `dom` check asks whether the reader can SEE the thing, not whether it is
+// in the document: the editor keeps whole surfaces mounted and hidden (the
+// Organization panels exist from boot), so `querySelector` alone completed
+// "open the Organization surface" the moment the lesson started — the tour
+// walked on while the reader was still looking at the canvas.
+//
+// Measured, not `offsetParent`: the popovers these steps point at are
+// `position: fixed`, where `offsetParent` is null even when they are on
+// screen. A `[hidden]` / `display: none` element measures 0x0.
+function _tourDomVisible(selector) {
+  if (!selector) return false;
+  for (const el of document.querySelectorAll(selector)) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) return true;
+  }
+  return false;
+}
+
+
 function _tourCheckPasses(check) {
   if (!check || check.kind === 'manual') return false;
   try {
@@ -132,11 +151,12 @@ function _tourCheckPasses(check) {
         });
       }
       case 'dom':
-        return !!document.querySelector(check.selector);
+        return _tourDomVisible(check.selector);
       case 'dom-absent':
         // The inverse of `dom` — completes when something DISAPPEARS (a
-        // type-error badge cleared by the fixing edit).
-        return !document.querySelector(check.selector);
+        // type-error badge cleared by the fixing edit), which for a reader
+        // includes "is still in the DOM but hidden".
+        return !_tourDomVisible(check.selector);
       default:
         return false;
     }

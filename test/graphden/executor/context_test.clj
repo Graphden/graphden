@@ -230,3 +230,63 @@
               "…and flags it for background revalidation"))
         (finally
           (sp/close storage))))))
+
+
+(deftest splice-reads-through-the-privileged-handle
+  (testing "the graph cache holds the FULL org-agnostic graph (readers slice it per org), so the splice must re-read the changed fns through `:compile-storage` — the privileged handle — not `(:storage ctx)`. With an org-scoped runtime handle, a fn the request's org cannot see came back EMPTY and the splice (which drops the changed ids before re-adding what it read) ERASED it from the shared cache. Measured on a tenancy stack: write a binding, and `?scope=search` for the owning fn answered 0 hits for ~1-2s — which is what makes the editor toast “Function not found” for the fn you just edited."
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [composed-fn]} (setup/setup-add-function! storage)
+              fn-id (:id composed-fn)
+              ;; A runtime handle that sees NOTHING — the shape an org-scoped
+              ;; storage has for another org's rows.
+              ;; A runtime handle that sees NOTHING — the shape an org-scoped
+              ;; storage has for another org's rows. The context is built with
+              ;; the real storage (it is validated on create) and the blind one
+              ;; is swapped in for the invalidation, which is exactly the
+              ;; asymmetry tenancy produces: privileged compile handle, scoped
+              ;; runtime handle.
+              blind (reify
+                      sp/StorageCRUD
+                      (create-entity [_ _ _] nil)
+
+                      (read-entity [_ _ _] nil)
+
+                      (update-entity [_ _ _ _] nil)
+
+                      (delete-entity [_ _ _] nil)
+
+                      (query-entities [_ _ _] [])
+
+                      (query-entities [_ _ _ _] [])
+
+                      (query-latest-per-group [_ _ _ _] [])
+
+
+                      sp/StorageBatchCRUD
+
+                      (create-entities [_ _ _] nil)
+
+                      (read-entities [_ _ _] {})
+
+                      (update-entities [_ _ _] nil)
+
+                      (upsert-entities [_ _ _] nil)
+
+                      (delete-entities [_ _ _] nil)
+
+                      (query-ref-many-owners [_ _ _ _] []))
+              ;; `:compile-storage` is assoc'd onto the ctx by the wiring
+              ;; (system.init.exec / branch-router), not by `create-context`.
+              c (assoc (exec/create-context {:storage storage})
+                       :compile-storage storage)
+              scoped (assoc c :storage blind)]
+          ;; Prime the cache the way a read does.
+          (reset! (:graph-cache c)
+                  {:fns [composed-fn] :slots [] :fn-slots []
+                   :bindings [] :list-items []})
+          (ctx/invalidate-graph-cache! scoped #{fn-id})
+          (is (some #(= fn-id (:id %)) (:fns @(:graph-cache c)))
+              "the fn survives the splice — it was re-read with the privileged handle"))
+        (finally
+          (sp/close storage))))))

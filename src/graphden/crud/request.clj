@@ -43,17 +43,52 @@
                       {:type :execution-error/missing-storage}))))
 
 
+(def core-entity-types
+  "The entity types the CORE schema ships. An ADDON adds its own (the
+   tenancy addon's `:grant`, `:org`, `:account`, `:app`, …) and reaches
+   them through the same `/api/entities/:type/:id` routes — so this set
+   is the fast path, not the whole answer."
+  {"fn" :fn
+   "ns" :ns
+   "slot" :slot
+   "fn-slot" :fn-slot
+   "binding" :binding
+   "binding-list-item" :binding-list-item
+   "service" :service})
+
+
 (defn entity-type-from-string
-  [s]
-  (case s
-    "fn" :fn
-    "ns" :ns
-    "slot" :slot
-    "fn-slot" :fn-slot
-    "binding" :binding
-    "binding-list-item" :binding-list-item
-    "service" :service
-    nil))
+  "URL segment → entity-type keyword, or nil when nothing by that name
+   exists. `known` is the live schema's entity set (see
+   `schema-entity-types`); without it only the core types resolve.
+
+   The 1-arity was the whole function, and it made every addon entity
+   un-deletable through the generic route: the tenancy Grants panel's ×
+   posts `DELETE /api/entities/grant/:id`, the segment resolved to nil,
+   and the handler answered 400 “Invalid request” — a dead button in a
+   shipped panel, and the step tutorial lesson 17 tells the reader to
+   perform."
+  ([s] (entity-type-from-string s nil))
+  ([s known]
+   (or (get core-entity-types s)
+       (when (and s (seq known))
+         (let [kw (keyword s)]
+           (when (contains? (set known) kw) kw))))))
+
+
+(defn schema-entity-types
+  "Entity-type keywords the STORAGE knows, from its schema metadata
+   (`{:entities {uuid → name}}`) — cached in the storage, so this is a
+   map read per request, not a query. nil-safe: a storage that cannot
+   answer leaves the caller with the core set."
+  [storage]
+  (try
+    (some-> storage
+            ((requiring-resolve 'graphden.storage.protocol.core/schema-metadata))
+            :entities
+            vals
+            set)
+    (catch Exception _ nil)))
 
 
 (defn parse-uri-segments
@@ -94,15 +129,19 @@
   "Extracts type-str, id-str, entity-type from request. Prefers
    reitit's `:path-params` when present; falls back to URI parsing
    (the handler is sometimes reached with the raw http-kit request
-   that hasn't been through reitit's `enrich-request`)."
-  [request]
-  (let [pp (:path-params request)
-        rp (when (nil? pp) (parse-uri-segments (:uri request)))
-        type-str (or (:type pp) (:type-str rp))
-        id-str (or (:id pp) (:id-str rp))]
-    {:type-str type-str
-     :id-str id-str
-     :entity-type (entity-type-from-string type-str)}))
+   that hasn't been through reitit's `enrich-request`).
+
+   `known` — the live schema's entity-type set, so an addon's entities
+   resolve too. Omit it and only the core types do."
+  ([request] (extract-entity-params request nil))
+  ([request known]
+   (let [pp (:path-params request)
+         rp (when (nil? pp) (parse-uri-segments (:uri request)))
+         type-str (or (:type pp) (:type-str rp))
+         id-str (or (:id pp) (:id-str rp))]
+     {:type-str type-str
+      :id-str id-str
+      :entity-type (entity-type-from-string type-str known)})))
 
 
 (defn read-json-body

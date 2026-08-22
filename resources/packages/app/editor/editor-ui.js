@@ -66,6 +66,28 @@ function selectFn(fnId, updateHistory = true) {
  * bookmark to a fn outside the loaded set — via the server (names are
  * globally unique). Async because that resolution may hit the network.
  */
+// Select a fn the user JUST created. The create answered 2xx, so a resolve
+// miss here is a stale read — not a wrong name: the org-scoped read path can
+// trail its own write by a few hundred milliseconds, and a single attempt
+// turned "created" into the toast “Function not found: <the name you just
+// typed>”. Reproduced on a tenancy stack while walking tutorial lesson 20,
+// where it also stalled the lesson: the tour was waiting for the fn to be
+// selected. Retry briefly, then fall through to the normal select so a
+// genuine miss still reports itself.
+async function selectJustCreatedFn(name, tries = 12, gapMs = 250) {
+  if (!name) return;
+  for (let i = 0; i < tries; i++) {
+    if (typeof resolveFnByName !== 'function') break;
+    try {
+      if (await resolveFnByName(name)) break;
+    } catch (_) { /* keep trying — the write already succeeded */ }
+    await new Promise((r) => setTimeout(r, gapMs));
+  }
+  if (typeof selectFnByName === 'function') await selectFnByName(name);
+}
+window.selectJustCreatedFn = selectJustCreatedFn;
+
+
 async function selectFnByName(name, updateHistory = true) {
   // Fast path: already-loaded fn (simple or qualified name).
   let fn = (graphData.fns || []).find(f => f.name === name);

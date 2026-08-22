@@ -64,8 +64,8 @@ function enterExtendEditMode(fn, anchorEl) {
       const opKey = 'extend-finalise:' + fn.id;
       const finalise = async () => {
         if (typeof initGraph === 'function') await initGraph();
-        if (pendingName && typeof selectFnByName === 'function') {
-          selectFnByName(pendingName);
+        if (pendingName && typeof selectJustCreatedFn === 'function') {
+          await selectJustCreatedFn(pendingName);
         }
       };
       if (typeof withBusy === 'function') {

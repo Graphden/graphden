@@ -82,7 +82,23 @@
   (testing "unknown / nil → nil"
     (is (nil? (req/entity-type-from-string "bogus")))
     (is (nil? (req/entity-type-from-string "")))
-    (is (nil? (req/entity-type-from-string nil)))))
+    (is (nil? (req/entity-type-from-string nil))))
+
+  (testing "an ADDON's entity type resolves when the live schema knows it"
+    ;; The hardcoded core list made every addon entity un-deletable through
+    ;; the generic route: the tenancy Grants panel's × posts
+    ;; `DELETE /api/entities/grant/:id`, the segment resolved to nil and the
+    ;; handler answered 400 “Invalid request” — a dead button in a shipped
+    ;; panel, and the action tutorial lesson 17 tells the reader to perform.
+    (let [known #{:fn :ns :grant :org :app-route}]
+      (is (= :grant (req/entity-type-from-string "grant" known)))
+      (is (= :app-route (req/entity-type-from-string "app-route" known)))
+      (is (= :fn (req/entity-type-from-string "fn" known))
+          "core types keep working without consulting the schema")
+      (is (nil? (req/entity-type-from-string "grant" #{:fn :ns}))
+          "…and a type the schema does NOT have stays unresolvable")
+      (is (nil? (req/entity-type-from-string "grant"))
+          "no known-set → core types only"))))
 
 
 ;; ============================================================================

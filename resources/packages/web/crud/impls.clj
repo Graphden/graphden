@@ -189,9 +189,16 @@
    The dual-source merge (path-params + URI fallback) is infra
    compensation for the per-handler-routing variance, not user
    logic — admins can compose new entity-type→keyword mappings at
-   the graph layer over the resulting `:type-str` field."
+   the graph layer over the resulting `:type-str` field.
+
+   The known-types set comes from the LIVE schema, so an addon's
+   entities (`grant`, `org`, `app`, …) resolve through the same routes
+   as the core ones — hardcoding the core seven left every addon entity
+   with a 400 on the generic delete."
   [request]
-  (request/extract-entity-params request))
+  (request/extract-entity-params
+    request
+    (request/schema-entity-types (:storage ctx))))
 
 
 (defbase resolve-type-fn-id

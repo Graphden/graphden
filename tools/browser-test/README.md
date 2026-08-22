@@ -79,3 +79,25 @@ graph.
 - `regression-sequence-fn-ref.test.js` / `regression-migrate-on-fn-ref.test.js`
   — need the dev/test-only `examples` package; deliberately outside the
   `edit-*` glob. Run by hand against a demo stack with examples loaded.
+
+## Organization lessons (needs a tenancy stack)
+
+`edit-tutorial-tour-org.test.js` walks tutorial lessons 16 / 17 / 20 / 21 / 19 / 18
+— Members, Grants, Apps, cross-org, account Settings, plans. Those surfaces
+exist only under the tenancy addon, so the file SKIPS (exit 0, loudly) unless
+you point it at a stack that has one:
+
+```bash
+GRAPHDEN_URL=http://localhost:8080 \
+GRAPHDEN_ORG_EMAIL=you@example.com GRAPHDEN_ORG_PASSWORD=… \
+  node edit-tutorial-tour-org.test.js
+```
+
+The account must be an org OWNER — a fresh signup is one, since its first login
+creates the personal org it owns. The local cloud-shaped stack (boot
+`graphden-cloud` against local checkouts) is the usual target; run this before a
+cloud release, since the monorepo gate's e2e stack is single-tenant and cannot
+reach any of it.
+
+Every other `edit-tutorial-tour*.test.js` runs against a single-tenant stack and
+takes `GRAPHDEN_VIEWPORT=390x844` to walk the same lessons at a phone size.

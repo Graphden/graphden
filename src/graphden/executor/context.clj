@@ -66,7 +66,19 @@
   [ctx changed-fn-ids]
   (let [cache (:graph-cache ctx)
         cached (some-> cache deref)
-        storage (:storage ctx)]
+        ;; PRIVILEGED handle, like the cold load in
+        ;; `types-api/cached-or-load-graph` — the cache holds the FULL
+        ;; org-agnostic graph and is sliced per read. `(:storage ctx)` is
+        ;; ORG-SCOPED under tenancy, and this splice DELETES the changed ids
+        ;; before re-adding what the read returned: a ctx whose org cannot see
+        ;; a fn therefore erased it from the shared cache. That happens on
+        ;; every write, because `invalidate-affected-ctxs!` sweeps the sibling
+        ;; branch contexts too — each splicing through its own scope. Measured
+        ;; on a tenancy stack: write a binding, and `?scope=search` for the
+        ;; OWNING fn answered 0 hits for ~1-2s (until some full reload restored
+        ;; it), which is what makes the editor toast “Function not found: <the
+        ;; fn you just edited>”.
+        storage (or (:compile-storage ctx) (:storage ctx))]
     (when (and cached storage (seq changed-fn-ids))
       (let [ids (set changed-fn-ids)
             of-changed? (fn [row] (contains? ids (:fn-id row)))

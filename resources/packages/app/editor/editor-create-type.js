@@ -274,7 +274,7 @@ function showTypeCreateForm(kind) {
       }
       hideTypeCreatePopover();
       if (typeof initGraph === 'function') await initGraph();
-      if (typeof selectFnByName === 'function') selectFnByName(name);
+      if (typeof selectJustCreatedFn === 'function') await selectJustCreatedFn(name);
     } catch (err) {
       errEl.textContent = err?.message || String(err);
       errEl.style.display = 'block';

@@ -7,6 +7,7 @@
    `graph_rows_route_test`."
   (:require
     [cheshire.core :as json]
+    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
@@ -23,6 +24,16 @@
 
 (def ^:dynamic *router* nil)
 (def ^:dynamic *storage* nil)
+
+
+;; Registry impls are a PACKAGE ns (path ≠ ns, loaded by the package loader),
+;; so reach the private `resolve-remote-version` by load-file + ns-resolve —
+;; the house pattern (see effect_trace_test).
+(def ^:private registry-resolve-remote-version
+  (let [r (io/resource "packages/registry/registry/impls.clj")]
+    (when r (load-file (java.io.File/.getPath (io/file r))))
+    (ns-resolve (find-ns 'graphden.packages.app.registry.impls)
+                'resolve-remote-version)))
 
 
 (def ^:private test-auth-token "import-graph-test-token-xyz")
@@ -322,3 +333,22 @@
             "latest resolved to 2.1.0 and was mirrored")
         (is (seq (sp/query-entities *storage* :fn {:name "rp3-2-1-0"}))))
       (finally (stub)))))
+
+
+(deftest remote-fetch-ssrf-guarded-in-restricted-ctx
+  ;; A RESTRICTED (tenant/cloud) execution — `*allowed-effects*` bound —
+  ;; must refuse a caller-supplied `source` pointing at an internal /
+  ;; link-local target BEFORE dialing (SSRF + registry-token exfiltration).
+  ;; The unrestricted platform / self-host ctx is NOT gated, so an offline
+  ;; localhost hub still resolves (that's the whole point of push/pull).
+  (testing "restricted ctx blocks a link-local source (cloud-metadata probe)"
+    (binding [cr/*allowed-effects* #{:network}]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"(?i)egress"
+            (registry-resolve-remote-version "http://169.254.169.254" "acme.x" "latest"))
+          "link-local source → :egress/blocked before any dial")))
+  (testing "unrestricted ctx does NOT egress-block (self-host localhost hub)"
+    ;; *allowed-effects* nil → no egress check; resolve reaches the dial and
+    ;; returns nil (nothing listening) rather than throwing :egress/blocked.
+    (is (nil? (registry-resolve-remote-version "http://127.0.0.1:1" "acme.x" "latest"))
+        "loopback allowed in the unrestricted path (returns nil, not blocked)")))

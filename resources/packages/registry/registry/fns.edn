@@ -59,6 +59,11 @@
    :args {:value {:type a :description "Bundle (or any EDN value) to encode for the text wire."}}
    :return-type a}
 
+  {:name :parse-graph-edn
+   :description "Read one EDN value from `string` with the graph WIRE readers (decodes `#graphden/ref` tagged literals emitted for version-qualified `@` and root-ns refs). Use on the import path so a CLI/export bundle round-trips; `:parse-edn` (default readers) → nil on such a tag. nil when it doesn't parse."
+   :args {:string {:type :text :description "EDN text to parse with wire readers."}}
+   :return-type a}
+
   {:name :external-deps-shape
    :description "What a subtree depends on: the external fn NAMES it references and the published packages those fns come from."
    :type {:dependencies [:list :keyword]
@@ -2401,8 +2406,10 @@
    :args {:coll {:as :request} :key {:value :body} :default {:value ""}}}
 
   {:name :_import-parsed
-   :description "The request body read as EDN — a {:fns […]} bundle map or a bare vector; nil when it doesn't parse."
-   :parent :parse-edn
+   ;; wire-aware read: a CLI/export bundle re-encodes unspellable refs as
+   ;; `#graphden/ref` tags, which `:parse-edn` (default readers) can't read.
+   :description "The request body read as EDN (wire readers) — a {:fns […]} bundle map or a bare vector; nil when it doesn't parse."
+   :parent :parse-graph-edn
    :args {:string :_import-body-text}}
 
   {:name :_import-fns

@@ -483,7 +483,13 @@
    The inbound check is conservative: a stale row referenced only by
    ANOTHER stale row is kept this round; re-importing the same snapshot
    converges (the referencing row is gone by then). Returns
-   `{:pruned [names] :kept-referenced [names]}`."
+   `{:pruned [names] :kept-referenced [names]}`.
+
+   Scope is derived from the bundle's OWN namespaces, so an EMPTY bundle
+   covers no namespaces and prunes nothing — `?prune=true` on an empty
+   snapshot is a deliberate fail-closed NO-OP, never a wipe. (Clearing a
+   namespace's entire contents is done by importing a bundle that still
+   declares that namespace but omits the fns, not by importing nothing.)"
   [storage fn-defs]
   (let [bundle-namespaces (into #{} (map :namespace) fn-defs)
         expected (into #{} (map #(records/fn-id (:namespace %) (:name %))) fn-defs)

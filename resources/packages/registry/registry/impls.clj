@@ -6,6 +6,7 @@
     [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.string :as str]
+    [graphden.clients.egress :as egress]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
@@ -461,7 +462,16 @@
            (not (re-find #"[*><~^ ]" (str spec))))
     spec
     (let [constraint (if (contains? #{nil "" "latest"} (some-> spec str)) "*" (str spec))
-          resp @(http-client/get (str base "/api/packages")
+          list-url (str base "/api/packages")
+          ;; SSRF guard: `base` is caller-supplied (POST /api/packages/install
+          ;; body). In a RESTRICTED (tenant/cloud) execution — `*allowed-effects*`
+          ;; bound — block internal / rebinding targets BEFORE dialing, so a
+          ;; tenant can't probe cloud-internal services or exfiltrate the
+          ;; registry bearer (throws :egress/blocked). The unrestricted
+          ;; platform / self-host ctx skips it, so an offline localhost hub
+          ;; still resolves — mirrors `web/http-client` http-request.
+          _ (when (some? cr/*allowed-effects*) (egress/check-target! list-url))
+          resp @(http-client/get list-url
                                  {:headers (remote-auth-headers) :as :text :timeout 60000})]
       (when (and (nil? (:error resp)) (= 200 (:status resp)))
         (let [rows (try (json/parse-string (:body resp) true) (catch Exception _ nil))
@@ -493,6 +503,12 @@
     (if (nil? concrete)
       {:error "remote-version-not-found" :name pkg-name}
       (let [url (str base "/api/packages/" pkg-name "/" concrete "?format=edn")
+            ;; SSRF guard on the concrete-spec path too (resolve-remote-version
+            ;; passes concrete specs straight through without a list fetch, so
+            ;; this is the only check for a pinned `?format=edn` fetch). Only in
+            ;; a RESTRICTED execution (see resolve-remote-version) so a self-host
+            ;; localhost hub still works.
+            _ (when (some? cr/*allowed-effects*) (egress/check-target! url))
             resp @(http-client/get url {:headers (remote-auth-headers)
                                         :as :text :timeout 60000})]
         (cond
@@ -615,8 +631,24 @@
 ;; `:current-branch-id`.
 
 
+(defbase parse-graph-edn
+  "Read one EDN value from `string` with the graph WIRE readers, so a
+   bundle that the CLI / export re-encoded through `wire/encode-unreadable-kws`
+   (emitting `#graphden/ref` tagged literals for version-qualified `@` and
+   root-ns refs that aren't spellable as readable keywords) round-trips.
+   The generic `:parse-edn` uses default readers and throws → nil on such a
+   tag, silently breaking the import of any graph with unspellable refs.
+   nil when it doesn't parse."
+  [string]
+  (try (edn/read-string {:readers wire/wire-readers} string)
+       (catch Exception _ nil)))
+
+
 (def impls
   {:graph-fn-defs graph-fn-defs
+   ;; taint-propagate: returns the parsed caller bundle (content passthrough),
+   ;; same as core :parse-edn.
+   :parse-graph-edn {:impl parse-graph-edn :taint-propagate? true}
    :secret-path-args secret-path-args-fn
    :strip-secret-paths strip-secret-paths-fn
    :encode-unreadable-kws encode-unreadable-kws-fn

@@ -148,11 +148,17 @@
    silent. Pure — the preview `push`/`import --dry-run` and `diff` all use it."
   [current incoming]
   (let [key-of (juxt :namespace :name)
+        ;; nil-safe ordering key — `:namespace` is nil for root-ns defs, and
+        ;; a vector containing nil isn't Comparable, so stringify both parts.
+        sort-key (fn [m] [(str (:namespace m)) (str (:name m))])
         cur (into {} (map (juxt key-of identity)) current)
         inc (into {} (map (juxt key-of identity)) incoming)
         body #(dissoc % :namespace :name)]
-    {:added (vec (sort (map second (remove #(contains? cur (key %)) inc))))
-     :removed (vec (sort (map second (remove #(contains? inc (key %)) cur))))
+    ;; sort the fn-def MAPS by their [namespace name] key — a bare `sort`
+    ;; tries to compare the maps themselves (not Comparable) and throws a
+    ;; ClassCastException the moment there are ≥2 added or ≥2 removed defs.
+    {:added (vec (sort-by sort-key (map second (remove #(contains? cur (key %)) inc))))
+     :removed (vec (sort-by sort-key (map second (remove #(contains? inc (key %)) cur))))
      :changed (vec (sort (for [[k v] inc
                                :let [c (get cur k)]
                                :when (and c (not= (body c) (body v)))]

@@ -17,6 +17,8 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.packages.owned :as owned]
+    [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
     [graphden.system.branch-router :as br]
     [graphden.versioning.storage.core :as vs]))
@@ -29,6 +31,19 @@
    \"other-fn\" (a string) stay distinguishable, which JSON loses."
   [string]
   (try (edn/read-string string) (catch Exception _ nil)))
+
+
+(defbase platform-owned-def-names
+  "Names among `fn-defs` whose deterministic `(namespace, name)` fn-id was
+   written by the package sync this boot — the fns the editor API's
+   package-guard refuses to touch (`crud.package-guard`, the 2026-08-20
+   `:add`-poisoning class). The MCP upsert guard consults this so the sync
+   path stops being the one write route around that protection."
+  [fn-defs]
+  (into []
+        (comp (filter #(owned/owned-fn-id? (records/fn-id (:namespace %) (:name %))))
+              (map #(some-> (:name %) name)))
+        fn-defs))
 
 
 (defbase sync-fn-defs-branch!
@@ -58,4 +73,5 @@
 
 (def impls
   {:parse-edn parse-edn
+   :platform-owned-def-names platform-owned-def-names
    :sync-fn-defs-branch! sync-fn-defs-branch!})

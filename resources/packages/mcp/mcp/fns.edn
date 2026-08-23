@@ -20,12 +20,17 @@
  :description "MCP server — JSON-RPC endpoint + tools/resources over existing graph primitives."
  :fns
  [;; ==========================================================================
-  ;; Base-fns (impls.clj) — the only two Clojure boundaries Phase B needs
+  ;; Base-fns (impls.clj) — the only three Clojure boundaries the tools need
   ;; ==========================================================================
   {:name :parse-edn
    :description "Read one EDN value from text; nil when it doesn't parse. Generic counterpart to `:parse-json` — fn-defs travel as EDN because that is the one encoding where a reference (`:other-fn`) stays distinguishable from a string."
    :args {:string {:type :nullable-text :description "EDN source text."}}
    :return-type :any}
+
+  {:name :platform-owned-def-names
+   :description "Names among `fn-defs` whose deterministic (namespace, name) fn-id was written by the package sync this boot — the fns the editor's package-guard protects. One in-memory registry lookup per def."
+   :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}}
+   :return-type [:list :text]}
 
   {:name :sync-fn-defs-branch!
    :description "Sync fn-defs into a NAMED branch + delta-invalidate that branch's registry. Atomic effect boundary (same carve-out as `:merge-branch!`). Returns the synced fn-ids as text."
@@ -174,11 +179,21 @@
                                         :base {:type "string" :description "Branch to fork from. Defaults to main."}}
                            :required ["name"]}}
             {:name "upsert-fn-defs"
-             :description "Create or update fn-defs IN A BRANCH. `fn-defs` is EDN text: a vector of maps in fns.edn syntax, e.g. [{:name :my-fn :parent :add :args {:nums [1 2]}}]. EDN, not JSON — only there does a reference (:other-fn) stay distinguishable from a string. The same constraints as a human's fns.edn apply (cycles, name collisions, type-check), so a rejection is feedback you can act on."
+             :description "Create or update fn-defs IN A BRANCH. `fn-defs` is EDN text: a vector of maps in fns.edn syntax, e.g. [{:name :my-fn :parent :add :args {:nums [1 2]}}]. EDN, not JSON — only there does a reference (:other-fn) stay distinguishable from a string. The same constraints as a human's fns.edn apply (cycles, name collisions, type-check), so a rejection is feedback you can act on. Platform fn-defs (the ones the package sync restores on every boot) are refused unless allow-platform-overwrite is true — prefer building under your own namespace."
              :inputSchema {:type "object"
                            :properties {:branch {:type "string" :description "Target branch name — never main."}
-                                        :fn-defs {:type "string" :description "EDN vector of fn-def maps."}}
+                                        :fn-defs {:type "string" :description "EDN vector of fn-def maps."}
+                                        :allow-platform-overwrite {:type "boolean" :description "Explicitly allow shadowing platform (package-synced) fn-defs on the branch. Default false."}}
                            :required ["branch" "fn-defs"]}}
+            {:name "run-tests"
+             :description "Run the branch's tests (the `tests`-namespace fns) through the standard execute pipeline and get {total passed failed other results}. Run after upsert-fn-defs to close the write→verify loop."
+             :inputSchema {:type "object"
+                           :properties {:fn-ids {:type "array" :items {:type "string"} :description "Optional test fn-id strings — run only these; omit to run every test on the branch."}
+                                        :timeout-ms {:type "integer" :description "Per-test timeout in ms. Defaults to 10000."}}
+                           :required []}}
+            {:name "list-branches"
+             :description "Every branch with its base, timestamps and policy — orient after a context loss: which ai/* scratch branches already exist."
+             :inputSchema {:type "object" :properties {} :required []}}
             {:name "diff-branch"
              :description "What your branch changed against another (default main): added / modified / removed entities. This is what the human reviews."
              :inputSchema {:type "object"
@@ -399,6 +414,32 @@
    :args {:code {:value -32602}
           :message {:value "every fn-def must be a map with a :name"}}}
 
+  ;; Platform-guard: the editor API refuses writes against package-synced
+  ;; fns (crud.package-guard); this sync path must not stay the one write
+  ;; route around that protection (the 2026-08-20 :add-poisoning class).
+  {:name :_mcp-upsert-allow-platform?
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :allow-platform-overwrite} :default {:value false}}}
+
+  {:name :_mcp-upsert-owned-names
+   :description "Names in the parsed bundle that would land on package-synced fn-ids."
+   :parent :platform-owned-def-names
+   :args {:fn-defs :_mcp-upsert-parsed}}
+
+  {:name :_mcp-upsert-platform-protected?
+   :parent :and
+   :args {:values [{:parent :not :args {:value :_mcp-upsert-allow-platform?}}
+                   {:parent :not :args {:value {:parent :empty? :args {:coll :_mcp-upsert-owned-names}}}}]}}
+
+  {:name :_mcp-err-platform-protected
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:parent :str
+                    :args {:parts ["These fn-defs are platform-owned (the package sync restores them on every boot): "
+                                   {:parent :str-join
+                                    :args {:coll :_mcp-upsert-owned-names :separator {:value ", "}}}
+                                   ". Build under your own namespace instead, or pass allow-platform-overwrite=true to shadow them on the branch deliberately."]}}}}
+
   {:name :_mcp-upsert-applied
    :description "Sync into the resolved branch; returns the written fn-ids."
    :parent :sync-fn-defs-branch!
@@ -415,12 +456,40 @@
    :args {:text {:parent :to-json-string :args {:data :_mcp-upsert-result}}}}
 
   {:name :_mcp-tool-upsert
-   :description "upsert-fn-defs tool — guards first (branch resolves, EDN is a vector, every item is a named map), then the atomic branch-scoped sync. A rejection is a -32602 the model can read and fix."
+   :description "upsert-fn-defs tool — guards first (branch resolves, EDN is a vector, every item is a named map, no platform fn-defs without the explicit flag), then the atomic branch-scoped sync. A rejection is a -32602 the model can read and fix."
    :parent :cond
-   :args {:clauses [:_mcp-upsert-branch-missing?  :_mcp-err-branch-missing
-                    :_mcp-upsert-not-a-vector?    :_mcp-err-not-a-vector
-                    :_mcp-upsert-items-malformed? :_mcp-err-items-malformed
-                    {:value true}                 :_mcp-tool-upsert-ok]}}
+   :args {:clauses [:_mcp-upsert-branch-missing?      :_mcp-err-branch-missing
+                    :_mcp-upsert-not-a-vector?        :_mcp-err-not-a-vector
+                    :_mcp-upsert-items-malformed?     :_mcp-err-items-malformed
+                    :_mcp-upsert-platform-protected?  :_mcp-err-platform-protected
+                    {:value true}                     :_mcp-tool-upsert-ok]}}
+
+  ;; --- run-tests: the /api/tests/run apply stage, fed from tool arguments ----
+  ;; `:request` stays free and unifies with the MCP dispatch's own request
+  ;; (the same scope-pin the HTTP handler passes), so per-branch scoping via
+  ;; X-Graphden-Branch works unchanged.
+  {:name :_mcp-run-tests-fn-ids
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :fn-ids} :default {:value nil}}}
+
+  {:name :_mcp-run-tests-timeout
+   :parent :get
+   :args {:coll :_mcp-tool-args :key {:value :timeout-ms} :default {:value nil}}}
+
+  {:name :_mcp-tool-run-tests
+   :description "run-tests tool — the SAME sequential runner POST /api/tests/run uses (effect gating, redaction, per-org caps, persistence), summarised as {total passed failed other results}."
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data {:parent :_tests-run-apply
+                               :args {:fn-ids :_mcp-run-tests-fn-ids
+                                      :timeout-ms :_mcp-run-tests-timeout}}}}}}
+
+  ;; --- list-branches: the GET /api/branches data, JSON-stringified -----------
+  {:name :_mcp-tool-list-branches
+   :description "list-branches tool — the same {ok count branches} shape GET /api/branches serves."
+   :parent :_mcp-tool-ok
+   :args {:text {:parent :to-json-string
+                 :args {:data :_list-branches-data}}}}
 
   ;; --- tools/call dispatch ---------------------------------------------------
   {:name :_mcp-tools-call
@@ -438,6 +507,10 @@
                     :_mcp-tool-create-branch
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "upsert-fn-defs"}}}
                     :_mcp-tool-upsert
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "run-tests"}}}
+                    :_mcp-tool-run-tests
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "list-branches"}}}
+                    :_mcp-tool-list-branches
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "diff-branch"}}}
                     :_mcp-tool-diff-branch
                     {:value true}

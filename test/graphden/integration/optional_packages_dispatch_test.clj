@@ -108,6 +108,27 @@
       (is (seq (get-in body [:result :tools])) "tools/list is populated"))))
 
 
+(deftest mcp-route-fails-closed-without-a-bearer
+  ;; /mcp rides :post (auth-required): every AI tool call must carry a real
+  ;; graphden token — the whole model of "the AI acts with exactly that
+  ;; user's rights" rests on this 401. This was the one auth surface no MCP
+  ;; test covered (mcp-endpoint-test drives :_mcp-dispatch directly).
+  (let [post! (fn [headers]
+                (br/dispatch *router*
+                             {:request-method :post
+                              :uri "/mcp"
+                              :headers (merge {"content-type" "application/json"} headers)
+                              :query-string nil
+                              :body (json/generate-string
+                                      {:jsonrpc "2.0" :id 1 :method "tools/list" :params {}})}))]
+    (testing "no Authorization header → 401"
+      (is (= 401 (:status (post! {})))))
+    (testing "a wrong bearer → 401"
+      (is (= 401 (:status (post! {"authorization" "Bearer wrong"})))))
+    (testing "the right bearer → 200 (sanity: the same request succeeds)"
+      (is (= 200 (:status (post! auth-headers)))))))
+
+
 (deftest registry-index-is-served-and-fresh-through-the-per-branch-handler
   (testing "GET /api/packages is served (200, JSON array) — the registry router
             reaches the request through the branch-router's optional slot"

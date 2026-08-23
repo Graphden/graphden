@@ -58,7 +58,8 @@
 (deftest tools-list-catalog
   (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 2 :method "tools/list"})]
     (is (= #{"list-namespaces" "search-fns" "read-fn" "execute-fn"
-             "create-branch" "upsert-fn-defs" "diff-branch"}
+             "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
+             "diff-branch"}
            (into #{} (map :name) (get-in rpc [:result :tools]))))
     (testing "every tool carries an object inputSchema"
       (doseq [t (get-in rpc [:result :tools])]
@@ -184,8 +185,51 @@
           rpc (call-tool! "upsert-fn-defs" {:branch branch :fn-defs "[{:parent :add}]"})]
       (is (= -32602 (get-in rpc [:error :code])))))
 
-  (testing "tools/list advertises the mutation tools"
+  (testing "tools/list advertises the mutation + verification tools"
     (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 100 :method "tools/list"})]
       (is (= #{"list-namespaces" "search-fns" "read-fn" "execute-fn"
-               "create-branch" "upsert-fn-defs" "diff-branch"}
+               "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
+               "diff-branch"}
              (into #{} (map :name) (get-in rpc [:result :tools])))))))
+
+
+(deftest mutation-platform-guard
+  ;; The editor API refuses writes against package-synced fns
+  ;; (crud.package-guard); the MCP sync path enforces the same protection —
+  ;; a platform fn-def in the bundle is a -32602 unless the model passes
+  ;; allow-platform-overwrite explicitly.
+  (let [branch (str "ai/mcp-plat-" (subs (str (random-uuid)) 0 8))]
+    (call-tool! "create-branch" {:name branch})
+    (testing "a platform fn-def (core.arithmetic/add) is refused without the flag"
+      ;; The guard is identity-targeted: the deterministic (namespace, name)
+      ;; id must equal a package-synced row's. A bare `:add` with no
+      ;; namespace is a DIFFERENT identity (a new root-ns fn) and passes —
+      ;; same rule the editor's package-guard applies.
+      (let [rpc (call-tool! "upsert-fn-defs"
+                            {:branch branch
+                             :fn-defs "[{:name :add :namespace \"core.arithmetic\" :parent :const :args {:value 1}}]"})
+            msg (get-in rpc [:error :message] "")]
+        (is (= -32602 (get-in rpc [:error :code])))
+        (is (re-find #"platform-owned" msg))
+        (is (re-find #"add" msg))
+        (is (re-find #"allow-platform-overwrite" msg) "the message names the escape hatch")))
+    (testing "the flag lets a deliberate bundle through (plumbing check on a harmless def)"
+      (let [data (tool-text (call-tool! "upsert-fn-defs"
+                                        {:branch branch
+                                         :allow-platform-overwrite true
+                                         :fn-defs "[{:name :mcp-plat-own :parent :add :args {:nums [1 2]}}]"}))]
+        (is (true? (:ok data)) (pr-str data))))))
+
+
+(deftest tool-run-tests-and-list-branches
+  (testing "run-tests runs the branch's (empty) test set through the real runner"
+    (let [data (tool-text (call-tool! "run-tests" {}))]
+      (is (contains? data :total) (pr-str data))
+      (is (int? (:total data)))
+      (is (int? (:passed data)))
+      (is (int? (:failed data)))))
+  (testing "list-branches returns the /api/branches shape"
+    (let [data (tool-text (call-tool! "list-branches" {}))]
+      (is (true? (:ok data)))
+      (is (pos? (:count data)) "at least main exists")
+      (is (some #(= "main" (:name %)) (:branches data))))))

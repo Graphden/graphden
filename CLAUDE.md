@@ -167,6 +167,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/EDITOR_MODULES.md](docs/EDITOR_MODULES.md) | Per-module map of the editor frontend + JS load order | Before touching any `editor-*.js` / `web/runtime/*.js` |
 | [docs/EDITOR_ROW_ACTIONS.md](docs/EDITOR_ROW_ACTIONS.md) | As-shipped row-actions partial contract (4 contexts, query-param matrix) + why the other popovers stay JS | When extending the row-actions partial or considering another popover migration |
 | [docs/PARTIALS.md](docs/PARTIALS.md) | Graph-native HTML partials at `GET /partials/*` — HTMX wiring, recipe, gotchas | When wiring a new server-rendered popover/panel |
+| [docs/MCP_CLIENTS.md](docs/MCP_CLIENTS.md) | Connecting AI clients to `/mcp` — Claude Code/Cursor setup, branch scoping, the agent cycle + its honesty table | When wiring an MCP client, or before live-verifying fn-defs through /mcp |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Canonical error `:type` keywords | When handling errors |
 | [docs/EXTENDING.md](docs/EXTENDING.md) | HOF semantics, custom storage, schema extensions | When extending below the package layer |
@@ -615,6 +616,30 @@ resources/executor-packages.edn   # Operator manifest of EXTERNAL Type-2 package
 ## Packages System
 
 Base functions and fn-defs live in `resources/packages/{pkg}/{module}/` as `fns.edn` (declarations) + `impls.clj` (Clojure impls). Dependencies in `package.edn` drive load order. See [docs/PACKAGES.md](docs/PACKAGES.md) for full format and workflow.
+
+## Live graph verification via /mcp (agent workflow)
+
+For NON-trivial fn-def work, verify the composition on a LIVE instance
+before the final rebuild, through the `/mcp` endpoint of your own
+worktree stack ([docs/MCP_CLIENTS.md](docs/MCP_CLIENTS.md) has the full
+setup + the honesty table):
+
+1. `bb wt up` → `claude mcp add --transport http graphden
+   http://localhost:<port из вывода wt up>/mcp` (re-add after every
+   `wt up` — the port is per-claim).
+2. On a scratch branch `ai/<feature>`: `upsert-fn-defs` (the EDN you
+   write IS the future fns.edn fragment) → `execute-fn` / `run-tests` —
+   `-32602`s and sync errors are actionable feedback.
+3. Copy the VERIFIED EDN into `fns.edn` verbatim.
+4. Final `bb wt up` — the ONLY step that runs the real package
+   boot-sync (load-order, topological sort across packages,
+   ambiguous-ref, packages.owned) — then `bb ci`.
+
+Do NOT use the MCP cycle for: constant/description edits, renames,
+`impls.clj` (base-fns need a rebuild; fast hypotheses go over nREPL —
+skill `graphden-repl`), frontend, docs. NEVER point an MCP client at the
+shared demo stack on :9002. `upsert-fn-defs` refuses platform
+(package-synced) fn-defs without an explicit `allow-platform-overwrite`.
 
 ## Best Practices (CRITICAL)
 

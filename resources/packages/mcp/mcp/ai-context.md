@@ -119,10 +119,14 @@ can be referenced is `:const` (`{:parent :const :args {:value …}}`).
 4. **`upsert-fn-defs`** — write your fn-defs (EDN vector) INTO that
    branch. The same constraints a human faces apply (no dependency
    cycles, unique names, type-check), so a rejection is precise feedback
-   — read it, fix the proposal, try again.
+   — read it, fix the proposal, try again. Platform fn-defs (the ones the
+   package sync owns) are refused — build under your own namespace.
 5. **`execute-fn`** — run what you built and check the result.
-6. **`diff-branch`** — this is what the human reviews: added / modified /
+6. **`run-tests`** — after writing tests (§10), run the branch's test set
+   and read `{total passed failed}` — the write→verify loop, closed.
+7. **`diff-branch`** — this is what the human reviews: added / modified /
    removed entities. Leave your branch clean and readable.
+   (`list-branches` re-orients you after a context loss.)
 
 ## 8. Naming & style (so your graph reads like ours)
 

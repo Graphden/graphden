@@ -20,6 +20,7 @@ what it costs.
 | Persistence | ephemeral (reaped) | persistent | persistent | persistent |
 | Always-on services | ✗ | ✗ | ✗ | ✓ (up to 20) |
 | Resource isolation | shared pod | shared pod | shared pod | dedicated cgroup-limited shard |
+| BYO executor (run your own — [BYO_RUNBOOK.md](BYO_RUNBOOK.md)) | ✗ | ✗ | ✓ | ✓ |
 | `raw-sql` (platform DB) | ✗ | ✗ | ✗ | ✗ |
 
 Notes:

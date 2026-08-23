@@ -44,6 +44,7 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Distributing packages | [PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md) |
 | Extending below the package layer | [EXTENDING.md](EXTENDING.md) |
 | Guide served to external AI authors | [AI_CONTEXT.md](AI_CONTEXT.md) |
+| Connecting AI clients (Claude Code / Cursor) to `/mcp` | [MCP_CLIENTS.md](MCP_CLIENTS.md) |
 
 > Design records (ADRs), RFCs, performance notes, and other
 > engineering-internal documents live alongside these but are aimed at

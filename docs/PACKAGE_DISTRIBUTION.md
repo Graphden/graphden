@@ -719,9 +719,18 @@ the branch-router's request-scope selector. The exporter's format IS the
 import format, so cloud→self-host (and back) is one download + one POST,
 then the normal diff → review → merge flow.
 
-**Planned (not yet implemented):** pulling a package from a *remote*
-registry (another graphden install / the cloud) directly from
-`POST /api/packages/install`.
+**Remote-registry pull:** `POST /api/packages/install` with
+`{name, version, source}` mirrors the CONCRETE `version` from the remote
+registry at `source` (its `GET /api/packages/:name/:version?format=edn`
+face — the EDN wire keeps fn-def keywords intact; the bearer for the
+remote comes from `GRAPHDEN_REGISTRY_TOKEN`), stores it as a LOCAL
+`:package-version` row (never re-marked public), and then the normal
+install worklist materializes + pins it. Missing dependencies mirror the
+same way, one worklist step at a time. Version constraints
+(`latest`/ranges) are not resolved remotely — name an exact version. So
+"self-host pulls a public package from the cloud" is: a free cloud
+account's token in `GRAPHDEN_REGISTRY_TOKEN` + one install call with
+`source: https://graphden.dev`.
 
 **Ordering rule:** a fns-package transitively depends on an impl-package (§ 1).
 So install impl-dependencies first (Type-2, rebuild), then the fns-package

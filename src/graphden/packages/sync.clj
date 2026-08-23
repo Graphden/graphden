@@ -20,6 +20,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [clojure.walk]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
@@ -368,6 +369,93 @@
     (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)))
 
 
+(defn- ns-path-index
+  "`{ns-id → dotted-path}` resolver over storage's `:ns` rows (memoised
+   walk up `:parent-id`)."
+  [storage]
+  (let [ns-by-id (into {} (map (juxt :id identity)) (sp/query-entities storage :ns {}))]
+    (fn ns-path
+      [nsid]
+      (when-let [r (ns-by-id nsid)]
+        (if-let [p (:parent-id r)]
+          (str (ns-path p) "." (:name r))
+          (:name r))))))
+
+
+(defn drop-orphan-anon-defs
+  "Strip `_anon-*` top-level defs that nothing else in the bundle
+   references. The exporter lifts every inline anonymous def to a
+   synthetic top-level `_anon-<hash>` entry; when the referencing OWNERS
+   are dropped from an import (platform-owned defs are skipped —
+   `import-bundle!`), their anons become pure orphans, and syncing a
+   whole-graph bundle then floods the target with thousands of duplicate
+   anon identities (observed poisoning the compiled router's coercion
+   closures). Anons a KEPT def reaches — directly or through other kept
+   anons — stay, so user-authored inline anons round-trip untouched.
+   Returns the filtered vector."
+  [fn-defs]
+  (let [anon-name? #(str/starts-with? (name %) "_anon-")
+        anon-defs (into {} (comp (filter #(anon-name? (:name %)))
+                                 (map (juxt :name identity)))
+                        fn-defs)
+        refs-of (fn [d]
+                  (let [acc (volatile! #{})]
+                    (clojure.walk/postwalk
+                      (fn [x]
+                        (when (and (keyword? x) (anon-name? x)
+                                   (contains? anon-defs (keyword (name x))))
+                          (vswap! acc conj (keyword (name x))))
+                        x)
+                      [(:args d) (:parent d) (:parents d) (:return-type d)
+                       (:type d) (:input d)])
+                    @acc))
+        roots (remove #(anon-name? (:name %)) fn-defs)]
+    (loop [kept (into #{} (mapcat refs-of) roots)]
+      (let [next-kept (into kept (mapcat #(refs-of (anon-defs %))) kept)]
+        (if (= next-kept kept)
+          (filterv #(or (not (anon-name? (:name %)))
+                        (contains? kept (:name %)))
+                   fn-defs)
+          (recur next-kept))))))
+
+
+(defn adopt-bundle-identities!
+  "Canonicalise IDENTITIES before a bundle sync: for each def whose
+   `(namespace, name)` already exists as a row with a RANDOM (editor-
+   created) id — and whose deterministic id does NOT exist yet — repoint
+   every ref at the deterministic id and purge the old identity, so the
+   following `sync-bundle!` re-creates the fn under its canonical
+   `uuid-v5(ns, name)` id instead of minting a same-name sibling.
+
+   This is the import-side half of cross-install push/pull: an fn born in
+   the editor has a random id locally; the hub's sync of the pushed
+   bundle minted the deterministic id; without adoption the first PULL
+   after a push lands a DUPLICATE name next to the original. Same
+   trade-off as the boot reconciler's MOVE: refs survive (identity + all
+   branch version rows, `idrepair/repoint-refs!`), the old row's own
+   per-branch version history does not — the bundle carries the current
+   state and the sync recreates it on the target branch.
+
+   Returns the adopted names (empty = nothing to do)."
+  [storage fn-defs]
+  (let [ns-path (ns-path-index storage)
+        adoptable
+        (for [d fn-defs
+              :let [det-id (records/fn-id (:namespace d) (:name d))
+                    rows (sp/query-entities storage :fn {:name (name (:name d))})
+                    same-ns (filterv #(= (:namespace d) (some-> (:namespace-id %) ns-path))
+                                     rows)]
+              :when (and (not-any? #(= det-id (:id %)) same-ns)
+                         (= 1 (count same-ns)))]
+          [(first same-ns) det-id])]
+    (doseq [[row det-id] adoptable]
+      (log/info "adopting editor-created identity onto its deterministic id"
+                {:name (:name row) :from (:id row) :to det-id})
+      (idrepair/repoint-refs! storage {(:id row) det-id})
+      (idrepair/purge-fn-subgraph! storage (:id row)))
+    (mapv (fn [[row _]] (:name row)) adoptable)))
+
+
 (defn reconcile-bundle-scope!
   "Declarative PRUNE for a runtime bundle import (`POST /api/import/graph`
    `?prune=true` — the push/pull snapshot semantics): within EXACTLY the
@@ -389,13 +477,7 @@
   [storage fn-defs]
   (let [bundle-namespaces (into #{} (map :namespace) fn-defs)
         expected (into #{} (map #(records/fn-id (:namespace %) (:name %))) fn-defs)
-        ns-by-id (into {} (map (juxt :id identity)) (sp/query-entities storage :ns {}))
-        ns-path (fn ns-path
-                  [nsid]
-                  (when-let [r (ns-by-id nsid)]
-                    (if-let [p (:parent-id r)]
-                      (str (ns-path p) "." (:name r))
-                      (:name r))))
+        ns-path (ns-path-index storage)
         stale (vec
                 (for [row (sp/query-entities storage :fn {})
                       :when (and (:name row)

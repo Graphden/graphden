@@ -4,6 +4,7 @@
    graph composition (fn-defs) over this + the CRUD base-fns."
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.string :as str]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
@@ -18,7 +19,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.tenancy.context :as tc]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [org.httpkit.client :as http-client]))
 
 
 ;; The export BUNDLES (`:export-namespace` / `:export-graph`) are graph
@@ -427,6 +429,72 @@
 
 
 ;; ---------------------------------------------------------------------------
+;; Remote-registry mirror — the client half of cross-install package pull
+;; (PACKAGE_DISTRIBUTION § 13). ONE remote package per call: the install
+;; worklist drives the dependency closure through its normal `:resolve`
+;; ops, each missing dep mirroring on its own retry — so the recursion
+;; stays graph-visible, and this base-fn stays a transport+store boundary
+;; (fetch → decode → idempotent insert; same atomic check-then-insert
+;; class as `publish-package-apply`).
+;; ---------------------------------------------------------------------------
+
+(defbase mirror-remote-package!
+  "Fetch `(pkg-name, spec)` from the REMOTE registry `source` and store it
+   as a local `:package-version` row. Idempotent: an existing
+   `(name, version)` row wins. Transport is the fetch route's EDN face
+   (`?format=edn` — the JSON face stringifies fn-def keywords). `spec`
+   must be a CONCRETE version: remote constraint resolution is not built,
+   so nil / \"latest\" / range specs fail as data. The bearer comes from
+   `GRAPHDEN_REGISTRY_TOKEN` (the caller's account token on the remote —
+   a public package needs any valid account there). Errors ride as data
+   (`{:error …}`) so the install worklist can wrap them."
+  [source pkg-name spec]
+  (cr/record-effect! :network)
+  (cr/record-effect! :db)
+  (cr/record-effect! :env)
+  (if (or (nil? spec)
+          (contains? #{"" "latest" "*"} (str spec))
+          (re-find #"[*><~^ ]" (str spec)))
+    {:error "remote-install-needs-exact-version" :name pkg-name :spec spec}
+    (let [token (System/getenv "GRAPHDEN_REGISTRY_TOKEN")
+          base (str/replace (str source) #"/+$" "")
+          url (str base "/api/packages/" pkg-name "/" spec "?format=edn")
+          resp @(http-client/get url
+                                 {:headers (cond-> {}
+                                             (seq (str token))
+                                             (assoc "Authorization" (str "Bearer " token)))
+                                  :as :text :timeout 60000})]
+      (cond
+        (:error resp)
+        {:error "remote-unreachable" :source base :detail (str (:error resp))}
+
+        (not= 200 (:status resp))
+        {:error "remote-fetch-failed" :source base :status (:status resp)}
+
+        :else
+        (let [row (try (edn/read-string {:readers wire/wire-readers} (:body resp))
+                       (catch Exception _ ::unreadable))]
+          (cond
+            (= ::unreadable row) {:error "remote-bundle-unreadable" :source base}
+            (nil? row) {:error "remote-not-found" :name pkg-name :version spec}
+            :else
+            (let [storage (request/require-storage ctx)]
+              (when-not (seq (sp/query-entities storage :package-version
+                                                {:name pkg-name :version spec}))
+                (sp/create-entity storage :package-version
+                                  (-> row
+                                      (select-keys [:name :version :ns-root :fns
+                                                    :dependencies :package-dependencies
+                                                    :secrets :content-hash])
+                                      (assoc :org-id (tc/current-org)
+                                             ;; a mirrored copy is LOCAL — never
+                                             ;; re-published as public here
+                                             :public? false
+                                             :published-at (java.time.Instant/now)))))
+              {:mirrored (str pkg-name) :version (str spec) :from base})))))))
+
+
+;; ---------------------------------------------------------------------------
 ;; Bundle import — POST /api/import/graph. The §3.3 atomic write core:
 ;; branch resolve/create, the branch-switched sync, the optional prune and
 ;; the TARGET branch's invalidation are one effect-ordered sequence (same
@@ -450,7 +518,7 @@
    semantics, branch tombstones only); delta-invalidate THAT branch's
    compiled registry.
 
-   Returns `{:fn-ids [...] :skipped-owned [...] :pruned {...}}`, or
+   Returns `{:fn-ids [...] :skipped-owned [...] :adopted [...] :pruned {...}}`, or
    `{:error \"branch-not-found\"}` when the branch doesn't resolve and
    `create?` is false — errors ride as data so the graph maps them to
    response envelopes."
@@ -470,16 +538,26 @@
     (if-not branch
       {:error "branch-not-found"}
       (let [storage (vs/switch-branch request-storage (:id branch))
-            {owned-defs true wanted false}
-            (group-by #(boolean (owned/owned-fn-id? (ids/fn-id (:namespace %) (:name %))))
+            {owned-defs true wanted-raw false}
+            (group-by #(owned/owned-fn-id? (ids/fn-id (:namespace %) (:name %)))
                       (vec fn-defs))
+            ;; Dropping the owned defs orphans their exporter-lifted
+            ;; `_anon-*` entries — syncing those floods the branch with
+            ;; duplicate anon identities (they poisoned compiled routers).
+            wanted (pkg-sync/drop-orphan-anon-defs (vec wanted-raw))
+            ;; Canonicalise BEFORE the sync: an editor-born fn has a random
+            ;; id here while the bundle's sync mints uuid-v5(ns,name) — see
+            ;; adopt-bundle-identities!. Without it the first pull after a
+            ;; push lands a duplicate name next to the original.
+            adopted (pkg-sync/adopt-bundle-identities! storage (vec wanted))
             fn-ids (when (seq wanted) (pkg-sync/sync-bundle! storage (vec wanted)))
             pruned (when prune? (pkg-sync/reconcile-bundle-scope! storage (vec wanted)))]
         (exec-ctx/invalidate-graph-cache!
           (if-let [router (br/current-router)] (br/ctx-for router (:id branch)) ctx)
           fn-ids)
         (cond-> {:fn-ids (mapv str fn-ids)
-                 :skipped-owned (mapv #(some-> (:name %) name) owned-defs)}
+                 :skipped-owned (mapv #(some-> (:name %) name) owned-defs)
+                 :adopted adopted}
           pruned (assoc :pruned pruned))))))
 
 
@@ -524,6 +602,7 @@
    :materialize-package-fns materialize-package-fns
    :rewrite-refs-to-version rewrite-refs-to-version
    :package-upsert-pin package-upsert-pin
+   :mirror-remote-package! mirror-remote-package!
    ;; taint-propagate: :skipped-owned returns the caller bundle's own
    ;; :name fields — content passthrough (SECRETS.md § T3).
    :import-bundle! {:impl import-bundle! :taint-propagate? true}})

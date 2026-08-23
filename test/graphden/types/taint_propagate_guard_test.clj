@@ -84,7 +84,7 @@
     :nil? :non-blank? :not :notify-after-write :or :os-arch
     :os-load-average :os-name :os-processors :package-upsert-pin
     :package-version-materialized? :pairs->map :parse-constraint
-    :import-bundle! :parse-edn :parse-int :parse-json :parse-uuid :pg-execute
+    :import-bundle! :mirror-remote-package! :parse-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding
     ;; :pkg-delete-guard-reason reads server rows (fn name via the
     ;; owned registry) — the reason string carries no caller content.

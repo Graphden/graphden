@@ -16,7 +16,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.test-infra.shared-bootstrap :as sb]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [org.httpkit.server :as hk]))
 
 
 (def ^:dynamic *router* nil)
@@ -158,6 +159,30 @@
         (is (contains? (branch-fn-names branch) "imp-leaf"))))))
 
 
+(deftest import-adopts-editor-born-identities
+  ;; The pull-after-push dedup: an fn born in the editor carries a RANDOM
+  ;; id; the hub's sync of a pushed bundle minted the deterministic
+  ;; uuid-v5(ns,name). Importing that bundle back must ADOPT the local
+  ;; random-id row onto the deterministic id — not land a same-name twin.
+  (let [branch (str "imp/adopt-" (subs (str (random-uuid)) 0 8))
+        seed "[{:name :adopt-seed :namespace \"imp.adopt\" :parent :add :args {:nums [1]}}]"
+        _ (import! (str "target=" branch "&create=true") seed)
+        branch-row (first (sp/query-entities (:base-storage *storage*)
+                                             :branch {:name branch}))
+        on-branch (vs/switch-branch *storage* (:id branch-row))
+        ns-id (:namespace-id (first (sp/query-entities on-branch :fn {:name "adopt-seed"})))
+        editor-row (sp/create-entity on-branch :fn {:id (random-uuid)
+                                                    :name "adoptee"
+                                                    :namespace-id ns-id})
+        bundle "[{:name :adoptee :namespace \"imp.adopt\" :parent :add :args {:nums [7]}}]"
+        {:keys [json]} (import! (str "target=" branch) bundle)]
+    (is (= ["adoptee"] (:adopted json)) (pr-str json))
+    (let [rows (sp/query-entities on-branch :fn {:name "adoptee"})]
+      (is (= 1 (count rows)) "no same-name twin")
+      (is (not= (:id editor-row) (:id (first rows)))
+          "the surviving row carries the deterministic id, not the random one"))))
+
+
 (deftest export-import-round-trips-the-whole-graph
   ;; The migration story: GET /api/export/graph → POST /api/import/graph on
   ;; a branch. Platform defs come back skipped-owned (the boot sync owns
@@ -176,3 +201,67 @@
     (is (true? (:ok json)))
     (is (seq (:skipped-owned json))
         "the whole-graph bundle's platform defs are skipped, not rewritten")))
+
+
+(deftest remote-install-mirrors-and-installs
+  ;; Cross-install package pull (PACKAGE_DISTRIBUTION § 13): POST
+  ;; /api/packages/install with a :source mirrors the version from the
+  ;; remote registry's EDN face, then the normal install worklist
+  ;; materializes + pins it locally.
+  (let [row {:name "acme.rp" :version "1.0.0" :ns-root "acme.rp"
+             :fns [{:name :rp-hello :namespace "acme.rp"
+                    :parent :const :args {:value "hi"}}]
+             :dependencies [] :package-dependencies []
+             :secrets [] :content-hash "rp-hash"}
+        seen (atom [])
+        stub (hk/run-server
+               (fn [req]
+                 (swap! seen conj (:uri req))
+                 (if (= "/api/packages/acme.rp/1.0.0" (:uri req))
+                   {:status 200 :headers {"Content-Type" "application/edn"}
+                    :body (pr-str row)}
+                   {:status 404 :body "nope"}))
+               {:port 0})
+        source (str "http://localhost:" (:local-port (meta stub)))]
+    (try
+      (let [resp (br/dispatch *router*
+                              {:request-method :post
+                               :uri "/api/packages/install"
+                               :headers (merge auth-headers
+                                               {"content-type" "application/json"})
+                               :query-string nil
+                               :body (json/generate-string
+                                       {:name "acme.rp" :version "1.0.0"
+                                        :source source})})
+            json (json/parse-string (str (:body resp)) true)]
+        (is (= 200 (:status resp)) (pr-str json))
+        (is (true? (:ok json)) (pr-str json))
+        (is (= ["/api/packages/acme.rp/1.0.0"] @seen)
+            "exactly one remote fetch (idempotent mirror)")
+        (testing "the mirrored row exists locally, never public"
+          (let [local (first (sp/query-entities *storage* :package-version
+                                                {:name "acme.rp" :version "1.0.0"}))]
+            (is (some? local))
+            (is (false? (:public? local)))
+            (is (= "rp-hash" (:content-hash local)))
+            (is (= (:fns row) (:fns local))
+                "fn-def keywords survive the EDN wire")))
+        (testing "the version is materialized under its version-qualified ns"
+          (is (seq (sp/query-entities *storage* :fn {:name "rp-hello"})))))
+      (finally (stub)))))
+
+
+(deftest remote-install-rejects-a-version-constraint
+  (let [resp (br/dispatch *router*
+                          {:request-method :post
+                           :uri "/api/packages/install"
+                           :headers (merge auth-headers
+                                           {"content-type" "application/json"})
+                           :query-string nil
+                           :body (json/generate-string
+                                   {:name "acme.rp2" :version "latest"
+                                    :source "http://localhost:1"})})
+        json (json/parse-string (str (:body resp)) true)]
+    (is (false? (:ok json)) (pr-str json))
+    (is (= "not-found" (:reason json))
+        "a non-exact spec can't mirror; the worklist reports not-found")))

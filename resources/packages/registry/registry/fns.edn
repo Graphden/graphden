@@ -620,11 +620,32 @@
    :parent :fetch-package-version
    :args {:pkg-name :_fetch-pkg-name :pkg-version :_fetch-pkg-version}}
 
-  {:name :fetch-package-handler
-   :lambda-params [:request]
-   :description "Ring handler for GET /api/packages/:name/:version (auth-required) — JSON bundle, or null when absent."
+  {:name :_fetch-pkg-edn?
+   :description "`?format=edn` — the faithful wire for cross-install mirroring (JSON stringifies fn-def keywords)."
+   :parent :equal?
+   :args {:a {:parent :query-param
+              :args {:request {:as :request} :param-name {:value "format"}}}
+          :b {:value "edn"}}}
+
+  {:name :_fetch-pkg-edn-body
+   :parent :pr-str
+   :args {:value :_fetch-pkg-result}}
+
+  {:name :_fetch-pkg-edn-resp
+   :parent :edn-ok-response
+   :args {:body :_fetch-pkg-edn-body}}
+
+  {:name :_fetch-pkg-json-resp
    :parent :json-handler
    :args {:data :_fetch-pkg-result}}
+
+  {:name :fetch-package-handler
+   :lambda-params [:request]
+   :description "Ring handler for GET /api/packages/:name/:version (auth-required) — JSON bundle by default; ?format=edn serves the same row as EDN text (keywords intact — what mirror-remote-package! consumes)."
+   :parent :if
+   :args {:test :_fetch-pkg-edn?
+          :then :_fetch-pkg-edn-resp
+          :else :_fetch-pkg-json-resp}}
 
   {:name :api-packages-fetch
    :description "GET /api/packages/:name/:version — the full published bundle. Auth-required."
@@ -983,11 +1004,58 @@
    :parent :invoke
    :args {:func {:as :self} :arg :_inst-expand-state}}
 
+  ;; --- remote mirror (cross-install pull, PACKAGE_DISTRIBUTION § 13):
+  ;;     a locally-unresolvable op with a `:source` mirrors the version
+  ;;     from the remote registry and retries the SAME op ONCE — the
+  ;;     `:mirrored` flag on the op prevents a loop when the remote
+  ;;     doesn't have it either. Dep ops inherit the same behaviour, so
+  ;;     the remote closure arrives one worklist step at a time. ---
+  {:name :_inst-op-mirrored?
+   :parent :get
+   :args {:coll :_inst-op :key {:value :mirrored} :default {:value false}}}
+
+  {:name :_inst-should-mirror?
+   :parent :and
+   :args {:values [:_inst-row-nil?
+                   {:parent :some?
+                    :args {:value {:as :source :type :nullable-text}}}
+                   {:parent :not :args {:value :_inst-op-mirrored?}}]}}
+
+  {:name :_inst-mirror-fetched
+   :parent :mirror-remote-package!
+   :args {:source {:as :source :type :nullable-text}
+          :pkg-name {:ref :_inst-op-name :type :text}
+          :spec {:ref :_inst-op-spec :type :nullable-text}}}
+
+  {:name :_inst-mirrored-op
+   :parent :assoc
+   :args {:map :_inst-op :key {:value :mirrored} :value {:value true}}}
+
+  {:name :_inst-mirror-pending
+   :parent :cons
+   :args {:item :_inst-mirrored-op
+          :coll {:ref :_inst-rest :type [:list :any]}}}
+
+  {:name :_inst-mirror-state
+   :parent :zipmap
+   :args {:keys [{:value :pending} {:value :visited}]
+          :vals [:_inst-mirror-pending :_inst-visited]}}
+
+  {:name :_inst-mirror-reenter
+   :parent :invoke
+   :args {:func {:as :self} :arg :_inst-mirror-state}}
+
+  {:name :_inst-mirror-retry
+   :description "Mirror, then re-enter the worklist on the SAME op (now :mirrored) — the fetch runs first via :do ordering."
+   :parent :do
+   :args {:steps [:_inst-mirror-fetched :_inst-mirror-reenter]}}
+
   {:name :_inst-do-resolve
    :parent :cond
-   :args {:clauses [:_inst-row-nil?  :_inst-fail-not-found
-                    :_inst-visiting? :_inst-advance
-                    {:value true}    :_inst-expand-recurse]}}
+   :args {:clauses [:_inst-should-mirror? :_inst-mirror-retry
+                    :_inst-row-nil?       :_inst-fail-not-found
+                    :_inst-visiting?      :_inst-advance
+                    {:value true}         :_inst-expand-recurse]}}
 
   ;; --- :install op: guard fn-level deps, materialize (unless already
   ;;     visible), pin, then continue — or return the root envelope ---
@@ -1080,7 +1148,7 @@
           :else :_inst-write-then-continue}}
 
   {:name :_install-body
-   :description "Parsed JSON body of POST /api/packages/install — `{:name :version}`."
+   :description "Parsed JSON body of POST /api/packages/install — `{:name :version :source?}` (source = remote registry base URL for cross-install pull)."
    :parent :parse-json-body}
 
   {:name :_install-name-raw
@@ -1093,9 +1161,15 @@
   {:name :_install-version
    :parent :to-str :args {:value :_install-version-raw}}
 
+  {:name :_install-source
+   :description "Optional remote registry base URL — cross-install pull (PACKAGE_DISTRIBUTION § 13). nil = local-only install."
+   :parent :get
+   :args {:coll :_install-body :key {:value :source} :default nil}}
+
   {:name :_install-result
    :parent :install-package
-   :args {:pkg-name :_install-name :pkg-version :_install-version}}
+   :args {:pkg-name :_install-name :pkg-version :_install-version
+          :source :_install-source}}
 
   {:name :install-package-handler
    :lambda-params [:request]
@@ -2289,13 +2363,21 @@
   ;; predicate per rule; the §3.3 atomic write core is `:import-bundle!`.
   ;; ---------------------------------------------------------------------
   {:name :import-bundle!
-   :description "Apply a bundle's fn-defs to the branch named `branch-name` (create it when `create?`, stamping the caller as owner with the `owner` write-policy). Platform-owned defs are skipped + reported; the rest sync through the same path the package loader uses; `prune?` adds snapshot semantics (branch tombstones for fns the bundle no longer contains, kept + reported while referenced); the TARGET branch's registry is delta-invalidated. Returns {:fn-ids :skipped-owned :pruned} or {:error \"branch-not-found\"}."
+   :description "Apply a bundle's fn-defs to the branch named `branch-name` (create it when `create?`, stamping the caller as owner with the `owner` write-policy). Platform-owned defs are skipped + reported; the rest sync through the same path the package loader uses; `prune?` adds snapshot semantics (branch tombstones for fns the bundle no longer contains, kept + reported while referenced); the TARGET branch's registry is delta-invalidated. Editor-born same-name identities are ADOPTED onto their deterministic ids first (adopt-bundle-identities! — the pull-after-push dedup). Returns {:fn-ids :skipped-owned :adopted :pruned} or {:error \"branch-not-found\"}."
    :args {:branch-name {:type :nullable-text :description "Target branch — never the request's own, never main implicitly. nil/blank never resolves (the route's guard 400s first)."}
           :create? {:type :bool :description "Create the branch (forked off the request's branch) when it doesn't exist."}
           :prune? {:type :bool :description "Snapshot semantics: tombstone fns in the bundle's namespaces that the bundle no longer contains."}
           :fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps, exactly the fns.edn shape."}}
    :return-type :keyword-map
    :effects #{:db}}
+
+  {:name :mirror-remote-package!
+   :description "Fetch (pkg-name, spec) from the REMOTE registry `source` (?format=edn face; bearer from GRAPHDEN_REGISTRY_TOKEN) and store it as a local :package-version row — idempotent, never public. spec must be a CONCRETE version. Errors ride as data ({:error ...}) so the install worklist wraps them."
+   :args {:source {:type :nullable-text :description "Remote registry base URL, e.g. https://graphden.dev."}
+          :pkg-name {:type :text :description "Package name."}
+          :spec {:type :nullable-text :description "CONCRETE version (constraints are rejected as data)."}}
+   :return-type :keyword-map
+   :effects #{:network :db :env}}
 
   {:name :_import-branch-param
    :description "The target branch name (`?target=` — NOT `?branch=`, which is the branch-router's own request-scope selector); REQUIRED, imports never fall back to the request's own branch."

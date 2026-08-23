@@ -204,6 +204,16 @@
   #uuid "9de343a8-7a6b-4041-9599-6acfedac1253")
 
 
+(def ^:private branch-approval-org-id-field-uuid
+  ;; Tenant owner — lets the tenancy addon's OrgScopedStorage stamp +
+  ;; org-filter approval rows (defence-in-depth: the merge gate + the
+  ;; /approvals read are ALREADY safe because they key on the org-scoped
+  ;; `:source-branch-id`, but scoping the row makes even a bare query
+  ;; org-isolated). NULL ≡ public / single-tenant. Same nullable-text
+  ;; shape as `:branch.org-id`.
+  #uuid "6a616a15-4783-4e6d-8801-730ccbded6b9")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :fn-version
 ;; =============================================================================
@@ -771,8 +781,9 @@
 
       ;; -----------------------------------------------------------------
       ;; branch-approval — one row per reviewer approval of a proposal.
-      ;; Plain, non-version-intercepted (like branch-merge). Org-scoped
-      ;; transitively via `source-branch-id` → branch.org-id.
+      ;; Plain, non-version-intercepted (like branch-merge). Carries
+      ;; `:org-id` so the tenancy addon scopes it directly (in addition
+      ;; to the transitive scoping via `source-branch-id` → branch.org-id).
       ;; -----------------------------------------------------------------
       (ds/add-entity :branch-approval branch-approval-entity-uuid
                      {:source-branch-id {:uuid branch-approval-source-branch-id-field-uuid
@@ -782,7 +793,10 @@
                       :content-stamp {:uuid branch-approval-content-stamp-field-uuid
                                       :type :text}
                       :created-at {:uuid branch-approval-created-at-field-uuid
-                                   :type :timestamptz}})
+                                   :type :timestamptz}
+                      :org-id {:uuid branch-approval-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
 
       ;; -----------------------------------------------------------------
       ;; fn-version — derived from gds/fn-fields (see § derivation above).

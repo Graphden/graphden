@@ -47,10 +47,18 @@
                     :auth-provider (auth/single-token-provider test-auth-token)})
              _ (cr/rebuild! ctx)
              router (br/create-router ctx "_app-ring-response")]
+         ;; Register the router as the process-active one — same as prod's
+         ;; `:exec/branch-router` init-key. The merge post-commit reaches
+         ;; for `br/current-router` to invalidate a cross-branch merge's
+         ;; TARGET ctx; without this it would fall back to the base ctx and
+         ;; a merge into a NON-main target branch would stay invisible.
+         (br/set-active-router! router)
          (try
            (binding [*router* router]
              (t))
-           (finally (sp/close storage)))))))
+           (finally
+             (br/clear-active-router!)
+             (sp/close storage)))))))
 
 
 (defn- auth-headers
@@ -220,3 +228,53 @@
           (str "no-header write returned 200; got=" (:status write-resp)))
       (is (some? (fn-by-name nil fn-name))
           "fn visible on main without explicit header — branch-routing default works"))))
+
+
+(deftest branch-require-merge-blocks-direct-writes-allows-merge-test
+  ;; Protected branches Stage 2: with `require-merge?` on a branch, DIRECT
+  ;; graph writes are refused (open-core enforcement) but a MERGE from
+  ;; another branch still lands. This is the GitHub "push only via merge"
+  ;; toggle, enforced without the tenancy addon.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        prot (str "protected" run-id)
+        feat (str "feat-into-prot" run-id)
+        probe (str "prot-probe" run-id)
+        identity-fn (fn-by-name nil "identity")]
+    ;; a protected branch off main, flag on
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name prot :base-branch-id "main"
+                                          :require-merge true}}))))
+    (testing "the branch row carries require-merge? true"
+      (let [row (-> (dispatch {:method :get :path (str "/api/branches/" prot)})
+                    parse-json :branch)]
+        (is (true? (:require-merge? row)))))
+    (testing "a DIRECT write to the protected branch is refused"
+      (let [resp (dispatch {:method :post :path "/api/entities/fn" :branch prot
+                            :content-type "application/x-www-form-urlencoded"
+                            :body (str "name=" probe "&parent-ids=" (:id identity-fn))})]
+        (is (= 409 (:status resp))
+            (str "direct write to a require-merge branch is a 409 CONFLICT "
+                 "(well-formed write refused by policy); got " (:status resp)))
+        (is (nil? (fn-by-name prot probe)) "nothing was written")))
+    (testing "a MERGE into the protected branch still lands"
+      (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                     :body {:name feat :base-branch-id prot}}))))
+      (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn" :branch feat
+                                     :content-type "application/x-www-form-urlencoded"
+                                     :body (str "name=" probe "&parent-ids=" (:id identity-fn))})))
+          "a write on the UNprotected child is fine")
+      (is (some? (fn-by-name feat probe)) "probe IS on feat before merge")
+      (let [m (dispatch {:method :post :path (str "/api/branches/" prot "/merge")
+                         :body {:source feat}})]
+        (is (= 200 (:status m)) (str "merge into protected branch OK; got " (:body m))))
+      (is (some? (fn-by-name prot probe))
+          "the fn landed on the protected branch via merge, not a direct write"))
+    (testing "clearing the flag re-opens direct writes"
+      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" prot "/protect")
+                                     :body {:require-merge false}}))))
+      (let [probe2 (str probe "-after")
+            resp (dispatch {:method :post :path "/api/entities/fn" :branch prot
+                            :content-type "application/x-www-form-urlencoded"
+                            :body (str "name=" probe2 "&parent-ids=" (:id identity-fn))})]
+        (is (= 200 (:status resp)) "direct write allowed after clearing the flag")
+        (is (some? (fn-by-name prot probe2)))))))

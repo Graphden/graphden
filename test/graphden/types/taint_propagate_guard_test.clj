@@ -104,7 +104,8 @@
     :ring-route-paths :ring-router :routes->js-bundle
     :rule-owner-of-name :running-entry :secret-leaf :secret-path-args
     :select-keys
-    :service-blocking-free-args :set-branch-policy! :sleep :sleep-until-ms
+    :service-blocking-free-args :set-branch-policy!
+    :set-branch-require-merge! :sleep :sleep-until-ms
     :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
     ;; :sse-stream returns the adopted-channel response map; the
     ;; render callable's output goes to the WIRE, never into the

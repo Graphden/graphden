@@ -144,8 +144,9 @@ read endpoints sit behind it too (matches `/api/services`).
 |--------|------------------------------------------|---------------------------------------|--------------------------------------|
 | GET    | `/api/branches`                          |                                       | `{ok, count, branches: [{id, name, base-branch-id, created-at, owner-id, write-policy}]}` |
 | GET    | `/api/branches/:ref`                     |                                       | `{ok, branch}` or `{ok: false, error}` |
-| POST   | `/api/branches`                          | `{name, base-branch-id?, forbid-invalid??, write-policy?}` | `{ok, branch}` — the creating principal's stable id is stamped as `owner-id` |
+| POST   | `/api/branches`                          | `{name, base-branch-id?, forbid-invalid??, write-policy?, require-merge??}` | `{ok, branch}` — the creating principal's stable id is stamped as `owner-id` |
 | POST   | `/api/branches/:ref/policy`              | `{write-policy}` ∈ `open`/`owner`/`admins` | `{ok, write-policy}` (`open` clears to null) — WHO may flip is the tenancy authorize-writer's call |
+| POST   | `/api/branches/:ref/protect`             | `{require-merge}` boolean               | `{ok, require-merge?}` — the open-core "push only via merge" toggle; direct writes then 409 `:branch/merge-required`, merges still land |
 | DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}`. Rejected when the branch has children (`:reason :branch-has-children`) or is a live **merge SOURCE** (`:constraint-violation/branch-is-merge-source` — deleting it would revert every target it merged into, since merge is by-reference; delete those targets first) |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
 | GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
@@ -194,7 +195,7 @@ core's `case` matcher.
 | Affordance | Where | What it does |
 |------------|-------|--------------|
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
-| Branch popover | click chip | Branch list + inline create + Δ diff + ⇢ merge + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks protected rows |
+| Branch popover | click chip | Branch list + inline create + Δ diff + ⇢ merge + 🔀 require-merge toggle (open-core; accented = on) + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks write-policy-protected rows |
 | Diff modal | click Δ in row | Full-viewport list of differences (`:added-in-source` / `:added-in-target` / `:modified`); :fn rows are clickable → navigate |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
@@ -240,6 +241,40 @@ API and renders the UI, but without principals the policy is inert —
 which is why the editor shows the ⛨ / Advanced affordances only under
 `body.gd-tenancy`. Flipping a policy (or deleting a protected branch)
 is itself gated on owner / `:manage-grants`.
+
+## Protected branches (Stage 2 — push only via merge, 2026-08-23)
+
+`write-policy` above answers **who** may write a branch and is
+enforced by the tenancy addon. Its sibling `require-merge?` (nullable
+boolean on the same `:branch` identity row) answers a different,
+open-core question: **how** the branch may change at all.
+
+- `nil` / `false` — direct writes allowed (the default; unchanged).
+- `true` — the branch accepts changes **only via merge**, the
+  GitHub-style "push only via merge requests" toggle. Any DIRECT
+  content mutation (create / update / delete of a versioned graph
+  entity through the editor, `/api/entities/*`, or the MCP upsert
+  path) is refused with `:branch/merge-required` → **409** and the
+  message *"This branch accepts changes only via merge…"*. A **merge
+  into** the branch is exempt — that is the entire point — so the flow
+  becomes: work on a child branch, then merge it in.
+
+Unlike `write-policy`, this needs **no tenancy addon**: enforcement
+lives in `VersionedStorage` itself (`assert-not-merge-protected!`,
+armed per-request by `branch_router` via `*enforce-require-merge?*`;
+merge runs outside that arming, so it is structurally exempt). The
+editor surfaces it as an always-visible 🔀 toggle on each branch row
+in the branch popover (dim = off, accented = on), hidden only for a
+read-only viewer (`gd-no-write`). Flip it over HTTP with
+`POST /api/branches/:ref/protect` `{require-merge: true|false}`, or at
+create time with `POST /api/branches` `{require-merge: true}`.
+
+> Merge invalidation footnote: the post-merge graph-cache invalidation
+> targets the merge's TARGET ctx. It captures the active router on the
+> request thread (dynamic/per-thread router state does not convey to
+> the raw post-commit thread), so a merge into a NON-main protected
+> branch becomes visible immediately — see
+> `merge-post-commit!` in `app/branches/impls.clj`.
 
 ## Demo seeder
 

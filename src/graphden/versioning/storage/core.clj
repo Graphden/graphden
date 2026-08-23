@@ -820,6 +820,46 @@
         (filterv alive owner-ids)))))
 
 
+(def ^:dynamic *enforce-require-merge?*
+  "Armed `true` by the HTTP request dispatch (`system.branch-router`);
+   `false` during boot / system / merge writes. When true, a DIRECT write
+   to a `:require-merge?` branch's versioned graph entity is refused
+   (`:branch/merge-required`) — GitHub-style 'push only via merge'. Merge
+   writes never reach this path (they write version rows straight to
+   base-storage, whose `:fn-version` &c. are not versioned entities), so a
+   merge INTO a protected branch is allowed. Default false so boot's
+   package sync — which writes to main through VersionedStorage but never
+   goes through dispatch — is never gated."
+  false)
+
+
+(defn- branch-requires-merge?
+  "Does `branch-id`'s `:branch` row carry `:require-merge?`? One direct
+   (non-versioned) base read; nil branch-id (unset) → false."
+  [base-storage branch-id]
+  (boolean (and branch-id
+                (:require-merge? (sp/read-entity base-storage :branch branch-id)))))
+
+
+(defn- assert-not-merge-protected!
+  "Refuse a DIRECT write to a merge-protected branch. Called once per
+   write-method entry (not per row) for versioned graph entities, and only
+   when enforcement is armed. Merge is exempt structurally (see the var
+   docstring)."
+  [base-storage branch-id entity-name]
+  (when (and *enforce-require-merge?*
+             (res/versioned-entity? entity-name)
+             (branch-requires-merge? base-storage branch-id))
+    (let [reason (str "This branch accepts changes only via merge — "
+                      "push-only-via-merge is on. Work on another branch "
+                      "and merge into it.")]
+      ;; `:reason` is the user-facing text — `crud.entities` surfaces it
+      ;; verbatim (no opaque ref), and `web/errors` maps the type to 409.
+      (throw (ex-info reason
+                      {:type :branch/merge-required :reason reason
+                       :branch-id branch-id :entity entity-name})))))
+
+
 (defrecord VersionedStorage
   [base-storage branch-id]
 
@@ -866,6 +906,7 @@
 
   (create-entity
     [_ entity-name data]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entity base-storage entity-name data)
@@ -881,6 +922,7 @@
 
   (update-entity
     [_ entity-name id data]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entity base-storage entity-name id data)
@@ -889,6 +931,7 @@
 
   (delete-entity
     [_ entity-name id]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
     (epoch/bump! base-storage entity-name)
     (cond
       (not (res/versioned-entity? entity-name))
@@ -953,6 +996,7 @@
 
   (create-entities
     [_ entity-name data-seq]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entities base-storage entity-name data-seq)
@@ -970,6 +1014,7 @@
 
   (update-entities
     [_ entity-name data-seq]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
     (epoch/bump! base-storage entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entities base-storage entity-name data-seq)
@@ -978,6 +1023,7 @@
 
   (upsert-entities
     [this entity-name data-seq]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
     (if-not (res/versioned-entity? entity-name)
       (sp/upsert-entities base-storage entity-name data-seq)
       ;; For versioned: batch check existence in BASE storage (no version
@@ -1003,6 +1049,7 @@
 
   (delete-entities
     [_ entity-name ids]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
     (epoch/bump! base-storage entity-name)
     (cond
       (not (res/versioned-entity? entity-name))
@@ -1100,11 +1147,13 @@
      (error-tolerance Phase 5 — merges INTO the branch are refused
      while recorded type diagnostics exist on either side), and the
      protected-branch pair :owner-id / :write-policy (Stage 1 —
-     enforced by the tenancy addon's authorize-writer)."
+     enforced by the tenancy addon's authorize-writer), and
+     :require-merge? (Stage 2 — 'push only via merge', enforced in
+     open core)."
   ([versioned-storage branch-name]
    (create-branch! versioned-storage branch-name {}))
   ([versioned-storage branch-name {:keys [base-branch-id forbid-invalid?
-                                          owner-id write-policy]}]
+                                          owner-id write-policy require-merge?]}]
    (let [parent-id (or base-branch-id (:branch-id versioned-storage))]
      (epoch/bump! (:base-storage versioned-storage) :branch)
      (sp/create-entity (:base-storage versioned-storage) :branch
@@ -1119,7 +1168,9 @@
                          (some? owner-id)
                          (assoc :owner-id owner-id)
                          (some? write-policy)
-                         (assoc :write-policy write-policy))))))
+                         (assoc :write-policy write-policy)
+                         (some? require-merge?)
+                         (assoc :require-merge? (boolean require-merge?)))))))
 
 
 (defn switch-branch

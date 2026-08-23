@@ -43,6 +43,8 @@ Advanced            → (cloud/tenancy only) pick who can write the
 row → switch        → click a branch row to switch to it
 Δ (diff)            → show the diff vs another branch
 ⇢ (merge)           → fold another branch into this one
+🔀 (require merge)  → toggle "push only via merge" for this branch
+                      (works everywhere, including single-user)
 ⛨ (protection)      → (cloud/tenancy only) change who can write;
                       a 🔒 marks protected rows
 × delete
@@ -52,7 +54,23 @@ A *protected* branch refuses edits — and merges into it — from
 anyone outside its policy (the branch owner and the org's admins
 always keep access, so nothing can be locked forever). On a
 self-hosted single-user instance there are no other users to keep
-out, so the protection affordances stay hidden.
+out, so the write-policy affordances (⛨ / Advanced) stay hidden.
+
+### Push only via merge (🔀)
+
+The 🔀 toggle is the exception that DOES show on a single-user
+instance — because it doesn't care *who* you are, only *how* the
+branch changes. Turn it on and the branch stops accepting direct
+edits: creating, editing or deleting a fn-def straight on it comes
+back as *"This branch accepts changes only via merge…"* (a 409).
+The only way to change it is to **merge another branch into it** —
+exactly the GitHub "protect `main`, land through pull requests"
+workflow, one click deep.
+
+The usual shape: keep `main` on 🔀, do your work on a child branch
+(`feat-…`), then merge the child into `main`. The toggle rides on
+the branch itself, so it survives reloads and applies to every
+client. Turn it back off any time to re-open direct writes.
 
 ### Try it
 

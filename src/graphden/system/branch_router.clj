@@ -1243,50 +1243,58 @@
         ;; itself stays org-agnostic (Design B) — keyed by branch-id alone.
         (let [request-scope (:request-scope base-ctx)
               run (fn []
-                    ;; Route-collection seam (docs/TENANCY_SEAM.md
-                    ;; § Route-collection seam): consult
-                    ;; every installed fall-through router FIRST, INSIDE the
-                    ;; request-scope so `*current-org*` is bound — the tenancy
-                    ;; org-admin panels (grants/users/…) AND the optional
-                    ;; registry (`/api/packages/installed` reads org/branch-
-                    ;; scoped pins) need the same org binding branch resolution
-                    ;; does. A matched path returns a response; no match (or an
-                    ;; empty collection → no optional package installed) falls
-                    ;; through to the branch-resolution chain. Branch-agnostic
-                    ;; by design: the branch ref is irrelevant to these paths.
-                    (or (rc/dispatch-first request)
-                        (let [branch-ref (extract-branch-ref request)
-                              branch-id (resolve-branch-id router branch-ref)]
-                          (cond
-                            (or (nil? branch-ref) (some? branch-id))
-                            ((handler-for router branch-id) request)
+                    ;; Arm merge-only branch protection for the whole request
+                    ;; write path (editor CRUD + bundle import both flow
+                    ;; through here). Off outside a request — boot's package
+                    ;; sync writes to main through VersionedStorage but never
+                    ;; through dispatch, so it is never gated; merge writes
+                    ;; go straight to base-storage version tables, so they are
+                    ;; exempt structurally. See `vs/*enforce-require-merge?*`.
+                    (binding [vs/*enforce-require-merge?* true]
+                      ;; Route-collection seam (docs/TENANCY_SEAM.md
+                      ;; § Route-collection seam): consult
+                      ;; every installed fall-through router FIRST, INSIDE the
+                      ;; request-scope so `*current-org*` is bound — the tenancy
+                      ;; org-admin panels (grants/users/…) AND the optional
+                      ;; registry (`/api/packages/installed` reads org/branch-
+                      ;; scoped pins) need the same org binding branch resolution
+                      ;; does. A matched path returns a response; no match (or an
+                      ;; empty collection → no optional package installed) falls
+                      ;; through to the branch-resolution chain. Branch-agnostic
+                      ;; by design: the branch ref is irrelevant to these paths.
+                      (or (rc/dispatch-first request)
+                          (let [branch-ref (extract-branch-ref request)
+                                branch-id (resolve-branch-id router branch-ref)]
+                            (cond
+                              (or (nil? branch-ref) (some? branch-id))
+                              ((handler-for router branch-id) request)
 
-                            ;; A PAGE load naming a branch that is gone (merged
-                            ;; and deleted elsewhere, or by this user's own tour
-                            ;; cleanup in another tab) used to answer 400 — and
-                            ;; since the 400 replaced the HTML, the editor never
-                            ;; booted: no scripts, no explanation, nothing to
-                            ;; click. Send the navigation to the same URL without
-                            ;; the stale `?branch=` instead; the editor loads on
-                            ;; the default branch and the user is back in
-                            ;; business. API/XHR callers still get the 400 below,
-                            ;; which is what they can act on.
-                            (document-navigation? request)
-                            {:status 302
-                             :headers {"Location" (uri-without-branch request)
-                                       "Cache-Control" "no-store"}
-                             :body ""}
+                              ;; A PAGE load naming a branch that is gone (merged
+                              ;; and deleted elsewhere, or by this user's own tour
+                              ;; cleanup in another tab) used to answer 400 — and
+                              ;; since the 400 replaced the HTML, the editor never
+                              ;; booted: no scripts, no explanation, nothing to
+                              ;; click. Send the navigation to the same URL without
+                              ;; the stale `?branch=` instead; the editor loads on
+                              ;; the default branch and the user is back in
+                              ;; business. API/XHR callers still get the 400 below,
+                              ;; which is what they can act on.
+                              (document-navigation? request)
+                              {:status 302
+                               :headers {"Location" (uri-without-branch request)
+                                         "Cache-Control" "no-store"}
+                               :body ""}
 
-                            :else
-                            {:status 400
-                             :headers {"Content-Type" "application/json"}
-                             ;; JSON-encode — `branch-ref` is user-controlled
-                             ;; (X-Graphden-Branch header / ?branch=), so a raw
-                             ;; string-concat let a `"` inject arbitrary keys
-                             ;; into the response envelope.
-                             :body (json/generate-string
-                                     {:ok false
-                                      :error (str "Unknown branch: " branch-ref)})}))))]
+                              :else
+                              {:status 400
+                               :headers {"Content-Type" "application/json"}
+                               ;; JSON-encode — `branch-ref` is user-controlled
+                               ;; (X-Graphden-Branch header / ?branch=), so a raw
+                               ;; string-concat let a `"` inject arbitrary keys
+                               ;; into the response envelope.
+                               :body (json/generate-string
+                                       {:ok false
+                                        :error (str "Unknown branch: " branch-ref)})})))))]
           (if request-scope
             (request-scope base-ctx request run)
             (run))))))

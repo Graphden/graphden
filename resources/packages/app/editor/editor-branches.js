@@ -522,6 +522,17 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
+  // Require-merge toggle (open-core): flip "push only via merge" for
+  // this branch. Boolean — click POSTs the negation of the current
+  // state (read off `data-require-merge`) to /branches/:ref/protect,
+  // then reloads the popover so the button reflects the new state.
+  popover.querySelectorAll('.branch-row-require-merge').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleBranchRequireMerge(btn);
+    });
+  });
+
   popover.querySelectorAll('.branch-row-delete').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -627,6 +638,35 @@ function openBranchPolicyMenu(btn) {
   pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 300)) + 'px';
   pop.style.top = (r.bottom + 6) + 'px';
   document.body.appendChild(pop);
+}
+
+// Flip "push only via merge" for a branch. `require-merge` in the
+// body is the JSON key the /protect handler reads (JSON can't carry a
+// trailing `?`). WHO may flip it is open-core (any authenticated
+// writer of the branch); a rejection surfaces in the shared slot.
+async function toggleBranchRequireMerge(btn) {
+  const branchName = btn.getAttribute('data-rm-branch');
+  const next = btn.getAttribute('data-require-merge') !== '1';
+  const err = document.getElementById('branch-popover-error');
+  try {
+    const resp = await window.authFetch(API.api_branches_ref_protect(branchName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 'require-merge': next }),
+    });
+    const body = await resp.json();
+    if (body.ok) {
+      openBranchPopover(); // re-render rows with the new protection state
+    } else if (err) {
+      err.textContent = body.error || 'Could not change branch protection';
+      err.classList.remove('hidden');
+    }
+  } catch (e2) {
+    if (err) {
+      err.textContent = 'Network error: ' + (e2?.message || e2);
+      err.classList.remove('hidden');
+    }
+  }
 }
 
 async function createBranchFromInput(parentName) {

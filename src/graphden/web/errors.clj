@@ -41,6 +41,9 @@
    :constraint-violation/unique 409
    :merge-conflict 409
    :merge-protection-violation 409
+   ;; push-only-via-merge: the write is well-formed, the branch's
+   ;; require-merge policy refuses a DIRECT write — merge into it instead.
+   :branch/merge-required 409
    :user/exists 409
    ;; authz
    :authz/forbidden 403
@@ -85,7 +88,7 @@
     "refinement" "capability" "execution" "execution-error"
     "graph-error" "secrets" "authz" "user" "grant" "domain"
     "merge-conflict" "merge-protection-violation" "not-found" "vault"
-    "quota" "sequence-op"})
+    "quota" "sequence-op" "branch"})
 
 
 (defn status-for

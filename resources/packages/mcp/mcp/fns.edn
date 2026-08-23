@@ -319,13 +319,14 @@
    :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :branch} :default {:value ""}}}}}
 
   {:name :_mcp-create-branch-parsed
-   :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main. `:forbid-invalid?` and `:write-policy` are carried as nil — the MCP tool exposes neither policy flag (yet); the parsed record must still satisfy the pipeline's shape."
+   :description "The create-branch pipeline's parsed shape, from tool arguments instead of a JSON body. `:base` defaults to main. `:forbid-invalid?`, `:write-policy` and `:require-merge?` are carried as nil — the MCP tool exposes none of the policy flags (yet); the parsed record must still satisfy the pipeline's shape."
    :parent :zipmap
-   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?} {:value :write-policy}]
+   :args {:keys [{:value :branch-name} {:value :base-ref} {:value :forbid-invalid?} {:value :write-policy} {:value :require-merge?}]
           :vals [{:parent :to-str
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :name} :default {:value ""}}}}}
                  {:parent :to-str
                   :args {:value {:parent :get :args {:coll :_mcp-tool-args :key {:value :base} :default {:value "main"}}}}}
+                 {:parent :const :args {:value nil}}
                  {:parent :const :args {:value nil}}
                  {:parent :const :args {:value nil}}]}}
 

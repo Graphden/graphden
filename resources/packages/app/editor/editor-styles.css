@@ -799,7 +799,8 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .branch-row-delete,
 .branch-row-merge,
-.branch-row-diff {
+.branch-row-diff,
+.branch-row-require-merge {
   background: transparent; color: var(--muted-fg);
   border: 0; border-radius: 2px;
   width: 18px; height: 18px; padding: 0; line-height: 1;
@@ -808,7 +809,14 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .branch-row-delete { font-size: 14px; }
 .branch-row-delete:hover,
 .branch-row-merge:hover,
-.branch-row-diff:hover { color: var(--fg); background: var(--bg); }
+.branch-row-diff:hover,
+.branch-row-require-merge:hover { color: var(--fg); background: var(--bg); }
+/* Require-merge toggle is open-core (always visible), unlike the
+   tenancy-only ⛨ policy shield. Dim when off, accented when on;
+   still hidden for a read-only viewer (gd-no-write). */
+.branch-row-require-merge { opacity: 0.45; }
+.branch-row-require-merge.on { opacity: 1; color: var(--accent); }
+body.gd-no-write .branch-row-require-merge { display: none; }
 
 .branch-popover-create {
   display: flex; flex-direction: column; gap: 6px;

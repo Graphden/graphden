@@ -114,7 +114,7 @@
    policy is set. Atomic §3.1 boundary; the response-shape building
    lives in graph (`:_create-branch-apply` → `:as-json-branch` +
    `:zipmap` envelope), not here."
-  [branch-name base-branch-id forbid-invalid? write-policy]
+  [branch-name base-branch-id forbid-invalid? write-policy require-merge?]
   (cr/record-effect! :db)
   (let [policy (normalize-write-policy write-policy)
         owner (:user-id tc/*current-principal*)
@@ -126,7 +126,9 @@
                                  (some? owner)
                                  (assoc :owner-id owner)
                                  (some? policy)
-                                 (assoc :write-policy policy)))]
+                                 (assoc :write-policy policy)
+                                 (some? require-merge?)
+                                 (assoc :require-merge? (boolean require-merge?))))]
     ;; A fresh branch needs no invalidation (its ctx builds lazily),
     ;; but the epoch bump must still be NOTED — un-noted it ages past
     ;; grace and triggers a spurious heal ~10s after every branch
@@ -266,13 +268,22 @@
   [source-branch-id target-branch-id]
   (cr/record-effect! :db)
   (let [merge-bumps (some-> epoch/*request-bump-log* deref seq vec)
+        ;; Capture the router on the REQUEST thread. Like `merge-bumps`
+        ;; above, `current-router` reads dynamic/per-thread state
+        ;; (`*active-router-override*`) that does NOT convey to the raw
+        ;; post-commit Thread — reading it there falls back to the
+        ;; process-global (nil under the parallel-test override), so the
+        ;; invalidation would target `ctx` (the request's own branch)
+        ;; instead of a cross-branch merge's TARGET ctx, leaving a merged
+        ;; fn invisible on a NON-main target until an unrelated recompile.
+        router (br/current-router)
         post-commit!
         (fn []
           (let [affected (mrg/merge-affected-fn-ids
                            (branches/base-storage ctx) source-branch-id)]
             (when (seq affected)
               (exec-ctx/invalidate-graph-cache!
-                (if-let [router (br/current-router)]
+                (if router
                   (br/ctx-for router target-branch-id)
                   ctx)
                 affected)))
@@ -336,6 +347,25 @@
     policy))
 
 
+(defbase set-branch-require-merge!
+  "Set a branch's `:require-merge?` flag — GitHub-style 'push only via
+   merge request' (protected branches, Stage 2). When true, DIRECT graph
+   writes to the branch (editor CRUD + bundle import) are refused
+   (`:branch/merge-required`, enforced in open core by
+   `versioning.storage.core`); the only way in is a merge from another
+   branch. Writes through the same base storage as `set-branch-policy!`,
+   so WHO may flip it is the tenancy authorize-writer's call (owner /
+   org :manage-grants); the ENFORCEMENT works without the addon, so a
+   solo self-hoster can protect main too. Returns the boolean set."
+  [branch-id require-merge?]
+  (cr/record-effect! :db)
+  (let [flag (boolean require-merge?)]
+    (sp/update-entity (branches/base-storage ctx) :branch branch-id
+                      {:require-merge? flag})
+    (epoch/bump! (branches/base-storage ctx) :branch)
+    flag))
+
+
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
@@ -345,4 +375,5 @@
    :merge-branch!              merge-branch!
    :merge-post-commit!         merge-post-commit!
    :merge-skipped-branch-local merge-skipped-branch-local
-   :set-branch-policy!         set-branch-policy!})
+   :set-branch-policy!         set-branch-policy!
+   :set-branch-require-merge!  set-branch-require-merge!})

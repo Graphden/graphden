@@ -82,6 +82,18 @@
   #uuid "c7251e69-b9eb-469e-b936-0cca96cc874f")
 
 
+(def ^:private branch-require-merge-field-uuid
+  ;; Protected branches (Stage 2, 2026-08-23) — GitHub-style "push only
+  ;; via merge request". When true, DIRECT writes to this branch's graph
+  ;; (editor CRUD + bundle import) are refused (`:branch/merge-required`,
+  ;; 409); the only way a change lands is a MERGE from another branch.
+  ;; Unlike `:write-policy` (WHO, tenancy-enforced), this is HOW — a
+  ;; structural property enforced in OPEN CORE (no principals needed), so
+  ;; a solo self-hoster can protect main too. Plain nullable boolean on a
+  ;; NON-versioned entity, mirroring `:forbid-invalid?`.
+  #uuid "805548b9-d190-4622-92f8-f68f89254a7f")
+
+
 (def ^:private branch-owner-id-field-uuid
   ;; Protected branches (Stage 1, 2026-08-15) — the creating principal's
   ;; STABLE user id (`:user-id`, not the mutable username), stamped at
@@ -645,6 +657,10 @@
                       :forbid-invalid? {:uuid branch-forbid-invalid-field-uuid
                                         :type :bool
                                         :nullable? true}
+                      ;; Protected branches (Stage 2): "push only via merge".
+                      :require-merge? {:uuid branch-require-merge-field-uuid
+                                       :type :bool
+                                       :nullable? true}
                       ;; Protected branches (Stage 1): creator + write policy.
                       :owner-id {:uuid branch-owner-id-field-uuid
                                  :type :text

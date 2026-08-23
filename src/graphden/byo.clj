@@ -104,6 +104,29 @@
         :else result))))
 
 
+(defn- start-poll-fallback!
+  "The relay-less freshness path: without SSE the graph would silently
+   freeze at the bootstrap snapshot forever — say so loudly, or, when
+   `refresh-poll-ms` is set, re-run the same coalesced refresh on a fixed
+   cadence (a full refetch, so keep it coarse — tens of seconds). Returns
+   the scheduled executor, or nil when only the WARN applies."
+  [refresh-poll-ms submit-refresh!]
+  (if refresh-poll-ms
+    (do (log/info "BYO executor polling for graph changes"
+                  {:every-ms refresh-poll-ms})
+        (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
+          (java.util.concurrent.ScheduledExecutorService/.scheduleWithFixedDelay
+            ^Runnable submit-refresh!
+            (long refresh-poll-ms) (long refresh-poll-ms)
+            java.util.concurrent.TimeUnit/MILLISECONDS)))
+    (do (log/warn (str "BYO executor started WITHOUT a live-refresh signal: "
+                       "no :sse-url and no :refresh-poll-ms — the graph is "
+                       "frozen at this bootstrap snapshot until restart. "
+                       "Set GRAPHDEN_SSE_URL (preferred) or "
+                       "GRAPHDEN_REFRESH_POLL_MS."))
+        nil)))
+
+
 (defn start-byo!
   "Assemble + start a BYO executor. Returns a handle for `stop-byo!`.
 
@@ -185,25 +208,7 @@
                     ;; its only freshness signal. The CAS-coalesced
                     ;; submit-refresh! makes a redundant resync cheap.
                     :on-connect submit-refresh!}))
-        ;; Without SSE the graph would silently freeze at the bootstrap
-        ;; snapshot forever — say so loudly, and offer a poll fallback:
-        ;; `:refresh-poll-ms` re-runs the same coalesced refresh on a fixed
-        ;; cadence (a full refetch, so keep it coarse — tens of seconds).
-        poller (when (nil? sse-url)
-                 (if refresh-poll-ms
-                   (do (log/info "BYO executor polling for graph changes"
-                                 {:every-ms refresh-poll-ms})
-                       (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
-                         (java.util.concurrent.ScheduledExecutorService/.scheduleWithFixedDelay
-                           ^Runnable submit-refresh!
-                           (long refresh-poll-ms) (long refresh-poll-ms)
-                           java.util.concurrent.TimeUnit/MILLISECONDS)))
-                   (do (log/warn (str "BYO executor started WITHOUT a live-refresh signal: "
-                                      "no :sse-url and no :refresh-poll-ms — the graph is "
-                                      "frozen at this bootstrap snapshot until restart. "
-                                      "Set GRAPHDEN_SSE_URL (preferred) or "
-                                      "GRAPHDEN_REFRESH_POLL_MS."))
-                       nil)))]
+        poller (when (nil? sse-url) (start-poll-fallback! refresh-poll-ms submit-refresh!))]
     (log/info "BYO executor serving" {:org org :handler handler-fn :port port})
     {:server server :source source :ctx ctx :storage storage
      :refresh-exec refresh-exec :poller poller}))

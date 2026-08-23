@@ -438,13 +438,49 @@
 ;; class as `publish-package-apply`).
 ;; ---------------------------------------------------------------------------
 
+(defn- remote-registry-token
+  []
+  (System/getenv "GRAPHDEN_REGISTRY_TOKEN"))
+
+
+(defn- remote-auth-headers
+  []
+  (let [token (remote-registry-token)]
+    (cond-> {} (seq (str token)) (assoc "Authorization" (str "Bearer " token)))))
+
+
+(defn- resolve-remote-version
+  "Resolve `spec` (nil/\"latest\"/\"*\" or a semver constraint) to a CONCRETE
+   published version of `pkg-name` on the remote registry `base`, by fetching
+   its version list and picking the highest that satisfies the constraint.
+   Returns the concrete version string, or nil when nothing matches / the
+   list is unreachable. Concrete specs pass straight through without a list
+   fetch."
+  [base pkg-name spec]
+  (if (and spec (not (contains? #{"" "latest" "*"} (str spec)))
+           (not (re-find #"[*><~^ ]" (str spec))))
+    spec
+    (let [constraint (if (contains? #{nil "" "latest"} (some-> spec str)) "*" (str spec))
+          resp @(http-client/get (str base "/api/packages")
+                                 {:headers (remote-auth-headers) :as :text :timeout 60000})]
+      (when (and (nil? (:error resp)) (= 200 (:status resp)))
+        (let [rows (try (json/parse-string (:body resp) true) (catch Exception _ nil))
+              versions (into []
+                             (comp (filter #(= (str pkg-name) (str (:name %))))
+                                   (map :version)
+                                   (filter #(semver/satisfies-constraint? % constraint)))
+                             (if (map? rows) (:packages rows (:versions rows)) rows))]
+          (last (sort-by semver/parse-version versions)))))))
+
+
 (defbase mirror-remote-package!
   "Fetch `(pkg-name, spec)` from the REMOTE registry `source` and store it
    as a local `:package-version` row. Idempotent: an existing
    `(name, version)` row wins. Transport is the fetch route's EDN face
-   (`?format=edn` — the JSON face stringifies fn-def keywords). `spec`
-   must be a CONCRETE version: remote constraint resolution is not built,
-   so nil / \"latest\" / range specs fail as data. The bearer comes from
+   (`?format=edn` — the JSON face stringifies fn-def keywords). `spec` may
+   be a CONCRETE version OR a constraint (`nil` / `\"latest\"` / a semver
+   range): a non-concrete spec is resolved against the remote's version
+   list first (`resolve-remote-version`). The bearer comes from
    `GRAPHDEN_REGISTRY_TOKEN` (the caller's account token on the remote —
    a public package needs any valid account there). Errors ride as data
    (`{:error …}`) so the install worklist can wrap them."
@@ -452,46 +488,41 @@
   (cr/record-effect! :network)
   (cr/record-effect! :db)
   (cr/record-effect! :env)
-  (if (or (nil? spec)
-          (contains? #{"" "latest" "*"} (str spec))
-          (re-find #"[*><~^ ]" (str spec)))
-    {:error "remote-install-needs-exact-version" :name pkg-name :spec spec}
-    (let [token (System/getenv "GRAPHDEN_REGISTRY_TOKEN")
-          base (str/replace (str source) #"/+$" "")
-          url (str base "/api/packages/" pkg-name "/" spec "?format=edn")
-          resp @(http-client/get url
-                                 {:headers (cond-> {}
-                                             (seq (str token))
-                                             (assoc "Authorization" (str "Bearer " token)))
-                                  :as :text :timeout 60000})]
-      (cond
-        (:error resp)
-        {:error "remote-unreachable" :source base :detail (str (:error resp))}
+  (let [base (str/replace (str source) #"/+$" "")
+        concrete (resolve-remote-version base pkg-name spec)]
+    (if (nil? concrete)
+      {:error "remote-version-not-found" :name pkg-name}
+      (let [url (str base "/api/packages/" pkg-name "/" concrete "?format=edn")
+            resp @(http-client/get url {:headers (remote-auth-headers)
+                                        :as :text :timeout 60000})]
+        (cond
+          (:error resp)
+          {:error "remote-unreachable" :source base :detail (str (:error resp))}
 
-        (not= 200 (:status resp))
-        {:error "remote-fetch-failed" :source base :status (:status resp)}
+          (not= 200 (:status resp))
+          {:error "remote-fetch-failed" :source base :status (:status resp)}
 
-        :else
-        (let [row (try (edn/read-string {:readers wire/wire-readers} (:body resp))
-                       (catch Exception _ ::unreadable))]
-          (cond
-            (= ::unreadable row) {:error "remote-bundle-unreadable" :source base}
-            (nil? row) {:error "remote-not-found" :name pkg-name :version spec}
-            :else
-            (let [storage (request/require-storage ctx)]
-              (when-not (seq (sp/query-entities storage :package-version
-                                                {:name pkg-name :version spec}))
-                (sp/create-entity storage :package-version
-                                  (-> row
-                                      (select-keys [:name :version :ns-root :fns
-                                                    :dependencies :package-dependencies
-                                                    :secrets :content-hash])
-                                      (assoc :org-id (tc/current-org)
-                                             ;; a mirrored copy is LOCAL — never
-                                             ;; re-published as public here
-                                             :public? false
-                                             :published-at (java.time.Instant/now)))))
-              {:mirrored (str pkg-name) :version (str spec) :from base})))))))
+          :else
+          (let [row (try (edn/read-string {:readers wire/wire-readers} (:body resp))
+                         (catch Exception _ ::unreadable))]
+            (cond
+              (= ::unreadable row) {:error "remote-bundle-unreadable" :source base}
+              (nil? row) {:error "remote-not-found" :name pkg-name :version concrete}
+              :else
+              (let [storage (request/require-storage ctx)]
+                (when-not (seq (sp/query-entities storage :package-version
+                                                  {:name pkg-name :version concrete}))
+                  (sp/create-entity storage :package-version
+                                    (-> row
+                                        (select-keys [:name :version :ns-root :fns
+                                                      :dependencies :package-dependencies
+                                                      :secrets :content-hash])
+                                        (assoc :org-id (tc/current-org)
+                                               ;; a mirrored copy is LOCAL — never
+                                               ;; re-published as public here
+                                               :public? false
+                                               :published-at (java.time.Instant/now)))))
+                {:mirrored (str pkg-name) :version (str concrete) :from base}))))))))
 
 
 ;; ---------------------------------------------------------------------------

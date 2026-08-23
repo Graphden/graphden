@@ -787,7 +787,9 @@
     {:ns graphden.packages.sync :defn reconcile-bundle-scope!
      :say "Snapshot semantics for a runtime import (`?prune=true`): within
            exactly the bundle's namespaces, a deterministic-id fn the bundle
-           no longer contains is branch-TOMBSTONED — never the boot
+           no longer contains is TOMBSTONED on the branch (a `:deleted-at`
+           version — so it hides an INHERITED fn too, not just a
+           branch-local one, and the deletion propagates on merge). Never the boot
            reconciler's identity-plane purge, which would reach across
            branches. Referenced removals are kept + reported, loud."}
     {:ns graphden.packages.git-format :defn bundle->files

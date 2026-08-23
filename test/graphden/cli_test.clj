@@ -118,3 +118,19 @@
         (is (= {:query "target=hub/main&create=true"
                 :auth "Bearer lt"} @local-import)))
       (finally (hub) (local)))))
+
+
+(deftest bundle-diff-classifies-added-removed-changed
+  (let [current [{:namespace "a" :name :keep :parent :add :args {:nums [1]}}
+                 {:namespace "a" :name :gone :parent :add :args {:nums [2]}}
+                 {:namespace "a" :name :edit :parent :add :args {:nums [3]}}]
+        incoming [{:namespace "a" :name :keep :parent :add :args {:nums [1]}}
+                  {:namespace "a" :name :edit :parent :add :args {:nums [9]}}
+                  {:namespace "a" :name :new :parent :add :args {:nums [4]}}]
+        d (cli/bundle-diff current incoming)]
+    (is (= [:new] (map :name (:added d))))
+    (is (= [:gone] (map :name (:removed d))))
+    (is (= [:edit] (:changed d)))
+    (testing "a re-export with no real change is silent"
+      (is (= {:added [] :removed [] :changed []}
+             (cli/bundle-diff current current))))))

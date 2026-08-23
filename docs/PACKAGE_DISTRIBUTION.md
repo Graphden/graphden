@@ -726,8 +726,8 @@ face — the EDN wire keeps fn-def keywords intact; the bearer for the
 remote comes from `GRAPHDEN_REGISTRY_TOKEN`), stores it as a LOCAL
 `:package-version` row (never re-marked public), and then the normal
 install worklist materializes + pins it. Missing dependencies mirror the
-same way, one worklist step at a time. Version constraints
-(`latest`/ranges) are not resolved remotely — name an exact version. So
+same way, one worklist step at a time. A non-concrete spec (`latest` or a semver range) is resolved against
+the remote's version list first, then the concrete version is mirrored. So
 "self-host pulls a public package from the cloud" is: a free cloud
 account's token in `GRAPHDEN_REGISTRY_TOKEN` + one install call with
 `source: https://graphden.dev`.

@@ -100,7 +100,13 @@ GD_BIND=127.0.0.1 docker compose up -d
 - **Snapshot to git** whenever you like:
   `bb graph-export --url http://localhost:9002 --token $AUTH_TOKEN --out ../my-graph`
   — one EDN file per namespace, byte-stable (a git diff is a graph
-  diff). Re-apply anywhere with `bb graph-import`.
+  diff). Re-apply anywhere with `bb graph-import`. Preview what an import
+  would change first with `graphden.cli diff` (or `push --dry-run`).
+  **Note:** a snapshot is the whole graph in plaintext. Vault paths are
+  stripped by default (the `:secrets` manifest lists what needs
+  re-binding), but the graph STRUCTURE and any inline values travel — so
+  treat a snapshot repo like source, not like a secrets store, and don't
+  commit it anywhere you wouldn't commit the code.
 - **When the network is back, push** your branch to the hub as a
   review branch:
   `clojure -M -m graphden.cli push --local-url http://localhost:9002

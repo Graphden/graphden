@@ -461,10 +461,20 @@
    `?prune=true` — the push/pull snapshot semantics): within EXACTLY the
    namespaces the bundle covers, a named fn row whose id equals its own
    deterministic derivation but which the bundle no longer contains is
-   soft-deleted through `storage` — the branch-switched VersionedStorage,
-   so this is a branch TOMBSTONE that rides the normal merge flow. Never
-   the boot reconciler's identity-plane purge, which reaches across
-   branches.
+   TOMBSTONED on `storage` — the branch-switched VersionedStorage — so it
+   resolves ABSENT here and on descendants while the identity survives.
+   This rides the normal merge flow: the tombstone is a branch version
+   row, so the deletion shows up in the diff and propagates on merge, and
+   is revertable. Never the boot reconciler's identity-plane purge, which
+   reaches across branches.
+
+   The tombstone (not a hard delete) is load-bearing: a bare
+   `delete-entity` is `*tombstone-delete?* false` by default, and a hard
+   delete of a branch's version rows is a SILENT NO-OP for a fn INHERITED
+   from the base branch (there is no branch-local version row to remove) —
+   so a snapshot that drops an fn present on main would fail to hide it.
+   `*tombstone-delete?* true` writes a `:deleted-at` version instead, so
+   inherited AND branch-local removals both take effect.
 
    Guards mirror `reconcile-moved-identities!`: `_anon-*` / anonymous
    shapes and random-id (editor-created) rows are never touched, and a
@@ -490,10 +500,11 @@
                   row))
         {kept true pruned false}
         (group-by #(boolean (seq (idrepair/inbound-refs storage (:id %)))) stale)]
-    (doseq [row pruned]
-      (log/info "bundle prune: deleting fn absent from the imported snapshot"
-                {:name (:name row) :id (:id row)})
-      (sp/delete-entity storage :fn (:id row)))
+    (binding [vs/*tombstone-delete?* true]
+      (doseq [row pruned]
+        (log/info "bundle prune: tombstoning fn absent from the imported snapshot"
+                  {:name (:name row) :id (:id row)})
+        (sp/delete-entity storage :fn (:id row))))
     (doseq [row kept]
       (log/warn "bundle prune: fn absent from the snapshot but STILL REFERENCED — kept"
                 {:name (:name row) :id (:id row)}))

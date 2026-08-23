@@ -366,6 +366,23 @@
     flag))
 
 
+(defbase set-review-state!
+  "Set a branch's `:review-state` — the change-proposal handoff. `proposed?`
+   truthy → \"proposed\" (this branch is submitted for review into its base);
+   falsy → nil (withdraw). Writes through the same still-org-scoped base
+   storage as `set-branch-policy!`, so WHO may propose/withdraw is the
+   tenancy authorize-writer's call on the branch row (its owner); without
+   the addon the write is open (single-tenant). Returns the state set
+   (\"proposed\" or nil)."
+  [branch-id proposed?]
+  (cr/record-effect! :db)
+  (let [state (when proposed? "proposed")]
+    (sp/update-entity (branches/base-storage ctx) :branch branch-id
+                      {:review-state state})
+    (epoch/bump! (branches/base-storage ctx) :branch)
+    state))
+
+
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
@@ -376,4 +393,5 @@
    :merge-post-commit!         merge-post-commit!
    :merge-skipped-branch-local merge-skipped-branch-local
    :set-branch-policy!         set-branch-policy!
-   :set-branch-require-merge!  set-branch-require-merge!})
+   :set-branch-require-merge!  set-branch-require-merge!
+   :set-review-state!          set-review-state!})

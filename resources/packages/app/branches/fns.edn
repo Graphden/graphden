@@ -183,14 +183,15 @@
   {:name :as-json-branch
    :description "Convert a `:branch` storage row into a JSON-safe map — `{:id (str id) :name name :base-branch-id (some-> base-branch-id str) :created-at (some-> created-at str) :owner-id owner-id :write-policy write-policy}`. Own pin `:branch-row`. Used by `:_get-branch-data` and reusable by any other handler that surfaces a branch row."
    :parent :zipmap
-   :args {:keys [{:value :id} {:value :name} {:value :base-branch-id} {:value :created-at} {:value :owner-id} {:value :write-policy} {:value :require-merge?}]
+   :args {:keys [{:value :id} {:value :name} {:value :base-branch-id} {:value :created-at} {:value :owner-id} {:value :write-policy} {:value :require-merge?} {:value :review-state}]
           :vals [:_branch-id-str
                  :_branch-row-name
                  :_branch-base-id-str
                  :_branch-created-at-str
                  {:parent :get :args {:coll {:as :branch-row} :key {:value :owner-id} :default nil}}
                  {:parent :get :args {:coll {:as :branch-row} :key {:value :write-policy} :default nil}}
-                 {:parent :get :args {:coll {:as :branch-row} :key {:value :require-merge?} :default nil}}]
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :require-merge?} :default nil}}
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :review-state} :default nil}}]
           :branch-row {:type :nullable-keyword-map
                        :description "Storage row of a `:branch` entity — fields stringified for the JSON wire."}}}
 
@@ -1061,6 +1062,13 @@
    :return-type :bool
    :effects #{:db}}
 
+  {:name :set-review-state!
+   :description "Atomic library boundary — set `:branch.review-state` by branch id. Truthy `proposed?` → \"proposed\" (submitted for review into its base); falsy → nil (withdraw). Returns the stored state (\"proposed\" or nil)."
+   :args {:branch-id {:type :uuid :description "Branch id whose review-state to set."}
+          :proposed? {:type :any :description "Truthy → propose for review; falsy → withdraw."}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
   {:name :_branch-policy-parsed
    :description "Parse POST /api/branches/:ref/policy into `{:branch-ref :write-policy}` — ref from the URL (shared `:_branches-target-ref`), policy from the JSON body."
    :parent :zipmap
@@ -1201,6 +1209,65 @@
    :description "Ring handler for POST /api/branches/:ref/protect (auth-required)."
    :parent :json-handler
    :args {:data :_branch-protect-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/branches/:ref/propose — mark / unmark a branch as a change
+  ;; PROPOSAL (submitted for review into its base). Body `{proposed}`
+  ;; (bool; omitted ≡ true, so a bare POST proposes). OPEN CORE — a branch
+  ;; carrying review-state "proposed" is what the reviewer's proposal list
+  ;; shows. WHO may propose/withdraw is the tenancy authorize-writer's call
+  ;; on the underlying `:branch` write (its owner).
+  ;; ---------------------------------------------------------------------
+  {:name :_branch-propose-parsed
+   :description "Parse POST /api/branches/:ref/propose into `{:branch-ref :proposed}` — ref from the URL, flag from the JSON body (absent ≡ true: a bare POST proposes)."
+   :parent :zipmap
+   :args {:keys [{:value :branch-ref} {:value :proposed}]
+          :vals [:_branches-target-ref
+                 {:parent :get
+                  :args {:coll {:parent :parse-json-body}
+                         :key {:value :proposed}
+                         :default {:value true}}}]}}
+
+  {:name :_branch-propose-resolved
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :branch-ref} :default nil}}}}
+
+  {:name :_branch-propose-missing?
+   :parent :nil?
+   :args {:value {:as :resolved}}}
+
+  {:name :_branch-propose-err-missing
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "Branch not found"}}}
+
+  {:name :_branch-propose-apply-set
+   :parent :set-review-state!
+   :args {:branch-id {:parent :assert-some
+                      :args {:value {:parent :get
+                                     :args {:coll {:as :resolved}
+                                            :key {:value :id}
+                                            :default nil}}}}
+          :proposed? {:parent :get :args {:coll {:as :parsed} :key {:value :proposed} :default {:value true}}}}}
+
+  {:name :_branch-propose-apply
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :review-state}]
+          :vals [{:value true} :_branch-propose-apply-set]}}
+
+  {:name :_branch-propose-data
+   :description "POST /api/branches/:ref/propose — `:cond` of `[missing? → 404-envelope, true → apply]`."
+   :parent :cond
+   :args {:clauses [:_branch-propose-missing?  :_branch-propose-err-missing
+                    {:value true}              :_branch-propose-apply]
+          :parsed :_branch-propose-parsed
+          :resolved :_branch-propose-resolved}}
+
+  {:name :set-branch-propose-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for POST /api/branches/:ref/propose (auth-required)."
+   :parent :json-handler
+   :args {:data :_branch-propose-data}}
 
   ;; ---------------------------------------------------------------------
   ;; DELETE /api/branches/:ref — delete branch + all its version rows.
@@ -1841,14 +1908,16 @@
                           :created-at :nullable-text
                           :owner-id :any
                           :write-policy :any
-                          :require-merge? :any}
+                          :require-merge? :any
+                          :review-state :any}
                  :source {:id :nullable-text
                           :name :any
                           :base-branch-id :nullable-text
                           :created-at :nullable-text
                           :owner-id :any
                           :write-policy :any
-                          :require-merge? :any}
+                          :require-merge? :any
+                          :review-state :any}
                  :conflicts [:list {:entity-name :any
                                     :entity-id :text
                                     :source-version :jsonb
@@ -2364,11 +2433,66 @@
           :attrs :_bp-row-rm-attrs
           :children [{:value "🔀"}]}}
 
+  ;; --- Change-proposal toggle (open-core) ---
+  ;; "Propose this branch for review into its base" — a boolean toggle
+  ;; on `:review-state`. The current state rides on `data-review-state`
+  ;; + the `on` class; the JS handler POSTs the negation to
+  ;; /branches/:ref/propose. The accented on-state doubles as the
+  ;; "this branch is a proposal" marker a reviewer scans for.
+  {:name :_bp-row-review-state
+   :parent :get
+   :args {:coll {:as :item} :key {:value :review-state} :default nil}}
+
+  {:name :_bp-row-proposed?
+   :parent :equal?
+   :args {:a :_bp-row-review-state :b {:value "proposed"}}}
+
+  {:name :_bp-row-propose-data
+   :parent :if
+   :args {:test :_bp-row-proposed? :then {:value "1"} :else {:value ""}}}
+
+  {:name :_bp-row-propose-class
+   :parent :if
+   :args {:test :_bp-row-proposed?
+          :then {:value "branch-row-propose on"}
+          :else {:value "branch-row-propose"}}}
+
+  {:name :_bp-row-propose-title
+   :parent :if
+   :args {:test :_bp-row-proposed?
+          :then {:value "Proposed for review — click to withdraw"}
+          :else {:value "Propose this branch for review into its base"}}}
+
+  {:name :_bp-row-propose-attrs-1
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map {:value {}} :key {:value :class} :value :_bp-row-propose-class}}
+          :key {:value :data-propose-branch}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-propose-attrs-2
+   :parent :assoc
+   :args {:map :_bp-row-propose-attrs-1
+          :key {:value :data-review-state}
+          :value :_bp-row-propose-data}}
+
+  {:name :_bp-row-propose-attrs
+   :parent :assoc
+   :args {:map :_bp-row-propose-attrs-2
+          :key {:value :title}
+          :value :_bp-row-propose-title}}
+
+  {:name :_bp-row-propose-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-propose-attrs
+          :children [{:value "📤"}]}}
+
   {:name :_bp-row-actions-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-actions"}}
-          :children [:_bp-row-diff-btn :_bp-row-merge-btn :_bp-row-rm-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-diff-btn :_bp-row-propose-btn :_bp-row-merge-btn :_bp-row-rm-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
 
   ;; The full per-branch row — assembled via the named children.
   {:name :_bp-row

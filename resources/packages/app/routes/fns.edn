@@ -711,6 +711,11 @@
    :parent :post
    :args {:path "/branches/:ref/protect" :handler :set-branch-protect-handler}}
 
+  {:name :api-branch-propose
+   :description "POST /api/branches/:ref/propose — mark / unmark a branch as a change proposal for review into its base. Body `{proposed}` (bool; absent ≡ true). Auth-required."
+   :parent :post
+   :args {:path "/branches/:ref/propose" :handler :set-branch-propose-handler}}
+
   ;; --- /api/fns/:fn-id/versions — history of one fn across branches ---
 
   {:name :api-fn-versions
@@ -798,6 +803,7 @@
                   :api-branch-merge
                   :api-branch-policy
                   :api-branch-protect
+                  :api-branch-propose
                   :api-fn-versions
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
                   ;; live in the OPTIONAL `registry` package now and install via

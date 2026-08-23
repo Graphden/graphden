@@ -533,6 +533,17 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
+  // Change-proposal toggle (open-core): mark/unmark this branch as a
+  // proposal for review into its base. Click POSTs the negation of the
+  // current state (read off `data-review-state`) to /branches/:ref/propose,
+  // then reloads the popover.
+  popover.querySelectorAll('.branch-row-propose').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleBranchPropose(btn);
+    });
+  });
+
   popover.querySelectorAll('.branch-row-delete').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -659,6 +670,35 @@ async function toggleBranchRequireMerge(btn) {
       openBranchPopover(); // re-render rows with the new protection state
     } else if (err) {
       err.textContent = body.error || 'Could not change branch protection';
+      err.classList.remove('hidden');
+    }
+  } catch (e2) {
+    if (err) {
+      err.textContent = 'Network error: ' + (e2?.message || e2);
+      err.classList.remove('hidden');
+    }
+  }
+}
+
+// Mark/unmark a branch as a change proposal for review into its base.
+// `proposed` is the JSON key the /propose handler reads. WHO may
+// propose/withdraw is open-core (any authenticated writer of the branch);
+// a rejection surfaces in the shared slot.
+async function toggleBranchPropose(btn) {
+  const branchName = btn.getAttribute('data-propose-branch');
+  const next = btn.getAttribute('data-review-state') !== '1';
+  const err = document.getElementById('branch-popover-error');
+  try {
+    const resp = await window.authFetch(API.api_branches_ref_propose(branchName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ proposed: next }),
+    });
+    const body = await resp.json();
+    if (body.ok) {
+      openBranchPopover(); // re-render rows with the new proposal state
+    } else if (err) {
+      err.textContent = body.error || 'Could not change the proposal state';
       err.classList.remove('hidden');
     }
   } catch (e2) {

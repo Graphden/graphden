@@ -278,3 +278,42 @@
                             :body (str "name=" probe2 "&parent-ids=" (:id identity-fn))})]
         (is (= 200 (:status resp)) "direct write allowed after clearing the flag")
         (is (some? (fn-by-name prot probe2)))))))
+
+
+(deftest branch-propose-review-state-lifecycle-test
+  ;; Change proposals Phase A: a branch owner marks a branch as
+  ;; "proposed" (submitted for review into its base) and can withdraw it.
+  ;; The state rides on `:review-state`, surfaced in the branch JSON, and
+  ;; is what a reviewer's proposal list filters on.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        feat (str "propose-feat" run-id)]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name feat :base-branch-id "main"}}))))
+    (testing "a fresh branch is not a proposal"
+      (let [row (-> (dispatch {:method :get :path (str "/api/branches/" feat)})
+                    parse-json :branch)]
+        (is (nil? (:review-state row)) "review-state absent until proposed")))
+    (testing "POST /propose marks it proposed"
+      (let [resp (dispatch {:method :post :path (str "/api/branches/" feat "/propose")
+                            :body {:proposed true}})]
+        (is (= 200 (:status resp)))
+        (is (true? (:ok (parse-json resp))))
+        (is (= "proposed" (:review-state (parse-json resp))) "handler echoes the stored state"))
+      (let [row (-> (dispatch {:method :get :path (str "/api/branches/" feat)})
+                    parse-json :branch)]
+        (is (= "proposed" (:review-state row)) "review-state persisted on the branch row")))
+    (testing "the proposal shows in the branch list as proposed"
+      ;; re-propose (the previous `testing` left it proposed) then read the list
+      (dispatch {:method :post :path (str "/api/branches/" feat "/propose") :body {:proposed true}})
+      (let [branches (-> (dispatch {:method :get :path "/api/branches"})
+                         parse-json :branches)
+            row (some (fn [b] (when (= feat (:name b)) b)) branches)]
+        (is (= "proposed" (:review-state row)) "list surfaces review-state for the reviewer")))
+    (testing "POST /propose {proposed false} withdraws it"
+      (let [resp (dispatch {:method :post :path (str "/api/branches/" feat "/propose")
+                            :body {:proposed false}})]
+        (is (= 200 (:status resp)))
+        (is (nil? (:review-state (parse-json resp))) "withdrawn → nil"))
+      (let [row (-> (dispatch {:method :get :path (str "/api/branches/" feat)})
+                    parse-json :branch)]
+        (is (nil? (:review-state row)) "review-state cleared on the branch row")))))

@@ -94,6 +94,17 @@
   #uuid "805548b9-d190-4622-92f8-f68f89254a7f")
 
 
+(def ^:private branch-review-state-field-uuid
+  ;; Change proposals (2026-08-23) — the async review handoff. nil ≡ an
+  ;; ordinary working branch; "proposed" ≡ its owner asked for this
+  ;; branch to be reviewed and merged into its base. The reviewer list
+  ;; is just the branches carrying "proposed". OPEN CORE (no principals
+  ;; needed); the WHO-may-approve gate rides the target's `:write-policy`
+  ;; + per-branch review policy. Plain nullable text on a NON-versioned
+  ;; entity, mirroring `:write-policy`.
+  #uuid "bc75cdfe-0fa5-437d-90ea-a471cd5011ed")
+
+
 (def ^:private branch-owner-id-field-uuid
   ;; Protected branches (Stage 1, 2026-08-15) — the creating principal's
   ;; STABLE user id (`:user-id`, not the mutable username), stamped at
@@ -661,6 +672,11 @@
                       :require-merge? {:uuid branch-require-merge-field-uuid
                                        :type :bool
                                        :nullable? true}
+                      ;; Change proposals: "proposed" marks a branch as
+                      ;; submitted for review into its base. NULL ≡ ordinary.
+                      :review-state {:uuid branch-review-state-field-uuid
+                                     :type :text
+                                     :nullable? true}
                       ;; Protected branches (Stage 1): creator + write policy.
                       :owner-id {:uuid branch-owner-id-field-uuid
                                  :type :text

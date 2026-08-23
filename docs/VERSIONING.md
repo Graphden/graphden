@@ -147,6 +147,7 @@ read endpoints sit behind it too (matches `/api/services`).
 | POST   | `/api/branches`                          | `{name, base-branch-id?, forbid-invalid??, write-policy?, require-merge??}` | `{ok, branch}` — the creating principal's stable id is stamped as `owner-id` |
 | POST   | `/api/branches/:ref/policy`              | `{write-policy}` ∈ `open`/`owner`/`admins` | `{ok, write-policy}` (`open` clears to null) — WHO may flip is the tenancy authorize-writer's call |
 | POST   | `/api/branches/:ref/protect`             | `{require-merge}` boolean               | `{ok, require-merge?}` — the open-core "push only via merge" toggle; direct writes then 409 `:branch/merge-required`, merges still land |
+| POST   | `/api/branches/:ref/propose`             | `{proposed}` boolean (absent ≡ true)    | `{ok, review-state}` — mark/withdraw the branch as a change proposal for review into its base (open-core); the reviewer list = branches with `review-state "proposed"` |
 | DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}`. Rejected when the branch has children (`:reason :branch-has-children`) or is a live **merge SOURCE** (`:constraint-violation/branch-is-merge-source` — deleting it would revert every target it merged into, since merge is by-reference; delete those targets first) |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
 | GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
@@ -195,7 +196,7 @@ core's `case` matcher.
 | Affordance | Where | What it does |
 |------------|-------|--------------|
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
-| Branch popover | click chip | Branch list + inline create + Δ diff + ⇢ merge + 🔀 require-merge toggle (open-core; accented = on) + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks write-policy-protected rows |
+| Branch popover | click chip | Branch list + inline create + Δ diff + 📤 propose-for-review toggle (open-core; accented = proposed) + ⇢ merge + 🔀 require-merge toggle (open-core; accented = on) + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks write-policy-protected rows |
 | Diff modal | click Δ in row | Full-viewport list of differences (`:added-in-source` / `:added-in-target` / `:modified`); :fn rows are clickable → navigate |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
@@ -275,6 +276,29 @@ create time with `POST /api/branches` `{require-merge: true}`.
 > the raw post-commit thread), so a merge into a NON-main protected
 > branch becomes visible immediately — see
 > `merge-post-commit!` in `app/branches/impls.clj`.
+
+## Change proposals (Phase A — review handoff, 2026-08-23)
+
+`require-merge?` above forces changes onto a *side* branch; a **proposal**
+is how that side branch is handed to a reviewer. A nullable `:review-state`
+on the `:branch` row (nil ≡ ordinary working branch; `"proposed"` ≡ its
+owner submitted it for review into its `base-branch-id`) carries the async
+handoff — no separate merge-request entity. The reviewer's proposal list is
+simply the branches whose `:review-state` is `"proposed"`.
+
+- Toggle over HTTP: `POST /api/branches/:ref/propose` `{proposed: true|false}`
+  (body absent ≡ `true`); the state is surfaced by `as-json-branch` and in
+  `GET /api/branches`.
+- OPEN CORE — no principals needed; WHO may propose/withdraw is the same
+  authorize-writer call as any branch-row write (its owner). Enforcement of
+  the setter lives in `set-review-state!` (`app/branches/impls.clj`).
+- Editor: an always-visible 📤 toggle per branch row in the branch popover
+  (accented when proposed), hidden only for a read-only viewer.
+
+> The *review* half — a configurable per-branch approval policy (how many
+> approvals, from whom, self-approval, stale-dismissal) plus a merge gate
+> that counts approvals — is the next phase; `:review-state` is the marker
+> that phase builds the reviewer surface on.
 
 ## Demo seeder
 

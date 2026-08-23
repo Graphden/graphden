@@ -7,6 +7,7 @@
    `graph_rows_route_test`."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
@@ -147,6 +148,31 @@
         (is (contains? (branch-fn-names branch) "imp-drop"))))))
 
 
+(deftest import-prune-tombstones-a-fn-inherited-from-the-base-branch
+  ;; The push/pull case: a deletion made on main must PROPAGATE. A bare
+  ;; hard-delete is a no-op for an fn INHERITED from the base branch (no
+  ;; branch-local version row to remove), so prune has to TOMBSTONE. Import
+  ;; onto main, fork a child, then import a smaller snapshot with prune onto
+  ;; the child — the fn that lives only on the parent must vanish on the child.
+  (let [_ (import! "target=main"
+                   (str "[{:name :inh-keep :namespace \"imp.inh\" :parent :add :args {:nums [1]}}"
+                        " {:name :inh-gone :namespace \"imp.inh\" :parent :add :args {:nums [2]}}]"))
+        child (str "imp/inh-" (subs (str (random-uuid)) 0 8))]
+    (import! (str "target=" child "&create=true") "[]")   ; fork child off main, add nothing
+    (is (contains? (branch-fn-names child) "inh-gone")
+        "the child inherits both fns from main")
+    (testing "prune on the child tombstones the inherited fn absent from the snapshot"
+      (let [{:keys [json]} (import! (str "target=" child "&prune=true")
+                                    "[{:name :inh-keep :namespace \"imp.inh\" :parent :add :args {:nums [1]}}]")]
+        (is (= ["inh-gone"] (get-in json [:pruned :pruned])) (pr-str json))
+        (is (not (contains? (branch-fn-names child) "inh-gone"))
+            "the inherited fn is hidden on the child (tombstone), not a silent no-op")
+        (is (contains? (branch-fn-names child) "inh-keep"))
+        (testing "main still has it — the tombstone is branch-scoped"
+          (is (some #(= "inh-gone" (:name %))
+                    (sp/query-entities *storage* :fn {:name "inh-gone"}))))))))
+
+
 (deftest import-prune-keeps-referenced-fns-loud
   (let [branch (str "imp/ref-" (subs (str (random-uuid)) 0 8))
         both (str "[{:name :imp-leaf :namespace \"imp.refs\" :parent :add :args {:nums [1]}}"
@@ -251,17 +277,48 @@
       (finally (stub)))))
 
 
-(deftest remote-install-rejects-a-version-constraint
-  (let [resp (br/dispatch *router*
-                          {:request-method :post
-                           :uri "/api/packages/install"
-                           :headers (merge auth-headers
-                                           {"content-type" "application/json"})
-                           :query-string nil
-                           :body (json/generate-string
-                                   {:name "acme.rp2" :version "latest"
-                                    :source "http://localhost:1"})})
-        json (json/parse-string (str (:body resp)) true)]
-    (is (false? (:ok json)) (pr-str json))
-    (is (= "not-found" (:reason json))
-        "a non-exact spec can't mirror; the worklist reports not-found")))
+(deftest remote-install-resolves-latest-against-the-remote-list
+  ;; A non-concrete spec (latest / range) is resolved against the remote's
+  ;; version list first (resolve-remote-version), then the concrete version
+  ;; is mirrored + installed.
+  (let [mk-row (fn [v]
+                 {:name "acme.rp3" :version v :ns-root "acme.rp3"
+                  :fns [{:name (keyword (str "rp3-" (str/replace v "." "-")))
+                         :namespace "acme.rp3" :parent :const :args {:value v}}]
+                  :dependencies [] :package-dependencies []
+                  :secrets [] :content-hash (str "h-" v)})
+        seen (atom [])
+        stub (hk/run-server
+               (fn [req]
+                 (swap! seen conj (:uri req))
+                 (condp = (:uri req)
+                   "/api/packages"
+                   {:status 200 :headers {"Content-Type" "application/json"}
+                    :body (json/generate-string
+                            {:packages [{:name "acme.rp3" :version "1.0.0"}
+                                        {:name "acme.rp3" :version "2.1.0"}
+                                        {:name "other" :version "9.0.0"}]})}
+                   "/api/packages/acme.rp3/2.1.0"
+                   {:status 200 :headers {"Content-Type" "application/edn"}
+                    :body (pr-str (mk-row "2.1.0"))}
+                   {:status 404 :body "nope"}))
+               {:port 0})
+        source (str "http://localhost:" (:local-port (meta stub)))]
+    (try
+      (let [resp (br/dispatch *router*
+                              {:request-method :post
+                               :uri "/api/packages/install"
+                               :headers (merge auth-headers {"content-type" "application/json"})
+                               :query-string nil
+                               :body (json/generate-string
+                                       {:name "acme.rp3" :version "latest" :source source})})
+            json (json/parse-string (str (:body resp)) true)]
+        (is (= 200 (:status resp)) (pr-str json))
+        (is (true? (:ok json)) (pr-str json))
+        (is (some #{"/api/packages"} @seen) "the version list was consulted")
+        (is (some #{"/api/packages/acme.rp3/2.1.0"} @seen) "the highest version was fetched")
+        (is (some? (first (sp/query-entities *storage* :package-version
+                                             {:name "acme.rp3" :version "2.1.0"})))
+            "latest resolved to 2.1.0 and was mirrored")
+        (is (seq (sp/query-entities *storage* :fn {:name "rp3-2-1-0"}))))
+      (finally (stub)))))

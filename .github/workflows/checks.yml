@@ -185,7 +185,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5.0.1
 
       # Lint + render BOTH fleet shapes, so a template error on either the
       # shared path or the dedicated-shard path (executorOrgs + sse +

@@ -14,10 +14,16 @@
        out under DIR. Existing fns/*.edn under DIR are removed first so
        the directory IS the snapshot — deletions show up as git deletions.
 
-     import DIR --url U --token T --target BRANCH [--create] [--prune]
+     import DIR --url U --token T --target BRANCH [--create] [--prune] [--dry-run]
        Read the snapshot under DIR and apply it to the NAMED branch
        (`--create` forks it; `--prune` = snapshot semantics). Prints the
-       server's report (fn-ids / skipped-owned / pruned).
+       server's report (fn-ids / skipped-owned / pruned). `--dry-run`
+       prints the client-side diff against the target instead of writing.
+
+     diff DIR --url U --token T [--branch B]
+       Preview what the snapshot under DIR would change against branch B
+       (default main) — added / removed / changed fns, no write. The same
+       diff `--dry-run` shows before push/import.
 
      push --local-url L --local-token LT --hub-url H --hub-token HT
           [--branch B] [--target T] [--no-prune]
@@ -59,7 +65,7 @@
    positional args under :args. Flags without a value: --create --prune
    --include-secret-paths."
   [argv]
-  (let [flags #{"--create" "--prune" "--include-secret-paths" "--no-prune"}]
+  (let [flags #{"--create" "--prune" "--include-secret-paths" "--no-prune" "--dry-run"}]
     (loop [argv argv opts {:args []}]
       (if-let [a (first argv)]
         (cond
@@ -132,6 +138,40 @@
 
 
 ;; =============================================================================
+;; diff — what a bundle WOULD change against a target branch (client-side)
+;; =============================================================================
+
+(defn bundle-diff
+  "Compare two fn-def vectors by `[namespace name]` identity: what `incoming`
+   adds / removes / changes relative to `current`. `:changed` compares the
+   def maps minus the identity keys, so a re-export with no real change is
+   silent. Pure — the preview `push`/`import --dry-run` and `diff` all use it."
+  [current incoming]
+  (let [key-of (juxt :namespace :name)
+        cur (into {} (map (juxt key-of identity)) current)
+        inc (into {} (map (juxt key-of identity)) incoming)
+        body #(dissoc % :namespace :name)]
+    {:added (vec (sort (map second (remove #(contains? cur (key %)) inc))))
+     :removed (vec (sort (map second (remove #(contains? inc (key %)) cur))))
+     :changed (vec (sort (for [[k v] inc
+                               :let [c (get cur k)]
+                               :when (and c (not= (body c) (body v)))]
+                           (:name v))))}))
+
+
+(defn- print-diff
+  [{:keys [added removed changed]} label]
+  (println (str "diff vs " label ":"))
+  (println (str "  + added:   " (count added)))
+  (println (str "  - removed: " (count removed)))
+  (println (str "  ~ changed: " (count changed)))
+  (doseq [[sym rows] [["+" added] ["-" removed]]
+          nm (take 40 (map #(if (map? %) (:name %) %) rows))]
+    (println (str "  " sym " " nm)))
+  (doseq [nm (take 40 changed)] (println (str "  ~ " nm))))
+
+
+;; =============================================================================
 ;; import
 ;; =============================================================================
 
@@ -150,22 +190,47 @@
                   (File/.listFiles fns-dir)))))
 
 
+(defn- post-import!
+  "POST a fn-def bundle to /api/import/graph on `url`, or — when
+   `:dry-run` — fetch the target branch and print the client-side diff
+   instead of writing. Returns an exit code."
+  [{:keys [url token target create prune no-prune dry-run]} fn-defs]
+  (if dry-run
+    (let [current (:fns (fetch-export! {:url url :token token :branch target}))]
+      (print-diff (bundle-diff current fn-defs) (str "branch '" target "'"))
+      0)
+    (let [query (str "target=" target
+                     (when create "&create=true")
+                     (when (and prune (not no-prune)) "&prune=true"))
+          resp @(http/post (str url "/api/import/graph?" query)
+                           {:headers {"Authorization" (str "Bearer " token)
+                                      "Content-Type" "application/edn"}
+                            :body (pr-str {:fns (wire/encode-unreadable-kws fn-defs)})
+                            :timeout 300000})]
+      (println (str (:status resp) " " (:body resp)))
+      (if (and (nil? (:error resp)) (= 200 (:status resp))) 0 1))))
+
+
 (defn import!
   "Returns a process exit code."
   [opts]
   (require-opts! opts [:url :token :target])
   (let [dir (io/file (or (first (:args opts)) "."))
-        fn-defs (gf/files->bundle (read-snapshot-dir dir))
-        query (str "target=" (:target opts)
-                   (when (:create opts) "&create=true")
-                   (when (:prune opts) "&prune=true"))
-        resp @(http/post (str (:url opts) "/api/import/graph?" query)
-                         {:headers {"Authorization" (str "Bearer " (:token opts))
-                                    "Content-Type" "application/edn"}
-                          :body (pr-str {:fns (wire/encode-unreadable-kws fn-defs)})
-                          :timeout 300000})]
-    (println (str (:status resp) " " (:body resp)))
-    (if (and (nil? (:error resp)) (= 200 (:status resp))) 0 1)))
+        fn-defs (gf/files->bundle (read-snapshot-dir dir))]
+    (post-import! opts fn-defs)))
+
+
+(defn diff!
+  "Show what the snapshot under DIR would change against branch `--branch`
+   (default main) on the instance — a client-side preview, no write."
+  [opts]
+  (require-opts! opts [:url :token])
+  (let [dir (io/file (or (first (:args opts)) "."))
+        incoming (gf/files->bundle (read-snapshot-dir dir))
+        branch (or (:branch opts) "main")
+        current (:fns (fetch-export! {:url (:url opts) :token (:token opts) :branch branch}))]
+    (print-diff (bundle-diff current incoming) (str "branch '" branch "'"))
+    0))
 
 
 ;; =============================================================================
@@ -173,21 +238,15 @@
 ;; =============================================================================
 
 (defn- transfer!
-  "Snapshot `src`'s branch and apply it to `dst` as `target`
-   (create + prune by default — the push branch IS the snapshot).
+  "Snapshot `src`'s branch and apply it to `dst` as `target` (create + prune
+   by default — the push branch IS the snapshot). With `:dry-run`, print the
+   client-side diff against the destination target instead of writing.
    Returns a process exit code."
-  [{:keys [src-url src-token src-branch dst-url dst-token target no-prune]}]
-  (let [bundle (fetch-export! {:url src-url :token src-token :branch src-branch})
-        query (str "target=" target "&create=true"
-                   (when-not no-prune "&prune=true"))
-        resp @(http/post (str dst-url "/api/import/graph?" query)
-                         {:headers {"Authorization" (str "Bearer " dst-token)
-                                    "Content-Type" "application/edn"}
-                          :body (pr-str {:fns (wire/encode-unreadable-kws
-                                                (vec (:fns bundle)))})
-                          :timeout 300000})]
-    (println (str (:status resp) " " (:body resp)))
-    (if (and (nil? (:error resp)) (= 200 (:status resp))) 0 1)))
+  [{:keys [src-url src-token src-branch dst-url dst-token target no-prune dry-run]}]
+  (let [bundle (fetch-export! {:url src-url :token src-token :branch src-branch})]
+    (post-import! {:url dst-url :token dst-token :target target
+                   :create true :prune (not no-prune) :dry-run dry-run}
+                  (vec (:fns bundle)))))
 
 
 (defn push!
@@ -199,8 +258,8 @@
         code (transfer! {:src-url (:local-url opts) :src-token (:local-token opts)
                          :src-branch branch
                          :dst-url (:hub-url opts) :dst-token (:hub-token opts)
-                         :target target :no-prune (:no-prune opts)})]
-    (when (zero? code)
+                         :target target :no-prune (:no-prune opts) :dry-run (:dry-run opts)})]
+    (when (and (zero? code) (not (:dry-run opts)))
       (println (str "pushed local '" branch "' -> hub '" target
                     "'. Review + merge on the hub: diff it against main, then merge.")))
     code))
@@ -215,8 +274,8 @@
         code (transfer! {:src-url (:hub-url opts) :src-token (:hub-token opts)
                          :src-branch branch
                          :dst-url (:local-url opts) :dst-token (:local-token opts)
-                         :target target :no-prune (:no-prune opts)})]
-    (when (zero? code)
+                         :target target :no-prune (:no-prune opts) :dry-run (:dry-run opts)})]
+    (when (and (zero? code) (not (:dry-run opts)))
       (println (str "pulled hub '" branch "' -> local '" target
                     "'. Merge it: POST /api/branches/main/merge {\"source\": \"" target
                     "\"} or use the editor's branch popover.")))
@@ -230,7 +289,8 @@
 (def ^:private usage
   "usage:
   clojure -M -m graphden.cli export --url URL --token TOKEN --out DIR [--branch B] [--include-secret-paths]
-  clojure -M -m graphden.cli import DIR --url URL --token TOKEN --target BRANCH [--create] [--prune]
+  clojure -M -m graphden.cli import DIR --url URL --token TOKEN --target BRANCH [--create] [--prune] [--dry-run]
+  clojure -M -m graphden.cli diff DIR --url URL --token TOKEN [--branch B]
   clojure -M -m graphden.cli push --local-url L --local-token LT --hub-url H --hub-token HT [--branch B] [--target T] [--no-prune]
   clojure -M -m graphden.cli pull --local-url L --local-token LT --hub-url H --hub-token HT [--branch B] [--target T] [--no-prune]")
 
@@ -243,6 +303,7 @@
                (case cmd
                  "export" (export! opts)
                  "import" (import! opts)
+                 "diff" (diff! opts)
                  "push" (push! opts)
                  "pull" (pull! opts)
                  (fail! 2 usage))

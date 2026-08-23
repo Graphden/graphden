@@ -116,6 +116,7 @@
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
     :sub :subs :subtype? :svg-polyline-points :tabulate-records
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
+    :platform-owned-def-names
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create
@@ -144,7 +145,8 @@
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
     :gte :group-by :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
-    :parse-int :parse-json :parse-uuid :position-in :postwalk :pr-str
+    :parse-int :parse-json :parse-uuid :platform-owned-def-names
+    :position-in :postwalk :pr-str
     :quot :range
     :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :select-keys :digest-hex
     :slurp :some :some? :sort :sort-by :str :str-contains? :str-join :str-len :str-lower

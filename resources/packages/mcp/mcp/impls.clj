@@ -73,5 +73,8 @@
 
 (def impls
   {:parse-edn parse-edn
-   :platform-owned-def-names platform-owned-def-names
+   ;; taint-propagate: returns the caller bundle's own :name fields —
+   ;; content passthrough (SECRETS.md § T3).
+   :platform-owned-def-names {:impl platform-owned-def-names
+                              :taint-propagate? true}
    :sync-fn-defs-branch! sync-fn-defs-branch!})

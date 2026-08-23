@@ -558,6 +558,11 @@
                             ctx (read-graph (compile-storage ctx)
                                             (:executor-orgs ctx)))]
                       {:graph graph :compiled (ce/compile-all lookups)})))]
+            ;; The denominator for `:registry/delta-recompiled-fns`. Without it
+            ;; "we recompiled 8000 fns via deltas" has no scale: it could be
+            ;; most of the compile work or a rounding error next to the
+            ;; rebuilds. Same units on both sides, so the split is readable.
+            (counters/count! :registry/rebuilt-fns (count compiled))
             (reset! (:compiled-registry ctx) compiled)
             (prime-graph-cache! ctx graph)
             (prime-compile-deps! ctx graph)
@@ -701,6 +706,17 @@
             (prep-compile-inputs
               ctx (or cached (read-graph storage (:executor-orgs ctx))))
             blast (deps/transitive-blast reverse-deps changed-fn-ids)]
+        ;; How much of the graph a "delta" actually recompiles. The event
+        ;; counter above says a delta HAPPENED; these two say what it cost,
+        ;; and their ratio is the only thing that distinguishes a real delta
+        ;; from a full rebuild wearing its name. A write that seeds 1 fn and
+        ;; blasts 400 is not a delta — it is the whole graph reached through
+        ;; a shared ancestor, and nothing in the timing tells you which one
+        ;; you got.
+        ;;
+        ;; Counts, not timings: `n` fns compiled is `n` on any box.
+        (counters/count! :registry/delta-seed-fns (count changed-fn-ids))
+        (counters/count! :registry/delta-recompiled-fns (count blast))
         ;; CRUD impls invoke `invalidate-graph-cache!` directly on
         ;; the http-kit worker thread (see `crud/entities.clj`), so
         ;; two concurrent client requests can land here against the

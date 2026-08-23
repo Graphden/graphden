@@ -66,6 +66,58 @@ execute-bound. The banked test-suite wins (2026-07-09, ~36 min →
 ~23 min) came from delta-invalidation + minimal package sets, not
 execute-path tuning.
 
+### 2026-08-23 — delta-recompile is already tight; the cost is full rebuilds
+
+A test-suite audit reached "registry-test costs 91 s because each
+install/fork/materialise recompiles the graph" and proposed tightening
+the delta path. Instrumenting it first — `:registry/delta-seed-fns` and
+`:registry/delta-recompiled-fns` in `compile-runtime/delta-recompile!`,
+`:registry/rebuilt-fns` in `rebuild!` — killed the hypothesis outright.
+
+Whole unit suite, 1777 tests:
+
+| counter | value |
+|---|---|
+| `:registry/delta-recompile` | 365 |
+| `:registry/delta-seed-fns` | 477 |
+| `:registry/delta-recompiled-fns` | 478 |
+| `:registry/rebuild` | 146 |
+| `:registry/rebuilt-fns` | 52 678 |
+
+**Blast ratio 478/477 = 1.002.** A delta that names one changed fn
+recompiles one fn. The inverse-closure walk is not over-reaching, the
+shared-ancestor fan-out people worry about does not happen, and there is
+no headroom there to take.
+
+**99.1 % of all compile work in the suite is full rebuilds** (52 678 of
+53 156 fns). So the question was never "are deltas tight" but "why 146
+rebuilds". Of those, 17 come from `:registry/invalidate-full` — a write
+that answered *unknown* and dropped the registry. The other ~129 are
+cold-start compiles: one per test namespace that builds its own ctx.
+That is the fixture design (per-NS logical DB + own ctx buys parallel
+isolation), not a product defect, and `registry-test` shows the pattern
+in miniature — ONE rebuild of 5665 fns, then 21 deltas totalling 123
+fns.
+
+Where that leaves the two audiences:
+
+- **Production:** the 17 full-clears are the only real target, and each
+  is worth real money — measured at 4137 fns, the next request after one
+  takes ~49.8 s. Finding *which* call sites they are needs a per-caller
+  breakdown; `affected-fn-ids` covers every entity type today, so they
+  are coming from somewhere else (a write whose `entity-data` lacked an
+  `:id`, or one of the direct 1-arity callers in `system/init/services`,
+  `branch_router`, `context`). Not yet done.
+- **The test suite:** ~129 cold compiles is inherent to per-NS ctx
+  isolation. Sharing a compiled registry the way the golden DB is shared
+  would be the lever, and it is a fixture-architecture change, not a
+  compiler one.
+
+And a caution for whoever picks up `registry-test`'s 91 s: its 62 s of
+*test* time is not the compile — that lives in its 27.8 s fixture. The
+tests themselves are storage writes and materialisation. Measure before
+optimising; this note exists because the last person didn't.
+
 ## Diagnosis (2026-05) — "no single hot frame, GC pressure smear"
 
 Leaf-time top frames (collapsed) from a 63-second

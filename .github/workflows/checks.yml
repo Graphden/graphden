@@ -5,6 +5,11 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  # On demand, on any branch. Added with the integration job below: that job
+  # is scoped to PRs and main, so without this there is no way to exercise it
+  # from a feature branch before landing — and a CI job whose first execution
+  # is on main is a job nobody has tested.
+  workflow_dispatch:
 
 env:
   JAVA_VERSION: '21'
@@ -99,23 +104,80 @@ jobs:
           key: deps-${{ hashFiles('deps.edn') }}
           restore-keys: deps-
 
-      # Unit suite only — a deliberate scope, and worth stating accurately.
-      #
-      # e2e genuinely CANNOT run here: it boots `graphden-executor:latest`,
-      # which this runner has no way to build cheaply. The `:integration`
-      # suite is different — it needs only testcontainers (postgres, and
-      # openbao for the vault client), both of which ubuntu-latest can run.
-      # It is left out because the landing gate runs it on every merge and
-      # duplicating ~15 min here buys nothing *while everything lands through
-      # the gate*.
-      #
-      # The consequence, recorded by the 2026-08-22 test audit so nobody has
-      # to rediscover it: ~24% of the suite — including every HTTP-level
-      # accounts test (login, logout, OAuth, Telegram, password reset, CSRF)
-      # — has exactly ONE execution point, the local gate. A release that
-      # goes around it runs none of them.
+      # Unit suite here; the integration suite is its own job below. e2e is
+      # the one that genuinely CANNOT run on a hosted runner — it boots
+      # `graphden-executor:latest`, which this runner has no way to build
+      # cheaply — and stays with the landing gate.
       - name: Run unit tests
         run: bb test-unit
+
+  integration:
+    name: integration (testcontainers)
+    # The 2026-08-22 test audit found ~24% of the suite — 71 namespaces,
+    # including EVERY HTTP-level accounts test (login, logout, OAuth,
+    # Telegram, password reset, CSRF) — had exactly one execution point: the
+    # local landing gate. A release that went around the gate ran none of
+    # them, and that has happened (see the release-train notes).
+    #
+    # It runs here because it can: `:integration` needs testcontainers
+    # (postgres, plus openbao for the vault client) and NOT the graphden
+    # image, and ubuntu-latest ships a working Docker daemon. The comment
+    # this replaces claimed otherwise for both suites; only e2e was true.
+    #
+    # Scoped to PRs and main rather than every push, on the same reasoning
+    # as `coverage`: develop landings already go through the gate, which
+    # runs this suite on the MERGED result. What this job adds is a second
+    # execution point for the paths that reach main another way — plus
+    # `workflow_dispatch`, so it can be run against any branch on demand.
+    if: >-
+      github.ref == 'refs/heads/main'
+      || github.event_name == 'pull_request'
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Measured ~6 min on the dev box; a hosted runner is slower and pulls
+    # two container images cold. Generous, but bounded — a hang must not
+    # burn the default 6 h.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5.7.0
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          cli: latest
+          bb: latest
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: deps-${{ hashFiles('deps.edn') }}
+          restore-keys: deps-
+
+      # Pull the images the fixtures ask for BEFORE the suite starts. A cold
+      # pull inside a testcontainers `Wait/forHttp` eats the ready-check
+      # window and surfaces as a boot timeout rather than as "the network was
+      # slow" — the same failure mode tests.edn documents for the dev box at
+      # parallelism 8.
+      - name: Pre-pull testcontainers images
+        run: |
+          set -euo pipefail
+          # Keep in sync with the fixtures: postgres:16.11-alpine is pinned in
+          # test-infra/shared-container + storage.postgres/test-setup, and
+          # vault-test asks for openbao. Ryuk is testcontainers' own reaper and
+          # picks its tag from the library version, so let IT pull that one —
+          # naming a tag here would rot the moment deps.edn bumps.
+          docker pull -q postgres:16.11-alpine
+          docker pull -q quay.io/openbao/openbao:latest
+
+      - name: Run integration tests
+        run: bb test-integration
 
   coverage:
     name: coverage

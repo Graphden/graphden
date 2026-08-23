@@ -70,7 +70,7 @@
   ;; stay offline + hermetic (a speed/determinism convenience, not an access
   ;; workaround).
   mathx/mathx {:git/url "https://github.com/Graphden/graphden-mathx.git"
-               :git/sha "a99354d1d2cae3b36bedca07523bf133921c595d"}}
+               :git/sha "8337147045ff2fec94212806ae16235ad2f625bc"}}
 
  :aliases
  {:test

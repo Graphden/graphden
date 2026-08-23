@@ -1381,6 +1381,13 @@
                                   (concat source-merges target-merges))]
               (when (seq merge-ids)
                 (sp/delete-entities st :branch-merge merge-ids)))
+            ;; Delete change-review approvals recorded against this branch
+            ;; (the proposal source). Without this, deleting a proposed /
+            ;; approved branch would orphan its :branch-approval rows.
+            (let [appr-ids (mapv :id (sp/query-entities st :branch-approval
+                                                        {:source-branch-id branch-id}))]
+              (when (seq appr-ids)
+                (sp/delete-entities st :branch-approval appr-ids)))
             ;; Delete the branch record
             (sp/delete-entity st :branch branch-id))]
       (if-let [pool (:pool base)]

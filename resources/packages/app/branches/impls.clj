@@ -391,10 +391,29 @@
 
 (defn- normalize-approver-ids
   "Coerce the body's `approver-ids` to a vector of user-id strings (the
-   JSONB shape stored on the branch). nil/blank → nil (clears)."
+   JSONB shape stored on the branch). nil/empty → nil (clears). Rejects a
+   non-sequential value (e.g. a bare string, which `seq` would shred into
+   characters) with a clean 400 rather than storing garbage."
   [approver-ids]
-  (when (seq approver-ids)
-    (mapv str approver-ids)))
+  (cond
+    (nil? approver-ids) nil
+    (sequential? approver-ids) (when (seq approver-ids) (mapv str approver-ids))
+    :else (throw (ex-info "approver-ids must be a list of user ids"
+                          {:type :validation-error/approver-ids :value approver-ids}))))
+
+
+(defn- normalize-required-approvals
+  "Coerce `required-approvals` to a non-negative int (nil ≡ off). Rejects
+   a negative or non-integer value with a clean 400 instead of silently
+   treating it as off (negative) or 500ing (`(int \"x\")`)."
+  [n]
+  (cond
+    (nil? n) nil
+    ;; JSON integers parse as Long → nat-int?. A float / negative / non-number
+    ;; is a clean rejection (a client sending 2.0 should send 2).
+    (nat-int? n) (int n)
+    :else (throw (ex-info "required-approvals must be a non-negative integer"
+                          {:type :validation-error/required-approvals :value n}))))
 
 
 (defbase set-branch-review-policy!
@@ -407,7 +426,7 @@
    Returns the stored `{:required-approvals :allow-self-approval? :approver-ids}`."
   [branch-id required-approvals allow-self-approval? approver-ids]
   (cr/record-effect! :db)
-  (let [row {:required-approvals (when required-approvals (int required-approvals))
+  (let [row {:required-approvals (normalize-required-approvals required-approvals)
              :allow-self-approval? (when (some? allow-self-approval?)
                                      (boolean allow-self-approval?))
              :approver-ids (normalize-approver-ids approver-ids)}]
@@ -434,9 +453,12 @@
           (case policy
             ("owner") (or admin? (and uid owner (= uid owner)))
             ("admins") admin?
-            ;; nil / "open" / anything unknown → open (role gate is the
-            ;; write-policy's job; unknown values validated elsewhere).
-            true)))))
+            ;; nil / "" / "open" → open (no write-policy restriction).
+            (nil "" "open") true
+            ;; anything else → DENY (hardening): write-policy is validated
+            ;; to the known set at set time, so an unknown value here is
+            ;; anomalous — fail closed rather than fall open.
+            false)))))
 
 
 (defbase approve-proposal!
@@ -498,7 +520,7 @@
         target-id (:base-branch-id source-row)
         target-row (when target-id (sp/read-entity base-storage :branch target-id))
         required (or (:required-approvals target-row) 0)
-        allow-self? (boolean (:allow-self-approval? target-row))
+        allow-self? (merge-policy/self-approval-allowed? target-row)
         author-id (:owner-id source-row)
         stamp (merge-policy/branch-content-stamp base-storage source-branch-id)
         approvals (sp/query-entities base-storage :branch-approval

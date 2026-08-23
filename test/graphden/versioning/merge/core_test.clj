@@ -501,3 +501,30 @@
         (approve! "carol" (mp/branch-content-stamp base src-id))
         (is (= 1 (mp/count-valid-approvals base src-id nil false))))
       (sp/close storage))))
+
+
+(deftest self-approval-allowed?-defaults-on
+  (testing "nil :allow-self-approval? ≡ ON (author's own approval counts) —
+            solo/small teams aren't locked out; explicit false opts into strict"
+    (is (true? (mp/self-approval-allowed? {})) "nil default → true")
+    (is (true? (mp/self-approval-allowed? {:allow-self-approval? nil})) "explicit nil → true")
+    (is (true? (mp/self-approval-allowed? {:allow-self-approval? true})))
+    (is (false? (mp/self-approval-allowed? {:allow-self-approval? false})) "explicit false → strict")))
+
+
+(deftest delete-branch-cascades-approvals-test
+  (testing "deleting a branch removes its :branch-approval rows (no orphans)"
+    (let [{:keys [storage base]} (create-test-storage)
+          src (vs/create-branch! storage "cascade-src")
+          src-id (:id src)]
+      (sp/create-entity base :branch-approval
+                        {:source-branch-id src-id :approver-id "alice"
+                         :content-stamp "x" :created-at (java.time.Instant/now)})
+      (sp/create-entity base :branch-approval
+                        {:source-branch-id src-id :approver-id "bob"
+                         :content-stamp "x" :created-at (java.time.Instant/now)})
+      (is (= 2 (count (sp/query-entities base :branch-approval {:source-branch-id src-id}))))
+      (vs/delete-branch! storage src-id)
+      (is (empty? (sp/query-entities base :branch-approval {:source-branch-id src-id}))
+          "approvals cascaded with the branch")
+      (sp/close storage))))

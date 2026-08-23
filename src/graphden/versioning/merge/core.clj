@@ -151,6 +151,18 @@
     (str (count rows) "|" (or max-ts "0"))))
 
 
+(defn self-approval-allowed?
+  "Whether a proposal author's OWN approval counts toward the target's
+   `:required-approvals`. Default (nil `:allow-self-approval?`) is TRUE —
+   a solo author / small team isn't locked out; a team wanting strict
+   review sets the flag false. Single source of truth for the default so
+   the gate and the status projection agree."
+  [target-row]
+  (if (some? (:allow-self-approval? target-row))
+    (boolean (:allow-self-approval? target-row))
+    true))
+
+
 (defn count-valid-approvals
   "How many DISTINCT, non-stale approvals the proposal `source-branch-id`
    currently has toward a merge into the target. WHO may approve was
@@ -188,7 +200,7 @@
     (when (pos? required)
       (let [source-row (sp/read-entity base-storage :branch source-branch-id)
             author-id (:owner-id source-row)
-            allow-self? (boolean (:allow-self-approval? target-row))
+            allow-self? (self-approval-allowed? target-row)
             have (count-valid-approvals base-storage source-branch-id author-id allow-self?)]
         (when (< have required)
           (throw (ex-info (str "Merge blocked: this branch requires " required
@@ -205,6 +217,10 @@
 (defn validate-merge!
   [versioned-storage source-branch-id]
   (validate-branch-policy! versioned-storage source-branch-id)
+  ;; Run the review-approval gate here too, so `safe-merge-branch!` (and any
+  ;; future route wired to it) can never skip required-approvals — the live
+  ;; merge base-fn calls it directly; this closes the latent bypass.
+  (validate-approval-policy! versioned-storage source-branch-id)
   (let [{:keys [protected-transfers blocked?]}
         (detect-protected-transfers versioned-storage source-branch-id)]
     (when blocked?

@@ -126,19 +126,36 @@
 (deftest ^:perf list-secrets-sql-cost
   (testing "GET /api/secrets — the endpoint that used to scan the graph"
     ;; The docstring's ~9x. Filtering moved into SQL; a change that walks the
-    ;; fn graph again to find `:secret-leaf` descendants shows up here as a
-    ;; query count proportional to the graph, long before anyone notices the
-    ;; page got slow. Reading a graph with no secrets in it is fine for that:
-    ;; a scan costs the same whether it finds anything or not, which is the
-    ;; whole point of the regression.
-    (let [{:keys [queries result]}
+    ;; fn graph again to find `:secret-leaf` descendants shows up here as work
+    ;; proportional to the graph, long before anyone notices the page got slow.
+    ;; Reading a graph with no secrets in it is fine for that: a scan costs the
+    ;; same whether it finds anything or not, which is the whole point.
+    (let [{:keys [queries result statements]}
           (record! :sql/list-secrets
                    #(setup/via-graph *graph* :list-secrets-handler
                                      {:uri "/api/secrets"
                                       :request-method :get}))]
       (is (= 200 (:status result))
           "the read must succeed, or its query count means nothing")
-      (is (pos? queries)))))
+      (is (pos? queries))
+      ;; THE actual guard, and the reason this scenario has a behavioural
+      ;; assertion at all. The total is 6 and jitters by one with branch-row
+      ;; caching — a budget alone would either be loose enough to miss a small
+      ;; regression or tight enough to fail honestly-green runs (it did both:
+      ;; first measured 5 here, 6 on a GitHub runner, 7 once locally).
+      ;;
+      ;; What does NOT jitter is the SHAPE: every statement runs exactly once.
+      ;; The regression this scenario exists for — walking the graph per fn —
+      ;; is precisely a statement with calls > 1, and pg_stat_statements
+      ;; normalises it into one row that says so.
+      (is (every? #(= 1 (:calls %)) statements)
+          (str "a statement ran more than once — /api/secrets is scanning "
+               "again rather than filtering in SQL: "
+               (pr-str (->> statements
+                            (filter #(> (:calls %) 1))
+                            (mapv (juxt :calls #(subs (str (:query %))
+                                                      0
+                                                      (min 90 (count (str (:query %))))))))))))))
 
 
 (deftest ^:perf graph-layout-sql-cost

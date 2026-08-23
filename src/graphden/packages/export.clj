@@ -575,7 +575,13 @@
     (->> (vals (:fns ctx))
          (remove #(contains? prim-id->kw (:id %)))
          (filter :name)
-         (mapv #(fn-row->fn-def % ctx)))))
+         (mapv #(fn-row->fn-def % ctx))
+         ;; Deterministic emission order — `(vals (:fns ctx))` iterates a
+         ;; hash-map, so without this the SAME graph exported twice shuffles
+         ;; its defs (git-diff noise, order-sensitive consumers). [ns name]
+         ;; groups a namespace's defs together, the natural read order.
+         (sort-by (juxt #(str (:namespace %)) #(str (:name %))))
+         vec)))
 
 
 ;; =============================================================================

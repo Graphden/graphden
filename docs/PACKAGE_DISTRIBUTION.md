@@ -352,12 +352,12 @@ the forker's own org — a deliberate act, not the default.
   the dev CLI classpath is driven by `deps.edn` as usual.
 - **Proven end-to-end via a real git coord (`mathx`, Track B):** the standalone
   repo [`graphden/graphden-mathx`](https://github.com/graphden/graphden-mathx)
-  (`@a99354d1`) is a real out-of-tree Type-2 package — a `:gcd` base-fn
+  (`@8337147`) is a real out-of-tree Type-2 package — a `:gcd` base-fn
   (`ops/impls.clj` `defbase` + the `impls` var linking it) plus a
   `:gcd-with-12` composed fn-def (`ops/fns.edn`). It is pulled in by a **git
   coord**, not a local path:
   - `executor-packages.edn` + `deps.edn` root `:deps` list
-    `{:git/url "git@github.com:graphden/graphden-mathx.git" :git/sha "a99354d1…"}`.
+    `{:git/url "https://github.com/Graphden/graphden-mathx.git" :git/sha "8337147…"}`.
     `bb rebuild` **clones the package straight from GitHub** into the uberjar
     (build.clj merges the manifest coord into the basis). The running instance
     loads it (base-fn count 249 → 250, `mathx.ops` synced) and
@@ -366,7 +366,8 @@ the forker's own org — a deliberate act, not the default.
     `:override-deps {mathx/mathx {:local/root "external-packages/mathx"}}`, so
     `bb test` / `bb dev` resolve the identical in-tree copy — **no repo access,
     no ssh-agent, offline**. `external-packages/mathx/` is kept in-tree as the
-    override source (and matches the pushed repo at `@a99354d1`).
+    override source (and matches the pushed repo at `@8337147` — a byte-level
+    match `pkg-copy-sync` enforces in `bb ci`).
   - **Access requirement:** none — the repo is **public** and the coord is an
     https URL, so `bb rebuild` / `bb check` / any non-`:test`/`:dev` invocation
     resolves it anonymously, no credentials or ssh-agent. (If you fork it into a
@@ -787,10 +788,11 @@ is real; modularity itself comes from packages + protocols/Integrant, in-tree.
 
 | Repo | Kind | How it relates to the monorepo | Access |
 |------|------|--------------------------------|--------|
-| `graphden/graphden` (this) | monorepo | core / web / storage / **app-base** / app-editor / **registry** / **mcp** / **tenancy-admin** — all co-evolving first-party, in ONE tree. Emits the uberjar; can emit a `graphden-core` artifact (Task 7). | private |
+| `graphden/graphden` (this) | monorepo | core / web / storage / **app-base** / app-editor / **registry** / **mcp** — all co-evolving first-party, in ONE tree. Emits the uberjar; can emit a `graphden-core` artifact (Task 7). | public (AGPL-3.0) |
 | `graphden/graphden-mathx` | external Type-2 pkg | pulled IN by git coord (`deps.edn` + `executor-packages.edn`); in-tree copy at `external-packages/mathx` for offline test (§ 5.1). | public |
-| `graphden/graphden-examples` | extracted dev pkg | the pedagogical `examples` package moved OUT; in-tree at `external-packages/examples`, on the classpath only via the `:dev`/`:test` `:extra-paths` (never prod). | private |
-| `graphden/graphden-cloud` | thin consumer | depends on graphden as a **git-dep**, turns the tenancy addon on, adds cloud modules (`usage-metering` …). NOT a fork (§ 16). | private |
+| `graphden/graphden-examples` | extracted dev pkg | the pedagogical `examples` package moved OUT; in-tree at `external-packages/examples`, on the classpath only via the `:dev`/`:test` `:extra-paths` (never prod). | public |
+| `graphden/graphden-tenancy` | private addon | the multi-tenant POLICY (grants/RLS/quotas/users + the `tenancy-admin` package), extracted 2026-08-03; pulled into `graphden-cloud` as a git-dep. Core keeps only the SPI seam (`tenancy/context.clj`, [TENANCY_SEAM.md](TENANCY_SEAM.md)). | private |
+| `graphden/graphden-cloud` | thin consumer | depends on graphden **and graphden-tenancy** as git-deps, turns the tenancy addon on, adds cloud modules (`usage-metering` …). NOT a fork (§ 16). | private |
 | *future* private cloud modules | closed addons | attach to `graphden-cloud` via `GRAPHDEN_ADDON_CONFIGS` (billing / metering sinks / at-scale routing). | proprietary |
 
 What's NOT extracted, on purpose: the Postgres storage impl (a swap *seam*

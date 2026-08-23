@@ -233,8 +233,8 @@ whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
    {:packages
     [{:name "mathx"
       :lib mathx/mathx
-      :coord {:git/url "git@github.com:graphden/graphden-mathx.git"
-              :git/sha "a99354d1…"}}]}
+      :coord {:git/url "https://github.com/Graphden/graphden-mathx.git"
+              :git/sha "8337147…"}}]}
    ```
 
 3. **`bb rebuild` pulls it in.** The build clones the repo at that sha,

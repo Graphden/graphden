@@ -33,15 +33,16 @@
           (def gd-executor (str gd-instance "-executor"))
           (def gd-url (str "http://localhost:" (or (System/getenv "GD_PORT_HTTP") "9002")))
 
-          ;; --- shared SSH agent for the private mathx clone -----------------
-          ;; `bb rebuild` builds the uberjar, which resolves the PRIVATE
-          ;; `graphden-mathx` git coord over SSH (the :build alias is the only
-          ;; one without the :dev/:test local-root override — by design, it is
-          ;; the real distribution form). A per-shell `ssh-agent` doesn't help:
-          ;; `bb ssh-key` and `bb rebuild` run in separate shells that don't
-          ;; share it. So `bb ssh-key` loads the key into ONE agent bound to a
-          ;; FIXED socket path, and `ssh-env` points every SSH-using child at
-          ;; it — no `export SSH_AUTH_SOCK` needed in your rc.
+          ;; --- shared SSH agent (git pushes; historically the mathx clone) --
+          ;; The monorepo's `origin` is an ssh remote, so anything that pushes
+          ;; (the wtq gate's develop push, `bb release`'s sibling-repo pushes)
+          ;; needs an agent. It used to also serve `bb rebuild`'s resolve of
+          ;; the then-private mathx git coord; mathx is public/https now, but
+          ;; the splice stays harmless. A per-shell `ssh-agent` doesn't help:
+          ;; `bb ssh-key` and the consuming task run in separate shells that
+          ;; don't share it. So `bb ssh-key` loads the key into ONE agent bound
+          ;; to a FIXED socket path, and `ssh-env` points every SSH-using child
+          ;; at it — no `export SSH_AUTH_SOCK` needed in your rc.
           (def gd-ssh-sock (str (System/getenv "HOME") "/.ssh/graphden-agent.sock"))
           (defn ssh-env
             "p/shell opts pointing SSH at the fixed graphden agent socket when it
@@ -574,17 +575,20 @@
   ;; Tests split into THREE groups by what they exercise:
   ;;   - unit:        pure logic + light fixtures, in-JVM, ~4 min
   ;;   - integration: real PostgreSQL via testcontainers + full Ring
-  ;;                  chain, in-JVM, ~14-17 min — the most expensive
-  ;;                  thing the gate does, twice the cost of e2e
+  ;;                  chain, in-JVM, ~6-7 min since the 2026-08-17
+  ;;                  fixture-sharing epic (was ~14-17 min)
   ;;   - e2e:         Playwright browsers against a running graphden
-  ;;                  deployment (Node, separate process), ~11 min
+  ;;                  deployment (Node, separate process), ~11-26 min
   ;;                  — requires `bb rebuild` first + AUTH_TOKEN env
   ;;
-  ;; Those are measurements, taken from three consecutive landing gates:
+  ;; Measurements. Three consecutive landing gates pre-fixture-epic:
   ;;   integration  841 / 928 / 998 s
   ;;   e2e          656 / 663 / 672 s  (the suite itself is 533-550 s of that;
   ;;                                    the rest is the isolated stack booting)
   ;;   unit         246 s as a process, 205 s of kaocha's own wall
+  ;; Post-fixture-epic gates (2026-08-23): integration 366 / 381 s. e2e varies
+  ;; with host load far more than with code — 1015-1567 s observed on the same
+  ;; day; the wtq resources CSV says which kind of run you had.
   ;;
   ;; They replace ~1.5 / ~10-12 / ~15-25 min, which had drifted in BOTH
   ;; directions — integration was 40% dearer than advertised, e2e less than
@@ -681,7 +685,7 @@
                   "-M:dev:test -m kaocha.runner :perf --no-randomize")}
 
   test-integration
-  {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~14-17 min — measured 841/928/998 s across three landing gates, and the single most expensive thing the gate does (twice e2e). The old ~10-12 min was 40% optimistic."
+  {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~6-7 min since the 2026-08-17 fixture-sharing epic — measured 366/381 s on 2026-08-23 gates; was 841/928/998 s (~14-17 min) before, when it was the single most expensive thing the gate did."
    :task (do (assert-gate-only! "bb test-integration")
              ;; documentation reporter: newline-terminated output. The
              ;; default dots reporter emits one giant unbroken line that
@@ -964,7 +968,7 @@
   ;; === DOCKER DEPLOYMENT ===
 
   ssh-key
-  {:doc "Load an SSH key into a FIXED-socket agent that every `bb` task shares, so `bb rebuild` can clone the private mathx repo without an `export SSH_AUTH_SOCK` in your rc. Usage: bb ssh-key [keyfile]. Default key: first of ~/.ssh/{id_ed25519,id_ecdsa,id_rsa}. Run it once per boot (or after a passphrase timeout)."
+  {:doc "Load an SSH key into a FIXED-socket agent that every `bb` task shares, so git pushes (the wtq gate's develop push, bb release) work without an `export SSH_AUTH_SOCK` in your rc. Usage: bb ssh-key [keyfile]. Default key: first of ~/.ssh/{id_ed25519,id_ecdsa,id_rsa}. Run it once per boot (or after a passphrase timeout)."
    :task
    (let [home (System/getenv "HOME")
          key (or (first *command-line-args*)
@@ -992,7 +996,7 @@
      (println (str green "✓ Key loaded. `bb rebuild` will now use it." reset)))}
 
   rebuild
-  {:doc "Rebuild jar + docker and restart the CANONICAL instance (keeps DB data). In an agent worktree this refuses to run unless GD_INSTANCE is set — use `bb wt up` for your own isolated stack. Needs the private mathx clone over SSH: run `bb ssh-key` first (see that task)."
+  {:doc "Rebuild jar + docker and restart the CANONICAL instance (keeps DB data). In an agent worktree this refuses to run unless GD_INSTANCE is set — use `bb wt up` for your own isolated stack. External package deps (mathx) resolve anonymously over https — no ssh needed."
    :task (do
            (assert-not-clobbering-shared-stack! "bb rebuild")
 

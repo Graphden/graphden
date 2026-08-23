@@ -153,9 +153,14 @@ services:
       # the start-server call entirely. Set in `.env` for dev debug.
       GRAPHDEN_NREPL_PORT: ${GRAPHDEN_NREPL_PORT:-}
     ports:
-      - "${GD_PORT_HTTP:-9002}:8080"
-      - "${GD_PORT_HISTORY:-9081}:8081"  # Tutorial: user-built history endpoint runs here
-      - "${GD_PORT_NREPL:-9099}:7888"  # Opt-in nREPL — only listens when GRAPHDEN_NREPL_PORT=7888
+      # GD_BIND — the OFFLINE / "internal requests only" preset
+      # (docs/DEPLOYMENT.md § Local offline instance): GD_BIND=127.0.0.1
+      # keeps every port loopback-only, so a laptop instance serves the
+      # editor and its own apps locally but is unreachable from the
+      # network — zero Clojure involved, the bind is the boundary.
+      - "${GD_BIND:-0.0.0.0}:${GD_PORT_HTTP:-9002}:8080"
+      - "${GD_BIND:-0.0.0.0}:${GD_PORT_HISTORY:-9081}:8081"  # Tutorial: user-built history endpoint runs here
+      - "${GD_BIND:-0.0.0.0}:${GD_PORT_NREPL:-9099}:7888"  # Opt-in nREPL — only listens when GRAPHDEN_NREPL_PORT=7888
     # The JVM runs with -XX:+UseContainerSupport -XX:MaxRAMPercentage=75, so it
     # sizes its heap against the CONTAINER's limit. With no limit that is the
     # whole HOST: on an 11.7 GB box this executor sized itself for an 8.8 GB

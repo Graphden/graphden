@@ -199,6 +199,25 @@ core's `case` matcher.
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
 
+## Push branches (cross-install review, 2026-08-23)
+
+A branch is also the unit of CROSS-INSTALL flow: a local (offline)
+instance pushes a snapshot of its work to the hub as a branch named
+`push/<name>` (`graphden.cli push` → `POST /api/import/graph?target=…`),
+and review happens with everything in this document — diff against main,
+resolve conflicts, merge, with `forbid-invalid?` and the write-policy
+applying as usual. The convention rests on machinery, not new entities:
+
+- the push branch is created with the pushing principal stamped as
+  `owner-id` and the `owner` write-policy, so only its author updates it;
+- a re-push is a fresh snapshot of the same branch (`?prune=true` —
+  deletions travel);
+- the reverse direction lands the hub's main locally as `hub/main`
+  (`graphden.cli pull`), merged with the same local merge flow;
+- `branch-local?` fns (ports, cron, vault paths) never propagate through
+  the merge, so local runtime wiring can't leak into the hub's main —
+  exactly the same guarantee in-instance branches already have.
+
 ## Protected branches (Stage 1, 2026-08-15)
 
 A branch may carry a `write-policy` (nullable text on the `:branch`

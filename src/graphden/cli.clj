@@ -19,6 +19,21 @@
        (`--create` forks it; `--prune` = snapshot semantics). Prints the
        server's report (fn-ids / skipped-owned / pruned).
 
+     push --local-url L --local-token LT --hub-url H --hub-token HT
+          [--branch B] [--target T] [--no-prune]
+       The offline workflow's publish half: snapshot the LOCAL branch B
+       (default main) and apply it to the hub as branch T (default
+       push/<B>), created on demand (owner-stamped, owner write-policy)
+       and pruned to the snapshot. Review + merge then happen on the hub
+       (diff → conflicts → merge — VERSIONING.md § HTTP API).
+
+     pull --local-url L --local-token LT --hub-url H --hub-token HT
+          [--branch B] [--target T] [--no-prune]
+       The other direction: snapshot the HUB branch B (default main) and
+       land it locally as branch T (default hub/<B>). Merge it into your
+       local main with the normal merge flow (the editor's branch
+       popover, or POST /api/branches/main/merge {source: hub/<B>}).
+
    Exit codes: 0 ok, 1 the server refused (its reason is printed),
    2 bad usage / IO."
   (:require
@@ -44,7 +59,7 @@
    positional args under :args. Flags without a value: --create --prune
    --include-secret-paths."
   [argv]
-  (let [flags #{"--create" "--prune" "--include-secret-paths"}]
+  (let [flags #{"--create" "--prune" "--include-secret-paths" "--no-prune"}]
     (loop [argv argv opts {:args []}]
       (if-let [a (first argv)]
         (cond
@@ -154,13 +169,70 @@
 
 
 ;; =============================================================================
+;; push / pull — instance → instance transfer (the offline workflow)
+;; =============================================================================
+
+(defn- transfer!
+  "Snapshot `src`'s branch and apply it to `dst` as `target`
+   (create + prune by default — the push branch IS the snapshot).
+   Returns a process exit code."
+  [{:keys [src-url src-token src-branch dst-url dst-token target no-prune]}]
+  (let [bundle (fetch-export! {:url src-url :token src-token :branch src-branch})
+        query (str "target=" target "&create=true"
+                   (when-not no-prune "&prune=true"))
+        resp @(http/post (str dst-url "/api/import/graph?" query)
+                         {:headers {"Authorization" (str "Bearer " dst-token)
+                                    "Content-Type" "application/edn"}
+                          :body (pr-str {:fns (wire/encode-unreadable-kws
+                                                (vec (:fns bundle)))})
+                          :timeout 300000})]
+    (println (str (:status resp) " " (:body resp)))
+    (if (and (nil? (:error resp)) (= 200 (:status resp))) 0 1)))
+
+
+(defn push!
+  "LOCAL branch → hub branch `push/<branch>` (see the ns doc)."
+  [opts]
+  (require-opts! opts [:local-url :local-token :hub-url :hub-token])
+  (let [branch (or (:branch opts) "main")
+        target (or (:target opts) (str "push/" branch))
+        code (transfer! {:src-url (:local-url opts) :src-token (:local-token opts)
+                         :src-branch branch
+                         :dst-url (:hub-url opts) :dst-token (:hub-token opts)
+                         :target target :no-prune (:no-prune opts)})]
+    (when (zero? code)
+      (println (str "pushed local '" branch "' -> hub '" target
+                    "'. Review + merge on the hub: diff it against main, then merge.")))
+    code))
+
+
+(defn pull!
+  "Hub branch → LOCAL branch `hub/<branch>` (see the ns doc)."
+  [opts]
+  (require-opts! opts [:local-url :local-token :hub-url :hub-token])
+  (let [branch (or (:branch opts) "main")
+        target (or (:target opts) (str "hub/" branch))
+        code (transfer! {:src-url (:hub-url opts) :src-token (:hub-token opts)
+                         :src-branch branch
+                         :dst-url (:local-url opts) :dst-token (:local-token opts)
+                         :target target :no-prune (:no-prune opts)})]
+    (when (zero? code)
+      (println (str "pulled hub '" branch "' -> local '" target
+                    "'. Merge it: POST /api/branches/main/merge {\"source\": \"" target
+                    "\"} or use the editor's branch popover.")))
+    code))
+
+
+;; =============================================================================
 ;; entry
 ;; =============================================================================
 
 (def ^:private usage
   "usage:
   clojure -M -m graphden.cli export --url URL --token TOKEN --out DIR [--branch B] [--include-secret-paths]
-  clojure -M -m graphden.cli import DIR --url URL --token TOKEN --target BRANCH [--create] [--prune]")
+  clojure -M -m graphden.cli import DIR --url URL --token TOKEN --target BRANCH [--create] [--prune]
+  clojure -M -m graphden.cli push --local-url L --local-token LT --hub-url H --hub-token HT [--branch B] [--target T] [--no-prune]
+  clojure -M -m graphden.cli pull --local-url L --local-token LT --hub-url H --hub-token HT [--branch B] [--target T] [--no-prune]")
 
 
 (defn -main
@@ -171,6 +243,8 @@
                (case cmd
                  "export" (export! opts)
                  "import" (import! opts)
+                 "push" (push! opts)
+                 "pull" (pull! opts)
                  (fail! 2 usage))
                (catch clojure.lang.ExceptionInfo e
                  (fail! (if (= :cli/usage (:type (ex-data e))) 2 1)

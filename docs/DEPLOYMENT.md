@@ -81,6 +81,44 @@ This starts:
 The executor listens on container port `8080`, published to the host
 as **`http://localhost:9002`**.
 
+### Option 1a: Local OFFLINE instance (partially-local workflow)
+
+The default Graphden story is "open the site and work". The LOCAL
+instance is the opt-in for two situations: flaky/absent network, or a
+cloud prod you don't want to spend on while iterating (test runs on your
+own hardware are free). It is the SAME compose stack with two habits:
+
+```bash
+# Loopback-only: the editor + your apps are reachable from this machine
+# only — "internal requests only" is the port BINDING, not a mode.
+GD_BIND=127.0.0.1 docker compose up -d
+```
+
+- **Work offline.** Everything is local: editor, branches, executions.
+  Runtime config (ports, cron schedules, vault paths) is `branch-local?`
+  by design, so nothing of your local wiring can leak into the hub later.
+- **Snapshot to git** whenever you like:
+  `bb graph-export --url http://localhost:9002 --token $AUTH_TOKEN --out ../my-graph`
+  — one EDN file per namespace, byte-stable (a git diff is a graph
+  diff). Re-apply anywhere with `bb graph-import`.
+- **When the network is back, push** your branch to the hub as a
+  review branch:
+  `clojure -M -m graphden.cli push --local-url http://localhost:9002
+  --local-token $AUTH_TOKEN --hub-url https://your-hub --hub-token
+  $HUB_TOKEN --branch main --target push/my-feature` — the hub branch is
+  created owner-stamped with the `owner` write-policy, and review/merge
+  happen with the hub's normal diff → conflicts → merge flow.
+- **Pull the hub's main** into a local `hub/main` branch with
+  `clojure -M -m graphden.cli pull …`, then merge it locally (editor
+  branch popover or `POST /api/branches/main/merge`).
+- **`:service` rows never travel** in bundles: your local cron/web-server
+  services stay local, the hub's stay on the hub.
+
+The push/pull identity model is deterministic (`uuid-v5(namespace,
+name)`), so re-pushing/re-pulling is idempotent, and an fn you created in
+the local editor is ADOPTED onto its canonical id on first import rather
+than duplicated.
+
 ### Option 2: Docker with External Database
 
 If you have an existing PostgreSQL instance:

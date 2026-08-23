@@ -78,6 +78,7 @@ around it changes.
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
 | 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written · ▶ interactive |
 | 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written · ▶ interactive |
+| 32 | [Working offline: a local instance, git snapshots, push/pull](32-offline-and-push.md) | ✅ written |
 | 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written · ▶ interactive |
 | 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written · ▶ interactive |
 | 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written · ▶ interactive |

@@ -81,3 +81,40 @@
       (is (= 1 (cli/import! {:args [dir] :url url :token "t" :target "x"}))
           "a non-200 from the server is exit code 1")
       (finally (stop)))))
+
+
+(deftest push-and-pull-transfer-between-two-stub-instances
+  ;; push: local → hub as push/<branch> (create+prune); pull: hub → local
+  ;; as hub/<branch>. Assert the wire calls each direction makes.
+  (let [hub-import (atom nil)
+        local-import (atom nil)
+        mk-stub (fn [import-sink]
+                  (hk/run-server
+                    (fn [req]
+                      (condp = (:uri req)
+                        "/api/export/graph"
+                        {:status 200 :headers {"Content-Type" "application/edn"}
+                         :body (pr-str fixture-bundle)}
+                        "/api/import/graph"
+                        (do (reset! import-sink {:query (:query-string req)
+                                                 :auth (get-in req [:headers "authorization"])})
+                            {:status 200 :body "{\"ok\":true}"})
+                        {:status 404 :body ""}))
+                    {:port 0}))
+        hub (mk-stub hub-import)
+        local (mk-stub local-import)
+        hub-url (str "http://localhost:" (:local-port (meta hub)))
+        local-url (str "http://localhost:" (:local-port (meta local)))
+        base {:local-url local-url :local-token "lt"
+              :hub-url hub-url :hub-token "ht"}]
+    (try
+      (testing "push lands on the HUB as push/main, pruned, hub bearer"
+        (is (zero? (cli/push! base)))
+        (is (= {:query "target=push/main&create=true&prune=true"
+                :auth "Bearer ht"} @hub-import))
+        (is (nil? @local-import) "push never writes locally"))
+      (testing "pull lands LOCALLY as hub/main with the local bearer"
+        (is (zero? (cli/pull! (assoc base :no-prune true))))
+        (is (= {:query "target=hub/main&create=true"
+                :auth "Bearer lt"} @local-import)))
+      (finally (hub) (local)))))

@@ -26,6 +26,7 @@
     [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.packages.records :as records]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
@@ -773,6 +774,21 @@
                      ;; (over-refresh of a fresh one is harmless).
                      (doseq [[bid entry] @handlers]
                        (when-not (contains? snap bid) (refresh! bid entry))))
+              ;; Convey ONLY the test-isolation registry overrides onto the
+              ;; heal thread — NOT bound-fn* (that would drag per-request
+              ;; bindings like the tenant org into a background rebuild).
+              ;; Without this a heal fired from an isolated test thread
+              ;; rebuilt ctxs against an EMPTY rich-types registry: base-fn
+              ;; markers (`:lazy-seq-args` on `:cond` &c.) vanished and the
+              ;; recompiled closures evaluated cond clauses EAGERLY — the
+              ;; 2026-08-23 "/api" update-keys ClassCast poisoning. In
+              ;; production both overrides are nil, so behavior is unchanged.
+              rt-override registry-core/*rich-types-override*
+              per-org-override registry-core/*per-org-rich-override*
+              work (fn []
+                     (binding [registry-core/*rich-types-override* rt-override
+                               registry-core/*per-org-rich-override* per-org-override]
+                       (work)))
               t (Thread. ^Runnable work "graph-epoch-heal")]
           (if *epoch-heal-sync?*
             (work)

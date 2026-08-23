@@ -219,6 +219,12 @@ and bounded for *fairness*:
   *do* (a free tenant can't touch `:network` / `:process` at all).
 - **Fairness** — the fleet-wide per-org execution quota, the per-org egress
   rate-limit, and the response byte-cap bound how *often* and how *much*.
+  The per-org execution cap also bounds an org's share of the bounded
+  execution QUEUE: admission (`acquire-execution-slot!`) rejects the org's
+  cap+1-th concurrent execution before it can park, so one org holds at
+  most `*max-concurrent-executions-per-org*` of the pool+queue slots — a
+  single tenant cannot monopolise the queue (2026-08-23 audit follow-up;
+  no separate queue partitioning needed).
 
 What the shared tier does **not** give is a hard **resource** boundary: the
 co-located tenants share the pod's CPU, heap, and threads, so a heavy or

@@ -10,6 +10,7 @@
     [graphden.fleet.control-loop :as fleet-loop]
     [graphden.fleet.discovery :as fleet-discovery]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
+    [graphden.util.counters :as counters]
     [integrant.core :as ig]))
 
 
@@ -25,10 +26,30 @@
 ;; (`GRAPHDEN_EXECUTOR_ID` set) — single-tenant / self-hosted never starts it.
 ;; =============================================================================
 
-(def ^:private fleet-controller-lock-id
-  "Fixed advisory-lock key that elects the single fleet controller — a constant
-   so every pod contends for the SAME lock."
-  #uuid "f1ee7c07-0000-0000-0000-000000000001")
+(defn fleet-controller-lock-id
+  "Advisory-lock key that elects a release's single controller. Advisory
+   locks are DB-wide and a mixed fleet's releases share one Postgres, so a
+   constant key made two releases' controllers contend for ONE lock — the
+   winner saw only its own SRV membership and tried to place every org onto
+   its own pods (the 2026-08-23 audit's mixed-fleet wedge). The key is now
+   derived from `scope` — the release identity (`GRAPHDEN_FLEET_LOCK_SCOPE`,
+   defaulting to `GRAPHDEN_FLEET_DNS`, which is per-release by construction:
+   each release has its own headless Service). Same scope → same lock
+   (leader election within the release); different releases → different
+   locks, each managing its own scoped cell set (`scope-cells`). Blank
+   scope keeps the historic constant, so single-release fleets are
+   unchanged."
+  [scope]
+  (if (str/blank? (str scope))
+    #uuid "f1ee7c07-0000-0000-0000-000000000001"
+    (java.util.UUID/nameUUIDFromBytes
+      (String/.getBytes (str "graphden-fleet-controller/" scope) "UTF-8"))))
+
+
+(defn- csv-set
+  [s]
+  (when-not (str/blank? (str s))
+    (into #{} (comp (map str/trim) (remove str/blank?)) (str/split (str s) #","))))
 
 
 (defn- fleet-controller-opts
@@ -36,12 +57,18 @@
    `:sustain-ticks` (imbalance must persist this many ticks before a move),
    `:min-improvement` (magnitude floor), `:max-moves` (per-tick cap),
    `:w-overlap` (overlap-accounting weight — > 0 co-locates code-sharing cells;
-   default 0 keeps pure load-balancing, so overlap is strictly opt-in)."
+   default 0 keeps pure load-balancing, so overlap is strictly opt-in),
+   `:shard-orgs` (this release's `GRAPHDEN_EXECUTOR_ORGS` — a dedicated
+   release's controller manages ONLY its shard) and `:exclude-orgs`
+   (`GRAPHDEN_FLEET_EXCLUDE_ORGS` — the shared release's list of orgs that
+   dedicated releases own; see `control-loop/scope-cells`)."
   []
   {:sustain-ticks (or (some-> (System/getenv "GRAPHDEN_FLEET_SUSTAIN_TICKS") parse-long) 3)
    :min-improvement (or (some-> (System/getenv "GRAPHDEN_FLEET_MIN_IMPROVEMENT") parse-double) 0.0)
    :max-moves (or (some-> (System/getenv "GRAPHDEN_FLEET_MAX_MOVES") parse-long) Integer/MAX_VALUE)
-   :w-overlap (or (some-> (System/getenv "GRAPHDEN_FLEET_OVERLAP_WEIGHT") parse-double) 0.0)})
+   :w-overlap (or (some-> (System/getenv "GRAPHDEN_FLEET_OVERLAP_WEIGHT") parse-double) 0.0)
+   :shard-orgs (csv-set (System/getenv "GRAPHDEN_EXECUTOR_ORGS"))
+   :exclude-orgs (csv-set (System/getenv "GRAPHDEN_FLEET_EXCLUDE_ORGS"))})
 
 
 (defn- fleet-controller-tick!
@@ -58,7 +85,11 @@
   [ctx holder state-atom opts]
   (try
     (pg-lock/ensure-live! holder)
-    (if (pg-lock/try-lock! (pg-lock/holder-conn holder) fleet-controller-lock-id)
+    (if (pg-lock/try-lock! (pg-lock/holder-conn holder)
+                           (or (:lock-id opts)
+                               (fleet-controller-lock-id
+                                 (or (System/getenv "GRAPHDEN_FLEET_LOCK_SCOPE")
+                                     (System/getenv "GRAPHDEN_FLEET_DNS")))))
       (let [executors-fn (or (:executors-fn opts) fleet-discovery/fleet-executors)
             run-tick-fn (or (:run-tick-fn opts) fleet-loop/run-tick!)
             env {:storage (:storage ctx)
@@ -67,6 +98,14 @@
                  :move-fn (fn [cmd] (fleet-command/execute-move! ctx cmd))}
             decision (run-tick-fn env @state-atom opts)]
         (reset! state-atom (:state decision))
+        ;; Ops surface: these ride the existing counters-snapshot pipeline
+        ;; (docs/MONITORING.md) — the first fleet observability beyond
+        ;; /internal/fleet/status and log-grep.
+        (counters/count! :fleet/ticks)
+        (when (seq (:initial-placements decision))
+          (counters/count! :fleet/initial-placements (count (:initial-placements decision))))
+        (when (seq (:moves decision))
+          (counters/count! :fleet/rebalance-moves (count (:moves decision))))
         (when (or (seq (:moves decision)) (seq (:initial-placements decision)))
           (log/info "Fleet controller applied placement"
                     {:initial (count (:initial-placements decision))
@@ -74,6 +113,7 @@
                      :imbalance (:current-imbalance decision)})))
       (reset! state-atom {}))
     (catch Exception e
+      (counters/count! :fleet/tick-failures)
       (log/warn e "Fleet controller tick failed — will retry next tick"))))
 
 
@@ -82,8 +122,14 @@
   ;; `enabled?` is the fleet identity (`GRAPHDEN_EXECUTOR_ID`) — a non-blank
   ;; string on a fleet member, nil/false otherwise. Guard against a literal
   ;; `false` (whose `(str false)` = "false" is non-blank) reading as enabled.
-  (if-not (and enabled? (not (str/blank? (str enabled?))))
-    (do (log/info "Fleet controller disabled (not a fleet member)") nil)
+  ;; `GRAPHDEN_FLEET_CONTROLLER=off|false|0` is the operator's explicit
+  ;; kill-switch (helm `fleet.controllerEnabled: false`) — a release that
+  ;; must never run a controller (e.g. a dedicated shard the shared
+  ;; release's controller manages) stays a plain fleet member.
+  (if (or (not (and enabled? (not (str/blank? (str enabled?)))))
+          (contains? #{"off" "false" "0"}
+                     (some-> (System/getenv "GRAPHDEN_FLEET_CONTROLLER") str/lower-case)))
+    (do (log/info "Fleet controller disabled (not a fleet member, or switched off)") nil)
     (let [holder (pg-lock/create-lock-holder pg-opts)
           state-atom (atom {})
           opts (fleet-controller-opts)

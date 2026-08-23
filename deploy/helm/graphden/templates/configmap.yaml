@@ -14,6 +14,14 @@ data:
   JDBC_URL: {{ .Values.database.jdbcUrl | quote }}
   DB_USERNAME: {{ .Values.database.username | quote }}
   DB_POOL_SIZE: {{ .Values.database.poolSize | quote }}
+  {{- if not .Values.fleet.controllerEnabled }}
+  # Operator kill-switch: this release runs no placement controller.
+  GRAPHDEN_FLEET_CONTROLLER: "off"
+  {{- end }}
+  {{- with .Values.fleet.excludeOrgs }}
+  # Orgs that DEDICATED releases own — out of this controller's scope.
+  GRAPHDEN_FLEET_EXCLUDE_ORGS: {{ . | quote }}
+  {{- end }}
   GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS: {{ .Values.fleet.controllerPeriodMs | quote }}
   GRAPHDEN_FLEET_SUSTAIN_TICKS: {{ .Values.fleet.sustainTicks | quote }}
   GRAPHDEN_FLEET_MIN_IMPROVEMENT: {{ .Values.fleet.minImprovement | quote }}

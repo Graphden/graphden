@@ -92,6 +92,18 @@ vault:
 
 # Placement-controller tuning (docs/FLEET_RFC.md §6.3). Read by the leader pod.
 fleet:
+  # Off = this release runs NO controller (env GRAPHDEN_FLEET_CONTROLLER=off).
+  # In a mixed fleet exactly ONE picture must hold per release: either every
+  # release runs its own controller over its own scope (the default — lock
+  # keys derive from the release's SRV name, cell scope from executorOrgs /
+  # excludeOrgs), or a dedicated release disables its controller entirely.
+  controllerEnabled: true
+  # Shared-release scope guard for mixed fleets: comma-separated orgs that
+  # DEDICATED releases own — this release's controller will not manage their
+  # cells (GRAPHDEN_FLEET_EXCLUDE_ORGS; docs/FLEET_DEPLOY.md § Dedicated
+  # tenant shard). Dedicated releases need nothing here: their scope IS
+  # executorOrgs.
+  excludeOrgs: ""
   controllerPeriodMs: 30000
   sustainTicks: 3
   minImprovement: "0.0"

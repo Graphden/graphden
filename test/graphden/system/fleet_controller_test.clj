@@ -65,3 +65,20 @@
       (tick! (ctx) ::holder state opts)         ; must not throw
       (is (= {:over-count 1} @state)
           "state is untouched — the throw is caught before the reset"))))
+
+
+(deftest lock-id-is-per-release
+  ;; Advisory locks are DB-wide and a mixed fleet's releases share one
+  ;; Postgres — a constant key made two releases' controllers contend for
+  ;; one lock (the winner saw only its own SRV and mis-placed every org).
+  (testing "blank scope keeps the historic constant (single-release fleets)"
+    (is (= #uuid "f1ee7c07-0000-0000-0000-000000000001"
+           (fleet/fleet-controller-lock-id nil)
+           (fleet/fleet-controller-lock-id ""))))
+  (testing "a scope derives a stable, distinct key per release"
+    (let [shared (fleet/fleet-controller-lock-id "_http._tcp.gd-shared.ns.svc")
+          dedicated (fleet/fleet-controller-lock-id "_http._tcp.gd-acme.ns.svc")]
+      (is (= shared (fleet/fleet-controller-lock-id "_http._tcp.gd-shared.ns.svc"))
+          "deterministic — every pod of a release contends for the same lock")
+      (is (not= shared dedicated) "different releases stop colliding")
+      (is (not= shared (fleet/fleet-controller-lock-id nil))))))

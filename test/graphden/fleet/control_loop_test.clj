@@ -161,6 +161,38 @@
         "a throwing :org read is tolerated; placement cells are still discovered")))
 
 
+(deftest scope-cells-bounds-a-release-to-its-shard
+  ;; The mixed-fleet guard: a dedicated release manages ONLY its shard's
+  ;; orgs; the shared release manages everything except the orgs dedicated
+  ;; releases own. Without it a controller tried to place other releases'
+  ;; orgs onto its own pods, the load 409'd and the cell wedged :unplaced.
+  (let [cells [{:org "acme" :entry-fn-id c1 :weight 1.0}
+               {:org "beta" :entry-fn-id c2 :weight 1.0}
+               {:org "public" :entry-fn-id c1 :weight 1.0}]]
+    (testing "a dedicated release (shard-orgs) keeps exactly its orgs"
+      (is (= {:cells [{:org "acme" :entry-fn-id c1 :weight 1.0}] :skipped 2}
+             (loop/scope-cells cells {:shard-orgs #{"acme"}}))))
+    (testing "the shared release drops the excluded (dedicated) orgs"
+      (is (= {:cells [{:org "beta" :entry-fn-id c2 :weight 1.0}
+                      {:org "public" :entry-fn-id c1 :weight 1.0}]
+              :skipped 1}
+             (loop/scope-cells cells {:exclude-orgs #{"acme"}}))))
+    (testing "no scope config = manage everything (single-release fleet)"
+      (is (= {:cells cells :skipped 0} (loop/scope-cells cells {}))))))
+
+
+(deftest run-tick-respects-the-release-scope
+  ;; Scoped to acme only — beta's cell must produce NO move (it belongs to
+  ;; another release's controller).
+  (let [storage (fleet-storage {:app-routes {"acme" c1 "beta" c2}})
+        applied (atom [])
+        env {:storage storage :forward-deps {}
+             :executors ["e1"] :move-fn #(swap! applied conj %)}
+        decision (loop/run-tick! env {} {:shard-orgs #{"acme"}})]
+    (is (= 1 (count (:initial-placements decision))))
+    (is (= ["acme"] (mapv :org @applied)))))
+
+
 (deftest run-tick-drives-plan-through-the-move-seam
   (let [;; two org apps, both unplaced → both get an initial placement this tick.
         storage (fleet-storage {:app-routes {"acme" c1 "beta" c2}})

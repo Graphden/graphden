@@ -16,6 +16,7 @@
    Keeping the decision pure means the whole policy — thresholds, sustained
    counting, initial-vs-rebalance split — is unit-tested without a fleet."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.fleet.metrics :as metrics]
     [graphden.fleet.packer :as packer]
     [graphden.fleet.rebalance :as rebalance]
@@ -148,9 +149,35 @@
           (distinct (concat app-roots placed-roots))))))
 
 
+(defn scope-cells
+  "The cells THIS release's controller manages — the mixed-fleet guard
+   (docs/FLEET_DEPLOY.md § Dedicated tenant shard). Releases share one
+   Postgres, so every controller SEES every cell; without scoping, a
+   controller tries to place OTHER releases' orgs onto its own pods — the
+   directed load 409s (the target pod's shard refuses it) and the cell
+   wedges `:unplaced`, retried identically every tick.
+
+   - `:shard-orgs` non-empty (a dedicated release — every pod of a release
+     carries the same `GRAPHDEN_EXECUTOR_ORGS`): manage exactly those orgs.
+   - otherwise (the shared release, nil shard): manage everything EXCEPT
+     `:exclude-orgs` — the operator lists the orgs dedicated releases own
+     (`GRAPHDEN_FLEET_EXCLUDE_ORGS`).
+
+   Returns `{:cells [...] :skipped n}` so the caller can log what this
+   controller deliberately does not manage."
+  [cells {:keys [shard-orgs exclude-orgs]}]
+  (let [in-scope? (cond
+                    (seq shard-orgs) #(contains? shard-orgs (:org %))
+                    (seq exclude-orgs) #(not (contains? exclude-orgs (:org %)))
+                    :else (constantly true))
+        scoped (filterv in-scope? cells)]
+    {:cells scoped :skipped (- (count cells) (count scoped))}))
+
+
 (defn run-tick!
   "One control pass with side effects behind the `move-fn` seam. Reads the live
-   cells + current placement, decides via `plan-tick`, then realises the decision
+   cells + current placement, scopes them to this release (`scope-cells`),
+   decides via `plan-tick`, then realises the decision
    by calling `move-fn` with `{:org :entry-fn-id :to-executor}` for each initial
    placement and then each (sustained) move — `move-fn` owns the `move-cell!` +
    directed transport. Returns the `plan-tick` decision (so the caller carries
@@ -158,12 +185,19 @@
 
    `env` — `{:storage :forward-deps :executors :move-fn}`. With `:w-overlap` > 0
    in `opts`, cells are discovered WITH their closures so placement can co-locate
-   code-sharing cells."
+   code-sharing cells. `:shard-orgs` / `:exclude-orgs` in `opts` bound the
+   managed cell set (mixed fleets — see `scope-cells`)."
   [{:keys [storage forward-deps executors move-fn]} state opts]
-  (let [cells (discover-cells storage forward-deps
-                              {:with-closure? (pos? (double (:w-overlap opts 0.0)))})
+  (let [discovered (discover-cells storage forward-deps
+                                   {:with-closure? (pos? (double (:w-overlap opts 0.0)))})
+        {:keys [cells skipped]} (scope-cells discovered opts)
         current (current-placement storage)
         decision (plan-tick {:cells cells :current current :executors executors} state opts)]
+    (when (pos? skipped)
+      (log/debug "fleet controller: cells outside this release's scope skipped"
+                 {:skipped skipped
+                  :shard-orgs (:shard-orgs opts)
+                  :exclude-orgs (:exclude-orgs opts)}))
     (doseq [{:keys [org entry-fn-id to]} (:initial-placements decision)]
       (move-fn {:org org :entry-fn-id entry-fn-id :to-executor to}))
     (doseq [{:keys [org entry-fn-id to]} (:moves decision)]

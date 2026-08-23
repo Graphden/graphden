@@ -166,13 +166,36 @@ To provision org `acme`:
    `executorOrgs` scopes what THIS release compiles + runs. `replicaCount>1` runs
    a `:singleton` service once (advisory-lock arbitrated) and a `:per-pod`
    listener on each — same semantics as the shared fleet.
-3. **Route `acme`'s traffic** (`acme.graphden.app` and its `/api/*`) to this
+3. **Scope the CONTROLLERS** (mixed-fleet rule, 2026-08-23). Releases share
+   one Postgres, so without scoping the two placement controllers used to
+   contend for ONE advisory lock — and whichever won saw only its own SRV
+   membership and tried to place every org onto its own pods (the load
+   409'd on the off-shard pod and the cell wedged `:unplaced` forever).
+   Fixed on two axes, both defaulted sanely:
+   - **Locks are per-release now** (`fleet-controller-lock-id` derives from
+     `GRAPHDEN_FLEET_DNS`, which each release's chart sets to its own
+     headless Service) — each release elects its own leader.
+   - **Cells are scoped per-release** (`control-loop/scope-cells`): a
+     dedicated release manages exactly its `executorOrgs`; the SHARED
+     release must be told which orgs dedicated releases own — set
+     `fleet.excludeOrgs="acme"` on it (env
+     `GRAPHDEN_FLEET_EXCLUDE_ORGS`). Alternatively run the dedicated
+     release with NO controller at all: `fleet.controllerEnabled=false`
+     (env `GRAPHDEN_FLEET_CONTROLLER=off`) — right for a 1-pod shard,
+     where there is nothing to balance.
+4. **Route `acme`'s traffic** (`acme.graphden.app` and its `/api/*`) to this
    release's Service. A misroute to the shared fleet answers `421` — the backstop,
    not the routing.
 
 Result: `acme`'s services — created from the editor or `POST
 /api/orgs/services/create` — run **only** on this pod set, sandboxed by the
 effect gate AND bounded by the cgroup. The shared fleet never starts them.
+
+Controller observability: the tick counters (`:fleet/ticks`,
+`:fleet/initial-placements`, `:fleet/rebalance-moves`,
+`:fleet/tick-failures`) ride the standard counters pipeline
+(docs/MONITORING.md), alongside `GET /internal/fleet/status` and the
+`"Fleet controller applied placement"` log line.
 
 **Still open (topology-dependent, not shipped):** the tenant's editor lists its
 services' DESIRED state only; cross-pod runtime status (running / failed) and a

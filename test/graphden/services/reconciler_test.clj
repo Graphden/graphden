@@ -127,6 +127,42 @@
                        branch-id (assoc :branch-id branch-id)))))
 
 
+(deftest reconcile-once-respects-the-org-shard-test
+  ;; The dedicated-shard contract END-TO-END (not just the predicate): a
+  ;; TENANT service starts only on a pod whose :executor-orgs shard names
+  ;; its org — a compile-all (nil-shard) pod and a foreign shard must both
+  ;; leave it alone (docs/FLEET_DEPLOY.md § Dedicated tenant shard).
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed}
+        (make-trackable-fn! storage "sharded" calls stops)
+        svc (make-service-row! storage (:id composed) true)
+        _ (sp/update-entity storage :service (:id svc) {:org-id "acme"})]
+    (try
+      (testing "a nil-shard (compile-all shared) pod never starts a tenant service"
+        (let [c (setup/default-registry-ctx storage)
+              running (atom {})
+              r (recon/reconcile-once! c running)]
+          (is (= [] (:started r)))
+          (is (empty? @calls))))
+      (testing "a foreign shard leaves it alone too"
+        (let [c (assoc (setup/default-registry-ctx storage) :executor-orgs #{"public" "beta"})
+              running (atom {})
+              r (recon/reconcile-once! c running)]
+          (is (= [] (:started r)))
+          (is (empty? @calls))))
+      (testing "the org's own dedicated shard starts it"
+        (let [c (assoc (setup/default-registry-ctx storage) :executor-orgs #{"public" "acme"})
+              running (atom {})
+              r (recon/reconcile-once! c running)]
+          (is (= [(:id svc)] (:started r)))
+          (is (= [{:suffix "sharded"}] @calls))
+          ;; stop it so the storage teardown isn't racing a live stopper
+          (doseq [{:keys [stopper]} (vals @running)] (stopper))))
+      (finally (sp/close storage)))))
+
+
 (deftest reconcile-once-starts-enabled-services-test
   (let [storage (setup/create-branch-versioned-test-storage)
         calls (atom [])

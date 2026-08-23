@@ -540,7 +540,11 @@
    process exit code so callers (`bb test-e2e`) can chain on it."
   [& args]
   (let [script (or (first args) "tools/browser-test/run-edit-tests.sh")
-        token (or (System/getenv "AUTH_TOKEN") "e2e-isolated")
+        ;; not-empty: AUTH_TOKEN="" (e.g. a caller splicing "${AUTH_TOKEN:-}")
+        ;; must fall back too — an empty admin token boots a stack whose
+        ;; wrong-password path never says "wrong password", failing
+        ;; edit-auth-login deterministically 5/5 (observed 2026-08-23).
+        token (or (not-empty (System/getenv "AUTH_TOKEN")) "e2e-isolated")
         exit (run-suite! script token)]
     (shutdown-agents)
     (System/exit (int exit))))

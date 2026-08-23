@@ -98,9 +98,11 @@ it was approved, that approval is automatically dismissed (it went
 stale) and the branch needs a fresh approval before it can merge —
 just like GitHub dismissing stale reviews on a new push.
 
-On a solo self-host there's no "someone else", so this degrades to
-propose → approve-your-own → merge; it becomes real review the moment
-a second account exists (cloud/tenancy).
+By default a proposal author's **own** approval counts, so a solo user or
+a small team isn't locked out — propose → approve → merge works with one
+person. A team that wants genuine four-eyes review sets
+`allow-self-approval: false` on the target (via the API), and then a
+required approval must come from **someone other than the author**.
 
 ### Try it — the plain flow
 

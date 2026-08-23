@@ -26,7 +26,8 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
-    [graphden.test-infra.shared-bootstrap :as sb]))
+    [graphden.test-infra.shared-bootstrap :as sb]
+    [graphden.web.errors :as web-errors]))
 
 
 (def ^:dynamic *router* nil)
@@ -363,3 +364,70 @@
       (let [st (-> (dispatch {:method :get :path (str "/api/branches/" src "/approvals")})
                    parse-json)]
         (is (zero? (:have st)))))))
+
+
+(deftest branch-review-stale-dismissal-and-cascade-test
+  ;; Stale-dismissal over HTTP + delete cascades approvals + input validation.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        tgt (str "sd-tgt" run-id)
+        src (str "sd-src" run-id)
+        probe (str "sd-probe" run-id)
+        probe2 (str "sd-probe2" run-id)
+        identity-fn (fn-by-name nil "identity")
+        write! (fn [branch nm]
+                 (dispatch {:method :post :path "/api/entities/fn" :branch branch
+                            :content-type "application/x-www-form-urlencoded"
+                            :body (str "name=" nm "&parent-ids=" (:id identity-fn))}))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name tgt :base-branch-id "main"}}))))
+    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
+                                   :body {:required-approvals 1}}))))
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name src :base-branch-id tgt}}))))
+    (is (= 200 (:status (write! src probe))))
+    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/approve") :body {}}))))
+    (testing "approved → satisfied"
+      (is (true? (:satisfied (parse-json (dispatch {:method :get :path (str "/api/branches/" src "/approvals")}))))))
+    (testing "editing the source after approval auto-dismisses it (stale) → merge re-blocked"
+      (is (= 200 (:status (write! src probe2))))
+      (let [st (parse-json (dispatch {:method :get :path (str "/api/branches/" src "/approvals")}))]
+        (is (false? (:satisfied st)) "approval went stale after the edit")
+        (is (zero? (:have st))))
+      (let [m (dispatch {:method :post :path (str "/api/branches/" tgt "/merge") :body {:source src}})]
+        (is (= 409 (:status m)) "merge blocked again until re-approved"))
+      ;; re-approving at the new content re-satisfies the policy (the merge
+      ;; landing itself is covered by branch-review-policy-gate-lifecycle-test;
+      ;; not repeated here to avoid a second committing merge in one deftest).
+      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/approve") :body {}}))))
+      (is (true? (:satisfied (parse-json (dispatch {:method :get :path (str "/api/branches/" src "/approvals")}))))
+          "fresh approval at the new content re-satisfies"))))
+
+
+;; delete-cascade of :branch-approval → merge/core-test/delete-branch-cascades-approvals-test.
+
+
+(deftest branch-review-policy-rejects-bad-input-test
+  ;; Boundary validation — malformed review-policy input is REJECTED with a
+  ;; `:validation-error/*` (which the top-level `wrap-error-boundary` maps to
+  ;; a clean 400), never silently accepted or a raw 500. This harness's
+  ;; `br/dispatch` runs the router WITHOUT that outer boundary, so the throw
+  ;; propagates here — we assert both that it rejects AND that its type maps
+  ;; to 400 (the boundary's job in prod).
+  (let [run-id (str "-" (System/currentTimeMillis))
+        tgt (str "rv-bad" run-id)
+        rejected (fn [body]
+                   (try (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
+                                   :body body})
+                        nil
+                        (catch clojure.lang.ExceptionInfo ex ex)))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name tgt :base-branch-id "main"}}))))
+    (testing "a negative required-approvals is rejected → 400 at the boundary"
+      (let [e (rejected {:required-approvals -1})]
+        (is (some? e) "rejected, not silently accepted as off")
+        (is (= 400 (web-errors/status-for-ex-data (ex-data e)))
+            "validation-error maps to a clean 400")))
+    (testing "approver-ids as a bare string is rejected → 400 (not char-shredded)"
+      (let [e (rejected {:approver-ids "not-a-list"})]
+        (is (some? e))
+        (is (= 400 (web-errors/status-for-ex-data (ex-data e))))))))

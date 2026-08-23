@@ -398,6 +398,21 @@
            visible through resolution, copying no rows — plus any resolution
            overrides. The payoff step tying resolution and conflict detection
            together."}
+    {:ns graphden.versioning.merge.core :defn validate-approval-policy!
+     :say "Merge GOVERNANCE — the code-review gate. When the target branch
+           sets `:required-approvals`, a merge into it is refused
+           (`:branch/approval-required`, 409) until the proposal has enough
+           VALID approvals. Counting is pure/open-core (WHO may approve was
+           enforced when each `:branch-approval` row was written); the live
+           merge base-fn calls this right after the `:forbid-invalid?` gate.
+           This is how 'protect main, land via reviewed merges' is enforced."}
+    {:ns graphden.versioning.merge.core :defn branch-content-stamp
+     :say "The stale-dismissal fingerprint: a branch's own version rows
+           reduced to `count|max(created-at)`. An approval records the source's
+           stamp at approval time; any later edit APPENDS a version row, so the
+           stamp advances and `count-valid-approvals` stops counting the now-
+           stale approval — GitHub's 'dismiss stale reviews on a new push',
+           expressed as a monotonic content signal rather than an event hook."}
     {:ns graphden.storage.postgres.graph-epoch :defn bump!
      :say "The graph EPOCH — freshness as a comparison, not an
            imperative. Every graph-shaped write bumps this sequence

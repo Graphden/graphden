@@ -840,7 +840,7 @@
                :target "#branch-chip-btn"
                :check {:kind "manual"}}
               {:title "That's branching"
-               :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The written lesson 08 covers protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
+               :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The branch row also carries the review workflow: 📤 propose a branch for review, ✅ approve one, 🔀 require merges (no direct writes), and ✔N require N approvals before a merge lands. The written lesson 08 covers those plus protected branches and branch-local fns (runtime config that deliberately never merges). Click Finish to clean up (the branch goes too) or keep it."
                :target nil
                :check {:kind "manual"}}]}
             {:id "25"

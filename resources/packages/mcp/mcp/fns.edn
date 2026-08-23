@@ -20,13 +20,10 @@
  :description "MCP server — JSON-RPC endpoint + tools/resources over existing graph primitives."
  :fns
  [;; ==========================================================================
-  ;; Base-fns (impls.clj) — the only three Clojure boundaries the tools need
+  ;; Base-fns (impls.clj). (`:parse-edn` moved to core/system — the
+  ;; registry's import route needed it too and base-fn names are globally
+  ;; unique; the bare refs below still resolve.)
   ;; ==========================================================================
-  {:name :parse-edn
-   :description "Read one EDN value from text; nil when it doesn't parse. Generic counterpart to `:parse-json` — fn-defs travel as EDN because that is the one encoding where a reference (`:other-fn`) stays distinguishable from a string."
-   :args {:string {:type :nullable-text :description "EDN source text."}}
-   :return-type :any}
-
   {:name :platform-owned-def-names
    :description "Names among `fn-defs` whose deterministic (namespace, name) fn-id was written by the package sync this boot — the fns the editor's package-guard protects. One in-memory registry lookup per def."
    :args {:fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}}

@@ -368,6 +368,57 @@
     (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)))
 
 
+(defn reconcile-bundle-scope!
+  "Declarative PRUNE for a runtime bundle import (`POST /api/import/graph`
+   `?prune=true` — the push/pull snapshot semantics): within EXACTLY the
+   namespaces the bundle covers, a named fn row whose id equals its own
+   deterministic derivation but which the bundle no longer contains is
+   soft-deleted through `storage` — the branch-switched VersionedStorage,
+   so this is a branch TOMBSTONE that rides the normal merge flow. Never
+   the boot reconciler's identity-plane purge, which reaches across
+   branches.
+
+   Guards mirror `reconcile-moved-identities!`: `_anon-*` / anonymous
+   shapes and random-id (editor-created) rows are never touched, and a
+   row something still references is KEPT and reported instead of
+   deleted (`idrepair/inbound-refs` — a referenced removal stays loud).
+   The inbound check is conservative: a stale row referenced only by
+   ANOTHER stale row is kept this round; re-importing the same snapshot
+   converges (the referencing row is gone by then). Returns
+   `{:pruned [names] :kept-referenced [names]}`."
+  [storage fn-defs]
+  (let [bundle-namespaces (into #{} (map :namespace) fn-defs)
+        expected (into #{} (map #(records/fn-id (:namespace %) (:name %))) fn-defs)
+        ns-by-id (into {} (map (juxt :id identity)) (sp/query-entities storage :ns {}))
+        ns-path (fn ns-path
+                  [nsid]
+                  (when-let [r (ns-by-id nsid)]
+                    (if-let [p (:parent-id r)]
+                      (str (ns-path p) "." (:name r))
+                      (:name r))))
+        stale (vec
+                (for [row (sp/query-entities storage :fn {})
+                      :when (and (:name row)
+                                 (nil? (:anonymous-hash row))
+                                 (not (str/starts-with? (:name row) "_anon-")))
+                      :let [path (some-> (:namespace-id row) ns-path)]
+                      :when (and (contains? bundle-namespaces path)
+                                 (= (:id row) (records/fn-id path (keyword (:name row))))
+                                 (not (contains? expected (:id row))))]
+                  row))
+        {kept true pruned false}
+        (group-by #(boolean (seq (idrepair/inbound-refs storage (:id %)))) stale)]
+    (doseq [row pruned]
+      (log/info "bundle prune: deleting fn absent from the imported snapshot"
+                {:name (:name row) :id (:id row)})
+      (sp/delete-entity storage :fn (:id row)))
+    (doseq [row kept]
+      (log/warn "bundle prune: fn absent from the snapshot but STILL REFERENCED — kept"
+                {:name (:name row) :id (:id row)}))
+    {:pruned (mapv :name pruned)
+     :kept-referenced (mapv :name kept)}))
+
+
 (defn- run-type-check-sweep!
   "Topological-order type-check sweep across `expanded-fn-defs`.
 

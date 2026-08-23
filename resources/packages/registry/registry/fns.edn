@@ -2278,6 +2278,154 @@
    :parent :post
    :args {:path "/packages/panel-publish" :handler :_pkg-publish-panel-handler}}
 
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/import/graph?target=<branch>[&create=true][&prune=true] —
+  ;; apply an exported EDN bundle (the GET /api/export/graph shape, or a
+  ;; bare fn-def vector) to a NAMED branch: the write half of the
+  ;; export/import pair. Push/pull between installs and git-stored graph
+  ;; snapshots land here, then ride the normal diff → review → merge flow.
+  ;; Body is application/edn TEXT (EDN keeps a reference `:other-fn`
+  ;; distinguishable from the string "other-fn"). Guards first, one
+  ;; predicate per rule; the §3.3 atomic write core is `:import-bundle!`.
+  ;; ---------------------------------------------------------------------
+  {:name :import-bundle!
+   :description "Apply a bundle's fn-defs to the branch named `branch-name` (create it when `create?`, stamping the caller as owner with the `owner` write-policy). Platform-owned defs are skipped + reported; the rest sync through the same path the package loader uses; `prune?` adds snapshot semantics (branch tombstones for fns the bundle no longer contains, kept + reported while referenced); the TARGET branch's registry is delta-invalidated. Returns {:fn-ids :skipped-owned :pruned} or {:error \"branch-not-found\"}."
+   :args {:branch-name {:type :nullable-text :description "Target branch — never the request's own, never main implicitly. nil/blank never resolves (the route's guard 400s first)."}
+          :create? {:type :bool :description "Create the branch (forked off the request's branch) when it doesn't exist."}
+          :prune? {:type :bool :description "Snapshot semantics: tombstone fns in the bundle's namespaces that the bundle no longer contains."}
+          :fn-defs {:type [:union :null [:list :keyword-map]] :description "Parsed fn-def maps, exactly the fns.edn shape."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_import-branch-param
+   :description "The target branch name (`?target=` — NOT `?branch=`, which is the branch-router's own request-scope selector); REQUIRED, imports never fall back to the request's own branch."
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "target"}}}
+
+  {:name :_import-create?
+   :parent :equal?
+   :args {:a {:parent :query-param
+              :args {:request {:as :request} :param-name {:value "create"}}}
+          :b {:value "true"}}}
+
+  {:name :_import-prune?
+   :parent :equal?
+   :args {:a {:parent :query-param
+              :args {:request {:as :request} :param-name {:value "prune"}}}
+          :b {:value "true"}}}
+
+  {:name :_import-body-text
+   :parent :get
+   :args {:coll {:as :request} :key {:value :body} :default {:value ""}}}
+
+  {:name :_import-parsed
+   :description "The request body read as EDN — a {:fns […]} bundle map or a bare vector; nil when it doesn't parse."
+   :parent :parse-edn
+   :args {:string :_import-body-text}}
+
+  {:name :_import-fns
+   :description "The fn-def vector: a bundle map contributes its :fns, a bare vector is taken as-is."
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value :_import-parsed :type {:value :map}}}
+          :then {:parent :get :args {:coll :_import-parsed :key {:value :fns} :default nil}}
+          :else :_import-parsed}}
+
+  ;; Guards — one predicate each; the cond below reads as the rule list.
+  {:name :_import-no-branch?
+   :parent :empty?
+   :args {:coll :_import-branch-param}}
+
+  {:name :_import-too-large?
+   :description "Body cap — a runaway bundle must 413, not OOM the pod. 20M chars is an order of magnitude past the whole platform corpus."
+   :parent :gt
+   :args {:nums [{:parent :count :args {:coll :_import-body-text}} {:value 20000000}]}}
+
+  {:name :_import-not-a-vector?
+   :parent :not
+   :args {:value {:parent :is-a? :args {:value :_import-fns :type {:value :vector}}}}}
+
+  {:name :_import-item-is-named-map?
+   :description "One fn-def is a map carrying a :name — anonymous top-level defs can't be addressed or reconciled."
+   :parent :and
+   :args {:values [{:parent :is-a? :args {:value {:as :item} :type {:value :map}}}
+                   {:parent :some?
+                    :args {:value {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}}}]}}
+
+  {:name :_import-items-malformed?
+   :parent :not
+   :args {:value {:parent :every?
+                  :args {:pred :_import-item-is-named-map?
+                         :coll :_import-fns}}}}
+
+  {:name :_import-applied
+   :description "The §3.3 write core, referenced by BOTH the branch-not-found predicate and the ok-envelope — the per-execution result cache makes that one write, not two."
+   :parent :import-bundle!
+   :args {:branch-name :_import-branch-param
+          :create? :_import-create?
+          :prune? :_import-prune?
+          :fn-defs :_import-fns}}
+
+  {:name :_import-branch-not-found?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll :_import-applied :key {:value :error} :default nil}}
+          :b {:value "branch-not-found"}}}
+
+  {:name :_import-err-no-branch
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "branch-param-required"
+                             :hint "POST /api/import/graph?target=<branch>[&create=true][&prune=true]"
+                             :http-status 400}}}}
+
+  {:name :_import-err-too-large
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "bundle-too-large" :http-status 413}}}}
+
+  {:name :_import-err-not-a-vector
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "body-not-a-bundle"
+                             :hint "application/edn: {:fns [fn-def ...]} or a bare vector of named fn-def maps"
+                             :http-status 400}}}}
+
+  {:name :_import-err-malformed
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "fn-def-without-name" :http-status 400}}}}
+
+  {:name :_import-err-branch-missing
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "branch-not-found"
+                             :hint "pass ?create=true to fork it off the request's branch"
+                             :http-status 404}}}}
+
+  {:name :_import-ok-body
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map :_import-applied :key {:value :ok} :value {:value true}}}
+          :key {:value :branch}
+          :value :_import-branch-param}}
+
+  {:name :_import-ok
+   :parent :json-handler
+   :args {:data :_import-ok-body}}
+
+  {:name :_import-result
+   :parent :cond
+   :args {:clauses [:_import-no-branch?        :_import-err-no-branch
+                    :_import-too-large?        :_import-err-too-large
+                    :_import-not-a-vector?     :_import-err-not-a-vector
+                    :_import-items-malformed?  :_import-err-malformed
+                    :_import-branch-not-found? :_import-err-branch-missing
+                    {:value true}              :_import-ok]}}
+
+  {:name :_import-graph-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/import/graph (auth-required)."
+   :parent :_import-result}
+
+  {:name :api-import-graph
+   :description "POST /api/import/graph?target=<branch>[&create=true][&prune=true] — apply an exported EDN bundle to a NAMED branch (?branch= stays the request-scope selector). Auth-required."
+   :parent :post
+   :args {:path "/import/graph" :handler :_import-graph-handler}}
+
   ;; Route-collection seam: this package's routes as a fall-through
   ;; `:router-or-nil`, installed into the JVM-wide route collection by the
   ;; `:registry/router-install` init-key at boot. `app` no longer lists these
@@ -2305,7 +2453,8 @@
                   :api-packages-panel-fork
                   :api-packages-panel-publish
                   :api-export-graph
-                  :api-export-graph-rows]}}
+                  :api-export-graph-rows
+                  :api-import-graph]}}
 
   {:name :_registry-routes
    :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` + `/partials/packages-governance` leaves."

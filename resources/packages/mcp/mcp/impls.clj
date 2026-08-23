@@ -12,7 +12,6 @@
    an all-or-nothing write across fn-defs that could be recombined
    wrongly."
   (:require
-    [clojure.edn :as edn]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
@@ -24,13 +23,8 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-(defbase parse-edn
-  "Read one EDN value from `string`; nil when it doesn't parse. Generic
-   counterpart to `:parse-json` — the MCP tools take fn-defs as EDN text
-   because that is the ONE encoding where `:other-fn` (a reference) and
-   \"other-fn\" (a string) stay distinguishable, which JSON loses."
-  [string]
-  (try (edn/read-string string) (catch Exception _ nil)))
+;; (`parse-edn` moved to core/system/impls.clj — the registry's import
+;; route needed it too, and base-fn names are globally unique.)
 
 
 (defbase platform-owned-def-names
@@ -72,8 +66,7 @@
 
 
 (def impls
-  {:parse-edn parse-edn
-   ;; taint-propagate: returns the caller bundle's own :name fields —
+  {;; taint-propagate: returns the caller bundle's own :name fields —
    ;; content passthrough (SECRETS.md § T3).
    :platform-owned-def-names {:impl platform-owned-def-names
                               :taint-propagate? true}

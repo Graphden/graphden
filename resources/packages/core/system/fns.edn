@@ -92,6 +92,11 @@
                        :description "When true, convert string keys to keywords."}}
    :return-type :jsonb}
 
+  {:name :parse-edn
+   :description "Read one EDN value from text; nil when it doesn't parse. Generic counterpart to `:parse-json` — fn-def bundles travel as EDN because that is the one encoding where a reference (`:other-fn`) stays distinguishable from a string (moved from the optional mcp package when the registry's import route needed it too)."
+   :args {:string {:type :nullable-text :description "EDN source text."}}
+   :return-type :any}
+
   {:name :system-property
    :description "`(System/getProperty name)` — read a JVM system property (`java.vm.name`, `java.version`, `user.dir`, etc.). Returns nil when unset. Counterpart to `:env` for environment variables."
    :args {:name {:type :text :description "Property name (`java.version`, …)."}}

@@ -8,6 +8,7 @@
    `{:impl … :return-type-rule …}`."
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
@@ -46,6 +47,18 @@
     (catch com.fasterxml.jackson.core.JsonProcessingException _
       (throw (ex-info "Malformed JSON."
                       {:type :validation-error/malformed-json})))))
+
+
+(defbase parse-edn
+  "Read one EDN value from `string`; nil when it doesn't parse. Generic
+   counterpart to `:parse-json` — EDN is the one encoding where
+   `:other-fn` (a reference) and \"other-fn\" (a string) stay
+   distinguishable, so fn-def bundles travel as EDN (the MCP
+   `upsert-fn-defs` tool, `POST /api/import/graph`). Moved here from the
+   optional mcp package when the registry's import route needed it too —
+   base-fn names are globally unique, so shared primitives live in core."
+  [string]
+  (try (edn/read-string string) (catch Exception _ nil)))
 
 
 ;; === System Information ===
@@ -312,6 +325,7 @@
 (def impls
   {:to-json-string {:impl to-json-string :taint-propagate? true}
    :parse-json {:impl parse-json :taint-propagate? true}
+   :parse-edn {:impl parse-edn :taint-propagate? true}
    :system-property system-property-fn
    :jvm-uptime-ms jvm-uptime-ms-fn
    :heap-used heap-used-fn

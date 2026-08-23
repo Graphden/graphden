@@ -708,11 +708,20 @@ takes `{name, version}` and reads the local `:package-version` row —
 not a remote client). All sync onto a branch → test → merge; update = install
 newer version + merge; rollback = revert / re-install older.
 
-**Planned (not yet implemented):** importing an exported `.edn` bundle at
-runtime over HTTP, and pulling a package from a *remote* registry (another
-graphden install / the cloud) — today a bundle crosses installs only by hand
-(download the EDN, place it under `resources/packages/`, rebuild) or via the
-MCP `upsert-fn-defs` tool.
+**Runtime bundle import:** `POST /api/import/graph?target=<branch>` accepts
+an exported `.edn` bundle (the `GET /api/export/graph` shape, or a bare
+fn-def vector) and applies it to a NAMED branch — `?create=true` forks the
+branch (caller stamped owner, `owner` write-policy), `?prune=true` gives
+snapshot semantics (branch tombstones for fns the bundle no longer contains;
+referenced ones are kept + reported), and package-owned defs are skipped +
+reported rather than rewritten. `?target=`, not `?branch=` — the latter is
+the branch-router's request-scope selector. The exporter's format IS the
+import format, so cloud→self-host (and back) is one download + one POST,
+then the normal diff → review → merge flow.
+
+**Planned (not yet implemented):** pulling a package from a *remote*
+registry (another graphden install / the cloud) directly from
+`POST /api/packages/install`.
 
 **Ordering rule:** a fns-package transitively depends on an impl-package (§ 1).
 So install impl-dependencies first (Type-2, rebuild), then the fns-package

@@ -10,6 +10,7 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.export :as export]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
@@ -426,6 +427,63 @@
 
 
 ;; ---------------------------------------------------------------------------
+;; Bundle import — POST /api/import/graph. The §3.3 atomic write core:
+;; branch resolve/create, the branch-switched sync, the optional prune and
+;; the TARGET branch's invalidation are one effect-ordered sequence (same
+;; carve-out as the MCP `sync-fn-defs-branch!` and fork/materialize cores);
+;; the HTTP guards + envelopes around it are graph composition in fns.edn.
+;; ---------------------------------------------------------------------------
+
+(defbase import-bundle!
+  "Apply an exported bundle's `fn-defs` to the branch named `branch-name` —
+   never the request's own branch, never main implicitly.
+
+   Steps: resolve the branch by name (create it off the request's branch
+   when `create?`, stamping the caller as owner with the `owner`
+   write-policy — the push-branch convention); split out defs whose
+   deterministic id is PACKAGE-OWNED (skipped + reported — the boot sync
+   would restore them anyway, and silently repointing platform fns is the
+   2026-08-20 incident class); sync the rest through the SAME
+   `sync-bundle!` path the package loader uses (name collisions, cycles,
+   type-check all apply — a rejection surfaces as an error the caller can
+   act on); optionally prune (`reconcile-bundle-scope!` — snapshot
+   semantics, branch tombstones only); delta-invalidate THAT branch's
+   compiled registry.
+
+   Returns `{:fn-ids [...] :skipped-owned [...] :pruned {...}}`, or
+   `{:error \"branch-not-found\"}` when the branch doesn't resolve and
+   `create?` is false — errors ride as data so the graph maps them to
+   response envelopes."
+  [branch-name create? prune? fn-defs]
+  (cr/record-effect! :db)
+  (let [request-storage (request/require-storage ctx)
+        find-branch #(first (sp/query-entities (:base-storage request-storage)
+                                               :branch {:name branch-name}))
+        branch (or (find-branch)
+                   (when create?
+                     (let [principal tc/*current-principal*]
+                       (vs/create-branch! request-storage branch-name
+                                          (cond-> {}
+                                            (seq (str (:user-id principal)))
+                                            (assoc :owner-id (str (:user-id principal))
+                                                   :write-policy "owner"))))))]
+    (if-not branch
+      {:error "branch-not-found"}
+      (let [storage (vs/switch-branch request-storage (:id branch))
+            {owned-defs true wanted false}
+            (group-by #(boolean (owned/owned-fn-id? (ids/fn-id (:namespace %) (:name %))))
+                      (vec fn-defs))
+            fn-ids (when (seq wanted) (pkg-sync/sync-bundle! storage (vec wanted)))
+            pruned (when prune? (pkg-sync/reconcile-bundle-scope! storage (vec wanted)))]
+        (exec-ctx/invalidate-graph-cache!
+          (if-let [router (br/current-router)] (br/ctx-for router (:id branch)) ctx)
+          fn-ids)
+        (cond-> {:fn-ids (mapv str fn-ids)
+                 :skipped-owned (mapv #(some-> (:name %) name) owned-defs)}
+          pruned (assoc :pruned pruned))))))
+
+
+;; ---------------------------------------------------------------------------
 ;; Package pins — per-branch desired-state "this branch uses package P at V".
 ;; The pin drives update/rollback (repoint the row) and the editor's installed
 ;; list. Reference-install writes a pin instead of copying rows.
@@ -465,4 +523,7 @@
    :fork-package-fns fork-package-fns
    :materialize-package-fns materialize-package-fns
    :rewrite-refs-to-version rewrite-refs-to-version
-   :package-upsert-pin package-upsert-pin})
+   :package-upsert-pin package-upsert-pin
+   ;; taint-propagate: :skipped-owned returns the caller bundle's own
+   ;; :name fields — content passthrough (SECRETS.md § T3).
+   :import-bundle! {:impl import-bundle! :taint-propagate? true}})

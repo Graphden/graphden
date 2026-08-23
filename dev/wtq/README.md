@@ -40,8 +40,12 @@ moments an agent pauses for you are landing and cleanup (Rule 5 in `AGENT.md`).
 
 ## Why it's safe to run in parallel
 
-- **Fast loop is parallel.** `bb ci` takes a *per-checkout* flock, so N agents
-  run it simultaneously without stepping on each other.
+- **Fast loop is parallel where it can be.** `bb lint` (no tests) takes no lock
+  at all, so N agents run it simultaneously. A full `bb ci` (unit tests
+  selected) takes a *machine-wide* flock (`/tmp/graphden-ci.lock`) and
+  serializes — two concurrent unit suites on this box once lost 9 of 17 checks
+  to TIMEOUT at load 75 (`scripts/ci.clj` documents the incident). The lock
+  blocks rather than fails, so a queued `bb ci` just waits its turn.
 - **Heavy checks are serialized.** `integration` + `e2e` run
   against the canonical `graphden-executor:latest`, so exactly one may build it
   at a time. `bb wt merge` enforces that with a machine-wide `flock` — the lock
@@ -74,9 +78,11 @@ bb wt claim <name> [task...]    # (agent-invoked) register feature/<name> + work
 bb wt list                      # every worktree: branch, ahead/behind develop, dirty, last RESULT
 bb wt status                    # queue lock holder + recent gate logs
 bb wt log <name>                # tail the latest gate log for a feature
-bb wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy]
+bb wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release]
                                 # (agent, inside a worktree) queue -> gate -> land on develop
                                 #   --deploy also resets the develop DB schema on landing
+                                #   --release chains `bb release --push` (../graphden-cloud)
+                                #     after a GREEN landing, outside the queue lock
 bb wt up                        # (agent, inside a worktree) build + run THIS branch on its own ports
 bb wt down                      # (agent, inside a worktree) stop it (keeps the DB volume)
 bb wt drop <name> [-f]          # remove a worktree + branch + its instance, volumes, image, ports
@@ -106,6 +112,14 @@ bb wt start <name>                     # launch an agent inside an existing work
   committed.
 - `--no-e2e` is an escape hatch for changes with no runtime surface (docs,
   comments); it still runs lint + unit + integration.
+- `--release` is the "release is part of the feature" shortcut: after a GREEN
+  landing it runs `bb release --push <landed-sha>` from the sibling
+  `../graphden-cloud` checkout — but only once the queue lock is released
+  (the release waits on tenancy CI and the cloud deploy; that wait must not
+  hold the queue), and only if `origin/develop` really is at the landed sha
+  (a skipped/failed develop push would otherwise fail the release later and
+  uglier). A failed release never changes the landing verdict — develop has
+  advanced; fix and re-run `bb release --push` by hand.
 - **The visual-regression suite is in the gate** (since 2026-08-22), diff-scoped
   to what a screenshot can see — packages' `.js` / `.css` / `.html` / `.svg`,
   `app/**/fns.edn` (where the hiccup lives) and `tools/visual-tests/**`. It runs

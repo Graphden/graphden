@@ -101,8 +101,9 @@ You were started in one of two ways:
 4. **Land** — when the feature is complete and `bb lint` is green, run the
    gate. No sign-off needed (Rule 5):
 
-   `bb wt merge` takes **~30–40 min** (merge develop → ci → build image →
-   integration → e2e → fast-forward develop → advance the demo instance) —
+   `bb wt merge` takes **~30–50 min** for a full run, ~10 min for a
+   docs-only / diff-scoped one (merge develop → ci → build image →
+   e2e → integration → fast-forward develop → advance the demo instance) —
    longer than a
    foreground command may run, so **launch it with `run_in_background: true`**
    and wait to be re-invoked when it exits. Then check the outcome:

@@ -787,6 +787,10 @@ cmd_watch() {
 cmd_drop() {
   local name="${1:-}"; local force="${2:-}"
   [ -n "$name" ] || die "usage: wt drop <name> [-f]"
+  # Normalize the flag up front: anything that isn't -f/--force is a typo, and
+  # letting it through used to be dangerous — the `${force:+--force}` expansion
+  # below hands git --force for ANY non-empty second argument.
+  case "$force" in ''|-f|--force) : ;; *) die "usage: wt drop <name> [-f]" ;; esac
   local path="$WTQ_ROOT/$name" branch="feature/$name"
   [ -d "$path" ] || die "no worktree at $path"
 
@@ -811,7 +815,7 @@ cmd_drop() {
   # FG-5 (audit-7): with -f the ancestry/dirty guards were skipped — say
   # loudly how many commits are about to be discarded (a detached-HEAD
   # worktree keeps its commits ONLY on the discarded HEAD).
-  if [ "${force:-0}" = 1 ]; then
+  if [ -n "$force" ]; then
     local n_lost
     n_lost="$(git -C "$path" rev-list --count "$TARGET..HEAD" 2>/dev/null || echo '?')"
     [ "$n_lost" = 0 ] || warn "discarding $n_lost commit(s) not on $TARGET"
@@ -1035,11 +1039,12 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 
     # e2e runs BEFORE integration: the browser suite is timing-sensitive (a
     # slow-server window trips a test's 10s waitForFunction), and running it
-    # AFTER integration's ~29 min of heavy JVM work left the host under
-    # residual GC / memory pressure — which surfaced as a DIFFERENT innocent
-    # e2e file AbortError-ing (and leaking a row on the abort) each gate run.
-    # On a fresh host the flake window is far narrower. A real e2e break still
-    # fails here first, before integration's ~29 min is spent.
+    # AFTER integration's heavy JVM work (~29 min when this ordering was
+    # chosen; ~6 min since the 2026-08-17 fixture-sharing epic) left the host
+    # under residual GC / memory pressure — which surfaced as a DIFFERENT
+    # innocent e2e file AbortError-ing (and leaking a row on the abort) each
+    # gate run. On a fresh host the flake window is far narrower. A real e2e
+    # break still fails here first, before integration's minutes are spent.
     if [ "$NEED_E2E" = 0 ]; then
       echo; echo "(e2e skipped — see the scope step above)"
     else
@@ -1176,14 +1181,15 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 }
 
 cmd_merge() {
-  local no_e2e=0 deploy=0 no_fleet=0 no_visual=0
+  local no_e2e=0 deploy=0 no_fleet=0 no_visual=0 release=0
   for a in "$@"; do
     case "$a" in
       --no-e2e) no_e2e=1 ;;
       --no-fleet) no_fleet=1 ;;
       --no-visual) no_visual=1 ;;
       --deploy) deploy=1 ;;   # branch changes the schema: reset the target DB on landing
-      *) die "unknown flag '$a' (wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy])" ;;
+      --release) release=1 ;; # after a GREEN landing, chain `bb release --push` from ../graphden-cloud
+      *) die "unknown flag '$a' (wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release])" ;;
     esac
   done
   local wt; wt="$(git rev-parse --show-toplevel)"
@@ -1248,6 +1254,35 @@ cmd_merge() {
   # anything scripting the gate — an agent that launches it in the background and
   # reads its exit code — was told "landed" when develop had not moved an inch.
   if [ "$rc" = 0 ]; then ok "$msg"; else warn "$msg"; fi
+
+  # --release: chain the prod release AFTER the queue lock is released, so the
+  # release's own waiting (tenancy CI, cloud deploy) never extends a queue
+  # slot. The release outcome does NOT change the landing verdict — RESULT is
+  # about develop, and develop HAS advanced; a failed release is re-runnable
+  # by hand ("bb release" is idempotent). Exit code stays the gate's.
+  if [ "$release" = 1 ] && [ "$rc" = 0 ]; then
+    local land_sha remote_sha cloud_dir="$MAIN_WT/../graphden-cloud"
+    land_sha="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+    if [ ! -d "$cloud_dir/.git" ]; then
+      warn "--release: no graphden-cloud checkout at $cloud_dir — release SKIPPED; run 'bb release --push $land_sha' there yourself."
+    else
+      # The release pins the monorepo by sha, and tenancy CI will `git
+      # checkout` that sha from GitHub — releasing a sha that never got
+      # pushed (no ssh-agent, WTQ_NO_PUSH) can only fail 5 minutes later
+      # with a worse error. Check the cheap way (public repo, anonymous).
+      remote_sha="$(git ls-remote "https://github.com/Graphden/graphden.git" "refs/heads/$TARGET" 2>/dev/null | cut -f1)"
+      if [ "$remote_sha" != "$land_sha" ]; then
+        warn "--release: origin/$TARGET is not at the landed sha ($land_sha) — the develop push failed or was skipped. Release SKIPPED; push develop, then run 'bb release --push $land_sha' from graphden-cloud."
+      else
+        info "--release: landing is GREEN — running 'bb release --push $land_sha' from $cloud_dir ..."
+        if ( cd "$cloud_dir" && bb release --push "$land_sha" ); then
+          ok "✓ released to prod (graphden @ ${land_sha:0:8})"
+        else
+          warn "--release: release FAILED — the LANDING itself is green and develop has advanced. Fix the cause, then re-run 'bb release --push $land_sha' from graphden-cloud."
+        fi
+      fi
+    fi
+  fi
   return "$rc"
 }
 

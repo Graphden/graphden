@@ -114,7 +114,8 @@
                      `GRAPHDEN_SSE_PORT`), e.g. \"https://hub.example.com:8081\".
                      nil ⇒ no live refresh (bootstrap-only).
    - `:token`        this executor's bearer (mint one on the hub with
-                     `POST /api/tokens`)
+                     `POST /api/my-tokens` — the tenancy addon's self-serve
+                     token route; on a bare self-host use `AUTH_TOKEN`)
    - `:org`          the org this executor serves (its slug)
    - `:branch`       branch to pin (nil ⇒ main)
    - `:handler-fn`   name of the org's app-handler fn to run per request

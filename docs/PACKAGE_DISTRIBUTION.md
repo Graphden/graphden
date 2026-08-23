@@ -696,16 +696,23 @@ hermetic `bb test`/`bb dev`, and the private-repo ssh-agent access note).
 
 | Type | Channel | How self-hosted installs | Rebuild? |
 |---|---|---|---|
-| **1 fns** | data | boot-bundle under `resources/packages/`, **or** `POST /api/packages/install` (EDN bundle / registry pull) | no — runtime, on a branch, then merge |
+| **1 fns** | data | boot-bundle under `resources/packages/`, **or** `POST /api/packages/install` (from THIS install's registry) | no — runtime, on a branch, then merge |
 | **2 impl+fns** | code (git-dep) | add coordinate to `executor-packages.edn` → `bb rebuild` | yes |
 | **3 core-swap** | code + Integrant | add dep + config fragment in `GRAPHDEN_ADDON_CONFIGS` → restart | yes |
 
 **Type-1 sources:** (a) bundled in the build (`resources/packages/<name>/`,
-loaded at boot like core/web/app); (b) an `.edn` bundle imported at runtime via
-`POST /api/packages/install` (the exporter's format *is* the install format);
-(c) pulled from a remote registry over HTTP (`fetch-package-version`). All sync
-onto a branch → test → merge; update = install newer version + merge; rollback
-= revert / re-install older.
+loaded at boot like core/web/app); (b) published into THIS install's registry
+(`POST /api/packages/publish`) and installed from it (`POST /api/packages/install`
+takes `{name, version}` and reads the local `:package-version` row —
+`fetch-package-version` is the *server* side of `GET /api/packages/:name/:version`,
+not a remote client). All sync onto a branch → test → merge; update = install
+newer version + merge; rollback = revert / re-install older.
+
+**Planned (not yet implemented):** importing an exported `.edn` bundle at
+runtime over HTTP, and pulling a package from a *remote* registry (another
+graphden install / the cloud) — today a bundle crosses installs only by hand
+(download the EDN, place it under `resources/packages/`, rebuild) or via the
+MCP `upsert-fn-defs` tool.
 
 **Ordering rule:** a fns-package transitively depends on an impl-package (§ 1).
 So install impl-dependencies first (Type-2, rebuild), then the fns-package

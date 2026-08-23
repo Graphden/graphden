@@ -84,7 +84,7 @@
     :nil? :non-blank? :not :notify-after-write :or :os-arch
     :os-load-average :os-name :os-processors :package-upsert-pin
     :package-version-materialized? :pairs->map :parse-constraint
-    :import-bundle! :mirror-remote-package! :parse-edn :parse-int :parse-json :parse-uuid :pg-execute
+    :import-bundle! :mirror-remote-package! :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding
     ;; :pkg-delete-guard-reason reads server rows (fn name via the
     ;; owned registry) — the reason string carries no caller content.
@@ -148,7 +148,7 @@
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
     :gte :group-by :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
-    :import-bundle! :parse-edn
+    :import-bundle! :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid :platform-owned-def-names
     :position-in :postwalk :pr-str
     :quot :range

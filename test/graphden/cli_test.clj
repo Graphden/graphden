@@ -133,4 +133,13 @@
     (is (= [:edit] (:changed d)))
     (testing "a re-export with no real change is silent"
       (is (= {:added [] :removed [] :changed []}
-             (cli/bundle-diff current current))))))
+             (cli/bundle-diff current current))))
+    (testing "≥2 added AND ≥2 removed — sort by [ns name], never compare the
+              maps themselves (that ClassCastExceptions), nil ns must not NPE"
+      (let [cur [{:namespace "a" :name :r1 :parent :add :args {}}
+                 {:namespace "b" :name :r2 :parent :add :args {}}]
+            inc [{:namespace "z" :name :a2 :parent :add :args {}}
+                 {:namespace nil :name :a1 :parent :add :args {}}]
+            d2 (cli/bundle-diff cur inc)]
+        (is (= [:a1 :a2] (map :name (:added d2))) "added sorted by [ns name]; nil ns first, no crash")
+        (is (= [:r1 :r2] (map :name (:removed d2))) "removed sorted, no crash")))))

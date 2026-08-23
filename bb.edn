@@ -1294,6 +1294,14 @@
          (do (println (str red "✗ smoke FAILED — " fail-count " of " (+ ok-count fail-count) " checks failed" reset))
              (System/exit 1)))))}
 
+  graph-export
+  {:doc "Export a running instance's graph into a git-friendly directory of per-namespace EDN files. Thin wrapper over `clojure -M -m graphden.cli export` — pass its options through: bb graph-export --url http://localhost:9002 --token $AUTH_TOKEN --out ../my-graph [--branch B] [--include-secret-paths]"
+   :task (apply p/shell "clojure" "-M" "-m" "graphden.cli" "export" *command-line-args*)}
+
+  graph-import
+  {:doc "Apply a git-stored graph snapshot directory to a NAMED branch of a running instance. Thin wrapper over `clojure -M -m graphden.cli import`: bb graph-import ../my-graph --url http://localhost:9002 --token $AUTH_TOKEN --target feature-x [--create] [--prune]"
+   :task (apply p/shell "clojure" "-M" "-m" "graphden.cli" "import" *command-line-args*)}
+
   clean
   {:doc "Clean generated files"
    :task (do

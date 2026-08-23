@@ -773,7 +773,30 @@
            Install is its mirror — `materialize-package-fns` syncs the pinned
            version's fns into a version-qualified `@`-namespace and writes a
            `:package-install` pin; update/rollback rewrites refs between
-           versions; fork copies copy-on-write with no pin."}]}
+           versions; fork copies copy-on-write with no pin."}
+    {:file "resources/packages/registry/registry/impls.clj" :defn import-bundle!
+     :say "The WRITE half of the export/import pair — `POST /api/import/graph`
+           applies an exported bundle to a NAMED branch: resolve/create the
+           target (owner-stamped, `owner` write-policy — the push-branch
+           convention), skip package-owned defs, adopt editor-born
+           same-name identities onto their deterministic ids, sync through
+           the SAME path the boot loader uses, optionally prune to snapshot
+           semantics, delta-invalidate that branch. Cross-install push/pull
+           and git-snapshot restores all land here, then ride the normal
+           diff → review → merge flow."}
+    {:ns graphden.packages.sync :defn reconcile-bundle-scope!
+     :say "Snapshot semantics for a runtime import (`?prune=true`): within
+           exactly the bundle's namespaces, a deterministic-id fn the bundle
+           no longer contains is branch-TOMBSTONED — never the boot
+           reconciler's identity-plane purge, which would reach across
+           branches. Referenced removals are kept + reported, loud."}
+    {:ns graphden.packages.git-format :defn bundle->files
+     :say "The GIT face: a bundle laid out as one module file per namespace
+           (the fns.edn module shape) + a manifest, byte-deterministic so a
+           git diff is a graph diff. Read the seq-order printer note — the
+           parser derives slot POSITIONS from map iteration order, so the
+           printer must not 'canonicalise' nested keys. `graphden.cli`
+           (export/import/push/pull) is the HTTP-only round-trip over this."}]}
 
   {:id :boot
    :title "Boot & lifecycle"

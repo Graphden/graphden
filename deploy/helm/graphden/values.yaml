@@ -35,11 +35,29 @@ service:
   # nodePort: 30080   # set with type: NodePort to expose on a fixed node port
   #                     (e.g. a kind extraPortMapping → host port → reverse proxy)
 
+# SSE invalidation relay for external / BYO executors (docs/SCALING.md § SSE
+# invalidation, docs/BYO_RUNBOOK.md). Off by default. Enabling sets
+# GRAPHDEN_SSE_PORT (each pod starts the relay's own httpkit server) and adds
+# a dedicated Service in front of it. The relay speaks plain HTTP — terminate
+# TLS at your ingress / LB and route the SSE hostname to this Service. Note
+# BYO subscribers hold LONG-LIVED streams: raise any LB idle-timeout in front
+# of it, and keep session affinity off (any pod's relay sees every event).
+sse:
+  enabled: false
+  port: 8081
+  service:
+    type: ClusterIP
+    port: 8081
+
 resources:
   requests:
     cpu: 500m
     memory: 768Mi
   limits:
+    # CPU limit included by default: a shard exists to BOUND a tenant's
+    # compute, and without a cpu limit the cgroup gives no CPU ceiling at
+    # all (docs/FLEET_DEPLOY.md § Dedicated tenant shard).
+    cpu: 2000m
     memory: 1536Mi
 
 # HorizontalPodAutoscaler over the StatefulSet. The SRV membership (headless

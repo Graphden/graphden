@@ -239,15 +239,27 @@ A customer runs the executor on their OWN hardware, but the graph stays in
 our Postgres. Built in these pieces:
 
 - **Pod role + BYO refusal — DONE.** An org carries `:org.execution-mode`
-  (`"hosted"` default, `"byo"`). A `"byo"` org runs on the customer's own
-  executor, so a HOSTED pod refuses to run it: both request boundaries (the
-  editor/API request-scope and the FaaS app-router) answer `421` when
-  `tenancy.context/byo-org?` is true and the pod isn't a BYO executor
-  (`:byo-executor?`, from `GRAPHDEN_BYO_EXECUTOR`). A BYO executor sets
-  `GRAPHDEN_EXECUTOR_ORGS` to its own org and `GRAPHDEN_BYO_EXECUTOR=true`, so
-  it serves that org and 421s everything else. `byo-org?` reads `:org` in the
-  public context (before the tenant org is bound — `:org` is tenant-hidden
-  once scoped) with a ~5s memo.
+  (`"hosted"` default, `"byo"`). A `"byo"` org runs its graph on the
+  customer's own executor, so a hosted pod refuses to EXECUTE for it — and
+  only that. The refusal is execute-scoped: the editor/API request-scope
+  answers `421` only for execute-bearing requests (the `/execute` API and
+  mutating `/api/services` calls — a `:service` row would run tenant code
+  on hosted pods), and the FaaS app-router 421s the org's app traffic. The
+  STORAGE plane — editor CRUD, export (including the BYO pod's own
+  `GET /api/export/graph-rows` bootstrap), diff/merge — keeps being served
+  by the hub through the normal tenant path (grant gate / limiter / RLS):
+  the graph lives here, only running it is the customer's job. (An earlier
+  iteration refused ALL of `/api/*`, which bricked the org: the BYO pod
+  could never bootstrap and the editor died with the flip.) The refusal
+  fires when `tenancy.context/byo-org?` is true and the pod isn't a BYO
+  executor (`:byo-executor?`, from `GRAPHDEN_BYO_EXECUTOR`). A BYO executor
+  sets `GRAPHDEN_EXECUTOR_ORGS` to its own org and
+  `GRAPHDEN_BYO_EXECUTOR=true`, so it serves that org and 421s everything
+  else. `byo-org?` reads `:org` in the public context (before the tenant
+  org is bound — `:org` is tenant-hidden once scoped) with a ~5s memo.
+  The flip itself is tier-gated: only a paid plan (`network` /
+  `dedicated`, `plans` `:byo-allowed?`) may be set `"byo"` — BYO is a
+  paid feature of the storage plane, not a ride around metering.
 - **Storage-over-HTTP — DONE.** `graphden.storage.remote.core/RemoteStorage`
   is a read-only leaf implementing the minimal read surface (`query-entities`,
   `read-entity(s)`, and an `ExecutionGraph` satisfy-gate; see
@@ -282,9 +294,11 @@ our Postgres. Built in these pieces:
     `fn:invalidate` with the writing org (`:org-id`, read straight off the
     stamped row — no tenancy dependency in that core code), the relay
     registers each subscriber under its authenticated org, and an event goes
-    only to that org's subscribers. A nil-org event (a public / platform /
-    single-tenant write — shared rows every bundle holds) goes to everyone. So
-    a BYO executor is woken only by changes it actually holds.
+    only to that org's subscribers. A nil-org event (an un-scoped /
+    single-tenant write) and a PUBLIC-org event (a platform-package write
+    under the tenancy addon, which stamps the public org — shared rows every
+    bundle holds) go to everyone. So a BYO executor is woken exactly by the
+    changes it actually holds.
 
 ### Running one (`graphden.byo`)
 
@@ -307,7 +321,10 @@ lives on the hub), reads the graph over HTTP into a `RemoteStorage`, compiles
 it, serves the org's handler fn over HTTP directly (not via the PG-backed
 service registry), and refreshes on each SSE push. `GRAPHDEN_HUB_URL` is the
 hub's APP url (`/api/export/graph-rows`); `GRAPHDEN_SSE_URL` is the relay's
-separate port — omit it for a bootstrap-only executor with no live refresh.
+separate port. Without a relay, set `GRAPHDEN_REFRESH_POLL_MS` to poll the
+hub for changes on a fixed cadence instead; with NEITHER set the graph
+freezes at the bootstrap snapshot until restart and `start-byo!` warns
+loudly.
 
 Provisioning a BYO customer, operator-side (platform-only, `:org` is
 tenant-forbidden): create the org, mint its executor token, point the org at
@@ -322,8 +339,12 @@ The read-only, one-org shape is deliberate:
 
 - **Serves the app path, not `/api/execute` with history.** `RemoteStorage`
   writes throw, and `/api/execute` persists `:fn-execution` rows. So a BYO
-  executor runs the org's APP (FaaS handler, no persistence); the editor's
-  Run-with-history stays on the hosted hub.
+  executor runs the org's APP (FaaS handler, no persistence) — and the hub
+  421s the org's `/api/execute` too (execution on our compute is exactly
+  what the byo flip opts out of). Net effect: a byo org EDITS on the hub
+  and RUNS through its own executor's app endpoint; the editor's Run
+  popover answers 421 for it. Forwarding editor runs to the customer's
+  executor is a possible future refinement, not built.
 - **Pinned to one branch.** A `RemoteStorage` bootstraps one branch
   (`GRAPHDEN_EXECUTOR_BRANCH`, default main). Serving several branches on one
   BYO executor means several RemoteStorages — out of scope for the single-org
@@ -351,7 +372,11 @@ See SERVICES.md § Roadmap.
 
 ## Still open
 
-Nothing about CORRECTNESS. The multi-node software topology — separate JVMs,
+Nothing about CORRECTNESS. (The 2026-08 audit found — and fixed — one real
+correctness hole here: the byo refusal covered ALL of `/api/*`, which made
+the byo flip brick the org because the BYO pod's own bootstrap read was
+refused too. It is execute-scoped now, with tests on both repos' gates.)
+The multi-node software topology — separate JVMs,
 real TCP between them, a BYO executor that reaches the graph over HTTP
 (`RemoteStorage`) instead of touching Postgres directly — needs no special
 hardware: it's separate processes + a config boundary, reproducible with

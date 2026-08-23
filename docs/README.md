@@ -25,6 +25,7 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Security & tenant isolation | [SECURITY_MODEL.md](SECURITY_MODEL.md) |
 | Plans & tiers (what each includes) | [PLANS.md](PLANS.md) |
 | Scaling & the executor fleet | [SCALING.md](SCALING.md) · [FLEET_DEPLOY.md](FLEET_DEPLOY.md) |
+| BYO executor — run your own executor against the hub | [BYO_RUNBOOK.md](BYO_RUNBOOK.md) |
 | What's shipped vs planned | [ROADMAP.md](ROADMAP.md) |
 | Error codes | [ERROR_CODES.md](ERROR_CODES.md) |
 

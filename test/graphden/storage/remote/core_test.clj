@@ -168,6 +168,37 @@
       (finally (stop)))))
 
 
+(deftest refresh-keeps-the-last-snapshot-when-the-hub-is-unreachable
+  ;; refresh! is best-effort: a failed refetch (non-200, hub down) must return
+  ;; false and KEEP serving the previous snapshot, never blank the graph.
+  (let [id (random-uuid)
+        bundle {:fns [{:id id :name "sticky"}]
+                :slots [] :fn-slots [] :bindings [] :list-items []}
+        mode (atom :ok)
+        handler (fn [_]
+                  (case @mode
+                    :ok {:status 200
+                         :headers {"Content-Type" "application/edn"}
+                         :body (pr-str bundle)}
+                    :fail {:status 503 :body "down"}))
+        stop (http-kit/run-server handler {:port 0})
+        port (:local-port (meta stop))
+        stopped (atom false)
+        stop! (fn [] (when (compare-and-set! stopped false true) (stop)))]
+    (try
+      (let [rs (remote/create-remote-storage (str "http://localhost:" port) "tok")]
+        (is (= "sticky" (:name (sp/read-entity rs :fn id))))
+        (testing "a 503 refresh returns false and keeps the old rows"
+          (reset! mode :fail)
+          (is (false? (remote/refresh! rs)))
+          (is (= "sticky" (:name (sp/read-entity rs :fn id)))))
+        (testing "the hub going away entirely (connection refused) is the same"
+          (stop!)
+          (is (false? (remote/refresh! rs)))
+          (is (= "sticky" (:name (sp/read-entity rs :fn id))))))
+      (finally (stop!)))))
+
+
 (deftest create-remote-storage-throws-on-non-200
   (let [handler (fn [_] {:status 403 :body "nope"})
         stop (http-kit/run-server handler {:port 0})

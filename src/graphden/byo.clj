@@ -112,7 +112,10 @@
                      e.g. \"https://hub.example.com\"
    - `:sse-url`      the hub's SSE RELAY base URL (a DIFFERENT port —
                      `GRAPHDEN_SSE_PORT`), e.g. \"https://hub.example.com:8081\".
-                     nil ⇒ no live refresh (bootstrap-only).
+                     nil ⇒ no live push; pair with `:refresh-poll-ms` or the
+                     graph freezes at the bootstrap snapshot (loud WARN).
+   - `:refresh-poll-ms` poll cadence (ms) for refetching the graph when there
+                     is no SSE relay; ignored when `:sse-url` is set.
    - `:token`        this executor's bearer (mint one on the hub with
                      `POST /api/my-tokens` — the tenancy addon's self-serve
                      token route; on a bare self-host use `AUTH_TOKEN`)
@@ -125,7 +128,8 @@
 
    The hub-side prep: create the org, mint this token, point the org at its
    handler, and flip it byo (`POST /api/orgs/execution-mode`)."
-  [{:keys [hub-url sse-url token org branch handler-fn port packages extra-base-fns]
+  [{:keys [hub-url sse-url token org branch handler-fn port packages
+           extra-base-fns refresh-poll-ms]
     :or {packages default-packages}}]
   ;; Preflight so a forgotten env var is a clear message, not a confusing
   ;; "bootstrap GET failed" or NPE deeper in.
@@ -169,7 +173,7 @@
                                                (catch Exception e
                                                  (log/warn e "BYO refresh failed" {:org org})))))))
         ;; The relay already fans out only this org's events + public ones. Its
-        ;; URL/port is separate from the hub. nil ⇒ bootstrap-only, no refresh.
+        ;; URL/port is separate from the hub. nil ⇒ no live push.
         source (when sse-url
                  (remote-sse/start-source!
                    {:hub-url sse-url :token token
@@ -180,15 +184,39 @@
                     ;; replay), and BYO has no PG epoch self-heal — SSE is
                     ;; its only freshness signal. The CAS-coalesced
                     ;; submit-refresh! makes a redundant resync cheap.
-                    :on-connect submit-refresh!}))]
+                    :on-connect submit-refresh!}))
+        ;; Without SSE the graph would silently freeze at the bootstrap
+        ;; snapshot forever — say so loudly, and offer a poll fallback:
+        ;; `:refresh-poll-ms` re-runs the same coalesced refresh on a fixed
+        ;; cadence (a full refetch, so keep it coarse — tens of seconds).
+        poller (when (nil? sse-url)
+                 (if refresh-poll-ms
+                   (do (log/info "BYO executor polling for graph changes"
+                                 {:every-ms refresh-poll-ms})
+                       (doto (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
+                         (java.util.concurrent.ScheduledExecutorService/.scheduleWithFixedDelay
+                           ^Runnable submit-refresh!
+                           (long refresh-poll-ms) (long refresh-poll-ms)
+                           java.util.concurrent.TimeUnit/MILLISECONDS)))
+                   (do (log/warn (str "BYO executor started WITHOUT a live-refresh signal: "
+                                      "no :sse-url and no :refresh-poll-ms — the graph is "
+                                      "frozen at this bootstrap snapshot until restart. "
+                                      "Set GRAPHDEN_SSE_URL (preferred) or "
+                                      "GRAPHDEN_REFRESH_POLL_MS."))
+                       nil)))]
     (log/info "BYO executor serving" {:org org :handler handler-fn :port port})
-    {:server server :source source :ctx ctx :storage storage :refresh-exec refresh-exec}))
+    {:server server :source source :ctx ctx :storage storage
+     :refresh-exec refresh-exec :poller poller}))
 
 
 (defn stop-byo!
-  "Stop a BYO executor handle: SSE source, refresh worker, then HTTP server."
-  [{:keys [server source refresh-exec]}]
+  "Stop a BYO executor handle: SSE source, poll loop, refresh worker, then
+   HTTP server."
+  [{:keys [server source refresh-exec poller]}]
   (when source (remote-sse/stop-source! source))
+  (when poller
+    (java.util.concurrent.ExecutorService/.shutdownNow
+      ^java.util.concurrent.ScheduledExecutorService poller))
   (when refresh-exec
     (java.util.concurrent.ExecutorService/.shutdown
       ^java.util.concurrent.ExecutorService refresh-exec))
@@ -199,9 +227,12 @@
 (defn -main
   "Entry point — reads config from the environment:
    `GRAPHDEN_HUB_URL`, `GRAPHDEN_SSE_URL` (optional — the hub's SSE relay;
-   unset ⇒ bootstrap-only, no live refresh), `GRAPHDEN_EXECUTOR_TOKEN`,
-   `GRAPHDEN_EXECUTOR_ORG`, `GRAPHDEN_EXECUTOR_BRANCH` (optional),
-   `GRAPHDEN_APP_HANDLER_FN`, `GRAPHDEN_PORT` (default 8080)."
+   unset ⇒ no live push), `GRAPHDEN_REFRESH_POLL_MS` (optional — poll the
+   hub for graph changes every N ms when there is no SSE relay; with
+   NEITHER set the graph freezes at the bootstrap snapshot and start-byo!
+   warns loudly), `GRAPHDEN_EXECUTOR_TOKEN`, `GRAPHDEN_EXECUTOR_ORG`,
+   `GRAPHDEN_EXECUTOR_BRANCH` (optional), `GRAPHDEN_APP_HANDLER_FN`,
+   `GRAPHDEN_PORT` (default 8080)."
   [& _args]
   (let [handle (start-byo!
                  {:hub-url (System/getenv "GRAPHDEN_HUB_URL")
@@ -210,6 +241,7 @@
                   :org (System/getenv "GRAPHDEN_EXECUTOR_ORG")
                   :branch (System/getenv "GRAPHDEN_EXECUTOR_BRANCH")
                   :handler-fn (or (System/getenv "GRAPHDEN_APP_HANDLER_FN") "_app-ring-response")
-                  :port (or (some-> (System/getenv "GRAPHDEN_PORT") parse-long) 8080)})]
+                  :port (or (some-> (System/getenv "GRAPHDEN_PORT") parse-long) 8080)
+                  :refresh-poll-ms (some-> (System/getenv "GRAPHDEN_REFRESH_POLL_MS") parse-long)})]
     (Runtime/.addShutdownHook (Runtime/getRuntime) (Thread. #(stop-byo! handle)))
     @(promise)))

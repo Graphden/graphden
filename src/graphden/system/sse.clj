@@ -16,15 +16,17 @@
    request-scope, which expect ordinary response maps.
 
    Fan-out is per-org: each subscriber registers under its authenticated org,
-   and an event tagged with the writing org (`:org-id`, added by
-   `crud.entities/notify-after-write!`) goes only to that org's subscribers. A
-   nil-org event (a public / platform / single-tenant write — shared rows that
-   live in every bundle) goes to everyone. So a BYO executor is woken only by
-   changes it actually holds."
+   and an event tagged with a real tenant org (`:org-id`, added by
+   `crud.entities/notify-after-write!`) goes only to that org's subscribers.
+   A nil-org event (an un-scoped / single-tenant write) and a PUBLIC-org
+   event (a platform write under the tenancy addon — shared rows that live
+   in every bundle) go to everyone. So a BYO executor is woken exactly by
+   the changes it actually holds."
   (:require
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
     [graphden.storage.postgres.notify :as pg-notify]
+    [graphden.tenancy.context :as tc]
     [org.httpkit.server :as hk])
   (:import
     (org.httpkit.server
@@ -73,11 +75,18 @@
 
 (defn- deliver?
   "Does an event tagged for `event-org` go to a subscriber whose org is
-   `sub-org`? A nil `event-org` (a public / platform / single-tenant write,
-   which touches the shared rows in every bundle) goes to everyone; an
-   org-tagged event goes only to that org's subscribers."
+   `sub-org`? A nil `event-org` (an un-scoped / single-tenant write) and a
+   PUBLIC-org event both go to everyone: under the tenancy addon every
+   scoped write is stamped with the writing org, so a platform-package
+   write arrives tagged with the public org — and public rows live in
+   every org's bundle, so every remote executor must be woken by them
+   (comparing only for equality left BYO executors serving stale platform
+   fns forever). An event tagged with a real tenant org goes only to that
+   org's subscribers."
   [event-org sub-org]
-  (or (nil? event-org) (= event-org sub-org)))
+  (or (nil? event-org)
+      (= event-org tc/public-org)
+      (= event-org sub-org)))
 
 
 (defn open-subscriber!

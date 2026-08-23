@@ -1,0 +1,25 @@
+{{- if .Values.sse.enabled }}
+{{/*
+SSE invalidation relay Service — fronts the per-pod relay servers for
+external / BYO executors (docs/SCALING.md § SSE invalidation,
+docs/BYO_RUNBOOK.md). Every pod's relay is registered on the same
+`graphden_events` stream, so round-robin across pods is correct. The relay
+speaks plain HTTP; terminate TLS at the ingress / LB in front of this
+Service, and raise its idle-timeout — subscribers hold long-lived streams.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graphden.fullname" . }}-sse
+  labels:
+    {{- include "graphden.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.sse.service.type }}
+  selector:
+    {{- include "graphden.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: sse
+      port: {{ .Values.sse.service.port }}
+      targetPort: sse
+      protocol: TCP
+{{- end }}

@@ -130,6 +130,34 @@
           (sp/close storage))))))
 
 
+(deftest start-byo-poll-fallback-refreshes-without-sse
+  ;; No SSE relay + :refresh-poll-ms ⇒ the executor refetches the graph on a
+  ;; fixed cadence instead of silently freezing at the bootstrap snapshot.
+  (let [storage (hub-storage!)
+        served-body (atom "p1")]
+    (exec/register-base-fn! :byo-poll-echo (fn [_args _ctx] {:status 200 :body @served-body}))
+    (let [base (setup/create-base-fn! storage "byo-poll-echo" :any)
+          _ (setup/create-composed-fn! storage "byo-poll-handler" (:id base))
+          hub (graph-rows-server storage)
+          hub-url (str "http://localhost:" (:local-port (meta hub)))
+          handle (byo/start-byo! {:hub-url hub-url :token token :org "acme"
+                                  :handler-fn "byo-poll-handler" :port 0 :packages []
+                                  :refresh-poll-ms 200
+                                  :extra-base-fns {:byo-poll-echo (exec/get-base-fn :byo-poll-echo)}})
+          byo-port (:local-port (meta (:server handle)))
+          GET (fn [] @(http/get (str "http://localhost:" byo-port "/") {:as :text :timeout 5000}))]
+      (try
+        (is (= "p1" (:body (GET))))
+        (testing "a graph change is picked up by the poll loop (no SSE at all)"
+          (reset! served-body "p2")
+          (is (wait/wait-for 5000 #(= "p2" (:body (GET))))
+              "the polled refresh+recompile re-ran the handler"))
+        (finally
+          (byo/stop-byo! handle)
+          (hub)
+          (sp/close storage))))))
+
+
 (deftest start-byo-throws-on-a-missing-handler-fn
   (let [storage (hub-storage!)
         hub (graph-rows-server storage)

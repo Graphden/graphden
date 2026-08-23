@@ -212,12 +212,16 @@ Set on hosted pods that participate in the dynamic fleet. The Helm chart wires a
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GRAPHDEN_HUB_URL` | *(required)* | Hub base URL serving `GET /api/export/graph-rows` |
-| `GRAPHDEN_SSE_URL` | *(empty)* | Hub SSE-relay URL (its `GRAPHDEN_SSE_PORT`). Unset ⇒ bootstrap-only, no live refresh |
+| `GRAPHDEN_SSE_URL` | *(empty)* | Hub SSE-relay URL (its `GRAPHDEN_SSE_PORT`). Unset ⇒ no live push — pair with the poll below |
+| `GRAPHDEN_REFRESH_POLL_MS` | *(empty)* | Poll the hub for graph changes every N ms when there is no SSE relay. With NEITHER this nor `GRAPHDEN_SSE_URL` set the graph freezes at the bootstrap snapshot (start-byo! warns loudly) |
 | `GRAPHDEN_EXECUTOR_TOKEN` | *(required)* | This executor's bearer token |
 | `GRAPHDEN_EXECUTOR_ORG` | *(required)* | The single org this executor serves |
 | `GRAPHDEN_EXECUTOR_BRANCH` | *(empty)* | Branch to pin (unset ⇒ main) |
 | `GRAPHDEN_APP_HANDLER_FN` | `_app-ring-response` | Name of the org's app-handler fn to run per request |
 | `GRAPHDEN_PORT` | `8080` | HTTP port to serve on |
+
+Step-by-step provisioning (operator side + customer side) lives in
+[BYO_RUNBOOK.md](BYO_RUNBOOK.md).
 
 There is no env-configurable execution max-depth, but the per-execution
 wall-clock deadline **is** tunable via `GRAPHDEN_MAX_EXECUTION_WALL_MS`

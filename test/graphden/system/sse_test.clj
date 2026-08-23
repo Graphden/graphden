@@ -17,6 +17,7 @@
     [graphden.auth.provider :as auth]
     [graphden.storage.remote.sse :as remote-sse]
     [graphden.system.sse :as sse]
+    [graphden.tenancy.context :as tc]
     [graphden.test-infra.wait :as wait]))
 
 
@@ -158,7 +159,16 @@
           (is (wait/wait-for 2000 #(seq @acme-got)))
           (is (wait/wait-for 2000 #(seq @beta-got)))
           (is (= "pub" (:id (first @acme-got))))
-          (is (= "pub" (:id (first @beta-got))))))
+          (is (= "pub" (:id (first @beta-got)))))
+        (testing "a PUBLIC-org-tagged event reaches everyone too — under the
+                  tenancy addon a platform-package write is stamped with the
+                  public org, and public rows live in every org's bundle"
+          (reset! acme-got []) (reset! beta-got [])
+          (fire {:kind :fn :op :invalidate :id "plat" :org-id tc/public-org})
+          (is (wait/wait-for 2000 #(seq @acme-got)))
+          (is (wait/wait-for 2000 #(seq @beta-got)))
+          (is (= "plat" (:id (first @acme-got))))
+          (is (= "plat" (:id (first @beta-got))))))
       (finally
         (remote-sse/stop-source! acme-src)
         (remote-sse/stop-source! beta-src)

@@ -131,6 +131,77 @@
                                :target-branch-id target-branch-id})))))))))
 
 
+(def ^:private branch-content-version-entities
+  [:fn-version :fn-slot-version :binding-version
+   :binding-list-item-version :resource-override-version])
+
+
+(defn branch-content-stamp
+  "A cheap content fingerprint of a branch's OWN version rows: the count
+   plus the max `:created-at` across the versioned-entity tables, filtered
+   by `branch-id`. Any edit or tombstone on the branch appends a version
+   row (newer `:created-at`, higher count), so the stamp advances — which
+   is how an approval recorded against an older stamp is detected as STALE
+   at merge time. `base-storage` is the UNWRAPPED handle (still org-scoped
+   beneath versioning on a multi-tenant pod)."
+  [base-storage branch-id]
+  (let [rows (mapcat (fn [ve] (sp/query-entities base-storage ve {:branch-id branch-id}))
+                     branch-content-version-entities)
+        max-ts (->> rows (keep :created-at) (map str) sort last)]
+    (str (count rows) "|" (or max-ts "0"))))
+
+
+(defn count-valid-approvals
+  "How many DISTINCT, non-stale approvals the proposal `source-branch-id`
+   currently has toward a merge into the target. WHO may approve was
+   enforced when each `:branch-approval` row was written (the approve
+   endpoint), so counting here stays pure/open-core: keep only approvals
+   whose `:content-stamp` still matches the source's current content
+   (drops stale ones after a post-approval edit), drop the author's own
+   approval unless `allow-self?`, then count distinct approver ids."
+  [base-storage source-branch-id author-id allow-self?]
+  (let [current-stamp (branch-content-stamp base-storage source-branch-id)
+        approvals (sp/query-entities base-storage :branch-approval
+                                     {:source-branch-id source-branch-id})]
+    (->> approvals
+         (filter #(= current-stamp (:content-stamp %)))
+         (remove #(and (not allow-self?) author-id (= author-id (:approver-id %))))
+         (map :approver-id)
+         distinct
+         count)))
+
+
+(defn validate-approval-policy!
+  "Review-policy gate. When the TARGET branch (the wrapper's current
+   branch) sets `:required-approvals` > 0, refuse the merge unless the
+   proposal `source-branch-id` has at least that many valid approvals
+   (`count-valid-approvals`) — throwing `:branch/approval-required` (409)
+   naming the shortfall. No-op when the target requires no approvals.
+   Open-core: judged purely on recorded `:branch-approval` rows. Called
+   on the live merge path right after `validate-branch-policy!`."
+  [versioned-storage source-branch-id]
+  (let [base-storage (vs/unwrap versioned-storage)
+        target-branch-id (vs/current-branch-id versioned-storage)
+        target-row (when target-branch-id
+                     (sp/read-entity base-storage :branch target-branch-id))
+        required (or (:required-approvals target-row) 0)]
+    (when (pos? required)
+      (let [source-row (sp/read-entity base-storage :branch source-branch-id)
+            author-id (:owner-id source-row)
+            allow-self? (boolean (:allow-self-approval? target-row))
+            have (count-valid-approvals base-storage source-branch-id author-id allow-self?)]
+        (when (< have required)
+          (throw (ex-info (str "Merge blocked: this branch requires " required
+                               " approval(s) to merge, but has " have
+                               ". Get the change reviewed and approved, then merge.")
+                          {:type :branch/approval-required
+                           :reason :insufficient-approvals
+                           :required required
+                           :have have
+                           :source-branch-id source-branch-id
+                           :target-branch-id target-branch-id})))))))
+
+
 (defn validate-merge!
   [versioned-storage source-branch-id]
   (validate-branch-policy! versioned-storage source-branch-id)

@@ -23,6 +23,7 @@ shape, self-hosted included.
 | `:merge-conflict` (POST /api/branches/:ref/merge) | 409 |
 | `:merge-protection-violation` (POST /api/branches/:ref/merge — protected-binding transfer OR the target branch's `:forbid-invalid?` policy over recorded type diagnostics) | 409 |
 | `:branch/merge-required` (a DIRECT write to a branch whose `require-merge?` is on — push-only-via-merge; merge into it instead) | 409 |
+| `:branch/approval-required` (a merge into a branch whose `required-approvals` exceeds the proposal's current valid approvals) | 409 |
 | `:user/exists` | 409 |
 | `:user/invalid`, `:grant/invalid-capability`, `:domain/unverified` (tenancy control-plane) | 400 |
 | execute already-running-as-service | 409 |

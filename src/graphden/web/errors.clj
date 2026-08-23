@@ -44,6 +44,9 @@
    ;; push-only-via-merge: the write is well-formed, the branch's
    ;; require-merge policy refuses a DIRECT write — merge into it instead.
    :branch/merge-required 409
+   ;; review policy: the merge is well-formed but the target needs more
+   ;; approvals than the proposal currently has.
+   :branch/approval-required 409
    :user/exists 409
    ;; authz
    :authz/forbidden 403

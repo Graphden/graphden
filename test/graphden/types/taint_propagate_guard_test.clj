@@ -105,7 +105,9 @@
     :rule-owner-of-name :running-entry :secret-leaf :secret-path-args
     :select-keys
     :service-blocking-free-args :set-branch-policy!
-    :set-branch-require-merge! :set-review-state! :sleep :sleep-until-ms
+    :set-branch-require-merge! :set-review-state!
+    :set-branch-review-policy! :approve-proposal! :dismiss-my-approval!
+    :proposal-approval-status :sleep :sleep-until-ms
     :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
     ;; :sse-stream returns the adopted-channel response map; the
     ;; render callable's output goes to the WIRE, never into the

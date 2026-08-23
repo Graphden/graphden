@@ -148,6 +148,9 @@ read endpoints sit behind it too (matches `/api/services`).
 | POST   | `/api/branches/:ref/policy`              | `{write-policy}` ∈ `open`/`owner`/`admins` | `{ok, write-policy}` (`open` clears to null) — WHO may flip is the tenancy authorize-writer's call |
 | POST   | `/api/branches/:ref/protect`             | `{require-merge}` boolean               | `{ok, require-merge?}` — the open-core "push only via merge" toggle; direct writes then 409 `:branch/merge-required`, merges still land |
 | POST   | `/api/branches/:ref/propose`             | `{proposed}` boolean (absent ≡ true)    | `{ok, review-state}` — mark/withdraw the branch as a change proposal for review into its base (open-core); the reviewer list = branches with `review-state "proposed"` |
+| POST   | `/api/branches/:ref/review-policy`       | `{required-approvals, allow-self-approval, approver-ids}` | `{ok, policy}` — set the branch's review requirements (on the merge target); enforced open-core by the merge gate |
+| POST / DELETE | `/api/branches/:ref/approve`      | (empty)                                 | `{ok, approver}` / `{ok, removed}` — record / withdraw the caller's approval of a proposal; POST is `:authz/forbidden` (403) if the caller may not approve merges into the target |
+| GET    | `/api/branches/:ref/approvals`           |                                         | `{ok, required, have, satisfied, approvers:[{approver-id, stale}]}` — the proposal's approval status |
 | DELETE | `/api/branches/:ref`                     |                                       | `{ok, id, name}` or `{ok: false, reason, error, child-branch-ids?}`. Rejected when the branch has children (`:reason :branch-has-children`) or is a live **merge SOURCE** (`:constraint-violation/branch-is-merge-source` — deleting it would revert every target it merged into, since merge is by-reference; delete those targets first) |
 | GET    | `/api/branches/:ref/diff?against=<ref>`  |                                       | `{ok, target, source, count, diffs}` |
 | GET    | `/api/branches/:ref/conflicts?source=…`  |                                       | `{ok, target, source, fork-point, count, conflicts}` |
@@ -196,7 +199,7 @@ core's `case` matcher.
 | Affordance | Where | What it does |
 |------------|-------|--------------|
 | Branch chip | context bar (`#gd-ctxbar` → `#branch-mount`, between the workspace chip and the packages chip) | Shows current branch. Inverted style when off main. |
-| Branch popover | click chip | Branch list + inline create + Δ diff + 📤 propose-for-review toggle (open-core; accented = proposed) + ⇢ merge + 🔀 require-merge toggle (open-core; accented = on) + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks write-policy-protected rows |
+| Branch popover | click chip | Branch list + inline create + Δ diff + 📤 propose-for-review toggle + ✅ approve (on proposed rows) + ⇢ merge + 🔀 require-merge toggle + ✔N required-approvals cycler + ⛨ write-policy (tenancy only) + × delete; a 🔒 marks write-policy-protected rows. Propose/approve/require-merge/required-approvals are all open-core |
 | Diff modal | click Δ in row | Full-viewport list of differences (`:added-in-source` / `:added-in-target` / `:modified`); :fn rows are clickable → navigate |
 | Conflict modal | merge fails with `:reason :merge-conflict` | Per-entity source/target radio, retry merge with `:conflict-resolutions` |
 | Fn-card ⌛ action | per fn-card row-actions | Version timeline + per-version `(N runs)` badge; click a row → inline-expand its executions (lazy fetch); `switch` button jumps to that version's branch |
@@ -295,10 +298,47 @@ simply the branches whose `:review-state` is `"proposed"`.
 - Editor: an always-visible 📤 toggle per branch row in the branch popover
   (accented when proposed), hidden only for a read-only viewer.
 
-> The *review* half — a configurable per-branch approval policy (how many
-> approvals, from whom, self-approval, stale-dismissal) plus a merge gate
-> that counts approvals — is the next phase; `:review-state` is the marker
-> that phase builds the reviewer surface on.
+## Review policy (Phase C — configurable approvals, 2026-08-23)
+
+A proposal is *reviewed* by recording approvals against it and gating the
+merge on their count — configurable per **target** branch, GitHub-style.
+
+**Policy fields** (nullable, on the merge-TARGET `:branch` row; all
+default off = current behaviour):
+
+- `:required-approvals` (int) — how many valid approvals a proposal needs
+  before a merge INTO this branch is allowed.
+- `:allow-self-approval?` (bool) — when not true, the proposal author's own
+  approval does not count (GitHub "require review from someone else").
+- `:approver-ids` (jsonb list of `:user-id`) — an explicit reviewer
+  allow-list, ADDITIVE to whoever the target's `:write-policy` role admits.
+  (So "who may approve" = the target's write-policy roles ∪ this list.)
+
+**Approvals** are `:branch-approval` rows (one per approval; mirrors
+`:branch-merge`): `{source-branch-id, approver-id, content-stamp,
+created-at}`. `content-stamp` is the source's content fingerprint
+(`merge.core/branch-content-stamp` — count + max version `created-at`) at
+approval time; a later edit advances it, so the approval is **auto-dismissed
+as stale** (counted only while the stamp matches — GitHub "dismiss stale
+approvals").
+
+**The merge gate** (`merge.core/validate-approval-policy!`, called on the
+live merge path right after the `forbid-invalid?` gate) counts DISTINCT,
+non-stale approvals, excluding the author unless self-approval is allowed,
+and throws `:branch/approval-required` (409) when short. WHO may approve is
+enforced when the approval is WRITTEN (`approve-proposal!` — target
+write-policy ∪ approver-ids), so the gate itself is pure/open-core.
+
+**HTTP**: `POST /api/branches/:ref/review-policy {required-approvals,
+allow-self-approval, approver-ids}`; `POST|DELETE /api/branches/:ref/approve`
+(record / withdraw the caller's approval); `GET /api/branches/:ref/approvals`
+→ `{required, have, satisfied, approvers:[{approver-id, stale}]}`.
+
+**Editor** (branch popover, open-core): a ✅ **Approve** button on proposed
+rows and a ✔N **required-approvals cycler** (click 0→1→2→3) per row.
+`approver-ids` / `allow-self-approval?` are set via the API/MCP (advanced,
+rarely changed). Without the tenancy addon there are no principals, so on a
+solo self-host the flow degrades to "propose → self-approve → merge".
 
 ## Demo seeder
 

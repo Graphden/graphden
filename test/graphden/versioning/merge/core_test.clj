@@ -461,3 +461,43 @@
       (let [empty-source (vs/create-branch! storage "empty-feature")]
         (is (empty? (mrg/merge-affected-fn-ids base (:id empty-source))))))
     (sp/close storage)))
+
+
+;; === Review policy — approval counting + stale-dismissal ===
+
+(deftest count-valid-approvals-test
+  (testing "distinct, stale-filtered, author-excluded approval counting"
+    (let [{:keys [storage base fn-id slot-id]} (create-test-storage)
+          src (vs/create-branch! storage "rev-src")
+          src-id (:id src)
+          src-storage (vs/switch-branch storage src-id)
+          b (create-binding-on-current! src-storage fn-id slot-id "v1")
+          stamp1 (mp/branch-content-stamp base src-id)
+          approve! (fn [uid stamp]
+                     (sp/create-entity base :branch-approval
+                                       {:source-branch-id src-id
+                                        :approver-id uid
+                                        :content-stamp stamp
+                                        :created-at (java.time.Instant/now)}))]
+      (testing "no approvals → 0"
+        (is (zero? (mp/count-valid-approvals base src-id nil false))))
+      (testing "two distinct reviewers at the current stamp → 2"
+        (approve! "alice" stamp1)
+        (approve! "bob" stamp1)
+        (is (= 2 (mp/count-valid-approvals base src-id nil false))))
+      (testing "a duplicate approval by the same reviewer stays distinct → 2"
+        (approve! "alice" stamp1)
+        (is (= 2 (mp/count-valid-approvals base src-id nil false))))
+      (testing "author's own approval excluded unless self-approval allowed"
+        (is (= 1 (mp/count-valid-approvals base src-id "alice" false)))
+        (is (= 2 (mp/count-valid-approvals base src-id "alice" true))))
+      (testing "editing the source advances the stamp → prior approvals go stale → 0"
+        (sp/update-entity src-storage :binding (:id b) {:value "v2"})
+        (is (not= stamp1 (mp/branch-content-stamp base src-id))
+            "content stamp advances after an edit")
+        (is (zero? (mp/count-valid-approvals base src-id nil false))
+            "all stamp1 approvals are now stale"))
+      (testing "a fresh approval at the new stamp counts again"
+        (approve! "carol" (mp/branch-content-stamp base src-id))
+        (is (= 1 (mp/count-valid-approvals base src-id nil false))))
+      (sp/close storage))))

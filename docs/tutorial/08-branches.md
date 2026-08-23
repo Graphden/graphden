@@ -42,9 +42,13 @@ Advanced            → (cloud/tenancy only) pick who can write the
                       new branch: everyone / only me / org admins
 row → switch        → click a branch row to switch to it
 Δ (diff)            → show the diff vs another branch
+📤 (propose)        → submit this branch for review into its base
+✅ (approve)        → approve a proposed branch for merge
 ⇢ (merge)           → fold another branch into this one
 🔀 (require merge)  → toggle "push only via merge" for this branch
                       (works everywhere, including single-user)
+✔N (reviews)        → cycle how many approvals a merge into this
+                      branch needs (0→1→2→3); works everywhere
 ⛨ (protection)      → (cloud/tenancy only) change who can write;
                       a 🔒 marks protected rows
 × delete
@@ -72,7 +76,33 @@ The usual shape: keep `main` on 🔀, do your work on a child branch
 the branch itself, so it survives reloads and applies to every
 client. Turn it back off any time to re-open direct writes.
 
-### Try it
+### Change proposals & review (📤 → ✅ → ⇢)
+
+Beyond "who/how" you can require *review*: someone proposes a change,
+someone (with rights) approves it, then it merges. All in the branch
+popover, no separate "pull request" object:
+
+- **📤 Propose** marks a branch as submitted for review into its base.
+  Proposed branches are the reviewer's to-do list (their 📤 lights up).
+- **✔N Reviews** on the *target* branch (e.g. `main`) cycles how many
+  approvals a merge into it needs. Set `main` to `✔1` and a merge into
+  `main` is refused (409, *"requires 1 approval(s)…"*) until the
+  proposal is approved.
+- **✅ Approve** records your approval of a proposed branch. Who may
+  approve = who may write the target (its write-policy roles, plus any
+  explicit reviewer list set via the API). Once the count is met, the
+  merge goes through.
+
+Approvals are **content-aware**: if the proposed branch is edited after
+it was approved, that approval is automatically dismissed (it went
+stale) and the branch needs a fresh approval before it can merge —
+just like GitHub dismissing stale reviews on a new push.
+
+On a solo self-host there's no "someone else", so this degrades to
+propose → approve-your-own → merge; it becomes real review the moment
+a second account exists (cloud/tenancy).
+
+### Try it — the plain flow
 
 1. Click the branch chip. In the create row, type `feat-tutorial`
    and click **Create**. The editor reloads on `feat-tutorial`;
@@ -85,6 +115,18 @@ client. Turn it back off any time to re-open direct writes.
    The diff modal lists every entity that resolves differently.
 5. From `main`, click `⇢` next to `feat-tutorial`. Confirm.
    The page reloads and `main` now sees your edit.
+
+### Try it — with review required
+
+1. Click `✔0` next to `main` once so it reads `✔1` — `main` now
+   requires one approval to merge into.
+2. Create a second branch `feat-review`, edit a value on it, switch
+   back to `main`.
+3. From `main`, click `⇢` next to `feat-review`. It's refused —
+   *"requires 1 approval(s)…"*.
+4. Click `📤` on `feat-review` (propose it), then `✅` (approve it).
+5. `⇢` now merges cleanly. Click `✔1` next to `main` three times to
+   cycle back to `✔0` and turn the requirement off again.
 
 ## Conflicts
 

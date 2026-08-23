@@ -544,6 +544,24 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
+  // Approve a proposal (open-core reviewer action). POSTs
+  // /branches/:ref/approve; a 403 (not allowed) surfaces in the slot.
+  popover.querySelectorAll('.branch-row-approve').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      approveProposal(btn);
+    });
+  });
+
+  // Cycle a branch's required-approvals (0→1→2→3→0) — the in-editor
+  // review-policy knob. POSTs /branches/:ref/review-policy.
+  popover.querySelectorAll('.branch-row-reqappr').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cycleRequiredApprovals(btn);
+    });
+  });
+
   popover.querySelectorAll('.branch-row-delete').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -699,6 +717,62 @@ async function toggleBranchPropose(btn) {
       openBranchPopover(); // re-render rows with the new proposal state
     } else if (err) {
       err.textContent = body.error || 'Could not change the proposal state';
+      err.classList.remove('hidden');
+    }
+  } catch (e2) {
+    if (err) {
+      err.textContent = 'Network error: ' + (e2?.message || e2);
+      err.classList.remove('hidden');
+    }
+  }
+}
+
+// Record the caller's approval of a proposal branch. A 403 (the caller
+// may not approve merges into the target) or any error surfaces in the
+// shared slot.
+async function approveProposal(btn) {
+  const branchName = btn.getAttribute('data-approve-branch');
+  const err = document.getElementById('branch-popover-error');
+  try {
+    const resp = await window.authFetch(API.api_branches_ref_approve(branchName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const body = await resp.json();
+    if (resp.ok && body.ok) {
+      openBranchPopover();
+    } else if (err) {
+      err.textContent = body.error
+        || (resp.status === 403 ? 'You are not allowed to approve merges into this branch' : 'Could not approve');
+      err.classList.remove('hidden');
+    }
+  } catch (e2) {
+    if (err) {
+      err.textContent = 'Network error: ' + (e2?.message || e2);
+      err.classList.remove('hidden');
+    }
+  }
+}
+
+// Cycle a branch's required-approvals 0→1→2→3→0 (the in-editor review
+// policy knob). approver-ids / allow-self-approval are set via the API.
+async function cycleRequiredApprovals(btn) {
+  const branchName = btn.getAttribute('data-reqappr-branch');
+  const cur = parseInt(btn.getAttribute('data-reqappr') || '0', 10) || 0;
+  const next = (cur + 1) % 4;
+  const err = document.getElementById('branch-popover-error');
+  try {
+    const resp = await window.authFetch(API.api_branches_ref_review_policy(branchName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 'required-approvals': next }),
+    });
+    const body = await resp.json();
+    if (body.ok) {
+      openBranchPopover();
+    } else if (err) {
+      err.textContent = body.error || 'Could not change the review policy';
       err.classList.remove('hidden');
     }
   } catch (e2) {

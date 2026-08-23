@@ -317,3 +317,49 @@
       (let [row (-> (dispatch {:method :get :path (str "/api/branches/" feat)})
                     parse-json :branch)]
         (is (nil? (:review-state row)) "review-state cleared on the branch row")))))
+
+
+(deftest branch-review-policy-gate-lifecycle-test
+  ;; Review policy Phase C: a target branch requiring N approvals refuses
+  ;; a merge until the proposal has them; approving unblocks it. Goes
+  ;; through the real Ring handler chain (same as the reviewer's clicks).
+  (let [run-id (str "-" (System/currentTimeMillis))
+        tgt (str "rp-tgt" run-id)
+        src (str "rp-src" run-id)
+        probe (str "rp-probe" run-id)
+        identity-fn (fn-by-name nil "identity")]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name tgt :base-branch-id "main"}}))))
+    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
+                                   :body {:required-approvals 1}}))))
+    (testing "the policy is surfaced on the branch row"
+      (is (= 1 (:required-approvals (-> (dispatch {:method :get :path (str "/api/branches/" tgt)})
+                                        parse-json :branch)))))
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name src :base-branch-id tgt}}))))
+    (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn" :branch src
+                                   :content-type "application/x-www-form-urlencoded"
+                                   :body (str "name=" probe "&parent-ids=" (:id identity-fn))}))))
+    (testing "merge is refused (409) while the proposal has no approvals"
+      (let [m (dispatch {:method :post :path (str "/api/branches/" tgt "/merge")
+                         :body {:source src}})]
+        (is (= 409 (:status m)) (str "needs approval; body=" (:body m))))
+      (is (nil? (fn-by-name tgt probe)) "nothing merged while blocked"))
+    (testing "approving satisfies the policy and the merge lands"
+      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/approve")
+                                     :body {}}))))
+      (let [st (-> (dispatch {:method :get :path (str "/api/branches/" src "/approvals")})
+                   parse-json)]
+        (is (= 1 (:required st)))
+        (is (= 1 (:have st)))
+        (is (true? (:satisfied st))))
+      (let [m (dispatch {:method :post :path (str "/api/branches/" tgt "/merge")
+                         :body {:source src}})]
+        (is (= 200 (:status m)) (str "merge with approval; body=" (:body m))))
+      (is (some? (fn-by-name tgt probe))
+          "the fn landed on the target after the approved merge"))
+    (testing "withdrawing the approval removes it"
+      (is (= 200 (:status (dispatch {:method :delete :path (str "/api/branches/" src "/approve")}))))
+      (let [st (-> (dispatch {:method :get :path (str "/api/branches/" src "/approvals")})
+                   parse-json)]
+        (is (zero? (:have st)))))))

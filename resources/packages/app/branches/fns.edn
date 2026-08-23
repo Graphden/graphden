@@ -183,7 +183,7 @@
   {:name :as-json-branch
    :description "Convert a `:branch` storage row into a JSON-safe map — `{:id (str id) :name name :base-branch-id (some-> base-branch-id str) :created-at (some-> created-at str) :owner-id owner-id :write-policy write-policy}`. Own pin `:branch-row`. Used by `:_get-branch-data` and reusable by any other handler that surfaces a branch row."
    :parent :zipmap
-   :args {:keys [{:value :id} {:value :name} {:value :base-branch-id} {:value :created-at} {:value :owner-id} {:value :write-policy} {:value :require-merge?} {:value :review-state}]
+   :args {:keys [{:value :id} {:value :name} {:value :base-branch-id} {:value :created-at} {:value :owner-id} {:value :write-policy} {:value :require-merge?} {:value :review-state} {:value :required-approvals} {:value :allow-self-approval?} {:value :approver-ids}]
           :vals [:_branch-id-str
                  :_branch-row-name
                  :_branch-base-id-str
@@ -191,7 +191,10 @@
                  {:parent :get :args {:coll {:as :branch-row} :key {:value :owner-id} :default nil}}
                  {:parent :get :args {:coll {:as :branch-row} :key {:value :write-policy} :default nil}}
                  {:parent :get :args {:coll {:as :branch-row} :key {:value :require-merge?} :default nil}}
-                 {:parent :get :args {:coll {:as :branch-row} :key {:value :review-state} :default nil}}]
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :review-state} :default nil}}
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :required-approvals} :default nil}}
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :allow-self-approval?} :default nil}}
+                 {:parent :get :args {:coll {:as :branch-row} :key {:value :approver-ids} :default nil}}]
           :branch-row {:type :nullable-keyword-map
                        :description "Storage row of a `:branch` entity — fields stringified for the JSON wire."}}}
 
@@ -1069,6 +1072,33 @@
    :return-type :nullable-text
    :effects #{:db}}
 
+  {:name :set-branch-review-policy!
+   :description "Atomic library boundary — set a branch's review policy (the merge TARGET's rules): `required-approvals` (int, nil=off), `allow-self-approval?` (bool), `approver-ids` (explicit reviewer user-id allow-list). Returns the stored policy map."
+   :args {:branch-id {:type :uuid :description "Branch id whose review policy to set."}
+          :required-approvals {:type :any :description "How many approvals a merge into this branch needs; nil/0 = off."}
+          :allow-self-approval? {:type :any :description "Truthy → the author's own approval counts."}
+          :approver-ids {:type :any :description "List of reviewer user-ids allowed to approve, additive to the write-policy role; nil = role-based only."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :approve-proposal!
+   :description "Atomic library boundary — record the current principal's approval of proposal branch `source-branch-id` for merge into its base. Enforces WHO-may-approve against the target's write-policy + approver-ids (else :authz/forbidden). Stamps the source content fingerprint for stale-dismissal. Returns the approver id."
+   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch being approved."}}
+   :return-type :text
+   :effects #{:db}}
+
+  {:name :dismiss-my-approval!
+   :description "Atomic library boundary — withdraw the current principal's own approval(s) of proposal branch `source-branch-id`. Returns the number removed."
+   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch to un-approve."}}
+   :return-type :int
+   :effects #{:db}}
+
+  {:name :proposal-approval-status
+   :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :approvers [{:approver-id :stale}]}` for the reviewer UI."
+   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch to report on."}}
+   :return-type :keyword-map
+   :effects #{}}
+
   {:name :_branch-policy-parsed
    :description "Parse POST /api/branches/:ref/policy into `{:branch-ref :write-policy}` — ref from the URL (shared `:_branches-target-ref`), policy from the JSON body."
    :parent :zipmap
@@ -1268,6 +1298,143 @@
    :description "Ring handler for POST /api/branches/:ref/propose (auth-required)."
    :parent :json-handler
    :args {:data :_branch-propose-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/branches/:ref/review-policy — set the branch's review
+  ;; requirements (on the merge TARGET): required-approvals /
+  ;; allow-self-approval / approver-ids. Open-core config; the merge gate
+  ;; enforces it. Separate from /protect (which owns require-merge).
+  ;; ---------------------------------------------------------------------
+  {:name :_branch-rp-parsed
+   :parent :zipmap
+   :args {:keys [{:value :branch-ref} {:value :required-approvals} {:value :allow-self-approval} {:value :approver-ids}]
+          :vals [:_branches-target-ref
+                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :required-approvals} :default nil}}
+                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :allow-self-approval} :default nil}}
+                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :approver-ids} :default nil}}]}}
+
+  {:name :_branch-rp-resolved
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :branch-ref} :default nil}}}}
+
+  {:name :_branch-rp-missing?
+   :parent :nil?
+   :args {:value {:as :resolved}}}
+
+  {:name :_branch-rp-err-missing
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "Branch not found"}}}
+
+  {:name :_branch-rp-apply-set
+   :parent :set-branch-review-policy!
+   :args {:branch-id {:parent :assert-some
+                      :args {:value {:parent :get :args {:coll {:as :resolved} :key {:value :id} :default nil}}}}
+          :required-approvals {:parent :get :args {:coll {:as :parsed} :key {:value :required-approvals} :default nil}}
+          :allow-self-approval? {:parent :get :args {:coll {:as :parsed} :key {:value :allow-self-approval} :default nil}}
+          :approver-ids {:parent :get :args {:coll {:as :parsed} :key {:value :approver-ids} :default nil}}}}
+
+  {:name :_branch-rp-apply
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :policy}]
+          :vals [{:value true} :_branch-rp-apply-set]}}
+
+  {:name :_branch-rp-data
+   :parent :cond
+   :args {:clauses [:_branch-rp-missing?  :_branch-rp-err-missing
+                    {:value true}         :_branch-rp-apply]
+          :parsed :_branch-rp-parsed
+          :resolved :_branch-rp-resolved}}
+
+  {:name :set-branch-review-policy-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for POST /api/branches/:ref/review-policy (auth-required)."
+   :parent :json-handler
+   :args {:data :_branch-rp-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/branches/:ref/approve — record the caller's approval of a
+  ;; PROPOSAL (source) branch. `approve-proposal!` throws :authz/forbidden
+  ;; (→ 403) when the caller may not approve merges into the target.
+  ;; DELETE withdraws the caller's own approval.
+  ;; ---------------------------------------------------------------------
+  {:name :_branch-approve-resolved
+   :parent :resolve-branch-ref
+   :args {:ref :_branches-target-ref}}
+
+  {:name :_branch-approve-missing?
+   :parent :nil?
+   :args {:value {:as :resolved}}}
+
+  {:name :_branch-approve-err-missing
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "Branch not found"}}}
+
+  {:name :_branch-approve-src-id
+   :parent :assert-some
+   :args {:value {:parent :get :args {:coll {:as :resolved} :key {:value :id} :default nil}}}}
+
+  {:name :_branch-approve-apply
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :approver}]
+          :vals [{:value true}
+                 {:parent :approve-proposal! :args {:source-branch-id :_branch-approve-src-id}}]}}
+
+  {:name :_branch-approve-data
+   :parent :cond
+   :args {:clauses [:_branch-approve-missing?  :_branch-approve-err-missing
+                    {:value true}              :_branch-approve-apply]
+          :resolved :_branch-approve-resolved}}
+
+  {:name :approve-proposal-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for POST /api/branches/:ref/approve (auth-required)."
+   :parent :json-handler
+   :args {:data :_branch-approve-data}}
+
+  {:name :_branch-dismiss-apply
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :removed}]
+          :vals [{:value true}
+                 {:parent :dismiss-my-approval! :args {:source-branch-id :_branch-approve-src-id}}]}}
+
+  {:name :_branch-dismiss-data
+   :parent :cond
+   :args {:clauses [:_branch-approve-missing?  :_branch-approve-err-missing
+                    {:value true}              :_branch-dismiss-apply]
+          :resolved :_branch-approve-resolved}}
+
+  {:name :dismiss-approval-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for DELETE /api/branches/:ref/approve (auth-required) — withdraw the caller's own approval."
+   :parent :json-handler
+   :args {:data :_branch-dismiss-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/branches/:ref/approvals — the proposal's approval status
+  ;; (required / have / satisfied / approvers) for the reviewer UI.
+  ;; ---------------------------------------------------------------------
+  {:name :_branch-approvals-status
+   :parent :proposal-approval-status
+   :args {:source-branch-id :_branch-approve-src-id}}
+
+  {:name :_branch-approvals-apply
+   :description "Merge `{:ok true}` onto the status map."
+   :parent :assoc
+   :args {:map :_branch-approvals-status :key {:value :ok} :value {:value true}}}
+
+  {:name :_branch-approvals-data
+   :parent :cond
+   :args {:clauses [:_branch-approve-missing?  :_branch-approve-err-missing
+                    {:value true}              :_branch-approvals-apply]
+          :resolved :_branch-approve-resolved}}
+
+  {:name :list-approvals-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for GET /api/branches/:ref/approvals (auth-required)."
+   :parent :json-handler
+   :args {:data :_branch-approvals-data}}
 
   ;; ---------------------------------------------------------------------
   ;; DELETE /api/branches/:ref — delete branch + all its version rows.
@@ -1909,7 +2076,10 @@
                           :owner-id :any
                           :write-policy :any
                           :require-merge? :any
-                          :review-state :any}
+                          :review-state :any
+                          :required-approvals :any
+                          :allow-self-approval? :any
+                          :approver-ids :any}
                  :source {:id :nullable-text
                           :name :any
                           :base-branch-id :nullable-text
@@ -1917,7 +2087,10 @@
                           :owner-id :any
                           :write-policy :any
                           :require-merge? :any
-                          :review-state :any}
+                          :review-state :any
+                          :required-approvals :any
+                          :allow-self-approval? :any
+                          :approver-ids :any}
                  :conflicts [:list {:entity-name :any
                                     :entity-id :text
                                     :source-version :jsonb
@@ -1953,6 +2126,26 @@
                          :key {:value :invalid-fn-names}
                          :default []}}]}}
 
+  {:name :_merge-apply-err-approval
+   :description "Review-policy envelope — `{:ok false :reason :insufficient-approvals :http-status 409 :error \"…\" :required :have}`. Thrown by `merge.core/validate-approval-policy!` when the target needs more approvals than the proposal has."
+   :parent :zipmap
+   :return-type {:ok :bool
+                 :reason :keyword
+                 :http-status :int
+                 :error :text
+                 :required :any
+                 :have :any}
+   :args {:keys [{:value :ok} {:value :reason} {:value :http-status :literal? true}
+                 {:value :error} {:value :required} {:value :have}]
+          :vals [{:value false}
+                 {:value :insufficient-approvals}
+                 {:value 409}
+                 {:parent :coalesce
+                  :args {:value {:parent :throwable-message :args {:ex {:as :exception}}}
+                         :default "Merge blocked: needs more approvals"}}
+                 {:parent :get :args {:coll :_merge-apply-ex-data :key {:value :required} :default nil}}
+                 {:parent :get :args {:coll :_merge-apply-ex-data :key {:value :have} :default nil}}]}}
+
   {:name :_merge-apply-err-generic-msg
    :description "Fallback message — `(or (.getMessage e) \"Unknown error\")`."
    :parent :coalesce
@@ -1966,10 +2159,10 @@
           :vals [{:value false} :_merge-apply-err-generic-msg]}}
 
   {:name :_merge-apply-clauses
-   :description "Dynamic `:case` clauses map — `{:merge-conflict <ref> :merge-protection-violation <ref>}`. Built via `:zipmap` so each result-vec entry is a ref (resolving to its envelope), not a literal keyword."
+   :description "Dynamic `:case` clauses map — `{:merge-conflict <ref> :merge-protection-violation <ref> :branch/approval-required <ref>}`. Built via `:zipmap` so each result-vec entry is a ref (resolving to its envelope), not a literal keyword."
    :parent :zipmap
-   :args {:keys [{:value :merge-conflict} {:value :merge-protection-violation}]
-          :vals [:_merge-apply-err-conflict :_merge-apply-err-protection]}}
+   :args {:keys [{:value :merge-conflict} {:value :merge-protection-violation} {:value :branch/approval-required}]
+          :vals [:_merge-apply-err-conflict :_merge-apply-err-protection :_merge-apply-err-approval]}}
 
   {:name :_merge-apply-on-throw
    :description "`:try`'s `:on-throw` handler — dispatches on `(:type (ex-data e))` via `:case`. The `:merge-conflict` clause builds the structured 409-style payload; `:merge-protection-violation` builds the 409 branch-policy/trait envelope; default falls through to a generic `{:ok false :error <message>}`."
@@ -2488,11 +2681,89 @@
           :attrs :_bp-row-propose-attrs
           :children [{:value "📤"}]}}
 
+  ;; --- Approve button (open-core; only on PROPOSED rows) ---
+  ;; The reviewer's core action: ✅ records an approval via POST
+  ;; /branches/:ref/approve. WHO may approve is enforced server-side
+  ;; (target write-policy + approver-ids); a rejection surfaces in the
+  ;; shared error slot.
+  {:name :_bp-row-approve-attrs
+   :parent :assoc
+   :args {:map {:value {:class "branch-row-approve"
+                        :title "Approve this proposal for merge into its base"}}
+          :key {:value :data-approve-branch}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-approve-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-approve-attrs
+          :children [{:value "✅"}]}}
+
+  {:name :_bp-row-approve-btn
+   :parent :if
+   :args {:test :_bp-row-proposed?
+          :then :_bp-row-approve-btn-shown
+          :else :_bp-row-empty-placeholder}}
+
+  ;; --- Required-approvals cycler (open-core; configures this branch AS
+  ;; a merge TARGET) --- click cycles 0→1→2→3→0, POSTing
+  ;; /branches/:ref/review-policy {required-approvals}. Shows the count.
+  {:name :_bp-row-required-approvals
+   :parent :get
+   :args {:coll {:as :item} :key {:value :required-approvals} :default {:value 0}}}
+
+  {:name :_bp-row-reqappr-n
+   :parent :coalesce
+   :args {:value :_bp-row-required-approvals :default {:value 0}}}
+
+  {:name :_bp-row-reqappr-str
+   :parent :to-str
+   :args {:value :_bp-row-reqappr-n}}
+
+  {:name :_bp-row-reqappr-on?
+   :parent :not
+   :args {:value {:parent :equal? :args {:a :_bp-row-reqappr-n :b {:value 0}}}}}
+
+  {:name :_bp-row-reqappr-class
+   :parent :if
+   :args {:test :_bp-row-reqappr-on?
+          :then {:value "branch-row-reqappr on"}
+          :else {:value "branch-row-reqappr"}}}
+
+  {:name :_bp-row-reqappr-label
+   :parent :str
+   :args {:parts [{:value "✔"} :_bp-row-reqappr-str]}}
+
+  {:name :_bp-row-reqappr-attrs-1
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map {:value {}} :key {:value :class} :value :_bp-row-reqappr-class}}
+          :key {:value :data-reqappr-branch}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-reqappr-attrs-2
+   :parent :assoc
+   :args {:map :_bp-row-reqappr-attrs-1
+          :key {:value :data-reqappr}
+          :value :_bp-row-reqappr-str}}
+
+  {:name :_bp-row-reqappr-attrs
+   :parent :assoc
+   :args {:map :_bp-row-reqappr-attrs-2
+          :key {:value :title}
+          :value {:value "Approvals required to merge in — click to cycle 0→3"}}}
+
+  {:name :_bp-row-reqappr-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-reqappr-attrs
+          :children [:_bp-row-reqappr-label]}}
+
   {:name :_bp-row-actions-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-actions"}}
-          :children [:_bp-row-diff-btn :_bp-row-propose-btn :_bp-row-merge-btn :_bp-row-rm-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-diff-btn :_bp-row-propose-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-rm-btn :_bp-row-reqappr-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
 
   ;; The full per-branch row — assembled via the named children.
   {:name :_bp-row

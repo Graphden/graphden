@@ -716,6 +716,34 @@
    :parent :post
    :args {:path "/branches/:ref/propose" :handler :set-branch-propose-handler}}
 
+  {:name :api-branch-review-policy
+   :description "POST /api/branches/:ref/review-policy — set the branch's review requirements (required-approvals / allow-self-approval / approver-ids). Auth-required; enforced in open core by the merge gate."
+   :parent :post
+   :args {:path "/branches/:ref/review-policy" :handler :set-branch-review-policy-handler}}
+
+  ;; POST /api/branches/:ref/approve (record) + DELETE (withdraw) — same path.
+  {:name :branches-approve-post-data
+   :parent :_method-map-with-middleware
+   :args {:method "post" :handler :approve-proposal-handler :middleware :_middleware-list}}
+
+  {:name :branches-approve-delete-data
+   :parent :_method-map-with-middleware
+   :args {:method "delete" :handler :dismiss-approval-handler :middleware :_middleware-list}}
+
+  {:name :_branches-approve-methods
+   :parent :merge
+   :args {:maps [:branches-approve-post-data :branches-approve-delete-data]}}
+
+  {:name :api-branch-approve
+   :description "Multi-method route entry `[\"/branches/:ref/approve\" {:post … :delete …}]` — approve / withdraw approval of a proposal."
+   :parent :list
+   :args {:items ["/branches/:ref/approve" :_branches-approve-methods]}}
+
+  {:name :api-branch-approvals
+   :description "GET /api/branches/:ref/approvals — the proposal's approval status (required / have / satisfied / approvers). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/branches/:ref/approvals" :handler :list-approvals-handler}}
+
   ;; --- /api/fns/:fn-id/versions — history of one fn across branches ---
 
   {:name :api-fn-versions
@@ -804,6 +832,9 @@
                   :api-branch-policy
                   :api-branch-protect
                   :api-branch-propose
+                  :api-branch-review-policy
+                  :api-branch-approve
+                  :api-branch-approvals
                   :api-fn-versions
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
                   ;; live in the OPTIONAL `registry` package now and install via

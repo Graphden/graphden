@@ -33,6 +33,14 @@
   #uuid "b2c3d4e5-f6a7-4890-9d0e-1f2a3b4c5d6e")
 
 
+(def ^:private branch-approval-entity-uuid
+  ;; Change proposals (review policy) — one row per approval a reviewer
+  ;; grants a proposal branch. Mirrors :branch-merge (a plain, non-
+  ;; version-intercepted record). Counted at merge time against the
+  ;; target's `:required-approvals`.
+  #uuid "d249d189-4ce0-4445-86e4-52bd3681159b")
+
+
 (def ^:private fn-version-entity-uuid
   #uuid "c3d4e5f6-a7b8-4901-0e1f-2a3b4c5d6e7f")
 
@@ -105,6 +113,29 @@
   #uuid "bc75cdfe-0fa5-437d-90ea-a471cd5011ed")
 
 
+(def ^:private branch-required-approvals-field-uuid
+  ;; Review policy — how many valid approvals a proposal needs before a
+  ;; merge INTO this branch is allowed. nil/0 ≡ off. Enforced open-core
+  ;; by the merge gate (`versioning.merge.core/validate-approval-policy!`).
+  #uuid "f581b52e-6096-4ad2-b745-c4557f50d042")
+
+
+(def ^:private branch-allow-self-approval-field-uuid
+  ;; Review policy — when NOT true, the proposal author's own approval
+  ;; does not count toward `:required-approvals` (GitHub "require review
+  ;; from someone other than the author"). nil ≡ off (self-approval NOT
+  ;; counted once approvals are required).
+  #uuid "c521de6f-595a-4612-9622-bfcc78c5e71e")
+
+
+(def ^:private branch-approver-ids-field-uuid
+  ;; Review policy — an explicit allow-list of reviewer `:user-id`s who
+  ;; may approve merges into this branch, ADDITIVE to whoever the
+  ;; `:write-policy` role already admits. nil ≡ role-based only. JSONB
+  ;; list of strings.
+  #uuid "da35ac02-e3a5-41d8-8030-3c5a66db189e")
+
+
 (def ^:private branch-owner-id-field-uuid
   ;; Protected branches (Stage 1, 2026-08-15) — the creating principal's
   ;; STABLE user id (`:user-id`, not the mutable username), stamped at
@@ -147,6 +178,30 @@
 
 (def ^:private branch-merge-created-at-field-uuid
   #uuid "15161718-1920-4890-2a3b-4c5d6e7f8a9b")
+
+
+;; =============================================================================
+;; Field UUIDs — :branch-approval
+;; =============================================================================
+
+(def ^:private branch-approval-source-branch-id-field-uuid
+  #uuid "6796332c-aa37-4c42-8370-30cfa565ae10")
+
+
+(def ^:private branch-approval-approver-id-field-uuid
+  #uuid "a5bbd60d-d73f-474f-b404-fe94f6328b53")
+
+
+(def ^:private branch-approval-content-stamp-field-uuid
+  ;; The source branch's content fingerprint (count + max version
+  ;; created-at) at approval time. A later edit on the source advances
+  ;; the stamp, so the merge gate treats this approval as STALE and
+  ;; drops it (GitHub "dismiss stale approvals").
+  #uuid "78f50d44-a3a3-40cd-be29-dc7881a38127")
+
+
+(def ^:private branch-approval-created-at-field-uuid
+  #uuid "9de343a8-7a6b-4041-9599-6acfedac1253")
 
 
 ;; =============================================================================
@@ -605,7 +660,7 @@
 ;; =============================================================================
 
 (def versioned-entities
-  #{:branch :branch-merge :fn-version :fn-slot-version
+  #{:branch :branch-merge :branch-approval :fn-version :fn-slot-version
     :binding-version :binding-list-item-version})
 
 
@@ -677,6 +732,18 @@
                       :review-state {:uuid branch-review-state-field-uuid
                                      :type :text
                                      :nullable? true}
+                      ;; Review policy (on the merge TARGET): how many
+                      ;; approvals, whether self-approval counts, and an
+                      ;; explicit reviewer allow-list. All NULL ≡ off.
+                      :required-approvals {:uuid branch-required-approvals-field-uuid
+                                           :type :int
+                                           :nullable? true}
+                      :allow-self-approval? {:uuid branch-allow-self-approval-field-uuid
+                                             :type :bool
+                                             :nullable? true}
+                      :approver-ids {:uuid branch-approver-ids-field-uuid
+                                     :type :jsonb
+                                     :nullable? true}
                       ;; Protected branches (Stage 1): creator + write policy.
                       :owner-id {:uuid branch-owner-id-field-uuid
                                  :type :text
@@ -700,6 +767,21 @@
                       :target-timestamp {:uuid branch-merge-target-timestamp-field-uuid
                                          :type :timestamptz}
                       :created-at {:uuid branch-merge-created-at-field-uuid
+                                   :type :timestamptz}})
+
+      ;; -----------------------------------------------------------------
+      ;; branch-approval — one row per reviewer approval of a proposal.
+      ;; Plain, non-version-intercepted (like branch-merge). Org-scoped
+      ;; transitively via `source-branch-id` → branch.org-id.
+      ;; -----------------------------------------------------------------
+      (ds/add-entity :branch-approval branch-approval-entity-uuid
+                     {:source-branch-id {:uuid branch-approval-source-branch-id-field-uuid
+                                         :type :ref :ref-entity :branch}
+                      :approver-id {:uuid branch-approval-approver-id-field-uuid
+                                    :type :text}
+                      :content-stamp {:uuid branch-approval-content-stamp-field-uuid
+                                      :type :text}
+                      :created-at {:uuid branch-approval-created-at-field-uuid
                                    :type :timestamptz}})
 
       ;; -----------------------------------------------------------------

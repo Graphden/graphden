@@ -242,7 +242,13 @@
         ;; exist on either side (throws :merge-protection-violation).
         ;; Part of the atomic boundary: it must judge the same
         ;; switched-to-target storage the merge itself uses.
-        _ (merge-policy/validate-branch-policy! storage source-branch-id)]
+        _ (merge-policy/validate-branch-policy! storage source-branch-id)
+        ;; Review policy — when the TARGET requires N approvals, refuse
+        ;; unless the source has that many valid (non-stale, distinct,
+        ;; non-author-unless-allowed) approvals (throws
+        ;; :branch/approval-required). Same atomic boundary + target
+        ;; storage as the branch-policy gate above.
+        _ (merge-policy/validate-approval-policy! storage source-branch-id)]
     (vs/merge-branch! storage source-branch-id
                       {:conflict-resolutions resolutions})))
 
@@ -383,6 +389,131 @@
     state))
 
 
+(defn- normalize-approver-ids
+  "Coerce the body's `approver-ids` to a vector of user-id strings (the
+   JSONB shape stored on the branch). nil/blank → nil (clears)."
+  [approver-ids]
+  (when (seq approver-ids)
+    (mapv str approver-ids)))
+
+
+(defbase set-branch-review-policy!
+  "Set a branch's review policy (the merge TARGET's rules): how many
+   approvals a proposal needs (`required-approvals`), whether the author's
+   own approval counts (`allow-self-approval?`), and an explicit reviewer
+   allow-list (`approver-ids`). nil/absent leaves each column cleared (off).
+   Writes through the same still-org-scoped base storage as
+   `set-branch-policy!`, so WHO may set it is the authorize-writer's call.
+   Returns the stored `{:required-approvals :allow-self-approval? :approver-ids}`."
+  [branch-id required-approvals allow-self-approval? approver-ids]
+  (cr/record-effect! :db)
+  (let [row {:required-approvals (when required-approvals (int required-approvals))
+             :allow-self-approval? (when (some? allow-self-approval?)
+                                     (boolean allow-self-approval?))
+             :approver-ids (normalize-approver-ids approver-ids)}]
+    (sp/update-entity (branches/base-storage ctx) :branch branch-id row)
+    (epoch/bump! (branches/base-storage ctx) :branch)
+    row))
+
+
+(defn- may-approve?
+  "Predicate: may the current principal (`uid`) approve merges into the
+   target branch `target-row`? Mirrors the target's `:write-policy` (who
+   may write/merge it) plus its explicit `:approver-ids` allow-list. Open
+   in single-tenant (no addon → no principals → `:manage-grants` seam is
+   default-deny, so `nil`/`open` policy admits everyone, which is the
+   correct self-host degrade)."
+  [target-row uid]
+  (let [policy (:write-policy target-row)
+        owner (:owner-id target-row)
+        approver-ids (set (:approver-ids target-row))
+        admin? (or (tc/current-platform-tier?)
+                   (tc/current-has-org-cap? :manage-grants))]
+    (boolean
+      (or (and uid (contains? approver-ids uid))
+          (case policy
+            ("owner") (or admin? (and uid owner (= uid owner)))
+            ("admins") admin?
+            ;; nil / "open" / anything unknown → open (role gate is the
+            ;; write-policy's job; unknown values validated elsewhere).
+            true)))))
+
+
+(defbase approve-proposal!
+  "Record the current principal's approval of proposal branch
+   `source-branch-id` for merge into its base. WHO may approve = who may
+   write the TARGET (base): its `:write-policy` (owner/admins/open) OR the
+   target's explicit `:approver-ids` allow-list — else `:authz/forbidden`.
+   The approval is stamped with the source's current content fingerprint,
+   so a later edit auto-dismisses it (counted valid only while the stamp
+   matches — `merge.core/count-valid-approvals`). Re-approving after an
+   edit simply records a fresh, current-stamped row. Returns the approver
+   id recorded."
+  [source-branch-id]
+  (cr/record-effect! :db)
+  (let [base-storage (branches/base-storage ctx)
+        source-row (sp/read-entity base-storage :branch source-branch-id)
+        target-id (:base-branch-id source-row)
+        target-row (when target-id (sp/read-entity base-storage :branch target-id))
+        uid (:user-id tc/*current-principal*)]
+    (when-not (may-approve? target-row uid)
+      (throw (ex-info "You are not allowed to approve merges into this branch."
+                      {:type :authz/forbidden :capability :approve-merge})))
+    (let [approver (or uid "anonymous")]
+      (sp/create-entity base-storage :branch-approval
+                        {:source-branch-id source-branch-id
+                         :approver-id approver
+                         :content-stamp (merge-policy/branch-content-stamp
+                                          base-storage source-branch-id)
+                         :created-at (java.time.Instant/now)})
+      approver)))
+
+
+(defbase dismiss-my-approval!
+  "Withdraw the current principal's own approval(s) of proposal branch
+   `source-branch-id`. Returns the number of approval rows removed."
+  [source-branch-id]
+  (cr/record-effect! :db)
+  (let [base-storage (branches/base-storage ctx)
+        uid (or (:user-id tc/*current-principal*) "anonymous")
+        mine (->> (sp/query-entities base-storage :branch-approval
+                                     {:source-branch-id source-branch-id})
+                  (filter #(= uid (:approver-id %)))
+                  (mapv :id))]
+    (when (seq mine)
+      (sp/delete-entities base-storage :branch-approval mine))
+    (count mine)))
+
+
+(defbase proposal-approval-status
+  "Read-only projection for the reviewer UI: the approval status of
+   proposal branch `source-branch-id` — its target's `:required-approvals`,
+   the current count of VALID (non-stale, distinct, author-adjusted)
+   approvals, whether that satisfies the requirement, and each recorded
+   approver with a `stale` flag. Pure read; org-scoped via the source
+   branch id."
+  [source-branch-id]
+  (let [base-storage (branches/base-storage ctx)
+        source-row (sp/read-entity base-storage :branch source-branch-id)
+        target-id (:base-branch-id source-row)
+        target-row (when target-id (sp/read-entity base-storage :branch target-id))
+        required (or (:required-approvals target-row) 0)
+        allow-self? (boolean (:allow-self-approval? target-row))
+        author-id (:owner-id source-row)
+        stamp (merge-policy/branch-content-stamp base-storage source-branch-id)
+        approvals (sp/query-entities base-storage :branch-approval
+                                     {:source-branch-id source-branch-id})
+        have (merge-policy/count-valid-approvals base-storage source-branch-id
+                                                 author-id allow-self?)]
+    {:required required
+     :have have
+     :satisfied (>= have required)
+     :approvers (mapv (fn [a]
+                        {:approver-id (:approver-id a)
+                         :stale (not= stamp (:content-stamp a))})
+                      approvals)}))
+
+
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
@@ -394,4 +525,8 @@
    :merge-skipped-branch-local merge-skipped-branch-local
    :set-branch-policy!         set-branch-policy!
    :set-branch-require-merge!  set-branch-require-merge!
-   :set-review-state!          set-review-state!})
+   :set-review-state!          set-review-state!
+   :set-branch-review-policy!  set-branch-review-policy!
+   :approve-proposal!          approve-proposal!
+   :dismiss-my-approval!       dismiss-my-approval!
+   :proposal-approval-status   proposal-approval-status})

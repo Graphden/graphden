@@ -173,6 +173,7 @@ helm install fleet deploy/helm/graphden \
 | `VAULT_ADDR` | *(empty)* | OpenBao / Vault address (unset → `:vault-get` errors) |
 | `VAULT_TOKEN` | *(empty)* | OpenBao / Vault token |
 | `AUTH_TOKEN` | *(empty)* | Single-token auth secret — **empty = auth OFF, instance fully open** (see [Authentication](#authentication)) |
+| `GRAPHDEN_REGISTRY_TOKEN` | *(empty)* | Bearer used when pulling a package from a REMOTE registry (`POST /api/packages/install` with `source` — [PACKAGE_DISTRIBUTION § 13](PACKAGE_DISTRIBUTION.md#13-self-hosted-install-by-package-type)). Empty ⇒ remote fetches go unauthenticated |
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |

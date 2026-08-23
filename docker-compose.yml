@@ -152,6 +152,11 @@ services:
       # Opt-in nREPL into the live executor. Unset → `-main` skips
       # the start-server call entirely. Set in `.env` for dev debug.
       GRAPHDEN_NREPL_PORT: ${GRAPHDEN_NREPL_PORT:-}
+      # Bearer for pulling packages from a REMOTE registry
+      # (POST /api/packages/install {…, source} — PACKAGE_DISTRIBUTION
+      # § 13). Unset → remote fetches go unauthenticated (a hub that
+      # requires auth will 401 them).
+      GRAPHDEN_REGISTRY_TOKEN: ${GRAPHDEN_REGISTRY_TOKEN:-}
     ports:
       # GD_BIND — the OFFLINE / "internal requests only" preset
       # (docs/DEPLOYMENT.md § Local offline instance): GD_BIND=127.0.0.1

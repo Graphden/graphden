@@ -2589,42 +2589,10 @@
    :parent :if
    :args {:test :_bp-row-require-merge? :then {:value "1"} :else {:value ""}}}
 
-  {:name :_bp-row-rm-class
-   :parent :if
-   :args {:test :_bp-row-require-merge?
-          :then {:value "branch-row-require-merge on"}
-          :else {:value "branch-row-require-merge"}}}
-
-  {:name :_bp-row-rm-title
-   :parent :if
-   :args {:test :_bp-row-require-merge?
-          :then {:value "Push only via merge is ON — click to allow direct writes"}
-          :else {:value "Direct writes allowed — click to require merge"}}}
-
-  {:name :_bp-row-rm-attrs-1
-   :parent :assoc
-   :args {:map {:parent :assoc
-                :args {:map {:value {}} :key {:value :class} :value :_bp-row-rm-class}}
-          :key {:value :data-rm-branch}
-          :value :_bp-row-name}}
-
-  {:name :_bp-row-rm-attrs-2
-   :parent :assoc
-   :args {:map :_bp-row-rm-attrs-1
-          :key {:value :data-require-merge}
-          :value :_bp-row-rm-data}}
-
-  {:name :_bp-row-rm-attrs
-   :parent :assoc
-   :args {:map :_bp-row-rm-attrs-2
-          :key {:value :title}
-          :value :_bp-row-rm-title}}
-
-  {:name :_bp-row-rm-btn
-   :parent :hiccup
-   :args {:tag {:value "button"}
-          :attrs :_bp-row-rm-attrs
-          :children [{:value "🔀"}]}}
+  ;; (the inline 🔀 require-merge + ✔N required-approvals buttons were
+  ;; consolidated into the ⚙ protection menu below; their state sub-fns —
+  ;; `_bp-row-rm-data` / `_bp-row-reqappr-str` / `_bp-row-reqappr-on?` —
+  ;; are reused as the ⚙ button's data-attrs.)
 
   ;; --- Change-proposal toggle (open-core) ---
   ;; "Propose this branch for review into its base" — a boolean toggle
@@ -2675,11 +2643,19 @@
           :key {:value :title}
           :value :_bp-row-propose-title}}
 
-  {:name :_bp-row-propose-btn
+  {:name :_bp-row-propose-btn-shown
    :parent :hiccup
    :args {:tag {:value "button"}
           :attrs :_bp-row-propose-attrs
           :children [{:value "📤"}]}}
+
+  ;; Propose is meaningless on `main` (you don't submit the trunk for review
+  ;; into its own base) — hide it there to declutter.
+  {:name :_bp-row-propose-btn
+   :parent :if
+   :args {:test :_bp-row-is-main?
+          :then :_bp-row-empty-placeholder
+          :else :_bp-row-propose-btn-shown}}
 
   ;; --- Approve button (open-core; only on PROPOSED rows) ---
   ;; The reviewer's core action: ✅ records an approval via POST
@@ -2724,46 +2700,65 @@
    :parent :not
    :args {:value {:parent :equal? :args {:a :_bp-row-reqappr-n :b {:value 0}}}}}
 
-  {:name :_bp-row-reqappr-class
+  ;; --- ⚙ Protection menu button (open-core) --- consolidates the
+  ;; branch-as-TARGET protection knobs (require-merge, required-approvals,
+  ;; count-self-approval) into one popover, so the row action bar stays
+  ;; uncluttered. The JS menu reads current state from these data-attrs.
+  {:name :_bp-row-allow-self
+   :parent :get
+   :args {:coll {:as :item} :key {:value :allow-self-approval?} :default nil}}
+
+  {:name :_bp-row-allow-self-data
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_bp-row-allow-self :b {:value true}}}  {:value "on"}
+                    {:parent :equal? :args {:a :_bp-row-allow-self :b {:value false}}} {:value "off"}
+                    {:value true} {:value ""}]}}
+
+  {:name :_bp-row-protect-active?
+   :parent :or
+   :args {:values [:_bp-row-require-merge? :_bp-row-reqappr-on?]}}
+
+  {:name :_bp-row-protect-class
    :parent :if
-   :args {:test :_bp-row-reqappr-on?
-          :then {:value "branch-row-reqappr on"}
-          :else {:value "branch-row-reqappr"}}}
+   :args {:test :_bp-row-protect-active?
+          :then {:value "branch-row-protect on"}
+          :else {:value "branch-row-protect"}}}
 
-  {:name :_bp-row-reqappr-label
-   :parent :str
-   :args {:parts [{:value "✔"} :_bp-row-reqappr-str]}}
-
-  {:name :_bp-row-reqappr-attrs-1
+  {:name :_bp-row-protect-attrs-1
    :parent :assoc
    :args {:map {:parent :assoc
-                :args {:map {:value {}} :key {:value :class} :value :_bp-row-reqappr-class}}
-          :key {:value :data-reqappr-branch}
+                :args {:map {:value {}} :key {:value :class} :value :_bp-row-protect-class}}
+          :key {:value :data-protect-branch}
           :value :_bp-row-name}}
 
-  {:name :_bp-row-reqappr-attrs-2
+  {:name :_bp-row-protect-attrs-2
    :parent :assoc
-   :args {:map :_bp-row-reqappr-attrs-1
-          :key {:value :data-reqappr}
-          :value :_bp-row-reqappr-str}}
+   :args {:map :_bp-row-protect-attrs-1 :key {:value :data-require-merge} :value :_bp-row-rm-data}}
 
-  {:name :_bp-row-reqappr-attrs
+  {:name :_bp-row-protect-attrs-3
    :parent :assoc
-   :args {:map :_bp-row-reqappr-attrs-2
-          :key {:value :title}
-          :value {:value "Approvals required to merge in — click to cycle 0→3"}}}
+   :args {:map :_bp-row-protect-attrs-2 :key {:value :data-reqappr} :value :_bp-row-reqappr-str}}
 
-  {:name :_bp-row-reqappr-btn
+  {:name :_bp-row-protect-attrs-4
+   :parent :assoc
+   :args {:map :_bp-row-protect-attrs-3 :key {:value :data-allow-self} :value :_bp-row-allow-self-data}}
+
+  {:name :_bp-row-protect-attrs
+   :parent :assoc
+   :args {:map :_bp-row-protect-attrs-4 :key {:value :title}
+          :value {:value "Branch protection — require merges, required approvals, self-approval"}}}
+
+  {:name :_bp-row-protect-btn
    :parent :hiccup
    :args {:tag {:value "button"}
-          :attrs :_bp-row-reqappr-attrs
-          :children [:_bp-row-reqappr-label]}}
+          :attrs :_bp-row-protect-attrs
+          :children [{:value "⚙"}]}}
 
   {:name :_bp-row-actions-span
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:value {:class "branch-row-actions"}}
-          :children [:_bp-row-diff-btn :_bp-row-propose-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-rm-btn :_bp-row-reqappr-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
+          :children [:_bp-row-diff-btn :_bp-row-propose-btn :_bp-row-approve-btn :_bp-row-merge-btn :_bp-row-protect-btn :_bp-row-policy-btn :_bp-row-delete-btn]}}
 
   ;; The full per-branch row — assembled via the named children.
   {:name :_bp-row

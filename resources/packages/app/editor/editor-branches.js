@@ -522,14 +522,13 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
-  // Require-merge toggle (open-core): flip "push only via merge" for
-  // this branch. Boolean — click POSTs the negation of the current
-  // state (read off `data-require-merge`) to /branches/:ref/protect,
-  // then reloads the popover so the button reflects the new state.
-  popover.querySelectorAll('.branch-row-require-merge').forEach((btn) => {
+  // ⚙ Protection menu (open-core): require-merge / required-approvals /
+  // count-self-approval, consolidated into one popover so the row action
+  // bar stays uncluttered.
+  popover.querySelectorAll('.branch-row-protect').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      toggleBranchRequireMerge(btn);
+      openProtectionMenu(btn);
     });
   });
 
@@ -553,14 +552,9 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   });
 
-  // Cycle a branch's required-approvals (0→1→2→3→0) — the in-editor
-  // review-policy knob. POSTs /branches/:ref/review-policy.
-  popover.querySelectorAll('.branch-row-reqappr').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      cycleRequiredApprovals(btn);
-    });
-  });
+  // Fill "n/N approvals" onto each proposed row + a "Proposals (N)"
+  // header, so a reviewer sees review status at a glance.
+  populateReviewStatus(popover);
 
   popover.querySelectorAll('.branch-row-delete').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -673,21 +667,27 @@ function openBranchPolicyMenu(btn) {
 // body is the JSON key the /protect handler reads (JSON can't carry a
 // trailing `?`). WHO may flip it is open-core (any authenticated
 // writer of the branch); a rejection surfaces in the shared slot.
-async function toggleBranchRequireMerge(btn) {
-  const branchName = btn.getAttribute('data-rm-branch');
-  const next = btn.getAttribute('data-require-merge') !== '1';
+function closeProtectionMenu() {
+  document.getElementById('gd-protect-pop')?.remove();
+  document.getElementById('gd-protect-scrim')?.remove();
+}
+
+// POST a review-policy / protect change and reload the popover. `url` is
+// already resolved via window.API. A rejection surfaces in the shared slot.
+async function postBranchProtection(url, payload, errMsg) {
   const err = document.getElementById('branch-popover-error');
   try {
-    const resp = await window.authFetch(API.api_branches_ref_protect(branchName), {
+    const resp = await window.authFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 'require-merge': next }),
+      body: JSON.stringify(payload),
     });
     const body = await resp.json();
     if (body.ok) {
-      openBranchPopover(); // re-render rows with the new protection state
+      closeProtectionMenu();
+      openBranchPopover();
     } else if (err) {
-      err.textContent = body.error || 'Could not change branch protection';
+      err.textContent = body.error || errMsg;
       err.classList.remove('hidden');
     }
   } catch (e2) {
@@ -696,6 +696,85 @@ async function toggleBranchRequireMerge(btn) {
       err.classList.remove('hidden');
     }
   }
+}
+
+// ⚙ protection menu (open-core): the branch-as-TARGET knobs in one place —
+// require-merge (push only via merge), required-approvals (0–3), and whether
+// the author's own approval counts. Current state is read off the button's
+// data-attrs. required-approvals + allow-self are POSTed together (the
+// /review-policy endpoint is a full set, so sending both preserves both).
+function openProtectionMenu(btn) {
+  closeProtectionMenu();
+  const branchName = btn.getAttribute('data-protect-branch');
+  const requireMerge = btn.getAttribute('data-require-merge') === '1';
+  const reqAppr = parseInt(btn.getAttribute('data-reqappr') || '0', 10) || 0;
+  // data-allow-self: "off" = explicitly disabled; "on"/"" = counted (default).
+  const allowSelf = btn.getAttribute('data-allow-self') !== 'off';
+  const rpUrl = API.api_branches_ref_review_policy(branchName);
+
+  const scrim = document.createElement('div');
+  scrim.id = 'gd-protect-scrim';
+  scrim.className = 'gd-pop-scrim';
+  scrim.addEventListener('click', closeProtectionMenu);
+  document.body.appendChild(scrim);
+
+  const pop = document.createElement('div');
+  pop.id = 'gd-protect-pop';
+  pop.className = 'gd-pop';
+  // branchName is user-controlled + decoded → textContent only (no innerHTML).
+  const heading = document.createElement('h5');
+  heading.textContent = 'Protect ' + branchName;
+  pop.appendChild(heading);
+
+  // require-merge checkbox
+  const rmLabel = document.createElement('label');
+  rmLabel.className = 'gd-protect-opt';
+  const rmBox = document.createElement('input');
+  rmBox.type = 'checkbox';
+  rmBox.checked = requireMerge;
+  rmBox.addEventListener('change', () =>
+    postBranchProtection(API.api_branches_ref_protect(branchName),
+                         { 'require-merge': rmBox.checked },
+                         'Could not change branch protection'));
+  rmLabel.appendChild(rmBox);
+  rmLabel.append(' Push only via merge (no direct writes)');
+  pop.appendChild(rmLabel);
+
+  // required-approvals select + self-approval checkbox (POSTed together)
+  const raLabel = document.createElement('label');
+  raLabel.className = 'gd-protect-opt';
+  raLabel.append('Required approvals: ');
+  const sel = document.createElement('select');
+  for (let n = 0; n <= 3; n++) {
+    const o = document.createElement('option');
+    o.value = String(n); o.textContent = String(n);
+    if (n === reqAppr) o.selected = true;
+    sel.appendChild(o);
+  }
+  raLabel.appendChild(sel);
+  pop.appendChild(raLabel);
+
+  const saLabel = document.createElement('label');
+  saLabel.className = 'gd-protect-opt';
+  const saBox = document.createElement('input');
+  saBox.type = 'checkbox';
+  saBox.checked = allowSelf;
+  saLabel.appendChild(saBox);
+  saLabel.append(" Count the author's own approval");
+  pop.appendChild(saLabel);
+
+  const pushPolicy = () =>
+    postBranchProtection(rpUrl,
+                         { 'required-approvals': parseInt(sel.value, 10),
+                           'allow-self-approval': saBox.checked },
+                         'Could not change the review policy');
+  sel.addEventListener('change', pushPolicy);
+  saBox.addEventListener('change', pushPolicy);
+
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 280)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+  document.body.appendChild(pop);
 }
 
 // Mark/unmark a branch as a change proposal for review into its base.
@@ -755,31 +834,32 @@ async function approveProposal(btn) {
   }
 }
 
-// Cycle a branch's required-approvals 0→1→2→3→0 (the in-editor review
-// policy knob). approver-ids / allow-self-approval are set via the API.
-async function cycleRequiredApprovals(btn) {
-  const branchName = btn.getAttribute('data-reqappr-branch');
-  const cur = parseInt(btn.getAttribute('data-reqappr') || '0', 10) || 0;
-  const next = (cur + 1) % 4;
-  const err = document.getElementById('branch-popover-error');
-  try {
-    const resp = await window.authFetch(API.api_branches_ref_review_policy(branchName), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 'required-approvals': next }),
-    });
-    const body = await resp.json();
-    if (body.ok) {
-      openBranchPopover();
-    } else if (err) {
-      err.textContent = body.error || 'Could not change the review policy';
-      err.classList.remove('hidden');
-    }
-  } catch (e2) {
-    if (err) {
-      err.textContent = 'Network error: ' + (e2?.message || e2);
-      err.classList.remove('hidden');
-    }
+// Fill "n/N approvals" onto each PROPOSED row + a "Proposals (N)" header,
+// so a reviewer sees review status at a glance. One /approvals fetch per
+// proposed row (proposals are few); best-effort — a failure is silent.
+async function populateReviewStatus(popover) {
+  const approveBtns = [...popover.querySelectorAll('.branch-row-approve[data-approve-branch]')];
+  if (!approveBtns.length) return;
+  const header = document.createElement('div');
+  header.className = 'branch-proposals-header';
+  header.textContent = approveBtns.length
+    + (approveBtns.length === 1 ? ' proposal awaiting review' : ' proposals awaiting review');
+  const anchor = popover.querySelector('.branch-section-rows');
+  if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(header, anchor);
+  for (const btn of approveBtns) {
+    const name = btn.getAttribute('data-approve-branch');
+    try {
+      const resp = await window.authFetch(API.api_branches_ref_approvals(name));
+      if (!resp.ok) continue;
+      const st = await resp.json();
+      const req = st.required ?? 0;
+      if (req <= 0) continue; // no approvals required → nothing to show
+      const badge = document.createElement('span');
+      badge.className = 'branch-appr-count' + (st.satisfied ? ' ok' : '');
+      badge.textContent = (st.have ?? 0) + '/' + req;
+      badge.title = 'approvals recorded / required';
+      btn.insertAdjacentElement('afterend', badge);
+    } catch (_) { /* best-effort */ }
   }
 }
 

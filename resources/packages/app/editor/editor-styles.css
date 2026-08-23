@@ -800,41 +800,53 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .branch-row-delete,
 .branch-row-merge,
 .branch-row-diff,
-.branch-row-require-merge,
+.branch-row-protect,
 .branch-row-propose,
-.branch-row-approve,
-.branch-row-reqappr {
+.branch-row-approve {
   background: transparent; color: var(--muted-fg);
   border: 0; border-radius: 2px;
   width: 18px; height: 18px; padding: 0; line-height: 1;
   font-size: 13px; cursor: pointer;
 }
-/* The required-approvals cycler shows a count (e.g. "✔2"), so it needs
-   to size to its text rather than a fixed 18px glyph box. */
-.branch-row-reqappr { width: auto; min-width: 18px; padding: 0 3px; font-size: 11px; }
 .branch-row-delete { font-size: 14px; }
 .branch-row-delete:hover,
 .branch-row-merge:hover,
 .branch-row-diff:hover,
-.branch-row-require-merge:hover,
+.branch-row-protect:hover,
 .branch-row-propose:hover,
-.branch-row-approve:hover,
-.branch-row-reqappr:hover { color: var(--fg); background: var(--bg); }
-/* Require-merge + propose + required-approvals toggles are open-core
-   (always visible), unlike the tenancy-only ⛨ policy shield. Dim when
-   off, accented when on; still hidden for a read-only viewer. */
-.branch-row-require-merge,
+.branch-row-approve:hover { color: var(--fg); background: var(--bg); }
+/* Propose + ⚙ protection are open-core (always visible), unlike the
+   tenancy-only ⛨ policy shield. Dim when off, accented when active;
+   still hidden for a read-only viewer. */
 .branch-row-propose,
-.branch-row-reqappr { opacity: 0.45; }
-.branch-row-require-merge.on,
+.branch-row-protect { opacity: 0.45; }
 .branch-row-propose.on,
-.branch-row-reqappr.on { opacity: 1; color: var(--accent); }
+.branch-row-protect.on { opacity: 1; color: var(--accent); }
 /* Approve is a positive action — always full-strength on proposed rows. */
 .branch-row-approve { opacity: 1; }
-body.gd-no-write .branch-row-require-merge,
 body.gd-no-write .branch-row-propose,
-body.gd-no-write .branch-row-approve,
-body.gd-no-write .branch-row-reqappr { display: none; }
+body.gd-no-write .branch-row-protect,
+body.gd-no-write .branch-row-approve { display: none; }
+
+/* n/N approvals badge next to ✅ on a proposed row. */
+.branch-appr-count {
+  font-size: 10px; color: var(--muted-fg);
+  padding: 0 3px; align-self: center;
+}
+.branch-appr-count.ok { color: var(--accent); }
+
+/* "N proposals awaiting review" header above the branch list. */
+.branch-proposals-header {
+  font-size: 11px; color: var(--accent);
+  padding: 2px 4px 4px;
+}
+
+/* ⚙ protection mini-menu option rows. */
+.gd-protect-opt {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 2px; font-size: 12px; color: var(--fg); cursor: pointer;
+}
+.gd-protect-opt select { margin-left: auto; }
 
 .branch-popover-create {
   display: flex; flex-direction: column; gap: 6px;

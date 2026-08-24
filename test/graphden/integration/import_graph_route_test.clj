@@ -36,6 +36,15 @@
                 'resolve-remote-version)))
 
 
+;; The `mirror-remote-package!` defbase — the SECOND egress-guard site (the
+;; pinned `?format=edn` fetch, reached with a CONCRETE spec that
+;; `resolve-remote-version` passes straight through without a list dial, so
+;; this guard is the only one on that path).
+(def ^:private registry-mirror-remote-package
+  (ns-resolve (find-ns 'graphden.packages.app.registry.impls)
+              'mirror-remote-package!))
+
+
 (def ^:private test-auth-token "import-graph-test-token-xyz")
 (def ^:private auth-headers {"authorization" (str "Bearer " test-auth-token)})
 
@@ -351,4 +360,42 @@
     ;; *allowed-effects* nil → no egress check; resolve reaches the dial and
     ;; returns nil (nothing listening) rather than throwing :egress/blocked.
     (is (nil? (registry-resolve-remote-version "http://127.0.0.1:1" "acme.x" "latest"))
-        "loopback allowed in the unrestricted path (returns nil, not blocked)")))
+        "loopback allowed in the unrestricted path (returns nil, not blocked)"))
+  (testing "the CONCRETE-spec mirror path is guarded too (its own check-target!)"
+    ;; A concrete version skips resolve-remote-version's list dial, so
+    ;; mirror-remote-package!'s own guard is the ONLY one on that path —
+    ;; a link-local source must still be blocked before the pinned fetch.
+    (binding [cr/*allowed-effects* #{:network :db :env}]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"(?i)egress"
+            (registry-mirror-remote-package
+              {:source "http://169.254.169.254" :pkg-name "acme.x" :spec "1.0.0"}
+              {}))
+          "concrete-spec mirror → :egress/blocked before the pinned dial")))
+  (testing "unrestricted ctx does NOT block the concrete mirror path either"
+    (let [r (registry-mirror-remote-package
+              {:source "http://127.0.0.1:1" :pkg-name "acme.x" :spec "1.0.0"}
+              {})]
+      (is (= "remote-unreachable" (:error r))
+          "loopback allowed unrestricted → reaches the dial, fails as data not :egress"))))
+
+
+(deftest import-decodes-graphden-ref-wire-tags
+  ;; Regression for the offline-epic fix (`_import-parsed` → `:parse-graph-edn`).
+  ;; The exporter emits `#graphden/ref` for keywords no default EDN reader
+  ;; accepts (root-ns `:/name`, version-qualified `:ns@ver/name`). With the
+  ;; old `:parse-edn` (default readers) such a bundle read as nil → the whole
+  ;; import 400'd "body-not-a-bundle". The wire readers must decode the tag.
+  (let [branch (str "imp/wire-" (subs (str (random-uuid)) 0 8))
+        ;; A root-ns ref (`#graphden/ref "/wt-root"` → :/wt-root) to a root
+        ;; fn defined in the SAME bundle — exercises the reader AND resolves.
+        bundle (str "[{:name :wt-root :parent :const :args {:value 7}}"
+                    " {:name :wt-user :namespace \"wt.demo\" :parent :add"
+                    "  :args {:nums [#graphden/ref \"/wt-root\"]}}]")
+        {:keys [status json]} (import! (str "target=" branch "&create=true") bundle)]
+    (is (not= "body-not-a-bundle" (:reason json))
+        "the #graphden/ref bundle is parsed, not rejected as unreadable")
+    (is (= 200 status) (pr-str json))
+    (is (contains? (branch-fn-names branch) "wt-user")
+        "the fn whose arg carries a wire-tag ref landed")
+    (is (contains? (branch-fn-names branch) "wt-root"))))

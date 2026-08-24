@@ -998,9 +998,42 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
     // editor picks up the new resolved view on the current branch.
     closeBranchPopover();
     location.reload();
-  } catch (err) {
-    setError(err?.message || 'Merge failed');
+  } catch (_err) {
+    // A thrown error here (no HTTP response) means the connection dropped
+    // rather than the server answering — and the merge endpoint only drops
+    // the connection AFTER it has committed: the post-commit step restarts
+    // the target branch's services, and when the target runs the very
+    // web-server serving this request (e.g. merging into main), that
+    // rebind severs the response mid-flight. Pre-commit failures
+    // (conflict / approval / validation) all come back as HTTP responses,
+    // handled above. So a network drop here means "merge committed, target
+    // is restarting" — don't cry "Failed to fetch": wait for the server to
+    // come back, then reload to show the real post-merge state.
+    setError('Merge submitted — ' + targetName + ' is restarting, verifying…');
+    const backUp = await waitForServerBack(30000);
+    if (backUp) { closeBranchPopover(); location.reload(); return; }
+    setError('Merge sent, but ' + targetName + ' has not come back yet — '
+             + 'reload in a moment to confirm.');
   }
+}
+
+
+// Poll /health until it answers OK or the deadline passes. Used after a
+// merge whose response was severed by the target's post-commit service
+// restart — the merge already committed; this just waits out the rebind.
+// /health is a fixed, deployment-invariant infra route (not a
+// graph-composed API route in window.API), so a same-origin relative
+// path is correct here.
+async function waitForServerBack(deadlineMs) {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch('/health', { cache: 'no-store' });
+      if (r.ok) return true;
+    } catch (_) { /* still down — keep polling */ }
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  return false;
 }
 
 let _conflictsModal = null;

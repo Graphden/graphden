@@ -528,3 +528,18 @@
       (is (empty? (sp/query-entities base :branch-approval {:source-branch-id src-id}))
           "approvals cascaded with the branch")
       (sp/close storage))))
+
+
+(deftest delete-branch-cascades-comments-test
+  (testing "deleting a branch removes its :branch-comment rows"
+    (let [{:keys [storage base]} (create-test-storage)
+          src (vs/create-branch! storage "cmt-cascade-src")
+          src-id (:id src)]
+      (sp/create-entity base :branch-comment
+                        {:source-branch-id src-id :author-id "alice"
+                         :body "hi" :created-at (java.time.Instant/now)})
+      (is (= 1 (count (sp/query-entities base :branch-comment {:source-branch-id src-id}))))
+      (vs/delete-branch! storage src-id)
+      (is (empty? (sp/query-entities base :branch-comment {:source-branch-id src-id}))
+          "comments cascaded with the branch")
+      (sp/close storage))))

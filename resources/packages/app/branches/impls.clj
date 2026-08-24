@@ -536,6 +536,54 @@
                       approvals)}))
 
 
+(defbase add-branch-comment!
+  "Record a review comment on proposal branch `source-branch-id` by the
+   current principal (`\"anonymous\"` single-tenant). WHO may comment =
+   whoever can resolve the branch (org-scoped upstream) — a comment is
+   conversation, not a mutation of the branch. Returns the new row's id."
+  [source-branch-id body]
+  (cr/record-effect! :db)
+  (let [author (or (:user-id tc/*current-principal*) "anonymous")
+        row (sp/create-entity (branches/base-storage ctx) :branch-comment
+                              {:source-branch-id source-branch-id
+                               :author-id author
+                               :body (str body)
+                               :created-at (java.time.Instant/now)})]
+    (str (:id row))))
+
+
+(defbase list-branch-comments
+  "Comments on proposal branch `source-branch-id`, oldest first —
+   `[{:id :author-id :body :created-at} …]` (ids/timestamps stringified
+   for the JSON wire)."
+  [source-branch-id]
+  (->> (sp/query-entities (branches/base-storage ctx) :branch-comment
+                          {:source-branch-id source-branch-id})
+       (sort-by :created-at)
+       (mapv (fn [c]
+               {:id (str (:id c))
+                :author-id (:author-id c)
+                :body (:body c)
+                :created-at (str (:created-at c))}))))
+
+
+(defbase delete-branch-comment!
+  "Delete comment `comment-id` — the AUTHOR's own only (`:authz/forbidden`
+   otherwise; single-tenant nil-principal ≡ \"anonymous\" so a solo user
+   can always delete their own). Returns true when a row was removed."
+  [comment-id]
+  (cr/record-effect! :db)
+  (let [base-storage (branches/base-storage ctx)
+        row (sp/read-entity base-storage :branch-comment comment-id)
+        caller (or (:user-id tc/*current-principal*) "anonymous")]
+    (when (and row (not= caller (:author-id row)))
+      (throw (ex-info "Only the comment's author may delete it."
+                      {:type :authz/forbidden :capability :delete-comment})))
+    (when row
+      (sp/delete-entity base-storage :branch-comment comment-id))
+    (some? row)))
+
+
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
@@ -551,4 +599,8 @@
    :set-branch-review-policy!  set-branch-review-policy!
    :approve-proposal!          approve-proposal!
    :dismiss-my-approval!       dismiss-my-approval!
-   :proposal-approval-status   proposal-approval-status})
+   :proposal-approval-status   proposal-approval-status
+   ;; taint-propagate: list returns caller-authored comment bodies.
+   :add-branch-comment!        add-branch-comment!
+   :list-branch-comments       {:impl list-branch-comments :taint-propagate? true}
+   :delete-branch-comment!     delete-branch-comment!})

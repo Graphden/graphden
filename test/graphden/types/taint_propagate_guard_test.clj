@@ -107,7 +107,8 @@
     :service-blocking-free-args :set-branch-policy!
     :set-branch-require-merge! :set-review-state!
     :set-branch-review-policy! :approve-proposal! :dismiss-my-approval!
-    :proposal-approval-status :sleep :sleep-until-ms
+    :proposal-approval-status :add-branch-comment! :list-branch-comments
+    :delete-branch-comment! :sleep :sleep-until-ms
     :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
     ;; :sse-stream returns the adopted-channel response map; the
     ;; render callable's output goes to the WIRE, never into the
@@ -148,7 +149,7 @@
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
     :gte :group-by :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
-    :import-bundle! :parse-edn :parse-graph-edn
+    :import-bundle! :list-branch-comments :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid :platform-owned-def-names
     :position-in :postwalk :pr-str
     :quot :range

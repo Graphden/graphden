@@ -334,8 +334,16 @@ allow-self-approval, approver-ids}`; `POST|DELETE /api/branches/:ref/approve`
 (record / withdraw the caller's approval); `GET /api/branches/:ref/approvals`
 → `{required, have, satisfied, approvers:[{approver-id, stale}]}`.
 
+**Comments**: each proposal carries a review-comment thread —
+`:branch-comment` rows (`{source-branch-id, author-id, body, created-at}`,
+org-scoped like approvals, cascaded on branch delete). `POST|GET|DELETE
+/api/branches/:ref/comments` (`{body}` to add; `{id}` to delete — the
+author's own only). The editor shows the thread under the Δ diff modal —
+the conversation lives next to the change it reviews.
+
 **Editor** (branch popover, open-core): a ✅ **Approve** button on proposed
-rows and a ✔N **required-approvals cycler** (click 0→1→2→3) per row.
+rows and a ⚙ protection menu (require-merge / required-approvals /
+count-self-approval) per row.
 `approver-ids` / `allow-self-approval?` are set via the API/MCP (advanced,
 rarely changed). Without the tenancy addon there are no principals, so on a
 solo self-host the flow degrades to "propose → self-approve → merge".

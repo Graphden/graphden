@@ -1388,6 +1388,11 @@
                                                         {:source-branch-id branch-id}))]
               (when (seq appr-ids)
                 (sp/delete-entities st :branch-approval appr-ids)))
+            ;; ... and its review comments, same rationale.
+            (let [cmt-ids (mapv :id (sp/query-entities st :branch-comment
+                                                       {:source-branch-id branch-id}))]
+              (when (seq cmt-ids)
+                (sp/delete-entities st :branch-comment cmt-ids)))
             ;; Delete the branch record
             (sp/delete-entity st :branch branch-id))]
       (if-let [pool (:pool base)]

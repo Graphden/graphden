@@ -744,6 +744,28 @@
    :parent :get-auth-required
    :args {:path "/branches/:ref/approvals" :handler :list-approvals-handler}}
 
+  ;; POST (add) + GET (list) + DELETE (remove own) — same path.
+  {:name :branches-comments-post-data
+   :parent :_method-map-with-middleware
+   :args {:method "post" :handler :add-branch-comment-handler :middleware :_middleware-list}}
+
+  {:name :branches-comments-get-data
+   :parent :_method-map-with-middleware
+   :args {:method "get" :handler :list-branch-comments-handler :middleware :_middleware-list}}
+
+  {:name :branches-comments-delete-data
+   :parent :_method-map-with-middleware
+   :args {:method "delete" :handler :delete-branch-comment-handler :middleware :_middleware-list}}
+
+  {:name :_branches-comments-methods
+   :parent :merge
+   :args {:maps [:branches-comments-post-data :branches-comments-get-data :branches-comments-delete-data]}}
+
+  {:name :api-branch-comments
+   :description "Multi-method route entry `[\"/branches/:ref/comments\" {:post … :get … :delete …}]` — the proposal's review-comment thread."
+   :parent :list
+   :args {:items ["/branches/:ref/comments" :_branches-comments-methods]}}
+
   ;; --- /api/fns/:fn-id/versions — history of one fn across branches ---
 
   {:name :api-fn-versions
@@ -835,6 +857,7 @@
                   :api-branch-review-policy
                   :api-branch-approve
                   :api-branch-approvals
+                  :api-branch-comments
                   :api-fn-versions
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
                   ;; live in the OPTIONAL `registry` package now and install via

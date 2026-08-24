@@ -93,6 +93,10 @@ popover, no separate "pull request" object:
   explicit reviewer list set via the API). Once the count is met, the
   merge goes through.
 
+Every proposal also carries a **comment thread** — open the Δ diff and
+the conversation sits right under the change: leave a note, the author
+replies, the reviewer approves when it's settled.
+
 Approvals are **content-aware**: if the proposed branch is edited after
 it was approved, that approval is automatically dismissed (it went
 stale) and the branch needs a fresh approval before it can merge —

@@ -79,6 +79,7 @@ async function showBranchDiff(targetName, sourceName) {
     body.innerHTML = await resp.text();
     if (window.htmx?.process) window.htmx.process(body);
     bindDiffRowNavigation(body, sourceName);
+    appendCommentsThread(body, sourceName);
   } catch (err) {
     body.classList.remove('branch-diff-loading');
     body.innerHTML = '<div class="branch-diff-error">Failed: '
@@ -116,6 +117,95 @@ function bindDiffRowNavigation(rootEl, sourceName) {
       }
     });
   });
+}
+
+// Review-comment thread for the SOURCE branch (the proposal under
+// review), appended below the diff — GitHub-style conversation next to
+// the change. All user content lands via textContent (no innerHTML —
+// comment bodies and branch names are user-controlled).
+async function appendCommentsThread(body, sourceName) {
+  const wrap = document.createElement('div');
+  wrap.className = 'branch-comments';
+  const h = document.createElement('h4');
+  h.textContent = 'Comments';
+  wrap.appendChild(h);
+  const list = document.createElement('div');
+  list.className = 'branch-comments-list';
+  wrap.appendChild(list);
+
+  const render = (comments) => {
+    list.textContent = '';
+    if (!comments.length) {
+      const empty = document.createElement('div');
+      empty.className = 'branch-comment-empty';
+      empty.textContent = 'No comments yet.';
+      list.appendChild(empty);
+      return;
+    }
+    for (const c of comments) {
+      const row = document.createElement('div');
+      row.className = 'branch-comment';
+      const meta = document.createElement('span');
+      meta.className = 'branch-comment-meta';
+      meta.textContent = (c['author-id'] || 'anonymous') + ' · '
+        + String(c['created-at'] || '').slice(0, 16);
+      const text = document.createElement('span');
+      text.className = 'branch-comment-body';
+      text.textContent = c.body || '';
+      const del = document.createElement('button');
+      del.className = 'branch-comment-del';
+      del.textContent = '×';
+      del.title = 'Delete (author only)';
+      del.addEventListener('click', async () => {
+        const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: c.id }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) reload();
+      });
+      row.appendChild(meta);
+      row.appendChild(text);
+      row.appendChild(del);
+      list.appendChild(row);
+    }
+  };
+
+  const reload = async () => {
+    try {
+      const r = await window.authFetch(API.api_branches_ref_comments(sourceName));
+      const d = await r.json();
+      if (d.ok) render(d.comments || []);
+    } catch (_) { /* best-effort */ }
+  };
+
+  const form = document.createElement('div');
+  form.className = 'branch-comment-form';
+  const input = document.createElement('textarea');
+  input.className = 'branch-comment-input';
+  input.rows = 2;
+  input.placeholder = 'Leave a review comment…';
+  const send = document.createElement('button');
+  send.className = 'branch-comment-send';
+  send.textContent = 'Comment';
+  send.addEventListener('click', async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: text }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (d.ok) { input.value = ''; reload(); }
+  });
+  form.appendChild(input);
+  form.appendChild(send);
+  wrap.appendChild(form);
+
+  body.appendChild(wrap);
+  reload();
 }
 
 window.showBranchDiff = showBranchDiff;

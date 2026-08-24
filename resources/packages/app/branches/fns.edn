@@ -1099,6 +1099,25 @@
    :return-type :keyword-map
    :effects #{}}
 
+  {:name :add-branch-comment!
+   :description "Atomic library boundary — record a review comment on proposal `source-branch-id` by the current principal. Returns the new comment id (text)."
+   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch commented on."}
+          :body {:type :text :description "Comment text."}}
+   :return-type :text
+   :effects #{:db}}
+
+  {:name :list-branch-comments
+   :description "Comments on proposal `source-branch-id`, oldest first — `[{:id :author-id :body :created-at} …]` (wire-safe strings)."
+   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch."}}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :delete-branch-comment!
+   :description "Delete comment `comment-id` — author's own only (:authz/forbidden otherwise). Returns true when a row was removed."
+   :args {:comment-id {:type :uuid :description "The comment to delete."}}
+   :return-type :bool
+   :effects #{:db}}
+
   {:name :_branch-policy-parsed
    :description "Parse POST /api/branches/:ref/policy into `{:branch-ref :write-policy}` — ref from the URL (shared `:_branches-target-ref`), policy from the JSON body."
    :parent :zipmap
@@ -1435,6 +1454,113 @@
    :description "Ring handler for GET /api/branches/:ref/approvals (auth-required)."
    :parent :json-handler
    :args {:data :_branch-approvals-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; /api/branches/:ref/comments — the proposal's review-comment thread.
+  ;; POST {body} adds (author = principal); GET lists oldest-first;
+  ;; DELETE {id} removes the caller's OWN comment. Reuses the approve
+  ;; chain's resolve/missing guards (same URL shape).
+  ;; ---------------------------------------------------------------------
+  {:name :_branch-comment-body
+   :description "The comment text out of the JSON body; nil when absent."
+   :parent :get
+   :args {:coll {:parent :parse-json-body} :key {:value :body} :default nil}}
+
+  {:name :_branch-comment-body-nonblank?
+   :parent :non-blank?
+   :args {:string {:parent :to-str :args {:value :_branch-comment-body}}}}
+
+  {:name :_branch-comment-body-blank?
+   :parent :not
+   :args {:value :_branch-comment-body-nonblank?}}
+
+  {:name :_branch-comment-err-blank
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "Comment body is required"}}}
+
+  {:name :_branch-comment-add
+   :parent :add-branch-comment!
+   :args {:source-branch-id :_branch-approve-src-id
+          :body {:parent :to-str :args {:value :_branch-comment-body}}}}
+
+  {:name :_branch-comment-add-apply
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :id}]
+          :vals [{:value true} :_branch-comment-add]}}
+
+  {:name :_branch-comment-add-data
+   :parent :cond
+   :args {:clauses [:_branch-approve-missing?    :_branch-approve-err-missing
+                    :_branch-comment-body-blank? :_branch-comment-err-blank
+                    {:value true}                :_branch-comment-add-apply]
+          :resolved :_branch-approve-resolved}}
+
+  {:name :add-branch-comment-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for POST /api/branches/:ref/comments (auth-required)."
+   :parent :json-handler
+   :args {:data :_branch-comment-add-data}}
+
+  {:name :_branch-comments-list
+   :parent :list-branch-comments
+   :args {:source-branch-id :_branch-approve-src-id}}
+
+  {:name :_branch-comments-list-apply
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :comments}]
+          :vals [{:value true} :_branch-comments-list]}}
+
+  {:name :_branch-comments-list-data
+   :parent :cond
+   :args {:clauses [:_branch-approve-missing?  :_branch-approve-err-missing
+                    {:value true}              :_branch-comments-list-apply]
+          :resolved :_branch-approve-resolved}}
+
+  {:name :list-branch-comments-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for GET /api/branches/:ref/comments (auth-required)."
+   :parent :json-handler
+   :args {:data :_branch-comments-list-data}}
+
+  {:name :_branch-comment-del-id
+   :description "The comment id out of the DELETE body."
+   :parent :parse-uuid
+   :args {:string {:parent :to-str
+                   :args {:value {:parent :get
+                                  :args {:coll {:parent :parse-json-body}
+                                         :key {:value :id} :default nil}}}}}}
+
+  {:name :_branch-comment-del-id-missing?
+   :parent :nil?
+   :args {:value :_branch-comment-del-id}}
+
+  {:name :_branch-comment-err-no-id
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "Comment id is required"}}}
+
+  {:name :_branch-comment-del
+   :parent :delete-branch-comment!
+   :args {:comment-id {:parent :assert-some :args {:value :_branch-comment-del-id}}}}
+
+  {:name :_branch-comment-del-apply
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :removed}]
+          :vals [{:value true} :_branch-comment-del]}}
+
+  {:name :_branch-comment-del-data
+   :parent :cond
+   :args {:clauses [:_branch-approve-missing?         :_branch-approve-err-missing
+                    :_branch-comment-del-id-missing?  :_branch-comment-err-no-id
+                    {:value true}                     :_branch-comment-del-apply]
+          :resolved :_branch-approve-resolved}}
+
+  {:name :delete-branch-comment-handler
+   :lambda-params [:request :default]
+   :description "Ring handler for DELETE /api/branches/:ref/comments (auth-required) — body `{id}`, author's own only."
+   :parent :json-handler
+   :args {:data :_branch-comment-del-data}}
 
   ;; ---------------------------------------------------------------------
   ;; DELETE /api/branches/:ref — delete branch + all its version rows.

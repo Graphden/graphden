@@ -103,7 +103,7 @@
 
 (deftest versioned-entities-constant-test
   (testing "versioned-entities lists every versioned entity name"
-    (is (= #{:branch :branch-merge :branch-approval :fn-version :fn-slot-version
+    (is (= #{:branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
              :binding-version :binding-list-item-version}
            vds/versioned-entities))))
 

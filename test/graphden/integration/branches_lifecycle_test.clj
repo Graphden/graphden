@@ -431,3 +431,33 @@
       (let [e (rejected {:approver-ids "not-a-list"})]
         (is (some? e))
         (is (= 400 (web-errors/status-for-ex-data (ex-data e))))))))
+
+
+(deftest branch-comments-lifecycle-test
+  ;; Proposal comments: add → list (oldest-first) → delete own → cascade
+  ;; with the branch. Single-tenant author is "anonymous", so delete-own
+  ;; succeeds here; the author≠caller 403 needs the tenancy harness.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        feat (str "cmt-feat" run-id)
+        cpath (fn [] (str "/api/branches/" feat "/comments"))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name feat :base-branch-id "main"}}))))
+    (testing "empty body is refused"
+      (let [r (parse-json (dispatch {:method :post :path (cpath) :body {:body "   "}}))]
+        (is (false? (:ok r)))))
+    (testing "add two comments, list oldest-first"
+      (is (true? (:ok (parse-json (dispatch {:method :post :path (cpath) :body {:body "first!"}})))))
+      (is (true? (:ok (parse-json (dispatch {:method :post :path (cpath) :body {:body "second"}})))))
+      (let [cs (:comments (parse-json (dispatch {:method :get :path (cpath)})))]
+        (is (= ["first!" "second"] (mapv :body cs)) "oldest first")
+        (is (every? #(= "anonymous" (:author-id %)) cs))))
+    (testing "delete own comment by id"
+      (let [cs (:comments (parse-json (dispatch {:method :get :path (cpath)})))
+            id (:id (first cs))
+            r (parse-json (dispatch {:method :delete :path (cpath) :body {:id id}}))]
+        (is (true? (:ok r)))
+        (is (true? (:removed r)))
+        (is (= ["second"] (mapv :body (:comments (parse-json (dispatch {:method :get :path (cpath)}))))))))
+    (testing "unknown branch → clean envelope"
+      (let [r (parse-json (dispatch {:method :get :path "/api/branches/no-such-cmt-branch/comments"}))]
+        (is (false? (:ok r)))))))

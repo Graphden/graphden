@@ -41,6 +41,13 @@
   #uuid "d249d189-4ce0-4445-86e4-52bd3681159b")
 
 
+(def ^:private branch-comment-entity-uuid
+  ;; Change proposals — one row per review comment on a proposal branch.
+  ;; Mirrors :branch-approval (plain, non-version-intercepted, org-scoped
+  ;; by the tenancy addon via its own :org-id).
+  #uuid "9c2c040e-a5de-4965-88a4-387811280c99")
+
+
 (def ^:private fn-version-entity-uuid
   #uuid "c3d4e5f6-a7b8-4901-0e1f-2a3b4c5d6e7f")
 
@@ -212,6 +219,31 @@
   ;; org-isolated). NULL ≡ public / single-tenant. Same nullable-text
   ;; shape as `:branch.org-id`.
   #uuid "6a616a15-4783-4e6d-8801-730ccbded6b9")
+
+
+;; =============================================================================
+;; Field UUIDs — :branch-comment
+;; =============================================================================
+
+(def ^:private branch-comment-source-branch-id-field-uuid
+  #uuid "7f43517c-a7b6-49df-af04-13bebbbdf819")
+
+
+(def ^:private branch-comment-author-id-field-uuid
+  #uuid "2e8dee1e-38fe-4a71-8ca5-d7f22b20b283")
+
+
+(def ^:private branch-comment-body-field-uuid
+  #uuid "645ca0db-b30f-41ed-b0ce-347f7a8932c4")
+
+
+(def ^:private branch-comment-created-at-field-uuid
+  #uuid "b0ee7a02-a2a1-4924-a182-47883c9a040b")
+
+
+(def ^:private branch-comment-org-id-field-uuid
+  ;; Tenant owner — same defence-in-depth as :branch-approval.org-id.
+  #uuid "4bf21b03-1b9a-4284-bcbd-b371f42781ac")
 
 
 ;; =============================================================================
@@ -670,7 +702,7 @@
 ;; =============================================================================
 
 (def versioned-entities
-  #{:branch :branch-merge :branch-approval :fn-version :fn-slot-version
+  #{:branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
     :binding-version :binding-list-item-version})
 
 
@@ -795,6 +827,23 @@
                       :created-at {:uuid branch-approval-created-at-field-uuid
                                    :type :timestamptz}
                       :org-id {:uuid branch-approval-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
+
+      ;; -----------------------------------------------------------------
+      ;; branch-comment — one review comment on a proposal branch. Plain,
+      ;; non-version-intercepted; org-scoped like :branch-approval.
+      ;; -----------------------------------------------------------------
+      (ds/add-entity :branch-comment branch-comment-entity-uuid
+                     {:source-branch-id {:uuid branch-comment-source-branch-id-field-uuid
+                                         :type :ref :ref-entity :branch}
+                      :author-id {:uuid branch-comment-author-id-field-uuid
+                                  :type :text}
+                      :body {:uuid branch-comment-body-field-uuid
+                             :type :text}
+                      :created-at {:uuid branch-comment-created-at-field-uuid
+                                   :type :timestamptz}
+                      :org-id {:uuid branch-comment-org-id-field-uuid
                                :type :text
                                :nullable? true}})
 

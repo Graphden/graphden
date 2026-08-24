@@ -6541,3 +6541,28 @@ body.gd-tour-sheet-open #side-menu {
   opacity: 0.85;
   font-style: italic;
 }
+
+/* Review-comment thread under the branch-diff modal. */
+.branch-comments { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 8px; }
+.branch-comments h4 { font-size: 12px; margin: 0 0 6px; color: var(--fg); }
+.branch-comments-list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.branch-comment { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+.branch-comment-meta { color: var(--muted-fg); font-size: 10px; white-space: nowrap; }
+.branch-comment-body { color: var(--fg); flex: 1; overflow-wrap: anywhere; }
+.branch-comment-del {
+  background: transparent; color: var(--muted-fg); border: 0;
+  cursor: pointer; font-size: 12px; padding: 0 2px;
+}
+.branch-comment-del:hover { color: var(--fg); }
+.branch-comment-empty { color: var(--muted-fg); font-size: 11px; }
+.branch-comment-form { display: flex; gap: 6px; margin-top: 6px; align-items: flex-end; }
+.branch-comment-input {
+  flex: 1; resize: vertical; font-size: 12px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 3px; padding: 4px 6px;
+}
+.branch-comment-send {
+  background: var(--accent); color: var(--on-accent);
+  border: 0; border-radius: 3px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+body.gd-no-write .branch-comment-form { display: none; }

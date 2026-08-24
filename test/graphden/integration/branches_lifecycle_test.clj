@@ -493,16 +493,22 @@
 
 (deftest branch-comment-body-cap-test
   ;; audit-2 P2: an over-long comment body is a clean 400, not an
-  ;; unbounded DB write.
+  ;; unbounded DB write. Like branch-review-policy-rejects-bad-input-test,
+  ;; this harness's br/dispatch runs WITHOUT the outer wrap-error-boundary,
+  ;; so the :validation-error throw propagates here — assert it rejects AND
+  ;; its type maps to 400 (the boundary's job in prod), and nothing stored.
   (let [src (str "cc-" (System/currentTimeMillis))
         cpath (str "/api/branches/" src "/comments")]
     (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
                                    :body {:name src :base-branch-id "main"}}))))
-    (testing "a body over the cap is rejected 400 and nothing is stored"
-      (let [big (str/join (repeat 10001 "x"))
-            r (dispatch {:method :post :path cpath :body {:body big}})]
-        (is (= 400 (:status r)))
-        (is (false? (:ok (parse-json r)))))
+    (testing "a body over the cap is rejected → 400 and nothing is stored"
+      (let [e (try (dispatch {:method :post :path cpath
+                              :body {:body (str/join (repeat 10001 "x"))}})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e) "rejected, not silently stored")
+        (is (= 400 (web-errors/status-for-ex-data (ex-data e)))
+            "comment-too-long maps to a clean 400"))
       (is (empty? (:comments (parse-json (dispatch {:method :get :path cpath}))))))
     (testing "a body at the cap is accepted"
       (let [ok (str/join (repeat 10000 "y"))]

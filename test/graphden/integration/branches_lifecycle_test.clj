@@ -486,9 +486,13 @@
         (is (= 1 (:required-approvals p)) "required-approvals updated")
         (is (false? (:allow-self-approval? p)) "allow-self updated")
         (is (= ["alice" "bob"] (:approver-ids p)) "approver-ids NOT clobbered")))
-    (testing "an explicit null clears it (present-but-null ≠ absent)"
+    (testing "an explicit null clears it (present-but-null ≠ absent) —
+              and the two OMITTED fields are :keep-preserved (audit-3 G3)"
       (is (= 200 (:status (rp {:approver-ids nil}))))
-      (is (nil? (:approver-ids (read-policy)))))))
+      (let [p (read-policy)]
+        (is (nil? (:approver-ids p)) "approver-ids cleared by explicit null")
+        (is (= 1 (:required-approvals p)) "required-approvals kept (:keep, omitted)")
+        (is (false? (:allow-self-approval? p)) "allow-self kept (:keep, omitted)")))))
 
 
 (deftest branch-comment-body-cap-test

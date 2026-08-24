@@ -453,24 +453,31 @@
    may write/merge it) plus its explicit `:approver-ids` allow-list. Open
    in single-tenant (no addon → no principals → `:manage-grants` seam is
    default-deny, so `nil`/`open` policy admits everyone, which is the
-   correct self-host degrade)."
+   correct self-host degrade).
+
+   A NIL `target-row` (the target branch didn't resolve — a missing
+   `:base-branch-id`, or a cross-org ref that OrgScoped filtered) fails
+   CLOSED: `nil` policy on a real row means \"open\", but a nil ROW means
+   \"no target\" and must not fall through to the open arm."
   [target-row uid]
-  (let [policy (:write-policy target-row)
-        owner (:owner-id target-row)
-        approver-ids (set (:approver-ids target-row))
-        admin? (or (tc/current-platform-tier?)
-                   (tc/current-has-org-cap? :manage-grants))]
-    (boolean
-      (or (and uid (contains? approver-ids uid))
-          (case policy
-            ("owner") (or admin? (and uid owner (= uid owner)))
-            ("admins") admin?
-            ;; nil / "" / "open" → open (no write-policy restriction).
-            (nil "" "open") true
-            ;; anything else → DENY (hardening): write-policy is validated
-            ;; to the known set at set time, so an unknown value here is
-            ;; anomalous — fail closed rather than fall open.
-            false)))))
+  (if (nil? target-row)
+    false
+    (let [policy (:write-policy target-row)
+          owner (:owner-id target-row)
+          approver-ids (set (:approver-ids target-row))
+          admin? (or (tc/current-platform-tier?)
+                     (tc/current-has-org-cap? :manage-grants))]
+      (boolean
+        (or (and uid (contains? approver-ids uid))
+            (case policy
+              ("owner") (or admin? (and uid owner (= uid owner)))
+              ("admins") admin?
+              ;; nil / "" / "open" → open (no write-policy restriction).
+              (nil "" "open") true
+              ;; anything else → DENY (hardening): write-policy is validated
+              ;; to the known set at set time, so an unknown value here is
+              ;; anomalous — fail closed rather than fall open.
+              false))))))
 
 
 (defbase approve-proposal!

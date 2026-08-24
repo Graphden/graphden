@@ -955,8 +955,18 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
   const setError = (msg) => {
     if (errBox) { errBox.textContent = msg; errBox.classList.remove('hidden'); }
   };
+
+  // Separate the FETCH from response-processing on purpose. Only the fetch
+  // itself REJECTING (no response arrived) is the "committed-merge, target
+  // restarting" case — the merge endpoint drops the connection solely in
+  // its post-commit step (restarting the target's services; when the target
+  // runs the very web-server serving this request, e.g. merging into main,
+  // the rebind severs the response). A response that DID arrive — even a
+  // 500, a proxy 502/504 HTML page, or an empty-bodied 401 — means the merge
+  // did NOT commit and must be shown as an error, never as "restarting".
+  let resp;
   try {
-    const resp = await window.authFetch(
+    resp = await window.authFetch(
       API.api_branches_ref_merge(targetName),
       {
         method: 'POST',
@@ -966,55 +976,51 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
           'conflict-resolutions': conflictResolutions || undefined,
         }),
       });
-    const body = await resp.json();
-    if (resp.status === 401) { setError('Sign in to merge'); return; }
-    if (body?.ok === false && body?.reason === 'merge-conflict') {
-      // Drop the popover so the modal has full attention.
-      closeBranchPopover();
-      showMergeConflictsModal(body, sourceName, targetName);
-      return;
-    }
-    if (!resp.ok || body?.ok === false) {
-      setError(body?.error || ('HTTP ' + resp.status));
-      return;
-    }
-    // Surface the audit-log when the resolver kept entries scoped
-    // to their origin branch (sticky-local fns — see
-    // graphden.versioning.branch-local). The alert is intentionally
-    // synchronous + simple: the user just clicked "Merge", we want
-    // them to KNOW these entries didn't propagate before the page
-    // reloads. The diff modal's 📍 badge already showed them ahead
-    // of time; this is the post-merge confirmation.
-    const skipped = body?.skipped?.['branch-local'] || [];
-    if (skipped.length > 0) {
-      const names = skipped.map((s) => ':' + (s['fn-name'] || s['entity-id']))
-                           .join(', ');
-      alert(skipped.length + ' branch-local fn'
-            + (skipped.length === 1 ? '' : 's')
-            + ' did NOT propagate to ' + targetName + ': ' + names
-            + '. (Marked with 📍 in the branch-diff modal.)');
-    }
-    // Success — drop everything and reload so caches refresh and the
-    // editor picks up the new resolved view on the current branch.
-    closeBranchPopover();
-    location.reload();
-  } catch (_err) {
-    // A thrown error here (no HTTP response) means the connection dropped
-    // rather than the server answering — and the merge endpoint only drops
-    // the connection AFTER it has committed: the post-commit step restarts
-    // the target branch's services, and when the target runs the very
-    // web-server serving this request (e.g. merging into main), that
-    // rebind severs the response mid-flight. Pre-commit failures
-    // (conflict / approval / validation) all come back as HTTP responses,
-    // handled above. So a network drop here means "merge committed, target
-    // is restarting" — don't cry "Failed to fetch": wait for the server to
-    // come back, then reload to show the real post-merge state.
+  } catch (_netErr) {
+    // Fetch rejected — no response. Post-commit restart severed it; the
+    // merge already committed. Wait out the rebind, then reload to the real
+    // post-merge state instead of crying "Failed to fetch".
     setError('Merge submitted — ' + targetName + ' is restarting, verifying…');
-    const backUp = await waitForServerBack(30000);
-    if (backUp) { closeBranchPopover(); location.reload(); return; }
+    if (await waitForServerBack(30000)) { closeBranchPopover(); location.reload(); return; }
     setError('Merge sent, but ' + targetName + ' has not come back yet — '
              + 'reload in a moment to confirm.');
+    return;
   }
+
+  // A response arrived — parse defensively (an error page / empty body is
+  // not JSON) and handle by status. Check 401 BEFORE parsing.
+  if (resp.status === 401) { setError('Sign in to merge'); return; }
+  const body = await resp.json().catch(() => ({}));
+  if (body?.ok === false && body?.reason === 'merge-conflict') {
+    // Drop the popover so the modal has full attention.
+    closeBranchPopover();
+    showMergeConflictsModal(body, sourceName, targetName);
+    return;
+  }
+  if (!resp.ok || body?.ok === false) {
+    setError(body?.error || ('HTTP ' + resp.status));
+    return;
+  }
+  // Surface the audit-log when the resolver kept entries scoped
+  // to their origin branch (sticky-local fns — see
+  // graphden.versioning.branch-local). The alert is intentionally
+  // synchronous + simple: the user just clicked "Merge", we want
+  // them to KNOW these entries didn't propagate before the page
+  // reloads. The diff modal's 📍 badge already showed them ahead
+  // of time; this is the post-merge confirmation.
+  const skipped = body?.skipped?.['branch-local'] || [];
+  if (skipped.length > 0) {
+    const names = skipped.map((s) => ':' + (s['fn-name'] || s['entity-id']))
+                         .join(', ');
+    alert(skipped.length + ' branch-local fn'
+          + (skipped.length === 1 ? '' : 's')
+          + ' did NOT propagate to ' + targetName + ': ' + names
+          + '. (Marked with 📍 in the branch-diff modal.)');
+  }
+  // Success — drop everything and reload so caches refresh and the
+  // editor picks up the new resolved view on the current branch.
+  closeBranchPopover();
+  location.reload();
 }
 
 

@@ -104,15 +104,27 @@
    wraps the base storage with `VersionedStorage` on the `main`
    branch — the same shape production runs under. Tests that drive
    branches / executions / services CRUD need this; pure-fn-graph
-   tests should stay on `create-test-storage` (lighter)."
-  []
-  (pth/clean-database-fast! *container*)
-  (let [storage (sc/register-storage!
-                  (pg/create-storage (pth/get-container-config *container*)))]
-    (sp/initialize storage (full-schema))
-    (sp/upsert-entities storage :fn
-                        (mapv #(dissoc % :kind) (records/boot-primitive-records)))
-    (vs/wrap-with-versioning storage "main")))
+   tests should stay on `create-test-storage` (lighter).
+
+   `pool-size` (optional) overrides the default test pool (2) for ONE
+   storage. A branch-churning ns (create/policy/propose/merge — each
+   merge spawns a post-commit thread and can trigger a graph-epoch-heal,
+   all contending the same pool) intermittently gets a borrowed
+   connection broken under that contention on a size-2 pool
+   (`HikariPool marked broken / Socket closed`, a non-deterministic
+   slice of the run erroring). A per-ns bump of a few connections costs
+   negligibly against a single storage's footprint and removes the
+   contention; the suite-wide default stays 2."
+  ([] (create-versioned-test-storage nil))
+  ([pool-size]
+   (pth/clean-database-fast! *container*)
+   (let [cfg (cond-> (pth/get-container-config *container*)
+               pool-size (assoc :pool-size pool-size))
+         storage (sc/register-storage! (pg/create-storage cfg))]
+     (sp/initialize storage (full-schema))
+     (sp/upsert-entities storage :fn
+                         (mapv #(dissoc % :kind) (records/boot-primitive-records)))
+     (vs/wrap-with-versioning storage "main"))))
 
 
 (defn create-branch-versioned-test-storage

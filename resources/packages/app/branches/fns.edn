@@ -2114,10 +2114,29 @@
   ;; leaves the "N proposals awaiting review" inbox (GitHub closes a merged
   ;; PR). Sequenced after the commit; a rejected merge (the `:try` catches
   ;; upstream) never reaches it, so a still-open proposal keeps its marker.
-  {:name :_merge-clear-review-state
+  ;;
+  ;; BEST-EFFORT: the clear writes the SOURCE branch through the org-scoped
+  ;; authz gate, which throws if the source is PROTECTED and the merger
+  ;; isn't admitted by its write-policy (merge gates on the TARGET, so you
+  ;; can merge a source you can't write). That throw must NOT fail an
+  ;; already-committed merge — wrap it in `:try` so a clear-failure logs and
+  ;; the merge still returns success (the proposal just keeps its marker).
+  {:name :_merge-clear-rs-attempt
    :parent :set-review-state!
    :args {:branch-id :_merge-source-id
           :proposed? {:value nil}}}
+
+  {:name :_merge-clear-rs-on-throw
+   :parent :log-warn
+   :args {:message {:value "post-merge review-state clear failed (merge committed; proposal keeps its marker)"}
+          :data {:parent :zipmap
+                 :args {:keys [{:value :error}]
+                        :vals [{:parent :throwable-message :args {:ex {:as :exception}}}]}}}}
+
+  {:name :_merge-clear-review-state
+   :parent :try
+   :args {:body :_merge-clear-rs-attempt
+          :on-throw :_merge-clear-rs-on-throw}}
 
   {:name :_merge-skipped-rows
    :parent :merge-skipped-branch-local

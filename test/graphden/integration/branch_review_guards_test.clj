@@ -30,13 +30,14 @@
 (use-fixtures :once
   (setup/create-container-fixture)
   exec/with-isolated-rich-types
+  ;; inline heal — this ns merges; the post-commit RAW thread's heal
+  ;; otherwise races into a CCE (see the helper's docstring).
+  setup/inline-heal-fixture
   (fn [t]
     (exec/with-clean-registry
-      ;; pool-size 6 (vs default 2) + inline heal: merges spawn a
-      ;; post-commit thread and can trigger a graph-epoch-heal, so several
-      ;; threads contend the pool; the extra connections + synchronous heal
-      ;; keep this ns off the shared-pool break the heavier
-      ;; branches-lifecycle-test occasionally hits.
+      ;; pool-size 6 (vs default 2): merges spawn a post-commit thread, so
+      ;; several threads contend the pool; the extra connections keep this
+      ;; ns off the size-2 connection break.
       #(let [storage (setup/create-versioned-test-storage 6)
              _ (sb/bootstrap-with-cached-sweep! storage ["core" "web" "app"])
              ctx (exec/create-context
@@ -46,8 +47,7 @@
              router (br/create-router ctx "_app-ring-response")]
          (br/set-active-router! router)
          (try
-           (binding [*router* router
-                     br/*epoch-heal-sync?* true]
+           (binding [*router* router]
              (t))
            (finally
              (br/clear-active-router!)

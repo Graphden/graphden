@@ -39,9 +39,12 @@
 (use-fixtures :once
   (setup/create-container-fixture)
   exec/with-isolated-rich-types
+  ;; inline heal — this ns merges; the post-commit RAW thread's heal
+  ;; otherwise races into a CCE (see setup/inline-heal-fixture docstring).
+  setup/inline-heal-fixture
   (fn [t]
     (exec/with-clean-registry
-      #(let [storage (setup/create-versioned-test-storage)
+      #(let [storage (setup/create-versioned-test-storage 6)
              _ (sb/bootstrap-with-cached-sweep! storage ["core" "web" "app"])
              ctx (exec/create-context
                    {:storage storage

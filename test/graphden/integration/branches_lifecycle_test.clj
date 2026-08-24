@@ -40,9 +40,18 @@
 (use-fixtures :once
   (setup/create-container-fixture)
   exec/with-isolated-rich-types
+  ;; Force graph-epoch heals inline — this ns merges, and the heal
+  ;; triggered from the merge-post-commit RAW thread otherwise races a
+  ;; request/teardown into a ClassCastException. See the helper's docstring.
+  setup/inline-heal-fixture
   (fn [t]
     (exec/with-clean-registry
-      #(let [storage (setup/create-versioned-test-storage)
+      ;; pool-size 6 (vs the default 2): this ns churns branches hard —
+      ;; every create/policy/propose/merge bumps the graph epoch, and merges
+      ;; spawn a post-commit thread; at size 2 those contend the test
+      ;; thread and a borrowed connection intermittently breaks under load
+      ;; ("HikariPool marked broken / Socket closed").
+      #(let [storage (setup/create-versioned-test-storage 6)
              _ (sb/bootstrap-with-cached-sweep! storage ["core" "web" "app"])
              ctx (exec/create-context
                    {:storage storage

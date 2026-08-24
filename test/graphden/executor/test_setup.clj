@@ -21,6 +21,7 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.system.branch-router :as br]
     [graphden.test-infra.schemas :as schemas]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.test-infra.shared-container :as sc]
@@ -660,3 +661,26 @@
      ;; as the slot-id directly, so passing `(:id arg-a)` works.
      :arg-a slot-a :arg-b slot-b
      :composed-fn composed-fn}))
+
+
+(defn inline-heal-fixture
+  "`use-fixtures :once`-composable fixture that forces graph-epoch heals
+   to run INLINE for the wrapped tests, via `alter-var-root` — NOT a
+   thread-local `binding`, because the heal is also triggered from the
+   merge-post-commit RAW thread, which dynamic bindings don't convey to.
+
+   Merge-heavy integration NSes need this: every branch write bumps the
+   epoch, so the background `graph-epoch-heal` thread rebuilds the ctx
+   CONCURRENTLY with a request reading `/api/graph/entities` — the request
+   then reads a mid-rebuild registry and a deferred thunk reaches
+   `update-in`/`update-keys` as a map (`ClassCastException: AFunction$1 →
+   Associative` / `Character → Map$Entry`), and near teardown the heal
+   thread hits the closing pool; a non-deterministic slice of the run
+   errors under load (recurred across gate / main-CI integration runs).
+
+   Sets the root true and does NOT restore: inline heal is always-correct
+   (just synchronous) and no test relies on the async path, so leaving it
+   true for the test JVM avoids a set/restore race between parallel NSes."
+  [t]
+  (alter-var-root #'br/*epoch-heal-sync?* (constantly true))
+  (t))

@@ -151,7 +151,10 @@
           ;; Fire the invalidation the way notify-after-write! does.
           (doseq [cb @(:callbacks relay-listener)]
             (cb {:kind :fn :op :invalidate :id (str fn-id)}))
-          (is (wait/wait-for 5000 #(pos? @refreshed)) "BYO executor received the SSE event + refreshed")
+          (is (wait/wait-for 30000 #(pos? @refreshed))
+              ;; slow-stack canon deadline (docs: e2e polls >= 30s) — 5s
+              ;; flaked under gate RAM contention (2026-08-24).
+              "BYO executor received the SSE event + refreshed")
           (is (= 2 (cr/execute byo-ctx fn-id {}))
               "and now executes the NEW value, pulled fresh over HTTP"))
         (finally

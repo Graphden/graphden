@@ -303,13 +303,18 @@ simply the branches whose `:review-state` is `"proposed"`.
 A proposal is *reviewed* by recording approvals against it and gating the
 merge on their count — configurable per **target** branch, GitHub-style.
 
-**Policy fields** (nullable, on the merge-TARGET `:branch` row; all
-default off = current behaviour):
+**Policy fields** (nullable, on the merge-TARGET `:branch` row;
+`:required-approvals` / `:approver-ids` default off — but see the
+`:allow-self-approval?` default below):
 
 - `:required-approvals` (int) — how many valid approvals a proposal needs
   before a merge INTO this branch is allowed.
-- `:allow-self-approval?` (bool) — when not true, the proposal author's own
-  approval does not count (GitHub "require review from someone else").
+- `:allow-self-approval?` (bool) — DEFAULT (nil) is **TRUE**: the proposal
+  author's own approval counts, so a solo user / small team isn't locked
+  out. Set it explicitly **false** for genuine four-eyes review — then the
+  author's own approval does not count (GitHub "require review from someone
+  else"). (`merge.core/self-approval-allowed?` is the single source of the
+  nil→true default, shared by the gate and the status projection.)
 - `:approver-ids` (jsonb list of `:user-id`) — an explicit reviewer
   allow-list, ADDITIVE to whoever the target's `:write-policy` role admits.
   (So "who may approve" = the target's write-policy roles ∪ this list.)
@@ -342,11 +347,14 @@ author's own only). The editor shows the thread under the Δ diff modal —
 the conversation lives next to the change it reviews.
 
 **Editor** (branch popover, open-core): a ✅ **Approve** button on proposed
-rows and a ⚙ protection menu (require-merge / required-approvals /
-count-self-approval) per row.
-`approver-ids` / `allow-self-approval?` are set via the API/MCP (advanced,
-rarely changed). Without the tenancy addon there are no principals, so on a
-solo self-host the flow degrades to "propose → self-approve → merge".
+rows (with an `n/N` progress badge), a "N proposals awaiting review" inbox
+header, and a ⚙ protection menu per row (require-merge / required-approvals
+/ count-self-approval). `approver-ids` is the only policy field still
+API/MCP-only (advanced, rarely changed); a partial `/review-policy` POST
+(the ⚙ menu) leaves it untouched (`:keep` patch semantics). Without the
+tenancy addon there are no principals, so on a solo self-host the flow
+degrades to "propose → self-approve → merge". A merged proposal's
+`review-state` clears automatically, dropping it off the review list.
 
 ## Demo seeder
 

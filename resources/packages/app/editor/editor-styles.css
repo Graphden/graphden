@@ -6555,6 +6555,10 @@ body.gd-tour-sheet-open #side-menu {
 }
 .branch-comment-del:hover { color: var(--fg); }
 .branch-comment-empty { color: var(--muted-fg); font-size: 11px; }
+.branch-comment-error {
+  color: var(--error-fg); font-size: 11px; margin-top: 4px;
+}
+.branch-comment-error.hidden { display: none; }
 .branch-comment-form { display: flex; gap: 6px; margin-top: 6px; align-items: flex-end; }
 .branch-comment-input {
   flex: 1; resize: vertical; font-size: 12px;

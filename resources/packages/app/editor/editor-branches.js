@@ -447,6 +447,7 @@ function toggleBranchPopover() {
 }
 
 function closeBranchPopover() {
+  closeProtectionMenu();   // don't orphan the ⚙ menu over a hidden popover
   const popover = document.getElementById('branch-popover');
   if (popover) popover.classList.add('hidden');
 }
@@ -663,10 +664,7 @@ function openBranchPolicyMenu(btn) {
   document.body.appendChild(pop);
 }
 
-// Flip "push only via merge" for a branch. `require-merge` in the
-// body is the JSON key the /protect handler reads (JSON can't carry a
-// trailing `?`). WHO may flip it is open-core (any authenticated
-// writer of the branch); a rejection surfaces in the shared slot.
+// Tear down the ⚙ protection menu (popover + scrim) if open.
 function closeProtectionMenu() {
   document.getElementById('gd-protect-pop')?.remove();
   document.getElementById('gd-protect-scrim')?.remove();

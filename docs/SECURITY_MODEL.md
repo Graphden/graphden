@@ -32,6 +32,16 @@ so a gap in one does not by itself cross tenants:
    grants gate WHO edits WHAT, and a branch's `write-policy` (protected
    branches — owner / org admins) gates writes and merges per branch
    ([VERSIONING.md § Protected branches](VERSIONING.md#protected-branches-stage-1-2026-08-15)).
+   The same owner/admin gate covers ALL of a branch's protection knobs —
+   `write-policy`, `require-merge?`, and the review policy
+   (`required-approvals` / `approver-ids` / `allow-self-approval?`) — so a
+   plain org member can't lower a colleague's review bar (the `:branch`
+   authz arm keys on the whole protection set, not just `write-policy`).
+   **Review authz**: who may APPROVE a merge = the target's write-policy
+   roles ∪ its `approver-ids`, enforced when the approval row is written
+   (the count gate itself is pure); who may COMMENT = anyone who can
+   resolve the (org-scoped) branch, and a comment is deletable only by its
+   author.
 2. **Database-layer RLS** — Postgres Row-Level Security (`FORCE`) filters every
    row by the connection's `graphden.current_org`, so even a raw-SQL path that
    bypassed the decorator stays confined. **Strict by default**: the app must

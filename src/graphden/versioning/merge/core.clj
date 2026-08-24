@@ -163,24 +163,35 @@
     true))
 
 
+(defn count-valid-approvals*
+  "Pure core of `count-valid-approvals`: given the already-fetched
+   `current-stamp` and `approvals` rows, keep only those whose
+   `:content-stamp` still matches (drops stale ones after a post-approval
+   edit), drop the author's own unless `allow-self?`, count distinct
+   approver ids. Split out so a caller that ALSO needs the stamp + the
+   approval rows (the status projection) computes them once instead of
+   re-running the 5-table stamp query + the approvals query twice."
+  [current-stamp approvals author-id allow-self?]
+  (->> approvals
+       (filter #(= current-stamp (:content-stamp %)))
+       (remove #(and (not allow-self?) author-id (= author-id (:approver-id %))))
+       (map :approver-id)
+       distinct
+       count))
+
+
 (defn count-valid-approvals
   "How many DISTINCT, non-stale approvals the proposal `source-branch-id`
    currently has toward a merge into the target. WHO may approve was
    enforced when each `:branch-approval` row was written (the approve
-   endpoint), so counting here stays pure/open-core: keep only approvals
-   whose `:content-stamp` still matches the source's current content
-   (drops stale ones after a post-approval edit), drop the author's own
-   approval unless `allow-self?`, then count distinct approver ids."
+   endpoint), so counting here stays pure/open-core. Fetches the current
+   stamp + approvals, then delegates to `count-valid-approvals*`."
   [base-storage source-branch-id author-id allow-self?]
-  (let [current-stamp (branch-content-stamp base-storage source-branch-id)
-        approvals (sp/query-entities base-storage :branch-approval
-                                     {:source-branch-id source-branch-id})]
-    (->> approvals
-         (filter #(= current-stamp (:content-stamp %)))
-         (remove #(and (not allow-self?) author-id (= author-id (:approver-id %))))
-         (map :approver-id)
-         distinct
-         count)))
+  (count-valid-approvals*
+    (branch-content-stamp base-storage source-branch-id)
+    (sp/query-entities base-storage :branch-approval
+                       {:source-branch-id source-branch-id})
+    author-id allow-self?))
 
 
 (defn validate-approval-policy!

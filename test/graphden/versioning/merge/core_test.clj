@@ -503,6 +503,21 @@
       (sp/close storage))))
 
 
+(deftest count-valid-approvals*-pure-core-test
+  ;; The pure arity the status projection reuses (audit-2 double-compute
+  ;; fix) must agree with the I/O arity's filtering — same stamp/author/
+  ;; self rules, no DB.
+  (let [stamp "3|2026"
+        rows [{:approver-id "alice" :content-stamp stamp}
+              {:approver-id "alice" :content-stamp stamp}    ; dup → distinct
+              {:approver-id "bob"   :content-stamp stamp}
+              {:approver-id "carol" :content-stamp "1|old"}]] ; stale → dropped
+    (is (= 2 (mp/count-valid-approvals* stamp rows nil false)) "distinct + stale-filtered")
+    (is (= 1 (mp/count-valid-approvals* stamp rows "alice" false)) "author excluded")
+    (is (= 2 (mp/count-valid-approvals* stamp rows "alice" true)) "author counted when allowed")
+    (is (zero? (mp/count-valid-approvals* "9|newer" rows nil false)) "all stale at a newer stamp")))
+
+
 (deftest self-approval-allowed?-defaults-on
   (testing "nil :allow-self-approval? ≡ ON (author's own approval counts) —
             solo/small teams aren't locked out; explicit false opts into strict"

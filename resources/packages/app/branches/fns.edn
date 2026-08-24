@@ -1073,11 +1073,11 @@
    :effects #{:db}}
 
   {:name :set-branch-review-policy!
-   :description "Atomic library boundary — set a branch's review policy (the merge TARGET's rules): `required-approvals` (int, nil=off), `allow-self-approval?` (bool), `approver-ids` (explicit reviewer user-id allow-list). Returns the stored policy map."
+   :description "Atomic library boundary — PATCH a branch's review policy (the merge TARGET's rules): `required-approvals` (int, nil=off), `allow-self-approval?` (bool), `approver-ids` (explicit reviewer user-id allow-list). The `:keep` sentinel leaves a column untouched (route supplies it for a body-absent key), so a partial update — the ⚙ menu — can't wipe an API-set allow-list. Returns the effective policy map."
    :args {:branch-id {:type :uuid :description "Branch id whose review policy to set."}
-          :required-approvals {:type :any :description "How many approvals a merge into this branch needs; nil/0 = off."}
-          :allow-self-approval? {:type :any :description "Truthy → the author's own approval counts."}
-          :approver-ids {:type :any :description "List of reviewer user-ids allowed to approve, additive to the write-policy role; nil = role-based only."}}
+          :required-approvals {:type :any :description "How many approvals a merge into this branch needs; nil/0 = off; :keep = leave unchanged."}
+          :allow-self-approval? {:type :any :description "Truthy → the author's own approval counts; :keep = leave unchanged."}
+          :approver-ids {:type :any :description "List of reviewer user-ids allowed to approve, additive to the write-policy role; nil = role-based only; :keep = leave unchanged."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -1097,7 +1097,7 @@
    :description "Read-only — the approval status of proposal `source-branch-id`: `{:required :have :satisfied :approvers [{:approver-id :stale}]}` for the reviewer UI."
    :args {:source-branch-id {:type :uuid :description "The proposal (source) branch to report on."}}
    :return-type :keyword-map
-   :effects #{}}
+   :effects #{:db}}
 
   {:name :add-branch-comment!
    :description "Atomic library boundary — record a review comment on proposal `source-branch-id` by the current principal. Returns the new comment id (text)."
@@ -1325,12 +1325,18 @@
   ;; enforces it. Separate from /protect (which owns require-merge).
   ;; ---------------------------------------------------------------------
   {:name :_branch-rp-parsed
+   ;; `:default {:value :keep}` — a JSON key ABSENT from the body reaches
+   ;; `set-branch-review-policy!` as the `:keep` sentinel (leave that column
+   ;; untouched); present-but-null reaches it as nil (clear). `:get` returns
+   ;; the real value when the key is present and the default ONLY when
+   ;; absent, so this distinguishes "don't touch approver-ids" (⚙ menu POSTs
+   ;; only the other two) from "clear approver-ids" (explicit API null).
    :parent :zipmap
    :args {:keys [{:value :branch-ref} {:value :required-approvals} {:value :allow-self-approval} {:value :approver-ids}]
           :vals [:_branches-target-ref
-                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :required-approvals} :default nil}}
-                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :allow-self-approval} :default nil}}
-                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :approver-ids} :default nil}}]}}
+                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :required-approvals} :default {:value :keep}}}
+                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :allow-self-approval} :default {:value :keep}}}
+                 {:parent :get :args {:coll {:parent :parse-json-body} :key {:value :approver-ids} :default {:value :keep}}}]}}
 
   {:name :_branch-rp-resolved
    :parent :resolve-branch-ref
@@ -2104,6 +2110,15 @@
    :args {:source-branch-id :_merge-source-id
           :target-branch-id :_merge-target-id}}
 
+  ;; Stage 2b — a merged proposal is done: clear its `review-state` so it
+  ;; leaves the "N proposals awaiting review" inbox (GitHub closes a merged
+  ;; PR). Sequenced after the commit; a rejected merge (the `:try` catches
+  ;; upstream) never reaches it, so a still-open proposal keeps its marker.
+  {:name :_merge-clear-review-state
+   :parent :set-review-state!
+   :args {:branch-id :_merge-source-id
+          :proposed? {:value nil}}}
+
   {:name :_merge-skipped-rows
    :parent :merge-skipped-branch-local
    :args {:source-branch-id :_merge-source-id}}
@@ -2123,10 +2138,11 @@
           :value :_merge-skipped-map}}
 
   {:name :_merge-apply-record
-   :description "The merge write sequence: commit (stage 1) → post-commit invalidate/restart (stage 2) → attach the :skipped audit. `:do` forces the steps in order and returns the last; `:_merge-record-committed` is result-cached, so the assoc re-reads the record without re-running the merge."
+   :description "The merge write sequence: commit (stage 1) → post-commit invalidate/restart (stage 2) → clear the merged proposal's review-state (stage 2b) → attach the :skipped audit. `:do` forces the steps in order and returns the last; `:_merge-record-committed` is result-cached, so the assoc re-reads the record without re-running the merge."
    :parent :do
    :args {:steps [:_merge-record-committed
                   :_merge-post-commit
+                  :_merge-clear-review-state
                   :_merge-record-with-skipped]}}
 
   {:name :_merge-apply-record-id

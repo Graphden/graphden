@@ -45,11 +45,11 @@ row → switch        → click a branch row to switch to it
 📤 (propose)        → submit this branch for review into its base
 ✅ (approve)        → approve a proposed branch for merge
 ⇢ (merge)           → fold another branch into this one
-🔀 (require merge)  → toggle "push only via merge" for this branch
-                      (works everywhere, including single-user)
-✔N (reviews)        → cycle how many approvals a merge into this
-                      branch needs (0→1→2→3); works everywhere
-⛨ (protection)      → (cloud/tenancy only) change who can write;
+⚙ (protection)      → open the branch-protection menu: "push only via
+                      merge", required approvals (0–3), and whether the
+                      author's own approval counts. Works everywhere,
+                      including single-user. Lit when any is on.
+⛨ (write access)    → (cloud/tenancy only) change who can write;
                       a 🔒 marks protected rows
 × delete
 ```
@@ -60,21 +60,21 @@ always keep access, so nothing can be locked forever). On a
 self-hosted single-user instance there are no other users to keep
 out, so the write-policy affordances (⛨ / Advanced) stay hidden.
 
-### Push only via merge (🔀)
+### Push only via merge (⚙ menu)
 
-The 🔀 toggle is the exception that DOES show on a single-user
-instance — because it doesn't care *who* you are, only *how* the
-branch changes. Turn it on and the branch stops accepting direct
-edits: creating, editing or deleting a fn-def straight on it comes
-back as *"This branch accepts changes only via merge…"* (a 409).
-The only way to change it is to **merge another branch into it** —
-exactly the GitHub "protect `main`, land through pull requests"
-workflow, one click deep.
+Open the ⚙ menu on a branch row and tick **"Push only via merge (no
+direct writes)"**. Unlike write-access (⛨), this shows on a single-user
+instance too — it doesn't care *who* you are, only *how* the branch
+changes. With it on, the branch stops accepting direct edits: creating,
+editing or deleting a fn-def straight on it comes back as *"This branch
+accepts changes only via merge…"* (a 409). The only way to change it is
+to **merge another branch into it** — exactly the GitHub "protect
+`main`, land through pull requests" workflow.
 
-The usual shape: keep `main` on 🔀, do your work on a child branch
-(`feat-…`), then merge the child into `main`. The toggle rides on
-the branch itself, so it survives reloads and applies to every
-client. Turn it back off any time to re-open direct writes.
+The usual shape: turn it on for `main`, do your work on a child branch
+(`feat-…`), then merge the child into `main`. It rides on the branch
+itself, so it survives reloads and applies to every client. Untick it
+any time to re-open direct writes.
 
 ### Change proposals & review (📤 → ✅ → ⇢)
 
@@ -84,10 +84,10 @@ popover, no separate "pull request" object:
 
 - **📤 Propose** marks a branch as submitted for review into its base.
   Proposed branches are the reviewer's to-do list (their 📤 lights up).
-- **✔N Reviews** on the *target* branch (e.g. `main`) cycles how many
-  approvals a merge into it needs. Set `main` to `✔1` and a merge into
-  `main` is refused (409, *"requires 1 approval(s)…"*) until the
-  proposal is approved.
+- **⚙ Required approvals** on the *target* branch (e.g. `main`) — open
+  its ⚙ menu and set "Required approvals" to 1. A merge into `main` is
+  then refused (409, *"requires 1 approval(s)…"*) until the proposal is
+  approved.
 - **✅ Approve** records your approval of a proposed branch. Who may
   approve = who may write the target (its write-policy roles, plus any
   explicit reviewer list set via the API). Once the count is met, the
@@ -104,9 +104,9 @@ just like GitHub dismissing stale reviews on a new push.
 
 By default a proposal author's **own** approval counts, so a solo user or
 a small team isn't locked out — propose → approve → merge works with one
-person. A team that wants genuine four-eyes review sets
-`allow-self-approval: false` on the target (via the API), and then a
-required approval must come from **someone other than the author**.
+person. A team that wants genuine four-eyes review unticks **"Count the
+author's own approval"** in the target's ⚙ menu, and then a required
+approval must come from **someone other than the author**.
 
 ### Try it — the plain flow
 
@@ -124,15 +124,17 @@ required approval must come from **someone other than the author**.
 
 ### Try it — with review required
 
-1. Click `✔0` next to `main` once so it reads `✔1` — `main` now
-   requires one approval to merge into.
+1. Open the `⚙` menu next to `main` and set **Required approvals** to
+   `1` — `main` now requires one approval to merge into.
 2. Create a second branch `feat-review`, edit a value on it, switch
    back to `main`.
 3. From `main`, click `⇢` next to `feat-review`. It's refused —
    *"requires 1 approval(s)…"*.
 4. Click `📤` on `feat-review` (propose it), then `✅` (approve it).
-5. `⇢` now merges cleanly. Click `✔1` next to `main` three times to
-   cycle back to `✔0` and turn the requirement off again.
+   Its badge reads `0/1` before and `1/1` after.
+5. `⇢` now merges cleanly, and the merged proposal drops off the
+   review list. Reopen `main`'s `⚙` menu and set Required approvals
+   back to `0` to turn the requirement off.
 
 ## Conflicts
 

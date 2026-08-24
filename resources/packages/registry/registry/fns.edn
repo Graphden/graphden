@@ -62,7 +62,7 @@
   {:name :parse-graph-edn
    :description "Read one EDN value from `string` with the graph WIRE readers (decodes `#graphden/ref` tagged literals emitted for version-qualified `@` and root-ns refs). Use on the import path so a CLI/export bundle round-trips; `:parse-edn` (default readers) → nil on such a tag. nil when it doesn't parse."
    :args {:string {:type :text :description "EDN text to parse with wire readers."}}
-   :return-type a}
+   :return-type :any}
 
   {:name :external-deps-shape
    :description "What a subtree depends on: the external fn NAMES it references and the published packages those fns come from."

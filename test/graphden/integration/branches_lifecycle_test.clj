@@ -19,6 +19,7 @@
    closure http-kit invokes for real /api requests."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
@@ -461,3 +462,73 @@
     (testing "unknown branch → clean envelope"
       (let [r (parse-json (dispatch {:method :get :path "/api/branches/no-such-cmt-branch/comments"}))]
         (is (false? (:ok r)))))))
+
+
+(deftest branch-review-policy-patch-preserves-approver-ids-test
+  ;; audit-2 P1: the ⚙ menu POSTs only required-approvals + allow-self;
+  ;; a full-set write nil'd an API-set approver-ids. With :keep patch
+  ;; semantics, a partial POST must leave approver-ids intact.
+  (let [tgt (str "rp-patch-" (System/currentTimeMillis))
+        rp (fn [body]
+             (dispatch {:method :post :path (str "/api/branches/" tgt "/review-policy")
+                        :body body}))
+        read-policy (fn []
+                      (-> (dispatch {:method :get :path (str "/api/branches/" tgt)})
+                          parse-json :branch))]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name tgt :base-branch-id "main"}}))))
+    (testing "API sets an explicit reviewer allow-list"
+      (is (= 200 (:status (rp {:required-approvals 2 :approver-ids ["alice" "bob"]}))))
+      (is (= ["alice" "bob"] (:approver-ids (read-policy)))))
+    (testing "a ⚙-menu-shaped partial POST (no approver-ids) leaves it intact"
+      (is (= 200 (:status (rp {:required-approvals 1 :allow-self-approval false}))))
+      (let [p (read-policy)]
+        (is (= 1 (:required-approvals p)) "required-approvals updated")
+        (is (false? (:allow-self-approval? p)) "allow-self updated")
+        (is (= ["alice" "bob"] (:approver-ids p)) "approver-ids NOT clobbered")))
+    (testing "an explicit null clears it (present-but-null ≠ absent)"
+      (is (= 200 (:status (rp {:approver-ids nil}))))
+      (is (nil? (:approver-ids (read-policy)))))))
+
+
+(deftest branch-comment-body-cap-test
+  ;; audit-2 P2: an over-long comment body is a clean 400, not an
+  ;; unbounded DB write.
+  (let [src (str "cc-" (System/currentTimeMillis))
+        cpath (str "/api/branches/" src "/comments")]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name src :base-branch-id "main"}}))))
+    (testing "a body over the cap is rejected 400 and nothing is stored"
+      (let [big (str/join (repeat 10001 "x"))
+            r (dispatch {:method :post :path cpath :body {:body big}})]
+        (is (= 400 (:status r)))
+        (is (false? (:ok (parse-json r)))))
+      (is (empty? (:comments (parse-json (dispatch {:method :get :path cpath}))))))
+    (testing "a body at the cap is accepted"
+      (let [ok (str/join (repeat 10000 "y"))]
+        (is (:ok (parse-json (dispatch {:method :post :path cpath :body {:body ok}}))))))))
+
+
+(deftest branch-merge-clears-proposal-review-state-test
+  ;; audit-2 P2: a merged proposal leaves the inbox — its review-state
+  ;; clears on the successful merge (GitHub closes a merged PR).
+  (let [run-id (str "-" (System/currentTimeMillis))
+        tgt (str "mc-tgt" run-id)
+        src (str "mc-src" run-id)
+        probe (str "mc-probe" run-id)
+        identity-fn (fn-by-name nil "identity")]
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name tgt :base-branch-id "main"}}))))
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name src :base-branch-id tgt}}))))
+    (is (= 200 (:status (dispatch {:method :post :path "/api/entities/fn" :branch src
+                                   :content-type "application/x-www-form-urlencoded"
+                                   :body (str "name=" probe "&parent-ids=" (:id identity-fn))}))))
+    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/propose")
+                                   :body {:proposed true}}))))
+    (testing "proposed before merge"
+      (is (= "proposed" (:review-state (:branch (parse-json (dispatch {:method :get :path (str "/api/branches/" src)})))))))
+    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" tgt "/merge")
+                                   :body {:source src}}))))
+    (testing "review-state cleared after the merge — proposal left the inbox"
+      (is (nil? (:review-state (:branch (parse-json (dispatch {:method :get :path (str "/api/branches/" src)})))))))))

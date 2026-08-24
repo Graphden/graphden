@@ -420,19 +420,31 @@
   "Set a branch's review policy (the merge TARGET's rules): how many
    approvals a proposal needs (`required-approvals`), whether the author's
    own approval counts (`allow-self-approval?`), and an explicit reviewer
-   allow-list (`approver-ids`). nil/absent leaves each column cleared (off).
+   allow-list (`approver-ids`). PATCH semantics: an arg of `:keep` (the
+   sentinel the route supplies for a JSON key ABSENT from the request
+   body) leaves that column untouched; any other value — including `nil`
+   — sets it (nil/empty clears). This is why the editor's ⚙ menu, which
+   POSTs only `required-approvals` + `allow-self-approval`, no longer wipes
+   an API/MCP-set `approver-ids` allow-list (the audit-2 clobber).
    Writes through the same still-org-scoped base storage as
    `set-branch-policy!`, so WHO may set it is the authorize-writer's call.
-   Returns the stored `{:required-approvals :allow-self-approval? :approver-ids}`."
+   Returns the EFFECTIVE `{:required-approvals :allow-self-approval? :approver-ids}`."
   [branch-id required-approvals allow-self-approval? approver-ids]
   (cr/record-effect! :db)
-  (let [row {:required-approvals (normalize-required-approvals required-approvals)
-             :allow-self-approval? (when (some? allow-self-approval?)
-                                     (boolean allow-self-approval?))
-             :approver-ids (normalize-approver-ids approver-ids)}]
-    (sp/update-entity (branches/base-storage ctx) :branch branch-id row)
-    (epoch/bump! (branches/base-storage ctx) :branch)
-    row))
+  (let [keep? #(= :keep %)
+        row (cond-> {}
+              (not (keep? required-approvals))
+              (assoc :required-approvals (normalize-required-approvals required-approvals))
+              (not (keep? allow-self-approval?))
+              (assoc :allow-self-approval? (when (some? allow-self-approval?)
+                                             (boolean allow-self-approval?)))
+              (not (keep? approver-ids))
+              (assoc :approver-ids (normalize-approver-ids approver-ids)))]
+    (when (seq row)
+      (sp/update-entity (branches/base-storage ctx) :branch branch-id row)
+      (epoch/bump! (branches/base-storage ctx) :branch))
+    (-> (sp/read-entity (branches/base-storage ctx) :branch branch-id)
+        (select-keys [:required-approvals :allow-self-approval? :approver-ids]))))
 
 
 (defn- may-approve?
@@ -512,9 +524,10 @@
    proposal branch `source-branch-id` — its target's `:required-approvals`,
    the current count of VALID (non-stale, distinct, author-adjusted)
    approvals, whether that satisfies the requirement, and each recorded
-   approver with a `stale` flag. Pure read; org-scoped via the source
+   approver with a `stale` flag. Read-only, org-scoped via the source
    branch id."
   [source-branch-id]
+  (cr/record-effect! :db)
   (let [base-storage (branches/base-storage ctx)
         source-row (sp/read-entity base-storage :branch source-branch-id)
         target-id (:base-branch-id source-row)
@@ -525,8 +538,11 @@
         stamp (merge-policy/branch-content-stamp base-storage source-branch-id)
         approvals (sp/query-entities base-storage :branch-approval
                                      {:source-branch-id source-branch-id})
-        have (merge-policy/count-valid-approvals base-storage source-branch-id
-                                                 author-id allow-self?)]
+        ;; reuse the stamp + approvals just fetched — the I/O arity of
+        ;; count-valid-approvals would re-run the 5-table stamp query + a
+        ;; second approvals query (the audit-2 double-compute).
+        have (merge-policy/count-valid-approvals* stamp approvals
+                                                  author-id allow-self?)]
     {:required required
      :have have
      :satisfied (>= have required)
@@ -536,20 +552,36 @@
                       approvals)}))
 
 
+(def ^:private max-comment-body-chars
+  "Upper bound on a review comment body. A comment is a sentence or two of
+   conversation; the cap keeps a tenant from bloating its org's DB (and the
+   diff modal that re-serves every comment) with a multi-MB body — http-kit's
+   ~8 MB max-body was the only prior bound. Generous enough for real prose."
+  10000)
+
+
 (defbase add-branch-comment!
   "Record a review comment on proposal branch `source-branch-id` by the
    current principal (`\"anonymous\"` single-tenant). WHO may comment =
    whoever can resolve the branch (org-scoped upstream) — a comment is
-   conversation, not a mutation of the branch. Returns the new row's id."
+   conversation, not a mutation of the branch. Rejects a body over
+   `max-comment-body-chars` with `:validation-error/comment-too-long` (400).
+   Returns the new row's id."
   [source-branch-id body]
   (cr/record-effect! :db)
-  (let [author (or (:user-id tc/*current-principal*) "anonymous")
-        row (sp/create-entity (branches/base-storage ctx) :branch-comment
-                              {:source-branch-id source-branch-id
-                               :author-id author
-                               :body (str body)
-                               :created-at (java.time.Instant/now)})]
-    (str (:id row))))
+  (let [text (str body)]
+    (when (> (count text) max-comment-body-chars)
+      (throw (ex-info (str "Comment too long: " (count text) " chars (max "
+                           max-comment-body-chars ").")
+                      {:type :validation-error/comment-too-long
+                       :max max-comment-body-chars})))
+    (let [author (or (:user-id tc/*current-principal*) "anonymous")
+          row (sp/create-entity (branches/base-storage ctx) :branch-comment
+                                {:source-branch-id source-branch-id
+                                 :author-id author
+                                 :body text
+                                 :created-at (java.time.Instant/now)})]
+      (str (:id row)))))
 
 
 (defbase list-branch-comments
@@ -557,6 +589,7 @@
    `[{:id :author-id :body :created-at} …]` (ids/timestamps stringified
    for the JSON wire)."
   [source-branch-id]
+  (cr/record-effect! :db)
   (->> (sp/query-entities (branches/base-storage ctx) :branch-comment
                           {:source-branch-id source-branch-id})
        (sort-by :created-at)

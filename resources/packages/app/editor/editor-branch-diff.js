@@ -133,6 +133,21 @@ async function appendCommentsThread(body, sourceName) {
   list.className = 'branch-comments-list';
   wrap.appendChild(list);
 
+  // Inline error slot — server rejections (a non-author's delete → 403,
+  // a network drop, a too-long body) surface here instead of silently
+  // no-op'ing. Cleared on the next successful action.
+  const errSlot = document.createElement('div');
+  errSlot.className = 'branch-comment-error hidden';
+  wrap.appendChild(errSlot);
+  const showErr = (msg) => {
+    errSlot.textContent = msg;
+    errSlot.classList.remove('hidden');
+  };
+  const clearErr = () => {
+    errSlot.textContent = '';
+    errSlot.classList.add('hidden');
+  };
+
   const render = (comments) => {
     list.textContent = '';
     if (!comments.length) {
@@ -157,13 +172,22 @@ async function appendCommentsThread(body, sourceName) {
       del.textContent = '×';
       del.title = 'Delete (author only)';
       del.addEventListener('click', async () => {
-        const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: c.id }),
-        });
-        const d = await r.json().catch(() => ({}));
-        if (d.ok) reload();
+        if (del.disabled) return;
+        del.disabled = true;
+        clearErr();
+        try {
+          const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: c.id }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (d.ok) { reload(); return; }
+          showErr(d.error || ('HTTP ' + r.status));
+        } catch (e) {
+          showErr('Could not delete comment: ' + (e?.message || 'network error'));
+        }
+        del.disabled = false;
       });
       row.appendChild(meta);
       row.appendChild(text);
@@ -190,15 +214,24 @@ async function appendCommentsThread(body, sourceName) {
   send.className = 'branch-comment-send';
   send.textContent = 'Comment';
   send.addEventListener('click', async () => {
+    if (send.disabled) return;          // no double-post on a double-click
     const text = input.value.trim();
     if (!text) return;
-    const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: text }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (d.ok) { input.value = ''; reload(); }
+    send.disabled = true;
+    clearErr();
+    try {
+      const r = await window.authFetch(API.api_branches_ref_comments(sourceName), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: text }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) { input.value = ''; reload(); }
+      else showErr(d.error || ('HTTP ' + r.status));
+    } catch (e) {
+      showErr('Could not post comment: ' + (e?.message || 'network error'));
+    }
+    send.disabled = false;
   });
   form.appendChild(input);
   form.appendChild(send);

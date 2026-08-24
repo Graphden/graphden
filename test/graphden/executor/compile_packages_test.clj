@@ -194,6 +194,41 @@
         (is (= big-body (:body out)))))))
 
 
+(deftest response-cache-wrap-single-handler-invocation-test
+  ;; Regression for the once-thunk fix (`rt/thunk` delay semantics).
+  ;; The outermost wrap chain forces the wrapped handler's response
+  ;; from several places (`:_fresh-immutable?`, `put-if!`'s `:value`,
+  ;; the encode chain's body AND header branches). Before once, a
+  ;; per-execute call-cache key divergence re-forced the `:response`
+  ;; thunk and RE-RAN the handler inside one request — the second run
+  ;; hit an already-drained body stream, and its internal-400 headers
+  ;; corrupted the encoded response (gzip body with no
+  ;; Content-Encoding). One request must run the handler EXACTLY once,
+  ;; and the encoded body + headers must come from that one run.
+  (let [calls (atom 0)
+        big-body (str/join (repeat 2000 "y"))
+        handler (fn [_request]
+                  (swap! calls inc)
+                  {:status 200
+                   :headers {"Content-Type" "application/json"}
+                   :body big-body})
+        out (run "response-cache-wrap"
+                 {:request {:uri "/regression/once-thunk"
+                            :request-method :get
+                            :headers {"accept-encoding" "gzip"}}
+                  :base-handler handler})
+        headers (:headers out)]
+    (is (= 1 @calls) "one HTTP request = exactly one handler invocation")
+    (is (= "gzip" (get headers "Content-Encoding"))
+        "encode decision applied to the HEADERS branch")
+    (is (bytes? (:body out)) "…and to the BODY branch — never one without the other")
+    (is (= big-body
+           (with-open [in (java.util.zip.GZIPInputStream.
+                            (java.io.ByteArrayInputStream. (:body out)))]
+             (slurp in)))
+        "the encoded body round-trips to the single run's payload")))
+
+
 ;; ============================================================================
 ;; examples.free-args — propagation + `{:as}` rename, shared free args
 ;; ============================================================================

@@ -9,8 +9,8 @@
      evaluation until the impl actually uses the arg).
 
    `resolve-arg` hides that distinction: if the arg is marked as a thunk it
-   calls it (once; thunks are not memoized — callers wanting memoization
-   should arrange it themselves), otherwise returns as-is.
+   calls it; thunks are once-memoized (delay semantics — see `thunk`), so
+   repeated reads of one arg see one value and never repeat an effect.
 
    `:fn`-typed args (higher-order) are NOT resolved. They enter the args map
    as already-wrapped callables and the impl (e.g. `map`, `reduce`) invokes
@@ -23,12 +23,32 @@
 
 
 (defn thunk
-  "Wrap a 0-arity fn as a resolver thunk. `resolve-arg` will call it exactly
-   once per use-site; multiple uses of the same arg in an impl body call the
-   thunk multiple times. Memoize yourself if that matters (usually it doesn't
-   — most impls reference each arg symbol once)."
+  "Wrap a 0-arity fn as a resolver thunk with ONCE (delay) semantics:
+   the wrapped fn runs at most once, every later force returns the
+   first result. A slot denotes ONE value per evaluation — the lazy
+   model is delay-based (CLAUDE.md § Lazy Execution), and the
+   closure-capture contract says captured args resolve once, invariant
+   per wrap (docs/CLOSURE_CAPTURE.md).
+
+   Once is load-bearing for correctness, not a cache: a ref thunk may
+   wrap an EFFECTFUL subtree (`:_call-base-handler` → the whole app
+   handler chain). Without once, a second force of the same thunk
+   instance re-ran the handler inside one HTTP request whenever the
+   per-execute call-cache key diverged — observed as the handler
+   executing twice (the second run against an already-drained request
+   body stream produced an internal 400 whose headers corrupted the
+   encoded response). Once also makes the call-cache sound by
+   construction: fa values ARE thunks, compared by identity inside the
+   projected cache key, and with once a given thunk instance always
+   denotes one value — so key equality implies input equality.
+
+   Kept as a plain 0-arity fn (not a raw `delay`) so impls that read
+   args raw (`((:body args))` — the closure-capture acceptance test)
+   can still invoke it; the delay lives inside and provides
+   thread-safe run-at-most-once."
   [f]
-  (with-meta f {::thunk true}))
+  (let [d (delay (f))]
+    (with-meta (fn [] @d) {::thunk true})))
 
 
 (defn thunk?

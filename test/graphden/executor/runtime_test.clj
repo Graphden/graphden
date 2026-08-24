@@ -34,12 +34,39 @@
   (testing "calls thunk wrapped via rt/thunk"
     (let [t (rt/thunk (fn [] 42))]
       (is (= 42 (rt/resolve-arg {:x t} :x)))))
-  (testing "thunk called every time resolve-arg is invoked"
+  (testing "ONCE semantics — repeated reads see one value, one effect.
+            Load-bearing: a ref thunk may wrap an effectful subtree (the
+            whole handler chain behind `:_call-base-handler`); before
+            once, a diverged call-cache key re-ran that handler inside
+            one HTTP request (drained-body 400 corrupting the encoded
+            response). See `rt/thunk`'s docstring."
     (let [call-count (atom 0)
           t (rt/thunk (fn [] (swap! call-count inc)))]
-      (rt/resolve-arg {:x t} :x)
-      (rt/resolve-arg {:x t} :x)
-      (is (= 2 @call-count)))))
+      (is (= 1 (rt/resolve-arg {:x t} :x)))
+      (is (= 1 (rt/resolve-arg {:x t} :x)) "second read returns the FIRST value")
+      (is (= 1 @call-count) "the wrapped fn ran exactly once")))
+  (testing "raw 0-arity invocation (impls reading `((:x args))`) shares
+            the same once cell"
+    (let [call-count (atom 0)
+          t (rt/thunk (fn [] (swap! call-count inc)))]
+      (is (= 1 (t)))
+      (is (= 1 (rt/resolve-arg {:x t} :x)))
+      (is (= 1 @call-count))))
+  (testing "once is thread-safe — concurrent first forces run the body
+            exactly once (delay semantics)"
+    (let [call-count (atom 0)
+          t (rt/thunk (fn [] (Thread/sleep 20) (swap! call-count inc)))
+          results (->> (repeatedly 8 #(future (t)))
+                       (doall)
+                       (mapv deref))]
+      (is (every? #(= 1 %) results))
+      (is (= 1 @call-count))))
+  (testing "a nil result is memoized too — no re-run on later reads"
+    (let [call-count (atom 0)
+          t (rt/thunk (fn [] (swap! call-count inc) nil))]
+      (is (nil? (rt/resolve-arg {:x t} :x)))
+      (is (nil? (rt/resolve-arg {:x t} :x)))
+      (is (= 1 @call-count)))))
 
 
 (deftest raw-fn-not-resolved

@@ -2708,11 +2708,25 @@
    :parent :get
    :args {:coll {:as :item} :key {:value :allow-self-approval?} :default nil}}
 
+  {:name :_bp-row-allow-self-on?
+   :parent :equal?
+   :args {:a :_bp-row-allow-self :b {:value true}}}
+
+  {:name :_bp-row-allow-self-off?
+   :parent :equal?
+   :args {:a :_bp-row-allow-self :b {:value false}}}
+
+  {:name :_bp-row-allow-self-off-data
+   :parent :if
+   :args {:test :_bp-row-allow-self-off?
+          :then {:value "off"}
+          :else {:value ""}}}
+
   {:name :_bp-row-allow-self-data
-   :parent :cond
-   :args {:clauses [{:parent :equal? :args {:a :_bp-row-allow-self :b {:value true}}}  {:value "on"}
-                    {:parent :equal? :args {:a :_bp-row-allow-self :b {:value false}}} {:value "off"}
-                    {:value true} {:value ""}]}}
+   :parent :if
+   :args {:test :_bp-row-allow-self-on?
+          :then {:value "on"}
+          :else :_bp-row-allow-self-off-data}}
 
   {:name :_bp-row-protect-active?
    :parent :or

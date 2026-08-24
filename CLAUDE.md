@@ -198,6 +198,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/TUTORIAL_API_POLL.md](docs/TUTORIAL_API_POLL.md) | End-to-end worked example: scheduled API poller built from fn-defs | After tutorial lessons 01–10, or as a template for a real integration |
 | [docs/RUNTIME_SLOT_ID_REFACTOR.md](docs/RUNTIME_SLOT_ID_REFACTOR.md) | The name→slot-id key-space refactor ledger — which runtime spaces are id-keyed vs name-keyed and why the remainder stays hybrid | Before re-keying any runtime map keyed by arg NAME |
 | [docs/adr/ADR-free-arg-slot-map-perf.md](docs/adr/ADR-free-arg-slot-map-perf.md) | Why `free-arg-slot-map` is cached the way it is (VERIFIED) | Before touching free-arg caching |
+| [docs/adr/ADR-thunk-once-and-cache-keys.md](docs/adr/ADR-thunk-once-and-cache-keys.md) | Why ref thunks are ONCE (delay) + the identity-keyed call-cache audit; residual window + revisit triggers | Before touching `rt/thunk`, `call-with-cache` keys, or composing an effectful base-fn under env-bindings with several call sites |
 | [docs/adr/ADR-slot-id-keyed-type-checker.md](docs/adr/ADR-slot-id-keyed-type-checker.md) | Slot-id-keyed checker — EVALUATED + REJECTED; closes TYPE_SYSTEM_DECISIONS § β | Before proposing to re-key the type checker |
 | [docs/devtour/README.md](docs/devtour/README.md) | The developer code-tour — symbol-anchored read of the codebase; `bb devtour` bake + `bb devtour-check` drift guard | When onboarding, or when a toured top-level form is renamed/moved/deleted (CI goes red) |
 

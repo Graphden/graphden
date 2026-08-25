@@ -58,6 +58,8 @@
   "relation: the per-binding rejection cases; each arm is one rule from docs/TYPES.md"
   "graphden.types.check/check-fn-def!"
   "one unit: the per-fn-def check sequence — pre-pass validators and the inference body share one derived let (a previous split duplicated it instead)"
+  "graphden.types.check/check-ref-type-overrides!"
+  "one unit: the per-arg `:type`-override lie-detection walk — both rejections (marker-strip taint-launder + widening) share the same resolved actual/override per binding; splitting would re-derive them"
   "graphden.packages.records.parse/map-arg-value->binding-fields"
   "relation: one arm per authored arg-value shape (literal / ref / rename / list / inline anon), all producing binding fields"
   "graphden.packages.records.types/resolve-type-ref"

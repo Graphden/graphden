@@ -260,6 +260,32 @@
           (is (= :literal-value (:actual-source d))))))))
 
 
+(deftest rejects-type-override-that-strips-a-secret-marker
+  ;; A `:type` override that DROPS a hide-result marker (`:secret`) is a taint
+  ;; launder: `subtype?` accepts it because marker auto-promotion makes
+  ;; `:text ⊆ [:secret :text]` true, so the widening check passes — but the
+  ;; recorded return loses the marker (redaction bypass + plain-sink smuggling).
+  (registry/record-rich-types! :secret-ref {:args {} :return-type [:secret :text]})
+  (registry/record-rich-types! :takes-text {:args {:s :text} :return-type :text})
+  (testing "stripping the :secret marker via `{:ref secret :type :text}` is REJECTED"
+    (try
+      (check/check-fn-def! {:name :launder
+                            :parent :takes-text
+                            :args {:s {:ref :secret-ref :type :text}}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/type-override-strips-marker (:type d)))
+          (is (= :s (:arg-name d)))
+          (is (= :ref-return (:actual-source d)))))))
+  (testing "an override that PRESERVES the marker (`:type [:secret :text]`) passes"
+    (registry/record-rich-types! :takes-secret {:args {:s [:secret :text]} :return-type :text})
+    (is (some? (check/check-fn-def!
+                 {:name :ok-preserves
+                  :parent :takes-secret
+                  :args {:s {:ref :secret-ref :type [:secret :text]}}})))))
+
+
 (deftest rejects-ref-on-sequence-slot-with-elem-type-mismatch
   (testing "sequence-slot bound to a ref whose return is [:list T'] with T'≠T is rejected (previously deferred under `deferred-binding?`'s loose 'sequence slot expects vector' arm, a silent footgun for typevar conflicts like :filter :pred :int-pred :coll :text-list-fn)"
     (registry/record-rich-types! :_text-list-source

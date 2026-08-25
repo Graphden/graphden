@@ -1004,6 +1004,43 @@
               [:literal-value
                (lit/classify-literal (:value b-form))]
               :else nil)]
+        ;; TAINT-STRIP guard (mirrors `crud.validation/resolver-rej` for the
+        ;; `type-override-fn-id` path): a hide-result marker (e.g. `:secret`)
+        ;; on the ref-return / value MUST be preserved by the override.
+        ;; `subtype?` cannot catch this — marker auto-promotion makes
+        ;; `:text ⊆ [:secret :text]` TRUE, so stripping the marker reads as a
+        ;; legal narrowing and passes the widening check below. Without this,
+        ;; `{:ref <secret-fn> :type :text}` launders the secret out of the
+        ;; type system: the recorded return loses the marker → the run-pane
+        ;; redaction (`persist/tainted-fn?`) no longer fires AND the value
+        ;; satisfies a plain-typed sink (e.g. `:http-request/:headers`),
+        ;; bypassing the `:auth-value` channel design.
+        (when (and actual override actual-source
+                   (not (has-type-var? actual))
+                   (not (has-type-var? override))
+                   (types/contains-hide-result-marker? actual)
+                   (not (types/contains-hide-result-marker? override)))
+          (throw (ex-info
+                   (str "Type-check failed in fn-def " (pr-str fn-name)
+                        "\n  arg " (pr-str arg-name) " ← " (pr-str b-form)
+                        "\n  parent " (pr-str parent-name) (source-suffix parent-name)
+                        "\n  reason: the `:type` override " (pr-str override)
+                        " strips a hide-result marker (e.g. :secret) carried by"
+                        " the " (name actual-source) " " (pr-str actual)
+                        ". A marked/tainted value cannot be reclassified to a"
+                        " plain type — that would launder it out of the type"
+                        " system (bypassing result-redaction and sink"
+                        " capability-narrowing). Bind it to a marker-typed slot"
+                        " (e.g. the `:auth-value` channel) instead.")
+                   (merge {:fn-name fn-name
+                           :parent-name parent-name
+                           :arg-name arg-name
+                           :binding b-form
+                           :actual-source actual-source
+                           :actual actual
+                           :override override
+                           :type :bindings/type-override-strips-marker}
+                          *source-info*))))
         (when (and actual override actual-source
                    (not (has-type-var? actual))
                    (not (has-type-var? override))

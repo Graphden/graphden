@@ -138,6 +138,36 @@
         (exec-ctx/invalidate-graph-cache! ctx)))))
 
 
+(defn- restart-notified-services!
+  "A sibling pod's `fn:invalidate` event must restart any cron/loop service
+   singleton THIS pod owns whose closure depends on the changed fn — just
+   dropping the ctx cache (`invalidate-from-notify!`) leaves a RUNNING closure
+   firing the pre-edit graph (HTTP services re-read lazily per request and are
+   fine; a cron loop holds the closure by reference). This mirrors the LOCAL
+   write path's `restart-services-depending-on!` hook, which fires only on the
+   pod that processed the write — so before this, a fn edit / merge on pod A
+   left pod B's cron singletons stale until a pod restart.
+
+   A seeded event scopes the restart to services depending on that fn on the
+   edited branch; a full-clear event (no seed) conservatively restarts every
+   service on the branch. Best-effort: the write already committed; a restart
+   failure is logged, never propagated. (The pod that emitted the event also
+   receives it and may restart a service its local hook just restarted — a rare
+   redundant bounce, not incorrectness.)"
+  [ctx id branch-id]
+  (let [branch-uuid (when-not (str/blank? branch-id)
+                      (java.util.UUID/fromString branch-id))
+        seeds (when-not (str/blank? id) [(java.util.UUID/fromString id)])]
+    (when branch-uuid
+      (try
+        (if (seq seeds)
+          (recon/restart-services-depending-on! ctx recon/running seeds branch-uuid)
+          (recon/restart-services-on-branch! ctx recon/running branch-uuid))
+        (catch Exception e
+          (log/warn e "cross-pod service restart hook failed"
+                    {:id id :branch-id branch-id}))))))
+
+
 (defn- on-notify
   "Multi-purpose listener callback. `reconcile!` is the injected
    reconcile fn (see the init-key's `:reconcile-fn` opt) —
@@ -163,6 +193,11 @@
         :service   (reconcile! ctx recon/running {:max-retries 0 :backoff-ms 0})
         :fn        (when (= op :invalidate)
                      (invalidate-from-notify! ctx id branch-id)
+                     ;; Dropping the ctx cache does NOT rebuild an already-
+                     ;; running cron/loop closure — restart the services that
+                     ;; depend on the changed fn on this pod (mirrors the local
+                     ;; write hook, which only fired on the writer pod).
+                     (restart-notified-services! ctx id branch-id)
                      ;; Delta applied — mark the writer's exact bump
                      ;; values COVERED so the lazy epoch validation
                      ;; doesn't heal over what this event just did.

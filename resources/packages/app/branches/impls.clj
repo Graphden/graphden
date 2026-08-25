@@ -292,7 +292,24 @@
                 (if router
                   (br/ctx-for router target-branch-id)
                   ctx)
-                affected)))
+                affected)
+              ;; Cross-pod: the local invalidate + restart-services-on-branch!
+              ;; below fire only on THIS pod. A merge writes no per-fn NOTIFY of
+              ;; its own (registries heal cross-pod via the graph epoch), but a
+              ;; RUNNING cron/loop closure on a sibling pod never re-fetches —
+              ;; it keeps firing the pre-merge graph. Emit the same fn:invalidate
+              ;; event an edit emits, per affected fn on the target branch, so
+              ;; sibling pods invalidate AND restart their own singletons
+              ;; (init.services/on-notify). org-id rides along for the SSE relay's
+              ;; per-org fan-out, exactly as the edit path does.
+              (when-let [emit (:notify-emitter ctx)]
+                (let [branch-str (str target-branch-id)
+                      org-id (:org-id (sp/read-entity (branches/base-storage ctx)
+                                                      :branch target-branch-id))]
+                  (doseq [fid affected]
+                    (emit (cond-> {:kind :fn :op :invalidate :id (str fid)
+                                   :branch-id branch-str}
+                            org-id (assoc :org-id org-id))))))))
           (try
             (recon/restart-services-on-branch! ctx recon/running
                                                target-branch-id)

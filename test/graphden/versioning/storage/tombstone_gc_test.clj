@@ -39,6 +39,19 @@
     (sp/delete-entity vf :fn id)))
 
 
+(defn- sweep-all!
+  "Run the GC with a cutoff in the FUTURE (negative retention) so a tombstone
+   just written by the test reliably qualifies. `tombstone-gc-sweep! base 0`
+   sets cutoff = now, and `gc-candidate-ids` uses a strict `created-at < cutoff`;
+   when the delete and the sweep land in the same clock millisecond (a fast /
+   coarse-clock CI runner) the just-written tombstone is NOT `< now`, so it is
+   skipped and the purge silently no-ops — a boundary race that intermittently
+   reds the GitHub integration run. A future cutoff removes the race without
+   touching prod semantics (prod retention is day-scale)."
+  [base]
+  (vs/tombstone-gc-sweep! base -1000))
+
+
 (defn- live?
   "Is fn `id` resolved (visible) on the branch `vf` points at?"
   [vf id]
@@ -60,7 +73,7 @@
         (testing "precondition: gone from the resolved view, identity row lingers"
           (is (not (live? v (:id f))))
           (is (identity-exists? base (:id f))))
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC purges the dead entity — identity + versions gone"
             (is (= 1 (:fn purged)))
             (is (not (identity-exists? base (:id f)))))))
@@ -78,7 +91,7 @@
         (testing "precondition: deleted on B, still live on main"
           (is (not (live? vb (:id f))))
           (is (live? v (:id f))))
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC must NOT purge — it resolves live on main"
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id f)))
@@ -103,7 +116,7 @@
         (testing "precondition: the fork inherits main's LATEST (the delete)"
           (is (not (live? v (:id f))))
           (is (not (live? vc (:id f)))))
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC purges it, and the fork still sees it absent (no resurrection)"
             (is (= 1 (:fn purged)))
             (is (not (identity-exists? base (:id f))))
@@ -128,7 +141,7 @@
         (testing "precondition: deleted on main, still live (edited) on the branch"
           (is (not (live? v (:id f))))
           (is (live? vb (:id f))))
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC must NOT purge — the branch resolves its own live version"
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id f)))
@@ -156,7 +169,7 @@
       (let [p (sp/create-entity v :fn {:name "parent" :parent-ids [] :description "h"})
             _ (sp/create-entity v :fn {:name "child" :parent-ids [(:id p)] :description "h"})]
         (tombstone-delete! v (:id p))                 ; tombstone the parent
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC must NOT purge a fn a live child still lists as a parent"
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id p))))))
@@ -175,7 +188,7 @@
       (let [tf (sp/create-entity v :fn {:name "slot-type" :parent-ids [] :description "h"})
             _  (sp/create-entity v :slot {:name "typed-x" :type-fn-id (:id tf)})]
         (tombstone-delete! v (:id tf))
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC must NOT purge a fn a live slot names as its :type-fn-id"
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id tf))))))
@@ -190,7 +203,7 @@
             _  (sp/create-entity v :fn {:name "uses-ret" :parent-ids []
                                         :return-type-fn-id (:id rt) :description "h"})]
         (tombstone-delete! v (:id rt))
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC must NOT purge a fn a live fn names as its :return-type-fn-id"
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id rt))))))
@@ -215,7 +228,7 @@
         (tombstone-delete! v (:id x))                                  ; delete X on main
         (testing "precondition: X dead on main"
           (is (not (live? v (:id x)))))
-        (let [purged (vs/tombstone-gc-sweep! base 0)]
+        (let [purged (sweep-all! base)]
           (testing "GC must NOT purge X — B's binding still references it"
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id x))))))
@@ -236,7 +249,7 @@
             b  (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id s) :list-append true})
             i  (sp/create-entity v :binding-list-item {:binding-id (:id b) :position 0 :value "x"})]
         (tombstone-delete! v (:id f))                 ; delete only the fn
-        (vs/tombstone-gc-sweep! base 0)
+        (sweep-all! base)
         (testing "the fn AND its owned binding + list-item are all reclaimed"
           (is (not (identity-exists? base (:id f))))
           (is (empty? (sp/query-entities base :binding {:id (:id b)}))
@@ -259,7 +272,7 @@
             i  (sp/create-entity v :binding-list-item {:binding-id (:id b) :position 0 :value "x"})]
         (binding [vs/*tombstone-delete?* true]
           (sp/delete-entity v :binding (:id b)))      ; delete only the binding; fn stays live
-        (vs/tombstone-gc-sweep! base 0)
+        (sweep-all! base)
         (testing "the binding and its own list-items are reclaimed; the owning fn survives"
           (is (empty? (sp/query-entities base :binding {:id (:id b)})))
           (is (empty? (sp/query-entities base :binding-list-item {:id (:id i)}))

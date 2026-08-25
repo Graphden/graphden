@@ -523,6 +523,34 @@
       (finally (sp/close storage)))))
 
 
+(deftest binding-create-handler-forwards-rename-to-a-view-slot
+  ;; Regression: the edge-label arg rename works end-to-end. The rename
+  ;; side-effect reads `:rename-to` from the RAW form-data — NOT the binding
+  ;; parser (which correctly omits the retired `:rename-to` column) — so
+  ;; `apply-create-core` must forward it to `ensure-rename-slot!`, minting a
+  ;; rename-view `:slot` with `:source-slot-id`. (A prior audit flagged this as
+  ;; broken by tracing only the parser path; this pins the real handler chain.)
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (let [parent   (setup/create-base-fn! storage "brh-parent")
+            src-slot (setup/create-slot! storage "orig" :int)
+            _        (setup/attach-slot! storage (:id parent) (:id src-slot) 0)
+            child    (setup/create-composed-fn! storage "brh-child" (:id parent))
+            res      (entities/apply-create-core
+                       {:entity-type :binding :type-str "binding"
+                        :form-data {:rename-to "renamed"}
+                        :entity-data {:fn-id (:id child) :slot-id (:id src-slot)}}
+                       c)]
+        (testing "the binding is created and the rename-view slot is forwarded"
+          (is (some? (:created res)))
+          (let [renamed (->> (sp/query-entities storage :slot {})
+                             (filter #(= "renamed" (:name %))) first)]
+            (is (some? renamed) "a rename-view slot was created through the handler")
+            (is (= (:id src-slot) (:source-slot-id renamed))))))
+      (finally (sp/close storage)))))
+
+
 (deftest create-entity-vault-put-capability-gate-test
   ;; Followup-A6: any direct attempt to create a fn-def with
   ;; `parent-ids` touching one of the admin-only WRITE vault

@@ -528,6 +528,28 @@
   (reset! @#'persist/live-executions {:total 0 :by-org {}}))
 
 
+(deftest acquire-execution-slot-tenant-per-pod-atom-cap
+  ;; The pure/non-persisted bypass fix: a tenant's inline pure executions write
+  ;; NO :fn-execution row, so `over-fleet-org-cap?` counts 0 pending forever.
+  ;; Before, the per-pod atom cap was short-circuited for tenants (`or tenant?`),
+  ;; so a flood of sub-timeout pure runs — counted by neither cap — let one
+  ;; tenant monopolise the shared pool. The atom cap now applies to tenants too.
+  (reset! @#'persist/live-executions {:total 0 :by-org {}})
+  (binding [persist/*max-concurrent-executions-per-org* 2]
+    (let [storage (fake-exec-storage {})            ; 0 pending → fleet cap never trips
+          acq #(persist/acquire-execution-slot! storage "acme" true)
+          a1 (acq) a2 (acq) a3 (acq)]
+      (testing "a tenant is capped by the per-pod atom even with 0 persisted rows"
+        (is (fn? a1))
+        (is (fn? a2))
+        (is (nil? a3) "the 3rd concurrent pure run is rejected — no pool monopoly"))
+      (testing "release frees a slot for the tenant"
+        (a1)
+        (is (fn? (acq))))
+      (a2)))
+  (reset! @#'persist/live-executions {:total 0 :by-org {}}))
+
+
 (deftest acquire-execution-slot-release-is-idempotent
   ;; apply-execute may release a slot on its error path AND the future's
   ;; `finally` may release the same slot — release MUST decrement exactly

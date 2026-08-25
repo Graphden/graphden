@@ -642,22 +642,29 @@
   "Try to reserve a concurrency slot for `org`. Returns a 0-arg RELEASE fn on
    success, or nil when a cap is already hit (caller must reject).
 
-   `tenant?` selects the per-org enforcement: true → FLEET-WIDE (count pending
-   `:fn-execution` rows in `storage`); false (the public/platform org) → the
-   per-pod atom. The global per-pod cap always applies. See the section
-   comment above for scope rationale."
+   Per-org enforcement is TWO-LAYER: the per-pod atom cap (below) applies to
+   EVERY org — including tenants — bounding an org to
+   `*max-concurrent-executions-per-org*` concurrent executions ON THIS POD,
+   whether or not they persist a `:fn-execution` row. `tenant?` additionally
+   gates FLEET-WIDE on the pending-row count (`over-fleet-org-cap?` below), the
+   cross-pod bound for persisted runs. The atom tallies ALL of the org's live
+   executions (inline pure + async) and is released in `run-future`'s `finally`.
+
+   Before this, the atom check was short-circuited for tenants (`or tenant?`),
+   so a flood of PURE / non-persisted executions (which write no `:fn-execution`
+   row) were counted by neither cap and let one tenant monopolise the shared
+   pool + queue — the isolation break `docs/SCALING.md` claims is prevented."
   [storage org tenant?]
   (let [[old new] (swap-vals!
                     live-executions
                     (fn [{:keys [by-org] :as st}]
-                      ;; PER-ORG fairness only — the GLOBAL per-pod bound moved
-                      ;; to the bounded execution pool (park-then-503), so this
-                      ;; no longer rejects at `*max-concurrent-executions*`.
-                      ;; Tenants gate per-org on the fleet count below; public
-                      ;; gates on the local atom here. `:total` is still tracked
-                      ;; for observability.
-                      (if (or tenant?
-                              (< (get by-org org 0) *max-concurrent-executions-per-org*))
+                      ;; PER-ORG fairness — the GLOBAL per-pod bound moved to the
+                      ;; bounded execution pool (park-then-503), so this no longer
+                      ;; rejects at `*max-concurrent-executions*`. The per-org
+                      ;; atom cap applies to every org (tenants gate ADDITIONALLY
+                      ;; on the fleet count below). `:total` tracked for
+                      ;; observability.
+                      (if (< (get by-org org 0) *max-concurrent-executions-per-org*)
                         (-> st (update :total inc) (update-in [:by-org org] (fnil inc 0)))
                         st)))]
     (when (not= old new)

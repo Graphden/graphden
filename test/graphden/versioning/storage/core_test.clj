@@ -2052,3 +2052,56 @@
         (testing "re-merge carries the source's genuine new edit"
           (is (= "v_S2" (bval)))))
       (finally (sp/close base)))))
+
+
+(deftest merge-refuses-to-silently-drop-inherited-content-test
+  ;; A by-reference merge carries only the source's OWN rows. A STACKED source
+  ;; (S forked off R, where R — not S — edited X) shows X by inheritance but
+  ;; owns no row for it; merging S into main would drop R's change silently.
+  ;; The guard refuses instead — the user merges the intermediate R first.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "inh-fn" :parent-ids []})
+            s (sp/create-entity v :slot {:name "inh-x" :type-fn-id (:id f)})
+            b (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id s) :value "v0"})
+            main (vs/current-branch-id v)
+            r  (vs/create-branch! v "inh-R")
+            _  (sp/update-entity (vs/switch-branch v (:id r)) :binding (:id b) {:value "vR"})
+            stacked (vs/create-branch! (vs/switch-branch v (:id r)) "inh-S")  ; S.base = R
+            bmain #(:value (sp/read-entity (vs/switch-branch v main) :binding (:id b)))]
+        (testing "S shows R's inherited value; main still shows v0"
+          (is (= "vR" (:value (sp/read-entity (vs/switch-branch v (:id stacked)) :binding (:id b)))))
+          (is (= "v0" (bmain))))
+        (testing "merging the stacked branch into main is REFUSED (would drop R's change)"
+          (let [ex (try (vs/merge-branch! (vs/switch-branch v main) (:id stacked))
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :merge/inherited-content-not-transferable (:type (ex-data ex))))
+            (is (some #(= (:id b) (:entity-id %)) (:entities (ex-data ex)))
+                "the dropped binding is named in the error")
+            (is (= "v0" (bmain)) "main is unchanged — the merge did not commit")))
+        (testing "merging the intermediate R first, then S, succeeds and carries the change"
+          (vs/merge-branch! (vs/switch-branch v main) (:id r))            ; R → main
+          (is (= "vR" (bmain)))
+          (vs/merge-branch! (vs/switch-branch v main) (:id stacked))      ; S → main now clean
+          (is (= "vR" (bmain)))))
+      (finally (sp/close base)))))
+
+
+(deftest merge-forked-off-target-is-not-blocked-test
+  ;; The guard must NOT over-trigger: a branch forked directly off the target
+  ;; shares all its inherited content with the target, so a normal merge of its
+  ;; own edit is complete and proceeds (the common propose→merge flow).
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "ok-fn" :parent-ids []})
+            s (sp/create-entity v :slot {:name "ok-x" :type-fn-id (:id f)})
+            b (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id s) :value "v0"})
+            main (vs/current-branch-id v)
+            feat (vs/create-branch! v "ok-feat")]      ; forked off main (= target)
+        (sp/update-entity (vs/switch-branch v (:id feat)) :binding (:id b) {:value "v_feat"})
+        (vs/merge-branch! (vs/switch-branch v main) (:id feat))
+        (testing "the forked-off-target merge is not blocked and carries the edit"
+          (is (= "v_feat" (:value (sp/read-entity (vs/switch-branch v main) :binding (:id b)))))))
+      (finally (sp/close base)))))

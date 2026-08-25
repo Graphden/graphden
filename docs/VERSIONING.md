@@ -603,19 +603,24 @@ keeps its inline 📍 badge on the same rows.
 
 ## Known gaps
 
-- **Merge is one-hop (non-transitive).** A merge of source `S` into target `T`
-  transfers only the versions `S` OWNS (its own version rows since the last
-  merge of `S` into `T`) — not content `S` merely *inherits* from an
-  intermediate ancestor `R` (`S.base = R`) that `T` does not share. So merging a
-  *stacked* branch `S` (forked off `R`, where `R` — not `S` — edited fn `X`) into
-  `main` leaves `main` at its old `X`, silently: the change was visible on `S` by
-  inheritance but `S` holds no version row for it, and `detect-conflicts`
-  compares only the two endpoints' own rows. Workaround: merge the intermediate
-  (`R`) first, or edit on the branch you merge. `load-merge-aware-cache`
-  collects only the target chain's *direct* merge sources (one hop); making
-  merge transitive (walk the source's own ancestor/merge closure) is a
-  deliberate open design question, not yet decided — flagged 2026-08-25.
-  (Re-merging the SAME source is safe: a re-merge carries only the source's
+- **Merge is one-hop (non-transitive) — and REFUSES rather than silently drops.**
+  A merge of source `S` into target `T` transfers only the versions `S` OWNS
+  (its own version rows since the last merge of `S` into `T`) — not content `S`
+  merely *inherits* from an intermediate ancestor `R` (`S.base = R`) or a branch
+  `S` itself merged, that `T` does not share. A by-reference merge (`branch-merge`
+  record) surfaces only `S`'s own rows, so that inherited content cannot be
+  carried. Rather than lose it silently, the merge is **blocked** with
+  `:merge/inherited-content-not-transferable` (409): `untransferable-inherited-
+  entities` (built on the resolved-view `diff-branches`) lists the entities that
+  would be dropped, and the merge refuses. **Workaround: merge the intermediate
+  branch (`R`) into `T` first, then merge `S`.** The common cases never trip it —
+  a branch forked off `T`, or a sibling of `T` off a shared ancestor, shares all
+  its inherited content with `T`, so nothing is dropped. Making merge
+  *transitive* (walk the source's own ancestor/merge closure during resolution +
+  detect conflicts on inherited rows) is a deliberate larger change to the
+  resolution backbone, deferred as a future enhancement — the block makes the
+  current one-hop model SAFE in the meantime (guard added 2026-08-25).
+  (Re-merging the SAME source is also safe: a re-merge carries only the source's
   changes SINCE the prior merge, so an unchanged re-merge cannot revert a target
   edit made in between — `merge-candidates-from-cache`'s per-source eligible
   window, regression-tested by `re-merge-does-not-silently-revert-target-edit`.)

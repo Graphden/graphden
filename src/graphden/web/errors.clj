@@ -47,6 +47,11 @@
    ;; review policy: the merge is well-formed but the target needs more
    ;; approvals than the proposal currently has.
    :branch/approval-required 409
+   ;; the merge is well-formed but the source shows content inherited from a
+   ;; branch the target does not share; a by-reference merge carries only the
+   ;; source's OWN rows, so that content would be silently lost — merge the
+   ;; intermediate branch into the target first.
+   :merge/inherited-content-not-transferable 409
    :user/exists 409
    ;; authz
    :authz/forbidden 403
@@ -91,7 +96,7 @@
     "refinement" "capability" "execution" "execution-error"
     "graph-error" "secrets" "authz" "user" "grant" "domain"
     "merge-conflict" "merge-protection-violation" "not-found" "vault"
-    "quota" "sequence-op" "branch"})
+    "quota" "sequence-op" "branch" "merge"})
 
 
 (defn status-for

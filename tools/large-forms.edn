@@ -102,6 +102,8 @@
   "one unit: identity row + version row inside one transaction / advisory-lock scope"
   "graphden.versioning.storage.core/delete-branch!"
   "one unit: the branch teardown transaction — write, invalidate, best-effort service stop (decision recorded in its docstring)"
+  "graphden.versioning.storage.merge/merge-branch!"
+  "one unit: the atomic merge critical section — lock both endpoints, recheck existence, detect-conflicts, refuse untransferable inherited content, write the merge record + resolutions, assert post-merge uniqueness — all inside one tx; splitting it would fragment the check-then-write-then-verify atomicity"
   "graphden.packages.sync/sync-fn-entities-from-packages!"
   "one unit: the sync write order (identities, slots, junctions, bindings, reconcile) is the correctness argument"
   "graphden.packages.sync/reconcile-moved-identities*!"

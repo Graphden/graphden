@@ -2307,6 +2307,24 @@
                  {:parent :get :args {:coll :_merge-apply-ex-data :key {:value :required} :default nil}}
                  {:parent :get :args {:coll :_merge-apply-ex-data :key {:value :have} :default nil}}]}}
 
+  {:name :_merge-apply-err-inherited
+   :description "Inherited-content envelope — `{:ok false :reason :inherited-content-not-transferable :http-status 409 :error \"…\" :entities [{:entity-name :entity-id} …]}`. Thrown by `merge.core` (via `merge/untransferable-inherited-entities`) when a by-reference merge would silently drop content the source shows by inheritance from a branch the target does not share."
+   :parent :zipmap
+   :return-type {:ok :bool
+                 :reason :keyword
+                 :http-status :int
+                 :error :text
+                 :entities :any}
+   :args {:keys [{:value :ok} {:value :reason} {:value :http-status :literal? true}
+                 {:value :error} {:value :entities}]
+          :vals [{:value false}
+                 {:value :inherited-content-not-transferable}
+                 {:value 409}
+                 {:parent :coalesce
+                  :args {:value {:parent :throwable-message :args {:ex {:as :exception}}}
+                         :default "Merge blocked: inherited content would be lost"}}
+                 {:parent :get :args {:coll :_merge-apply-ex-data :key {:value :entities} :default []}}]}}
+
   {:name :_merge-apply-err-generic-msg
    :description "Fallback message — `(or (.getMessage e) \"Unknown error\")`."
    :parent :coalesce
@@ -2320,10 +2338,12 @@
           :vals [{:value false} :_merge-apply-err-generic-msg]}}
 
   {:name :_merge-apply-clauses
-   :description "Dynamic `:case` clauses map — `{:merge-conflict <ref> :merge-protection-violation <ref> :branch/approval-required <ref>}`. Built via `:zipmap` so each result-vec entry is a ref (resolving to its envelope), not a literal keyword."
+   :description "Dynamic `:case` clauses map — `{:merge-conflict <ref> :merge-protection-violation <ref> :branch/approval-required <ref> :merge/inherited-content-not-transferable <ref>}`. Built via `:zipmap` so each result-vec entry is a ref (resolving to its envelope), not a literal keyword."
    :parent :zipmap
-   :args {:keys [{:value :merge-conflict} {:value :merge-protection-violation} {:value :branch/approval-required}]
-          :vals [:_merge-apply-err-conflict :_merge-apply-err-protection :_merge-apply-err-approval]}}
+   :args {:keys [{:value :merge-conflict} {:value :merge-protection-violation}
+                 {:value :branch/approval-required} {:value :merge/inherited-content-not-transferable}]
+          :vals [:_merge-apply-err-conflict :_merge-apply-err-protection
+                 :_merge-apply-err-approval :_merge-apply-err-inherited]}}
 
   {:name :_merge-apply-on-throw
    :description "`:try`'s `:on-throw` handler — dispatches on `(:type (ex-data e))` via `:case`. The `:merge-conflict` clause builds the structured 409-style payload; `:merge-protection-violation` builds the 409 branch-policy/trait envelope; default falls through to a generic `{:ok false :error <message>}`."

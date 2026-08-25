@@ -436,6 +436,40 @@
      :diffs (vec diffs)}))
 
 
+(defn untransferable-inherited-entities
+  "Entities a by-reference merge of `source-branch-id` into `target-branch-id`
+   would SILENTLY DROP. A merge inserts a `branch-merge` record that surfaces
+   only the SOURCE's OWN version rows; content the source shows by INHERITANCE
+   — from an ancestor it forked off, or a branch it merged — that the target
+   does not already share is NOT carried, so it would vanish from the merged
+   result without a conflict or any signal.
+
+   Returns `[{:entity-name :entity-id} …]`; EMPTY in the common cases where the
+   merge is complete: a branch forked off the target, or a sibling of it, shares
+   all its inherited content with the target (those entities resolve equal on
+   both sides, so they never enter the diff). Non-empty only for a genuine
+   cross-base / stacked / chained merge.
+
+   Computed from the resolved-view `diff-branches` (which already accounts for
+   ancestor + merge visibility): a diff entry the source contributes
+   (`:source-version` present) whose entity the source does NOT own a version
+   row for is inherited — the record won't carry it."
+  [base-storage source-branch-id target-branch-id]
+  (let [{:keys [diffs]} (diff-branches base-storage source-branch-id target-branch-id)
+        source-owned (reduce-kv
+                       (fn [acc entity-name {:keys [version-entity version-id-field]}]
+                         (assoc acc entity-name
+                                (into #{} (map version-id-field)
+                                      (sp/query-entities base-storage version-entity
+                                                         {:branch-id source-branch-id}))))
+                       {} res/entity-config)]
+    (vec
+      (for [{:keys [entity-name entity-id source-version]} diffs
+            :when (some? source-version)                       ; the source brings a value here
+            :when (not (contains? (get source-owned entity-name #{}) entity-id))]
+        {:entity-name entity-name :entity-id entity-id}))))
+
+
 (defn merge-affected-fn-ids
   "The set of `:fn` ids whose resolved definition (and therefore
    compiled closure) changes on the target when `source-branch-id` is
@@ -616,6 +650,25 @@
            (let [{:keys [conflicts]} (detect-conflicts storage source-branch-id
                                                        target-branch-id)]
              (assert-resolutions-cover-conflicts! conflicts conflict-resolutions)
+             ;; A by-reference merge carries only the source's OWN rows, so
+             ;; content the source shows by inheritance from a branch the target
+             ;; does not share would be SILENTLY dropped. Refuse rather than lose
+             ;; it — the user merges the intermediate branch into the target
+             ;; first. Empty (no-op) for the common forked-off-target / sibling
+             ;; merges; fires only on a genuine cross-base / stacked merge.
+             (let [dropped (untransferable-inherited-entities storage source-branch-id
+                                                              target-branch-id)]
+               (when (seq dropped)
+                 (throw (ex-info
+                          (str "Merge blocked: this branch shows " (count dropped)
+                               " change(s) inherited from a branch the target does not "
+                               "share. A merge transfers only this branch's own changes, "
+                               "so that content would be lost. Merge the intermediate "
+                               "branch into the target first, then merge this one.")
+                          {:type :merge/inherited-content-not-transferable
+                           :entities dropped
+                           :source-branch-id source-branch-id
+                           :target-branch-id target-branch-id}))))
              (let [merge-record (create-merge-record! storage source-branch-id
                                                       target-branch-id merge-ts)]
                (apply-resolutions! storage conflicts conflict-resolutions

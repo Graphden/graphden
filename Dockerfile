@@ -13,7 +13,7 @@ FROM eclipse-temurin:21-jre-jammy@sha256:fa4854e6057665066cb79953616671c20f32b96
 # This is the hadolint DL3008 contract: deliberate awareness of every
 # dependency patch instead of latent "whatever apt ships today" drift.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl=7.81.0-1ubuntu1.26 \
+        curl=7.81.0-1ubuntu1.27 \
     && rm -rf /var/lib/apt/lists/*
 
 # Marks every executor image we build — canonical and per-agent alike — so

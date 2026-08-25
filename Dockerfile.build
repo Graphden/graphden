@@ -16,7 +16,7 @@ FROM eclipse-temurin:21-jre-jammy@sha256:fa4854e6057665066cb79953616671c20f32b96
 
 # Pinned curl version — mirrors Dockerfile; see its comment for why.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl=7.81.0-1ubuntu1.26 \
+        curl=7.81.0-1ubuntu1.27 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

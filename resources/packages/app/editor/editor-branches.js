@@ -1146,8 +1146,21 @@ async function submitConflictResolutions(sourceName, targetName) {
     };
   });
   const errBox = document.getElementById('merge-conflicts-error');
+  const setError = (msg) => {
+    if (errBox) { errBox.textContent = msg; errBox.classList.remove('hidden'); }
+  };
+
+  // Same fetch/response split as mergeBranchInto (they submit the SAME merge —
+  // this is just the conflict-resolved re-submit). A fetch REJECTION means the
+  // merge committed and the target's post-commit service restart severed the
+  // response — the canonical case is resolving conflicts on a merge into main
+  // that touches the web-server serving this very request. Without this split
+  // the catch reported "Failed to fetch" on an already-committed merge, leaving
+  // the modal open so the user re-submits an already-done merge. A response that
+  // DID arrive (even an error page) means the merge did NOT commit.
+  let resp;
   try {
-    const resp = await window.authFetch(
+    resp = await window.authFetch(
       API.api_branches_ref_merge(targetName),
       {
         method: 'POST',
@@ -1157,22 +1170,21 @@ async function submitConflictResolutions(sourceName, targetName) {
           'conflict-resolutions': resolutions,
         }),
       });
-    const body = await resp.json();
-    if (!resp.ok || body?.ok === false) {
-      if (errBox) {
-        errBox.textContent = body?.error || ('HTTP ' + resp.status);
-        errBox.classList.remove('hidden');
-      }
-      return;
-    }
-    closeConflictsModal();
-    location.reload();
-  } catch (err) {
-    if (errBox) {
-      errBox.textContent = err?.message || 'Merge failed';
-      errBox.classList.remove('hidden');
-    }
+  } catch (_netErr) {
+    setError('Merge submitted — ' + targetName + ' is restarting, verifying…');
+    if (await waitForServerBack(30000)) { closeConflictsModal(); location.reload(); return; }
+    setError('Merge sent, but ' + targetName + ' has not come back yet — '
+             + 'reload in a moment to confirm.');
+    return;
   }
+  if (resp.status === 401) { setError('Sign in to merge'); return; }
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok || body?.ok === false) {
+    setError(body?.error || ('HTTP ' + resp.status));
+    return;
+  }
+  closeConflictsModal();
+  location.reload();
 }
 
 // Public API for sibling modules.

@@ -44,10 +44,17 @@ function makeCtx({ authFetch, healthOk = true }) {
   if (!document.body.addEventListener) document.body.addEventListener = () => {};
   if (!document.addEventListener) document.addEventListener = () => {};
   const errEl = { textContent: '', classList: { add() {}, remove() {} } };
-  document.getElementById = (id) =>
-    (id === 'branch-popover-error' ? errEl : null);
+  const conflictErrEl = { textContent: '', classList: { add() {}, remove() {} } };
+  document.getElementById = (id) => {
+    if (id === 'branch-popover-error') return errEl;
+    if (id === 'merge-conflicts-error') return conflictErrEl;
+    return null;
+  };
+  // submitConflictResolutions reads the conflict rows; an empty set is fine —
+  // the fetch/response handling under test is independent of the resolutions.
+  document.querySelectorAll = () => [];
 
-  const state = { reloaded: false, errEl };
+  const state = { reloaded: false, errEl, conflictErrEl };
   const locationStub = {
     search: '', href: 'http://x/', reload() { state.reloaded = true; },
   };
@@ -123,6 +130,49 @@ function makeCtx({ authFetch, healthOk = true }) {
     assert(/sign in/i.test(state.errEl.textContent),
            '401 handled before json() (guard moved ahead of the parse)');
     assert(state.reloaded === false, 'no reload on 401');
+  });
+
+  // submitConflictResolutions — the conflict-resolved RE-submit of the same
+  // merge. It must carry the SAME severed→verify→reload handling mergeBranchInto
+  // has (regression: it had a plain try/catch that reported "Failed to fetch" on
+  // an already-committed merge into a live service, leaving the modal open).
+  await test('conflict re-submit: fetch REJECTS → verify + reload, no scary error', async () => {
+    const { ctx, state } = makeCtx({
+      authFetch: () => Promise.reject(new TypeError('Failed to fetch')),
+      healthOk: true,
+    });
+    await ctx.submitConflictResolutions('feat', 'main');
+    assert(/restarting, verifying/i.test(state.conflictErrEl.textContent),
+           'shows "restarting, verifying…" on a severed connection');
+    assert(!/Failed to fetch/i.test(state.conflictErrEl.textContent),
+           'does NOT surface the raw "Failed to fetch" on a committed merge');
+    assert(state.reloaded === true, 'reloads after /health comes back');
+  });
+
+  await test('conflict re-submit: 500 non-JSON → error shown, NOT "restarting", no reload', async () => {
+    const { ctx, state } = makeCtx({
+      authFetch: () => Promise.resolve({
+        status: 500, ok: false,
+        json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')),
+      }),
+    });
+    await ctx.submitConflictResolutions('feat', 'main');
+    assert(/HTTP 500/.test(state.conflictErrEl.textContent),
+           'a non-JSON 500 surfaces as "HTTP 500" (defensive parse), not a crash');
+    assert(!/restarting/i.test(state.conflictErrEl.textContent),
+           'a received response is never misclassified as "restarting"');
+    assert(state.reloaded === false, 'does NOT reload on a real error');
+  });
+
+  await test('conflict re-submit: success → reload', async () => {
+    const { ctx, state } = makeCtx({
+      authFetch: () => Promise.resolve({
+        status: 200, ok: true, json: () => Promise.resolve({ ok: true }),
+      }),
+    });
+    await ctx.submitConflictResolutions('feat', 'main');
+    assert(state.reloaded === true, 'reloads on a successful conflict-resolved merge');
+    assert(state.conflictErrEl.textContent === '', 'no error shown on success');
   });
 
   console.log('\n' + passes + ' passed, ' + failures + ' failed');

@@ -195,6 +195,15 @@
   #uuid "6796332c-aa37-4c42-8370-30cfa565ae10")
 
 
+(def ^:private branch-approval-target-branch-id-field-uuid
+  ;; The branch the approval was AUTHORIZED for (= the source's
+  ;; base-branch-id at approve time). The merge gate counts an approval
+  ;; only when this equals the ACTUAL merge target — otherwise approvals
+  ;; gathered for one (e.g. open) branch could satisfy a merge into a
+  ;; different, protected branch (the target-agnostic-gate bypass).
+  #uuid "b3d1f6a2-4c85-4e7a-9f21-8a6d0c47e913")
+
+
 (def ^:private branch-approval-approver-id-field-uuid
   #uuid "a5bbd60d-d73f-474f-b404-fe94f6328b53")
 
@@ -820,6 +829,9 @@
       (ds/add-entity :branch-approval branch-approval-entity-uuid
                      {:source-branch-id {:uuid branch-approval-source-branch-id-field-uuid
                                          :type :ref :ref-entity :branch}
+                      :target-branch-id {:uuid branch-approval-target-branch-id-field-uuid
+                                         :type :ref :ref-entity :branch
+                                         :nullable? true}
                       :approver-id {:uuid branch-approval-approver-id-field-uuid
                                     :type :text}
                       :content-stamp {:uuid branch-approval-content-stamp-field-uuid

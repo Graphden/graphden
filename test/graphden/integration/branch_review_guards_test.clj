@@ -98,6 +98,44 @@
           "review-state must stay 'proposed' when the merge was rejected"))))
 
 
+(deftest approval-is-bound-to-its-target-branch-test
+  ;; P1 review-gate bypass (audit-4). An approval must count ONLY toward a
+  ;; merge into the branch it was authorized for. The exploit: gather the
+  ;; required approvals on a proposal off an OPEN decoy branch (where
+  ;; approving is unrestricted), then merge that same proposal into a
+  ;; PROTECTED branch — the target-agnostic gate used to count the decoy's
+  ;; approvals against the protected target's requirement and let it through.
+  (let [run-id (str "-" (System/currentTimeMillis))
+        protected (str "at-prot" run-id)
+        decoy (str "at-decoy" run-id)
+        src (str "at-src" run-id)]
+    ;; A protected target requiring 1 approval.
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name protected :base-branch-id "main"}}))))
+    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" protected "/review-policy")
+                                   :body {:required-approvals 1}}))))
+    ;; An open decoy branch (no policy) the attacker forks their proposal off.
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name decoy :base-branch-id "main"}}))))
+    (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                   :body {:name src :base-branch-id decoy}}))))
+    ;; Approve the proposal — legal, its base (the decoy) is open. This
+    ;; stamps :target-branch-id = decoy.
+    (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "/approve")}))))
+    (testing "the approval satisfies a merge into the decoy it was gathered for"
+      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" decoy "/merge")
+                                     :body {:source src}})))))
+    (testing "but the SAME approval does NOT satisfy a merge into the protected target"
+      ;; re-propose (merge cleared review-state) and re-approve toward decoy,
+      ;; then attempt the cross-target merge into `protected`.
+      (is (= 200 (:status (dispatch {:method :post :path "/api/branches"
+                                     :body {:name (str src "-b") :base-branch-id decoy}}))))
+      (is (= 200 (:status (dispatch {:method :post :path (str "/api/branches/" src "-b/approve")}))))
+      (is (= 409 (:status (dispatch {:method :post :path (str "/api/branches/" protected "/merge")
+                                     :body {:source (str src "-b")}})))
+          "cross-target approval must not count — the gate stays blocked (0/1)"))))
+
+
 (deftest generic-entity-route-cannot-forge-review-rows-test
   ;; audit-3 security P3 — the review gate's integrity against FORGED
   ;; :branch-approval / :branch-comment rows via the generic

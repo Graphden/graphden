@@ -402,10 +402,15 @@
      :say "Merge GOVERNANCE — the code-review gate. When the target branch
            sets `:required-approvals`, a merge into it is refused
            (`:branch/approval-required`, 409) until the proposal has enough
-           VALID approvals. Counting is pure/open-core (WHO may approve was
-           enforced when each `:branch-approval` row was written); the live
-           merge base-fn calls this right after the `:forbid-invalid?` gate.
-           This is how 'protect main, land via reviewed merges' is enforced."}
+           VALID approvals: distinct, non-stale, BOUND to this exact merge
+           target (`target-branch-id`), and — when the target names a
+           restrictive `:approver-ids` — from that allow-list. Counting is
+           pure/open-core (WHO may approve was enforced when each
+           `:branch-approval` row was written, and re-checked here so a
+           tightened policy or a wrong-target approval can't slip through);
+           the live merge base-fn calls this right after the
+           `:forbid-invalid?` gate. This is how 'protect main, land via
+           reviewed merges' is enforced."}
     {:ns graphden.versioning.merge.core :defn branch-content-stamp
      :say "The stale-dismissal fingerprint: a branch's own version rows
            reduced to `count|max(created-at)`. An approval records the source's

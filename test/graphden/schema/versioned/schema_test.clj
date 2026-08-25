@@ -67,6 +67,24 @@
       (is (= :timestamptz (:type (:created-at fields)))))))
 
 
+(deftest branch-approval-entity-test
+  (testing "branch-approval carries the target it was authorized for"
+    (let [schema (vds/build-schema (malli/create-builder))
+          fields (ds/entity-fields schema :branch-approval)]
+      (is (= :ref (:type (:source-branch-id fields))))
+      (is (= :branch (:ref-entity (:source-branch-id fields))))
+      ;; The merge gate counts an approval only when this equals the actual
+      ;; merge target — so approvals gathered for one branch (an open decoy)
+      ;; cannot satisfy a merge into another (a protected branch). Nullable
+      ;; so pre-field rows read back as untargeted (and thus never counted).
+      (is (= :ref (:type (:target-branch-id fields))))
+      (is (= :branch (:ref-entity (:target-branch-id fields))))
+      (is (true? (:nullable? (:target-branch-id fields))))
+      (is (= :text (:type (:approver-id fields))))
+      (is (= :text (:type (:content-stamp fields))))
+      (is (= :timestamptz (:type (:created-at fields)))))))
+
+
 (deftest fn-version-entity-test
   (testing "fn-version mirrors the new fn entity (no return-type enum column)"
     (let [schema (vds/build-schema (malli/create-builder))

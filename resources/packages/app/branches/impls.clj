@@ -449,16 +449,25 @@
 
 (defn- may-approve?
   "Predicate: may the current principal (`uid`) approve merges into the
-   target branch `target-row`? Mirrors the target's `:write-policy` (who
-   may write/merge it) plus its explicit `:approver-ids` allow-list. Open
-   in single-tenant (no addon → no principals → `:manage-grants` seam is
-   default-deny, so `nil`/`open` policy admits everyone, which is the
-   correct self-host degrade).
+   target branch `target-row`?
 
-   A NIL `target-row` (the target branch didn't resolve — a missing
-   `:base-branch-id`, or a cross-org ref that OrgScoped filtered) fails
-   CLOSED: `nil` policy on a real row means \"open\", but a nil ROW means
-   \"no target\" and must not fall through to the open arm."
+   When the target sets a non-empty `:approver-ids`, that list is
+   RESTRICTIVE: ONLY those users (∪ org-admins / platform tier, as an
+   unlock escalation) may approve — regardless of `:write-policy`. This
+   is GitHub-parity (\"require review from these users\") and the whole
+   point of naming reviewers: an `:approver-ids` that merely OR'd with an
+   open `:write-policy` restricted no one (the ⚙ menu leaves write-policy
+   open), so a named-reviewer requirement was silently a no-op.
+
+   With no `:approver-ids`, WHO may approve mirrors the target's
+   `:write-policy` (who may write/merge it): owner / org-admins / open.
+   Open in single-tenant (no addon → no principals → `:manage-grants`
+   seam is default-deny, so `nil`/`open` admits everyone — the correct
+   self-host degrade).
+
+   A NIL `target-row` (the target didn't resolve — missing
+   `:base-branch-id`, or a cross-org ref OrgScoped filtered) fails
+   CLOSED: a nil ROW means \"no target\", not \"open\"."
   [target-row uid]
   (if (nil? target-row)
     false
@@ -468,23 +477,29 @@
           admin? (or (tc/current-platform-tier?)
                      (tc/current-has-org-cap? :manage-grants))]
       (boolean
-        (or (and uid (contains? approver-ids uid))
-            (case policy
-              ("owner") (or admin? (and uid owner (= uid owner)))
-              ("admins") admin?
-              ;; nil / "" / "open" → open (no write-policy restriction).
-              (nil "" "open") true
-              ;; anything else → DENY (hardening): write-policy is validated
-              ;; to the known set at set time, so an unknown value here is
-              ;; anomalous — fail closed rather than fall open.
-              false))))))
+        (if (seq approver-ids)
+          ;; RESTRICTIVE allow-list: only the named reviewers, plus the
+          ;; admin unlock — NOT the write-policy roles.
+          (or admin? (and uid (contains? approver-ids uid)))
+          (case policy
+            ("owner") (or admin? (and uid owner (= uid owner)))
+            ("admins") admin?
+            ;; nil / "" / "open" → open (no write-policy restriction).
+            (nil "" "open") true
+            ;; anything else → DENY (hardening): write-policy is validated
+            ;; to the known set at set time, so an unknown value here is
+            ;; anomalous — fail closed rather than fall open.
+            false))))))
 
 
 (defbase approve-proposal!
   "Record the current principal's approval of proposal branch
-   `source-branch-id` for merge into its base. WHO may approve = who may
-   write the TARGET (base): its `:write-policy` (owner/admins/open) OR the
-   target's explicit `:approver-ids` allow-list — else `:authz/forbidden`.
+   `source-branch-id` for merge into its base. WHO may approve: if the
+   target sets `:approver-ids`, ONLY those users (∪ org-admins) — else the
+   target's `:write-policy` roles (owner/admins/open); otherwise
+   `:authz/forbidden`. The row is stamped with the TARGET it was
+   authorized for (`:target-branch-id`) so it can't be counted toward a
+   merge into a different branch.
    The approval is stamped with the source's current content fingerprint,
    so a later edit auto-dismisses it (counted valid only while the stamp
    matches — `merge.core/count-valid-approvals`). Re-approving after an
@@ -503,6 +518,11 @@
     (let [approver (or uid "anonymous")]
       (sp/create-entity base-storage :branch-approval
                         {:source-branch-id source-branch-id
+                         ;; Bind the approval to the branch it was AUTHORIZED
+                         ;; for. The merge gate counts it only when this equals
+                         ;; the actual merge target, so approvals gathered for
+                         ;; one branch can't satisfy a merge into another.
+                         :target-branch-id target-id
                          :approver-id approver
                          :content-stamp (merge-policy/branch-content-stamp
                                           base-storage source-branch-id)
@@ -541,21 +561,28 @@
         target-row (when target-id (sp/read-entity base-storage :branch target-id))
         required (or (:required-approvals target-row) 0)
         allow-self? (merge-policy/self-approval-allowed? target-row)
+        approver-ids (set (:approver-ids target-row))
         author-id (:owner-id source-row)
         stamp (merge-policy/branch-content-stamp base-storage source-branch-id)
         approvals (sp/query-entities base-storage :branch-approval
                                      {:source-branch-id source-branch-id})
         ;; reuse the stamp + approvals just fetched — the I/O arity of
         ;; count-valid-approvals would re-run the 5-table stamp query + a
-        ;; second approvals query (the audit-2 double-compute).
-        have (merge-policy/count-valid-approvals* stamp approvals
-                                                  author-id allow-self?)]
+        ;; second approvals query (the audit-2 double-compute). The count is
+        ;; judged against the proposal's own target (`target-id`), matching
+        ;; the merge gate — an approval stamped for a different target, or one
+        ;; outside a restrictive `:approver-ids` allow-list, doesn't count.
+        have (merge-policy/count-valid-approvals* stamp target-id approver-ids
+                                                  approvals author-id allow-self?)]
     {:required required
      :have have
      :satisfied (>= have required)
      :approvers (mapv (fn [a]
                         {:approver-id (:approver-id a)
-                         :stale (not= stamp (:content-stamp a))})
+                         :stale (or (not= stamp (:content-stamp a))
+                                    (not= target-id (:target-branch-id a))
+                                    (and (seq approver-ids)
+                                         (not (contains? approver-ids (:approver-id a)))))})
                       approvals)}))
 
 

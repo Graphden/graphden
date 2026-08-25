@@ -316,23 +316,38 @@ merge on their count — configurable per **target** branch, GitHub-style.
   else"). (`merge.core/self-approval-allowed?` is the single source of the
   nil→true default, shared by the gate and the status projection.)
 - `:approver-ids` (jsonb list of `:user-id`) — an explicit reviewer
-  allow-list, ADDITIVE to whoever the target's `:write-policy` role admits.
-  (So "who may approve" = the target's write-policy roles ∪ this list.)
+  allow-list. When non-empty it is **RESTRICTIVE**, not additive: ONLY
+  those users (∪ org-admins, as an escalation unlock) may approve —
+  regardless of `:write-policy`. This is GitHub's "require review from
+  these users", and the whole point of naming reviewers: an ADDITIVE list
+  OR'd with the ⚙-menu's open write-policy default restricted no one, so a
+  named-reviewer requirement was silently a no-op. With `:approver-ids`
+  empty, "who may approve" falls back to the target's `:write-policy`
+  roles (owner / org-admins / open).
 
 **Approvals** are `:branch-approval` rows (one per approval; mirrors
-`:branch-merge`): `{source-branch-id, approver-id, content-stamp,
-created-at}`. `content-stamp` is the source's content fingerprint
-(`merge.core/branch-content-stamp` — count + max version `created-at`) at
-approval time; a later edit advances it, so the approval is **auto-dismissed
-as stale** (counted only while the stamp matches — GitHub "dismiss stale
-approvals").
+`:branch-merge`): `{source-branch-id, target-branch-id, approver-id,
+content-stamp, created-at}`. `content-stamp` is the source's content
+fingerprint (`merge.core/branch-content-stamp` — count + max version
+`created-at`) at approval time; a later edit advances it, so the approval is
+**auto-dismissed as stale** (counted only while the stamp matches — GitHub
+"dismiss stale approvals"). `target-branch-id` records the branch the
+approval was AUTHORIZED for (the proposal's base at approval time); the
+merge gate counts an approval only when this equals the ACTUAL merge target,
+so approvals gathered on a proposal off an open decoy branch cannot be
+redirected to satisfy a merge into a protected one.
 
 **The merge gate** (`merge.core/validate-approval-policy!`, called on the
 live merge path right after the `forbid-invalid?` gate) counts DISTINCT,
-non-stale approvals, excluding the author unless self-approval is allowed,
-and throws `:branch/approval-required` (409) when short. WHO may approve is
-enforced when the approval is WRITTEN (`approve-proposal!` — target
-write-policy ∪ approver-ids), so the gate itself is pure/open-core.
+non-stale approvals that are **bound to the actual merge target**
+(`target-branch-id` = current branch) and — when the target sets a
+restrictive `:approver-ids` — **in that allow-list**, excluding the author
+unless self-approval is allowed, and throws `:branch/approval-required`
+(409) when short. WHO may approve is enforced when the approval is WRITTEN
+(`approve-proposal!` — restrictive `approver-ids` else target write-policy),
+and re-verified against target + allow-list at merge time, so a policy that
+tightened after approvals were gathered isn't satisfied by a
+now-unauthorized or wrong-target approval.
 
 **HTTP**: `POST /api/branches/:ref/review-policy {required-approvals,
 allow-self-approval, approver-ids}`; `POST|DELETE /api/branches/:ref/approve`

@@ -37,11 +37,17 @@ so a gap in one does not by itself cross tenants:
    (`required-approvals` / `approver-ids` / `allow-self-approval?`) — so a
    plain org member can't lower a colleague's review bar (the `:branch`
    authz arm keys on the whole protection set, not just `write-policy`).
-   **Review authz**: who may APPROVE a merge = the target's write-policy
-   roles ∪ its `approver-ids`, enforced when the approval row is written
-   (the count gate itself is pure); who may COMMENT = anyone who can
-   resolve the (org-scoped) branch, and a comment is deletable only by its
-   author.
+   **Review authz**: who may APPROVE a merge = a restrictive
+   `approver-ids` allow-list when the target sets one (∪ org-admins),
+   otherwise the target's write-policy roles — enforced when the approval
+   row is written. Each approval is bound to the target it was authorized
+   for (`target-branch-id`); the merge gate counts an approval only when it
+   matches the ACTUAL merge target AND (when set) the current allow-list,
+   so approvals gathered on a proposal off an open decoy branch can't be
+   redirected to clear a protected branch's requirement, and a tightened
+   policy isn't satisfied by a now-unauthorized approval. Who may COMMENT =
+   anyone who can resolve the (org-scoped) branch, and a comment is
+   deletable only by its author.
 2. **Database-layer RLS** — Postgres Row-Level Security (`FORCE`) filters every
    row by the connection's `graphden.current_org`, so even a raw-SQL path that
    bypassed the decorator stays confined. **Strict by default**: the app must

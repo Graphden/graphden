@@ -466,56 +466,75 @@
 ;; === Review policy — approval counting + stale-dismissal ===
 
 (deftest count-valid-approvals-test
-  (testing "distinct, stale-filtered, author-excluded approval counting"
+  (testing "distinct, stale-filtered, author-excluded, target-bound counting"
     (let [{:keys [storage base fn-id slot-id]} (create-test-storage)
           src (vs/create-branch! storage "rev-src")
           src-id (:id src)
+          target-id (:base-branch-id src)
           src-storage (vs/switch-branch storage src-id)
           b (create-binding-on-current! src-storage fn-id slot-id "v1")
           stamp1 (mp/branch-content-stamp base src-id)
-          approve! (fn [uid stamp]
+          approve! (fn [uid stamp & {:keys [target] :or {target target-id}}]
                      (sp/create-entity base :branch-approval
                                        {:source-branch-id src-id
+                                        :target-branch-id target
                                         :approver-id uid
                                         :content-stamp stamp
-                                        :created-at (java.time.Instant/now)}))]
+                                        :created-at (java.time.Instant/now)}))
+          count* (fn [author allow-self?]
+                   (mp/count-valid-approvals base src-id target-id #{} author allow-self?))]
       (testing "no approvals → 0"
-        (is (zero? (mp/count-valid-approvals base src-id nil false))))
+        (is (zero? (count* nil false))))
       (testing "two distinct reviewers at the current stamp → 2"
         (approve! "alice" stamp1)
         (approve! "bob" stamp1)
-        (is (= 2 (mp/count-valid-approvals base src-id nil false))))
+        (is (= 2 (count* nil false))))
       (testing "a duplicate approval by the same reviewer stays distinct → 2"
         (approve! "alice" stamp1)
-        (is (= 2 (mp/count-valid-approvals base src-id nil false))))
+        (is (= 2 (count* nil false))))
       (testing "author's own approval excluded unless self-approval allowed"
-        (is (= 1 (mp/count-valid-approvals base src-id "alice" false)))
-        (is (= 2 (mp/count-valid-approvals base src-id "alice" true))))
+        (is (= 1 (count* "alice" false)))
+        (is (= 2 (count* "alice" true))))
+      (testing "an approval stamped for a DIFFERENT target does not count"
+        (approve! "dave" stamp1 :target (:id (vs/create-branch! storage "other-target")))
+        (is (= 2 (count* nil false))
+            "dave's cross-target approval is ignored — the gate-bypass fix"))
+      (testing "a restrictive approver-ids allow-list counts only listed reviewers"
+        (is (= 1 (mp/count-valid-approvals base src-id target-id #{"alice"} nil false))
+            "only alice is in the allow-list")
+        (is (zero? (mp/count-valid-approvals base src-id target-id #{"nobody"} nil false))
+            "no listed reviewer approved"))
       (testing "editing the source advances the stamp → prior approvals go stale → 0"
         (sp/update-entity src-storage :binding (:id b) {:value "v2"})
         (is (not= stamp1 (mp/branch-content-stamp base src-id))
             "content stamp advances after an edit")
-        (is (zero? (mp/count-valid-approvals base src-id nil false))
+        (is (zero? (count* nil false))
             "all stamp1 approvals are now stale"))
       (testing "a fresh approval at the new stamp counts again"
         (approve! "carol" (mp/branch-content-stamp base src-id))
-        (is (= 1 (mp/count-valid-approvals base src-id nil false))))
+        (is (= 1 (count* nil false))))
       (sp/close storage))))
 
 
 (deftest count-valid-approvals*-pure-core-test
   ;; The pure arity the status projection reuses (audit-2 double-compute
-  ;; fix) must agree with the I/O arity's filtering — same stamp/author/
-  ;; self rules, no DB.
+  ;; fix) must agree with the I/O arity's filtering — same stamp/target/
+  ;; allow-list/author/self rules, no DB.
   (let [stamp "3|2026"
-        rows [{:approver-id "alice" :content-stamp stamp}
-              {:approver-id "alice" :content-stamp stamp}    ; dup → distinct
-              {:approver-id "bob"   :content-stamp stamp}
-              {:approver-id "carol" :content-stamp "1|old"}]] ; stale → dropped
-    (is (= 2 (mp/count-valid-approvals* stamp rows nil false)) "distinct + stale-filtered")
-    (is (= 1 (mp/count-valid-approvals* stamp rows "alice" false)) "author excluded")
-    (is (= 2 (mp/count-valid-approvals* stamp rows "alice" true)) "author counted when allowed")
-    (is (zero? (mp/count-valid-approvals* "9|newer" rows nil false)) "all stale at a newer stamp")))
+        tgt "target-A"
+        rows [{:approver-id "alice" :content-stamp stamp :target-branch-id tgt}
+              {:approver-id "alice" :content-stamp stamp :target-branch-id tgt}    ; dup → distinct
+              {:approver-id "bob"   :content-stamp stamp :target-branch-id tgt}
+              {:approver-id "carol" :content-stamp "1|old" :target-branch-id tgt}  ; stale → dropped
+              {:approver-id "dave"  :content-stamp stamp :target-branch-id "target-B"}]] ; wrong target → dropped
+    (is (= 2 (mp/count-valid-approvals* stamp tgt #{} rows nil false)) "distinct + stale + target filtered")
+    (is (= 1 (mp/count-valid-approvals* stamp tgt #{} rows "alice" false)) "author excluded")
+    (is (= 2 (mp/count-valid-approvals* stamp tgt #{} rows "alice" true)) "author counted when allowed")
+    (is (zero? (mp/count-valid-approvals* "9|newer" tgt #{} rows nil false)) "all stale at a newer stamp")
+    (is (= 1 (mp/count-valid-approvals* stamp "target-B" #{} rows nil false))
+        "switching the target to B counts dave (the only B row), not alice/bob (A)")
+    (is (= 1 (mp/count-valid-approvals* stamp tgt #{"alice"} rows nil false)) "restrictive allow-list keeps only alice")
+    (is (zero? (mp/count-valid-approvals* stamp tgt #{"zoe"} rows nil false)) "no listed reviewer present")))
 
 
 (deftest self-approval-allowed?-defaults-on

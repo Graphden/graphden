@@ -165,15 +165,27 @@
 
 (defn count-valid-approvals*
   "Pure core of `count-valid-approvals`: given the already-fetched
-   `current-stamp` and `approvals` rows, keep only those whose
-   `:content-stamp` still matches (drops stale ones after a post-approval
-   edit), drop the author's own unless `allow-self?`, count distinct
-   approver ids. Split out so a caller that ALSO needs the stamp + the
-   approval rows (the status projection) computes them once instead of
-   re-running the 5-table stamp query + the approvals query twice."
-  [current-stamp approvals author-id allow-self?]
+   `current-stamp`, the merge `target-branch-id`, the target's
+   `approver-ids` (a set; empty = no restriction), and the `approvals`
+   rows, count the DISTINCT approver ids that:
+     - still match the source's content stamp (non-stale — an edit after
+       approval advances the stamp and drops it), AND
+     - were authorized for THIS target: `:target-branch-id` equals
+       `target-branch-id` (so approvals gathered for a DIFFERENT branch
+       — e.g. an open decoy — can't satisfy a merge into a protected
+       one; the target-agnostic-gate bypass), AND
+     - when `approver-ids` is non-empty, are in that restrictive
+       allow-list (re-verified here at merge time so a policy that
+       tightened after approvals were gathered isn't satisfied by a
+       now-unauthorized approver), AND
+     - aren't the author's own unless `allow-self?`.
+   Split out so the status projection can reuse the fetched stamp +
+   rows instead of re-querying."
+  [current-stamp target-branch-id approver-ids approvals author-id allow-self?]
   (->> approvals
        (filter #(= current-stamp (:content-stamp %)))
+       (filter #(= target-branch-id (:target-branch-id %)))
+       (filter #(or (empty? approver-ids) (contains? approver-ids (:approver-id %))))
        (remove #(and (not allow-self?) author-id (= author-id (:approver-id %))))
        (map :approver-id)
        distinct
@@ -181,14 +193,15 @@
 
 
 (defn count-valid-approvals
-  "How many DISTINCT, non-stale approvals the proposal `source-branch-id`
-   currently has toward a merge into the target. WHO may approve was
-   enforced when each `:branch-approval` row was written (the approve
-   endpoint), so counting here stays pure/open-core. Fetches the current
-   stamp + approvals, then delegates to `count-valid-approvals*`."
-  [base-storage source-branch-id author-id allow-self?]
+  "How many DISTINCT, non-stale, target-bound, allow-list-satisfying
+   approvals the proposal `source-branch-id` currently has toward a merge
+   into `target-branch-id`. Fetches the current stamp + approvals, then
+   delegates to `count-valid-approvals*`."
+  [base-storage source-branch-id target-branch-id approver-ids author-id allow-self?]
   (count-valid-approvals*
     (branch-content-stamp base-storage source-branch-id)
+    target-branch-id
+    approver-ids
     (sp/query-entities base-storage :branch-approval
                        {:source-branch-id source-branch-id})
     author-id allow-self?))
@@ -212,7 +225,10 @@
       (let [source-row (sp/read-entity base-storage :branch source-branch-id)
             author-id (:owner-id source-row)
             allow-self? (self-approval-allowed? target-row)
-            have (count-valid-approvals base-storage source-branch-id author-id allow-self?)]
+            approver-ids (set (:approver-ids target-row))
+            have (count-valid-approvals base-storage source-branch-id
+                                        target-branch-id approver-ids
+                                        author-id allow-self?)]
         (when (< have required)
           (throw (ex-info (str "Merge blocked: this branch requires " required
                                " approval(s) to merge, but has " have

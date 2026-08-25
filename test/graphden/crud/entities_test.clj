@@ -953,6 +953,13 @@
             (is (nil? (:error r)))
             (is (some? (sp/read-entity storage :binding-list-item (:created r)))
                 "the type-breaking item row survived"))
+          (testing "the result carries :binding-id — the append success path uses it to
+                    route through invalidate! (:invalidate-after-write), which restarts
+                    cron/loop services holding the pre-append closure (like update/move)"
+            (is (some? (:binding-id r)))
+            (is (= (:binding-id r)
+                   (:binding-id (sp/read-entity storage :binding-list-item (:created r))))
+                "it is the owning binding of the appended item"))
           (testing "the success shape surfaces the failure additively"
             (is (vector? (:type-warnings r))))
           (testing "the per-branch diagnostics store recorded the same entry"

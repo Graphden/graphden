@@ -197,7 +197,7 @@
    later shifts +1 first (descending write order, so the per-write
    position-uniqueness check can't collide), then the new row takes
    the freed position. Returns `{:created <item-id> :position
-   <int> :fn-id <fn-id>}` on success (plus `:type-warnings
+   <int> :fn-id <fn-id> :binding-id <binding-id>}` on success (plus `:type-warnings
    [<diagnostic> …]` when the item landed but the owning fn now fails
    the aggregate type-check — error-tolerance Phase 3) or `{:error
    <reason>}` on pre-write validation rejection OR on a secret-flow
@@ -302,7 +302,14 @@
                       {:error (:reason rej)})
                   (cond-> {:created (:id new-item)
                            :position new-pos
-                           :fn-id fn-id}
+                           :fn-id fn-id
+                           ;; The owning binding — so the append success path can
+                           ;; go through `invalidate!` (`:invalidate-after-write`)
+                           ;; like update/move/remove, which restarts cron/loop
+                           ;; services holding the pre-append closure. A bare
+                           ;; graph-cache invalidate (the old append path) left
+                           ;; them firing the stale sequence.
+                           :binding-id binding-id}
                     rej (assoc :type-warnings [(:diagnostic rej)]))))))))))
 
 

@@ -92,12 +92,16 @@
                   :_seq-append-apply-ok-response]}}
 
   {:name :_seq-append-apply-do-invalidate
-   :parent :invalidate-graph-cache
-   :args {:seeds :_seq-append-apply-seeds}}
+   :description "Full invalidate (like update/move/remove), NOT a bare graph-cache clear: `invalidate!` also restarts cron/loop services holding the pre-append closure. entity-data carries `:binding-id` so `affected-fn-ids` derives the owning fn (+ `:id` of the new item for the delete-safe path)."
+   :parent :invalidate-after-write
+   :args {:entity-type {:value "binding-list-item"}
+          :entity-data :_seq-append-apply-item-data}}
 
-  {:name :_seq-append-apply-seeds
-   :parent :vec
-   :args {:coll [{:parent :get :args {:coll {:as :result} :key {:value :fn-id} :default nil}}]}}
+  {:name :_seq-append-apply-item-data
+   :parent :zipmap
+   :args {:keys [{:value :id} {:value :binding-id}]
+          :vals [{:parent :get :args {:coll {:as :result} :key {:value :created} :default nil}}
+                 {:parent :get :args {:coll {:as :result} :key {:value :binding-id} :default nil}}]}}
 
   {:name :_seq-append-apply-ok-response
    :parent :zipmap

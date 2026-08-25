@@ -24,8 +24,11 @@
     [rewrite-clj.zip :as z]))
 
 
-(def ^:private tour-edn "docs/devtour/tour.edn")
-(def ^:private out-html "docs/devtour/index.html")
+;; Both paths are env-overridable so an external repo can bake an alternate
+;; tour (same anchors, different prose) against this checkout without forking
+;; the generator. Defaults — and `bb devtour` / `bb devtour-check` — unchanged.
+(def ^:private tour-edn (or (System/getenv "DEVTOUR_TOUR") "docs/devtour/tour.edn"))
+(def ^:private out-html (or (System/getenv "DEVTOUR_OUT") "docs/devtour/index.html"))
 
 
 ;; --- anchor resolution -----------------------------------------------------

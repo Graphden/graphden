@@ -166,6 +166,12 @@
   (core/authenticate-token storage (provider/request-token request)))
 
 
+;; Defined below (with the password-login handlers); forward-declared so the
+;; social callback can route a 2FA-enabled account through the same pending-2fa
+;; second step.
+(declare pending-2fa-cookie)
+
+
 (defn- finish-social
   "Common tail for an OAuth/Telegram callback that produced a normalized
    identity `info`.
@@ -191,8 +197,17 @@
         (catch clojure.lang.ExceptionInfo _
           (redirect (str origin "/settings?error=identity_conflict"))))
       (redirect (str origin "/settings?error=link_intent")))
-    (let [{:keys [account-id]} (core/resolve-social-identity! storage info)]
-      (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin)))))
+    (let [{:keys [account account-id]} (core/resolve-social-identity! storage info)]
+      (if (core/totp-enabled? account)
+        ;; The account has 2FA enabled — a social identity ALONE must not mint a
+        ;; full session, or the second factor the user configured would protect
+        ;; only their password login (an attacker who compromised the linked
+        ;; provider would sail past it). Require the same pending-2fa second step
+        ;; the password path uses: set the short-lived gd_2fa cookie and land on
+        ;; the login page in its TOTP-entry state (?totp=1).
+        (redirect (str origin "/login?totp=1")
+                  (pending-2fa-cookie (core/mint-pending-2fa! storage account-id) origin))
+        (redirect (str origin "/") (session-cookie (core/mint-session! storage account-id) origin))))))
 
 
 (defn- handle-identities

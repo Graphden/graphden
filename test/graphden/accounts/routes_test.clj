@@ -155,6 +155,36 @@
                          "error=provider_disabled")))))
 
 
+(deftest ^:integration social-login-enforces-totp-when-enabled
+  ;; A social identity ALONE must not mint a full session for an account that
+  ;; enabled TOTP — the second factor would otherwise protect only the password
+  ;; path. The social callback must route through the same pending-2fa step.
+  (let [router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))
+                                    :app-origin origin
+                                    :oauth-providers {"github" {:client-id "c" :client-secret "s"}}})]
+    (with-redefs [oauth/exchange-code! (fn [_ _ _ _]
+                                         {:provider "github" :subject "gh-2fa"
+                                          :email "twofa@example.com" :email-verified? true
+                                          :display-name "TwoFA"})]
+      (let [cb #(router {:request-method :get :uri "/auth/github/callback"
+                         :query-string "code=c&state=S" :headers {"cookie" "gd_oauth=S"}})
+            r1 (cb)]
+        (testing "first social login (no 2FA yet) mints a normal session"
+          (is (some? (set-cookie-token r1))))
+        ;; enable TOTP on the just-created account
+        (let [acct-id (:account-id (core/find-identity (storage) "github" "gh-2fa"))
+              acct (core/account-of (storage) acct-id)]
+          (sp/update-entity (storage) :account (:id acct)
+                            (assoc acct :totp-enabled? true :totp-secret "JBSWY3DPEHPK3PXP")))
+        (let [r2 (cb)
+              sc (str (get-in r2 [:headers "Set-Cookie"]))]
+          (testing "with 2FA enabled the same social callback does NOT mint a session"
+            (is (nil? (set-cookie-token r2)) "no gd_session cookie")
+            (is (str/includes? sc "gd_2fa=") "a pending-2fa cookie is set instead")
+            (is (str/includes? (get-in r2 [:headers "Location"]) "/login?totp=1")
+                "redirects to the TOTP-entry state")))))))
+
+
 (deftest ^:integration telegram-callback
   (let [bot "123:TG-BOTTOKEN"
         router (routes/make-router {:storage (storage) :mailer (email/->CapturingMailer (atom []))

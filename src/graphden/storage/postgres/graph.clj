@@ -82,6 +82,15 @@
     "      FROM binding b"
     "      WHERE b.fn_id = r.fn_id AND b.type_override_fn_id IS NOT NULL"
     "    UNION ALL"
+    ;;     binding resolver refs — a `:resolved-value` binding references its
+    ;;     resolver fn ONLY through resolver_fn_id (its ref_fn_id is nil), so
+    ;;     without this arm the resolver's closure is dropped from the returned
+    ;;     execution graph → fn-not-found when the arg first forces (matches the
+    ;;     invalidation closure in executor.compile.deps).
+    "    SELECT b.resolver_fn_id"
+    "      FROM binding b"
+    "      WHERE b.fn_id = r.fn_id AND b.resolver_fn_id IS NOT NULL"
+    "    UNION ALL"
     ;;     binding-list-item refs (sequence elements)
     "    SELECT bli.ref_fn_id"
     "      FROM binding_list_item bli"

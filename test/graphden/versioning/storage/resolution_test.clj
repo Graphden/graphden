@@ -132,3 +132,20 @@
     (testing "unknown entity → nil"
       (is (nil? (owning-fn-id nil :branch fn-id {:fn-id other-fn}))
           ":branch isn't versioned — case dispatch falls through"))))
+
+
+(deftest extract-fn-refs-includes-resolver-fn-id
+  ;; A `:resolved-value` binding references its resolver fn ONLY through
+  ;; :resolver-fn-id (its :ref-fn-id is nil). If the closure walk skips it, the
+  ;; resolver's subtree is dropped from the resolved execution graph → the
+  ;; protocol's closure contract is broken (fn-not-found on first force).
+  (let [extract @#'res/extract-fn-refs-from-bindings
+        rid #uuid "00000000-0000-0000-0000-0000000000aa"
+        ref #uuid "00000000-0000-0000-0000-0000000000bb"
+        tov #uuid "00000000-0000-0000-0000-0000000000cc"]
+    (testing ":resolver-fn-id is chased alongside :ref-fn-id and :type-override-fn-id"
+      (is (contains? (extract [{:resolver-fn-id rid :value-present true}]) rid))
+      (is (= #{ref tov rid}
+             (extract [{:ref-fn-id ref} {:type-override-fn-id tov} {:resolver-fn-id rid}]))))
+    (testing "nil resolver-fn-id contributes nothing"
+      (is (empty? (extract [{:resolver-fn-id nil}]))))))

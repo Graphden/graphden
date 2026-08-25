@@ -255,7 +255,12 @@
         (mapcat (fn [b]
                   (cond-> []
                     (some? (:ref-fn-id b)) (conj (:ref-fn-id b))
-                    (some? (:type-override-fn-id b)) (conj (:type-override-fn-id b)))))
+                    (some? (:type-override-fn-id b)) (conj (:type-override-fn-id b))
+                    ;; A `:resolved-value` binding references its resolver fn only
+                    ;; through :resolver-fn-id — omitting it drops the resolver's
+                    ;; closure (fn-not-found on first force). Mirrors the CTE +
+                    ;; executor.compile.deps.
+                    (some? (:resolver-fn-id b)) (conj (:resolver-fn-id b)))))
         bindings))
 
 

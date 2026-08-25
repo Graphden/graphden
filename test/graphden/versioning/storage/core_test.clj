@@ -2002,3 +2002,53 @@
         (is (nil? (sp/read-entity base :binding bid))
             "base :binding identity rows rolled back with the failed version batch — no ghost"))
       (finally (sp/close base)))))
+
+
+(deftest re-merge-does-not-silently-revert-target-edit-test
+  ;; A source merged, then the TARGET edits the same entity, then the source is
+  ;; merged AGAIN (unchanged since). The re-merge must NOT silently revert the
+  ;; target's own later edit: a merge carries only the source's changes SINCE the
+  ;; previous merge of that source, so an unchanged re-merge contributes nothing.
+  ;; (Regression: `:target-timestamp` = merge time refreshed on every merge, so a
+  ;; stale source version re-won over a newer target edit — a silent lost update.)
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "rm-fn" :parent-ids []})
+            s (sp/create-entity v :slot {:name "rm-x" :type-fn-id (:id f)})
+            b (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id s) :value "v0"})
+            main (vs/current-branch-id v)
+            src (vs/create-branch! v "rm-src")
+            bval #(:value (sp/read-entity (vs/switch-branch v main) :binding (:id b)))]
+        (sp/update-entity (vs/switch-branch v (:id src)) :binding (:id b) {:value "v_S"})
+        (vs/merge-branch! (vs/switch-branch v main) (:id src))          ; merge #1
+        (is (= "v_S" (bval)) "merge #1 brings the source's value to the target")
+        (sp/update-entity (vs/switch-branch v main) :binding (:id b) {:value "v_T"})
+        (is (= "v_T" (bval)) "the target's own later edit wins over merge #1")
+        (vs/merge-branch! (vs/switch-branch v main) (:id src))          ; merge #2, src unchanged
+        (testing "re-merging the unchanged source does NOT revert the target's edit"
+          (is (= "v_T" (bval)))))
+      (finally (sp/close base)))))
+
+
+(deftest re-merge-carries-a-genuine-new-source-edit-test
+  ;; The complement of the guard above: if the source DID change since the first
+  ;; merge, the re-merge must still carry that new change (the fix must not
+  ;; over-suppress — only unchanged content is dropped).
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "rm2-fn" :parent-ids []})
+            s (sp/create-entity v :slot {:name "rm2-x" :type-fn-id (:id f)})
+            b (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id s) :value "v0"})
+            main (vs/current-branch-id v)
+            src (vs/create-branch! v "rm2-src")
+            bval #(:value (sp/read-entity (vs/switch-branch v main) :binding (:id b)))]
+        (sp/update-entity (vs/switch-branch v (:id src)) :binding (:id b) {:value "v_S1"})
+        (vs/merge-branch! (vs/switch-branch v main) (:id src))          ; merge #1
+        (is (= "v_S1" (bval)))
+        (sp/update-entity (vs/switch-branch v (:id src)) :binding (:id b) {:value "v_S2"})  ; new src edit
+        (vs/merge-branch! (vs/switch-branch v main) (:id src))          ; merge #2
+        (testing "re-merge carries the source's genuine new edit"
+          (is (= "v_S2" (bval)))))
+      (finally (sp/close base)))))

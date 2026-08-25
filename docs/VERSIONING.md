@@ -603,6 +603,22 @@ keeps its inline 📍 badge on the same rows.
 
 ## Known gaps
 
+- **Merge is one-hop (non-transitive).** A merge of source `S` into target `T`
+  transfers only the versions `S` OWNS (its own version rows since the last
+  merge of `S` into `T`) — not content `S` merely *inherits* from an
+  intermediate ancestor `R` (`S.base = R`) that `T` does not share. So merging a
+  *stacked* branch `S` (forked off `R`, where `R` — not `S` — edited fn `X`) into
+  `main` leaves `main` at its old `X`, silently: the change was visible on `S` by
+  inheritance but `S` holds no version row for it, and `detect-conflicts`
+  compares only the two endpoints' own rows. Workaround: merge the intermediate
+  (`R`) first, or edit on the branch you merge. `load-merge-aware-cache`
+  collects only the target chain's *direct* merge sources (one hop); making
+  merge transitive (walk the source's own ancestor/merge closure) is a
+  deliberate open design question, not yet decided — flagged 2026-08-25.
+  (Re-merging the SAME source is safe: a re-merge carries only the source's
+  changes SINCE the prior merge, so an unchanged re-merge cannot revert a target
+  edit made in between — `merge-candidates-from-cache`'s per-source eligible
+  window, regression-tested by `re-merge-does-not-silently-revert-target-edit`.)
 - Per-branch ctx cache is LRU-bounded (`default-max-cached-branches` = 16,
   `evict-lru-if-full` keyed on `:last-used`); tune via the
   `GRAPHDEN_MAX_CACHED_BRANCHES` env var (read by `:exec/branch-router`

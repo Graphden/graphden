@@ -507,19 +507,37 @@
    rows whose owning fn is sticky-local."
   [base-storage entity-name entity-id versions-by-branch own-latest merges]
   (when (seq merges)
-    (for [m merges
-          :let [src-versions (get versions-by-branch (:source-branch-id m) [])
-                eligible (filter #(not (pos? (compare (:created-at %)
-                                                      (:source-timestamp m))))
-                                 src-versions)
-                best (latest-by-created-at eligible)]
-          :when best
-          :when (not (branch-local-version? base-storage entity-name
-                                            entity-id best))
-          :when (or (nil? own-latest)
-                    (pos? (compare (:target-timestamp m)
-                                   (:created-at own-latest))))]
-      {:version best :effective-ts (:target-timestamp m)})))
+    (let [;; For each merge, the `:source-timestamp` of the PREVIOUS merge of the
+          ;; SAME source into this target (ordered by when the merge landed). A
+          ;; re-merge's eligible window starts strictly AFTER it, so source
+          ;; content already carried by an earlier merge does not re-compete on a
+          ;; later one. Without this, a second merge of an UNCHANGED source got a
+          ;; fresh `:target-timestamp` (= merge time) and silently re-elevated its
+          ;; stale version over any edit the target made since the first merge — a
+          ;; silent lost update on the normal re-merge-a-long-lived-branch flow.
+          prev-src-ts (into {}
+                            (mapcat (fn [[_src ms]]
+                                      (let [sorted (sort-by :target-timestamp ms)]
+                                        (map (fn [m prev] [(:id m) (:source-timestamp prev)])
+                                             (rest sorted) sorted))))
+                            (group-by :source-branch-id merges))]
+      (for [m merges
+            :let [lower (get prev-src-ts (:id m))
+                  src-versions (get versions-by-branch (:source-branch-id m) [])
+                  eligible (filter (fn [v]
+                                     (and (not (pos? (compare (:created-at v)
+                                                              (:source-timestamp m))))
+                                          (or (nil? lower)
+                                              (pos? (compare (:created-at v) lower)))))
+                                   src-versions)
+                  best (latest-by-created-at eligible)]
+            :when best
+            :when (not (branch-local-version? base-storage entity-name
+                                              entity-id best))
+            :when (or (nil? own-latest)
+                      (pos? (compare (:target-timestamp m)
+                                     (:created-at own-latest))))]
+        {:version best :effective-ts (:target-timestamp m)}))))
 
 
 (defn- resolve-version-from-cache

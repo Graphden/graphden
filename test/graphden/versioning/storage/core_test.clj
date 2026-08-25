@@ -2105,3 +2105,41 @@
         (testing "the forked-off-target merge is not blocked and carries the edit"
           (is (= "v_feat" (:value (sp/read-entity (vs/switch-branch v main) :binding (:id b)))))))
       (finally (sp/close base)))))
+
+
+(deftest batch-create-rejects-fn-name-collision-with-existing-test
+  ;; The batch write path (sp/create-entities → create-entities-versioned!, the
+  ;; path MCP upsert-fn-defs / package sync use) previously ran ONLY the
+  ;; list-item check — NOT check-fn-name-collision! — so a same-(ns,name) fn
+  ;; under a DIFFERENT id (editor random-id + sync deterministic-id) landed as a
+  ;; duplicate live row, turning bare-name resolution ambiguous. Now guarded.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [_ (sp/create-entity v :fn {:name "batch-dup" :parent-ids [] :description "h"})
+            ex (try (sp/create-entities v :fn [{:id (random-uuid) :name "batch-dup"
+                                                :parent-ids [] :description "h2"}])
+                    nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (testing "a batch create colliding with an existing live (ns,name) is rejected"
+          (is (= :constraint-violation/fn-name-collision (:type (ex-data ex)))))
+        (testing "no duplicate row was created — the name resolves to exactly one fn"
+          (is (= 1 (count (sp/query-entities v :fn {:name "batch-dup"}))))))
+      (finally (sp/close base)))))
+
+
+(deftest batch-create-rejects-intra-batch-duplicate-fn-names-test
+  ;; Two fns in ONE batch sharing (ns,name) both pass the against-storage check
+  ;; (neither committed yet) — the guard rejects them up front.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [ex (try (sp/create-entities v :fn [{:id (random-uuid) :name "twin" :parent-ids []}
+                                               {:id (random-uuid) :name "twin" :parent-ids []}])
+                    nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (testing "an intra-batch duplicate name is rejected"
+          (is (= :constraint-violation/fn-name-collision (:type (ex-data ex)))))
+        (testing "neither row was written"
+          (is (empty? (sp/query-entities v :fn {:name "twin"})))))
+      (finally (sp/close base)))))

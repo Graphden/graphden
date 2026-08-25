@@ -144,7 +144,7 @@
   ;; Phase 4) bind the invalidate as a regular composition step.
   ;; ---------------------------------------------------------------------
   {:name :invalidate-graph-cache
-   :description "Drop derived caches on the executor context. `seeds` empty / nil → full clear; non-empty → delta invalidate just those fn-ids + transitive dependents. Standard final step of any fn-graph write."
+   :description "Low-level ctx-cache drop. `seeds` empty / nil → full clear; non-empty → delta invalidate just those fn-ids + transitive dependents. NOTE: a fn-graph WRITE must NOT parent on this directly — it drops the cache but does NOT restart cron/loop services holding the pre-edit closure, nor emit the cross-pod NOTIFY. Use `:invalidate-after-write` for writes (it wraps this + the restart hook). Guarded by `write-invalidation-parity-test`."
    :args {:seeds {:type [:list :uuid]
                   :description "fn-ids whose closure should be invalidated. Empty / nil performs a full clear."
                   :required false}}

@@ -742,7 +742,13 @@
     (concat (:parent-ids fnr)
             (keep fnr [:return-type-fn-id :base-fn-id :element-fn-id])
             (keep :type-fn-id slots)
-            (mapcat (fn [b] (keep b [:ref-fn-id :type-override-fn-id])) bindings)
+            ;; All THREE binding fn-ref fields. A `:resolved-value` binding
+            ;; references its resolver fn ONLY through :resolver-fn-id, so
+            ;; omitting it exported an INCOMPLETE dependency closure — the
+            ;; resolver's subtree missing → fn-not-found on install/materialize.
+            ;; Pinned by `graph-parity-test` against the canonical edge set.
+            (mapcat (fn [b] (keep b [:ref-fn-id :type-override-fn-id :resolver-fn-id]))
+                    bindings)
             (filter some? item-ids))))
 
 

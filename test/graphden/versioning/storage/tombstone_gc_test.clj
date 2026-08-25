@@ -161,3 +161,62 @@
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id p))))))
       (finally (sp/close base)))))
+
+
+;; The GC's inbound-ref guard is the FULL ref surface, not just parent-ids
+;; (the 2026-08-25 finding: it purged a fn still referenced by a
+;; binding/slot/type-FK, dangling the ref forever — an editor random-id can't
+;; be re-minted). These three pin the non-parent families the old guard missed.
+
+(deftest does-not-purge-a-dead-fn-still-referenced-by-a-slot-type
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [tf (sp/create-entity v :fn {:name "slot-type" :parent-ids [] :description "h"})
+            _  (sp/create-entity v :slot {:name "typed-x" :type-fn-id (:id tf)})]
+        (tombstone-delete! v (:id tf))
+        (let [purged (vs/tombstone-gc-sweep! base 0)]
+          (testing "GC must NOT purge a fn a live slot names as its :type-fn-id"
+            (is (zero? (:fn purged)))
+            (is (identity-exists? base (:id tf))))))
+      (finally (sp/close base)))))
+
+
+(deftest does-not-purge-a-dead-fn-still-referenced-as-a-return-type
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [rt (sp/create-entity v :fn {:name "ret-type" :parent-ids [] :description "h"})
+            _  (sp/create-entity v :fn {:name "uses-ret" :parent-ids []
+                                        :return-type-fn-id (:id rt) :description "h"})]
+        (tombstone-delete! v (:id rt))
+        (let [purged (vs/tombstone-gc-sweep! base 0)]
+          (testing "GC must NOT purge a fn a live fn names as its :return-type-fn-id"
+            (is (zero? (:fn purged)))
+            (is (identity-exists? base (:id rt))))))
+      (finally (sp/close base)))))
+
+
+(deftest does-not-purge-a-dead-fn-referenced-by-a-binding-on-another-branch
+  ;; The finding's exact scenario: X is referenced by a binding.ref-fn-id set
+  ;; on branch B (a VERSION-plane ref, invisible to a delete evaluated on main),
+  ;; X is then tombstoned on main and dead on every branch. Purging X would
+  ;; leave B's binding pointing at nothing, unrecoverably.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [x     (sp/create-entity v :fn {:name "x-target" :parent-ids [] :description "h"})
+            owner (sp/create-entity v :fn {:name "y-owner" :parent-ids [] :description "h"})
+            slot  (sp/create-entity v :slot {:name "y-slot" :type-fn-id (:id owner)})
+            bnd   (sp/create-entity v :binding {:fn-id (:id owner) :slot-id (:id slot) :value "v"})
+            b     (vs/create-branch! v "refs-x")
+            vb    (vs/switch-branch v (:id b))]
+        (sp/update-entity vb :binding (:id bnd) {:ref-fn-id (:id x)})  ; version-plane ref on B
+        (tombstone-delete! v (:id x))                                  ; delete X on main
+        (testing "precondition: X dead on main"
+          (is (not (live? v (:id x)))))
+        (let [purged (vs/tombstone-gc-sweep! base 0)]
+          (testing "GC must NOT purge X — B's binding still references it"
+            (is (zero? (:fn purged)))
+            (is (identity-exists? base (:id x))))))
+      (finally (sp/close base)))))

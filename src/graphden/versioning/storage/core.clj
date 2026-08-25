@@ -38,6 +38,7 @@
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
     [graphden.types.diagnostics :as diag]
+    [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.uniqueness :as uniq]
@@ -310,10 +311,19 @@
                        purgeable (filter
                                    (fn [id]
                                      (and (dead-on-every-branch? base-storage entity-name id branch-ids)
-                                          ;; not still named as a live fn's parent
+                                          ;; A dead `:fn` is purgeable only when NOTHING outside its
+                                          ;; own subgraph still references it. The parent-ids junction
+                                          ;; alone is not enough: a `binding.ref-fn-id` /
+                                          ;; `slot.type-fn-id` / `fn.return-type-fn-id` (incl. the
+                                          ;; version plane, e.g. a ref set on ANOTHER branch) would
+                                          ;; be left dangling — and for an editor random-id fn that
+                                          ;; ref can never be healed, since the id can't be re-minted.
+                                          ;; `idrepair/inbound-refs` is the exact surface the
+                                          ;; hard-delete guard (`identity-child-refs`) and the
+                                          ;; bundle-prune guard both trust; it already subsumes the
+                                          ;; parent-ids check and excludes the fn's own owned rows.
                                           (not (and (= :fn entity-name)
-                                                    (seq (sp/query-ref-many-owners
-                                                           base-storage :fn :parent-ids id))))))
+                                                    (seq (idrepair/inbound-refs base-storage id))))))
                                    candidates)
                        n (reduce
                            (fn [acc id]

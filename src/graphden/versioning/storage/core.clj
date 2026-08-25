@@ -325,14 +325,54 @@
                                           (not (and (= :fn entity-name)
                                                     (seq (idrepair/inbound-refs base-storage id))))))
                                    candidates)
+                       purge-own-versions!
+                       (fn [id]
+                         (let [vs (sp/query-entities base-storage version-entity
+                                                     {version-id-field id})]
+                           (when (seq vs)
+                             (sp/delete-entities base-storage version-entity (mapv :id vs)))))
                        n (reduce
                            (fn [acc id]
-                             (let [vs (sp/query-entities base-storage version-entity
-                                                         {version-id-field id})]
-                               (when (seq vs)
-                                 (sp/delete-entities base-storage version-entity (mapv :id vs)))
-                               (sp/delete-entity base-storage entity-name id)
-                               (inc acc)))
+                             (case entity-name
+                               ;; A fn OWNS a subgraph (its bindings + their
+                               ;; list-items, fn-slots, all version rows). A bare
+                               ;; identity+version delete reclaims only the fn row
+                               ;; and orphans the rest — a monotonic storage leak
+                               ;; on create/delete churn, plus a dangling
+                               ;; `binding.fn-id` / `binding-list-item.binding-id`
+                               ;; at the purged fn. Purge the whole subgraph (the
+                               ;; fn is unreferenced from outside — the `purgeable`
+                               ;; inbound-refs guard above).
+                               :fn (idrepair/purge-fn-subgraph! base-storage id)
+                               ;; A binding OWNS its list-items. A user delete
+                               ;; tombstones only the binding, so its items stay
+                               ;; live-orphaned; purging the binding without them
+                               ;; dangles `binding-list-item.binding-id` (invisible
+                               ;; to the dangling-refs detector, which checks only
+                               ;; `.ref-fn-id`). Cascade the items (+ versions),
+                               ;; then the binding's own version rows + identity.
+                               :binding
+                               (let [liv (filter #(= id (:binding-id %))
+                                                 (sp/query-entities base-storage
+                                                                    :binding-list-item-version {}))
+                                     li (filter #(= id (:binding-id %))
+                                                (sp/query-entities base-storage
+                                                                   :binding-list-item {}))]
+                                 (when (seq liv)
+                                   (sp/delete-entities base-storage :binding-list-item-version
+                                                       (mapv :id liv)))
+                                 (when (seq li)
+                                   (sp/delete-entities base-storage :binding-list-item
+                                                       (mapv :id li)))
+                                 (purge-own-versions! id)
+                                 (sp/delete-entity base-storage entity-name id))
+                               ;; :fn-slot / :binding-list-item — nothing outside
+                               ;; their own (co-purged) version rows references
+                               ;; them by id (verified vs `ref-fields` /
+                               ;; `identity-child-refs`). Bare purge is safe.
+                               (do (purge-own-versions! id)
+                                   (sp/delete-entity base-storage entity-name id)))
+                             (inc acc))
                            0
                            purgeable)]
                    [entity-name n])))

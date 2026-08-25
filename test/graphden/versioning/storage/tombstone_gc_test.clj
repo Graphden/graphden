@@ -220,3 +220,49 @@
             (is (zero? (:fn purged)))
             (is (identity-exists? base (:id x))))))
       (finally (sp/close base)))))
+
+
+;; The GC RECLAIMS a dead entity's whole OWNED subgraph — a user delete
+;; tombstones only the target row, so without a cascade the owned children leak
+;; forever (storage cost on cloud) and dangle the ownership FK at the purged row.
+
+(deftest purges-a-dead-fns-owned-subgraph
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [tf (sp/create-entity v :fn {:name "sub-type" :parent-ids [] :description "h"})
+            f  (sp/create-entity v :fn {:name "sub-owner" :parent-ids [] :description "h"})
+            s  (sp/create-entity v :slot {:name "sub-slot" :type-fn-id (:id tf)})
+            b  (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id s) :list-append true})
+            i  (sp/create-entity v :binding-list-item {:binding-id (:id b) :position 0 :value "x"})]
+        (tombstone-delete! v (:id f))                 ; delete only the fn
+        (vs/tombstone-gc-sweep! base 0)
+        (testing "the fn AND its owned binding + list-item are all reclaimed"
+          (is (not (identity-exists? base (:id f))))
+          (is (empty? (sp/query-entities base :binding {:id (:id b)}))
+              "owned binding is not leaked")
+          (is (empty? (sp/query-entities base :binding-list-item {:id (:id i)}))
+              "owned list-item is not leaked")))
+      (finally (sp/close base)))))
+
+
+(deftest purges-a-dead-bindings-own-list-items
+  ;; Finding: the GC guarded only :fn; a dead :binding was purged bare, dangling
+  ;; its live-orphaned binding-list-item.binding-id. Cascade the items with it.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [tf (sp/create-entity v :fn {:name "b-type" :parent-ids [] :description "h"})
+            f  (sp/create-entity v :fn {:name "b-owner" :parent-ids [] :description "h"})
+            s  (sp/create-entity v :slot {:name "b-slot" :type-fn-id (:id tf)})
+            b  (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id s) :list-append true})
+            i  (sp/create-entity v :binding-list-item {:binding-id (:id b) :position 0 :value "x"})]
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity v :binding (:id b)))      ; delete only the binding; fn stays live
+        (vs/tombstone-gc-sweep! base 0)
+        (testing "the binding and its own list-items are reclaimed; the owning fn survives"
+          (is (empty? (sp/query-entities base :binding {:id (:id b)})))
+          (is (empty? (sp/query-entities base :binding-list-item {:id (:id i)}))
+              "no dangling binding-list-item.binding-id at the purged binding")
+          (is (identity-exists? base (:id f)) "the live owning fn is untouched")))
+      (finally (sp/close base)))))

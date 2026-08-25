@@ -400,6 +400,42 @@
           (tc/install-org-cap-fn! nil))))))
 
 
+(deftest withdraw-requires-publish-capability
+  ;; Withdraw is the DESTRUCTIVE counterpart of publish and must be gated on the
+  ;; same `:publish-packages` capability at the core — otherwise an org member
+  ;; explicitly DENIED publish rights could still permanently erase the org's
+  ;; published versions (a within-org missing-authorization escalation).
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        apply-id (get all-name->id :withdraw-package-apply)
+        mk! (fn [nm]
+              (:id (sp/create-entity (storage) :package-version
+                                     {:name nm :version "1.0.0" :ns-root nm
+                                      :fns [] :dependencies [] :content-hash "h"
+                                      :org-id "org-wd-test"})))]
+    (testing "a tenant WITHOUT :publish-packages is refused (:authz/forbidden), row survives"
+      (try
+        (tc/install-org-cap-fn! (constantly false))
+        (binding [tc/*current-org* "org-wd-test"]
+          (let [pid (mk! "wd.denied")
+                ex (try (exec/execute-with-named-args ctx apply-id {:id pid})
+                        nil
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (some? ex) "withdraw threw")
+            (is (= :authz/forbidden (:type (ex-data ex))))
+            (is (seq (sp/query-entities (storage) :package-version {:name "wd.denied"}))
+                "the version survives the refused withdraw")))
+        (finally (tc/install-org-cap-fn! nil))))
+    (testing "with :publish-packages the withdraw succeeds"
+      (try
+        (tc/install-org-cap-fn! (fn [cap] (= cap :publish-packages)))
+        (binding [tc/*current-org* "org-wd-test"]
+          (let [pid (mk! "wd.allowed")]
+            (exec/execute-with-named-args ctx apply-id {:id pid})
+            (is (empty? (sp/query-entities (storage) :package-version {:name "wd.allowed"}))
+                "the version is gone after an authorized withdraw")))
+        (finally (tc/install-org-cap-fn! nil))))))
+
+
 (deftest publish-handler-creates-and-rejects-duplicate
   (testing "POST /api/packages/publish exports + stores a package version"
     (let [resp (setup/via-graph *bootstrap* :publish-package-handler

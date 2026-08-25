@@ -283,6 +283,12 @@
    :return-type :nullable-keyword-map
    :effects #{:db :time}}
 
+  {:name :withdraw-package-apply
+   :description "Atomic withdraw core — capability-gated (`:publish-packages`) delete of a `:package-version` row by id. The DESTRUCTIVE counterpart of `:publish-package-apply`, guarded at the same core so no route (JSON / panel) bypasses it. Own-org only (the row is org-scoped). Returns the deleted id."
+   :args {:id {:type :uuid :description "The `:package-version` row id to delete."}}
+   :return-type :uuid
+   :effects #{:db}}
+
   ;; Publish = a graph guard over the atomic core. The empty-bundle
   ;; rejection is a pure input predicate (a typo'd / non-existent
   ;; `:ns-root` exports zero fns and would write a 0-fn garbage row
@@ -706,9 +712,9 @@
    :parent :not :args {:value {:parent :empty? :args {:coll :_wd-pins}}}}
 
   {:name :_wd-do-delete
-   :parent :delete-entity
-   :args {:entity-type {:value "package-version"}
-          :id {:parent :get :args {:coll :_wd-row :key {:value :id} :default nil}}}}
+   :description "Capability-gated delete of the :package-version row (via `:withdraw-package-apply`, which enforces `:publish-packages` at the core — mirrors publish). NOT the bare `:delete-entity`, which was auth-only and let a non-publisher erase published versions."
+   :parent :withdraw-package-apply
+   :args {:id {:parent :get :args {:coll :_wd-row :key {:value :id} :default nil}}}}
 
   {:name :_wd-ok-envelope
    :parent :assoc

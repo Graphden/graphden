@@ -157,6 +157,25 @@
                          :published-at (java.time.Instant/now)}))))
 
 
+(defbase withdraw-package-apply
+  "Delete a published `:package-version` row, gated on the `:publish-packages`
+   org capability — the DESTRUCTIVE counterpart of `publish-package-apply`, and
+   guarded at the same deepest effectful core so NO route (JSON or panel) can
+   bypass it. Before this, `withdraw` was auth-only, so an org member explicitly
+   DENIED publish rights could still permanently erase the org's published
+   versions. Single-tenant-safe via the platform-tier short-circuit (org-cap
+   seam is default-deny without the tenancy addon). Own-org only — the row is
+   org-scoped, so RLS/decorator confine the delete. Returns the deleted id."
+  [id]
+  (when-not (or (tc/current-platform-tier?)
+                (tc/current-has-org-cap? :publish-packages))
+    (throw (ex-info "Withdrawing a package requires the publish-packages capability."
+                    {:type :authz/forbidden :capability :publish-packages})))
+  (cr/record-effect! :db)
+  (sp/delete-entity (request/require-storage ctx) :package-version id)
+  id)
+
+
 ;; `:list-package-versions` / `:fetch-package-version` are pure graph
 ;; compositions in fns.edn over `:query-entities` — the per-row JSON
 ;; reshape (stringified ids/timestamps, `:fn-count`) is graph-visible.
@@ -657,6 +676,7 @@
    :tenancy-active? tenancy-active?
    :graph-rows graph-rows
    :publish-package-apply publish-package-apply
+   :withdraw-package-apply withdraw-package-apply
    :resolve-package-version resolve-package-version
    :missing-package-dependencies missing-package-dependencies
    :package-version-materialized? package-version-materialized?

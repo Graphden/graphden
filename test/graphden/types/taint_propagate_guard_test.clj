@@ -134,7 +134,7 @@
     :usage-org-daily :usage-org-fn-stats
     :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
     :vault-get :vault-metadata-get :vault-metadata-put :vault-put :vec
-    :version-qualified-ns :write-rej :zero? :zipmap})
+    :version-qualified-ns :withdraw-package-apply :write-rej :zero? :zipmap})
 
 
 (def ^:private golden-tainted

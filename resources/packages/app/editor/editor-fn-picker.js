@@ -343,6 +343,8 @@ function openFnPicker(opts) {
       + (section === 'compat' ? ' fn-picker-row-compat' : '');
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', idx === activeIdx ? 'true' : 'false');
+    // Stable hook for the tutorial spotlight (and tests): which fn this row is.
+    row.dataset.fnName = c.qualified;
 
     if (section === 'compat') {
       const ok = document.createElement('span');

@@ -1200,12 +1200,24 @@ function mountOpsSections(fallbackList, searchMode) {
     // under an active tenancy addon; writes there are system-only).
     mountAdminSection(opsHost, opsNavHost, 'assets', buildAssetsSection);
   }
-  // Select the first section on each surface so a pane is always showing.
+  // Select a section on each surface so a pane is always showing — the one
+  // the user is ALREADY on when there is one, the first otherwise. This
+  // mount re-runs on every graph refresh (updateEntityList), and defaulting
+  // unconditionally to the first section flipped an open panel back to
+  // Packages under the reader whenever background state landed — a test
+  // auto-run finishing was enough (caught by the lesson-26 tour: its
+  // green-dot check never saw the Tests panel it had just opened).
+  const activeOrFirst = (nav, pane) => {
+    const cur = [...nav.children]
+      .find((b) => b.getAttribute('aria-current') === 'page')?.dataset.section;
+    return (cur && pane.querySelector(':scope > section[data-section="' + cur + '"]'))
+      ? cur : nav.firstElementChild.dataset.section;
+  };
   if (opsNavHost?.firstElementChild) {
-    activateOpSection(opsNavHost, opsHost, opsNavHost.firstElementChild.dataset.section);
+    activateOpSection(opsNavHost, opsHost, activeOrFirst(opsNavHost, opsHost));
   }
   if (platNavHost && platNavHost !== opsNavHost && platNavHost.firstElementChild) {
-    activateOpSection(platNavHost, platHost, platNavHost.firstElementChild.dataset.section);
+    activateOpSection(platNavHost, platHost, activeOrFirst(platNavHost, platHost));
   }
 }
 

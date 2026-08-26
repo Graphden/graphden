@@ -20,7 +20,7 @@ const TOUR_TICK_MS = 600;
 let _tourLessons = null; // fetched /api/tour payload
 let _tourState = null;   // {lessonId, step, created: [{type,name}]}
 let _tourTimer = null;
-let _tourEls = null;     // {spot, pop}
+let _tourEls = null;     // {dim, spot, pop}
 
 function _tourSaveState() {
   try {
@@ -47,8 +47,17 @@ function _tourStep() {
   return (lesson.steps || [])[_tourState.step] || null;
 }
 
+// The spotlight is TWO stacked elements over the same rect: `dim` carries
+// the huge box-shadow scrim and sits BELOW every transient surface (a menu
+// the step opens must float bright over it), `spot` carries the accent ring
+// and sits ABOVE them (a `:targets` chain rings items INSIDE an open menu,
+// and a ring under the menu's own panel would be invisible). One element
+// cannot do both — its border and its shadow share a z-index.
 function _tourEnsureEls() {
   if (_tourEls) return _tourEls;
+  const dim = document.createElement('div');
+  dim.id = 'gd-tour-dim';
+  dim.setAttribute('aria-hidden', 'true');
   const spot = document.createElement('div');
   spot.id = 'gd-tour-spot';
   spot.setAttribute('aria-hidden', 'true');
@@ -57,10 +66,27 @@ function _tourEnsureEls() {
   pop.setAttribute('role', 'dialog');
   pop.setAttribute('aria-modal', 'false');
   pop.setAttribute('aria-label', 'Interactive tutorial');
+  document.body.appendChild(dim);
   document.body.appendChild(spot);
   document.body.appendChild(pop);
-  _tourEls = { spot, pop };
+  _tourEls = { dim, spot, pop };
   return _tourEls;
+}
+
+// Both spotlight layers move together.
+function _tourSpotRect(left, top, width, height) {
+  for (const el of [_tourEls.spot, _tourEls.dim]) {
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.style.width = width + 'px';
+    el.style.height = height + 'px';
+    el.classList.add('gd-tour-visible');
+  }
+}
+
+function _tourSpotHide() {
+  _tourEls.spot.classList.remove('gd-tour-visible');
+  _tourEls.dim.classList.remove('gd-tour-visible');
 }
 
 function _tourBtn(label, cls, onClick) {
@@ -70,6 +96,83 @@ function _tourBtn(label, cls, onClick) {
   b.textContent = label;
   b.addEventListener('click', onClick);
   return b;
+}
+
+// Step prose carries two inline marks, so "press this" and "type this" stop
+// looking like ordinary quoted words:
+//   [[Label]] — a UI element the step wants pressed (button, menu item, key)
+//               — rendered as a keycap-style chip;
+//   `text`    — text the reader must type — rendered as a monospace chip
+//               that copies itself to the clipboard on click, so a JSON
+//               payload never has to be retyped from prose.
+// Plain text passes through verbatim; a body with no marks renders exactly
+// as before.
+function _tourRenderBody(el, text) {
+  const parts = String(text || '').split(/(\[\[[^\]]+\]\]|`[^`\n]+`)/);
+  for (const part of parts) {
+    if (!part) continue;
+    let m = /^\[\[([^\]]+)\]\]$/.exec(part);
+    if (m) {
+      const chip = document.createElement('span');
+      chip.className = 'gd-tour-ui';
+      chip.textContent = m[1];
+      el.appendChild(chip);
+      continue;
+    }
+    m = /^`([^`\n]+)`$/.exec(part);
+    if (m) {
+      el.appendChild(_tourCopyChip(m[1]));
+      continue;
+    }
+    el.appendChild(document.createTextNode(part));
+  }
+}
+
+function _tourCopyChip(text) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'gd-tour-copy';
+  b.title = 'Click to copy';
+  b.setAttribute('aria-label', 'Copy to clipboard: ' + text);
+  const t = document.createElement('span');
+  t.className = 'gd-tour-copy-text';
+  t.textContent = text;
+  const ic = document.createElement('span');
+  ic.className = 'gd-tour-copy-ic';
+  ic.setAttribute('aria-hidden', 'true');
+  ic.textContent = '⧉';
+  b.appendChild(t);
+  b.appendChild(ic);
+  b.addEventListener('click', async () => {
+    const ok = await _tourClipboard(text);
+    ic.textContent = ok ? '✓' : '⧉';
+    b.classList.toggle('gd-tour-copied', ok);
+    setTimeout(() => {
+      ic.textContent = '⧉';
+      b.classList.remove('gd-tour-copied');
+    }, 1400);
+  });
+  return b;
+}
+
+async function _tourClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) { /* insecure context / permission — fall through */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch (_) { return false; }
 }
 
 function _tourRenderStep() {
@@ -100,7 +203,7 @@ function _tourRenderStep() {
 
   const body = document.createElement('div');
   body.className = 'gd-tour-body';
-  body.textContent = step.body || '';
+  _tourRenderBody(body, step.body);
 
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot';
@@ -193,12 +296,13 @@ function _tourPanelOf(target) {
 function _tourPosition() {
   if (!_tourEls || !_tourState) return;
   const step = _tourStep();
-  const { spot, pop } = _tourEls;
+  const { pop } = _tourEls;
   const narrow = _tourNarrow();
   pop.classList.toggle('gd-tour-sheet', narrow);
   _tourReserveForSheet(narrow && pop.classList.contains('gd-tour-visible')
                        ? pop.offsetHeight : 0);
-  const target = step?.target ? document.querySelector(step.target) : null;
+  const effSel = _tourEffTarget(step);
+  const target = effSel ? document.querySelector(effSel) : null;
   const rect = target ? target.getBoundingClientRect() : null;
   const visible = rect && rect.width > 0 && rect.height > 0
     && rect.bottom > 0 && rect.top < window.innerHeight;
@@ -206,21 +310,15 @@ function _tourPosition() {
   if (visible && narrow) {
     // Spotlight still anchors; the sheet's own geometry is in the stylesheet.
     const pad = 6;
-    spot.style.left = (rect.left - pad) + 'px';
-    spot.style.top = (rect.top - pad) + 'px';
-    spot.style.width = (rect.width + pad * 2) + 'px';
-    spot.style.height = (rect.height + pad * 2) + 'px';
-    spot.classList.add('gd-tour-visible');
+    _tourSpotRect(rect.left - pad, rect.top - pad,
+                  rect.width + pad * 2, rect.height + pad * 2);
     pop.classList.remove('gd-tour-centered');
     pop.style.left = '';
     pop.style.top = '';
   } else if (visible) {
     const pad = 6;
-    spot.style.left = (rect.left - pad) + 'px';
-    spot.style.top = (rect.top - pad) + 'px';
-    spot.style.width = (rect.width + pad * 2) + 'px';
-    spot.style.height = (rect.height + pad * 2) + 'px';
-    spot.classList.add('gd-tour-visible');
+    _tourSpotRect(rect.left - pad, rect.top - pad,
+                  rect.width + pad * 2, rect.height + pad * 2);
 
     const pw = pop.offsetWidth || 360;
     const ph = pop.offsetHeight || 180;
@@ -259,7 +357,7 @@ function _tourPosition() {
     // canvas area the step talks about — dock to a corner instead, scored
     // against the open floating surfaces, and keep re-checking each tick
     // until the target appears.
-    spot.classList.remove('gd-tour-visible');
+    _tourSpotHide();
     const pw = pop.offsetWidth || 360;
     const ph = pop.offsetHeight || 180;
     const cands = [
@@ -272,7 +370,7 @@ function _tourPosition() {
     pop.style.top = best.top + 'px';
     pop.classList.remove('gd-tour-centered');
   } else {
-    spot.classList.remove('gd-tour-visible');
+    _tourSpotHide();
     pop.classList.add('gd-tour-centered');
     pop.style.left = '';
     pop.style.top = '';
@@ -298,7 +396,8 @@ function _tourFloatingRects() {
   if (!document.body) return out;
   for (const el of document.body.children) {
     if (!(el instanceof HTMLElement)) continue;
-    if (_tourEls && (el === _tourEls.pop || el === _tourEls.spot)) continue;
+    if (_tourEls && (el === _tourEls.pop || el === _tourEls.spot
+                     || el === _tourEls.dim)) continue;
     const cs = getComputedStyle(el);
     if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
     if (cs.display === 'none' || cs.visibility === 'hidden') continue;
@@ -343,6 +442,23 @@ function _tourTargetVisible(selector) {
     && r.right > 0 && r.left < window.innerWidth;
 }
 
+// A step whose action passes through transient UI (a ⋯ menu, the
+// literal-vs-ref chooser, the fn picker) may carry `:targets` — an ordered
+// selector chain, one entry per stage. The spotlight follows the DEEPEST
+// stage currently on screen: "click ⋯, then ▶ Run, then Run" rings the menu
+// item the moment the menu opens, and the Run button once the popover
+// renders. Stages past the first are best-effort — a stale selector just
+// leaves the ring on the previous stage (the e2e guard pins `:target`).
+function _tourEffTarget(step) {
+  const chain = step?.targets;
+  if (Array.isArray(chain)) {
+    for (let i = chain.length - 1; i >= 0; i--) {
+      if (_tourTargetVisible(chain[i])) return chain[i];
+    }
+  }
+  return step?.target || null;
+}
+
 
 function _tourTick() {
   if (!_tourState) return;
@@ -378,10 +494,13 @@ function _tourTick() {
   // Still out of view (a long namespace list, a short window, or — on a
   // phone — under the sheet)? Bring it in: a spotlight the reader cannot
   // reach is the same dead end whichever edge hides it.
-  if (step.target && _tourState._scrolledFor !== _tourState.step) {
-    const el = document.querySelector(step.target);
-    if (el && (!_tourTargetVisible(step.target) || _tourUnderSheet(step.target))) {
-      _tourState._scrolledFor = _tourState.step;
+  // Keyed by step AND selector: a `:targets` chain re-earns its one scroll
+  // when the spotlight advances to a deeper stage mid-step.
+  const effSel = _tourEffTarget(step);
+  if (effSel && _tourState._scrolledFor !== _tourState.step + ':' + effSel) {
+    const el = document.querySelector(effSel);
+    if (el && (!_tourTargetVisible(effSel) || _tourUnderSheet(effSel))) {
+      _tourState._scrolledFor = _tourState.step + ':' + effSel;
       try { el.scrollIntoView({block: 'center', inline: 'nearest'}); } catch (_) { /* ignore */ }
     }
   }
@@ -452,7 +571,7 @@ function _tourPause() {
   const lesson = _tourLesson();
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
   if (_tourEls) {
-    _tourEls.spot.classList.remove('gd-tour-visible');
+    _tourSpotHide();
     _tourEls.pop.classList.remove('gd-tour-visible');
   }
   _tourReserveForSheet(0);
@@ -574,8 +693,8 @@ async function _tourEnd() {
 // and one quiet action. Three end-of-tour prompts built the same DOM by hand
 // before this.
 function _tourDialog({ title, body, primary, quiet }) {
-  const { spot, pop } = _tourEnsureEls();
-  spot.classList.remove('gd-tour-visible');
+  const { pop } = _tourEnsureEls();
+  _tourSpotHide();
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible', 'gd-tour-centered');
   // Same rule as a step: on a phone this is a bottom sheet, not a 360px box
@@ -586,7 +705,7 @@ function _tourDialog({ title, body, primary, quiet }) {
   titleEl.textContent = title;
   const bodyEl = document.createElement('div');
   bodyEl.className = 'gd-tour-body';
-  bodyEl.textContent = body;
+  _tourRenderBody(bodyEl, body);
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot';
   foot.appendChild(_tourBtn(primary[0], 'gd-tour-btn-primary', primary[1]));
@@ -609,6 +728,7 @@ function _tourTeardown() {
   _tourSaveState();
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
   if (_tourEls) {
+    _tourEls.dim.remove();
     _tourEls.spot.remove();
     _tourEls.pop.remove();
     _tourEls = null;

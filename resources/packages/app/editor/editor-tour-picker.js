@@ -82,8 +82,8 @@ async function openTutorialMenu() {
     if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
     return;
   }
-  const { spot, pop } = _tourEnsureEls();
-  spot.classList.remove('gd-tour-visible');
+  const { pop } = _tourEnsureEls();
+  _tourSpotHide();   // both spotlight layers — the ring AND the scrim
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible', 'gd-tour-centered');
   // On a phone the catalogue is a bottom sheet like every other tour surface

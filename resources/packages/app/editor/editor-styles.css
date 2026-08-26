@@ -6342,27 +6342,49 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
  * The spotlight is a fixed-position ring around the step's target; its huge
  * box-shadow dims everything else (same scrim token the modal backdrop
  * uses). pointer-events stays none so the user CLICKS THE REAL UI — the
- * tour only observes. The ring sits ABOVE the base layout but BELOW the
- * editor's floating UI (create menus / pickers / popovers, 10002+), so a
- * menu the user opens mid-step floats bright over the dim; the tour's own
- * popover stays on top of everything.
+ * tour only observes. The ring sits ABOVE the base layout (sidebar 200,
+ * ctxbar 280) but BELOW every transient surface the editor floats — and
+ * the LOWEST of those is the 300 family (auth/branch/org popovers), not
+ * just the 10002+ menus. At 9000 the scrim dimmed the very dropdown a
+ * step had just told the reader to pick from (branch popover, workspace
+ * chip, ⌛ versions); at 290 anything that pops up is bright by
+ * construction. The tour's own popover stays above the scrim.
  * ========================================================================== */
+/* Two layers over one rect (see _tourEnsureEls): the scrim must sit UNDER
+   every transient surface, the ring must draw OVER them — one element's
+   border and box-shadow cannot be z-split. */
+#gd-tour-dim {
+  position: fixed;
+  z-index: 290;
+  display: none;
+  pointer-events: none;
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px var(--modal-backdrop-bg);
+}
 #gd-tour-spot {
   position: fixed;
-  z-index: 9000;
+  /* Above even the editor's heavy floating UI (10002+) and tooltips
+     (10010): a `:targets` chain rings items INSIDE those surfaces.
+     pointer-events stays none, so nothing is ever blocked by the ring. */
+  z-index: 10050;
   display: none;
   pointer-events: none;
   border: 2px solid var(--accent);
   border-radius: 8px;
-  box-shadow: 0 0 0 9999px var(--modal-backdrop-bg);
 }
+#gd-tour-dim.gd-tour-visible,
 #gd-tour-spot.gd-tour-visible { display: block; }
 
 #gd-tour-pop {
   position: fixed;
-  /* Above the spotlight scrim (9000) but BELOW the editor's floating UI
-     (10002+): a run/edit popover the user opens mid-step must win over
-     the tour's own popover, never hide behind it. */
+  /* Above the spotlight scrim AND above the transparent full-screen
+     click-catchers some popovers float (.gd-pop-scrim, 340) — lower and
+     the tour's own Next button would need two clicks while one of those
+     is open. Still BELOW the editor's heavy floating UI (10002+): a
+     run/edit popover the user opens mid-step must win over the tour's
+     popover, never hide behind it. The engine's placement scorer keeps
+     the tour popover clear of the 300-family popovers this z-index would
+     otherwise cover. */
   z-index: 9001;
   display: none;
   width: 360px;
@@ -6458,6 +6480,55 @@ body.gd-tour-sheet-open #side-menu {
   line-height: 1.55;
   color: var(--fg);
 }
+/* Inline marks inside step prose (see _tourRenderBody):
+   [[Label]] — a UI element to press, rendered as a keycap-style chip;
+   `text`    — text to type, rendered as a click-to-copy monospace chip. */
+.gd-tour-ui {
+  display: inline;
+  padding: 0.5px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--card-bg);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  /* A long label ("I understand this will produce side effects") must wrap
+     inside a 360px popover — clone repeats the keycap frame per fragment. */
+  box-decoration-break: clone;
+}
+@media (max-width: 700px) {
+  .gd-tour-ui { white-space: normal; }
+}
+.gd-tour-copy {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  max-width: 100%;
+  padding: 0.5px 6px;
+  border: 1px dashed var(--input-border);
+  border-radius: 5px;
+  background: var(--hover-bg);
+  color: var(--fg);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: copy;
+  vertical-align: baseline;
+}
+.gd-tour-copy-text {
+  text-align: left;
+  overflow-wrap: anywhere;  /* a JSON payload wraps instead of overflowing */
+}
+.gd-tour-copy-ic {
+  font-size: 11px;
+  color: var(--muted-fg);
+}
+.gd-tour-copy:hover { border-color: var(--accent); }
+.gd-tour-copy:hover .gd-tour-copy-ic { color: var(--accent); }
+.gd-tour-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gd-tour-copied { border-style: solid; border-color: var(--success-fg); }
+.gd-tour-copied .gd-tour-copy-ic { color: var(--success-fg); }
 .gd-tour-foot {
   display: flex;
   align-items: center;

@@ -428,6 +428,8 @@ function openShellMenu() {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'auth-menu-item';
+    // Stable hook for the tutorial spotlight: which destination this row is.
+    b.dataset.item = label;
     b.textContent = label;
     b.addEventListener('click', onClick);
     menu.appendChild(b);

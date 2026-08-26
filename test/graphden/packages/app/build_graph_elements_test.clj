@@ -155,8 +155,11 @@
       (is (= "x" (get-in unset-edge [:data :argName]))))))
 
 
-(deftest hof-lambda-param-renders-as-lambda-badge
-  (testing "free arg below an is-fn boundary surfaces as `λname` on its node, not a placeholder"
+(deftest hof-lambda-param-renders-as-lambda-edge
+  (testing "free arg below an is-fn boundary surfaces as a λ-flagged
+            placeholder edge (unified-arg-edges 2026-08-26 — the compact
+            λ badge array is retired; same shape as every argument, the
+            :lambdaArg flag styles it as a non-bindable ghost)"
     (let [;; base-outer has :f :fn primary
           base-outer (random-uuid)
           base-outer-f (random-uuid)
@@ -178,10 +181,21 @@
                 (mk-arg {:id base-inner-v :fn-id base-inner :name "v"})
                 (mk-arg {:id outer-f :fn-id outer :source-id base-outer-f :ref-id inner :type :fn})
                 (mk-arg {:id inner-v-propagated :fn-id inner :source-id base-inner-v})]
-          {:keys [nodes]} (run outer fns args)
-          inner-node (some #(when (re-find #"base-inner" (str (get-in % [:data :label]))) %) nodes)]
-      (is (= ["v"] (get-in inner-node [:data :hofCapturedArgs]))
-          "λv badge surfaces — caller has no structural anchor for :v"))))
+          {:keys [nodes edges]} (run outer fns args)
+          lam-edge (some #(let [d (:data %)]
+                            (when (and (:isUnset d) (:lambdaArg d)
+                                       (= "v" (:argName d))) d))
+                         edges)
+          lam-node (when lam-edge
+                     (some #(when (= (:target lam-edge) (get-in % [:data :id]))
+                              (:data %))
+                           nodes))]
+      (is (some? lam-edge)
+          "λ edge for :v surfaces — caller has no structural anchor for it")
+      (is (:isPlaceholder lam-node) "its target is a placeholder node")
+      (is (:lambdaArg lam-node) "the node carries the λ flag")
+      (is (not-any? #(get-in % [:data :hofCapturedArgs]) nodes)
+          "the retired λ badge array never resurrects"))))
 
 
 (deftest hof-capture-migrates-the-edge-from-caller-to-inner-consumer

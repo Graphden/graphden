@@ -220,3 +220,33 @@ An alternative was considered (env-builder slot-id-only + cross-fn rename slot-i
 - Sync validator warnings about author-time collisions (deferred — separate concern, not blocking this refactor)
 - Multi-rename slots, parser changes — none
 - Public API signature changes — none (callers continue to pass names; translation is internal)
+
+### 9. Addendum (2026-08-27) — inherited renames
+
+Two facts established while closing the lesson-13 `:wrap-custom-script`
+descendant-binding bug (a value bound as `:body` silently vanished):
+
+- **Parser normalization (shipped).** A SCALAR rename whose source
+  resolves by inheritance to a POSITIONAL rename anchor
+  (`content → body` over `:wrap-element`'s `{:as :content}`) now
+  anchors descendants' fn-def bindings on the positional source slot —
+  the slot the editor writes for the same edit and the only slot the
+  positional runtime reader consults
+  (`records/slot-resolution/scalar-over-positional-hit`; regression:
+  `executor/compile/inherited_rename_binding_test`). Every other
+  rename shape keeps the rename-view slot as the binding anchor —
+  root-slot sources are served by `effective-binding`'s
+  rename-override hop, ref-tree sources by cross-fn ref-rename
+  translation.
+
+- **Known gap (deliberately open).** A descendant of a renaming
+  ancestor advertises the SOURCE name on its free-arg surface
+  (`free-arg-ext-names` → `:content`, not `:body`) and call-time args
+  by the renamed name miss. Three attempted fixes (chain-aware
+  `own-rename-chain-map`; inherited-seed walker layer; name/slot-id
+  dual env writes) each broke existing platform classifications
+  (`_list-secrets-shape-row`, `_layout-api-handler`, graph-composed
+  `/health`) — surfaces of fns like `_shape-secret-base` depend on the
+  per-fid rename scoping. Making renames inherit into surfaces needs
+  its own design pass over `deep-free-ext-names*`'s translate scoping;
+  don't retry the three shapes above as one-liners.

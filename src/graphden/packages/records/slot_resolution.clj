@@ -234,7 +234,73 @@
           args)))
 
 
+(defn- scalar-rename-source
+  "If `fn-def` exposes `exposed-name` through a SCALAR rename binding
+   `{X {:as exposed-name}}` (name actually changed, no `:ref`
+   passthrough), return the source arg-name X. Positional renames
+   inside sequence bindings return nil — their rename-view slot is
+   the runtime's read anchor and must stay the binding target.
+
+   Scalar rename views are TRANSPARENT for descendants' bindings: the
+   editor already writes a descendant's binding on the SOURCE slot
+   (the rename is a display-level view), and the executor resolves
+   inheritance bindings by source slot. The resolver below uses this
+   to normalize `:body` → the `content` anchor, so fn-def syntax and
+   the editor produce the same rows."
+  [fn-def exposed-name]
+  (when-let [args (:args fn-def)]
+    (some (fn [[ancestor-arg-name binding-value]]
+            (when (and (map? binding-value)
+                       (= exposed-name (some-> (:as binding-value) keyword))
+                       (not= ancestor-arg-name exposed-name)
+                       (not (:ref binding-value)))
+              ancestor-arg-name))
+          args)))
+
+
+(defn- positional-rename-anchor?
+  "True iff `fn-def` exposes `exposed-name` through a POSITIONAL
+   rename item inside a sequence binding (`:items [{:as exposed-name}
+   …]`-style). Positional rename slots are the runtime's read anchor
+   for the item value."
+  [fn-def exposed-name]
+  (boolean
+    (some (fn [[_ binding-value]]
+            (and (vector? binding-value)
+                 (some #(and (map? %)
+                             (= exposed-name (some-> (:as %) keyword)))
+                       binding-value)))
+          (:args fn-def))))
+
+
 (declare resolve-slot-owner-strict)
+(declare ^:private resolve-slot-owner-strict-inheritance)
+
+
+(defn- scalar-over-positional-hit
+  "When `ancestor` exposes `arg-name` through a SCALAR rename whose
+   source resolves (by inheritance from `ancestor-name`) to a
+   POSITIONAL rename anchor, return that anchor `[owner arg]` — else
+   nil.
+
+   This is the one rename shape where a binding must NOT target the
+   scalar rename-view slot: the positional item's runtime reader
+   (`seq-item-builder`) reads its OWN anchor slot and never consults
+   further rename views over it, so a binding left on the outer
+   scalar view is a silent no-op (lesson-13's `:wrap-custom-script`
+   children — `content → body` — were the reproducer). Normalizing to
+   the positional anchor also matches what the editor writes for the
+   same edit. Every other scalar-rename shape keeps the rename slot
+   as the binding anchor: root-slot sources are served by
+   `compile.bindings/effective-binding`'s rename-override hop, and
+   ref-tree sources by the cross-fn ref-rename translation."
+  [ancestor ancestor-name arg-name defs-by-name seen]
+  (when-let [src (scalar-rename-source ancestor arg-name)]
+    (when-let [hit (resolve-slot-owner-strict-inheritance
+                     ancestor-name src defs-by-name seen)]
+      (when (positional-rename-anchor? (get defs-by-name (first hit))
+                                       (second hit))
+        hit))))
 
 
 (defn- resolve-slot-owner-strict-inheritance
@@ -266,6 +332,23 @@
                     (rename-passthrough-ref ancestor arg-name)
                     arg-name defs-by-name seen')
 
+                  ;; Scalar rename over a POSITIONAL anchor — normalize
+                  ;; to the anchor (see `scalar-over-positional-hit`).
+                  ;; Top-level pass only (`seen` empty): inside
+                  ;; ref-pass recursion the rename slot stays the
+                  ;; anchor for cross-fn ref-rename translation.
+                  (and (empty? seen)
+                       (scalar-over-positional-hit
+                         ancestor name-in-chain arg-name
+                         defs-by-name seen'))
+                  (scalar-over-positional-hit
+                    ancestor name-in-chain arg-name
+                    defs-by-name seen')
+
+                  ;; Any other rename view (positional, scalar over a
+                  ;; root slot, scalar with a ref-tree source, or
+                  ;; reached through recursion) — the rename-view slot
+                  ;; is the binding anchor.
                   (rename-target ancestor arg-name)
                   [name-in-chain arg-name]
 

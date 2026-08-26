@@ -134,9 +134,8 @@ function metadataStripsHeight(nodeData) {
   // (always shown to expose an "add return-type" affordance), OR when
   // there's an explicit `:return-type` on the entity, OR when
   // `richTypes` carries a computed entry for this name.
-  const hasRtEntry = !!fn.name
-    && typeof richTypes === 'object'
-    && richTypes?.[fn.name] && richTypes[fn.name].return != null;
+  const hasRtEntry = typeof richTypeEntryOf === 'function'
+    && richTypeEntryOf(fn)?.return != null;
   const isNavRoot = !nodeData.isPlaceholder && nodeData.isRoot;
   // Mirror of appendFnMetadataStrips' isTypeRow gate — type-rows render
   // neither the return strip nor "set parent…".
@@ -151,8 +150,8 @@ function metadataStripsHeight(nodeData) {
   }
   // Effects strip — present iff the rich-type registry knows of either
   // computed or declared effects for this fn.
-  if (!compact && fn.name && typeof richTypes === 'object' && richTypes) {
-    const re = richTypes[fn.name];
+  if (!compact && fn.name && typeof richTypeEntryOf === 'function') {
+    const re = richTypeEntryOf(fn);
     const eff = (re && Array.isArray(re.effects)) ? re.effects : [];
     const decl = (re && Array.isArray(re['expects-effects'])) ? re['expects-effects'] : [];
     if (eff.length || decl.length) total += METADATA_STRIP_HEIGHT;

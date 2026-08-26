@@ -524,6 +524,44 @@
       (finally (sp/close storage)))))
 
 
+(deftest resolve-slot-effective-type-identity-keyed-test
+  ;; Regression (2026-08-26): tier-2 (backward-unified slot-types) must
+  ;; be keyed by fn IDENTITY, not by name — a leftover same-named fn
+  ;; (e.g. from a deleted tutorial-branch run) used to dictate another
+  ;; fn's value-form shape through the name-keyed registry lookup.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [slot     (setup/create-slot! storage "value" :any)
+            stale-id (random-uuid)
+            _        (registry/record-rich-types-raw!
+                       stale-id :dup-owner
+                       {:return {:body :text :status :int}
+                        :args {}
+                        :slot-types {:value {:body :text :status :int}}
+                        :effects #{}})
+            fresh    (sp/create-entity
+                       storage :fn
+                       {:id (random-uuid)
+                        :name "dup-owner"
+                        :return-type-fn-id (get setup/primitive-fn-ids :any)})]
+        (testing "a same-named OTHER fn's recorded slot-types don't leak in"
+          (is (= :any (vf/resolve-slot-effective-type
+                        storage {:fn-id (:id fresh) :slot-id (:id slot)}))
+              "tier-2 skipped (no id-keyed entry) — falls to the declared
+               slot type instead of the stale fn's record shape"))
+        (testing "the fn's OWN recorded slot-types still apply on id match"
+          (registry/record-rich-types-raw!
+            (:id fresh) :dup-owner
+            {:return :any
+             :args {}
+             :slot-types {:value {:body :text :status :int}}
+             :effects #{}})
+          (is (= {:body :text :status :int}
+                 (vf/resolve-slot-effective-type
+                   storage {:fn-id (:id fresh) :slot-id (:id slot)})))))
+      (finally (sp/close storage)))))
+
+
 ;; ============================================================================
 ;; ctx-backed form assembly — registry-pairs / build-leaf-form / build-form /
 ;; apply-value-form, driven against a minimal in-storage forms package.

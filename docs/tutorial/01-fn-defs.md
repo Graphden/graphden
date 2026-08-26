@@ -100,7 +100,10 @@ In the running editor, in a namespace of your choice (or create
    `:value`.
 3. Click `:value` and bind a literal map. The editor's value form
    takes JSON: `{"status": 200, "body": "Hello!"}` (in `fns.edn`
-   you'd write the same map as EDN).
+   you'd write the same map as EDN). When the slot's type is
+   already known, the form renders one field per key instead —
+   the `{} raw` button in its corner switches back to a raw
+   editor that accepts any JSON, a bare number, or plain text.
 4. Open the row's `⋯` actions popover and click ▶ Run — you
    should see the map come back.
 

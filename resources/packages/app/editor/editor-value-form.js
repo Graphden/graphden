@@ -55,6 +55,112 @@ function installFormLiveValidation(hostEl, expected, statusEl) {
 }
 
 // ============================================================================
+// RAW-VALUE ESCAPE HATCH
+// ============================================================================
+//
+// A typed form renders controls for the RESOLVED slot type — but the
+// resolved type is a hint, not a straitjacket (binding saves are
+// warn-and-persist server-side). The author must always be able to
+// enter a value of a DIFFERENT shape: another JSON object, a bare
+// number, a plain string. The "{} raw" toggle swaps the typed controls
+// for one smart-parse textarea (and back); both modes collect and save
+// through the identical `[data-form-field]` path, so Save needs no
+// special-casing.
+
+// True when the served form already IS a single raw editor (the
+// `_form-json` / EDN / smart-parse fallback) — a toggle would offer
+// the mode the user is in.
+function formIsRawAlready(root) {
+  const fields = root.querySelectorAll('[data-form-field]');
+  if (fields.length !== 1) return false;
+  const el = fields[0];
+  const kind = el.getAttribute('data-field-kind');
+  return !el.getAttribute('data-field-path')
+    && (kind === 'json' || kind === 'edn' || kind === 'any');
+}
+
+// Serialize a value for the raw textarea so the `any` smart-parse
+// collect round-trips it: a string whose text parses as JSON must
+// stay QUOTED (else collect would re-parse it into an object/number).
+function rawPrefillText(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') {
+    try { JSON.parse(v); return JSON.stringify(v); } catch (_) { return v; }
+  }
+  try { return JSON.stringify(v, null, 2); } catch (_) { return String(v); }
+}
+
+// "Nothing typed yet" detector — an untouched form collects to a tree
+// of ''/null leaves; prefill the raw textarea empty instead of that.
+function formValueIsBlank(v) {
+  if (v === null || v === undefined || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.values(v).every(formValueIsBlank);
+  return false;
+}
+
+// Mount the "{} raw" toggle above the typed form. `payloadValue` is
+// the currently-bound literal — the prefill fallback when the typed
+// controls don't collect cleanly.
+function installRawToggle(hostEl, payloadValue) {
+  const root = hostEl.querySelector('[data-form-root]');
+  if (!root || formIsRawAlready(root)) return;
+  const bar = document.createElement('div');
+  bar.className = 'value-form-toolbar';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'value-form-raw-toggle';
+  btn.textContent = '{} raw';
+  btn.title = 'Edit as a raw value — any JSON, number, or text';
+  bar.appendChild(btn);
+  hostEl.insertBefore(bar, hostEl.firstChild);
+  let stash = null; // typed-form children, held while raw mode is on
+  const refreshValidation = () => {
+    hostEl.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!stash) {
+      const collected = collectFormValue(root);
+      const cur = (collected.ok && !formValueIsBlank(collected.value))
+                  ? collected.value : payloadValue;
+      stash = document.createDocumentFragment();
+      while (root.firstChild) stash.appendChild(root.firstChild);
+      const ta = document.createElement('textarea');
+      ta.className = 'arg-value-edit-input value-form-raw-input';
+      ta.rows = 6;
+      ta.setAttribute('data-form-field', '');
+      ta.setAttribute('data-field-kind', 'any');
+      ta.setAttribute('data-lang', 'json');
+      ta.value = rawPrefillText(cur);
+      root.appendChild(ta);
+      installTextareaEnterGuard(root);
+      if (window.gdCode) window.gdCode.enhanceWithin(root);
+      btn.textContent = '⊞ form';
+      btn.title = 'Back to the typed form';
+      refreshValidation();
+      if (ta.dataset?.cmEnhanced) {
+        try { window.gdCode.viewOf(ta).focus(); } catch (_) {}
+      } else { try { ta.focus(); } catch (_) {} }
+    } else {
+      const collected = collectFormValue(root);
+      root.textContent = '';
+      root.appendChild(stash);
+      stash = null;
+      // Best-effort carry-over: a raw value matching the typed shape
+      // lands back in the controls; a mismatched one just leaves them.
+      if (collected.ok && collected.value != null
+          && typeof collected.value === 'object') {
+        fillFormValue(root, collected.value);
+      }
+      btn.textContent = '{} raw';
+      btn.title = 'Edit as a raw value — any JSON, number, or text';
+      refreshValidation();
+    }
+  });
+}
+
+// ============================================================================
 // FETCH + RENDER + SAVE
 // ============================================================================
 
@@ -125,6 +231,7 @@ function renderValueForm(hostEl, payload, opts) {
   } else {
     installTextareaEnterGuard(hostEl);
     installFormLiveValidation(hostEl, options.expected, options.statusEl);
+    installRawToggle(hostEl, payload.value);
     // Upgrade code textareas (js/css/json/edn source fields) to CodeMirror
     // AFTER prefill — the view snapshots textarea.value at creation and
     // syncs every doc change back, so collect/validation keep working.

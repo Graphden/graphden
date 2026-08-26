@@ -36,9 +36,9 @@ function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
   });
   const strip = document.createElement('div');
   strip.className = 'optional-args-strip';   // static looks in editor-styles.css
-  const fnName = originalFnId && lookups?.fnMap?.get(originalFnId)?.name;
-  const richArgs = (fnName && typeof richTypes === 'object' && richTypes)
-                   ? (richTypes[fnName]?.args || null) : null;
+  const originalFn = originalFnId ? lookups?.fnMap?.get(originalFnId) : null;
+  const richArgs = (typeof richTypeEntryOf === 'function')
+                   ? (richTypeEntryOf(originalFn)?.args || null) : null;
   // Same gate the `+` placeholders use — signed in, and not a
   // package-synced fn whose bindings the boot sync owns.
   const bindable = !!originalFnId
@@ -151,9 +151,9 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   // whose `:return-type` column is null, this is the only place the
   // computed shape lives client-side.
   let displayRich = null;
-  if (cardFnEntity.name && typeof richTypes === 'object' && richTypes
+  if (cardFnEntity.name && typeof richTypeEntryOf === 'function'
       && typeof formatTypeHint === 'function') {
-    const re = richTypes[cardFnEntity.name];
+    const re = richTypeEntryOf(cardFnEntity);
     if (re && re.return != null) {
       displayRich = formatTypeHint(re.return);
     }
@@ -180,8 +180,8 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
     // rich-types lookup gives the structural ['refine', base, constraint]
     // form, which resolveRefinementAlias / refinementConstraintText
     // walks for the chip's stacked second line.
-    const richReturn = (cardFnEntity.name && typeof richTypes === 'object' && richTypes)
-                       ? (richTypes[cardFnEntity.name]?.return || null)
+    const richReturn = (typeof richTypeEntryOf === 'function')
+                       ? (richTypeEntryOf(cardFnEntity)?.return || null)
                        : null;
     const refineStruct = (Array.isArray(richReturn) && richReturn[0] === 'refine')
       ? richReturn
@@ -310,8 +310,8 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   //                                (DRIFT — author should declare it)
   //   - declared NOT computed    → outlined ghost chip
   //                                (over-declared, harmless)
-  if (cardFnEntity.name && typeof richTypes === 'object' && richTypes) {
-    const re = richTypes[cardFnEntity.name];
+  if (cardFnEntity.name && typeof richTypeEntryOf === 'function') {
+    const re = richTypeEntryOf(cardFnEntity);
     const computed = (re && Array.isArray(re.effects)) ? re.effects : [];
     // Prefer the live DB value (updated by UI edits) over the
     // richTypes snapshot which is rebuilt only at server start.

@@ -113,16 +113,21 @@
   "Tier-2 of the slot-type priority chain — the backward-unified type
    the type-checker recorded on the owning fn's rich-type entry for
    this slot. nil when the rich-types entry has nothing to say
-   (anonymous fn-def, no narrowing recorded, or owning/slot missing
-   a `:name`).
+   (no narrowing recorded, or owning/slot row missing).
+
+   Keyed by the owning fn's IDENTITY, deliberately with NO stale-name
+   rescue: a name-keyed lookup let a DIFFERENT fn that happened to
+   share the name (e.g. a leftover from a deleted tutorial branch)
+   dictate this fn's form shape (AUDIT-name-vs-id-resolution class).
+   A missing id entry just degrades to tier-3, the declared slot type.
 
    Shared by `resolve-slot-effective-type` (which picks the first
    non-nil tier through `or`) and `slot-type-provenance` (which
    exposes each tier separately under `:unified` and gates the
    computation on `:override-fn-id` being absent)."
   [owning-fn-row slot-row]
-  (when (and (:name owning-fn-row) (:name slot-row))
-    (get-in (registry/rich-type-of (keyword (:name owning-fn-row)))
+  (when (and (:id owning-fn-row) (:name slot-row))
+    (get-in (registry/rich-type-of-id (:id owning-fn-row))
             [:slot-types (keyword (:name slot-row))])))
 
 
@@ -144,11 +149,15 @@
     (let [slot-kw (keyword (:name slot))
           {:keys [ids fn-map]} (inheritance-chain-info storage fn-id)]
       (some (fn [fid]
-              (when-let [fname (some-> (get fn-map fid) :name keyword)]
-                (let [t (some-> (get-in (registry/rich-type-of fname)
-                                        [:args slot-kw])
-                                types/resolve-alias)]
-                  (when (types/list-type? t) (types/list-elem t)))))
+              ;; Id-keyed with the stale-name rescue — ancestors here are
+              ;; typically package fns whose abandoned historical ids the
+              ;; rescue re-points; a bare-name lookup would let a same-
+              ;; named OTHER fn declare the element type.
+              (let [rich (registry/rich-type-of-id-or-stale-name
+                           fid (:name (get fn-map fid)))
+                    t    (some-> (get-in rich [:args slot-kw])
+                                 types/resolve-alias)]
+                (when (types/list-type? t) (types/list-elem t))))
             ids))))
 
 
@@ -187,8 +196,10 @@
       ;; index path into a structure) the type is per-position — walk
       ;; the structure. Otherwise descend past the [:list …] wrapper.
       item-id
-      (let [nav (when (and (:name owning) (:name slot))
-                  (get-in (registry/rich-type-of (keyword (:name owning)))
+      ;; Nav-types keyed by the owning fn's IDENTITY — same no-stale-
+      ;; name-rescue rationale as `backward-unified-slot-type`.
+      (let [nav (when (and (:id owning) (:name slot))
+                  (get-in (registry/rich-type-of-id (:id owning))
                           [:nav-types (keyword (:name slot))]))]
         (or (when nav (nav-item-type storage binding-id item-id nav))
             (when (types/list-type? resolved) (types/list-elem resolved))
@@ -303,8 +314,11 @@
         (not (:name type-fn-row)) nil
 
         :else
-        (let [name-kw (keyword (:name type-fn-row))
-              rich    (registry/rich-type-of name-kw)]
+        ;; Id-first with the stale-name rescue — a type-row read off
+        ;; storage may carry a historical id, but a bare-name lookup
+        ;; alone could hit a same-named unrelated fn.
+        (let [rich (registry/rich-type-of-id-or-stale-name
+                     (:id type-fn-row) (:name type-fn-row))]
           (cond
             (:type-row? rich)                         (:name type-fn-row)
             (and (:return rich) (not= :any (:return rich))) (:return rich)

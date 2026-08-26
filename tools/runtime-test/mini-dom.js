@@ -103,11 +103,37 @@ class MiniElement {
     this._text = v == null ? '' : String(v);
   }
 
+  // Real-DOM semantics: appending a node that already has a parent MOVES
+  // it (the old parent loses it), and appending a fragment moves the
+  // fragment's children in. Code under test that stashes/restores form
+  // controls (the raw-value toggle) relies on both.
   appendChild(child) {
+    if (child.tagName === '#FRAGMENT') {
+      for (const c of [...child.children]) this.appendChild(c);
+      return child;
+    }
+    if (child.parentNode) child.parentNode.removeChild(child);
     child.parentNode = this;
     this.children.push(child);
     return child;
   }
+
+  removeChild(child) {
+    const i = this.children.indexOf(child);
+    if (i >= 0) { this.children.splice(i, 1); child.parentNode = null; }
+    return child;
+  }
+
+  insertBefore(child, ref) {
+    if (ref == null) return this.appendChild(child);
+    this.appendChild(child);
+    this.children.pop();
+    const i = this.children.indexOf(ref);
+    this.children.splice(i < 0 ? this.children.length : i, 0, child);
+    return child;
+  }
+
+  get firstChild() { return this.children[0] || null; }
 
   setAttribute(k, v) { this.attributes[k] = String(v); }
 
@@ -161,6 +187,10 @@ class MiniElement {
     return e;
   }
 
+  // Enough of dispatchEvent for code that fires a synthetic event at the
+  // node holding the listener (no bubbling — same scope as dispatch).
+  dispatchEvent(e) { return this.dispatch(e.type, e); }
+
   click() { return this.dispatch('click'); }
 
   // `.a .b` — descendant combinator; each fragment is `tag.a.b`.
@@ -197,6 +227,7 @@ function createDocument() {
   return {
     createElement: (tag) => new MiniElement(tag),
     createTextNode: (t) => new MiniText(t),
+    createDocumentFragment: () => new MiniElement('#fragment'),
   };
 }
 

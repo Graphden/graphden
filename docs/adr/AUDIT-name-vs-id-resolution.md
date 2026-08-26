@@ -433,6 +433,21 @@ only (package `impls.clj` legitimately resolve name→id at boundaries).
 Not name/id issues, but surfaced by the "clean at every stage" full
 `bb test` and fixed per the no-ignored-errors bar:
 
+- **value-form / editor rich-types lookups were NAME-keyed** (fixed
+  2026-08-26). The "`rich-type-of` fn-name keying is BENIGN (unique)"
+  assumption below is false for USER fns: a leftover same-named fn
+  (deleted tutorial-branch run, per-ns duplicate) owns the bare-name
+  registry entry, and `crud/value_form.clj`'s tier-2
+  (`backward-unified-slot-type`), nav-types and type-row lookups —
+  plus the editor mirrors (`expectedSlotType`, `slotTypeProvenance`,
+  `navTypeOf`, `computeSlotType`, the layout/strip/picker reads) —
+  let that OTHER fn's inferred types dictate a fresh fn's form shape.
+  Server: id-keyed via `rich-type-of-id` (strict, no stale-name
+  rescue for tier-2/nav; rescue kept where the row may carry a
+  historical id). Client: `richTypeEntryOf(fn)` rejects a name entry
+  whose `fn-id` mismatches the row id. Guarded by
+  `value-form-test/resolve-slot-effective-type-identity-keyed-test`.
+
 - **app-router error/timeout sentinel namespace mismatch** (fixed
   `ecc78fdb`). `tenancy/app_router.clj` matched `run-with-timeout`'s
   result with BARE `::error`/`::timeout` — which resolve to app_router's

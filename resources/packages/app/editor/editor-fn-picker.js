@@ -55,8 +55,8 @@ function closeFnPicker() {
 // computed effect set. Falls back to the flat `return-type` column
 // for fns the registry hasn't snapshot'd yet.
 function fnRichInfo(f) {
-  const rich = (typeof richTypes === 'object' && richTypes && f.name)
-               ? richTypes[f.name] : null;
+  const rich = (typeof richTypeEntryOf === 'function')
+               ? richTypeEntryOf(f) : null;
   return {
     return: (rich && rich.return != null) ? rich.return : (f['return-type'] || null),
     effects: (rich && Array.isArray(rich.effects)) ? rich.effects : [],

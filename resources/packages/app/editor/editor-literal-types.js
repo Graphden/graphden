@@ -39,6 +39,22 @@ async function loadCompatibleTypeOptions(select, expected, opts) {
   return true;
 }
 
+// Rich-types entry for a specific fn ROW, identity-guarded. The
+// `/api/types` payload is keyed by NAME, but per-namespace names may
+// repeat, and a stale same-named fn (e.g. a leftover from a deleted
+// tutorial branch) can own the name's entry — reading it by name alone
+// let that OTHER fn's inferred types drive this fn's forms and hints
+// (AUDIT-name-vs-id-resolution class). Accept the entry only when its
+// `fn-id` matches the row's id; entries WITHOUT `fn-id` (augmented
+// type-row shapes) pass — they aren't checker-recorded fn entries.
+function richTypeEntryOf(fn) {
+  if (!fn?.name || typeof richTypes !== 'object' || !richTypes) return null;
+  const entry = richTypes[fn.name];
+  if (!entry) return null;
+  if (entry['fn-id'] && fn.id && entry['fn-id'] !== fn.id) return null;
+  return entry;
+}
+
 // The rich (structural) declared type of `arg`'s slot, recovered from
 // the rich-types registry. `[:list T]` / `[:map K V]` / `[:tuple …]`
 // slot types degrade to the bare `:sequence` / `:jsonb` primitive on
@@ -55,8 +71,7 @@ function slotRichType(arg) {
   if (!slotName) return null;
   for (const fid of getInheritanceChain(arg['fn-id'])) {
     const fn = lookups?.fnMap?.get(fid);
-    const t = (fn?.name && richTypes[fn.name])
-              ? richTypes[fn.name].args?.[slotName] : null;
+    const t = richTypeEntryOf(fn)?.args?.[slotName] ?? null;
     if (t != null) return t;
   }
   return null;
@@ -115,9 +130,7 @@ function expectedSlotType(arg) {
   // fn-id, so it short-circuits the fn-id resolution path.
   if (binding?.['type-override-fn-id'] == null) {
     const ownFn = arg['fn-id'] ? lookups.fnMap.get(arg['fn-id']) : null;
-    const unified = (ownFn?.name && typeof richTypes === 'object' && richTypes)
-                    ? richTypes[ownFn.name]?.['slot-types']?.[slot.name]
-                    : null;
+    const unified = richTypeEntryOf(ownFn)?.['slot-types']?.[slot.name] ?? null;
     if (unified != null) {
       if (arg['item-id']) {
         const elem = listElementType(unified, null);
@@ -249,9 +262,7 @@ function slotTypeProvenance(arg) {
   let unifiedType = null;
   if (overrideFnId == null) {
     const ownFn = arg['fn-id'] ? lookups.fnMap.get(arg['fn-id']) : null;
-    unifiedType = (ownFn?.name && typeof richTypes === 'object' && richTypes)
-                  ? (richTypes[ownFn.name]?.['slot-types']?.[slot.name] ?? null)
-                  : null;
+    unifiedType = richTypeEntryOf(ownFn)?.['slot-types']?.[slot.name] ?? null;
   }
   const refFn = binding?.['ref-fn-id'] ? lookups.fnMap.get(binding['ref-fn-id']) : null;
   // Source attribution per tier:
@@ -315,7 +326,7 @@ function computeSlotType(tfn) {
   const c = tfn.constraint;
   if (Array.isArray(c) && (c[0] === 'fn' || c[0] === 'map' || c[0] === 'tuple')) return c;
   if (!tfn.name) return null;
-  const rich = (typeof richTypes !== 'undefined' && richTypes) ? richTypes[tfn.name] : null;
+  const rich = richTypeEntryOf(tfn);
   // For NAMED type-rows (record-shapes, list/union/variant aliases,
   // refinements) prefer the alias name — readers recognise
   // `ring-response-shape` instantly and the inline-expand panel still
@@ -541,7 +552,7 @@ function navTypeOf(fnId, slotId) {
   const fn = lookups.fnMap?.get(fnId);
   const slot = lookups.slotMap?.get(slotId);
   if (!fn?.name || !slot?.name) return null;
-  const nav = richTypes[fn.name]?.['nav-types'];
+  const nav = richTypeEntryOf(fn)?.['nav-types'];
   return (nav && nav[slot.name] != null) ? nav[slot.name] : null;
 }
 

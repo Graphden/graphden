@@ -1787,6 +1787,19 @@ body.gd-no-execute .execute-cancel-btn {
   font-size: 11.5px; color: var(--error-fg);
   padding: 4px 0;
 }
+/* Raw-value escape hatch — the "{} raw" / "⊞ form" toggle row above a
+   typed form. A quiet text button: the typed form stays the star. */
+.value-form-toolbar {
+  display: flex; justify-content: flex-end;
+}
+.value-form-raw-toggle {
+  background: none; border: none; padding: 0 2px;
+  font-family: var(--mono); font-size: 10.5px;
+  color: var(--muted-fg); cursor: pointer;
+}
+.value-form-raw-toggle:hover { color: var(--accent); }
+/* The raw textarea replaces the typed controls inside the form root. */
+.value-form-raw-input { width: 100%; box-sizing: border-box; }
 /* Textarea control (long text / JSON) — user-resizable, monospace. */
 textarea.arg-value-edit-input {
   resize: vertical; min-height: 64px;

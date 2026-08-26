@@ -507,8 +507,20 @@ async function _tourEnd() {
           // Children first — a fork the lesson itself made (lesson 08) would
           // otherwise block its parent's delete.
           await _tourDeleteCreatedBranches(created);
+          // Namespaces are IDENTITY rows with no branch scope — deleting
+          // the branch removes every version row the lesson wrote, but a
+          // namespace the lesson created would stay visible on main as an
+          // empty orphan. "Full rollback" includes it: clear + delete the
+          // created ns rows FIRST, while this branch still resolves (the
+          // fetch wrapper stamps its header; after the branch delete the
+          // same requests would 4xx on a dead branch).
+          const nsOnly = created.filter((c) => c.type === 'ns');
+          if (nsOnly.length && typeof _tourDeleteNamespaces === 'function') {
+            const failedNs = await _tourDeleteNamespaces(nsOnly);
+            if (failedNs.length) ok = false;
+          }
           const r = await authFetch(API.api_branches_ref(branch), { method: 'DELETE' });
-          ok = !!r?.ok;
+          ok = ok && !!r?.ok;
         } catch (_) { ok = false; }
         _tourTeardown();
         // The hash may name a fn that existed only on the deleted branch —
@@ -679,6 +691,17 @@ async function startTutorial(lessonId, resumeStep, resumeCreated) {
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId)
     || (lessons.lessons || [])[0];
   if (!lesson) return false;
+  // A tour's steps anchor into the BUILD surface (the Explorer, the
+  // canvas); lessons that need another surface tell the reader to open
+  // it. Starting — or resuming after a branch-switch reload — while an
+  // '#@organization'-style deep link holds another surface open left
+  // every step's target buried under that surface (lesson 26 ends on
+  // Organization; the next lesson then dead-ended on "click + New
+  // namespace").
+  if (typeof gdShellSurface === 'function'
+      && document.body.getAttribute('data-surface') !== 'build') {
+    gdShellSurface('build');
+  }
   _tourState = {
     lessonId: lesson.id,
     step: Math.min(resumeStep || 0, lesson.steps.length - 1),
@@ -756,6 +779,14 @@ async function startTutorialIsolated(lessonId) {
   }
   _tourState = { lessonId, step: 0, created: [], branch };
   _tourSaveState();
+  // switchToBranch preserves the hash — drop a surface deep link
+  // (#@organization etc.) so the reload resumes the tour on Build,
+  // not buried under the previous surface.
+  if (/^#@/.test(location.hash)) {
+    try {
+      history.replaceState(null, '', location.pathname + location.search);
+    } catch (_) { /* keep the hash */ }
+  }
   switchToBranch(branch); // reload; maybeStartTutorial resumes on the branch
   return true;
 }

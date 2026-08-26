@@ -174,67 +174,87 @@ const {
     await finishAndDelete(page);
     console.log('  lesson 26: walked + cleaned');
 
-    // ---------- Branch isolation (org mode entry) ----------
-    // GATE-EXCLUDED, with evidence on both sides — set
-    // GRAPHDEN_TOUR_BRANCH_E2E=1 to run it.
-    //
-    // What is known: on a realistic 5763-fn graph the whole flow is fast
-    // (branch create 43ms, first request on the branch 60ms, switch
-    // ~1.0-1.4s, measured repeatedly). On the gate's e2e stack it stalls
-    // past 240s on EVERY attempt (5/5, twice now) — deterministic, not a
-    // flake, and it survived raising every deadline. So it is a property
-    // of that environment, not of the branch machinery, and blocking
-    // every landing on it buys nothing.
-    //
-    // Next investigation starts here, not from scratch: the diagnostics
-    // below print what the navigation actually returned. The suspicion to
-    // test first is that the page load carrying `?branch=` does not
-    // resolve the just-created branch in that environment — before the
-    // stale-branch fix that surfaced as a 400 (dead editor, same 240s
-    // stall); now it redirects to the default branch, which stalls the
-    // same wait for a different reason. Same symptom, one cause upstream.
-    if (process.env.GRAPHDEN_TOUR_BRANCH_E2E === '1') {
-      const isoT0 = Date.now();
-      const startedIso = await page.evaluate(async () => {
-        return await window.startTutorialIsolated('01');
-      });
-      assert(startedIso, 'startTutorialIsolated returned true');
-      try {
-        await page.waitForFunction(() => {
-          return /[?&]branch=tutorial-01-/.test(location.search)
-            && !!document.querySelector('#gd-tour-pop .gd-tour-title');
-        }, null, {timeout: 120000, polling: 300});
-      } catch (e) {
-        // The evidence the next investigation needs, printed BEFORE the
-        // failure propagates.
-        const diag = await page.evaluate(() => ({
-          url: location.href,
-          storedBranch: (() => {
-            try { return localStorage.getItem('graphden.branch'); }
-            catch (_) { return 'unreadable'; }
-          })(),
-          tourTitle: document.querySelector('#gd-tour-pop .gd-tour-title')
-            ?.textContent.trim() || null,
-        }));
-        console.error('  branch-isolation diagnostics: ' + JSON.stringify(diag));
-        throw e;
-      }
-      const isoSwitchMs = Date.now() - isoT0;
-      await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
-      await page.evaluate(() => {
-        Array.from(document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
-          .find((b) => b.textContent.trim() === 'End tour').click();
-      });
-      await waitTourTitle(page, 'Delete the tutorial branch?');
-      assert(await clickTourButton(page, 'Delete branch & return'),
-        'Delete branch & return button');
-      await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
-        null, {timeout: 120000, polling: 300});
-      console.log('  branch isolation: created, resumed, deleted, returned'
-        + ' (switch took ' + isoSwitchMs + 'ms)');
-    } else {
-      console.log('  branch isolation: skipped (GRAPHDEN_TOUR_BRANCH_E2E=1 runs it)');
+    // ---------- Branch isolation × LESSON STEPS ----------
+    // The intersection the reparent bug and the lesson-08 breakage both
+    // escaped through: branch-mode e2e used to be env-gated
+    // (GRAPHDEN_TOUR_BRANCH_E2E=1) and covered only entry/exit, while
+    // the step walks all ran in-place on main. The historic reason for
+    // the gate — a deterministic 240s stall of the `?branch=` load on
+    // THIS stack (5/5, twice) — no longer reproduces after the
+    // stale-branch + reparent + branch-router fixes (re-measured
+    // 2026-08-26 in the same testcontainers environment: the whole
+    // create→switch→resume flow completes in ~10s). So this now runs
+    // UNGATED and walks every lesson-01 step ON the tour branch, then
+    // asserts the full rollback: branch gone, main untouched, no
+    // tutorial-* leak.
+    await hardCleanup(page);
+    const isoT0 = Date.now();
+    const startedIso = await page.evaluate(async () => {
+      return await window.startTutorialIsolated('01');
+    });
+    assert(startedIso, 'startTutorialIsolated returned true');
+    try {
+      await page.waitForFunction(() => {
+        return /[?&]branch=tutorial-01-/.test(location.search)
+          && !!document.querySelector('#gd-tour-pop .gd-tour-title');
+      }, null, {timeout: 120000, polling: 300});
+    } catch (e) {
+      // Evidence first, failure second.
+      const diag = await page.evaluate(() => ({
+        url: location.href,
+        storedBranch: (() => {
+          try { return localStorage.getItem('graphden.branch'); }
+          catch (_) { return 'unreadable'; }
+        })(),
+        tourTitle: document.querySelector('#gd-tour-pop .gd-tour-title')
+          ?.textContent.trim() || null,
+      }));
+      console.error('  branch-isolation diagnostics: ' + JSON.stringify(diag));
+      throw e;
     }
+    const isoBranch = await page.evaluate(() =>
+      new URLSearchParams(location.search).get('branch'));
+    console.log('  branch isolation: on ' + isoBranch
+      + ' after ' + (Date.now() - isoT0) + 'ms');
+
+    // The full lesson-01 walk, on the branch — the same real-UI steps
+    // the in-place suite drives, incl. the set-parent REPARENT that the
+    // 2026-08-26 cross-branch gate bug blocked.
+    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
+    assert(await clickTourButton(page, 'Next'), 'welcome Next');
+    await waitTourTitle(page, 'Create a namespace');
+    await createRootNamespace(page, NS_NAME);
+    await waitTourTitle(page, 'Add a function', 150000);
+    await createFnInNamespace(page, NS_NAME, FN_NAME);
+    await waitTourTitle(page, 'Set the parent', 150000);
+    await setParentViaStrip(page, 'const');
+    await waitTourTitle(page, 'Bind :value', 150000);
+    await bindFirstPlaceholder(page, '{"status": 200, "body": "Hello!"}');
+    await waitTourTitle(page, 'Run it', 150000);
+    await runViaRowActions(page);
+    await waitTourTitle(page, "That's the whole loop", 150000);
+    console.log('  branch isolation: all lesson-01 steps walked on the branch');
+
+    // Finish → the branch-rollback dialog (not the per-item cleanup).
+    assert(await clickTourButton(page, 'Finish'), 'Finish button');
+    await waitTourTitle(page, 'Delete the tutorial branch?');
+    assert(await clickTourButton(page, 'Delete branch & return'),
+      'Delete branch & return button');
+    await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
+      null, {timeout: 120000, polling: 300});
+
+    // Rollback is COMPLETE: no tutorial-* branch survives (the lesson-08
+    // leak class), and main never saw the lesson's rows.
+    const branchesAfter = await api(page, 'GET', '/api/branches');
+    const leakedTutorial = (branchesAfter.branches || [])
+      .filter((b) => /^tutorial-/.test(b.name || ''));
+    assert(leakedTutorial.length === 0,
+      'no tutorial-* branch leaked (got: '
+      + JSON.stringify(leakedTutorial.map((b) => b.name)) + ')');
+    const mainTree = await api(page, 'GET', '/api/graph/entities?scope=tree');
+    assert(!(mainTree.namespaces || []).some((n) => n.name === NS_NAME),
+      'main never saw the lesson namespace');
+    console.log('  branch isolation: rolled back — branch deleted, main clean');
 
     // ---------- picker: a lesson this session cannot run is LOCKED --------
     // The org lessons drive panels that need `manage-users` / `manage-grants`.

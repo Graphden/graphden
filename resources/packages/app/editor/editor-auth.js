@@ -81,6 +81,13 @@ async function probeAccountsAuth() {
       accountsAuthed = false;
       window.gdAccount = null;
     }
+    if (accountsMode) {
+      // Does this deployment have org endpoints at all? The org-switcher
+      // gates on it so an accounts-only instance never fires a doomed
+      // GET /api/memberships (console 404 on every load). Absent field
+      // (older server) → undefined → the switcher keeps probing.
+      window.gdOrgsAvailable = ('orgs?' in (j || {})) ? !!j['orgs?'] : undefined;
+    }
   } catch (_) { /* network/parse failure → treat as no accounts */ }
   if (accountsMode) {
     renderAuthLock();

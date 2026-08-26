@@ -22,6 +22,9 @@ async function initOrgSwitcher() {
   // Orgs exist only under the accounts addon — wait for its boot probe and
   // skip entirely when it's absent (no wasted fetch on single-tenant boots).
   if (!(await window.gdAccountsReady)) return;
+  // /auth/me told us this deployment has no org surface — don't fire a
+  // doomed /api/memberships probe (a guaranteed console 404 per load).
+  if (window.gdOrgsAvailable === false) return;
   let data;
   try {
     // Fixed route-collection endpoint (tenancy auth-routes), not a graph route.

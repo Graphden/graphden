@@ -130,6 +130,13 @@ function _tourRenderStep() {
   pop.appendChild(body);
   pop.appendChild(foot);
   pop.classList.add('gd-tour-visible');
+  // When this step appeared on screen — the auto-advance below waits a
+  // beat past this, so a check that is ALREADY true (satisfied by stale
+  // state, or by the same action that finished the previous step) still
+  // shows the step instead of silently skipping it. The step counter
+  // used to jump 3->5 with nothing readable in between.
+  _tourState._shownAt = (typeof performance !== 'undefined' && performance.now)
+                        ? performance.now() : Date.now();
   _tourPosition();
 }
 
@@ -215,7 +222,6 @@ function _tourPosition() {
     spot.style.height = (rect.height + pad * 2) + 'px';
     spot.classList.add('gd-tour-visible');
 
-    // Popover: right of the target when it fits, else below, else above.
     const pw = pop.offsetWidth || 360;
     const ph = pop.offsetHeight || 180;
     // Clear of the PANEL the target lives in, not merely of the target. A
@@ -226,29 +232,44 @@ function _tourPosition() {
     // because a guard clicks by selector; a person cannot. Where there is
     // room, start after the panel.
     const panel = _tourPanelOf(target);
-    let left = Math.max(rect.right + 16,
-                        panel ? panel.right + 16 : 0);
-    let top = rect.top;
-    if (left + pw > window.innerWidth - 12) {
-      left = Math.min(Math.max(12, rect.left), window.innerWidth - pw - 12);
-      top = rect.bottom + 14;
-      if (top + ph > window.innerHeight - 12) top = Math.max(12, rect.top - ph - 14);
-    }
-    top = Math.min(Math.max(12, top), Math.max(12, window.innerHeight - ph - 12));
-    // Never cover the thing the step tells you to click: the clamps above
-    // can push the popover back over a target near a viewport edge (the
-    // branch chip sits top-left), and then the click lands on the popover.
-    const overlaps = left < rect.right + 8 && left + pw > rect.left - 8
-      && top < rect.bottom + 8 && top + ph > rect.top - 8;
-    if (overlaps) {
-      const below = rect.bottom + 14;
-      const above = rect.top - ph - 14;
-      if (below + ph <= window.innerHeight - 12) top = below;
-      else if (above >= 12) top = above;
-      else left = Math.min(rect.right + 16, Math.max(12, window.innerWidth - pw - 12));
-    }
-    pop.style.left = left + 'px';
-    pop.style.top = top + 'px';
+    // Candidate positions, best first: right of the panel/target, below,
+    // above, left, then the bottom corners as last resorts. Each is scored
+    // against the target AND every visible floating surface (menus,
+    // popovers a step just told the reader to open) — the winner is the
+    // first that covers nothing, else the least-covering one. Re-run every
+    // tick, so a menu opening mid-step pushes the popover away within
+    // ~600ms.
+    const startLeft = Math.max(rect.right + 16, panel ? panel.right + 16 : 0);
+    const cands = [
+      { left: startLeft, top: rect.top },
+      { left: rect.left, top: rect.bottom + 14 },
+      { left: rect.left, top: rect.top - ph - 14 },
+      { left: rect.left - pw - 16, top: rect.top },
+      { left: window.innerWidth - pw - 12, top: window.innerHeight - ph - 12 },
+      { left: 12, top: window.innerHeight - ph - 12 },
+    ];
+    const avoid = _tourFloatingRects();
+    const best = _tourPickSpot(cands, pw, ph, rect, avoid);
+    pop.style.left = best.left + 'px';
+    pop.style.top = best.top + 'px';
+    pop.classList.remove('gd-tour-centered');
+  } else if (step?.target) {
+    // The step names a target that is not on screen (not rendered yet, or
+    // scrolled away). A CENTERED modal here sat exactly on top of the
+    // canvas area the step talks about — dock to a corner instead, scored
+    // against the open floating surfaces, and keep re-checking each tick
+    // until the target appears.
+    spot.classList.remove('gd-tour-visible');
+    const pw = pop.offsetWidth || 360;
+    const ph = pop.offsetHeight || 180;
+    const cands = [
+      { left: window.innerWidth - pw - 12, top: window.innerHeight - ph - 12 },
+      { left: window.innerWidth - pw - 12, top: 12 },
+      { left: 12, top: window.innerHeight - ph - 12 },
+    ];
+    const best = _tourPickSpot(cands, pw, ph, null, _tourFloatingRects());
+    pop.style.left = best.left + 'px';
+    pop.style.top = best.top + 'px';
     pop.classList.remove('gd-tour-centered');
   } else {
     spot.classList.remove('gd-tour-visible');
@@ -256,6 +277,56 @@ function _tourPosition() {
     pop.style.left = '';
     pop.style.top = '';
   }
+}
+
+// Overlap area between a candidate popover box and a DOMRect, with an
+// 8px margin around the rect. 0 = clear.
+function _tourOverlapArea(left, top, pw, ph, r) {
+  const m = 8;
+  const w = Math.min(left + pw, r.right + m) - Math.max(left, r.left - m);
+  const h = Math.min(top + ph, r.bottom + m) - Math.max(top, r.top - m);
+  return (w > 0 && h > 0) ? w * h : 0;
+}
+
+// Fixed/absolute, visible, body-level floating UI — the editor's menus and
+// popovers. Regions the tour popover must not cover: a step routinely opens
+// one ("click ⋯, then ▶ Run") and the reader has to reach it. The tour's own
+// elements are excluded; so are full-screen overlays (nothing avoids those).
+// Body has a few dozen direct children — a per-tick scan is cheap.
+function _tourFloatingRects() {
+  const out = [];
+  if (!document.body) return out;
+  for (const el of document.body.children) {
+    if (!(el instanceof HTMLElement)) continue;
+    if (_tourEls && (el === _tourEls.pop || el === _tourEls.spot)) continue;
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    if (!(parseInt(cs.zIndex, 10) >= 300)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 24) continue;
+    if (r.width > window.innerWidth * 0.9
+        && r.height > window.innerHeight * 0.9) continue;
+    out.push(r);
+  }
+  return out;
+}
+
+// Pick the popover spot: clamp each candidate into the viewport, hard-weight
+// covering the TARGET, soft-weight covering any floating surface; first
+// zero-score candidate wins, else the least-covering one.
+function _tourPickSpot(cands, pw, ph, targetRect, avoidRects) {
+  let best = null;
+  for (const c of cands) {
+    const left = Math.min(Math.max(12, c.left), Math.max(12, window.innerWidth - pw - 12));
+    const top = Math.min(Math.max(12, c.top), Math.max(12, window.innerHeight - ph - 12));
+    let score = 0;
+    if (targetRect) score += _tourOverlapArea(left, top, pw, ph, targetRect) * 1000;
+    for (const r of avoidRects) score += _tourOverlapArea(left, top, pw, ph, r);
+    if (score === 0) return { left, top };
+    if (!best || score < best.score) best = { left, top, score };
+  }
+  return best || { left: 12, top: 12 };
 }
 
 // --- lifecycle ----------------------------------------------------------------
@@ -315,7 +386,11 @@ function _tourTick() {
     }
   }
   _tourPosition();
-  if (step.check && step.check.kind !== 'manual' && _tourCheckPasses(step.check)) {
+  const now = (typeof performance !== 'undefined' && performance.now)
+              ? performance.now() : Date.now();
+  const dwellOk = now - (_tourState._shownAt || 0) >= 900;
+  if (dwellOk && step.check && step.check.kind !== 'manual'
+      && _tourCheckPasses(step.check)) {
     if (typeof gdToast === 'function') gdToast('Step complete ✓');
     _tourAdvance(false);
   }
@@ -432,6 +507,15 @@ async function _tourEnd() {
           ok = !!r?.ok;
         } catch (_) { ok = false; }
         _tourTeardown();
+        // The hash may name a fn that existed only on the deleted branch —
+        // carried to main it selects nothing and the canvas opens silently
+        // empty. Drop it before the branch switch reloads.
+        try {
+          const cur = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+          if (created.some((c) => c.type === 'fn' && c.name === cur)) {
+            history.replaceState(null, '', location.pathname + location.search);
+          }
+        } catch (_) { /* keep the hash */ }
         if (typeof switchToBranch === 'function') switchToBranch(null);
         _tourReport(ok, ok ? _tourCopy('branch-done', 'Tutorial branch deleted')
                            : _tourCopy('branch-failed',

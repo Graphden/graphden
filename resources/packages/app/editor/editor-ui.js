@@ -122,10 +122,21 @@ async function selectFnByName(name, updateHistory = true) {
       try { fn = await resolveFnByName(privatized); } catch (_) { /* below */ }
     }
   }
-  if (!fn && typeof gdToast === 'function') {
-    // Silent-failure was worse than any message: the URL updated but
-    // the canvas kept the previous fn, with no hint why.
-    gdToast('Function not found: ' + name);
+  if (!fn) {
+    if (typeof gdToast === 'function') {
+      // Silent-failure was worse than any message: the URL updated but
+      // the canvas kept the previous fn, with no hint why.
+      gdToast('Function not found: ' + name);
+    }
+    // A dead hash (fn lived only on a deleted branch, was renamed, …)
+    // must not survive in the URL — a reload or share would repeat the
+    // silent-empty canvas.
+    try {
+      const cur = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+      if (cur && cur === name) {
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+    } catch (_) { /* URL untouched */ }
   }
   if (fn) {
     selectFn(fn.id, updateHistory);

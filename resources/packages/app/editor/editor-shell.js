@@ -39,6 +39,11 @@
   // originates from hash routing — pushing again would double the entry).
   function gdShellSurface(name, btn, opts) {
     gdHideAllSurfaces();
+    // A surface switch is a context switch: floating popovers from the
+    // previous surface (Run form, pickers, viewers) must not survive on
+    // top of the new one. Outside-pointerdown alone misses hash-routed
+    // and programmatic switches.
+    if (typeof dismissAllPopovers === 'function') dismissAllPopovers();
     // Record the active surface so surface-scoped chrome can gate on it — the
     // Explorer's left-edge expand tab only makes sense on Build (the other
     // surfaces are full overlays with no Explorer).

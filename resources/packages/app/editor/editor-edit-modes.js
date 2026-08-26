@@ -70,7 +70,6 @@ function openInlineEditPopover(opts) {
   errorEl.className = 'arg-value-edit-error';
   errorEl.setAttribute('role', 'alert');
   errorEl.setAttribute('aria-live', 'polite');
-  errorEl.style.display = 'none';
 
   const buttons = document.createElement('div');
   buttons.className = 'arg-value-edit-buttons';
@@ -85,10 +84,15 @@ function openInlineEditPopover(opts) {
   save.type = 'button';
   save.className = 'arg-value-edit-btn';
   save.textContent = 'Save';
+  // A CHOOSER stage (bind literal | bind fn-ref) commits nothing — a
+  // Save button there was inert and read as "something is missing"
+  // (tutorial finding 2026-08-26). `noSave` renders Cancel only.
+  if (opts.noSave) save.style.display = 'none';
   const doSave = async () => {
+    if (opts.noSave) return;
     save.disabled = true;
     cancel.disabled = true;
-    errorEl.style.display = 'none';
+    errorEl.classList.remove('visible');
     // `doSave` may return a bare boolean (legacy edit modes) or a
     // `{ok, error}` result — the latter lets a save surface the
     // server's rejection reason instead of the generic message.
@@ -102,7 +106,7 @@ function openInlineEditPopover(opts) {
       cancel.disabled = false;
       errorEl.textContent = res?.error
         || 'Save failed — check that you’re signed in.';
-      errorEl.style.display = 'block';
+      errorEl.classList.add('visible');
     }
   };
   save.addEventListener('click', doSave);
@@ -493,6 +497,7 @@ function openLiteralVsRefChooser({ anchorEl, ariaLabel, litLabel, refLabel,
   openInlineEditPopover({
     anchorEl,
     ariaLabel,
+    noSave: true,
     makeControl(root) {
       const wrap = document.createElement('div');
       wrap.className = 'free-arg-bind-chooser';

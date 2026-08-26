@@ -493,6 +493,16 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    place instead of rebuilding). `.ns-header`/`.entity-item` set an explicit
    `display`, which would beat the UA `[hidden]{display:none}`, so force it. */
 #entity-list [hidden] { display: none !important; }
+
+/* Search: pinned exact-match section above the matched-namespace tree. */
+.search-exact-section {
+  border-bottom: 1px solid var(--light-border);
+  padding-bottom: 4px; margin-bottom: 4px;
+}
+.search-exact-label {
+  font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted-fg); padding: 4px 8px 2px;
+}
 .ns-header:hover { background: var(--hover-bg); }
 /* Workspace highlight: namespaces the user works in get
    a left accent. No-op without the addon — the class is only added when the
@@ -1731,7 +1741,9 @@ body.gd-no-execute .execute-cancel-btn {
    closes the popover. Screen readers should announce it via
    role="alert" set in JS at the call site. */
 .arg-value-edit-error {
-  display: flex; align-items: flex-start; gap: 6px;
+  /* Hidden until a save actually fails — class-toggled (not inline
+     style), so an empty "!" chip can never render by default. */
+  display: none; align-items: flex-start; gap: 6px;
   padding: 6px 8px;
   margin-top: 4px;
   background: color-mix(in srgb, var(--error-fg) 10%, transparent);
@@ -1742,6 +1754,7 @@ body.gd-no-execute .execute-cancel-btn {
   color: var(--card-fg);
   overflow-wrap: anywhere;
 }
+.arg-value-edit-error.visible { display: flex; }
 .arg-value-edit-error::before {
   content: '!';
   flex-shrink: 0;
@@ -3327,7 +3340,10 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
  * Built fresh per arg in editor-mismatch-explainer.js.
  * ========================================================================= */
 .mismatch-explainer {
-  position: fixed; z-index: 10001;
+  /* Above the fn-picker (10002): the "Pick anyway" explainer opens ON
+     TOP of the picker (incompat-row click) and must stay clickable —
+     at the shared 10001 the picker swallowed its pointer events. */
+  position: fixed; z-index: 10003;
   display: none;
   background: var(--card-bg); color: var(--card-fg);
   border: 1px solid var(--card-border);

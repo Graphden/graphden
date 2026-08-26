@@ -1240,6 +1240,41 @@ function updateEntityList(data) {
 
   mountOpsSections(list, searchMode);
 
+  // Search: pin EXACT name matches above the tree. Substring matching
+  // alone buried `core.arithmetic.add` under dozens of `app.editor`
+  // internals that merely contain "add" — the row the reader typed the
+  // full name of must be first (tutorial finding 2026-08-26). Internals
+  // (`_`-private / anon) sort after public exact matches.
+  if (searchMode) {
+    const q = searchFilter.trim().toLowerCase();
+    const exact = [];
+    (function walk(node) {
+      for (const fn of node.fns || []) {
+        if ((fn.rawName || '').toLowerCase() === q
+            || (fn.displayName || '').toLowerCase() === q) exact.push(fn);
+      }
+      for (const child of node.children.values()) walk(child);
+    })(tree);
+    if (exact.length) {
+      const internal = (fn) => ((fn.rawName || '').startsWith('_')
+                               || /^anon-/.test(fn.displayName || '')) ? 1 : 0;
+      exact.sort((a, b) => internal(a) - internal(b)
+                        || (a.displayName || '').localeCompare(b.displayName || ''));
+      const sec = document.createElement('div');
+      sec.className = 'search-exact-section';
+      const lbl = document.createElement('div');
+      lbl.className = 'search-exact-label';
+      lbl.textContent = 'Exact match';
+      sec.appendChild(lbl);
+      for (const fn of exact.slice(0, 5)) {
+        const el = buildFnItem(fn);
+        el.hidden = false;
+        sec.appendChild(el);
+      }
+      list.appendChild(sec);
+    }
+  }
+
   // Top-level namespaces (sorted). Lens visibility is a `hidden` overlay set
   // inside renderNsNode (not a structural skip here), so a lens toggle flips in
   // place. Workspace-focus IS a structural skip — it's lens-independent (a lens

@@ -64,7 +64,8 @@ Now the surfaces:
 - In the Explorer's filter bar click the **✓ tests** chip — the tree
   focuses on your tests, each with a status dot: **green** passed,
   **red** failed, **grey** not run since its last edit.
-- Open **Operate → Tests** — the same list with a summary line and a
+- Open **Operate → Tests** (account menu → Organization) — the same
+  list with a summary line and a
   **Run all tests** button. The panel is live: it re-renders on its
   own as runs land — no refresh needed.
 

@@ -327,6 +327,13 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
     }
     const status = String(body?.status || '').replace(/^:/, '');
     const execId = body?.['execution-id'];
+    // Mark "a persisted run happened this page-load" on <body> — the
+    // interactive tour's lesson-09 step used to auto-pass off the mere
+    // presence of the History toggle; this gives its `dom` check a real
+    // signal to wait for.
+    if (persist && status !== 'rejected') {
+      document.body.dataset.gdPersistedRun = String(execId || 'yes');
+    }
     if (status === 'rejected') {
       resultHostEl.appendChild(renderErrorPane(body.error, body['error-data']));
     } else if (status === 'pending') {

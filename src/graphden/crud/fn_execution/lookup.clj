@@ -263,7 +263,12 @@
      (let [{:keys [fns-by-id slots-by-id all-bindings all-list-items
                    all-fn-slots]} db
            visited' (conj visited fn-id)
-           chain-fns (set (inheritance-chain-in-memory fn-id fns-by-id))
+           chain-vec (inheritance-chain-in-memory fn-id fns-by-id)
+           chain-fns (set chain-vec)
+           ;; Level-order position: 0 = the fn itself, growing towards the
+           ;; roots. Used to pick WHICH exposure of a slot identity names
+           ;; the free arg (closest wins — rename-view contract).
+           chain-pos (into {} (map-indexed (fn [i fid] [fid i])) chain-vec)
            chain-fn-slots (filter #(chain-fns (:fn-id %)) all-fn-slots)
            chain-bindings (filter #(chain-fns (:fn-id %)) all-bindings)
            chain-binding-ids (set (map :id chain-bindings))
@@ -283,12 +288,29 @@
                                          (true? (:list-append %))))
                             (map (comp root-of :slot-id))
                             set)
-           direct (into {}
-                        (keep (fn [{:keys [slot-id]}]
-                                (when-not (bound-roots (root-of slot-id))
-                                  (when-let [s (get slots-by-id slot-id)]
-                                    [(keyword (:name s)) slot-id]))))
-                        chain-fn-slots)
+           ;; ONE exposure per ROOT slot identity. A rename-view slot and
+           ;; its source share a root but carry different NAMES — surfacing
+           ;; both made the Run form show `data` AND `payload` after a
+           ;; rename (and leaked every `{:as …}` capture-rename's source
+           ;; name: `coll`+`item` next to `current`+`value`). The public
+           ;; name is the one on the CLOSEST chain fn, rename slot first on
+           ;; a tie; the shadowed source name is not a separate free arg.
+           direct (->> chain-fn-slots
+                       (keep (fn [{fs-fn-id :fn-id slot-id :slot-id}]
+                               (when-not (bound-roots (root-of slot-id))
+                                 (when-let [s (get slots-by-id slot-id)]
+                                   {:name (keyword (:name s))
+                                    :slot-id slot-id
+                                    :root (root-of slot-id)
+                                    :pos (get chain-pos fs-fn-id Long/MAX_VALUE)
+                                    :rename? (some? (:source-slot-id s))}))))
+                       (group-by :root)
+                       vals
+                       (map (fn [entries]
+                              (first (sort-by (juxt :pos (comp not :rename?) :name)
+                                              entries))))
+                       (map (juxt :name :slot-id))
+                       (into {}))
            ;; Recurse into every ref-fn-id reachable from chain bindings
            ;; — slot-bound refs + list-item refs. Each is a captured
            ;; sub-graph whose still-unbound free-args propagate up as
@@ -333,10 +355,24 @@
            ;; `:my-cron :args {:cron …}`) and have it disappear. Compare
            ;; by ROOT slot-id so a binding on a rename slot closes its
            ;; siblings everywhere in the chain (#51).
-           combined (merge transitive direct)]
+           combined (merge transitive direct)
+           unbound (into {}
+                         (remove (fn [[_ sid]] (bound-roots (root-of sid))))
+                         combined)
+           ;; Cross-LEVEL rename collapse (#51 class): the ref walk lifts a
+           ;; captured slot under its SOURCE name (`:func`) while this
+           ;; chain exposes the same identity under a rename (`:fn`). The
+           ;; caller-facing name is the chain's rename — drop the lifted
+           ;; exposure whose root the direct chain already names
+           ;; differently, so one identity never shows up twice.
+           direct-name-by-root (into {}
+                                     (map (fn [[n sid]] [(root-of sid) n]))
+                                     direct)]
        (into {}
-             (remove (fn [[_ sid]] (bound-roots (root-of sid))))
-             combined)))))
+             (remove (fn [[n sid]]
+                       (when-let [dn (get direct-name-by-root (root-of sid))]
+                         (not= dn n))))
+             unbound)))))
 
 
 (defn free-arg-slot-map

@@ -579,7 +579,7 @@
               {:title "Keep the interesting one"
                :body "Open Run again, tick “Save to history”, enter graphden and Run. Unticked runs are transient; a ticked one is stored with its arguments and result."
                :target ".execute-persist-checkbox"
-               :check {:kind "dom" :selector ".execute-history-toggle"}}
+               :check {:kind "dom" :selector "body[data-gd-persisted-run]"}}
               {:title "History is a graph read"
                :body "Click “History” at the top of the popover: your persisted run is listed with its input. Repeat re-fills the form from it — the same execution API the editor uses is what /api/execute exposes to your own callers."
                :target ".execute-history-toggle"
@@ -651,7 +651,7 @@
                :target ".placeholder-binder"
                :check {:kind "bindings-count" :name "two-plus-two" :count 2}}
               {:title "See it pass"
-               :body "Open Operate → Tests. Your test is listed with a green dot and the summary reads 1 passed — nobody pressed Run: the write itself triggered the auto-run."
+               :body "Open Organization → Tests. Your test is listed with a green dot and the summary reads 1 passed — nobody pressed Run: the write itself triggered the auto-run."
                :target nil
                :check {:kind "dom" :selector ".test-dot.test-passed"}}
               {:title "Tests are graph, too"

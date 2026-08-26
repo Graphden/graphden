@@ -230,17 +230,53 @@
         _ (setup/bind-ref! storage (:id outer-fn) (:id body-slot) (:id inner-fn))
         c (setup/default-registry-ctx storage)]
     (try
-      (testing "without the rename-binding :original surfaces as a free arg"
+      (testing "without the rename-binding the identity is free under its RENAME"
         (let [free (lookup/free-arg-slot-map c (:id outer-fn))]
-          (is (contains? free :original)
-              "the ref walk surfaces :original via :body → :inner-fn → :inner-base")
           (is (contains? free :renamed)
-              "and the rename slot is also free at this point")))
+              "the rename slot names the free identity")
+          (is (not (contains? free :original))
+              "the ref-walk's :original exposure collapses into :renamed —
+               one slot identity must not surface as two arg names
+               (tutorial finding 2026-08-26: Run form showed data+payload
+               after a rename)")))
       (testing "binding the RENAME slot closes both names"
         (setup/bind-value! storage (:id outer-fn) (:id rename-slot) 7)
         (let [free (lookup/free-arg-slot-map c (:id outer-fn))]
           (is (= {} free)
               "binding on the rename slot must mark :source-slot-id as bound too — without the fix, :original ghosts back as free")))
+      (finally (sp/close storage)))))
+
+
+(deftest same-chain-rename-shadows-source-name-test
+  ;; Tutorial finding 2026-08-26 (lessons 04/06/15): within ONE
+  ;; inheritance chain, a rename-view slot and its source both counted
+  ;; as direct free args — the Run form on a fn extending `:swap-conj`
+  ;; showed `coll`+`item` (source names) next to `value` (the rename),
+  ;; and a `data`→`payload` rename left BOTH fields. One root identity
+  ;; must surface exactly once, under the closest chain fn's rename.
+  (let [storage (setup/create-branch-versioned-test-storage)
+        _ (exec/register-base-fn! :test-shadow-base (fn [_ _] :ok))
+        base (setup/create-base-fn! storage "test-shadow-base" :any)
+        coll-slot (setup/create-slot! storage "coll" :any)
+        item-slot (setup/create-slot! storage "item" :any)
+        _ (setup/attach-slot! storage (:id base) (:id coll-slot) 0)
+        _ (setup/attach-slot! storage (:id base) (:id item-slot) 1)
+        child (setup/create-composed-fn! storage "test-shadow-child" (:id base))
+        current-slot (sp/create-entity storage :slot
+                                       {:name "current"
+                                        :type-fn-id (get setup/primitive-fn-ids :any)
+                                        :source-slot-id (:id coll-slot)})
+        value-slot (sp/create-entity storage :slot
+                                     {:name "value"
+                                      :type-fn-id (get setup/primitive-fn-ids :any)
+                                      :source-slot-id (:id item-slot)})
+        _ (setup/attach-slot! storage (:id child) (:id current-slot) 0)
+        _ (setup/attach-slot! storage (:id child) (:id value-slot) 1)
+        c (setup/default-registry-ctx storage)]
+    (try
+      (is (= #{:current :value}
+             (set (keys (lookup/free-arg-slot-map c (:id child)))))
+          "renames shadow their source names — no coll/item ghosts")
       (finally (sp/close storage)))))
 
 

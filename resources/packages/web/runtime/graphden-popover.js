@@ -44,7 +44,21 @@ function anchorBelowClamped(el, anchorEl, opts) {
 // targets outside the popover, and `pointerdown` fires before focus changes.
 // Call this exactly once per popover, at module load — the handlers are inert
 // while the popover is hidden.
+// Every installed popover, so a CONTEXT SWITCH can sweep them: surface
+// navigation (Build -> Organization, hash deep-links) fires no
+// outside-pointerdown, and a popover that survives it floats over the new
+// surface and blocks it (tutorial finding 2026-08-26: the Run popover sat
+// on top of the Organization panel).
+const _popoverRegistry = [];
+
+function dismissAllPopovers() {
+  for (const p of _popoverRegistry) {
+    try { if (p.isVisible()) p.onDismiss(); } catch (_) { /* keep sweeping */ }
+  }
+}
+
 function installPopoverDismiss({ getEl, getAnchor, isVisible, onDismiss }) {
+  _popoverRegistry.push({ isVisible, onDismiss });
   document.addEventListener('pointerdown', (e) => {
     const el = getEl();
     if (!el || !isVisible()) return;

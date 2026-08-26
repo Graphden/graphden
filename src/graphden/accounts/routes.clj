@@ -39,7 +39,8 @@
     [graphden.accounts.pages :as pages]
     [graphden.accounts.provider :as provider]
     [graphden.accounts.telegram :as telegram]
-    [graphden.crud.request :as req]))
+    [graphden.crud.request :as req]
+    [graphden.tenancy.context :as tctx]))
 
 
 (defn- graph-page
@@ -221,12 +222,20 @@
 
 (defn- handle-me
   [storage request]
-  (if-let [acct (current-account storage request)]
-    (json-resp 200 {:ok true
-                    :account {:id (str (:id acct))
-                              :email (:primary-email acct)
-                              :display-name (:display-name acct)}})
-    (json-resp 401 {:ok false :error "unauthenticated"})))
+  ;; `:orgs?` — does this deployment run the tenancy addon (i.e. do
+  ;; org endpoints like /api/memberships exist)? The editor's
+  ;; org-switcher gates its probe on it: an accounts-only instance
+  ;; used to fire a doomed GET /api/memberships on every load and
+  ;; leave a 404 in the console. Sent on both arms — the probe runs
+  ;; before sign-in too.
+  (let [orgs? (tctx/tenancy-addon-active?)]
+    (if-let [acct (current-account storage request)]
+      (json-resp 200 {:ok true
+                      :orgs? orgs?
+                      :account {:id (str (:id acct))
+                                :email (:primary-email acct)
+                                :display-name (:display-name acct)}})
+      (json-resp 401 {:ok false :orgs? orgs? :error "unauthenticated"}))))
 
 
 (defn- handle-tfa-state

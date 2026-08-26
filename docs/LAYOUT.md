@@ -70,6 +70,7 @@ Transform the database entities into graph nodes and edges based on expansions.
 For each function, determine its "display level":
 
 - Level 0: Show function as single node with direct children (refs, values, unset args)
+- Level N > 0: Show function with N ancestors expanded (inheritance chain visible)
 
 Unified arg edges (2026-08-26): EVERY unset arg — required, optional,
 ref-propagated (deep), or a HOF lambda-param — is emitted as the same
@@ -78,7 +79,6 @@ placeholder node + edge shape by `add-unset-arg-node`, carrying
 (lighter / sparser dashes / λ ghost). The former compact badge strips
 (`:optionalArgs` / `:hofCapturedArgs`) are retired; `:deepFreeArgs`
 (the informational ⇣-strip on expanded inner nodes) remains.
-- Level N > 0: Show function with N ancestors expanded (inheritance chain visible)
 
 **Inheritance chain:** `[fn-id, parent-id, grandparent-id, ...]`
 

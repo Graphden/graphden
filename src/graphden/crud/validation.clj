@@ -507,10 +507,13 @@
    those branches resolving NEW parents over OLD bindings — bindings
    whose slots fell out of the new inheritance closure silently unbind.
    This gate is the PERMANENT semantic, not a stopgap: the parent-set
-   is structural identity (it defines the slot closure), so
-   re-parenting is a root-branch, no-diverging-versions operation by
-   decision — see docs/adr/ADR-parent-set-identity.md for why the
-   versioned-parent-set alternative was rejected.
+   is structural identity (it defines the slot closure), so a
+   re-parent is legal only while NO OTHER branch holds live version
+   rows for the fn — see docs/adr/ADR-parent-set-identity.md for why
+   the versioned-parent-set alternative was rejected. The blocked case
+   is exactly the corrupting case: a fn nobody else resolves (converged
+   root, or a fn born on the request branch and never seen elsewhere —
+   the branch-isolated tutorial's whole workflow) re-parents freely.
 
    Skips entirely on a non-versioned storage (no `:branch-id` — no
    branches, no desync) and on creates / parent-preserving updates."
@@ -540,31 +543,29 @@
                             (remove #(= branch-id %)))
                       (sp/query-latest-per-group storage entity
                                                  {:fn-id fn-id}
-                                                 [id-field :branch-id])))]
-          (cond
-            (some? (:base-branch-id branch))
-            {:reason (str "Changing a fn's parents affects EVERY branch "
-                          "(parent links are identity-level), but the "
-                          "accompanying binding changes land only on this "
-                          "branch — switch to the root branch to re-parent.")}
-
-            :else
-            (let [foreign (into (foreign-branch-ids :fn-version :fn-id)
-                                (concat (foreign-branch-ids :binding-version
-                                                            :binding-id)
-                                        (foreign-branch-ids :fn-slot-version
-                                                            :fn-slot-id)))]
-              (when (seq foreign)
-                (let [names (into []
-                                  (keep #(some-> (sp/read-entity storage :branch %)
-                                                 :name))
-                                  foreign)]
-                  {:reason (str "Other branches hold their own versions of "
-                                "this fn — re-parenting would leave them "
-                                "with new parents over old bindings. Merge "
-                                "or delete those branch versions first. "
-                                "Diverging branches: "
-                                (pr-str (sort names)))})))))))))
+                                                 [id-field :branch-id])))
+              foreign (into (foreign-branch-ids :fn-version :fn-id)
+                            (concat (foreign-branch-ids :binding-version
+                                                        :binding-id)
+                                    (foreign-branch-ids :fn-slot-version
+                                                        :fn-slot-id)))]
+          (when (seq foreign)
+            (let [names (into []
+                              (keep #(some-> (sp/read-entity storage :branch %)
+                                             :name))
+                              foreign)]
+              {:reason (str "Other branches hold their own versions of "
+                            "this fn — re-parenting would leave them "
+                            "with new parents over old bindings. "
+                            (if (some? (:base-branch-id branch))
+                              (str "Parent links are identity-level (every "
+                                   "branch sees them instantly), but the "
+                                   "accompanying binding changes land only "
+                                   "on this branch — switch to the root "
+                                   "branch and converge first. ")
+                              "Merge or delete those branch versions first. ")
+                            "Diverging branches: "
+                            (pr-str (sort names)))})))))))
 
 
 (defn- resolver-rej

@@ -27,12 +27,18 @@ Two coherent designs existed:
 ## Decision: (b)
 
 The gate already shipped (`validation/reparent-cross-branch-rej`):
-a parent-set change is rejected unless the request branch is the ROOT
-branch AND no other branch holds `:fn-version` / `:binding-version` /
-`:fn-slot-version` rows for the fn (the reject names the diverging
-branches — merge or delete them first). Parent-preserving updates and
-non-versioned storages are unaffected. This ADR fixes that gate as the
-*final* semantic rather than a stopgap.
+a parent-set change is rejected whenever any OTHER branch holds live
+`:fn-version` / `:binding-version` / `:fn-slot-version` rows for the
+fn (the reject names the diverging branches — merge or delete them
+first). Equivalently, the two allowed shapes are the ROOT branch with
+every other branch converged on this fn, and a fn born on the request
+branch that no other branch has ever versioned (nobody else resolves
+it — the branch-isolated tutorial's create-then-set-parent flow, which
+an earlier, broader form of the gate wrongly rejected: it refused ALL
+off-root re-parents, contradicting rationale #4 below; narrowed
+2026-08-26). Parent-preserving updates and non-versioned storages are
+unaffected. This ADR fixes that gate as the *final* semantic rather
+than a stopgap.
 
 ## Why (a) is rejected
 

@@ -428,7 +428,7 @@ Adding more is one `defmethod` of
 
 ## Subtleties worth knowing
 
-### Parent-set edits are ROOT-branch-only (gated)
+### Parent-set edits require a converged fn (gated)
 
 `:parent-ids` is a `:ref-many` junction on the IDENTITY row — it is NOT
 versioned, so a re-parent is visible to EVERY branch the moment it
@@ -439,12 +439,18 @@ branch left every other branch resolving NEW parents over OLD bindings
 unbind — prod behaviour changes with no prod-visible edit).
 
 `validation/reparent-cross-branch-rej` therefore rejects a parent-set
-change unless BOTH hold:
+change whenever any OTHER branch holds its own live `:fn-version` /
+`:binding-version` / `:fn-slot-version` rows for this fn (the reject
+names the diverging branches — merge or delete them first; off-root it
+additionally points at the root branch as the place to converge). The
+two allowed shapes are exactly the non-corrupting ones:
 
-- the request branch is the ROOT branch (`:base-branch-id nil`), and
-- no other branch holds its own `:fn-version` / `:binding-version` /
-  `:fn-slot-version` rows for this fn (the reject names the diverging
-  branches — merge or delete them first).
+- the ROOT branch (`:base-branch-id nil`), every other branch converged
+  on this fn;
+- a fn BORN on the request branch that no other branch has ever
+  versioned — nobody else resolves it, so nothing can desync. This is
+  the branch-isolated tutorial's whole flow (create a fn on the
+  `tutorial-*` scratch branch, then assign its parent).
 
 Parent-PRESERVING updates and non-versioned storages are unaffected.
 This is option (b) of the two coherent designs, now DECIDED as the

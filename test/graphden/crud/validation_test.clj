@@ -539,7 +539,9 @@
 
 
 ;; =============================================================================
-;; reparent-cross-branch-rej — parent-set edits are root-branch-only
+;; reparent-cross-branch-rej — parent-set edits require that no OTHER
+;; branch holds live versions of the fn (root with converged branches,
+;; or a fn born on the request branch and never seen elsewhere)
 ;; =============================================================================
 
 (deftest reparent-cross-branch-gate-test
@@ -556,7 +558,7 @@
           (is (nil? (v/write-rej storage :fn {:id (:id f)
                                               :parent-ids [(:id p1)]
                                               :description "relabel"}))))
-        (testing "off-root branch → rejected"
+        (testing "off-root branch, fn resolved by root → rejected"
           (let [b (vs/create-branch! storage "rcb-feature")
                 on-b (vs/switch-branch storage (:id b))]
             (is (re-find #"root branch"
@@ -567,7 +569,21 @@
               (let [rej (v/write-rej storage :fn reparent)]
                 (is (some? rej))
                 (is (re-find #"rcb-feature" (:reason rej))
-                    "the diverging branch is named in the reason"))))))
+                    "the diverging branch is named in the reason")))
+            (testing "branch-born fn (no other branch holds versions) →
+                      allowed off-root — the branch-isolated tutorial's
+                      create-then-set-parent flow"
+              (let [born (sp/create-entity on-b :fn {:name "rcb-branch-born"
+                                                     :parent-ids [(:id p1)]})]
+                (is (nil? (v/write-rej on-b :fn {:id (:id born)
+                                                 :parent-ids [(:id p2)]})))))))
+        (testing "bare fn born off-root gets its FIRST parent assigned →
+                  allowed (the exact lesson-01 shape)"
+          (let [b2 (vs/create-branch! storage "rcb-tutorial")
+                on-b2 (vs/switch-branch storage (:id b2))
+                bare (sp/create-entity on-b2 :fn {:name "rcb-bare"})]
+            (is (nil? (v/write-rej on-b2 :fn {:id (:id bare)
+                                              :parent-ids [(:id p1)]}))))))
       (finally (sp/close storage)))))
 
 

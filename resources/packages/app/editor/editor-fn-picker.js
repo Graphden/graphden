@@ -75,6 +75,15 @@ function openFnPicker(opts) {
   const excludeSet = new Set(opts.excludeIds || []);
   const wantNs = opts.fnNamespaceId || null;
   const expected = opts.expectedType || null;
+  // Names the server (/api/types/candidates) confirmed compatible.
+  // Held at picker scope so a filter keystroke — which REBUILDS the
+  // candidate list from graphData — cannot downgrade them back to the
+  // client's primitive-only approximation: a fully-bound fn offered to
+  // a callable slot classified compatible on open, then fell into
+  // "Other" with a false ":text is not a subtype of [:fn …]" as soon
+  // as the reader typed its name (tutorial finding 2026-08-26,
+  // lesson 10).
+  const serverCompat = new Set();
 
   // Map a fn row to a picker candidate. Compatibility check: clientSubtype
   // is the fast local primitive-only fallback; structural cases (records,
@@ -84,7 +93,8 @@ function openFnPicker(opts) {
   function toCandidate(f) {
     const info = fnRichInfo(f);
     const compatible = expected && info.return
-      ? (typeof clientSubtype === 'function' ? clientSubtype(info.return, expected) : true)
+      ? (serverCompat.has(f.name)
+         || (typeof clientSubtype === 'function' ? clientSubtype(info.return, expected) : true))
       : null;   // null = no expectedType supplied; section headers hide
     return {
       id: f.id,
@@ -135,10 +145,10 @@ function openFnPicker(opts) {
       data = await r.json();
     } catch (_) { return; }
     if (!data?.ok || !Array.isArray(data.candidates)) return;
-    const compatNames = new Set(
-      data.candidates
-        .filter(c => c?.name && !c.name.startsWith('_anon-'))
-        .map(c => c.name));
+    for (const c of data.candidates) {
+      if (c?.name && !c.name.startsWith('_anon-')) serverCompat.add(c.name);
+    }
+    const compatNames = serverCompat;
     // The server's verdict is authoritative — upgrade any loaded candidate
     // it confirms compatible (beats the client's primitive-only
     // `clientSubtype` approximation, which can mis-rule structural types).

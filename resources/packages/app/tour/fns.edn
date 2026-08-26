@@ -797,6 +797,12 @@
             {:id "08"
              :chapter "The editor"
              :title "Branches"
+             ;; This lesson MANAGES branches itself (fork, edit, return to
+             ;; main) — running it inside a tour scratch branch broke its
+             ;; own story: "main never saw it" showed an empty canvas
+             ;; (branch-demo was born on the scratch branch, invisible from
+             ;; the real main) and the scratch branch leaked past cleanup.
+             :in-place true
              :steps
              [{:title "Branches are views, not copies"
                :body "A branch is a name plus a pointer to its parent. Editing on a branch writes a VERSION row scoped to it; main keeps its own. You will make a small fn, fork a branch, change it there, and watch main stay untouched."
@@ -1166,7 +1172,7 @@
                :target "button.more-actions-trigger"
                :check {:kind "dom" :selector ".service-popover"}}
               {:title "Create it — switched OFF"
-               :body "UNTICK “Enabled”, leave the restart policy on Always, and click “Create service”. The popover closes as soon as the row is written — a disabled row is the desired state “this exists but should not be running”, worth writing on purpose, and what keeps this tour from spawning a daemon on your instance."
+               :body "UNTICK “Enabled”, leave the restart policy on Always, and click “Create & reconcile”. The popover closes as soon as the row is written — a disabled row is the desired state “this exists but should not be running”, worth writing on purpose, and what keeps this tour from spawning a daemon on your instance."
                :target ".service-popover"
                :check {:kind "manual"}}
               {:title "What the row means"

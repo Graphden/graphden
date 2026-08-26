@@ -529,6 +529,12 @@ registerActionHandler('description', (btn, e, host) => {
     descriptionTooltipSticky = !descriptionTooltipSticky;
   }
   if (typeof showDescriptionTooltip === 'function') {
+    // Keyboard / synthetic clicks carry (0,0) — anchor at the button
+    // instead so the tooltip opens next to its card, not in the corner.
+    const evt = (e.clientX || e.clientY) ? e : (() => {
+      const r = btn.getBoundingClientRect();
+      return { clientX: r.left + r.width / 2, clientY: r.bottom };
+    })();
     showDescriptionTooltip({
       name: null,
       namespace: null,
@@ -537,7 +543,7 @@ registerActionHandler('description', (btn, e, host) => {
       entityId: btn.dataset.fnId
                 || btn.closest('[data-fn-id]')?.dataset.fnId
                 || null
-    }, e);
+    }, evt);
   }
 });
 

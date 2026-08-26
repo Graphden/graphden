@@ -489,7 +489,11 @@ async function _tourEnd() {
   // Branch-isolated run (org mode): the WHOLE lesson lives on a tour
   // branch, so the cleanup offer is one decision — delete the branch
   // (full rollback, returns to main) or keep it.
-  if (_tourState?.branch && _tourCurrentBranch() === _tourState.branch) {
+  // Offer the branch rollback whenever the tour OWNS a scratch branch —
+  // not only while standing on it. A lesson that ended after switching
+  // away (or a mis-scoped lesson) used to skip this offer entirely and
+  // leak one tutorial-* branch per run.
+  if (_tourState?.branch) {
     const branch = _tourState.branch;
     _tourDialog({
       title: _tourCopy('branch-title', 'Delete the tutorial branch?'),
@@ -730,6 +734,11 @@ async function startTutorialIsolated(lessonId) {
   const canBranch = window.API && API.api_branches
     && typeof switchToBranch === 'function';
   const onMain = canBranch && !_tourCurrentBranch();
+  // A lesson that MANAGES branches itself (lesson 08) opts out of the
+  // scratch-branch isolation — double-wrapping broke its own "main
+  // never saw it" beat and leaked the scratch branch.
+  const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);
+  if (lesson?.['in-place']) return startTutorial(lessonId);
   if (!canBranch || !onMain) return startTutorial(lessonId);
   const branch = 'tutorial-' + lessonId + '-'
     + Math.random().toString(36).slice(2, 6);

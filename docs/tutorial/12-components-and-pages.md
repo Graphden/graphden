@@ -94,14 +94,19 @@ Execute it. The result hiccup is `[:button "Run"]`. You just
 built your first component composition.
 
 In the editor the same thing is two clicks. Select `:button`,
-⋯ → "Extend", name the child — and look at the amber `?`-strip
-along the bottom of its card: `?label ?attrs`. A component's
-inputs reach a descendant as propagated *free* args (Lesson 04),
-so they never appear as slot rows with a `+` — the chips in that
-strip are the binder. Click `?label`, "Bind literal", type
-`Run`. A list-typed chip (`?children` on any container) opens the
-*append* flow instead, because a container holds items rather than
-one value.
+⋯ → "Extend", name the child — and look at the two lighter,
+dashed edges hanging off its card: `label` and `attrs`. A
+component's inputs reach a descendant as propagated *free* args
+(Lesson 04); there is no hiccup literal anywhere with a label
+inside it — the structure IS the composition, and the varying
+positions in it are these edges. They bind exactly like any other
+argument: click the `+` at the end of the `label` edge, "Bind
+literal", type `Run`. The dashed edge becomes a bound value. A
+list-typed input (`children` on any container) opens the *append*
+flow instead, because a container holds items rather than one
+value. The lighter/dashed rendering is provenance, not a
+different mechanism: the deeper an input comes from, the lighter
+its edge — hover it to see where it lives.
 
 Now extend it with caller attrs:
 

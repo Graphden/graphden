@@ -49,6 +49,24 @@ to `:str-len`. So `:greet-len` has ZERO free args. `▶ Run`
 opens the run popover saying *"No free arguments — click Run
 to invoke"* — no form to fill, one confirming click.
 
+## If you think in Clojure
+
+A graph fn has **no separate parameter list** — the argument
+vector is *derived* from the body. The closest Clojure analogue is
+the `#(...)` literal, where `%1`/`%2` in the body both use and
+declare the parameters:
+
+| Clojure | Graphden |
+|---|---|
+| `(defn f [label] …)` — params declared in `[]` | no declaration site: every unbound slot / `{:as :label}` capture in the body IS a parameter |
+| body uses `label` | the capture site both uses and declares it |
+| `(f "Run")` — positional call | binding by name: `:args {:label "Run"}`, the Run form, `/api/execute` args |
+| threading a param down by hand at every level | automatic: an unclosed hole at ANY depth surfaces as the top fn's parameter |
+| `(partial f 5)` / a factory returning a closure | a child fn-def binding some args — the rest stay free (Lesson 06) |
+
+The derived argument vector is always visible: it is exactly the
+set of placeholder edges on the card, and the Run form's fields.
+
 ## Free args bubble up
 
 This is the load-bearing property. Watch:
@@ -110,11 +128,19 @@ of its own.
 ## Seeing free args in the editor
 
 Open any composed fn-card and look at the CANVAS, not a text
-strip. Each **required free arg** renders as its own **placeholder
-node** hanging off the fn — a small empty node with a binder button
-(`+`) you click to bind it (a value, a ref, or a rename). That's the
-visual "this slot is still open" signal, and it's where you fill a
-slot in without leaving the graph.
+strip. **Every free arg renders the same way** — as a placeholder
+edge ending in a small node with a binder button (`+`) you click
+to bind it (a value, a ref, or a rename). That's the visual "this
+slot is still open" signal, and it's where you fill a slot in
+without leaving the graph.
+
+Where the arg CAME FROM is a style gradation on that same shape,
+not a different UI: an arg propagated from deep inside the
+composition draws lighter and more sparsely dashed than a direct
+slot's, an *optional* one (the fn runs without it) is dimmed, and
+a **λ-marked ghost edge** is a lambda parameter an enclosing
+higher-order fn supplies per call — visible so the mechanics are
+legible, but not bindable. Hover any of them for the provenance.
 
 Renaming one is a click on the arg's NAME on the incoming edge
 (the type chip beside it opens the type editor instead). The new

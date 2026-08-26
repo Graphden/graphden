@@ -385,8 +385,19 @@
         (finally (sp/close storage))))))
 
 
+(defn- no-badge-arrays?
+  "True when no node carries the RETIRED :optionalArgs /
+   :hofCapturedArgs badge arrays — the unified-arg-edges guard."
+  [result]
+  (not-any? (fn [n] (or (:optionalArgs (:data n)) (:hofCapturedArgs (:data n))))
+            (:nodes result)))
+
+
 (deftest layout-optional-arg-test
-  (testing "an unbound optional slot is routed as a compact optional badge"
+  (testing "an unbound optional slot renders as a uniform placeholder
+            edge flagged :optionalArg (unified-arg-edges 2026-08-26 —
+            the compact badge strip is gone; provenance is a style
+            gradation on the SAME shape every argument gets)"
     (let [storage (setup/create-test-storage)]
       (try
         (let [base (setup/create-base-fn! storage "lg-opt-base")
@@ -397,18 +408,22 @@
               _    (setup/attach-slot! storage (:id base) (:id slot) 0)
               c    (setup/create-composed-fn! storage "lg-opt-fn" (:id base))
               result (layout storage (:id c))
-              entry (some (fn [n]
-                            (some (fn [e] (when (= "opt" (name (:name e))) e))
-                                  (:optionalArgs (:data n))))
-                          (fn-nodes result))]
+              edge (some (fn [e]
+                           (let [d (:data e)]
+                             (when (and (:isUnset d) (= "opt" (:argName d))) d)))
+                         (:edges result))
+              node (when edge
+                     (some (fn [n]
+                             (when (= (:target edge) (:id (:data n)))
+                               (:data n)))
+                           (:nodes result)))]
           (is (seq (:nodes result)))
-          ;; The optional arg surfaces on the fn-node's :optionalArgs
-          ;; (each entry `{:name … :slot-id …}` so the editor can
-          ;; resolve the declaring ancestor for the strip's tooltip),
-          ;; not as a standalone placeholder node.
-          (is entry "optional arg entry present")
-          (is (= (:id slot) (:slot-id entry))
-              "entry carries slot-id so the editor's findSlotDeclaringFn can attribute the source"))
+          (is edge "the optional arg is an unset placeholder edge")
+          (is (:optionalArg edge) "the edge carries the :optionalArg flag")
+          (is (:isPlaceholder node) "its target is a placeholder node")
+          (is (:optionalArg node) "the node carries the flag too (styles the + binder)")
+          (is (no-badge-arrays? result)
+              "no node resurrects the retired :optionalArgs/:hofCapturedArgs arrays"))
         (finally (sp/close storage))))))
 
 

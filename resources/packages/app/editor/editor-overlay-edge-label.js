@@ -24,7 +24,9 @@
  * actual line breaks.
  */
 function createEdgeLabelOverlay(edge, container) {
-  const label = edge.data('argName');
+  // λ-params read as 'λname' — the per-call argument the enclosing
+  // HOF supplies, visually distinct from the caller's own signature.
+  const label = (edge.data('lambdaArg') ? 'λ' : '') + (edge.data('argName') || '');
   if (!label) return;
 
   // Description precedence (closest binding with a non-empty

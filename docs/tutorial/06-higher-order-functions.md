@@ -155,6 +155,19 @@ time, the executor supplies them as `{:request <ring-req>}`.
 The user doesn't write any glue — the names propagate
 automatically through ref chains AND through HOF boundaries.
 
+## "A function that returns a function"?
+
+Coming from Clojure you may reach for a factory — a fn that takes
+parameters and returns the callable you then hand to `:map`. There is
+no such step here, because a graph fn with unbound free args already
+IS that returned callable: binding some of its args (`add-5 :parent
+add :args {:a 5}`) is the factory call, the bound args are the
+closure, and the still-free arg is the lambda parameter the HOF
+supplies per element. Referencing a fn into a `:fn`-typed slot always
+passes the fn itself, unrun — the executor never evaluates it first
+to obtain another function. Partial application by inheritance
+replaces currying, and the composition stays visible in the graph.
+
 ## Iterating vs one-shot
 
 Two HOF flavours interact with closure-capture differently:

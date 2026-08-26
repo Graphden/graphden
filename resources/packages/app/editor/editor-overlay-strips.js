@@ -1,105 +1,11 @@
 // Editor Overlay (strips) - bottom-of-card metadata strips appended to
-// the fn-overlay: return-type / effects / parents / namespace,
-// optional-args, HOF-captured-args, and the sign-in CTA.
+// the fn-overlay: return-type / effects / parents / namespace, the
+// deep-free ⇣-strip, and the sign-in CTA. (The former optional-args /
+// HOF-captured badge strips are gone — every unset arg renders as a
+// uniform placeholder edge now; see layout's add-unset-arg-node.)
 // Depends on: editor-state.js, editor-data.js, editor-icons.js.
 
 // --- Strip helpers used by createFnOverlay ----------------------------------
-
-// Optional-but-unbound args (e.g. :get.default when no default was supplied)
-// render as a thin, muted strip instead of their own placeholder nodes —
-// they carry sane fallbacks so they're not part of the function's interface,
-// just a nicety the caller may or may not care about.
-//
-// Each `?name` is its own span so a hover shows the arg's declared type
-// AND the ancestor that originally declared the slot (resolved via
-// `findSlotDeclaringFn` from the optional entry's `slotId`). A user
-// reading the strip learns the name, the type-shape, AND which fn in
-// the inheritance chain introduced the optional arg — without opening
-// any popover.
-//
-// Wire format: each entry is `{:name "n" :slot-id "uuid"}` (or a plain
-// string in older payloads — kept for backward compatibility).
-//
-// On an editable card each chip is also a BINDER. These args reach the
-// card by propagation (a component's `{:as :label}` inside its parent's
-// hiccup children, say), so they never materialise as `fn_slot` rows and
-// never grow a `+` placeholder node — which left the editor with no way at
-// all to pin one. `{:parent :button :args {:label "Run"}}` in a fns.edn is
-// exactly a binding on (this fn, the origin slot), so the chip writes the
-// same row the package sync would.
-function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
-  if (!Array.isArray(optionalArgs) || !optionalArgs.length) return;
-  // Normalise the wire shape so the rendering loop stays uniform.
-  const entries = optionalArgs.map((e) => {
-    if (typeof e === 'string') return { name: e, slotId: null };
-    return { name: e.name, slotId: e['slot-id'] || e.slotId };
-  });
-  const strip = document.createElement('div');
-  strip.className = 'optional-args-strip';   // static looks in editor-styles.css
-  const originalFn = originalFnId ? lookups?.fnMap?.get(originalFnId) : null;
-  const richArgs = (typeof richTypeEntryOf === 'function')
-                   ? (richTypeEntryOf(originalFn)?.args || null) : null;
-  // Same gate the `+` placeholders use — signed in, and not a
-  // package-synced fn whose bindings the boot sync owns.
-  const bindable = !!originalFnId
-                && typeof isAuthenticated === 'function' && isAuthenticated()
-                && !(typeof isPackageOwnedFn === 'function'
-                     && isPackageOwnedFn(originalFnId))
-                && typeof enterFreeArgBindEditMode === 'function';
-  strip.title = (bindable
-                 ? 'Unset args — click one to bind it: '
-                 : 'Optional args (unset, using defaults): ')
-              + entries.map((e) => e.name).join(', ');
-  entries.forEach((entry, i) => {
-    if (i > 0) strip.appendChild(document.createTextNode(' '));
-    const canBind = bindable && !!entry.slotId;
-    const span = document.createElement(canBind ? 'button' : 'span');
-    if (canBind) {
-      span.type = 'button';
-      span.className = 'optional-arg-binder';
-    }
-    span.textContent = '?' + entry.name;
-    const argType = richArgs ? richArgs[entry.name] : null;
-    const typePart = (argType != null && typeof formatTypeHint === 'function')
-                     ? ' : ' + formatTypeHint(argType) : '';
-    let originPart = '';
-    if (entry.slotId && originalFnId && typeof findSlotDeclaringFn === 'function') {
-      const decl = findSlotDeclaringFn(originalFnId, entry.slotId);
-      if (decl?.fnName) originPart = ' (from :' + decl.fnName + ')';
-    }
-    span.title = '?' + entry.name + typePart + originPart
-                 + (canBind ? ' — click to bind' : '');
-    if (canBind) {
-      span.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const slot = lookups?.slotMap?.get(entry.slotId);
-        const argRow = {
-          'fn-id': originalFnId,
-          'slot-id': entry.slotId,
-          'binding-id': null,
-          name: entry.name,
-          type: slot?.['type-fn-id']
-                ? lookups?.fnMap?.get(slot['type-fn-id'])?.name : null,
-          value: null,
-          'ref-id': null,
-          description: slot?.description || null
-        };
-        // A LIST-typed arg (`:children` on every component) holds items,
-        // not one value — binding a single ref there would type-fail. Send
-        // it into the same append flow the sequence anchor's `+` uses.
-        const elemT = (typeof seqElemType === 'function')
-                      ? seqElemType(argRow) : null;
-        if (elemT !== null && typeof appendSequenceItem === 'function') {
-          appendSequenceItem(originalFnId, span, elemT, { elemType: elemT });
-        } else {
-          enterFreeArgBindEditMode(argRow, span);
-        }
-      });
-    }
-    strip.appendChild(span);
-  });
-  overlay.appendChild(strip);
-}
 
 // Per-fn metadata strips at the bottom of the overlay: return-type,
 // effects (with drift visualisation), edit-parents, namespace. All four
@@ -546,14 +452,6 @@ function appendFnActionToolbar(overlay, originalFnId, isNavRoot) {
 // not interface args for the graph-level caller. Render as a compact
 // strip prefixed with `λ` so the user can see the slot exists without
 // needing to plan for supplying it themselves.
-function appendHofCapturedArgsStrip(overlay, hofCapturedArgs) {
-  if (!Array.isArray(hofCapturedArgs) || !hofCapturedArgs.length) return;
-  const strip = document.createElement('div');
-  strip.className = 'hof-args-strip';   // static looks in editor-styles.css
-  strip.title = 'Args supplied by the enclosing HOF invocation: ' + hofCapturedArgs.join(', ');
-  strip.textContent = hofCapturedArgs.map(n => 'λ' + n).join(' ');
-  overlay.appendChild(strip);
-}
 
 
 /**

@@ -343,7 +343,7 @@
              :title "Higher-order functions"
              :steps
              [{:title "A slot that wants a function"
-               :body "Every slot so far wanted a VALUE. A slot whose type starts with :fn wants a CALLABLE instead — the executor hands the fn over unrun, and the impl decides when to invoke it. That is how map, filter and friends work."
+               :body "Every slot so far wanted a VALUE. A slot whose TYPE is :fn — the bare primitive, or the structural [:fn args ret] form — wants a CALLABLE instead: the executor hands the fn over unrun, and the impl decides when to invoke it. (It is the type, never the slot's name.) That is how map, filter and friends work."
                :target nil
                :check {:kind "manual"}}
               {:title "Find map"
@@ -392,7 +392,7 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Find button"
-               :body "Type button in the Explorer filter and click the button row (web.components). Its card ends in an amber ?-strip: ?label ?attrs — the inputs it leaves open."
+               :body "Type button in the Explorer filter and click the button row (web.components). Two lighter dashed edges hang off the card — label and attrs, the inputs it leaves open."
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "button"}}
               {:title "Make it yours"
@@ -402,12 +402,12 @@
                :creates {:type "fn" :name "tutorial-button"}}
               ;; Selection gate — the next step binds on the child.
               {:title "tutorial-button is open"
-               :body "Notice there is no “+” on this card. A component's inputs arrive as FREE args (lesson 04), so they live in the ?-strip along the bottom rather than on a slot row — and each chip there is clickable."
+               :body "A component's inputs arrive as FREE args (lesson 04) from inside its composition, so their edges render lighter and dashed than a direct slot's — but they bind exactly the same way, with the “+” on the edge's end."
                :target nil
                :check {:kind "selected" :name "tutorial-button"}}
               {:title "Give it a label"
-               :body "In the ?-strip click ?label, choose “Bind literal”, type exactly: Run — then Save. The chip disappears: that input is pinned now."
-               :target ".optional-arg-binder"
+               :body "Click the “+” at the end of the label edge, choose “Bind literal”, type exactly: Run — then Save. The dashed edge turns into a bound value: that input is pinned now."
+               :target ".placeholder-binder"
                :check {:kind "binding-bound" :name "tutorial-button" :slot "label"}}
               {:title "Run it"
                :body "⋯ → ▶ Run → Run. Back comes [\"button\" \"Run\"] — hiccup, the data form of HTML. Nothing renders it yet; it is a value like any other."
@@ -424,12 +424,12 @@
                :creates {:type "fn" :name "tutorial-card"}}
               ;; Selection gate — the next step appends on the child.
               {:title "tutorial-card is open"
-               :body "Its ?-strip shows ?children. That one is a LIST, so clicking it offers Append instead of Bind — a container holds items, not a single value."
+               :body "Its children input is a LIST, so its “+” offers Append instead of Bind — a container holds items, not a single value."
                :target nil
                :check {:kind "selected" :name "tutorial-card"}}
               {:title "Put your button inside"
-               :body "Click ?children, choose “Append fn-ref”, type tutorial in the picker and click the tutorial-button row. The canvas draws the edge: the card now contains your button."
-               :target ".optional-arg-binder"
+               :body "Click the “+” on the children edge, choose “Append fn-ref”, type tutorial in the picker and click the tutorial-button row. The canvas draws the edge: the card now contains your button."
+               :target ".placeholder-binder"
                :check {:kind "bindings-count" :name "tutorial-card" :count 1}}
               {:title "Run the card"
                :body "⋯ → ▶ Run → Run. The result nests: [\"div\" {\"class\" \"card\"} [\"button\" \"Run\"]]. Composing fns IS composing markup — there is no separate component runtime."
@@ -458,12 +458,12 @@
                :creates {:type "fn" :name "tutorial-script"}}
               ;; Selection gate — the next step binds on the child.
               {:title "tutorial-script is open"
-               :body "One chip in the ?-strip: ?body. Its type is :js-source — a type-row like any other, and the reason the next step gets a code editor instead of a plain text box."
+               :body "One dashed input edge: body. Its type is :js-source — a type-row like any other, and the reason the next step gets a code editor instead of a plain text box."
                :target nil
                :check {:kind "selected" :name "tutorial-script"}}
               {:title "Write some JavaScript"
                :body "Click ?body, choose “Bind literal”. The value form opens a real code editor — syntax highlighting, bracket matching. Type exactly: document.title = 'Graphden'; — then Save."
-               :target ".optional-arg-binder"
+               :target ".placeholder-binder"
                :check {:kind "binding-bound" :name "tutorial-script" :slot "content"}}
               {:title "Run it"
                :body "⋯ → ▶ Run → Run. Back comes [\"script\" {} \"document.title = 'Graphden';\"] — hiccup carrying your JS, ready to sit in a page's scripts list. The JS itself runs in the BROWSER when that page loads; running the fn here only builds the tag."

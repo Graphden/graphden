@@ -7,8 +7,6 @@
 
    - expansion-spec utilities (`get-effective-spec` / `spec->expand-set`
      / `spec-trivial?`);
-   - state-recording side helpers (`record-optional-unset!` /
-     `record-hof-captured!`);
    - graph node/edge field shaping (`arg-row->node-id-fields` /
      `arg-source-fn-fields` / `edge-source-fields`);
    - value / unset arg-node emission (`add-arg-value-node` /
@@ -100,32 +98,6 @@
          caller-bound-arg
          terminal-source-of
          child-covered-sources-for-fn)
-
-
-(defn record-optional-unset!
-  "Append `{:name arg-name :slot-id slot-id}` to `state.optional-unsets-
-   by-node[node-id]`. Used to populate a node's `+default, +else` badge
-   with the names of unbound optional args the caller chose to leave
-   blank. `slot-id` is carried so the editor can resolve the ancestor
-   that declared the slot (and surface it in the strip's per-name
-   tooltip) without re-walking the inheritance chain in two places."
-  [state node-id arg-name slot-id]
-  (when (and node-id arg-name)
-    (swap! state update-in [:optional-unsets-by-node node-id]
-           (fn [xs]
-             (let [entry (cond-> {:name arg-name}
-                           slot-id (assoc :slot-id slot-id))]
-               (if xs (conj xs entry) [entry]))))))
-
-
-(defn record-hof-captured!
-  "Append `arg-name` to `state.hof-captured-by-node[node-id]`. Used to
-   populate the λname HOF capture badge on nodes whose lambda-param
-   free arg is supplied per-call by the surrounding HOF invocation."
-  [state node-id arg-name]
-  (when (and node-id arg-name)
-    (swap! state update-in [:hof-captured-by-node node-id]
-           (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
 
 
 (defn arg-row->node-id-fields
@@ -869,38 +841,43 @@
 
 
 (defn add-unset-arg-node
-  "Emit a placeholder for an unset arg, choosing one of four routings:
+  "Emit a placeholder for an unset arg. Since the unified-arg-edges
+   redesign (2026-08-26) every unset arg renders as the SAME shape — a
+   placeholder node + edge — with FLAGS the client styles by, instead
+   of the three former compact badge strips. One rule for the reader:
+   an argument is an edge; where it came from is a style gradation +
+   tooltip, not a different UI.
 
-     1. Optional (root `:required=false`) — compact `?name` badge via
-        `:optionalArgs`; the caller's fn has a sensible fallback baked in.
-     2. Lambda-param of an enclosing HOF (`is-hof=true` AND no caller-side
-        structural binding via cross-HOF source-id chain) — compact
-        `λname` badge via `:hofCapturedArgs`. The HOF impl supplies it
-        per call.
-     3. HOF capture — `is-hof=true` but a caller's chain DOES bind this
-        arg structurally (cross-HOF source-id). The binding is rendered
-        on the capturing caller's edge; we record a migration target so
-        post-processing rewrites the edge to originate from THIS inside-
-        consumer node (the leaf that actually reads the value). Nothing
-        new is emitted in the lambda body to avoid double-counting.
-     4. Otherwise — a visible dashed placeholder node. This IS the
-        caller's interface; the caller must fill it."
+     - `:optionalArg` — root `:required=false`; the fn has a fallback
+       baked in, the caller MAY bind. Rendered lighter.
+     - `:lambdaArg` — lambda-param of an enclosing HOF with no caller-
+       side structural binding: the HOF impl supplies it per call, the
+       caller must NOT bind it. Rendered as a λ-marked ghost edge with
+       no `+`.
+     - `:deepArg` — the slot's owner sits OUTSIDE the arg-fn's parent
+       chain (ref-chain free-arg propagation): the hole lives deeper
+       than the visible slot surface but is still THIS fn's signature.
+       Rendered lighter/dashed; binding lands on this fn (closure
+       capture).
+     - HOF capture (`is-hof` AND a caller's chain binds the arg
+       structurally) keeps the migration routing: the caller's edge is
+       rewritten to originate from the inside consumer — nothing new
+       is emitted, avoiding double-counting."
   [state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns is-hof]
   (let [arg-map (:arg-map lookups)
         arg-rec (get arg-map arg-id)
         optional? (arg-is-optional? arg-map arg-rec)
         displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
-                           (when arg-name (name arg-name)))]
-    (cond
-      optional?
-      (record-optional-unset! state source-node-id displayed-name (:slot-id arg-rec))
-
-      is-hof
-      (if-let [bound (caller-bound-arg arg-map inverse-source-map arg-id)]
-        (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
-        (record-hof-captured! state source-node-id displayed-name))
-
-      :else
+                           (when arg-name (name arg-name)))
+        hof-bound (when is-hof (caller-bound-arg arg-map inverse-source-map arg-id))
+        lambda? (and is-hof (nil? hof-bound))
+        deep? (boolean
+                (when-let [owner (get (:slot-owner lookups) (:slot-id arg-rec))]
+                  (when-let [fid (:fn-id arg-rec)]
+                    (not (contains? (set (data/get-inheritance-chain* fid lookups))
+                                    owner)))))]
+    (if hof-bound
+      (swap! state update :captured-edge-migrations assoc (:id hof-bound) source-node-id)
       (let [node-id (str "unset-" source-node-id "-" arg-id)
             edge-id (str "e-unset-" source-node-id "-" arg-id)
             ;; Empty sequence anchor: the arg itself is :sequence-typed
@@ -910,7 +887,11 @@
             ;; to PUT `value=` on the anchor.
             empty-seq? (and arg-rec
                             (= :sequence (:type arg-rec))
-                            (nil? (:next-arg-id arg-rec)))]
+                            (nil? (:next-arg-id arg-rec)))
+            flag-fields (cond-> {}
+                          optional? (assoc :optionalArg true)
+                          lambda?   (assoc :lambdaArg true)
+                          deep?     (assoc :deepArg true))]
         (when-not (contains? (:added-node-ids @state) node-id)
           (swap! state update :added-node-ids conj node-id)
           (swap! state update :nodes conj
@@ -923,6 +904,7 @@
                                         ;; slots (Phase 4) without re-deriving
                                         ;; them from the node-id string.
                                         :argId (str arg-id)}
+                                       flag-fields
                                        (when arg-rec
                                          (arg-row->node-id-fields arg-rec)))
                           arg-type  (assoc :argType (name arg-type))
@@ -935,6 +917,7 @@
                                 :sourceArgId arg-id
                                 :argName displayed-name
                                 :isUnset true}
+                               flag-fields
                                ;; Same id-bundle as a bound-arg edge so the
                                ;; edge-label overlay can resolve the slot /
                                ;; fn / type via `argRowFromNode` and render

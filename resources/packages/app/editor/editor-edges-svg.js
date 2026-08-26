@@ -148,7 +148,15 @@ function renderEdges() {
     hits.appendChild(hit);
 
     const line = document.createElementNS(SVG_NS, 'path');
-    line.setAttribute('class', 'edge-line');
+    // Unified-arg-edges: every unset arg is an edge; PROVENANCE is a
+    // style gradation, not a different UI. Flags come from the layout
+    // emitter (add-unset-arg-node).
+    const ed = edge.data();
+    line.setAttribute('class', 'edge-line'
+      + (ed.isUnset ? ' edge-unset' : '')
+      + (ed.optionalArg ? ' edge-optional' : '')
+      + (ed.lambdaArg ? ' edge-lambda' : '')
+      + (ed.deepArg ? ' edge-deep' : ''));
     line.setAttribute('d', d);
     line.setAttribute('marker-start', 'url(#gd-edge-source)');
     line.setAttribute('marker-end', 'url(#gd-edge-target)');

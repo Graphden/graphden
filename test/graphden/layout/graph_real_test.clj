@@ -191,7 +191,13 @@
                             (filter #(str/starts-with? (str (:id (:data %))) "arg-"))
                             (map #(:label (:data %))))
               cards (->> (:nodes result)
-                         (filter #(= "fn" (:type (:data %))))
+                         ;; Placeholder nodes are typed "fn" but labeled
+                         ;; by their arg TYPE — two `any` placeholders are
+                         ;; legitimately identical, so exclude them from
+                         ;; the duplicate-card check (its subject is real
+                         ;; fn CARDS drawn twice).
+                         (filter #(and (= "fn" (:type (:data %)))
+                                       (not (:isPlaceholder (:data %)))))
                          (map #(:label (:data %))))]
           (is (seq (:nodes result)) (str nm " @" depth " produces nodes"))
           (is (:valid (:validation result))

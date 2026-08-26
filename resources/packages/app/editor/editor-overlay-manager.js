@@ -129,6 +129,27 @@ function createPlaceholderOverlay(node, container) {
   const arg = (typeof argRowFromNode === 'function')
               ? argRowFromNode(node.data())
               : null;
+  // λ-param of an enclosing HOF: the impl supplies it per call — the
+  // reader must SEE it (that is how HOFs work) but must not bind it.
+  // Informational badge for everyone, no `+`, regardless of auth.
+  if (node.data('lambdaArg')) {
+    const wrap = document.createElement('div');
+    wrap.className = 'node-overlay placeholder-overlay';
+    wrap.dataset.nodeId = node.id();
+    Object.assign(wrap.style, {
+      position: 'absolute', pointerEvents: 'none', zIndex: '10',
+      background: 'transparent', border: 'none', overflow: 'visible'
+    });
+    const badge = document.createElement('span');
+    badge.className = 'lambda-arg-badge';
+    badge.textContent = 'λ';
+    badge.title = 'Supplied per call by the enclosing higher-order fn — not bindable here';
+    badge.style.pointerEvents = 'auto';
+    wrap.appendChild(badge);
+    registerNodeOverlay(wrap);
+    container.appendChild(wrap);
+    return;
+  }
   const inImpl = arg && implementationFnIds?.has(arg['fn-id']);
   const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
@@ -150,12 +171,16 @@ function createPlaceholderOverlay(node, container) {
 
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'placeholder-binder' + (isSeqAnchor ? ' is-seq-anchor' : '');
+  btn.className = 'placeholder-binder' + (isSeqAnchor ? ' is-seq-anchor' : '')
+    + (node.data('optionalArg') ? ' is-optional' : '')
+    + (node.data('deepArg') ? ' is-deep' : '');
   btn.dataset.nodeId = node.id();
   btn.textContent = '+';
-  btn.title = isSeqAnchor
+  btn.title = (isSeqAnchor
               ? 'Add the first item'
-              : 'Bind this slot (literal value or fn-ref)';
+              : 'Bind this slot (literal value or fn-ref)')
+    + (node.data('optionalArg') ? ' — optional input, the fn runs without it' : '')
+    + (node.data('deepArg') ? ' — propagated from inside the composition; the binding lands on this fn' : '');
   btn.setAttribute('aria-label', btn.title);
 
   btn.addEventListener('click', (e) => {

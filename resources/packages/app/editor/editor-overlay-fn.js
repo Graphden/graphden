@@ -355,15 +355,11 @@ function createFnOverlay(node, container) {
     overlay.appendChild(more);
   }
 
-  appendOptionalArgsStrip(overlay, node.data('optionalArgs'), originalFnId);
-
   appendFnMetadataStrips(overlay, originalFnId, isNavRoot, {
     returnTypeAlias: node.data('returnTypeAlias') || null,
     ruleOwner: node.data('ruleOwner') || null,
     branchLocal: node.data('branchLocal') || null,
   });
-
-  appendHofCapturedArgsStrip(overlay, node.data('hofCapturedArgs'));
 
   appendDeepFreeArgsStrip(overlay, node.data('deepFreeArgs'));
 

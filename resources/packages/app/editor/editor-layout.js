@@ -94,7 +94,6 @@ function computeFnOverlayHeight(label, _width) {
 
 // Optional-args strip rendered by editor-overlays.js right above the drag
 // handle: 1px top border + italic text at 10px with 2px vertical padding.
-const OPTIONAL_STRIP_HEIGHT = 17;
 
 // Metadata strips appended below ancestor rows by
 // `appendFnMetadataStrips` (editor-overlays.js):
@@ -204,11 +203,6 @@ function calculateNodeSize(nodeData) {
       const cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
       return Math.min(cleanLen, maxLineLen);
     }));
-    const optionalArgs = nodeData.optionalArgs;
-    const optionalText = Array.isArray(optionalArgs) && optionalArgs.length
-      ? optionalArgs.map(n => '?' + n).join(' ')
-      : '';
-    const widthFromOptional = optionalText ? optionalText.length * 6 + 24 : 0;
     // Per-MI-cell floor so each cell still fits at least one icon-pair
     // worth of slack even when the names are very short. Without this,
     // a 3-cell MI row of `r404, r405, r500` collapses each cell to ~50px
@@ -224,7 +218,7 @@ function calculateNodeSize(nodeData) {
     // the row's symmetric breathing room (8 + 8 ≈ 16 px). 36 covers
     // it with a few pixels of slack so names hug the trigger.
     const iconBudget = 36;
-    const width = Math.max(80, maxLen * 7 + iconBudget, widthFromOptional, widthFromMI);
+    const width = Math.max(80, maxLen * 7 + iconBudget, widthFromMI);
     // `appendUseSiteHeader` prepends one extra row to non-nav-root
     // overlays whose fn has a global name (it skips local / anonymous
     // fns). Mirror the condition so row-height accounts for it.
@@ -237,12 +231,10 @@ function calculateNodeSize(nodeData) {
           ? USE_SITE_HEADER_HEIGHT
           : USE_SITE_HEADER_SLIM_HEIGHT)
       : 0;
-    const optionalExtra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
     const stripsExtra = isPlaceholder ? 0 : metadataStripsHeight(nodeData);
     const height = Math.max(30 + DRAG_HANDLE_HEIGHT,
                             computeFnOverlayHeight(label, width)
                             + useSiteRow
-                            + optionalExtra
                             + stripsExtra);
     return { width, height };
   }

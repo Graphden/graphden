@@ -650,18 +650,27 @@ async function bindFnRefPlaceholder(page, fnName) {
 
 
 // --- lesson 12 (components) helpers -----------------------------------------
-// A component's inputs arrive as propagated FREE args, so they never grow a
-// `+` placeholder — they are the `?name` chips in the card's amber strip, and
-// each chip is the binder.
+// A component's inputs arrive as propagated FREE args. Since the
+// unified-arg-edges redesign they render as ordinary placeholder EDGES
+// from the card (lighter/dashed, `+` on the placeholder node) — the
+// former amber `?name` chip strip is gone. Click-by-name = find the
+// unset edge carrying the arg name, click its target's binder.
 
 async function chipByName(page, chipName) {
-  await page.waitForFunction((name) => Array.from(
-    document.querySelectorAll('.optional-arg-binder'))
-    .some((b) => b.textContent.trim() === '?' + name),
-  chipName, {timeout: 30000, polling: 150});
+  await page.waitForFunction((name) => {
+    const gv = window.graphView;
+    if (!gv) return false;
+    const edge = gv.edgeList().find(
+      (e) => e.data?.argName === name && e.data?.isUnset);
+    if (!edge) return false;
+    return !!document.querySelector(
+      '.placeholder-binder[data-node-id="' + edge.data.target + '"]');
+  }, chipName, {timeout: 30000, polling: 150});
   await page.evaluate((name) => {
-    Array.from(document.querySelectorAll('.optional-arg-binder'))
-      .find((b) => b.textContent.trim() === '?' + name).click();
+    const edge = window.graphView.edgeList().find(
+      (e) => e.data?.argName === name && e.data?.isUnset);
+    document.querySelector(
+      '.placeholder-binder[data-node-id="' + edge.data.target + '"]').click();
   }, chipName);
 }
 

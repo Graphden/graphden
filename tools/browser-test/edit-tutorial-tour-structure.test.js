@@ -180,12 +180,19 @@ const {
     // own once the child is open; there is no Next to click.
     await waitTourTitle(page, 'tutorial-button is open', 150000);
     await waitTourTitle(page, 'Give it a label', 150000);
-    // A component's inputs are propagated free args: no `+` placeholder
-    // exists for them, only the `?name` chip. That IS the lesson's claim.
-    const placeholderCount = await page.evaluate(
-      () => document.querySelectorAll('.placeholder-binder').length);
-    assert(placeholderCount === 0,
-      'a component descendant offers chips, not slot placeholders');
+    // Unified-arg-edges: a component's propagated inputs render as the
+    // SAME placeholder edges any argument gets — `label` must be there,
+    // as a binder on a placeholder edge. That IS the lesson's claim now.
+    const labelEdge = await page.evaluate(() => {
+      const e = window.graphView.edgeList().find(
+        (x) => x.data?.argName === 'label' && x.data?.isUnset);
+      return e ? {target: e.data.target,
+                  binder: !!document.querySelector(
+                    '.placeholder-binder[data-node-id="' + e.data.target + '"]')}
+               : null;
+    });
+    assert(labelEdge && labelEdge.binder,
+      'the propagated label input is a bindable placeholder edge');
     await bindOptionalArgChip(page, 'label', 'Run');
     await waitTourTitle(page, 'Run it', 150000);
     await runViaRowActions(page);

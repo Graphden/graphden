@@ -342,6 +342,24 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
   stroke: var(--fg);
 }
 
+/* Unified arg edges — provenance is a gradation, not a different UI.
+   Unset edges are dashed; optional/deep grades lighten them; a λ edge
+   is a ghost: the enclosing HOF supplies that argument per call. */
+.edge-line.edge-unset { stroke-dasharray: 5 4; }
+.edge-line.edge-optional { opacity: 0.62; }
+.edge-line.edge-deep { opacity: 0.55; stroke-dasharray: 2 5; }
+.edge-line.edge-optional.edge-deep { opacity: 0.42; }
+.edge-line.edge-lambda { opacity: 0.38; stroke-dasharray: 1 5; }
+.placeholder-binder.is-optional { opacity: 0.72; }
+.placeholder-binder.is-deep { border-style: dotted; }
+.lambda-arg-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1px dashed var(--hof-border);
+  background: var(--hof-bg); color: var(--hof-fg);
+  font-size: 12px; font-style: italic; cursor: help;
+}
+
 /* Hovering an edge lights the whole visual bundle it belongs to. Markers use
    `fill: context-stroke`, so the arrowheads follow without a rule of their own. */
 .edge-line.edge-hovered {

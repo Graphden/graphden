@@ -687,9 +687,12 @@
 ;; Post-processing — once the process-* walkers have populated `state`,
 ;; three independent transforms shape the wire output:
 ;;
-;;   1. annotate-optionals — attach :optionalArgs / :hofCapturedArgs
-;;      metadata to source nodes so the client renders compact badges
-;;      instead of cluttering the graph with placeholder cards.
+;;   1. annotate-optionals — attach :deepFreeArgs metadata to expanded
+;;      inner nodes (the informational ⇣-strip). The former
+;;      :optionalArgs / :hofCapturedArgs badge arrays are gone — every
+;;      unset arg is a uniform placeholder edge now (see
+;;      add-unset-arg-node), styled by :optionalArg/:lambdaArg/:deepArg
+;;      flags instead of being folded into strips.
 ;;   2. migrate-captured-edges — when an unset arg inside an expanded
 ;;      HOF was structurally captured, rewrite the caller's edge so it
 ;;      visually originates from the inside-consumer node (the leaf
@@ -705,9 +708,8 @@
 ;; =============================================================================
 
 (defn- annotate-optionals
-  "Attach `:optionalArgs` / `:hofCapturedArgs` / `:deepFreeArgs`
-   arrays to each node's `:data` from the state-atom's per-node
-   maps. Pure transform.
+  "Attach the `:deepFreeArgs` array to each node's `:data` from the
+   state-atom's per-node map. Pure transform.
 
    `:deepFreeArgs` is the union of free-arg names migrated INTO
    this fn from the caller's expanded context — i.e. names this
@@ -720,16 +722,8 @@
   [nodes state]
   (mapv (fn [n]
           (let [node-id (get-in n [:data :id])
-                optionals (get (:optional-unsets-by-node @state) node-id)
-                hof-captured (get (:hof-captured-by-node @state) node-id)
                 deep-free (get (:deep-free-by-node @state) node-id)]
             (cond-> n
-              (seq optionals)
-              (assoc-in [:data :optionalArgs] (vec (distinct optionals)))
-
-              (seq hof-captured)
-              (assoc-in [:data :hofCapturedArgs] (vec (distinct hof-captured)))
-
               (seq deep-free)
               (assoc-in [:data :deepFreeArgs] (vec (sort deep-free))))))
         nodes))
@@ -842,10 +836,6 @@
         ;;                                       (cycle guard for shared-fn graphs)
         ;;   :in-progress-expansions          — expansion keys currently active
         ;;                                       (cycle guard for self-referential refs)
-        ;;   :optional-unsets-by-node         — node-id → [arg-name …] for the
-        ;;                                       compact `+default, +else` badge
-        ;;   :hof-captured-by-node            — node-id → [arg-name …] for the
-        ;;                                       λname HOF capture badge
         ;;   :captured-edge-migrations        — caller arg-id → inside consumer
         ;;                                       node-id, post-process rewrite of
         ;;                                       cross-HOF edges
@@ -855,8 +845,6 @@
                      :processed-arg-targets #{}
                      :processed-fn-nodes #{}
                      :in-progress-expansions #{}
-                     :optional-unsets-by-node {}
-                     :hof-captured-by-node {}
                      :captured-edge-migrations {}})
 
         inverse-source-map (bh/build-inverse-source-map arg-map)

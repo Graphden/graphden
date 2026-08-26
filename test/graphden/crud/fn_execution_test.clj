@@ -309,7 +309,11 @@
       (exec-stats/bump! pool {:org nil :fn-id fn-id :status :succeeded :duration-ms 20 :now-ms now})
       (exec-stats/bump! pool {:org nil :fn-id fn-id :status :failed :duration-ms 5 :now-ms now})
       (is (= {:runs 3 :failed 1 :cancelled 0 :duration-ms-sum 35}
-             (exec-stats/fn-stats pool nil fn-id 7))))
+             (exec-stats/fn-stats pool nil fn-id 7)))
+      (is (= {:runs 3 :failed 1 :cancelled 0 :duration-ms-sum 35}
+             (exec-stats/fn-stats pool nil (str fn-id) 7))
+          "a STRING fn-id (the graph passes the query param raw) must
+           coerce, not throw uuid=varchar and degrade the strip to 0"))
     (testing "org scoping — another org's bumps don't leak into public's read"
       (exec-stats/bump! pool {:org "acme" :fn-id fn-id :status :succeeded :duration-ms 1 :now-ms now})
       (is (= 3 (:runs (exec-stats/fn-stats pool nil fn-id 7))) "public unchanged")

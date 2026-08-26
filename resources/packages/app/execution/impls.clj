@@ -13,7 +13,21 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.services.reconciler :as recon]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.versioning.storage.core :as vs]))
+
+
+(defn- stats-pool
+  "Raw datasource for the usage-stat / error-log reads. Prefer the
+   privileged `:pg-storage` (present on tenancy-assembled ctxs), else
+   unwrap the branch `:storage` down to the PG record — the
+   single-tenant executor ctx carries NO `:pg-storage`, which left
+   every rollup surface (the 7d history strip, the Stats/Errors
+   panels) reading zeros while the write-side bump landed rows
+   (tutorial finding 2026-08-26)."
+  [ctx]
+  (or (:pool (:pg-storage ctx))
+      (:pool (vs/unwrap (:storage ctx)))))
 
 
 (defbase resolve-fn
@@ -157,7 +171,7 @@
   ;; Phase C2 error visibility — the current org's recent FAILED executions
   ;; (error text/data already write-side redacted + scrubbed), newest first.
   (cr/record-effect! :db)
-  (exec-errors/recent-failures (:pool (:pg-storage ctx)) (tc/current-org) days limit))
+  (exec-errors/recent-failures (stats-pool ctx) (tc/current-org) days limit))
 
 
 (defbase fn-stats-raw
@@ -171,7 +185,7 @@
   (cr/record-effect! :db)
   (let [{:keys [runs failed cancelled duration-ms-sum]
          :or {runs 0 failed 0 cancelled 0 duration-ms-sum 0}}
-        (exec-stats/fn-stats (:pool (:pg-storage ctx)) (tc/current-org) fn-id days)]
+        (exec-stats/fn-stats (stats-pool ctx) (tc/current-org) fn-id days)]
     {:runs runs
      :failed failed
      :cancelled cancelled
@@ -185,7 +199,7 @@
   ;; so it is privacy-safe and always scoped to the CURRENT org (tenant sees
   ;; their own workspace; public/single-tenant sees the platform). nil pool → zeros.
   (cr/record-effect! :db)
-  (exec-stats/org-summary (:pool (:pg-storage ctx)) (tc/current-org) days))
+  (exec-stats/org-summary (stats-pool ctx) (tc/current-org) days))
 
 
 (defbase usage-org-daily
@@ -193,7 +207,7 @@
   ;; Per-day series for the org over the window — the Stats panel's trend
   ;; bars. Same org-scoping + privacy contract as `usage-org-summary`.
   (cr/record-effect! :db)
-  (exec-stats/org-daily (:pool (:pg-storage ctx)) (tc/current-org) days))
+  (exec-stats/org-daily (stats-pool ctx) (tc/current-org) days))
 
 
 (defbase usage-org-fn-stats
@@ -201,7 +215,7 @@
   ;; Busiest fns for the org over the window, fn NAME joined for display.
   ;; Same org-scoping + privacy contract; a since-deleted fn shows its id.
   (cr/record-effect! :db)
-  (exec-stats/org-fn-stats-named (:pool (:pg-storage ctx)) (tc/current-org) days limit))
+  (exec-stats/org-fn-stats-named (stats-pool ctx) (tc/current-org) days limit))
 
 
 (defbase usage-all-org-stats
@@ -214,7 +228,7 @@
   ;; no graph composition can reach cross-org data from a tenant ctx.
   (cr/record-effect! :db)
   (if (or (tc/current-platform-tier?) (tc/current-has-platform-cap? :view-all-stats))
-    (exec-stats/org-all-stats (:pool (:pg-storage ctx)) days limit)
+    (exec-stats/org-all-stats (stats-pool ctx) days limit)
     []))
 
 

@@ -545,9 +545,9 @@
 
   ;; --- usage-stats strip (Phase C1) — 7-day rollup line above the rows. ---
   {:name :_peh-stats
-   :description "7-day usage rollup for the panel's fn — `{:runs :failed :cancelled :avg-ms}` from the pre-aggregated `:usage-stat` table (counts + durations only, org-scoped)."
+   :description "7-day usage rollup for the panel's fn — `{:runs :failed :cancelled :avg-ms}` from the pre-aggregated `:usage-stat` table (counts + durations only, org-scoped). `:fn-id` comes from the SAME `:fn-id-param` query read the rows use — the former `{:as :fn-id}` capture waited on a lambda-param nothing feeds on the partial route, so the strip aggregated `fn_id = NULL` and always read 0 (tutorial finding 2026-08-26)."
    :parent :usage-fn-stats
-   :args {:fn-id {:as :fn-id} :days 7}}
+   :args {:fn-id :fn-id-param :days 7}}
 
   {:name :_peh-stats-runs
    :parent :get

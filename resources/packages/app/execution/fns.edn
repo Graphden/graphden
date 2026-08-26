@@ -719,7 +719,7 @@
 
   {:name :fn-stats-raw
    :description "Raw usage rollup read for one fn from the pre-aggregated `:usage-stat` table — `{:runs :failed :cancelled :duration-ms-sum}` (zeros when no rows or no pool), counts + durations ONLY (never args/results/errors), scoped to the CURRENT org (tenant → own runs; public → platform). The derived :avg-ms and the display envelope are graph composition (`:usage-fn-stats`)."
-   :args {:fn-id {:type :uuid :description "The fn whose executions to aggregate."}
+   :args {:fn-id {:type :nullable-uuid :description "The fn whose executions to aggregate. Nil (absent/malformed query param) reads as zeros — the strip renders its empty state instead of 500ing."}
           :days {:type :int :description "Trailing window in days (e.g. 7)."}}
    :return-type {:runs :int :failed :int :cancelled :int :duration-ms-sum :int}
    :effects #{:db}}

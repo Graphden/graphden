@@ -42,8 +42,9 @@ const {
     await waitTourTitle(page, 'Free args become the form', 150000);
     await runViaRowActions(page, 'hello');
     await waitTourTitle(page, 'Keep the interesting one', 150000);
-    // The step completes on the history toggle being present, which it is
-    // as soon as the popover reopens — reopen it the way the lesson says.
+    // The step now completes on a REAL persisted run (the
+    // body[data-gd-persisted-run] marker) — do what the lesson says:
+    // reopen Run, tick "Save to history", enter graphden, Run.
     await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
@@ -52,6 +53,21 @@ const {
         .find((b) => b.textContent.trim() === '▶')
         .dispatchEvent(new MouseEvent('click', {bubbles: true}));
     });
+    await page.waitForSelector('.execute-popover.visible .execute-run-btn',
+      {timeout: 10000});
+    await page.waitForFunction(() => {
+      const p = document.querySelector('.execute-popover.visible');
+      return p && p.querySelector('[data-form-field]');
+    }, null, {timeout: 10000, polling: 100});
+    await page.evaluate(() => {
+      const p = document.querySelector('.execute-popover.visible');
+      const f = p.querySelector('[data-form-field]');
+      f.value = 'graphden';
+      f.dispatchEvent(new Event('input', {bubbles: true}));
+      const persist = p.querySelector('.execute-persist-checkbox');
+      if (persist && !persist.checked) persist.click();
+    });
+    await page.click('.execute-popover.visible .execute-run-btn');
     await waitTourTitle(page, 'History is a graph read', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 09 history Next');
     await waitTourTitle(page, "That's the run loop", 150000);

@@ -1268,7 +1268,10 @@ function updateEntityList(data) {
       sec.appendChild(lbl);
       for (const fn of exact.slice(0, 5)) {
         const el = buildFnItem(fn);
-        el.hidden = false;
+        // Same lens overlay as the tree rows — an exact-match row that
+        // ignored the lens read as "visible" to the tour's lens-clear
+        // probe and broke the lesson-05 e2e (all=false).
+        el.hidden = typeof fnKindVisible === 'function' ? !fnKindVisible(fn) : false;
         sec.appendChild(el);
       }
       list.appendChild(sec);

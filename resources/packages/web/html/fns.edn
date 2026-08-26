@@ -29,6 +29,35 @@
    :description "A hiccup tree value — `nil`, a scalar (`:text`/`:int`/`:float`/`:bool`), or a vector `[tag attrs? & children]`. Children are themselves hiccup-nodes; `:any`-typed at the element level so heterogeneous literal vectors like `[:div {:class \"x\"} \"hi\"]` classify cleanly."
    :union [:null :text :int :float :bool [:list :any]]}
 
+  ;; --- Page-asset tag types — nominal narrowings of :hiccup-node.
+  ;;
+  ;; A `<script>` / `<style>` element is a hiccup node, but not a
+  ;; VISUAL component: it renders nothing and only takes effect when a
+  ;; page carrying it loads. The narrowed return type is what lets
+  ;; type-driven tooling treat it accordingly — the execute-result
+  ;; pane dispatches a source-code representation (app/reprs) instead
+  ;; of a blank component-preview iframe, and future consumers (asset
+  ;; audits, page linting) get an honest hook.
+  ;;
+  ;; The base is `[:list :any]` — the element arm of the
+  ;; `:hiccup-node` union (a tag IS always a vector, never a scalar),
+  ;; which is also what makes `script-tag ⊆ hiccup-node` provable
+  ;; through union membership. The `[:elem 0 [:= "script"]]`
+  ;; constraint means "element at index 0 satisfies the inner
+  ;; constraint" (the wire form of the tag — a keyword tag serializes
+  ;; to its name). The shape is outside `constraint-implies?`'s proven
+  ;; vocabulary, so it compares by structural equality — which is
+  ;; exactly the discrimination the two types need (script-tag ⊄
+  ;; style-tag), while `[:refine B c] ⊆ B ⊆ :hiccup-node` keeps both
+  ;; usable in every `[:list :hiccup-node]` scripts/head slot.
+  ;; Constraint-less refinements would NOT work here: they are
+  ;; structurally identical and would conflate under `subtype?`.
+  {:name :script-tag
+   :refine {:base [:list :any] :constraint [:elem 0 [:= "script"]]}}
+
+  {:name :style-tag
+   :refine {:base [:list :any] :constraint [:elem 0 [:= "style"]]}}
+
   {:name :render-hiccup
    :description "Render a hiccup tree to an HTML string (`hiccup2.core/html`)."
    :args {:hiccup {:type :hiccup-node :description "Hiccup expression — vector of `[tag attrs? & children]`."}}
@@ -353,11 +382,13 @@
   {:name :wrap-style
    :description "Wrap a CSS string into `<style>content</style>` hiccup."
    :parent :wrap-element
+   :return-type :style-tag
    :args {:tag "style"}}
 
   {:name :wrap-script
    :description "Wrap a JS string into `<script>content</script>` hiccup."
    :parent :wrap-element
+   :return-type :script-tag
    :args {:tag "script"}}
 
   ;; Generic hiccup element constructor

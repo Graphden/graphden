@@ -946,6 +946,7 @@
   {:name :graphden-runtime-script-tag
    :description "`<script src=\"/assets/graphden-runtime.js?v=<hash>\">` — loads the graphden runtime bundle (dispatcher + built-in `submit-form` / `navigate` / `custom` handlers, see `web/runtime/graphden-runtime.js` + `graphden-actions-builtin.js`). Hash-busted so the immutable browser cache is invalidated on every deploy."
    :parent :hiccup
+   :return-type :script-tag
    :args {:tag {:value "script"}
           :attrs {:parent :assoc
                   :args {:map {:value {}}
@@ -956,6 +957,7 @@
   {:name :graphden-bootstrap-script
    :description "Inline `<script>` calling `bindActionDispatch(document.body)` on DOMContentLoaded — required once per page so the runtime starts routing `data-action` clicks."
    :parent :hiccup
+   :return-type :script-tag
    :args {:tag {:value "script"}
           :attrs {:value {}}
           :children {:value ["document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"]}}}

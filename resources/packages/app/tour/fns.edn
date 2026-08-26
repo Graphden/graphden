@@ -519,10 +519,10 @@
                :targets [".placeholder-binder" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-script" :slot "content"}}
               {:title "Run it"
-               :body "[[⋯]] → [[▶ Run]] → [[Run]]. Back comes [\"script\" {} \"document.title = 'Graphden';\"] — hiccup carrying your JS, ready to sit in a page's scripts list. The JS itself runs in the BROWSER when that page loads; running the fn here only builds the tag."
+               :body "[[⋯]] → [[▶ Run]] → [[Run]]. The result pane says ‹script› tag and shows your JS source — the return type is :script-tag, so the editor knows this is a page asset and shows its code instead of previewing it as a component. The value underneath is hiccup ([\"script\" {} …]), ready to sit in a page's scripts list; the JS itself runs in the BROWSER when that page loads."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               :check {:kind "dom" :selector ".execute-result-host > *"}}
+               :check {:kind "dom" :selector ".execute-result-repr .repr-source"}}
               {:title "Know what you gave up"
                :body "Inside that string the graph sees nothing: no types, no effects, no references. That is the trade — full freedom, zero analysis — so keep the hatch small and the composition in fns. The written lesson 13 adds the per-click twin (:dispatch-custom) and the CSS variant. Click [[Finish]] to clean up or keep it."
                :target nil

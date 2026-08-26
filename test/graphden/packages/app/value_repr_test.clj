@@ -10,7 +10,8 @@
     [graphden.crud.value-form :as vform]
     [graphden.crud.value-repr :as vrepr]
     [graphden.executor.interface :as exec]
-    [graphden.test-infra.exec-harness :as harness]))
+    [graphden.test-infra.exec-harness :as harness]
+    [graphden.types.core :as types]))
 
 
 (use-fixtures :once (harness/exec-fixture (str (ns-name *ns*))))
@@ -25,6 +26,19 @@
   [form s]
   (some #(and (string? %) (str/includes? % s))
         (tree-seq coll? seq form)))
+
+
+(def ^:private shipped-repr-registry
+  "The shipped `:_value-repr-registry` value — MUST mirror
+   `resources/packages/app/reprs/fns.edn`. Tests that overwrite the
+   registry restore THIS, so a stale copy silently strips shipped
+   rows for whatever deftest runs next."
+  [[["list" "numeric"] "_repr-numeric-list"]
+   [["list" ["map" "keyword" "any"]] "_repr-record-list"]
+   ["script-tag" "_repr-asset-tag"]
+   ["style-tag" "_repr-asset-tag"]
+   ["js-source" "_repr-source-text"]
+   ["css-source" "_repr-source-text"]])
 
 
 (defn- succeeded-body
@@ -141,8 +155,7 @@
       (harness/sync! [{:name :_value-repr-registry
                        :namespace "app.reprs"
                        :parent :const
-                       :args {:value [[["list" "numeric"] "_repr-numeric-list"]
-                                      [["list" ["map" "keyword" "any"]] "_repr-record-list"]]}}]))))
+                       :args {:value shipped-repr-registry}}]))))
 
 
 (deftest render-value-repr-direct-test
@@ -167,8 +180,7 @@
   (harness/sync! [{:name :_value-repr-registry
                    :namespace "app.reprs"
                    :parent :const
-                   :args {:value [[["list" "numeric"] "_repr-numeric-list"]
-                                  [["list" ["map" "keyword" "any"]] "_repr-record-list"]]}}])
+                   :args {:value shipped-repr-registry}}])
   (testing "a list of keyword-keyed records renders as a table"
     (let [v [{:name "a" :n 1 :extra {:deep true}}
              {:name "b" :n 2 :extra nil}]
@@ -200,3 +212,104 @@
 
   (testing "numeric lists still sparkline (registry rows are disjoint)"
     (is (in-tree? (succeeded-body [1 2 3]) "repr-sparkline-wrap"))))
+
+
+(deftest asset-tag-repr-test
+  ;; Self-contained registry sync — same golden-template-cache rationale
+  ;; as record-list-table-repr-test above.
+  ;; The golden bootstrap seeds rich-types WITHOUT the fn-def sweep,
+  ;; so the shipped `:wrap-script` return declaration is not recorded
+  ;; in a fresh clone and the harness checker cannot re-derive it for
+  ;; descendants (platform composed ancestors carry no recorded free
+  ;; args here). The children below therefore declare their return
+  ;; types explicitly — same pattern as `component-preview-test`'s
+  ;; `:vr-comp`. The PRODUCTION inheritance path (boot sweep records
+  ;; `:wrap-script`'s declared return; editor-created descendants
+  ;; inherit the computed form) is covered end-to-end by the tour
+  ;; e2e's lesson-13 Run step, whose check requires this repr.
+  (harness/sync! [{:name :_value-repr-registry
+                   :namespace "app.reprs"
+                   :parent :const
+                   :args {:value shipped-repr-registry}}
+                  {:name :vr-script
+                   :parent :wrap-custom-script
+                   :return-type :script-tag
+                   :args {:body {:value "document.title = 'Graphden';"}}}
+                  {:name :vr-style
+                   :parent :wrap-custom-style
+                   :return-type :style-tag
+                   :args {:body {:value ".x { color: red; }"}}}
+                  {:name :vr-src-script
+                   :parent :const
+                   :return-type :script-tag
+                   :args {:value ["script" {"src" "/assets/x.js"}]}}])
+
+  (testing "the narrowed return types hold the intended subtype shape"
+    (let [script (types/resolve-alias :script-tag)
+          style  (types/resolve-alias :style-tag)
+          hic    (types/resolve-alias :hiccup-node)]
+      (is (types/subtype? script hic) "script-tag ⊆ hiccup-node — binds in :scripts slots")
+      (is (not (types/subtype? hic script)) "hiccup-node ⊄ script-tag — components never dispatch here")
+      (is (not (types/subtype? script style)) "distinct elem-constraints discriminate")
+      (is (not (types/subtype? style script)))))
+
+  (testing "running a wrap-custom-script child shows the source repr, not a blank iframe"
+    (let [result (exec/execute-by-name harness/*context* "vr-script" {})
+          f (succeeded-body result (harness/fn-id "vr-script"))]
+      (is (= "document.title = 'Graphden';" (last result)) "sanity: the composition builds the tag")
+      (is (tree-string-containing f "repr-source-wrap"))
+      (is (tree-string-containing f "‹script› tag"))
+      (is (tree-string-containing f "document.title = 'Graphden';"))
+      (is (not (in-tree? f :iframe)))
+      (is (not (in-tree? f "Component preview")))))
+
+  (testing "the wire form (string tag, post JSON/JSONB round-trip) renders identically"
+    (let [f (succeeded-body ["script" {} "document.title = 'Graphden';"]
+                            (harness/fn-id "vr-script"))]
+      (is (tree-string-containing f "‹script› tag"))
+      (is (tree-string-containing f "document.title = 'Graphden';"))))
+
+  (testing "a style tag captions as ‹style›"
+    (let [f (succeeded-body (exec/execute-by-name harness/*context* "vr-style" {})
+                            (harness/fn-id "vr-style"))]
+      (is (tree-string-containing f "‹style› tag"))
+      (is (tree-string-containing f ".x { color: red; }"))))
+
+  (testing "a body-less bundle-loading tag falls back to its src"
+    (let [f (succeeded-body ["script" {:src "/assets/x.js"}]
+                            (harness/fn-id "vr-src-script"))]
+      (is (tree-string-containing f "‹script› tag"))
+      (is (tree-string-containing f "src: /assets/x.js"))))
+
+  (testing "a plain :hiccup-node component still component-previews (no regression)"
+    (harness/sync! [{:name :vr-plain-comp
+                     :parent :const
+                     :return-type :hiccup-node
+                     :args {:value ["div" {"class" "c"} "still-a-component"]}}])
+    (let [f (succeeded-body ["div" {"class" "c"} "still-a-component"]
+                            (harness/fn-id "vr-plain-comp"))]
+      (is (in-tree? f :iframe))
+      (is (in-tree? f "Component preview")))))
+
+
+(deftest source-text-repr-test
+  (harness/sync! [{:name :_value-repr-registry
+                   :namespace "app.reprs"
+                   :parent :const
+                   :args {:value shipped-repr-registry}}
+                  ;; Same seed-vs-sweep note as asset-tag-repr-test
+                  ;; above — declare the return explicitly.
+                  {:name :vr-js-const
+                   :parent :const
+                   :return-type :js-source
+                   :args {:value "console.log(1);\nconsole.log(2);"}}])
+  (testing "a declared :js-source return renders the formatted source repr"
+    (let [f (succeeded-body "console.log(1);\nconsole.log(2);"
+                            (harness/fn-id "vr-js-const"))]
+      (is (tree-string-containing f "repr-source-wrap"))
+      (is (tree-string-containing f "console.log(1);\nconsole.log(2);"))
+      (is (not (in-tree? f "execute-result-scalar")))))
+  (testing "an untyped plain string keeps the scalar pane (no runtime-shape overreach)"
+    (let [f (succeeded-body "just a string")]
+      (is (not (tree-string-containing f "repr-source-wrap")))
+      (is (in-tree? f "execute-result-scalar")))))

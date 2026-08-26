@@ -156,9 +156,16 @@ form opens a **code editor** (syntax highlighting, bracket
 matching) rather than a text box: the slot's type is
 `:js-source`, and the form picks its widget from the type like
 everywhere else. Type `document.title = 'Graphden';`, Save, then
-run the fn: `["script" {} "document.title = 'Graphden';"]`. The
-JS runs in the browser when a page carrying that tag loads —
-running the fn only builds the tag.
+run the fn. The result pane shows **`‹script› tag`** with your JS
+source under it — the same type-driven dispatch again, on the way
+OUT this time: the fn's return type is `:script-tag` (a narrowing
+of `:hiccup-node` — see Lesson 5), so the editor knows the value
+is a page asset, not a visual component, and shows its source
+instead of trying to render it. The value itself is ordinary
+hiccup — `["script" {} "document.title = 'Graphden';"]` — ready
+to sit in a page's `:scripts` list. The JS runs in the browser
+when a page carrying that tag loads — running the fn only builds
+the tag.
 
 ## Try it: extend `/demo/contact`
 

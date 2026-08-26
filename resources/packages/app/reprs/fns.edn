@@ -223,10 +223,122 @@
           :attrs {:value {:class "repr-record-wrap"}}
           :children [:_repr-rl-table :_repr-rl-caption]}}
 
+  ;; --- built-in repr: source block (shared caption + <pre> shell) ---
+  ;;
+  ;; The presentation half shared by the source-text and asset-tag
+  ;; reprs below: a caption line over a `<pre><code>` block. Free args
+  ;; `:caption` / `:source` bind per-repr.
+
+  {:name :_repr-source-caption
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "repr-source-caption"}}
+          :children [{:as :caption :type :text}]}}
+
+  {:name :_repr-source-code
+   :parent :hiccup
+   :args {:tag {:value "code"} :attrs {:value nil}
+          :children [{:as :source :type :text}]}}
+
+  {:name :_repr-source-pre
+   :parent :hiccup
+   :args {:tag {:value "pre"}
+          :attrs {:value {:class "repr-source"}}
+          :children [:_repr-source-code]}}
+
+  {:name :_repr-source-block
+   :description "Caption + `<pre><code>` source block — the shared shell of the source-text and asset-tag reprs. Frees: `:caption`, `:source`."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "repr-source-wrap"}}
+          :children [:_repr-source-caption :_repr-source-pre]}}
+
+  ;; --- built-in repr: source text (:js-source / :css-source) ---
+  ;;
+  ;; A multi-line source string in the scalar pane collapses its
+  ;; newlines; the `<pre>` keeps formatting. ONE repr serves both
+  ;; types deliberately: constraint-less refinements over the same
+  ;; base are structurally identical under `subtype?`, so
+  ;; per-language registry rows could not dispatch deterministically
+  ;; — a generic caption is the honest rendering.
+
+  {:name :_repr-source-text
+   :description "Source-code repr for `:js-source` / `:css-source` values — the represented string in a `<pre><code>` block."
+   :parent :_repr-source-block
+   :args {:caption {:value "source"}
+          :source {:as :value :type :text}}}
+
+  ;; --- built-in repr: page-asset tag (:script-tag / :style-tag) ---
+  ;;
+  ;; A `<script>` / `<style>` hiccup element renders nothing visible —
+  ;; a component-preview iframe of it is a blank box. What the author
+  ;; wants to SEE after running such a fn is the tag's source, so the
+  ;; repr shows `‹tag› tag` + the body (or the `src` attr for
+  ;; bundle-loading tags, or the JSON of the value as a last resort).
+  ;; One repr serves both types: the caption reads the tag name from
+  ;; the value itself (keyword at runtime, string after the JSON /
+  ;; JSONB round-trip of the display paths — both handled).
+
+  {:name :_repr-at-tag-raw
+   :description "The value's 0th element — the tag, keyword or string depending on the serialization path."
+   :parent :get
+   :args {:coll {:as :value :type [:list :any]} :key {:value 0} :default {:value ""}}}
+
+  {:name :_repr-at-tag-name
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value :_repr-at-tag-raw :type {:value :keyword}}}
+          :then {:parent :name :args {:value :_repr-at-tag-raw}}
+          :else {:parent :to-str :args {:value :_repr-at-tag-raw}}}}
+
+  {:name :_repr-at-caption-text
+   :parent :str
+   :args {:parts [{:value "‹"}
+                  :_repr-at-tag-name
+                  {:value "› tag — takes effect when a page carrying it loads"}]}}
+
+  {:name :_repr-at-body
+   :description "Inline body of the tag — `[tag attrs body]` element 2; nil for body-less (src-loading) tags."
+   :parent :get
+   :args {:coll {:as :value :type [:list :any]} :key {:value 2} :default nil}}
+
+  {:name :_repr-at-src
+   :description "`src` read off element 1 (the attrs map) — what a bundle-loading tag has instead of a body."
+   :parent :get
+   :args {:coll {:parent :coalesce
+                 :args {:value {:parent :get
+                                :args {:coll {:as :value :type [:list :any]}
+                                       :key {:value 1} :default nil}}
+                        :default {:value {}}}}
+          :key {:value :src} :default nil}}
+
+  {:name :_repr-at-source-text
+   :description "What the `<pre>` shows: the text body when present, else `src: <url>` for a bundle tag, else the value's JSON."
+   :parent :cond
+   :args {:clauses [{:parent :is-a? :args {:value :_repr-at-body :type {:value :text}}}
+                    :_repr-at-body
+                    {:parent :some? :args {:value :_repr-at-src}}
+                    {:parent :str :args {:parts [{:value "src: "}
+                                                 {:parent :to-str :args {:value :_repr-at-src}}]}}
+                    {:value true}
+                    {:parent :to-json-string :args {:data {:as :value :type [:list :any]}}}]}}
+
+  {:name :_repr-asset-tag
+   :description "Repr for `:script-tag` / `:style-tag` values — `‹tag› tag` caption + the tag's source. The web.html return types dispatch here so running a page-asset fn shows its code instead of a blank component-preview iframe."
+   :parent :_repr-source-block
+   :args {:caption :_repr-at-caption-text
+          :source :_repr-at-source-text}}
+
   ;; --- the dispatch registry ---
 
   {:name :_value-repr-registry
    :description "Type -> repr-fn dispatch table for typed value representations. Each pair is [type-name repr-fn-name]; a VECTOR type-name is a structural key ([\"list\" \"numeric\"] means [:list :numeric]). Matched by `subtype?`, most-specific wins. Repr fns must be PURE (value -> hiccup); the resolver refuses effectful targets and sanitizes output (graphden.web.hiccup-sanitize) before the editor inlines it. Add a repr fn-def + a row here to extend — no executor / resolver change needed."
    :parent :const
    :args {:value [[["list" "numeric"] "_repr-numeric-list"]
-                  [["list" ["map" "keyword" "any"]] "_repr-record-list"]]}}]}
+                  [["list" ["map" "keyword" "any"]] "_repr-record-list"]
+                  ["script-tag" "_repr-asset-tag"]
+                  ["style-tag" "_repr-asset-tag"]
+                  ;; :js-source / :css-source are structurally identical
+                  ;; refinements — both rows target the SAME repr so the
+                  ;; subtype tie can never pick a wrong-language rendering.
+                  ["js-source" "_repr-source-text"]
+                  ["css-source" "_repr-source-text"]]}}]}

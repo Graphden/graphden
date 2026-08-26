@@ -368,7 +368,17 @@ this type", `:_value-repr-registry` (`app/reprs/fns.edn`) answers
   cells as JSON, 50-row cap with a visible count), registered for
   `["list" "keyword-map"]` — the everyday storage-query /
   API-selection result stops rendering as a bullet list of JSON
-  dumps.
+  dumps; `_repr-asset-tag` — for `:script-tag` / `:style-tag`
+  returns (the `web.html` page-asset refinements of `:hiccup-node`,
+  TYPES.md § Named types): a `‹script› tag` caption + the tag's
+  source body in a `<pre>` (`src:` line for bundle-loading tags) —
+  an invisible-by-nature element would otherwise reach the
+  component-preview iframe and render as a blank box;
+  `_repr-source-text` — a formatted `<pre>` for `:js-source` /
+  `:css-source` strings (one shared target for both rows: two
+  constraint-less refinements over `:text` are structurally
+  identical under `subtype?`, so per-language rows could not
+  dispatch deterministically).
 
 **Component preview** is the neighbouring tier, not a registry row:
 when the fn's declared return type is semantically `:hiccup-node`
@@ -376,7 +386,10 @@ when the fn's declared return type is semantically `:hiccup-node`
 scalar, `:hiccup-node` being a union), the result renders as markup
 in a fully sandboxed iframe (`sandbox=""` — no scripts, no
 same-origin; unlike the HTML-response pane's `allow-scripts`). This
-is the static half of a devcards-style component preview.
+is the static half of a devcards-style component preview. The
+narrowed `:script-tag` / `:style-tag` returns deliberately fail the
+mutual-equality test (refinement ⊂ base, never ⊇) — a page asset is
+not a visual component, and its repr above wins the dispatch anyway.
 
 ## Interactive component preview — `GET /preview`
 

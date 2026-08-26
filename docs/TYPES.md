@@ -650,6 +650,23 @@ Modules adding their own named type-rows just put the
 directly in their `fns.edn` alongside their fn-defs — the loader
 recognises the shape and emits the right fn-row + slot structure.
 
+A refinement's constraint payload is **open**: shapes outside the
+recognised vocabulary above are accepted and compared by structural
+equality (both by `constraint-implies?` and the literal checks).
+That makes an unrecognised constraint a sound *nominal
+discriminator*: two refinements over the same base with distinct
+opaque constraints are mutually incomparable, while each stays
+`⊆ base`. `web.html` uses this for its page-asset tag types —
+`:script-tag` / `:style-tag` are
+`[:refine :hiccup-node [:elem 0 [:= "script"|"style"]]]`
+(`[:elem N c]` reads "element at index N satisfies `c`"): both bind
+anywhere a `:hiccup-node` is expected, but type-driven tooling (the
+execute-result repr dispatch, app/reprs) can tell a page asset from
+a visual component. Two *constraint-less* refinements over one base
+would NOT discriminate — they are structurally identical and
+mutually `subtype?` (which is why `:js-source` / `:css-source`
+share one repr registry target).
+
 ### Per-namespace alias names
 
 Type names follow the per-namespace rule fn names do

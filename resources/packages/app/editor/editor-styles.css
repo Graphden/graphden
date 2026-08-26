@@ -4478,6 +4478,27 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--muted-fg);
   font-size: 11px;
 }
+/* Source-block repr (:script-tag / :style-tag / :js-source /
+   :css-source) — caption line over a formatted source body. */
+.execute-result-repr .repr-source-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.execute-result-repr .repr-source-caption {
+  color: var(--muted-fg);
+  font-size: 11px;
+}
+.execute-result-repr .repr-source {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--card-row-highlight);
+  border-radius: 2px;
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .execute-result-truncated {
   padding: 4px 6px;
   margin-bottom: 6px;

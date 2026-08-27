@@ -1223,6 +1223,11 @@ function mountOpsSections(fallbackList, searchMode) {
 
 
 function updateEntityList(data) {
+  // A search reply (or an early auth repaint) can land before the graph
+  // data primes on a fresh tab — painting from null threw mid-function
+  // and left the sidebar dead. An empty shape renders the transient
+  // empty state instead; the post-prime repaint fills it in.
+  if (!data) data = { namespaces: [], fns: [] };
   const list = document.getElementById('entity-list');
   list.innerHTML = '';
 

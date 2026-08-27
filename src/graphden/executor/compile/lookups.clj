@@ -50,6 +50,23 @@
           fn-map)))
 
 
+(defn- per-fn-caches
+  "Hot per-(fn-id) caches shared by the compile pipeline and the
+   public-boundary surface views — same lifetime as `:chain-cache`,
+   populated lazily so a deep walk / surface mapping runs once per
+   fn-id instead of once per ref-binding or per execute (surface
+   views uncached ran per call — 2.5x layout perf trend)."
+  []
+  {:chain-cache        (atom {})
+   :deep-frees-cache   (atom {})
+   :deep-free-ext-entries-cache (atom {})
+   :surface-entries-cache (atom {})
+   :surface-names-cache (atom {})
+   :cache-projection-frees-cache (atom {})
+   :bindings-cache     (atom {})
+   :env-bindings-cache (atom {})})
+
+
 (defn build-lookups
   "Index entities for fast lookup during compile. Inputs:
      fns                 — vector of fn rows
@@ -117,33 +134,24 @@
                               (reduce (fn [acc i]
                                         (update acc (:binding-id i) (fnil conj []) i))
                                       {}))]
-    {:fn-map             fn-map
-     :slot-map           slot-map
-     :fn-slots-by-fn     fn-slots-by-fn
-     :slot-by-fn-name    slot-by-fn-name
-     :slot-by-fn-source-slot slot-by-fn-source-slot
-     :bindings-by-fn     bindings-by-fn
-     :binding-by-fn-slot binding-by-fn-slot
-     :items-by-binding   items-by-binding
-     :chain-cache        (atom {})
-     ;; Graph-global HOF-marker set — a pure function of `fn-map`, so
-     ;; computed ONCE here instead of rescanned per-fn in
-     ;; `collect-bindings*` / `collect-env-bindings`. The free-arg
-     ;; walkers call `collect-env-bindings` per visited node, which
-     ;; made this an O(n²) hotspot (~190M fn-row visits on the
-     ;; [core web app] graph). `bindings.clj` reads this key with an
-     ;; on-the-fly recompute fallback for hand-built lookups.
-     :fn-typed-fn-ids    (compute-fn-typed-fn-ids {:fn-map fn-map})
-     ;; Hot per-(fn-id) caches used by the compile pipeline. Same
-     ;; lifetime as `:chain-cache` — populated lazily by the
-     ;; compile fns and shared across the compile-all pass so a
-     ;; deep walk runs once per fn-id instead of once per ref-
-     ;; binding pointing at it.
-     :deep-frees-cache   (atom {})
-     :deep-free-ext-entries-cache (atom {})
-     :cache-projection-frees-cache (atom {})
-     :bindings-cache     (atom {})
-     :env-bindings-cache (atom {})}))
+    (merge
+      {:fn-map             fn-map
+       :slot-map           slot-map
+       :fn-slots-by-fn     fn-slots-by-fn
+       :slot-by-fn-name    slot-by-fn-name
+       :slot-by-fn-source-slot slot-by-fn-source-slot
+       :bindings-by-fn     bindings-by-fn
+       :binding-by-fn-slot binding-by-fn-slot
+       :items-by-binding   items-by-binding
+       ;; Graph-global HOF-marker set — a pure function of `fn-map`, so
+       ;; computed ONCE here instead of rescanned per-fn in
+       ;; `collect-bindings*` / `collect-env-bindings`. The free-arg
+       ;; walkers call `collect-env-bindings` per visited node, which
+       ;; made this an O(n²) hotspot (~190M fn-row visits on the
+       ;; [core web app] graph). `bindings.clj` reads this key with an
+       ;; on-the-fly recompute fallback for hand-built lookups.
+       :fn-typed-fn-ids    (compute-fn-typed-fn-ids {:fn-map fn-map})}
+      (per-fn-caches))))
 
 
 (def ^:private cached-build-lookups-max-size

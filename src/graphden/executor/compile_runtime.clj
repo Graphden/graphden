@@ -933,15 +933,60 @@
    underlying walk — and every internal consumer of
    `deep-free-ext-entries` (`build-hof-translation`,
    `hof-lambda-params`, `cache-projection-frees`) — stays on raw
-   per-fid naming; only name-facing boundaries read this."
-  [fn-id lookups]
-  (mapv (fn [{:keys [ext-name slot-id] :as e}]
-          (let [rn (when slot-id
-                     (l/chain-rename-for-slot fn-id slot-id lookups))]
-            (if (and rn (not= rn ext-name))
-              (assoc e :ext-name rn :source-name ext-name)
-              e)))
-        (r/deep-free-ext-entries fn-id lookups)))
+   per-fid naming; only name-facing boundaries read this.
+
+   Memoised via `:surface-entries-cache` — this runs on EVERY public
+   execute (`translate-named-args`), and the per-entry chain walk
+   uncached was a 2.5x graph-layout perf-trend regression."
+  [fn-id {:keys [surface-entries-cache] :as lookups}]
+  (letfn [(compute
+            []
+            (mapv (fn [{:keys [ext-name slot-id] :as e}]
+                    (let [rn (when slot-id
+                               (l/chain-rename-for-slot fn-id slot-id
+                                                        lookups))]
+                      (if (and rn (not= rn ext-name))
+                        (assoc e :ext-name rn :source-name ext-name)
+                        e)))
+                  (r/deep-free-ext-entries fn-id lookups)))]
+    (if-let [cache surface-entries-cache]
+      (or (get @cache fn-id)
+          (let [res (compute)]
+            (swap! cache assoc fn-id res)
+            res))
+      (compute))))
+
+
+(defn- surface-names
+  "`{:names [kw …] :accepted #{kw …}}` for fn-id — the public
+   (closest-chain-rename) name vector and the accepted set (public ∪
+   raw). Order and MEMBERSHIP of `:names` stay the NAME walker's —
+   the entries walker also lists env-covered slots the caller doesn't
+   supply, so entries only contribute the rename SUBSTITUTION, never
+   new names.
+
+   Memoised via `:surface-names-cache`: `execute-with-named-args`
+   validates per call — HOFs call it per ITEM — so this must cost an
+   atom lookup, not a rebuild."
+  [fn-id {:keys [surface-names-cache] :as lookups}]
+  (letfn [(compute
+            []
+            (let [raw (r/deep-free-ext-names fn-id lookups)
+                  rename-of (into {}
+                                  (keep (fn [e]
+                                          (when-let [src (:source-name e)]
+                                            [src (:ext-name e)])))
+                                  (surface-entries fn-id lookups))
+                  names (into [] (distinct)
+                              (map #(get rename-of % %) raw))]
+              {:names names
+               :accepted (into (set raw) names)}))]
+    (if-let [cache surface-names-cache]
+      (or (get @cache fn-id)
+          (let [res (compute)]
+            (swap! cache assoc fn-id res)
+            res))
+      (compute))))
 
 
 (defn free-arg-ext-names
@@ -958,20 +1003,7 @@
    override them; HOF dispatch is shielded by the structural-name
    fast-path in `hof-lambda-params`."
   [ctx fn-id]
-  (let [lookups (lookups-for-ctx ctx)
-        entries (surface-entries fn-id lookups)
-        rename-of (into {}
-                        (keep (fn [e]
-                                (when-let [src (:source-name e)]
-                                  [src (:ext-name e)])))
-                        entries)]
-    ;; Order and MEMBERSHIP stay the NAME walker's — the entries
-    ;; walker also lists env-covered slots the caller doesn't supply,
-    ;; so entries only contribute the rename SUBSTITUTION, never new
-    ;; names.
-    (into [] (distinct)
-          (map #(get rename-of % %)
-               (r/deep-free-ext-names fn-id lookups)))))
+  (:names (surface-names fn-id (lookups-for-ctx ctx))))
 
 
 (defn free-arg-accepted-names
@@ -981,8 +1013,7 @@
    `{:body v}`), both routing to the same slot in
    `translate-named-args`."
   [ctx fn-id]
-  (into (set (r/deep-free-ext-names fn-id (lookups-for-ctx ctx)))
-        (free-arg-ext-names ctx fn-id)))
+  (:accepted (surface-names fn-id (lookups-for-ctx ctx))))
 
 
 ;; =============================================================================

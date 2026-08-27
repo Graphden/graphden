@@ -19,6 +19,7 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.context :as ctx]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* form-req json-req uniq]]
@@ -118,7 +119,26 @@
                                           "&parent-ids=" (:id base))))]
       (is (= 200 (:status resp)))
       (is (some #(= comp-name (:name %))
-                (sp/query-entities storage :fn {}))))))
+                (sp/query-entities storage :fn {})))))
+
+  (testing "the CREATE itself records a platform-child's rich-types entry"
+    ;; Pre-fix only binding/binding-list-item writes ran the
+    ;; post-write type-check, so a freshly-extended child (no
+    ;; bindings yet) had NO registry entry until its first binding
+    ;; write — `fn-return-type` nil, no typed repr, effects unknown.
+    ;; The bare `:fn` create must record it. The parent must be a
+    ;; REGISTERED fn (the editor's extend case) — a synthetic test
+    ;; base-fn has no registry entry to inherit from.
+    (let [storage (:storage *graph*)
+          parent (first (sp/query-entities storage :fn {:name "wrap-custom-script"}))
+          child-name (uniq "pce-fresh")
+          resp (via-create (form-req "/api/entities/fn"
+                                     (str "name=" child-name
+                                          "&parent-ids=" (:id parent))))
+          row (first (filter #(= child-name (:name %))
+                             (sp/query-entities storage :fn {})))]
+      (is (= 200 (:status resp)))
+      (is (some? (registry/rich-type-of-id (:id row)))))))
 
 
 (deftest process-create-entity-binding-test

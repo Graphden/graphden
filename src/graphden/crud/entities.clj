@@ -472,6 +472,13 @@
    `id-uuid`."
   [storage type-str entity-data id-uuid]
   (cond
+    ;; A bare `:fn` write IS the owning fn — without this arm a
+    ;; freshly-extended child (no bindings yet) had NO rich-types
+    ;; entry until its first binding write: `fn-return-type` nil,
+    ;; effects unknown, no typed repr / return chip. The entry only
+    ;; appeared after the first binding mutation re-ran the check.
+    (= type-str "fn")
+    (or id-uuid (:id entity-data))
     (= type-str "binding")
     (or (:fn-id entity-data)
         (when id-uuid
@@ -500,7 +507,7 @@
    additively as `:type-warnings` on the success envelope. nil when
    the check passes or doesn't apply to this entity type."
   [storage type-str entity-data id-uuid]
-  (when (#{"binding" "binding-list-item"} type-str)
+  (when (#{"fn" "binding" "binding-list-item"} type-str)
     (when-let [fn-id (post-write-type-check-fn-id
                        storage type-str entity-data id-uuid)]
       (tc/type-check-fn-after-mutation! storage fn-id
@@ -537,7 +544,8 @@
                         {:error pkg-reason :http-status 403}
                         (try-create-or-error storage entity-type entity-data type-str))]
     (if (:created create-result)
-      (let [rej (post-write-type-rej storage type-str entity-data nil)]
+      (let [rej (post-write-type-rej storage type-str entity-data
+                                     (:created create-result))]
         (if (:secret? rej)
           ;; Hard reject: roll back the just-created row (logged, not
           ;; swallowed — an orphan surviving the rejection must be

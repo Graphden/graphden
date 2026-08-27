@@ -134,6 +134,7 @@ function openNamespacePicker(opts) {
 
   nsPickerOutsideHandler = (e) => {
     if (!el.contains(e.target)) {
+      if (pointerEventInTour(e)) return;
       closeNamespacePicker();
       if (typeof opts.onCancel === 'function') opts.onCancel();
     }

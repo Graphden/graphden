@@ -265,6 +265,7 @@ function ensureRowActionsDismissHandler() {
     if (rowActionsPopoverEl.style.display === 'none') return;
     if (rowActionsPopoverEl.contains(e.target)) return;
     if (rowActionsPopoverAnchor?.contains(e.target)) return;
+    if (pointerEventInTour(e)) return;
     rowActionsPopoverSticky = false;
     if (rowActionsPopoverAnchor) {
       rowActionsPopoverAnchor.setAttribute('aria-expanded', 'false');

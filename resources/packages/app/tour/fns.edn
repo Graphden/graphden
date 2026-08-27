@@ -575,7 +575,7 @@
                :targets [".placeholder-binder" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-cell\"]"]
                :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
               {:title "Run it twice"
-               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the popover asks you to acknowledge it first (lesson 07's gate). Tick the box, type `tick` in the field and [[Run]] — you get [\"tick\"]. Now Run it a SECOND time the same way: [\"tick\" \"tick\"]. Nothing in the graph changed between the runs; the cell kept the value."
+               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the popover asks you to acknowledge it first (lesson 07's gate). Tick the box, type `tick` in the field and [[Run]] — the result is a one-item list, shown as a single bulleted row: tick. Open [[Raw]] under it to see the plain JSON, [\"tick\"]. Now Run it a SECOND time the same way: two rows — [\"tick\" \"tick\"] in Raw. Nothing in the graph changed between the runs; the cell kept the value."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}

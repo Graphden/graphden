@@ -385,6 +385,7 @@ function initBranchSelector() {
     const btn = document.getElementById('branch-chip-btn');
     if (!popover || popover.classList.contains('hidden')) return;
     if (popover.contains(e.target) || btn.contains(e.target)) return;
+    if (pointerEventInTour(e)) return;
     closeBranchPopover();
   });
   document.addEventListener('keydown', (e) => {

@@ -298,6 +298,7 @@ function ensureDescriptionTooltipDismissHandler() {
                              || e.target.closest('.description-tooltip'))) {
       return;
     }
+    if (pointerEventInTour(e)) return;
     descriptionTooltipSticky = false;
     hideDescriptionTooltip(true);
   });
@@ -383,6 +384,7 @@ function ensureIconReasonPopover() {
     if (!iconReasonPopoverEl || iconReasonPopoverEl.style.display === 'none') return;
     if (iconReasonPopoverEl.contains(e.target)) return;
     if (iconReasonAnchor?.contains(e.target)) return;
+    if (pointerEventInTour(e)) return;
     hideIconReasonPopover();
   }, true);
   document.addEventListener('keydown', (e) => {

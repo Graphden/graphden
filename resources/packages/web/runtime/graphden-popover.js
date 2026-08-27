@@ -57,11 +57,24 @@ function dismissAllPopovers() {
   }
 }
 
+// A pointer event inside the interactive tutorial's popover never counts as
+// "outside": mid-step the reader clicks its copy-chips to grab the value the
+// open popover (Run, a picker) is waiting for, and dismissing that popover
+// turns every copy into "reopen and start over". Pointer twin of the Escape
+// rule below. Ad-hoc dismissers that don't go through installPopoverDismiss
+// consult this too. On pages without the tour (the standalone runtime bundle)
+// the id never matches and this is a cheap no-op.
+function pointerEventInTour(e) {
+  const t = e.target;
+  return !!(t && typeof t.closest === 'function' && t.closest('#gd-tour-pop'));
+}
+
 function installPopoverDismiss({ getEl, getAnchor, isVisible, onDismiss }) {
   _popoverRegistry.push({ isVisible, onDismiss });
   document.addEventListener('pointerdown', (e) => {
     const el = getEl();
     if (!el || !isVisible()) return;
+    if (pointerEventInTour(e)) return;
     const t = e.target;
     const anchor = getAnchor ? getAnchor() : null;
     if (t && (el.contains(t) || anchor?.contains(t))) return;

@@ -152,7 +152,7 @@ function openInlineEditPopover(opts) {
   }
 
   inlineEditOutsideHandler = (e) => {
-    if (!el.contains(e.target)) closeInlineEdit();
+    if (!el.contains(e.target) && !pointerEventInTour(e)) closeInlineEdit();
   };
   setTimeout(() => document.addEventListener('pointerdown', inlineEditOutsideHandler), 0);
 }

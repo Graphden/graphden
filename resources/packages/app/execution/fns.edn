@@ -1651,7 +1651,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-result-pane execute-result-repr"}}
-          :children [:_er-repr-hiccup]}}
+          :children [:_er-repr-hiccup :_er-raw-details]}}
 
   ;; --- Component-preview pane (declared `:hiccup-node` return) ---
   ;;
@@ -1814,6 +1814,35 @@
           :then :_er-item-as-str
           :else :_er-item-pre-json}}
 
+  ;; --- Raw view — the exact JSON under every shaped rendering ---
+  ;;
+  ;; A shaped pane (bullets, record table, a registered repr) is a VIEW of
+  ;; the result, and the reader has no way to see what it is a view OF: a
+  ;; one-element list rendered as a single bullet reads nothing like the
+  ;; `["tick"]` the tutorial (and any JSON-minded reader) expects. Chrome's
+  ;; network panel answers this with a preview/raw pair; here the raw half
+  ;; is a collapsed `<details>` under the shaped pane — zero JS, and
+  ;; `:_er-result-as-json` is already computed for the size gate. Bounded:
+  ;; the >50 KB branch dispatches to the large-preview pane before any of
+  ;; the panes that embed this.
+
+  {:name :_er-raw-summary
+   :parent :hiccup
+   :args {:tag {:value "summary"} :attrs {:value nil}
+          :children [{:value "Raw"}]}}
+
+  {:name :_er-raw-pre
+   :parent :hiccup
+   :args {:tag {:value "pre"}
+          :attrs {:value {:class "execute-result-json"}}
+          :children [:_er-result-as-json]}}
+
+  {:name :_er-raw-details
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "execute-result-raw"}}
+          :children [:_er-raw-summary :_er-raw-pre]}}
+
   ;; --- List pane (sequential result) ---
 
   {:name :_er-list-li
@@ -1879,7 +1908,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-result-pane"}}
-          :children [:_er-list-ul]}}
+          :children [:_er-list-ul :_er-raw-details]}}
 
   ;; --- Record pane (map-typed result) ---
   ;; Iterates over the map — but :map HOFs iterate over sequences, so
@@ -1953,7 +1982,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-result-pane"}}
-          :children [:_er-record-table]}}
+          :children [:_er-record-table :_er-raw-details]}}
 
   ;; --- Scalar-fallback pane (non-nil, not list, not map) ---
 

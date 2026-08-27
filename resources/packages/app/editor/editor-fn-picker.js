@@ -550,6 +550,7 @@ function openFnPicker(opts) {
       // shouldn't dismiss the picker.
       const explainerEl = document.querySelector('.mismatch-explainer.visible');
       if (explainerEl?.contains(e.target)) return;
+      if (pointerEventInTour(e)) return;
       closeFnPicker();
       if (typeof opts.onCancel === 'function') opts.onCancel();
     }

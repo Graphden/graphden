@@ -466,9 +466,16 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
     });
   });
 
-  // Outside-click closes the menu.
+  // Outside-click closes the menu — except a click in the tutorial popover
+  // (a copy-chip mid-step must not throw the menu away), which keeps the
+  // listener armed for the next click instead of consuming its one shot.
   setTimeout(() => {
-    document.addEventListener('click', closeChildCreateMenu, { once: true });
+    const onDocClick = (e) => {
+      if (pointerEventInTour(e)) return;
+      document.removeEventListener('click', onDocClick);
+      closeChildCreateMenu();
+    };
+    document.addEventListener('click', onDocClick);
   }, 0);
 }
 

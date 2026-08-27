@@ -247,6 +247,7 @@ function initAuthLock() {
     const btn = document.getElementById('auth-lock-btn');
     if (!popover || popover.classList.contains('hidden')) return;
     if (popover.contains(e.target) || btn.contains(e.target)) return;
+    if (pointerEventInTour(e)) return;
     closeAuthPopover();
   });
 
@@ -495,6 +496,39 @@ function openShellMenu() {
       void openAuthPopover();
     });
   }
+
+  // Community footer — the menu's quiet last block, the in-editor pointer at
+  // the project's channels (URLs mirror README/landing). The support link
+  // shows only where supporting is the ask: self-host installs. Cloud plans
+  // already pay — `gd-tenancy` on body marks those deployments.
+  divider();
+  if (!document.body.classList.contains('gd-tenancy')) {
+    const support = document.createElement('a');
+    support.className = 'auth-menu-item auth-menu-support';
+    support.href = 'https://boosty.to/graphden';
+    support.target = '_blank';
+    support.rel = 'noopener';
+    support.textContent = 'Support the project ♥';
+    menu.appendChild(support);
+  }
+  const social = document.createElement('div');
+  social.className = 'auth-menu-social';
+  for (const [label, href] of [
+    ['Website', 'https://graphden.dev'],
+    ['GitHub', 'https://github.com/Graphden/graphden'],
+    ['Discord', 'https://discord.gg/UDC4pZFvp'],
+    ['Telegram', 'https://t.me/graphden'],
+    ['X', 'https://x.com/graphdendev'],
+    ['YouTube', 'https://www.youtube.com/@Graphdendev'],
+  ]) {
+    const a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = label;
+    social.appendChild(a);
+  }
+  menu.appendChild(social);
 
   pop.replaceChildren(menu);
   pop.dataset.gdContent = 'menu';

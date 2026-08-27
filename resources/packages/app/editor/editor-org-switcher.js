@@ -63,6 +63,7 @@ async function initOrgSwitcher() {
   document.addEventListener('click', (e) => {
     if (popover.classList.contains('hidden')) return;
     if (popover.contains(e.target) || btn.contains(e.target)) return;
+    if (pointerEventInTour(e)) return;
     popover.classList.add('hidden');
   });
   document.addEventListener('keydown', (e) => {

@@ -653,6 +653,15 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 }
 .auth-menu-item:hover { background: var(--bg); }
 .auth-menu-div { height: 1px; margin: 4px 2px; background: var(--border); }
+/* Community footer — support link (self-host only) + social row. Quiet by
+   design: muted text, brightens on hover, sits under the last divider. */
+.auth-menu-support { display: block; text-decoration: none; }
+.auth-menu-social {
+  display: flex; flex-wrap: wrap; gap: 2px 10px;
+  padding: 4px 8px 6px; font-size: 11px;
+}
+.auth-menu-social a { color: var(--muted-fg); text-decoration: none; }
+.auth-menu-social a:hover { color: var(--accent); text-decoration: underline; }
 
 /* "Sign out everywhere" — same chrome as the lock, sits beside it. */
 .auth-logout-all-btn {
@@ -4406,6 +4415,20 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 6px 8px;
   background: var(--card-row-highlight);
   border-radius: 2px;
+}
+/* Collapsed raw-JSON view under a shaped result pane (bullets/table/repr) —
+   the Chrome-devtools preview/raw pair, server-rendered as <details>. */
+.execute-result-raw {
+  margin-top: 6px;
+}
+.execute-result-raw summary {
+  cursor: pointer;
+  color: var(--muted-fg);
+  font-size: 11px;
+  user-select: none;
+}
+.execute-result-raw[open] summary {
+  margin-bottom: 4px;
 }
 /* Sandboxed iframe previewing a Ring HTML response — the page picks
    its own colors inside the frame, the shell just gives it room. */

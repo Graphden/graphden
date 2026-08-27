@@ -134,7 +134,7 @@
               {:title "Bind :value"
                :body "Inheriting :const exposed its :value slot. Click the [[+]] placeholder on the :value slot, choose [[Bind literal]], enter this JSON: `{\"status\": 200, \"body\": \"Hello!\"}` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "hello-handler" :slot "value"}}
               {:title "Run it"
                :body "Click the [[⋯]] button on the card's top row, then [[▶ Run]], then [[Run]] in the Run pane that opens in the right panel. Your map comes straight back — no build, no deploy: the graph you just edited is already the running system."
@@ -178,7 +178,7 @@
               {:title "Seed the inherited slot"
                :body "add-10 inherited add's :nums slot — a sequence. On the add-10 card click the [[+]] placeholder on :nums, choose [[Append literal]], enter `10` — then [[Save]]. The seed becomes the list's first item."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "add-10" :slot "nums"}}
               {:title "Run the child"
                :body "Click [[⋯]] on the add-10 row, then [[▶ Run]], then [[Run]]. The bound seed makes the sum 10 — the child runs the parent's implementation with its own bindings."
@@ -215,7 +215,7 @@
               {:title "Bind the inherited slot"
                :body "Click the [[+]] on :string, choose [[Bind literal]], type `alpha` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-value" :name "tutorial-a"
                        :slot "string" :value "alpha"}}
               {:title "Back to the parent"
@@ -235,7 +235,7 @@
               {:title "Give it a different value"
                :body "Click the [[+]] on :string, choose [[Bind literal]], type `beta` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-value" :name "tutorial-b"
                        :slot "string" :value "beta"}}
               {:title "One slot, two values"
@@ -257,7 +257,7 @@
               {:title "A free arg becomes a Run field"
                :body "Click [[⋯]] on the to-json-string row, then [[▶ Run]]. The Run pane opens in the right panel, with a data field — the free slot surfaced as your input. Enter `{\"a\": 1}` and [[Run]]: the JSON string comes back."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Pin it in a child"
                :body "Now the other direction: click [[⋯]] again, choose [[Extend]], name it `tutorial-json` — then [[Save]]. The editor opens your new child fn."
@@ -275,7 +275,7 @@
               {:title "Bind :data in the child"
                :body "On the tutorial-json card click the [[+]] on :data, choose [[Bind literal]], enter: `{\"greeting\": \"hello\"}` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-json" :slot "data"}}
               {:title "Bound beats free"
                :body "Run tutorial-json ([[⋯]] → [[▶ Run]] → [[Run]]): no fields this time — the binding closed the slot, so callers have nothing left to supply. Free args propagate UP until someone pins them."
@@ -304,7 +304,7 @@
               {:title "The new name is the interface"
                :body "[[⋯]] → [[▶ Run]]. The form asks for payload now, not data — enter `{\"a\": 1}` and [[Run]]: back comes {\"a\":1}. A rename is a VIEW over the same slot — the parent still knows it as :data, your callers see payload. Click [[Next]] when you have run it."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "manual"}}
               {:title "Templates, specialized"
                :body "That is the whole free-argument mechanism: leave slots open to make a template, bind them to specialize, rename them to give the template its own vocabulary. The written lesson 04 adds deep propagation through several levels. Click [[Finish]] to clean up or keep both children."
@@ -341,7 +341,7 @@
               {:title "Ask for a fn the slot cannot take"
                :body "Click the [[+]] on :string and choose [[Bind fn-ref]]. The picker states Expected: text and splits candidates into Compatible and Other. Expand [[Other]], then click the [[str-len]] row there — it returns an int, not text."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"str-len\"]"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"str-len\"]"]
                :check {:kind "dom" :selector ".mismatch-explainer.visible [data-pick-fn-id]"}}
               {:title "The server explains the mismatch"
                :body "Expected text, got [:refine :int [:>= 0]], and the reason: that refinement is not a subtype of text. The verdict comes from the same checker the backend uses. Click [[Pick anyway]] — graphden lets you save it."
@@ -409,7 +409,7 @@
               {:title "A callable slot offers no literal"
                :body "Click the [[+]] on :func. Instead of the value form you saw in earlier lessons, the fn picker opens straight away: a literal is not a thing you can put in a callable slot."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".fn-picker-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover"]
                :check {:kind "dom" :selector ".fn-picker-popover"}}
               {:title "Compatible means callable-shaped"
                :body "The picker states Expected: (item:a) → b and splits candidates into Compatible and Other. A fn qualifies when its FREE argument is named :item — that is the name a HOF passes each element under. Press [[Escape]] to close the picker."
@@ -422,7 +422,7 @@
               {:title "Run it"
                :body "Click [[⋯]] on the stringify-map-keys row, then [[▶ Run]]. Its free arg is the map to convert — enter `{\"a\": 1}` and [[Run]]. The callback ran once per key, without you ever invoking it yourself."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "That's a HOF"
                :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 06 goes further — closure capture, lambda-params, and why a deeply nested callable can still see the request it was built under. Click [[Finish]] to clean up or keep tutorial-map."
@@ -454,7 +454,7 @@
               {:title "Give it a label"
                :body "Click the [[+]] at the end of the label edge, choose [[Bind literal]], type exactly `Run` — then [[Save]]. The dashed edge turns into a bound value: that input is pinned now."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-button" :slot "label"}}
               {:title "Run it"
                :body "[[⋯]] → [[▶ Run]] → [[Run]]. Back comes [\"button\" \"Run\"] — hiccup, the data form of HTML. Nothing renders it yet; it is a value like any other."
@@ -479,7 +479,7 @@
               {:title "Put your button inside"
                :body "Click the [[+]] on the children edge, choose [[Append fn-ref]], type `tutorial` in the picker and click the [[tutorial-button]] row. The canvas draws the edge: the card now contains your button."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-button\"]"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-button\"]"]
                :check {:kind "bindings-count" :name "tutorial-card" :count 1}}
               {:title "Run the card"
                :body "[[⋯]] → [[▶ Run]] → [[Run]]. The result nests: [\"div\" {\"class\" \"card\"} [\"button\" \"Run\"]]. Composing fns IS composing markup — there is no separate component runtime."
@@ -516,7 +516,7 @@
               {:title "Write some JavaScript"
                :body "Click ?body, choose [[Bind literal]]. The value form opens a real code editor — syntax highlighting, bracket matching. Type exactly `document.title = 'Graphden';` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-script" :slot "content"}}
               {:title "Run it"
                :body "[[⋯]] → [[▶ Run]] → [[Run]]. The result pane says ‹script› tag and shows your JS source — the return type is :script-tag, so the editor knows this is a page asset and shows its code instead of previewing it as a component. The value underneath is hiccup ([\"script\" {} …]), ready to sit in a page's scripts list; the JS itself runs in the BROWSER when that page loads."
@@ -553,7 +553,7 @@
               {:title "Seed it with an empty list"
                :body "Click the [[+]] on :initial-value, choose [[Bind literal]], enter exactly `[]` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-cell" :slot "initial-value"}}
               {:title "Now something that writes to it"
                :body "Type `swap-conj` in the filter and click the [[swap-conj]] row (core.concurrency) — it appends a value to a list-holding cell, atomically."
@@ -572,12 +572,12 @@
               {:title "Point it at your cell"
                :body "Click the [[+]] on :a, choose [[Bind fn-ref]], type `tutorial` in the picker and click the [[tutorial-cell]] row."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-cell\"]"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-cell\"]"]
                :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
               {:title "Run it twice"
                :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 07's gate). Tick the box, type `tick` in the field and [[Run]] — the result is a one-item list, shown as a single bulleted row: tick. Open [[Raw]] under it to see the plain JSON, [\"tick\"]. Now Run it a SECOND time the same way: two rows — [\"tick\" \"tick\"] in Raw. Nothing in the graph changed between the runs; the cell kept the value."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "That's in-graph state"
                :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 15 covers :swap vs :reset and cache patterns. Click [[Finish]] to clean up or keep both."
@@ -634,11 +634,11 @@
               {:title "Free args become the form"
                :body "Click [[⋯]] on the row, then [[▶ Run]]. The Run pane opens in the right panel — one field, named after the free slot. Type `hello` and click [[Run]]: the answer 5 comes back under the card."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Keep the interesting one"
-               :body "Open Run again, tick [[Save to history]], enter `graphden` and [[Run]]. Unticked runs are transient; a ticked one is stored with its arguments and result."
-               :target ".execute-persist-checkbox"
+               :body "In the same Run pane, tick [[Save to history]], enter `graphden` and [[Run]]. Unticked runs are transient; a ticked one is stored with its arguments and result."
+               :target ".execute-popover.visible"
                :check {:kind "dom" :selector "body[data-gd-persisted-run]"}}
               {:title "History is a graph read"
                :body "Your persisted run is already listed under the form — the Runs tab doubles as this fn's history. Click the row to expand it; [[Repeat]] re-fills the form from it — the same execution API the editor uses is what /api/execute exposes to your own callers."
@@ -671,7 +671,7 @@
                :check {:kind "dom" :selector ".execute-effects-warning"}}
               {:title "Acknowledge, then run"
                :body "Tick [[I understand this will produce side effects]], enter `PATH` in the name field, and click [[Run]]. On a self-hosted instance the value comes back; in the public demo you get “Forbidden effect: :env” instead — the demo tier allows only :db, :time, :state and :random."
-               :target ".execute-confirm-checkbox"
+               :target ".execute-popover.visible"
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Two gates, one vocabulary"
                :body "The checkbox is the human gate; the tier's allowed-effect set is the machine one, enforced at the execution boundary — the same mechanism that keeps a cloud tenant from reaching the network on a free plan. Declared effects are what both read."
@@ -709,12 +709,12 @@
               {:title "Bind one side"
                :body "The card shows two [[+]] placeholders, :actual and :expected. Click either one, choose [[Bind literal]], enter `4` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "two-plus-two" :count 1}}
               {:title "Bind the other"
                :body "Now the remaining [[+]]: [[Bind literal]], enter `4` again — [[Save]]. With every free arg bound the test becomes runnable, and graphden runs it FOR you on the write."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "two-plus-two" :count 2}}
               {:title "See it pass"
                :body "Open [[Organization]] → [[Tests]]. Your test is listed with a green dot and the summary reads 1 passed — nobody pressed Run: the write itself triggered the auto-run."
@@ -742,7 +742,7 @@
               {:title "Give the inner fn a value"
                :body "On the tutorial-inner card click the [[+]] on :value, choose [[Bind literal]], enter this JSON: `\"hi\"` — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-inner" :slot "value"}}
               {:title "Now the outer fn"
                :body "Type `str-upper` in the filter, click the [[str-upper]] row, then [[⋯]] → [[Extend]] and name it `tutorial-outer` — [[Save]]."
@@ -758,12 +758,12 @@
               {:title "Chain them"
                :body "Click the [[+]] on :string, choose [[Bind fn-ref]], type `tutorial` in the picker and click the [[tutorial-inner]] row. The canvas draws the edge: outer now calls inner."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-inner\"]"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-inner\"]"]
                :check {:kind "bindings-count" :name "tutorial-outer" :count 1}}
               {:title "Run it with a trace"
                :body "[[⋯]] → [[▶ Run]], tick [[Trace path]], then [[Run]]. The answer is HI — and under it a new button appears: [[Show path on canvas]]."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-show-path-btn"}}
               {:title "Draw the path"
                :body "Click [[Show path on canvas]]. Every fn the run traversed is highlighted with a timing badge, and a small panel offers to clear the view. Ticking [[+ capture values]] as well would put each node's return value on its card."
@@ -794,7 +794,7 @@
               {:title "Break it on purpose"
                :body "Click [[⋯]] → [[▶ Run]]. Type `not json at all` into the string field, TICK [[Save to history]], and [[Run]]. The result pane reads “Malformed JSON.” — an unticked run leaves no audit row, so ticking is what puts this failure on the list you are about to open."
                :target "button.more-actions-trigger"
-               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Open Errors"
                :body "Account button (top right) → [[Organization]] → [[Errors]]. The panel lists your org's failed runs from the last 7 days, newest first — the fn as a link, when it finished, and the message."
@@ -860,10 +860,12 @@
               {:title "Pick a root"
                :body "Tick one namespace — say [[core]]. The Explorer collapses to that subtree; the chip now names your scope instead of [[All functions]]."
                :target "#gd-ws-chip"
+               :targets ["#gd-ws-chip" "#gd-ws-pop"]
                :check {:kind "manual"}}
               {:title "And back"
                :body "Reopen the chip and choose [[All functions]] to clear the scope. Reloading the page would have kept it — the choice is yours per browser, and it survives."
                :target "#gd-ws-chip"
+               :targets ["#gd-ws-chip" "#gd-ws-pop"]
                :check {:kind "manual"}}
               {:title "That's workspaces"
                :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 22 adds per-fn hiding (⊘) and how workspaces interact with grants. Click [[Finish]]."
@@ -901,7 +903,7 @@
               {:title "Give it a value on main"
                :body "Click the [[+]] on :string, choose [[Bind literal]], type exactly `main version` — then [[Save]]. (The slot is text, so the field takes plain text — no quotes.)"
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-value" :name "branch-demo"
                        :slot "string" :value "main version"}}
               {:title "Fork a branch"
@@ -1103,7 +1105,7 @@
               {:title "Answer like a web server"
                :body "Click the [[+]] on :value, choose [[Bind literal]], and enter exactly: {\"status\": 200, \"headers\": {\"Content-Type\": \"text/html\"}, \"body\": \"<h1>Hello from my app</h1>\"} — then [[Save]]."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-page" :slot "value"}}
               {:title "Open Apps"
                :body "Account button (top right) → [[Organization]] → [[Apps]]. The table lists every app this org serves: its subdomain label, and the fn behind it."
@@ -1249,7 +1251,7 @@
               {:title "Give it something to return"
                :body "On the tutorial-tick card click the [[+]] on the :value slot, choose [[Bind literal]] and type exactly `\"tick\"` — with the quotes, because the slot's type is :any and the editor reads it as JSON. A service has no caller to pass arguments in, so a fn with free args can never become one."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".arg-value-edit-popover"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-tick" :slot "value"}}
               {:title "Wrap it in a future"
                :body "Clear the filter, type `future`, click the [[future]] row, then [[⋯]] → [[Extend]] and name it `tutorial-daemon`. :future is the fn that declares the :process effect — the marker for “spawns supervised background work”. Without it in the parent chain the server refuses to make a service, by design."
@@ -1260,7 +1262,7 @@
               {:title "Point it at the thunk"
                :body "On the tutorial-daemon card click the [[+]] on the :body slot and pick [[tutorial-tick]]. :body is a callable slot, so the picker opens straight away — a literal cannot go there — and the ref is passed in as the daemon's body instead of being executed here. The fn now has no free arguments AND carries :process: the two conditions for a service."
                :target ".placeholder-binder"
-               :targets [".placeholder-binder" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-tick\"]"]
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-tick\"]"]
                :check {:kind "binding-bound" :name "tutorial-daemon" :slot "body"}}
               ;; Selection gate — the \u2699 must belong to the daemon.
               {:title "tutorial-daemon is open"

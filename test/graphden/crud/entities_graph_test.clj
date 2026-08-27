@@ -946,6 +946,17 @@
           "every match contains the needle")
       (is (contains? body :truncated?))))
 
+  (testing "scope=search — qualified needles match (dotted, slashed, ns-only)"
+    (let [dotted  (via-entities {"scope" "search" "q" "core.arithmetic.add"})
+          slashed (via-entities {"scope" "search" "q" "core.arithmetic/add"})
+          ns-only (via-entities {"scope" "search" "q" "core.arithmetic"})]
+      (is (some #(= "add" (:name %)) (:fns dotted))
+          "the dotted qualified spelling finds the fn")
+      (is (= (mapv :id (:fns dotted)) (mapv :id (:fns slashed)))
+          "the canonical ns.path/name spelling normalizes to the dotted one")
+      (is (some #(= "add" (:name %)) (:fns ns-only))
+          "a namespace-only needle lists that namespace's fns")))
+
   (testing "scope=search with a blank q — no matches"
     (is (empty? (:fns (via-entities {"scope" "search" "q" "   "})))))
 

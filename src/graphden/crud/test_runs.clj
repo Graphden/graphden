@@ -33,6 +33,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.types.core :as types]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
@@ -49,18 +50,6 @@
   (boolean (some #{test-ns-segment} (str/split (str path) #"\."))))
 
 
-(defn- ns-path-of
-  "Dotted path for ns row `id` — walks `:parent-id` chains over `by-id`.
-   Cycle-guarded: bad parent data degrades to the partial path instead
-   of looping."
-  [by-id id]
-  (loop [segs () cur id seen #{}]
-    (let [row (get by-id cur)]
-      (if (or (nil? row) (contains? seen cur))
-        (str/join "." segs)
-        (recur (cons (:name row) segs) (:parent-id row) (conj seen cur))))))
-
-
 (defn test-namespace-ids
   "Ids of every `:ns` row whose dotted path contains the `tests`
    segment. `:ns` rows are global (unversioned), org-scoped by the
@@ -69,7 +58,7 @@
   (let [rows (sp/query-entities storage :ns {})
         by-id (into {} (map (juxt :id identity)) rows)]
     (into #{}
-          (comp (filter #(test-ns-path? (ns-path-of by-id (:id %))))
+          (comp (filter #(test-ns-path? (ns-path/path-of by-id (:id %))))
                 (map :id))
           rows)))
 

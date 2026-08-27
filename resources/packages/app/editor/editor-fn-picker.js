@@ -409,7 +409,10 @@ function openFnPicker(opts) {
   }
 
   function render() {
-    const q = search.value.trim().toLowerCase();
+    // `/`→`.`: qualified candidate names are dotted, but the product
+    // prints the canonical `ns.path/name` spelling everywhere — accept
+    // a pasted qualified name in either form.
+    const q = search.value.trim().toLowerCase().replace(/\//g, '.');
     const filtered = candidates
       .filter(c => !q || c.qualified.toLowerCase().includes(q)
                        || c.name.toLowerCase().includes(q))

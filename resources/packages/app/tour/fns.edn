@@ -702,7 +702,7 @@
                :check {:kind "fn-exists" :name "two-plus-two"}
                :creates {:type "fn" :name "two-plus-two"}}
               {:title "Make it an assertion"
-               :body "On the new card click [[set parent…]] and pick [[assert-eq]] (core.logic). The card gains two slots: :actual and :expected."
+               :body "On the new card click [[set parent…]], type `assert-eq` in the picker and pick [[core.logic.assert-eq]]. The card gains two slots: :actual and :expected."
                :target ".reparent-strip"
                :targets [".reparent-strip" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"assert-eq\"]"]
                :check {:kind "fn-parent" :name "two-plus-two" :parent "assert-eq"}}

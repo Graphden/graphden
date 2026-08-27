@@ -14,6 +14,7 @@
     [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.diagnostics :as diag]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vcore]))
 
 
@@ -323,16 +324,26 @@
 
 
 (defn- list-scope-search
-  "Server-side filter: case-insensitive substring on the raw fn name,
-   capped at `*default-search-limit*`. Replaces the client-side scan
-   over the (former) full-fns mirror in the sidebar filter box, the
-   fn / namespace / MI-reparent pickers, and name→id resolution."
-  [{:keys [base rev-index role-of]} q]
-  (let [needle (some-> q str/lower-case str/trim not-empty)
+  "Server-side filter: case-insensitive substring on each fn's QUALIFIED
+   dotted name (`core.logic.assert-eq`; a root fn is its bare name), so
+   a bare-name, a namespace-prefixed, and a namespace-only needle all
+   match. `/` in the needle normalizes to `.` — the canonical
+   `ns.path/name` spelling the rest of the product prints is accepted
+   verbatim. Capped at `*default-search-limit*`. Replaces the
+   client-side scan over the (former) full-fns mirror in the sidebar
+   filter box, the fn / namespace / MI-reparent pickers, and name→id
+   resolution."
+  [{:keys [base rev-index role-of namespaces]} q]
+  (let [needle (some-> q str/lower-case str/trim not-empty
+                       (str/replace "/" "."))
+        paths (when needle (ns-path/path-map @namespaces))
+        qualified (fn [f]
+                    (let [p (get paths (:namespace-id f))]
+                      (if (seq p) (str p "." (:name f)) (:name f))))
         matches (when needle
                   (into []
                         (filter #(and (:name %)
-                                      (str/includes? (str/lower-case (:name %)) needle)))
+                                      (str/includes? (str/lower-case (qualified %)) needle)))
                         (:fns base)))
         limited (into [] (take *default-search-limit*) matches)]
     {:fns (mapv (comp (partial light-fn-row @rev-index) role-of) limited)

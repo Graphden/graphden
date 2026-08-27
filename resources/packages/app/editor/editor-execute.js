@@ -1,7 +1,14 @@
 // Editor Execute — orchestrator.
 //
-// Click ▶ on the fn-card root row → this module opens a singleton
-// popover that:
+// ▶ Run (fn-card root row / Explorer row ⋯) → the RUN PANE: the run
+// form + result + this fn's history, mounted in the right inspector's
+// Runs tab. It used to be a floating anchored popover; that shape
+// fought the canvas it reports on — it parked over the very nodes a
+// traced run highlights, could not be moved, and the first canvas pan
+// dismissed it (2026-08-27 lesson-27 finding). The inspector is a
+// fixed column, so the canvas stays fully visible and pannable while
+// a run session is open — finishing the 2026-08 shell redesign that
+// already retired the Run surface in favour of "▶ action + inspector".
 //
 //   1. Loads a type-aware `/api/value-form` for each free-arg of the
 //      fn (reusing `editor-value-form.js` — same widgets that drive
@@ -15,59 +22,26 @@
 // Splits:
 //   * Pure rendering primitives → editor-execute-result.js
 //   * History panel (fetch + render rows + Repeat)
-//     → editor-execute-history.js
-//
-// One popover at a time — same dismiss scaffold the provenance /
-// mismatch popovers use.
+//     → editor-execute-history.js — mounted BELOW the form in the
+//     same tab (one list, with working Repeat / path / tree / expand
+//     bindings; the tab's former htmx-only mount rendered those
+//     buttons dead).
 //
 // Auth: ▶ is gated to authenticated users at the fn-card layer
 // (matches the rest of the write-actions). The POST itself goes
 // through `authFetch` so a stale session also surfaces a 401.
 
-// graph-first-exception: the popover SHELL is server-rendered
+// graph-first-exception: the pane SHELL is server-rendered
 // (/partials/execute-popover) and mounted here; this file owns the
 // client-only run/poll/cancel state machine + /api/value-form widget
 // mounts, which have no server-side representation between requests.
-let executePopoverEl = null;
-let executePopoverAnchor = null;
 
-// Per-popover-instance state — wiped on dismiss. `argFormHosts` is
+// Per-mount state — wiped on every (re)mount. `argFormHosts` is
 // also read by editor-execute-history.js (Repeat re-fills these
 // widgets); the editor JS bundle concatenates the scripts so the
 // `let` is shared.
-let pollState = null;     // { execId, attempt, timer, anchorEl }
+let pollState = null;     // { execId, attempt, timer }
 let argFormHosts = [];    // [{ slotName, slotId, hostEl, read }]
-
-
-function ensureExecutePopoverEl() {
-  if (executePopoverEl) return executePopoverEl;
-  const el = document.createElement('div');
-  el.className = 'execute-popover';
-  el.setAttribute('role', 'dialog');
-  el.setAttribute('aria-label', 'Run function');
-  // Keyboard: Enter (outside a textarea, where it inserts a newline)
-  // triggers Run when the button is enabled. Bound ONCE here — the popover
-  // is a singleton reused across opens, so binding this in showExecutePopover
-  // stacked a fresh keydown listener per open, each closing over a stale
-  // (detached) run button → Enter re-ran previously-opened fns. Read the
-  // CURRENT run button off the DOM at keypress time instead.
-  el.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-    if (e.target?.tagName === 'TEXTAREA') return;
-    const runBtn = el.querySelector('.execute-run-btn');
-    if (!runBtn || runBtn.disabled) return;
-    e.preventDefault();
-    runBtn.click();
-  });
-  document.body.appendChild(el);
-  executePopoverEl = el;
-  return el;
-}
-
-
-function executePopoverVisible() {
-  return !!executePopoverEl && executePopoverEl.classList.contains('visible');
-}
 
 
 function stopPolling() {
@@ -75,20 +49,6 @@ function stopPolling() {
     clearTimeout(pollState.timer);
   }
   pollState = null;
-}
-
-
-function hideExecutePopover() {
-  if (!executePopoverEl) return;
-  stopPolling();
-  argFormHosts = [];
-  executePopoverEl.classList.remove('visible');
-  executePopoverEl.style.display = 'none';
-  if (executePopoverAnchor) {
-    try { executePopoverAnchor.setAttribute('aria-expanded', 'false'); }
-    catch (_) {}
-  }
-  executePopoverAnchor = null;
 }
 
 
@@ -399,13 +359,68 @@ async function submitCancel(execId, resultHostEl) {
 }
 
 
-// === Main entry point ======================================================
+// === Main entry points =====================================================
 
-async function showExecutePopover(fnEntity, anchorEl) {
-  if (!fnEntity || !anchorEl) return;
+// ▶ Run — select the fn (the inspector is the SELECTION's detail
+// surface; a run pane for an unselected fn would show one fn's form
+// under another fn's head) and land its inspector on the Runs tab,
+// where `gdMountRunPane` (called from the tab renderer) mounts the
+// form. `anchorEl` is accepted for call-site compatibility; nothing
+// anchors to it anymore.
+function showExecutePopover(fnEntity, _anchorEl) {
+  if (!fnEntity) return;
+  if (typeof window.gdInspectorShowRuns !== 'function') return;
+  if (typeof selectedFnId !== 'undefined' && selectedFnId !== fnEntity.id
+      && typeof selectFn === 'function') {
+    // selectFn re-renders the inspector; the tab preset below makes
+    // that render land on Runs directly.
+    window.gdInspectorShowRuns(fnEntity.id, { preselectOnly: true });
+    selectFn(fnEntity.id);
+    return;
+  }
+  window.gdInspectorShowRuns(fnEntity.id);
+}
+
+
+// Mount the run pane (form + result host + history) into the Runs
+// tab's hosts. Called by the inspector's tab renderer — every mount
+// is a fresh build, so per-mount state resets here.
+async function gdMountRunPane(fnId) {
+  const host = document.getElementById('gd-insp-run-host');
+  const runsHost = document.getElementById('gd-insp-runs');
+  if (!host) return;
+  const fnEntity = (typeof lookups !== 'undefined')
+    ? lookups?.fnMap?.get(fnId) : null;
+  if (!fnEntity) return;
   if (typeof fetchValueForm !== 'function') return;  // value-form not loaded
-  const el = ensureExecutePopoverEl();
-  el.textContent = '';
+  if (typeof isAuthenticated === 'function' && !isAuthenticated()) {
+    // The runs list already shows its own sign-in note; an
+    // unauthenticated form would only 401 on Run.
+    return;
+  }
+  stopPolling();
+  const el = document.createElement('div');
+  // Keeps the .execute-popover styling family (and the e2e suite's
+  // `.execute-popover.visible` waits); `gd-insp-run` switches the
+  // geometry from floating-fixed to in-panel static. `visible` is
+  // added only once the shell + arg forms are mounted — the class
+  // pair means "form ready", same contract the floating popover had.
+  el.className = 'execute-popover gd-insp-run';
+  el.setAttribute('role', 'form');
+  el.setAttribute('aria-label', 'Run function');
+  // Keyboard: Enter (outside a textarea, where it inserts a newline)
+  // triggers Run when the button is enabled. The pane is rebuilt per
+  // mount, so binding here cannot stack stale listeners.
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (e.target?.tagName === 'TEXTAREA') return;
+    const runBtn = el.querySelector('.execute-run-btn');
+    if (!runBtn || runBtn.disabled) return;
+    e.preventDefault();
+    runBtn.click();
+  });
+  host.textContent = '';
+  host.appendChild(el);
   argFormHosts = [];
 
   // Shell ships from the server — header / effects banner / free-arg
@@ -428,8 +443,6 @@ async function showExecutePopover(fnEntity, anchorEl) {
 
   // --- post-swap wiring ---
   const head = el.querySelector('.execute-popover-header');
-  const historyBtn = el.querySelector('.execute-history-toggle');
-  const historyHost = el.querySelector('.execute-history-host');
   const confirmCb = el.querySelector('.execute-confirm-checkbox');
   const persistCb = el.querySelector('.execute-persist-checkbox');
   const traceCb = el.querySelector('.execute-trace-checkbox');
@@ -437,13 +450,6 @@ async function showExecutePopover(fnEntity, anchorEl) {
   const runBtn = el.querySelector('.execute-run-btn');
   const cancelBtn = el.querySelector('.execute-cancel-btn');
   const resultHost = el.querySelector('.execute-result-host');
-  const close = el.querySelector('.execute-popover-close');
-  if (close) {
-    close.addEventListener('click', (e) => {
-      e.stopPropagation();
-      hideExecutePopover();
-    });
-  }
 
   // Branch indicator — which branch chip the user is on is CLIENT
   // state (URL ?branch= + localStorage), so the pill is inserted here
@@ -506,28 +512,22 @@ async function showExecutePopover(fnEntity, anchorEl) {
     });
   }
 
-  // History toggle handler — needs resultHost in scope so panel
-  // rows can expand their full result into it.
-  let historyLoaded = false;
-  historyBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const isOpen = historyHost.style.display !== 'none';
-    if (isOpen) {
-      historyHost.style.display = 'none';
-      historyBtn.setAttribute('aria-expanded', 'false');
-      return;
-    }
-    historyHost.style.display = '';
-    historyBtn.setAttribute('aria-expanded', 'true');
-    if (!historyLoaded) {
-      historyHost.textContent = '';
-      historyHost.appendChild(renderSubmitSpinner('Loading history…'));
-      const panel = await buildHistoryPanel(fnEntity, resultHost);
-      historyHost.textContent = '';
-      historyHost.appendChild(panel);
-      historyLoaded = true;
-    }
-  });
+  // History — always mounted below the form in the same tab (the
+  // Runs tab IS the history surface; the former in-form toggle is
+  // gone). buildHistoryPanel binds Repeat / path / tree / row-expand
+  // against this pane's resultHost.
+  async function mountHistory() {
+    if (!runsHost) return;
+    runsHost.textContent = '';
+    runsHost.appendChild(renderSubmitSpinner('Loading runs…'));
+    const panel = await buildHistoryPanel(fnEntity, resultHost);
+    // A slow fetch may resolve after the tab re-rendered — only land
+    // in the CURRENT runs host.
+    if (document.getElementById('gd-insp-runs') !== runsHost) return;
+    runsHost.textContent = '';
+    runsHost.appendChild(panel);
+  }
+  mountHistory();
 
   runBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -542,19 +542,9 @@ async function showExecutePopover(fnEntity, anchorEl) {
     await submitExecution(fnEntity, args, persistCb.checked,
                           !!traceCb?.checked, !!captureCb?.checked,
                           resultHost, cancelBtn);
-    // Run completed — the new row (if persisted) belongs in History.
-    // Invalidate the cached panel so the next toggle re-fetches; if the
-    // panel is currently OPEN, refresh it in-place so the user sees the
-    // new row immediately without having to close/reopen.
-    historyLoaded = false;
-    if (historyHost.style.display !== 'none') {
-      historyHost.textContent = '';
-      historyHost.appendChild(renderSubmitSpinner('Refreshing history…'));
-      const panel = await buildHistoryPanel(fnEntity, resultHost);
-      historyHost.textContent = '';
-      historyHost.appendChild(panel);
-      historyLoaded = true;
-    }
+    // Run completed — the new row (if persisted) belongs in the runs
+    // list below; refresh it in place.
+    mountHistory();
   });
 
   cancelBtn.addEventListener('click', async (e) => {
@@ -563,28 +553,15 @@ async function showExecutePopover(fnEntity, anchorEl) {
     if (id) await submitCancel(id, resultHost);
   });
 
-  // (Enter-to-Run keydown is bound once in ensureExecutePopoverEl —
-  // binding it here would leak a listener per open onto the singleton.)
-
-  // Show + position
-  if (executePopoverAnchor && executePopoverAnchor !== anchorEl) {
-    try { executePopoverAnchor.setAttribute('aria-expanded', 'false'); }
-    catch (_) {}
-  }
-  try { anchorEl.setAttribute('aria-expanded', 'true'); }
-  catch (_) {}
-  executePopoverEl.classList.add('visible');
-  anchorBelowClamped(executePopoverEl, anchorEl,
-                     { fallbackW: 480, fallbackH: 320 });
-  executePopoverAnchor = anchorEl;
+  el.classList.add('visible');
   // Auto-focus the first form input (textarea / text input) inside
-  // the popover so the user can start typing or hit Enter immediately
+  // the pane so the user can start typing or hit Enter immediately
   // without an extra click. Skip if no free-args exist (focus would
   // land on the Run button, which is fine on its own). RAF wait gives
   // the value-form's deferred renderers (Tier-2 widgets) a tick to
   // mount.
   requestAnimationFrame(() => {
-    const first = executePopoverEl.querySelector(
+    const first = el.querySelector(
       '.execute-popover-body textarea, .execute-popover-body input:not([type=checkbox])');
     if (!first) return;
     // A code field is CodeMirror-enhanced (editor-code.js) — the
@@ -598,12 +575,5 @@ async function showExecutePopover(fnEntity, anchorEl) {
 }
 
 
-installPopoverDismiss({
-  getEl: () => executePopoverEl,
-  getAnchor: () => executePopoverAnchor,
-  isVisible: executePopoverVisible,
-  onDismiss: hideExecutePopover,
-});
-
-
 window.showExecutePopover = showExecutePopover;
+window.gdMountRunPane = gdMountRunPane;

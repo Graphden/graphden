@@ -132,15 +132,9 @@ async function readResult(page) {
            '(add [1,2,3]) → 6 rendered as scalar (got '
            + JSON.stringify(resultA) + ')');
 
-    // === Phase B: persist run + history panel reveals row ===
-    // Close the popover (click ×) so we reopen fresh.
-    await page.evaluate(() => {
-      document.querySelector('.execute-popover-close')?.click();
-    });
-    await page.waitForFunction(
-      () => !document.querySelector('.execute-popover.visible'),
-      null,
-      {timeout: 3000, polling: 50});
+    // === Phase B: persist run + history list reveals row ===
+    // The run pane lives in the inspector's Runs tab now — nothing to
+    // close; re-navigating remounts it fresh.
     await openExecutePopoverFor(page, 'core.arithmetic.add');
     await fillNumsAndRun(page, '[10, 20]', true);
     const resultB = await readResult(page);
@@ -148,33 +142,21 @@ async function readResult(page) {
            '(add [10,20]) with persist? → 30 (got '
            + JSON.stringify(resultB) + ')');
 
-    // Click History toggle — panel should reveal at least one row.
-    await page.evaluate(() => {
-      document.querySelector('.execute-history-toggle').click();
-    });
-    // Panel renders rows after an async fetch — wait for the host to
-    // become visible AND at least one row to be in the DOM.
+    // History is always mounted below the form in the Runs tab — the
+    // run handler refreshes it after the persisted run; wait for the row.
     await page.waitForFunction(
-      () => {
-        const h = document.querySelector('.execute-history-host');
-        return h && h.style.display !== 'none'
-               && h.querySelectorAll('.execute-history-row').length >= 1;
-      },
+      () => document.querySelectorAll('#gd-insp-runs .execute-history-row').length >= 1,
       null,
       {timeout: 10000, polling: 100});
     const historyState = await page.evaluate(() => {
-      const host = document.querySelector('.execute-history-host');
-      const visible = host && host.style.display !== 'none';
-      const rows = host?.querySelectorAll('.execute-history-row') || [];
+      const rows = document.querySelectorAll('#gd-insp-runs .execute-history-row');
       return {
-        visible,
         rowCount: rows.length,
         firstStatus: rows[0]?.querySelector('.execute-history-status')?.textContent,
         firstPreview: rows[0]?.querySelector('.execute-history-preview')?.textContent,
         repeatBtnExists: !!rows[0]?.querySelector('.execute-history-repeat-btn'),
       };
     });
-    assert(historyState.visible, 'history panel revealed after toggle');
     assert(historyState.rowCount >= 1,
            'at least one persisted row in history (got ' + historyState.rowCount + ')');
     assert(historyState.firstStatus === 'succeeded',

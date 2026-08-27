@@ -296,7 +296,10 @@ row TTLs (failed rows sweep after 30 days).
 ## Editor UI
 
 The ▶ button on a fn-card root row (auth-required, visible only to
-signed-in users) opens the **execute popover**:
+signed-in users) opens the **Run pane** — it selects the fn and lands
+the right inspector on its **Runs** tab, so the canvas stays fully
+visible (and pannable) next to the form, the result, and the fn's
+run history below:
 
 - One type-aware form per free-arg, loaded via `/api/value-form` —
   same widgets that drive binding edits.
@@ -418,7 +421,7 @@ is open by the same `:get-auth-required` seam).
 - **Effect-confirm mirror of the Run gate**: a component whose
   declared effects are non-empty — or UNKNOWN (no rich-types entry;
   the preview auto-executes on page load, so unknown fails closed) —
-  gets a confirm page with the Run popover's effect chips and a
+  gets a confirm page with the Run pane's effect chips and a
   "Render anyway" link carrying `effects=confirm`.
 - Non-components (return type not semantically `:hiccup-node`)
   get a 400; unknown fn-ids a 404.
@@ -544,7 +547,7 @@ Adding instrumentation is a one-liner inside the `defbase` body:
 `(cr/record-effect! cat)` is a no-op outside an execution trace
 context, so direct unit-tests of the impl don't need special setup.
 
-The editor's execute popover surfaces the runtime set as a "ran:"
+The editor's Run pane surfaces the runtime set as a "ran:"
 strip below the result. Two drift visuals:
 
 - **`execute-effects-drift`** (red dashed outline) — observed at
@@ -589,6 +592,6 @@ impls can call it unconditionally.
 | File                                                      | Coverage                                      |
 |-----------------------------------------------------------|-----------------------------------------------|
 | `test/graphden/crud/fn_execution_test.clj`                | parse / validate (rejection reasons) / apply (inline + persisted + args rows) / get / cancel (flag + real interrupt) / list (branch-scoped + per-version + `?limit` clamp) / bounded-pool queue-full → 503 / per-org over-capacity / TTL sweep (incl. `as-instant` Date regression) / failed-path / args-too-large / result-truncation / exec-stats rollups |
-| `tools/browser-test/edit-execute.test.js`                 | E2E: ▶ popover, fill args, Run, inline result, History panel reveal |
+| `tools/browser-test/edit-execute.test.js`                 | E2E: ▶ Run pane, fill args, Run, inline result, history row reveal |
 
 Total: ~59 deftests / ~267 assertions backend, 8 assertions browser.

@@ -201,16 +201,13 @@ async function openExecutePopover(page, fnName) {
     // Phase D: open history. The cancelled run should appear with the
     // submitted args (ms=SLEEP_MS).
     // ===================================================================
-    await page.evaluate(() => {
-      const btn = document.querySelector('.execute-popover .execute-history-toggle');
-      if (btn) btn.click();
-    });
+    // History is always mounted below the form in the Runs tab.
     await page.waitForSelector(
-      '.execute-popover .execute-history-row',
+      '#gd-insp-runs .execute-history-row',
       {timeout: 10000});
     const historyState = await page.evaluate(() => {
       const rows = document.querySelectorAll(
-        '.execute-popover .execute-history-row');
+        '#gd-insp-runs .execute-history-row');
       const first = rows[0];
       return {
         rowCount: rows.length,
@@ -241,7 +238,7 @@ async function openExecutePopover(page, fnName) {
 
     await page.evaluate(() => {
       const row = document.querySelector(
-        '.execute-popover .execute-history-row');
+        '#gd-insp-runs .execute-history-row');
       row?.querySelector('.execute-history-repeat-btn')?.click();
     });
     await page.waitForFunction(

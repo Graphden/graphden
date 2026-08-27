@@ -165,10 +165,9 @@ async function openExecutePopoverForCard(page, fnId) {
            'summary panel text: ' + JSON.stringify(view.panelText));
 
     // ===================================================================
-    // Phase C: ✕ clear restores normal rendering. (The panel lives
-    // outside the execute popover, so this real pointerdown also
-    // dismisses the popover — the standard outside-click behaviour;
-    // Phase D reopens it.)
+    // Phase C: ✕ clear restores normal rendering. (The run pane lives
+    // in the inspector's Runs tab and survives canvas clicks; Phase D
+    // re-opens it for the wrap fn, which simply remounts the pane.)
     // ===================================================================
     await page.click('.path-view-clear');
     const cleared = await page.evaluate(() => ({
@@ -190,20 +189,20 @@ async function openExecutePopoverForCard(page, fnId) {
     await api(page, 'POST', '/api/execute',
               {'fn-id': probeWrap.id, 'args': {}, 'persist?': true});
     await openExecutePopoverForCard(page, probeWrap.id);
-    await page.click('.execute-popover.visible .execute-history-toggle');
+    // History is always mounted below the form in the Runs tab.
     await page.waitForSelector(
-      '.execute-popover.visible .execute-history-path-btn', {timeout: 30000});
+      '#gd-insp-runs .execute-history-path-btn', {timeout: 30000});
     const hist = await page.evaluate(() => {
-      const popover = document.querySelector('.execute-popover.visible');
+      const runs = document.getElementById('gd-insp-runs');
       return {
-        rows: popover.querySelectorAll('.execute-history-row').length,
-        pathBtns: popover.querySelectorAll('.execute-history-path-btn').length,
+        rows: runs.querySelectorAll('.execute-history-row').length,
+        pathBtns: runs.querySelectorAll('.execute-history-path-btn').length,
       };
     });
     assert(hist.rows >= 2 && hist.pathBtns >= 1 && hist.pathBtns < hist.rows,
            'path button only on traced rows (' + hist.pathBtns + '/'
            + hist.rows + ' rows)');
-    await page.click('.execute-popover.visible .execute-history-path-btn');
+    await page.click('#gd-insp-runs .execute-history-path-btn');
     await page.waitForSelector('.path-view-panel', {timeout: 10000});
     const replay = await page.evaluate(() =>
       [...document.querySelectorAll('.node-overlay.path-highlighted')]

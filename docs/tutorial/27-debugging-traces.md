@@ -74,7 +74,7 @@ Traces obey the same `:secret` rules as results (lesson 07):
 
 ## Try it — catch a request
 
-Traces of manual runs cover fns you can call from the Run popover.
+Traces of manual runs cover fns you can call from the Run pane.
 For a **web handler** you usually want the real thing: the actual
 HTTP request, with its params and headers. That's the trap:
 

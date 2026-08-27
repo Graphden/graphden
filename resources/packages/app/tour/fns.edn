@@ -137,7 +137,7 @@
                :targets [".placeholder-binder" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "hello-handler" :slot "value"}}
               {:title "Run it"
-               :body "Click the [[⋯]] button on the card's top row, then [[▶ Run]], then [[Run]] in the popover. Your map comes straight back — no build, no deploy: the graph you just edited is already the running system."
+               :body "Click the [[⋯]] button on the card's top row, then [[▶ Run]], then [[Run]] in the Run pane that opens in the right panel. Your map comes straight back — no build, no deploy: the graph you just edited is already the running system."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
@@ -255,7 +255,7 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "to-json-string"}}
               {:title "A free arg becomes a Run field"
-               :body "Click [[⋯]] on the to-json-string row, then [[▶ Run]]. The popover shows a data field — the free slot surfaced as your input. Enter `{\"a\": 1}` and [[Run]]: the JSON string comes back."
+               :body "Click [[⋯]] on the to-json-string row, then [[▶ Run]]. The Run pane opens in the right panel, with a data field — the free slot surfaced as your input. Enter `{\"a\": 1}` and [[Run]]: the JSON string comes back."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
@@ -575,7 +575,7 @@
                :targets [".placeholder-binder" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-cell\"]"]
                :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
               {:title "Run it twice"
-               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the popover asks you to acknowledge it first (lesson 07's gate). Tick the box, type `tick` in the field and [[Run]] — the result is a one-item list, shown as a single bulleted row: tick. Open [[Raw]] under it to see the plain JSON, [\"tick\"]. Now Run it a SECOND time the same way: two rows — [\"tick\" \"tick\"] in Raw. Nothing in the graph changed between the runs; the cell kept the value."
+               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 07's gate). Tick the box, type `tick` in the field and [[Run]] — the result is a one-item list, shown as a single bulleted row: tick. Open [[Raw]] under it to see the plain JSON, [\"tick\"]. Now Run it a SECOND time the same way: two rows — [\"tick\" \"tick\"] in Raw. Nothing in the graph changed between the runs; the cell kept the value."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
@@ -624,7 +624,7 @@
              :title "Executing a fn"
              :steps
              [{:title "Running is part of editing"
-               :body "There is no build step: the fn you are looking at IS the running one. The Run popover turns every unbound slot into an input field, keeps a history of what you ran, and can persist the interesting runs."
+               :body "There is no build step: the fn you are looking at IS the running one. The Run pane — it opens in the right panel's Runs tab — turns every unbound slot into an input field, keeps a history of what you ran, and can persist the interesting runs. The canvas stays fully visible and pannable while it is open."
                :target nil
                :check {:kind "manual"}}
               {:title "Find str-len"
@@ -632,7 +632,7 @@
                :target "input[placeholder=\"Filter...\"]"
                :check {:kind "selected" :name "str-len"}}
               {:title "Free args become the form"
-               :body "Click [[⋯]] on the row, then [[▶ Run]]. The popover shows one field, named after the free slot. Type `hello` and click [[Run]]: the answer 5 comes back under the card."
+               :body "Click [[⋯]] on the row, then [[▶ Run]]. The Run pane opens in the right panel — one field, named after the free slot. Type `hello` and click [[Run]]: the answer 5 comes back under the card."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
@@ -641,8 +641,8 @@
                :target ".execute-persist-checkbox"
                :check {:kind "dom" :selector "body[data-gd-persisted-run]"}}
               {:title "History is a graph read"
-               :body "Click [[History]] at the top of the popover: your persisted run is listed with its input. Repeat re-fills the form from it — the same execution API the editor uses is what /api/execute exposes to your own callers."
-               :target ".execute-history-toggle"
+               :body "Your persisted run is already listed under the form — the Runs tab doubles as this fn's history. Click the row to expand it; [[Repeat]] re-fills the form from it — the same execution API the editor uses is what /api/execute exposes to your own callers."
+               :target ".execute-history-row"
                :check {:kind "manual"}}
               {:title "That's the run loop"
                :body "Free args in, result out, history when you ask for it. The written lesson 09 adds cancellation, TTLs and the run-from-another-fn story. Click [[Finish]]."

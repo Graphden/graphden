@@ -37,6 +37,9 @@
   ;; The branch pill is inserted CLIENT-side after the swap — which
   ;; branch chip the user sees is client state (URL ?branch= +
   ;; localStorage), and the JS already owns that surface.
+  ;; No close button and no History toggle: the pane lives in the
+  ;; inspector's Runs tab (a persistent panel, nothing to dismiss),
+  ;; and the history list is always mounted right below the form.
   {:name :_xp-header
    :parent :hiccup
    :args {:tag {:value "div"}
@@ -44,14 +47,7 @@
           :children [{:parent :hiccup
                       :args {:tag {:value "span"}
                              :attrs {:value {:class "execute-popover-title"}}
-                             :children [:_xp-title]}}
-                     {:value [:button {:type "button"
-                                       :class "execute-history-toggle"
-                                       :title "Show persisted runs of this fn"
-                                       :aria-expanded "false"} "History"]}
-                     {:value [:button {:type "button"
-                                       :class "execute-popover-close"
-                                       :aria-label "Close run-fn popover"} "×"]}]}}
+                             :children [:_xp-title]}}]}}
 
   ;; --- effects banner ---------------------------------------------------
 
@@ -217,8 +213,6 @@
    :args {:tag {:value "div"}
           :attrs {:value {:class "execute-popover-content"}}
           :children [:_xp-header
-                     {:value [:div {:class "execute-history-host"
-                                    :style "display:none"}]}
                      :_xp-effects-banner
                      :_xp-body
                      :_xp-options

@@ -280,12 +280,13 @@ function _tourUnderSheet(selector) {
 }
 
 // The panel a target sits in — the region the popover must not cover, since
-// the reader has to keep using it. Today that is the Explorer sidebar and the
-// operations surface; both are wide, scrolling regions whose contents ARE the
-// step's subject. Returns a DOMRect or null.
+// the reader has to keep using it. Today: the Explorer sidebar, the
+// operations surface, and the right inspector (whose Runs tab hosts the run
+// form + result the step is about); each is a scrolling region whose
+// contents ARE the step's subject. Returns a DOMRect or null.
 function _tourPanelOf(target) {
   if (!target) return null;
-  const panel = target.closest('#side-menu, #gd-operate-panels, #gd-shell-surface');
+  const panel = target.closest('#side-menu, #gd-operate-panels, #gd-shell-surface, #gd-inspector');
   if (!panel) return null;
   const r = panel.getBoundingClientRect();
   // Only worth avoiding if it is actually a panel-sized region on screen.
@@ -338,16 +339,24 @@ function _tourPosition() {
     // because a guard clicks by selector; a person cannot. Where there is
     // room, start after the panel.
     const panel = _tourPanelOf(target);
-    // Candidate positions, best first: right of the panel/target, below,
-    // above, left, then the bottom corners as last resorts. Each is scored
-    // against the target AND every visible floating surface (menus,
-    // popovers a step just told the reader to open) — the winner is the
-    // first that covers nothing, else the least-covering one. Re-run every
+    // Candidate positions, best first: past the panel/target (AFTER a
+    // left-side panel like the Explorer, BEFORE a right-side one like
+    // the inspector — the old right-only rule clamped candidates back
+    // ONTO the inspector when a step targeted the Run pane), below,
+    // above, left, then the bottom corners as last resorts. Each is
+    // scored against the target, every visible floating surface
+    // (menus, popovers a step just told the reader to open), the
+    // canvas cards AND the panel itself — the winner is the first
+    // that covers nothing, else the least-covering one. Re-run every
     // tick, so a menu opening mid-step pushes the popover away within
     // ~600ms.
-    const startLeft = Math.max(spotRect.right + 16, panel ? panel.right + 16 : 0);
+    const panelOnRight = panel && panel.left > window.innerWidth / 2;
+    const primary = panelOnRight
+      ? { left: panel.left - pw - 16, top: spotRect.top }
+      : { left: Math.max(spotRect.right + 16, panel ? panel.right + 16 : 0),
+          top: spotRect.top };
     const cands = [
-      { left: startLeft, top: spotRect.top },
+      primary,
       { left: spotRect.left, top: spotRect.bottom + 14 },
       { left: spotRect.left, top: spotRect.top - ph - 14 },
       { left: spotRect.left - pw - 16, top: spotRect.top },
@@ -355,6 +364,7 @@ function _tourPosition() {
       { left: 12, top: window.innerHeight - ph - 12 },
     ];
     const avoid = _tourFloatingRects().concat(_tourNodeRects());
+    if (panel) avoid.push(panel);
     const best = _tourPickSpot(cands, pw, ph, spotRect, avoid);
     pop.style.left = best.left + 'px';
     pop.style.top = best.top + 'px';

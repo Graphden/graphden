@@ -29,7 +29,7 @@ builds the request body for you.
 ## The free-arg form
 
 If the fn has any FREE arguments (slots that no ancestor binds —
-see lesson 04), the execute popover shows a form to supply
+see lesson 04), the Run pane shows a form to supply
 them. Field types match the slot's declared type:
 
 - `:text` slot → text input
@@ -47,7 +47,8 @@ valid.
 
 1. Open `:str-len` in the editor. It has one free arg
    `:string` (declared :text). Click `▶`.
-2. The popover shows a `:string` field with the hint
+2. The Run pane opens in the right panel's **Runs** tab, with a
+   `:string` field and the hint
    `Expected: text`. Type `hello world`.
 3. Click `Run`. Result `11` appears.
 
@@ -130,7 +131,7 @@ Every fn carries a set of effects it transitively touches
 | `:state` | Mutates in-graph state (`:swap` / `:reset` on a `:cell` / `:atom`) |
 | `:raw-sql` | Raw SQL escape hatches (`:pg-query` & co) that bypass the storage protocol |
 
-When you open the run popover for a fn with EFFECTS, it shows
+When you open the Run pane for a fn with EFFECTS, it shows
 a warning banner — `side effects:` followed by one chip per
 category — plus a confirm checkbox:
 
@@ -143,7 +144,7 @@ side effects: [network] [db]
 The gate prevents accidental side effects: Run stays disabled
 until you tick the acknowledgement. For pure fns (no effects
 in the registry) neither the banner nor the checkbox appears —
-the popover opens straight to the form (or the "No free
+the pane opens straight to the form (or the "No free
 arguments" note) with Run enabled.
 
 ## The type-error gate
@@ -162,7 +163,7 @@ half-typed sketch in the graph, but it won't execute.
 
 By default, PURE runs are kept in memory only — visible for
 the next few minutes (TTL), then garbage-collected. Tick the
-`Save to history` checkbox in the popover and the result
+`Save to history` checkbox in the pane and the result
 writes a `:fn-execution` row.
 
 Effectful runs don't get a choice: the checkbox comes
@@ -179,14 +180,14 @@ The persisted row carries:
   declared one — drift between the two surfaces in the editor)
 - `:error` + `:error-data` on failure (capped at 4 KB)
 
-Persisted executions show up in the fn-card's history panel
+Persisted executions show up in the runs list under the form
 (see below) and survive restarts.
 
-## The history panel
+## The history list
 
-The popover header has a `History` toggle; clicking it fetches
-and expands a panel listing this fn's PERSISTED runs (in-memory
-non-persisted runs never appear there). Each row shows:
+The Runs tab doubles as this fn's history: below the form sits
+the list of its PERSISTED runs (in-memory non-persisted runs
+never appear there). Each row shows:
 
 - The args used
 - The status (`succeeded` / `failed` / `cancelled` / `pending` —
@@ -204,7 +205,7 @@ controls whether a pure run's result survives the in-memory TTL
 Long-running executions (an `:http-get` that hangs, a
 `:sleep` for 30 minutes) can be cancelled:
 
-- From the popover during the run — a `Cancel` button appears
+- From the Run pane during the run — a `Cancel` button appears
   in place of `Run`.
 - From the history panel later — the running row has a `Cancel`
   action.
@@ -278,7 +279,7 @@ Two side effects of this:
 
 ## Tracing an execution
 
-The execute popover also has a `Trace path` checkbox (off by
+The Run pane also has a `Trace path` checkbox (off by
 default — tracing adds a small capture cost to the run). When
 checked, the run records which fns it traversed: one entry per
 internal fn call, with the time each call took and whether it

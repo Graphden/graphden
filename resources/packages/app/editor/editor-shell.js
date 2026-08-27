@@ -404,9 +404,22 @@
       return;
     }
     if (inspTab === 'stats') {
-      body.innerHTML = '<div id="gd-insp-runs" class="gd-insp-runs">'
+      // Runs tab = the RUN PANE (form + result, mounted by
+      // editor-execute.js gdMountRunPane) + this fn's run history
+      // below it. The pane mount owns the history too (it binds
+      // Repeat / path / expand against its own result host); the
+      // plain-partial load is the signed-out / module-missing
+      // fallback — gdMountRunPane returns without touching the
+      // hosts in those cases.
+      body.innerHTML = '<div id="gd-insp-run-host"></div>'
+        + '<div id="gd-insp-runs" class="gd-insp-runs">'
         + '<div class="gd-insp-runs-loading">Loading runs…</div></div>';
-      gdLoadInspectorRuns(fnId);
+      const authed = (typeof isAuthenticated === 'function') && isAuthenticated();
+      if (authed && typeof window.gdMountRunPane === 'function') {
+        window.gdMountRunPane(fnId);
+      } else {
+        gdLoadInspectorRuns(fnId);
+      }
       return;
     }
     if (inspTab === 'history') {
@@ -508,6 +521,16 @@
   }
 
   window.gdInspectorRender = gdInspectorRender;
+
+  // ▶ Run entry (editor-execute.js): land the inspector on the Runs
+  // tab. `preselectOnly` presets the tab without rendering — for the
+  // caller about to selectFn(), whose own inspector render then lands
+  // on Runs directly (avoids a double render + a flash of Overview).
+  window.gdInspectorShowRuns = function gdInspectorShowRuns(fnId, opts) {
+    inspTab = 'stats';
+    if (opts?.preselectOnly) return;
+    gdInspectorRender(fnId);
+  };
 
   // ---- Workspace switcher --------------------------------------------------
   // The context-bar chip scopes the explorer to a namespace root (a "workspace"

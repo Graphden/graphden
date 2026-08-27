@@ -3875,6 +3875,24 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .execute-popover.visible { display: block; }
 
+/* In-panel mode — the run pane lives in the inspector's Runs tab
+   (editor-execute.js gdMountRunPane), not floating over the canvas.
+   Same inner styling family; only the floating geometry is undone. */
+.execute-popover.gd-insp-run {
+  position: static;
+  z-index: auto;
+  box-shadow: none;
+  border: 0;
+  border-left: 3px solid var(--accent);
+  border-radius: 0;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  overflow-y: visible;
+  padding: 8px 0 8px 10px;
+  margin-bottom: 10px;
+}
+
 /* Free-arg form widgets inside the Run popover: cap the auto-generated
    textareas (record fields like :headers / :body arrived as huge empty
    boxes that dwarfed the form) — still resizable when more room is
@@ -3987,21 +4005,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   font-weight: 600; font-size: 13px;
   color: var(--accent);
 }
-/* History toggle in the header — sits between title and ×.
- * Plain text-link styling so it doesn't compete with title weight. */
-.execute-history-toggle {
-  font-family: inherit; font-size: 11px;
-  background: transparent; border: 0;
-  color: var(--accent);
-  padding: 2px 6px; margin-right: auto; margin-left: 8px;
-  cursor: pointer; border-radius: 3px;
-}
-.execute-history-toggle:hover { background: var(--hover-bg); }
-.execute-history-toggle[aria-expanded="true"] {
-  background: var(--card-row-highlight);
-  font-weight: 600;
-}
-
 /* Branch indicator — only shown when running off main; mirrors the
  * top-bar chip's inverted-pill style so the visual cue is the same
  * across the editor. */
@@ -4011,18 +4014,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 2px 6px; border-radius: 2px;
   margin-left: 8px;
   white-space: nowrap;
-}
-
-.execute-popover-close {
-  width: 22px; height: 22px; padding: 0;
-  background: transparent; color: var(--card-fg);
-  border: 0; border-radius: 3px;
-  font-size: 20px; line-height: 1; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center;
-  opacity: 0.65;
-}
-.execute-popover-close:hover {
-  opacity: 1; background: var(--overlay-pressed);
 }
 
 /* Effect-warning banner — only rendered when the fn declares effects.
@@ -4557,18 +4548,16 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 
 
-/* History panel — collapsible list of persisted runs for the
- * current fn. Each row shows status / timestamp / duration /
- * result preview. Click a row to expand its full result into the
- * main result host; Repeat re-fills the form with that run's args. */
-.execute-history-host {
-  margin-bottom: 8px;
+/* History list — persisted runs for the current fn, mounted below
+ * the run form in the inspector's Runs tab. Each row shows status /
+ * timestamp / duration / result preview. Click a row to expand its
+ * full result into the main result host; Repeat re-fills the form
+ * with that run's args. */
+.execute-history-host-wrap {
   padding: 6px 8px;
   background: var(--card-row-highlight);
   border-left: 2px solid var(--accent);
   border-radius: 2px;
-  max-height: 200px;
-  overflow-y: auto;
 }
 /* Phase C2 error-log sidebar section. */
 .error-log-row { padding: 6px 8px; border-bottom: 1px dashed var(--light-border);

@@ -354,7 +354,7 @@ function _tourPosition() {
       { left: window.innerWidth - pw - 12, top: window.innerHeight - ph - 12 },
       { left: 12, top: window.innerHeight - ph - 12 },
     ];
-    const avoid = _tourFloatingRects();
+    const avoid = _tourFloatingRects().concat(_tourNodeRects());
     const best = _tourPickSpot(cands, pw, ph, spotRect, avoid);
     pop.style.left = best.left + 'px';
     pop.style.top = best.top + 'px';
@@ -373,7 +373,8 @@ function _tourPosition() {
       { left: window.innerWidth - pw - 12, top: 12 },
       { left: 12, top: window.innerHeight - ph - 12 },
     ];
-    const best = _tourPickSpot(cands, pw, ph, null, _tourFloatingRects());
+    const best = _tourPickSpot(cands, pw, ph, null,
+                               _tourFloatingRects().concat(_tourNodeRects()));
     pop.style.left = best.left + 'px';
     pop.style.top = best.top + 'px';
     pop.classList.remove('gd-tour-centered');
@@ -427,6 +428,25 @@ function _tourFloatingRects() {
     if (r.width < 40 || r.height < 24) continue;
     if (r.width > window.innerWidth * 0.9
         && r.height > window.innerHeight * 0.9) continue;
+    out.push(r);
+  }
+  return out;
+}
+
+// Viewport rects of the canvas cards (`.node-overlay` — fn cards, value
+// nodes, [[+]] placeholder binders). On canvas lessons these ARE the step's
+// subject: without them in the avoid list the popover repeatedly parked on
+// the selected fn's card, covering the ⋯ / [[+]] the step asks to press
+// (lessons 05/15/27/29 in the 2026-08-26 walkthrough). Scored SOFT, like
+// the floating surfaces — a crowded canvas still yields the least-covering
+// corner instead of no position at all.
+function _tourNodeRects() {
+  const out = [];
+  for (const el of document.querySelectorAll('.node-overlay')) {
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    if (r.bottom < 0 || r.top > window.innerHeight
+        || r.right < 0 || r.left > window.innerWidth) continue;
     out.push(r);
   }
   return out;

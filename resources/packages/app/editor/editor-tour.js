@@ -306,19 +306,27 @@ function _tourPosition() {
   const rect = target ? target.getBoundingClientRect() : null;
   const visible = rect && rect.width > 0 && rect.height > 0
     && rect.bottom > 0 && rect.top < window.innerHeight;
+  // Second half of the search-step fix (see _tourWantedRowSel): while the
+  // ring still sits on the filter input — the wanted row not rendered yet —
+  // the lit hole covers the input TOGETHER with the result list below it.
+  // The step's next instruction is to read that list; a scrim over it made
+  // the reader search in the dark. The popover keeps avoiding the whole
+  // panel either way (_tourPanelOf), so nothing else moves.
+  const spotRect = (visible && target.id === 'search-input')
+    ? _tourWithEntityList(rect) : rect;
 
   if (visible && narrow) {
     // Spotlight still anchors; the sheet's own geometry is in the stylesheet.
     const pad = 6;
-    _tourSpotRect(rect.left - pad, rect.top - pad,
-                  rect.width + pad * 2, rect.height + pad * 2);
+    _tourSpotRect(spotRect.left - pad, spotRect.top - pad,
+                  spotRect.width + pad * 2, spotRect.height + pad * 2);
     pop.classList.remove('gd-tour-centered');
     pop.style.left = '';
     pop.style.top = '';
   } else if (visible) {
     const pad = 6;
-    _tourSpotRect(rect.left - pad, rect.top - pad,
-                  rect.width + pad * 2, rect.height + pad * 2);
+    _tourSpotRect(spotRect.left - pad, spotRect.top - pad,
+                  spotRect.width + pad * 2, spotRect.height + pad * 2);
 
     const pw = pop.offsetWidth || 360;
     const ph = pop.offsetHeight || 180;
@@ -337,17 +345,17 @@ function _tourPosition() {
     // first that covers nothing, else the least-covering one. Re-run every
     // tick, so a menu opening mid-step pushes the popover away within
     // ~600ms.
-    const startLeft = Math.max(rect.right + 16, panel ? panel.right + 16 : 0);
+    const startLeft = Math.max(spotRect.right + 16, panel ? panel.right + 16 : 0);
     const cands = [
-      { left: startLeft, top: rect.top },
-      { left: rect.left, top: rect.bottom + 14 },
-      { left: rect.left, top: rect.top - ph - 14 },
-      { left: rect.left - pw - 16, top: rect.top },
+      { left: startLeft, top: spotRect.top },
+      { left: spotRect.left, top: spotRect.bottom + 14 },
+      { left: spotRect.left, top: spotRect.top - ph - 14 },
+      { left: spotRect.left - pw - 16, top: spotRect.top },
       { left: window.innerWidth - pw - 12, top: window.innerHeight - ph - 12 },
       { left: 12, top: window.innerHeight - ph - 12 },
     ];
     const avoid = _tourFloatingRects();
-    const best = _tourPickSpot(cands, pw, ph, rect, avoid);
+    const best = _tourPickSpot(cands, pw, ph, spotRect, avoid);
     pop.style.left = best.left + 'px';
     pop.style.top = best.top + 'px';
     pop.classList.remove('gd-tour-centered');
@@ -375,6 +383,19 @@ function _tourPosition() {
     pop.style.left = '';
     pop.style.top = '';
   }
+}
+
+// The filter input's rect extended over the result list under it. Falls back
+// to the input alone if the list isn't measurable (collapsed rail mid-toggle).
+function _tourWithEntityList(rect) {
+  const list = document.getElementById('entity-list');
+  const lr = list ? list.getBoundingClientRect() : null;
+  if (!lr || lr.width <= 0 || lr.height <= 0) return rect;
+  const left = Math.min(rect.left, lr.left);
+  const top = Math.min(rect.top, lr.top);
+  const right = Math.max(rect.right, lr.right);
+  const bottom = Math.max(rect.bottom, lr.bottom);
+  return { left, top, right, bottom, width: right - left, height: bottom - top };
 }
 
 // Overlap area between a candidate popover box and a DOMRect, with an
@@ -453,10 +474,37 @@ function _tourEffTarget(step) {
   const chain = step?.targets;
   if (Array.isArray(chain)) {
     for (let i = chain.length - 1; i >= 0; i--) {
-      if (_tourTargetVisible(chain[i])) return chain[i];
+      if (_tourTargetVisible(chain[i])) return _tourSearchUpgrade(step, chain[i]);
     }
   }
-  return step?.target || null;
+  return _tourSearchUpgrade(step, step?.target || null);
+}
+
+// A search-and-pick step ("type `x` in the filter, click the row") anchors
+// on the filter INPUT — and the scrim then dimmed the very result list the
+// reader was told to read, so the pick happened in the dark. The row the
+// step wants is already named by its own check (the fn it waits to see
+// selected, or the parent it waits to see extended), so the moment that row
+// is rendered the ring moves ONTO it — and falls back to the input whenever
+// further typing filters it away again. Re-resolved every tick, so the ring
+// follows the row as the list re-renders under the reader's keystrokes.
+// (While the ring is still on the input, `_tourPosition` widens the lit
+// hole over the result list — the second half of the same fix.)
+function _tourWantedRowSel(step) {
+  const check = step?.check;
+  const name = check?.kind === 'selected' ? check.name
+    : check?.kind === 'fn-parent' ? check.parent : null;
+  if (!name || typeof _tourFindFn !== 'function') return null;
+  const fn = _tourFindFn(name);
+  return fn?.id
+    ? '#entity-list .entity-item[data-fn-id="' + fn.id + '"]' : null;
+}
+
+function _tourSearchUpgrade(step, sel) {
+  const el = sel ? document.querySelector(sel) : null;
+  if (el?.id !== 'search-input') return sel;
+  const rowSel = _tourWantedRowSel(step);
+  return (rowSel && _tourTargetVisible(rowSel)) ? rowSel : sel;
 }
 
 

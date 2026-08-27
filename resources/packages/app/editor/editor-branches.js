@@ -843,7 +843,7 @@ async function populateReviewStatus(popover) {
   header.textContent = approveBtns.length
     + (approveBtns.length === 1 ? ' proposal awaiting review' : ' proposals awaiting review');
   const anchor = popover.querySelector('.branch-section-rows');
-  if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(header, anchor);
+  if (anchor?.parentNode) anchor.parentNode.insertBefore(header, anchor);
   for (const btn of approveBtns) {
     const name = btn.getAttribute('data-approve-branch');
     try {

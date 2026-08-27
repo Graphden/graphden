@@ -1247,7 +1247,7 @@
                :check {:kind "fn-parent" :name "tutorial-tick" :parent "const"}
                :creates {:type "fn" :name "tutorial-tick"}}
               {:title "Give it something to return"
-               :body "On the tutorial-tick card click the [[+]] on value, choose [[Bind literal]] and type exactly `\"tick\"` — with the quotes, because the slot's type is :any and the editor reads it as JSON. A service has no caller to pass arguments in, so a fn with free args can never become one."
+               :body "On the tutorial-tick card click the [[+]] on the :value slot, choose [[Bind literal]] and type exactly `\"tick\"` — with the quotes, because the slot's type is :any and the editor reads it as JSON. A service has no caller to pass arguments in, so a fn with free args can never become one."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-tick" :slot "value"}}
@@ -1258,7 +1258,7 @@
                :check {:kind "fn-parent" :name "tutorial-daemon" :parent "future"}
                :creates {:type "fn" :name "tutorial-daemon"}}
               {:title "Point it at the thunk"
-               :body "On the tutorial-daemon card click the [[+]] on body and pick [[tutorial-tick]]. body is a callable slot, so the picker opens straight away — a literal cannot go there — and the ref is passed in as the daemon's body instead of being executed here. The fn now has no free arguments AND carries :process: the two conditions for a service."
+               :body "On the tutorial-daemon card click the [[+]] on the :body slot and pick [[tutorial-tick]]. :body is a callable slot, so the picker opens straight away — a literal cannot go there — and the ref is passed in as the daemon's body instead of being executed here. The fn now has no free arguments AND carries :process: the two conditions for a service."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-tick\"]"]
                :check {:kind "binding-bound" :name "tutorial-daemon" :slot "body"}}

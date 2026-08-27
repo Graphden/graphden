@@ -957,6 +957,13 @@
       (is (some #(= "add" (:name %)) (:fns ns-only))
           "a namespace-only needle lists that namespace's fns")))
 
+  (testing "scope=search — exact-name hits rank above qualified-only matches"
+    (let [body (via-entities {"scope" "search" "q" "str"})]
+      (is (= "str" (:name (first (:fns body))))
+          (str "the fn named exactly `str` must survive the cap and come "
+               "first, even though `str` also matches every core.strings.* "
+               "qualified name"))))
+
   (testing "scope=search with a blank q — no matches"
     (is (empty? (:fns (via-entities {"scope" "search" "q" "   "})))))
 

@@ -413,11 +413,24 @@ function openFnPicker(opts) {
     // prints the canonical `ns.path/name` spelling everywhere — accept
     // a pasted qualified name in either form.
     const q = search.value.trim().toLowerCase().replace(/\//g, '.');
+    // Mirror the server's ranking: exact name, then name-substring, then
+    // qualified-only — so an exact hit isn't crowded below a namespace's
+    // worth of qualified matches before the 50-row cap.
+    const tier = (c) => {
+      const n = c.name.toLowerCase();
+      if (n === q) return 0;
+      if (n.includes(q)) return 1;
+      return 2;
+    };
     const filtered = candidates
       .filter(c => !q || c.qualified.toLowerCase().includes(q)
                        || c.name.toLowerCase().includes(q))
       .sort((a, b) => {
         if (a.sameNs !== b.sameNs) return a.sameNs ? -1 : 1;
+        if (q) {
+          const t = tier(a) - tier(b);
+          if (t !== 0) return t;
+        }
         return a.qualified.localeCompare(b.qualified);
       });
 

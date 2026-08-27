@@ -340,11 +340,21 @@
         qualified (fn [f]
                     (let [p (get paths (:namespace-id f))]
                       (if (seq p) (str p "." (:name f)) (:name f))))
+        ;; Rank BEFORE capping: an exact-name hit must survive the cap even
+        ;; when a short needle also matches a whole namespace's worth of
+        ;; qualified names (`str` matches everything under `core.strings`).
+        tier (fn [f]
+               (let [n (str/lower-case (:name f))]
+                 (cond
+                   (= n needle) 0
+                   (str/includes? n needle) 1
+                   (str/includes? (str/lower-case (qualified f)) needle) 2)))
         matches (when needle
-                  (into []
-                        (filter #(and (:name %)
-                                      (str/includes? (str/lower-case (qualified %)) needle)))
-                        (:fns base)))
+                  (->> (:fns base)
+                       (keep #(when (:name %)
+                                (when-let [t (tier %)] [t %])))
+                       (sort-by first)
+                       (mapv second)))
         limited (into [] (take *default-search-limit*) matches)]
     {:fns (mapv (comp (partial light-fn-row @rev-index) role-of) limited)
      :truncated? (boolean (and needle (> (count matches) *default-search-limit*)))}))

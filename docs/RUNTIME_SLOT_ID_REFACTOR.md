@@ -239,14 +239,24 @@ descendant-binding bug (a value bound as `:body` silently vanished):
   rename-override hop, ref-tree sources by cross-fn ref-rename
   translation.
 
-- **Known gap (deliberately open).** A descendant of a renaming
-  ancestor advertises the SOURCE name on its free-arg surface
-  (`free-arg-ext-names` → `:content`, not `:body`) and call-time args
-  by the renamed name miss. Three attempted fixes (chain-aware
+- **Surface gap — CLOSED by
+  [ADR-inherited-rename-surface](adr/ADR-inherited-rename-surface.md).**
+  A descendant of a renaming ancestor used to advertise the SOURCE
+  name (`free-arg-ext-names` → `:content`) and call-time args by the
+  renamed name missed. Three in-the-walk fixes (chain-aware
   `own-rename-chain-map`; inherited-seed walker layer; name/slot-id
   dual env writes) each broke existing platform classifications
   (`_list-secrets-shape-row`, `_layout-api-handler`, graph-composed
   `/health`) — surfaces of fns like `_shape-secret-base` depend on the
-  per-fid rename scoping. Making renames inherit into surfaces needs
-  its own design pass over `deep-free-ext-names*`'s translate scoping;
-  don't retry the three shapes above as one-liners.
+  per-fid rename scoping. The landed design applies inherited renames
+  as a POST-PROCESSING view over the walker's `{ext-name, slot-id}`
+  output at the public boundary only (`surface-entries` /
+  `free-arg-ext-names` / `translate-named-args` /
+  `free-arg-accepted-names`); the walk and every internal consumer
+  (`build-hof-translation`, HOF classification, cache projection,
+  env writes) stay on raw per-fid naming. Raw source names remain
+  accepted at the boundary. One genuine walker hole was fixed along
+  the way: `deep-free-ext-entries*`'s positional `{:as :n}` branch
+  looked the rename slot up on the WALKED fid only, so a descendant's
+  positional free had no slot-id entry at all (no boundary routing);
+  it now resolves along the inheritance chain.

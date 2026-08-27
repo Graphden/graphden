@@ -116,7 +116,7 @@
                      :args named-args
                      :args-type (type named-args)})))
   (when (and (seq named-args) (uuid? fn-id))
-    (let [valid (set (cr/free-arg-ext-names context fn-id))]
+    (let [valid (cr/free-arg-accepted-names context fn-id)]
       (when-let [unknown (first (remove valid (keys named-args)))]
         (throw (ex-info (str "Unknown argument name: " unknown)
                         {:type :execution-error/unknown-arg-name

@@ -637,10 +637,26 @@
                                 (and (map? (:value item))
                                      (:as (:value item))
                                      (not (:literal item)))
+                                ;; The rename slot for a positional
+                                ;; `{:as :n}` item is owned by the fn
+                                ;; whose binding carries the item —
+                                ;; which, when the walk sits at a
+                                ;; DESCENDANT, is an ancestor. Resolve
+                                ;; along the inheritance chain
+                                ;; (closest junction wins; fid-first
+                                ;; keeps the direct case identical),
+                                ;; else a descendant's positional free
+                                ;; had NO slot-id entry at all — no
+                                ;; boundary slot routing, no rename
+                                ;; surface (ADR-inherited-rename-
+                                ;; surface).
                                 (let [n (some-> (:as (:value item)) keyword)
                                       slot (when n
-                                             (get (:slot-by-fn-name lookups)
-                                                  [fid n]))
+                                             (some #(get (:slot-by-fn-name
+                                                           lookups)
+                                                         [% n])
+                                                   (l/inheritance-chain*
+                                                     fid lookups)))
                                       sid (:id slot)
                                       ext (or (when slot
                                                 (get next-renames sid))
@@ -796,7 +812,28 @@
                            r-fn-id
                            (:name (get (:fn-map lookups) r-fn-id)))))]
     (let [frees (set (deep-free-ext-names r-fn-id lookups))
-          unknown (remove frees declared)]
+          ;; The author may declare a param under the PUBLIC
+          ;; (closest-chain-rename) name the editor shows
+          ;; (ADR-inherited-rename-surface). Canonicalize such a
+          ;; declaration back to the walker's raw name — the runtime
+          ;; keys the invocation map by wiring names. A renamed name
+          ;; covering several distinct raws stays un-canonicalized and
+          ;; falls into the clear unknown-param error below.
+          renamed->raw (->> (deep-free-ext-entries r-fn-id lookups)
+                            (keep (fn [{:keys [ext-name slot-id]}]
+                                    (when slot-id
+                                      (when-let [rn (l/chain-rename-for-slot
+                                                      r-fn-id slot-id lookups)]
+                                        (when (not= rn ext-name)
+                                          [rn ext-name])))))
+                            (group-by first)
+                            (keep (fn [[rn pairs]]
+                                    (let [raws (distinct (map second pairs))]
+                                      (when (= 1 (count raws))
+                                        [rn (first raws)]))))
+                            (into {}))
+          canonical (mapv #(get renamed->raw % %) declared)
+          unknown (remove frees canonical)]
       (when (seq unknown)
         (throw (ex-info (str ":lambda-params names args that are not free "
                              "args of the fn: " (pr-str (vec unknown))
@@ -805,7 +842,7 @@
                          :fn-id r-fn-id
                          :declared declared
                          :unknown (vec unknown)})))
-      (vec declared))))
+      canonical)))
 
 
 (defn alpha-equiv-lambda-params

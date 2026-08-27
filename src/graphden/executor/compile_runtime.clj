@@ -920,18 +920,69 @@
            :base-fns (:base-fns ctx))))
 
 
+(defn surface-entries
+  "The fn's free-arg entries AS THE PUBLIC BOUNDARY presents them —
+   `deep-free-ext-entries` with each entry's slot-id mapped through
+   the closest-chain rename (`l/chain-rename-for-slot`). An entry a
+   chain rename covers gets the renamed `:ext-name` and keeps the
+   walker's raw name under `:source-name`, so callers may address the
+   slot by either. Entries no chain rename covers pass through
+   unchanged.
+
+   This is a PRESENTATION view (ADR-inherited-rename-surface): the
+   underlying walk — and every internal consumer of
+   `deep-free-ext-entries` (`build-hof-translation`,
+   `hof-lambda-params`, `cache-projection-frees`) — stays on raw
+   per-fid naming; only name-facing boundaries read this."
+  [fn-id lookups]
+  (mapv (fn [{:keys [ext-name slot-id] :as e}]
+          (let [rn (when slot-id
+                     (l/chain-rename-for-slot fn-id slot-id lookups))]
+            (if (and rn (not= rn ext-name))
+              (assoc e :ext-name rn :source-name ext-name)
+              e)))
+        (r/deep-free-ext-entries fn-id lookups)))
+
+
 (defn free-arg-ext-names
   "Ordered vector of external names for fn-id's free args reachable
    through its ref-chain — propagates names through non-HOF refs and
    env-bindings so deep frees (`:request` of `:_request-body` →
    `:_create-parsed` → `:process-create-entity`) surface at the outer
-   fn-def's interface.
+   fn-def's interface. Names are the PUBLIC (closest-chain-rename)
+   view — a free-`body` descendant of `:wrap-custom-script` reports
+   `:body`, matching the canvas and the Run form
+   (ADR-inherited-rename-surface).
 
    Includes optional frees (e.g. `:default` of `:get`) — callers can
    override them; HOF dispatch is shielded by the structural-name
    fast-path in `hof-lambda-params`."
   [ctx fn-id]
-  (vec (r/deep-free-ext-names fn-id (lookups-for-ctx ctx))))
+  (let [lookups (lookups-for-ctx ctx)
+        entries (surface-entries fn-id lookups)
+        rename-of (into {}
+                        (keep (fn [e]
+                                (when-let [src (:source-name e)]
+                                  [src (:ext-name e)])))
+                        entries)]
+    ;; Order and MEMBERSHIP stay the NAME walker's — the entries
+    ;; walker also lists env-covered slots the caller doesn't supply,
+    ;; so entries only contribute the rename SUBSTITUTION, never new
+    ;; names.
+    (into [] (distinct)
+          (map #(get rename-of % %)
+               (r/deep-free-ext-names fn-id lookups)))))
+
+
+(defn free-arg-accepted-names
+  "Every name a caller may use for fn-id's free args: the public
+   (renamed) surface PLUS the walker's raw names — raw stays accepted
+   for compatibility (`{:content v}` keeps working next to
+   `{:body v}`), both routing to the same slot in
+   `translate-named-args`."
+  [ctx fn-id]
+  (into (set (r/deep-free-ext-names fn-id (lookups-for-ctx ctx)))
+        (free-arg-ext-names ctx fn-id)))
 
 
 ;; =============================================================================
@@ -990,8 +1041,18 @@
   [fn-id args lookups]
   (if (or (nil? args) (empty? args))
     args
-    (let [entries (r/deep-free-ext-entries fn-id lookups)
-          by-name (group-by :ext-name entries)]
+    (let [entries (surface-entries fn-id lookups)
+          ;; Index by BOTH the public (renamed) name and the walker's
+          ;; raw name — `{:body v}` and `{:content v}` land in the
+          ;; same slot (ADR-inherited-rename-surface).
+          by-name (reduce (fn [acc e]
+                            (cond-> (update acc (:ext-name e)
+                                            (fnil conj []) e)
+                              (:source-name e)
+                              (update (:source-name e)
+                                      (fnil conj []) e)))
+                          {}
+                          entries)]
       (reduce-kv
         (fn [acc arg-name v]
           (let [matches (get by-name arg-name)]

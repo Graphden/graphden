@@ -13,13 +13,16 @@
    matching the slot the editor writes for the same edit; every other
    rename shape keeps the rename-view slot as its anchor.
 
-   Known residual gap (out of scope here): CALL-TIME args addressed
-   by the ancestor's renamed name (`execute` with `{:body …}` on a
-   descendant with a FREE body) still miss — the free-arg surface of
-   a descendant advertises the SOURCE name (`content`), which also
-   is what call-time resolution honours."
+   The call-time half of the same contract lives in
+   `inherited-rename-surface-test` below
+   (docs/adr/ADR-inherited-rename-surface.md): a descendant's public
+   free-arg surface advertises the ancestor's renamed name, and
+   call-time args are accepted under BOTH the renamed and the raw
+   source name."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.exec-harness :as harness]))
@@ -60,3 +63,43 @@
   (testing "call-time args by the SOURCE name reach a free descendant"
     (is (= [:script {} "YY();"]
            (exec/execute-by-name harness/*context* "irb-free" {:content "YY();"})))))
+
+
+(deftest inherited-rename-surface-test
+  (harness/sync! [{:name :irs-free :parent :wrap-custom-script}])
+
+  (testing "the public free-arg surface advertises the ancestor's renamed name"
+    (is (= [:body] (vec (cr/free-arg-ext-names harness/*context*
+                                               (harness/fn-id "irs-free"))))))
+
+  (testing "call-time args by the RENAMED name reach the descendant"
+    (is (= [:script {} "ZZ();"]
+           (exec/execute-by-name harness/*context* "irs-free" {:body "ZZ();"}))))
+
+  (testing "the raw source name stays accepted (compatibility)"
+    (is (= [:script {} "YY();"]
+           (exec/execute-by-name harness/*context* "irs-free" {:content "YY();"})))
+    (is (contains? (cr/free-arg-accepted-names harness/*context*
+                                               (harness/fn-id "irs-free"))
+                   :content)))
+
+  (testing "execute-with-named-args validation accepts the renamed name"
+    (is (= [:script {} "VV();"]
+           (exec/execute-with-named-args harness/*context*
+                                         (harness/fn-id "irs-free")
+                                         {:body "VV();"}))))
+
+  (testing "the crud (Run-form) surface and the executor surface AGREE on the name"
+    ;; The whole point of the contract: one public name, everywhere.
+    (is (= #{:body}
+           (set (keys (lookup/free-arg-slot-map harness/*context*
+                                                (harness/fn-id "irs-free"))))
+           (set (cr/free-arg-ext-names harness/*context*
+                                       (harness/fn-id "irs-free"))))))
+
+  (testing "surfaces without inherited renames are untouched (regression pin)"
+    ;; Root-slot renames were already chain-aware; a plain composed fn
+    ;; keeps its raw surface verbatim.
+    (harness/sync! [{:name :irs-plain :parent :wrap-script}])
+    (is (= [:content] (vec (cr/free-arg-ext-names harness/*context*
+                                                  (harness/fn-id "irs-plain")))))))

@@ -295,6 +295,27 @@
       :else (recur (:source-slot-id (get slot-map src)) (inc depth)))))
 
 
+(defn chain-rename-for-slot
+  "The closest-chain RENAME name for `slot-id` at `fn-id`, or nil when
+   no fn along the inheritance chain owns a rename-view slot whose
+   `source-slot-id` chain transitively reaches `slot-id`. The
+   resolution half of `rename-for-slot`, exposed on its own for the
+   public-boundary surface mapping (ADR-inherited-rename-surface):
+   nil-on-miss lets that caller keep the walker's raw ext-name (which
+   may legitimately differ from the slot's own name) instead of
+   falling back to it."
+  [fn-id slot-id {:keys [slot-map fn-slots-by-fn] :as lookups}]
+  (some (fn [fid]
+          (let [own-slots (->> (get fn-slots-by-fn fid [])
+                               (keep #(get slot-map (:slot-id %))))]
+            (some-> (first (filter #(rename-chain-reaches?
+                                      % slot-id slot-map)
+                                   own-slots))
+                    :name
+                    keyword)))
+        (inheritance-chain* fn-id lookups)))
+
+
 (defn rename-for-slot
   "Effective external name for `slot-id` as seen by F's caller. Walks
    the inheritance chain (closest-first); the first own-slot found
@@ -316,18 +337,9 @@
    populates the FK for every EDN-declared rename. Positional
    list-item renames don't reach this resolver — they live in
    binding-list-item rows and resolve through that path."
-  [fn-id slot-id {:keys [slot-map fn-slots-by-fn] :as lookups}]
-  (let [renamed (some (fn [fid]
-                        (let [own-slots (->> (get fn-slots-by-fn fid [])
-                                             (keep #(get slot-map (:slot-id %))))]
-                          (some-> (first (filter #(rename-chain-reaches?
-                                                    % slot-id slot-map)
-                                                 own-slots))
-                                  :name
-                                  keyword)))
-                      (inheritance-chain* fn-id lookups))]
-    (or renamed
-        (some-> (get-in slot-map [slot-id :name]) keyword))))
+  [fn-id slot-id {:keys [slot-map] :as lookups}]
+  (or (chain-rename-for-slot fn-id slot-id lookups)
+      (some-> (get-in slot-map [slot-id :name]) keyword)))
 
 
 (defn effective-reader-slot-id

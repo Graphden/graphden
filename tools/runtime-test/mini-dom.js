@@ -23,7 +23,7 @@
 'use strict';
 
 // `tag.a.b[attr][attr="v"]` — the shapes the runtime's builders use.
-const SELECTOR_RE = /^([a-zA-Z][\w-]*)?((?:\.[\w-]+)*)((?:\[[^\]]+\])*)$/;
+const SELECTOR_RE = /^([a-zA-Z][\w-]*)?(#[\w-]+)?((?:\.[\w-]+)*)((?:\[[^\]]+\])*)$/;
 const ATTR_RE = /\[([\w-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]/g;
 
 function parseSimple(sel) {
@@ -32,19 +32,21 @@ function parseSimple(sel) {
   const attrs = [];
   let a;
   ATTR_RE.lastIndex = 0;
-  while ((a = ATTR_RE.exec(m[3] || '')) !== null) {
+  while ((a = ATTR_RE.exec(m[4] || '')) !== null) {
     const value = a[2] !== undefined ? a[2] : (a[3] !== undefined ? a[3] : a[4]);
     attrs.push({ name: a[1], value: value === undefined ? null : value });
   }
   return {
     tag: m[1] ? m[1].toLowerCase() : null,
-    classes: (m[2] || '').split('.').filter(Boolean),
+    id: m[2] ? m[2].slice(1) : null,
+    classes: (m[3] || '').split('.').filter(Boolean),
     attrs,
   };
 }
 
 function matches(node, part) {
   if (part.tag && node.tagName.toLowerCase() !== part.tag) return false;
+  if (part.id && node.getAttribute('id') !== part.id) return false;
   if (!part.classes.every((c) => node.classList.contains(c))) return false;
   return part.attrs.every(({ name, value }) => {
     const got = node.getAttribute(name);

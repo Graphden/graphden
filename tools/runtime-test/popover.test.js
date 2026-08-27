@@ -151,7 +151,7 @@ function popoverUnderTest(viewport) {
     isVisible: () => state.visible,
     onDismiss: () => { state.dismissed += 1; },
   });
-  return { fire, el, inside, anchor, anchorChild, outside, state };
+  return { fire, document, el, inside, anchor, anchorChild, outside, state };
 }
 
 
@@ -166,6 +166,20 @@ test('a pointerdown inside does not', () => {
   const p = popoverUnderTest();
   p.fire('pointerdown', { target: p.inside });
   assert(p.state.dismissed === 0, 'clicking your own content must not close you');
+});
+
+
+test('a pointerdown inside the tutorial popover does not', () => {
+  // Mid-lesson the reader clicks the tour's copy-chips while the popover the
+  // step opened (Run, a picker) waits for the value — that click must not be
+  // "outside". The tour surface is identified by its #gd-tour-pop id.
+  const p = popoverUnderTest();
+  const tour = p.document.createElement('div');
+  tour.setAttribute('id', 'gd-tour-pop');
+  const chip = p.document.createElement('button');
+  tour.appendChild(chip);
+  p.fire('pointerdown', { target: chip });
+  assert(p.state.dismissed === 0, 'the tutorial popover subtree is exempt');
 });
 
 

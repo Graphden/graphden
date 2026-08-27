@@ -214,9 +214,14 @@
 
 (deftest static-scaffold-parts
   (let [body (body-of :_partial-xp-handler {"fn-id" (str (ga/fn-id :add))})]
-    (doseq [marker ["execute-popover-header" "execute-history-toggle"
-                    "execute-history-host" "execute-popover-body"
+    (doseq [marker ["execute-popover-header" "execute-popover-body"
                     "execute-options-row" "execute-action-bar"
                     "execute-run-btn" "execute-cancel-btn"
-                    "execute-result-host" "execute-popover-close"]]
-      (is (str/includes? body marker) (str marker " present")))))
+                    "execute-result-host"]]
+      (is (str/includes? body marker) (str marker " present")))
+    ;; The pane lives in the inspector's Runs tab now — no close button,
+    ;; and the history list is mounted below the form by the client, not
+    ;; toggled from the header.
+    (doseq [marker ["execute-popover-close" "execute-history-toggle"
+                    "execute-history-host"]]
+      (is (not (str/includes? body marker)) (str marker " retired")))))

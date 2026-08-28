@@ -118,8 +118,8 @@ the inherited type) — "you can't promise less than your parent
 did." A widening is a type ERROR, but it does not block the
 save: the write succeeds and the failure is recorded as a
 per-branch type diagnostic. The fn's card gets a ⚠ badge, the
-fn shows up in the **Organization** surface's **Type errors** section
-(open it from the account menu in the top bar — your avatar, or a lock icon on a self-hosted instance), and trying to
+fn shows up in the **Type errors** tab of the diagnostics bar
+(the collapsible strip under the canvas), and trying to
 EXECUTE it is refused until you fix the type. (Structural
 violations — cycles, name collisions — and secret-flow
 violations still reject the save outright.)
@@ -158,8 +158,8 @@ violations still reject the save outright.)
    status flips to ✗ (refinement violated) — but Save still
    LANDS. The fn is now flagged: its card root row gains a ⚠
    badge (hover: "1 type error on this fn — see the Type errors
-   panel") and the **Organization** surface's **Type errors** section
-   (open it from the account menu) lists
+   panel") and the diagnostics bar's **Type errors** tab (under
+   the canvas) lists
    `:tutorial-bad-port` with the refinement diagnostic.
 6. Press ▶, tick the side-effects acknowledgement, and hit Run
    (no need to fill the free args — the refusal fires before

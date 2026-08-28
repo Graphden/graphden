@@ -124,8 +124,8 @@ Two failure modes guard an MI parent set:
   incompatible types (neither a subtype of the other). This is a
   TYPE error: at package sync it fails the load; in the editor
   the fn still SAVES, and the conflict surfaces as a recorded
-  diagnostic — ⚠ badge on the card, an entry in the "Type
-  errors" section on the **Organization** surface (Lesson 03) — with
+  diagnostic — ⚠ badge on the card, an entry in the diagnostics
+  bar's "Type errors" tab (Lesson 03) — with
   execution refused until one
   side backs off.
 

@@ -100,6 +100,12 @@ the log carries a loud WARN.
 3. Edit the app in the hub editor → the executor logs
    `RemoteStorage refreshed` (SSE push or the next poll tick) and the next
    request serves the change.
+4. In the hub editor, the org owner's **Organization → Executor** panel
+   shows the org's execution mode and — when the executor's SSE stream is
+   up — "connected now: 1". (Per hub instance: on a multi-pod hub the
+   stream lands on one pod, so another pod's panel may show 0 while the
+   stream is healthy; the executor's own `RemoteStorage refreshed` log is
+   the ground truth.)
 
 ## Troubleshooting
 

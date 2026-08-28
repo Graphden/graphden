@@ -143,6 +143,28 @@
                @subscribers)))
 
 
+(defonce ^:private active-relay-subscribers
+  ;; Pointer to the ACTIVE relay's subscribers atom (nil when no relay runs
+  ;; in this process). Process-global rather than component state so a
+  ;; consumer with no handle on the integrant system — the tenancy addon's
+  ;; executor-admin panel, reached via requiring-resolve — can answer "is
+  ;; org X's remote executor connected right now?". PER-POD truth: a
+  ;; subscriber holds its stream to ONE pod, so a consumer on another pod
+  ;; sees 0 — present it as "connected to this hub instance", never as a
+  ;; fleet-wide fact.
+  (atom nil))
+
+
+(defn org-connection-count
+  "How many remote/BYO executors are subscribed to THIS pod's relay under
+   `org` right now. nil when no relay runs in this process (distinct from
+   0 = relay up, nobody connected). A nil `org` counts the single-tenant
+   (nil-org) subscribers."
+  [org]
+  (when-let [subs @active-relay-subscribers]
+    (count (filter #(= org %) (vals @subs)))))
+
+
 (defn start-relay!
   "Start the SSE relay: an httpkit server on `port` serving `/events/stream`,
    plus a callback on `notify-listener` that broadcasts each `graphden_events`
@@ -163,13 +185,17 @@
                    (pg-notify/register! notify-listener
                                         (fn [event] (broadcast! subscribers event))))]
     (log/info "SSE invalidation relay started" {:port port})
+    (reset! active-relay-subscribers subscribers)
     {:server server :subscribers subscribers
      :notify-listener notify-listener :callback callback}))
 
 
 (defn stop-relay!
   "Unregister the callback + stop the httpkit server."
-  [{:keys [server notify-listener callback]}]
+  [{:keys [server notify-listener callback subscribers]}]
+  ;; Only clear the introspection pointer if it is OURS — a concurrently
+  ;; running relay (parallel tests) must keep its registration.
+  (swap! active-relay-subscribers (fn [cur] (when-not (identical? cur subscribers) cur)))
   (when (and notify-listener callback)
     (pg-notify/unregister! notify-listener callback))
   (when server (server))

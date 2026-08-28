@@ -120,6 +120,7 @@
                   "packages/app/editor/editor-grants-admin.js"
                   "packages/app/editor/editor-users-admin.js"
                   "packages/app/editor/editor-roles-admin.js"
+                  "packages/app/editor/editor-executors-admin.js"
                   "packages/app/editor/editor-orgs-admin.js"
                   "packages/app/editor/editor-platform-access.js"
                   "packages/app/editor/editor-quota.js"

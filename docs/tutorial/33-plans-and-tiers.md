@@ -91,8 +91,11 @@ executor** on the customer's hardware runs the org's app. The flip is
 per-ORG and operator-side; the customer's half is one container with a
 minted API token. If you want one app self-run and the rest hosted,
 that app gets its own org (you can belong to several — lesson 29) and
-only that org flips. The full recipe — both halves, verification,
-troubleshooting — is [BYO_RUNBOOK.md](../BYO_RUNBOOK.md).
+only that org flips. As the org's owner you can watch it from
+**Organization → Executor**: the current mode, whether your executor is
+connected to the hub right now, and a ready-to-run snippet with your org
+prefilled. The full recipe — both halves, verification, troubleshooting —
+is [BYO_RUNBOOK.md](../BYO_RUNBOOK.md).
 
 ## Handing out a demo
 

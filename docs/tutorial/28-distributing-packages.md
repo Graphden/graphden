@@ -11,7 +11,7 @@ so it lives as a **⬆ action on the namespace** in the Explorer.
 **Concepts introduced**: `registry`, `:package-version`,
 `publish`, `pin` (`:package-install`), `reference-install` vs
 `fork` (copy-on-write), `version constraint` / `latest` /
-`rollback`, the **packages chip** (Build surface) and the
+`rollback`, `withdraw`, the **packages chip** (Build surface) and the
 per-namespace **⬆ publish** action, publish **visibility**
 (org-private vs public) and the `publish-packages` capability,
 the Organization surface's **governance view**, and — beyond the
@@ -171,6 +171,37 @@ reference them) — uninstall only removes *this branch's* claim on
 the package. Remove the last pin and the table collapses to the
 empty-state notice.
 
+## Withdraw — retract a published version
+
+Uninstall is the consumer's act; **withdraw** is the publisher's.
+A published version is immutable, but not eternal — publishing the
+wrong namespace or the wrong number shouldn't be permanent. The
+publisher can delete the registry row:
+
+```bash
+curl -X DELETE "http://localhost:9002/api/packages/withdraw?name=hello&version=1.0.0" \
+  -H "Authorization: Bearer $AUTH_TOKEN"
+# → {"ok":true,"withdrawn":"hello"}
+```
+
+Rules:
+
+- **Refused with 409 `still-installed`** while *any* branch still
+  pins the package — a pin resolves through the version row, so
+  withdrawing under it would break installs. Consumers unpin
+  (uninstall or update away) first.
+- **404 `no-such-version`** when the `(name, version)` pair is
+  unknown.
+- Withdrawing is gated by the same **`publish-packages`**
+  capability as publishing, and only on your own org's rows — a
+  non-publisher can't erase what your org shipped.
+- The materialized `ns@version` fns are **not** removed — by then
+  they're ordinary graph content, deleted like any other namespace
+  if you want them gone too.
+
+There's no panel button for this — withdraw is an API-only,
+deliberate act.
+
 ## Governance — the Organization surface's packages view
 
 Publish and install are everyday **Build**-surface acts; oversight
@@ -206,6 +237,11 @@ on Organization; acting on it happens on the Build packages chip.
    governance catalog lists both published `hello` versions with
    their visibility; the install audit shows a row per pin
    (re-install first if you removed the pin in step 6).
+8. Withdraw `hello 1.0.0` with the `curl` above — it's unpinned,
+   so the row disappears from the registry browse. Now try
+   withdrawing `1.1.0` while its pin from step 7 exists: a 409
+   `still-installed` refusal. Uninstall first, and the withdraw
+   goes through.
 
 ## Installing from ANOTHER graphden's registry
 

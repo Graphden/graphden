@@ -78,6 +78,11 @@ any time to re-open direct writes.
 
 ### Change proposals & review (📤 → ✅ → ⇢)
 
+> Prefer to be shown? The review cycle is its own guided in-editor
+> tour — protection, the 409 refusal, proposal and approval:
+> [open the demo with tour 08b running](https://app.graphden.dev/?demo=1&tutorial=08b)
+> (no sign-up), or pick lesson 08b in the editor's account menu.
+
 Beyond "who/how" you can require *review*: someone proposes a change,
 someone (with rights) approves it, then it merges. All in the branch
 popover, no separate "pull request" object:

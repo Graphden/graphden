@@ -921,11 +921,98 @@
                :targets ["#branch-chip-btn" ".branch-popover"]
                :check {:kind "on-branch" :name "main"}}
               {:title "main never saw it"
-               :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. In the branch popover, Δ shows the difference and ⇢ merges the branch in when you want it."
+               :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. Time to compare the two sides properly."
                :target "#branch-chip-btn"
                :check {:kind "manual"}}
+              {:title "Open the diff"
+               :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The diff modal lists every entity that resolves differently between the two branches — here one modified row: the binding you changed. (A comment box sits under it — that is where review conversations live.)"
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-diff[data-diff-source=\"tutorial-branch\"]"]
+               :check {:kind "dom" :selector ".branch-diff-modal:not(.hidden) .branch-diff-card"}}
+              {:title "Read it, then close it"
+               :body "That row is the whole difference between the branches — exactly what a reviewer would read. Close the diff ([[×]]). (Pressing [[⇢]] on the row would fold the branch into main; the tour leaves that unclicked — a merged branch becomes part of main's history and could no longer be cleaned up at the end.)"
+               :target ".branch-diff-close"
+               :check {:kind "dom-absent" :selector ".branch-diff-modal:not(.hidden)"}}
               {:title "That's branching"
-               :body "Fork, edit in isolation, compare, merge — over a live graph, with no files to copy. The branch row also carries the review workflow: 📤 propose a branch for review, ✅ approve one (its badge shows n/N approvals), and ⚙ protect a branch — require merges (no direct writes) and require N approvals before a merge lands. Each proposal even has a comment thread under its Δ diff. The written lesson 08 covers those plus protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
+               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: 📤 propose, ✅ approve, ⚙ protect — the NEXT tour lesson (08b · Review) walks that whole cycle, refusal included. The written lesson 08 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "08b"
+             :chapter "The editor"
+             :title "Review: propose and approve"
+             ;; Like lesson 08 this lesson MANAGES branches itself — a
+             ;; protected release branch plus a feature branch proposed
+             ;; into it; a tour scratch branch would fork the story
+             ;; mid-way. The protected branch is LESSON-owned (never
+             ;; main), so an abort can't leave the user's trunk locked
+             ;; behind a review requirement.
+             :in-place true
+             :steps
+             [{:title "Review is the target's policy"
+               :body "On GitHub you protect a branch and require approvals before anything merges into it; graphden works the same way. You will build a protected release branch, propose a change into it, watch an unapproved merge get refused, then approve it so the merge WOULD land."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Something to change"
+               :body "Type `const` in the Explorer filter and click the [[const]] row, then [[⋯]] → [[Extend]] and name it `review-demo` — [[Save]]."
+               :target "input[placeholder=\"Filter...\"]"
+               :targets ["input[placeholder=\"Filter...\"]" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "review-demo" :parent "const"}
+               :creates {:type "fn" :name "review-demo"}}
+              {:title "Give it a value"
+               :body "Click the [[+]] on :value, choose [[Bind literal]], enter `1` — then [[Save]]. This is the state your “release” will hold."
+               :target ".placeholder-binder"
+               :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "binding-value" :name "review-demo" :slot "value" :value "1"}}
+              {:title "A release branch"
+               :body "Click the branch chip, type `tutorial-release` in the create row and click [[Create]]. This branch plays the role of a protected main — without touching your real one."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "on-branch" :name "tutorial-release"}
+               :creates {:type "branch" :name "tutorial-release"}}
+              {:title "Protect it"
+               :body "Open the branch chip again and click [[⚙]] on the tutorial-release row. Set [[Required approvals]] to 1 and close the menu. From now on, a merge into tutorial-release needs one recorded approval — the rule lives on the TARGET."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-protect[data-protect-branch=\"tutorial-release\"]" "#gd-protect-pop"]
+               :check {:kind "dom" :selector ".branch-row-protect[data-protect-branch=\"tutorial-release\"][data-reqappr=\"1\"]"}}
+              {:title "A feature branch"
+               :body "Close the ⚙ menu and get the branch popover back up (the chip toggles it). In its create row type `tutorial-feature` and click [[Create]]. It forks from the branch you are ON — tutorial-release — so that is where its proposal will aim."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "on-branch" :name "tutorial-feature"}
+               :creates {:type "branch" :name "tutorial-feature"}}
+              {:title "Change the value here"
+               :body "Still on review-demo: click its value (“1”) and change it to `2` — then [[Save]]. That edit is the change you are about to put up for review."
+               :target ".arg-value-editable"
+               :check {:kind "binding-value" :name "review-demo" :slot "value" :value "2"}}
+              {:title "Back to the release branch"
+               :body "Open the branch chip and click the tutorial-release row — you review from the target's side."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "on-branch" :name "tutorial-release"}}
+              {:title "Try to merge — refused"
+               :body "Click [[⇢]] on the tutorial-feature row and confirm. The merge is refused: “requires 1 approval(s)”. No branch slips into a protected target unreviewed — not even yours."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-merge[data-merge-source=\"tutorial-feature\"]"]
+               :check {:kind "dom" :selector "#branch-popover-error:not(.hidden)"}}
+              {:title "Propose it"
+               :body "Click [[📤]] on the tutorial-feature row — the branch is now submitted for review into its base, and the popover header counts “1 proposal awaiting review”. Proposed branches are the reviewer's to-do list."
+               :target ".branch-row-propose[data-propose-branch=\"tutorial-feature\"]"
+               :check {:kind "dom" :selector ".branch-row-propose.on[data-propose-branch=\"tutorial-feature\"]"}}
+              {:title "Approve it"
+               :body "Click [[✅]] on the same row. Its badge flips to 1/1 — the requirement is met. (By default your OWN approval counts, so a solo user is never locked out; a team that wants four-eyes review unticks “Count the author's own approval” in ⚙.)"
+               :target ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"
+               :check {:kind "dom" :selector ".branch-appr-count.ok"}}
+              {:title "Ready to land — and why we stop"
+               :body "The badge reads 1/1: pressing [[⇢]] now WOULD land the merge. The tour leaves it unclicked on purpose — a merge is by-reference (the target reads the source's version rows), so a merged branch becomes part of its target's history and can no longer be deleted. Landing this one would make the sandbox permanent; in real work that permanence is exactly the point."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Back to main"
+               :body "Open the branch chip and click the main row — the review sandbox has served its purpose."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "on-branch" :name "main"}}
+              {:title "That's review"
+               :body "Refuse, propose, approve — with the rule on the target, exactly the pull-request shape. Editing a proposed branch dismisses its now-stale approvals (like GitHub dismissing stale reviews), every proposal carries a comment thread under its Δ diff, and ⚙ can also demand “push only via merge” (no direct writes at all). The written lesson 08 covers all of it. Click [[Finish]] to clean up — review-demo and both branches go."
                :target nil
                :check {:kind "manual"}}]}
             {:id "25"

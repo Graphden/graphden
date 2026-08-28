@@ -1,4 +1,4 @@
-// Lessons 07, 08, 26 — effects, branches, tests (+ branch isolation)
+// Lessons 07, 08, 08b, 26 — effects, branches, review, tests (+ branch isolation)
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -14,7 +14,7 @@ const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
-  pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
+  pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, tourTitle,
@@ -29,7 +29,7 @@ const {
     }
   });
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-ops — lessons 07 / 08 / 26 + branch isolation');
+  console.log('edit-tutorial-tour-ops — lessons 07 / 08 / 08b / 26 + branch isolation');
   let failed = false;
   try {
     await hardCleanup(page);
@@ -61,6 +61,27 @@ const {
     assert(mainValue.includes('main version'),
       'main still reads "main version" after the branch edit');
     assert(await clickTourButton(page, 'Next'), 'lesson 08 back-on-main Next');
+    await waitTourTitle(page, 'Open the diff', 150000);
+    // Δ on the tutorial-branch row → diff modal with the fn's changed row.
+    await waitClickable(page, '#branch-chip-btn');
+    await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+    await page.waitForSelector('.branch-row-diff[data-diff-source="tutorial-branch"]',
+      {timeout: 15000});
+    await page.evaluate(() => document.querySelector(
+      '.branch-row-diff[data-diff-source="tutorial-branch"]').click());
+    await page.waitForFunction(() => {
+      const m = document.querySelector('.branch-diff-modal');
+      // The loaded diff lists the modified BINDING row (by entity id) with a
+      // difference count — the fn's NAME does not appear in the row.
+      return m && !m.classList.contains('hidden')
+        && !m.querySelector('.branch-diff-loading')
+        && /difference/.test(m.textContent || '');
+    }, null, {timeout: 60000, polling: 200});
+    await waitTourTitle(page, 'Read it, then close it', 150000);
+    // The lesson stops short of merging on purpose: a branch merged into
+    // main becomes part of main's history (merge is by-reference) and can
+    // no longer be deleted — cleanup would leave it behind forever.
+    await page.evaluate(() => document.querySelector('.branch-diff-close').click());
     await waitTourTitle(page, "That's branching", 150000);
     await finishAndDelete(page);
     // The cleanup must have removed the lesson's BRANCH too, not just the fn.
@@ -69,7 +90,93 @@ const {
       .map((b) => b.name);
     assert(!names.includes('tutorial-branch'),
       'tour cleanup deleted the lesson branch');
-    console.log('  lesson 08: walked + cleaned (branch too)');
+    console.log('  lesson 08: walked + cleaned (branch too, diff opened)');
+
+    // ---------- Lesson 08b — review: refusal → propose → approve → land ----------
+    await page.goto(BASE + '/?tutorial=08b');
+    await waitTourTitle(page, "Review is the target's policy", 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 08b Next');
+    await waitTourTitle(page, 'Something to change');
+    await filterAndSelect(page, 'const', 'const');
+    await extendViaRowActions(page, 'review-demo', 'const');
+    await waitTourTitle(page, 'Give it a value', 150000);
+    await bindFirstPlaceholder(page, '1');
+    await waitTourTitle(page, 'A release branch', 150000);
+    await createBranchViaChip(page, 'tutorial-release');
+    await waitTourTitle(page, 'Protect it', 150000);
+    // ⚙ on the tutorial-release row → Required approvals = 1. The policy
+    // POST reloads the popover; the ⚙ button's data-attr reflects it.
+    await waitClickable(page, '#branch-chip-btn');
+    await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+    await page.waitForSelector(
+      '.branch-row-protect[data-protect-branch="tutorial-release"]', {timeout: 15000});
+    await page.evaluate(() => document.querySelector(
+      '.branch-row-protect[data-protect-branch="tutorial-release"]').click());
+    await page.waitForSelector('#gd-protect-pop select', {timeout: 15000});
+    await page.evaluate(() => {
+      const sel = document.querySelector('#gd-protect-pop select');
+      sel.value = '1';
+      sel.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+    await page.waitForSelector(
+      '.branch-row-protect[data-protect-branch="tutorial-release"][data-reqappr="1"]',
+      {timeout: 30000});
+    await waitTourTitle(page, 'A feature branch', 150000);
+    // Close the ⚙ menu. Whether its scrim click also dismissed the branch
+    // popover depends on event order — the chip TOGGLES, so click it only
+    // when the create row is actually hidden.
+    await page.evaluate(() => document.getElementById('gd-protect-scrim')?.click());
+    for (let i = 0; i < 3; i++) {
+      const createRowUp = await page.evaluate(() => {
+        const el = document.getElementById('branch-create-input');
+        return !!el && el.offsetParent !== null;
+      });
+      if (createRowUp) break;
+      await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    await page.fill('#branch-create-input', 'tutorial-feature');
+    await page.evaluate(() => document.getElementById('branch-create-btn').click());
+    await page.waitForFunction(
+      () => new URLSearchParams(location.search).get('branch') === 'tutorial-feature',
+      null, {timeout: 120000, polling: 300});
+    await waitTourTitle(page, 'Change the value here', 150000);
+    await editBoundValue(page, '2');
+    await waitTourTitle(page, 'Back to the release branch', 150000);
+    await switchBranchViaChip(page, 'tutorial-release');
+    await waitTourTitle(page, 'Try to merge — refused', 150000);
+    await waitClickable(page, '#branch-chip-btn');
+    await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+    await page.waitForSelector('.branch-row-merge[data-merge-source="tutorial-feature"]',
+      {timeout: 15000});
+    await page.evaluate(() => document.querySelector(
+      '.branch-row-merge[data-merge-source="tutorial-feature"]').click());
+    await page.waitForFunction(() => {
+      const e = document.getElementById('branch-popover-error');
+      return e && !e.classList.contains('hidden') && /approval/i.test(e.textContent || '');
+    }, null, {timeout: 60000, polling: 200});
+    await waitTourTitle(page, 'Propose it', 150000);
+    await page.evaluate(() => document.querySelector(
+      '.branch-row-propose[data-propose-branch="tutorial-feature"]').click());
+    await page.waitForSelector('.branch-row-propose.on[data-propose-branch="tutorial-feature"]',
+      {timeout: 30000});
+    await waitTourTitle(page, 'Approve it', 150000);
+    await page.evaluate(() => document.querySelector(
+      '.branch-row-approve[data-approve-branch="tutorial-feature"]').click());
+    await page.waitForSelector('.branch-appr-count.ok', {timeout: 30000});
+    await waitTourTitle(page, 'Ready to land — and why we stop', 150000);
+    assert(await clickTourButton(page, 'Next'), 'lesson 08b ready-to-land Next');
+    await waitTourTitle(page, 'Back to main', 150000);
+    await switchBranchViaChip(page, 'main');
+    await waitTourTitle(page, "That's review", 150000);
+    await finishAndDelete(page);
+    const reviewBranches = await api(page, 'GET', '/api/branches');
+    const reviewNames = (Array.isArray(reviewBranches) ? reviewBranches
+      : (reviewBranches.branches || [])).map((b) => b.name);
+    assert(!reviewNames.includes('tutorial-release')
+           && !reviewNames.includes('tutorial-feature'),
+      'tour cleanup deleted both review branches');
+    console.log('  lesson 08b: walked + cleaned (refused → proposed → approved; branches cleaned)');
 
     // ---------- Lesson 07 — effects (chip, ack gate, run) ----------
     await page.goto(BASE + '/?tutorial=07');

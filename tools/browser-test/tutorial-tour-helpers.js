@@ -58,7 +58,7 @@ async function hardCleanup(page) {
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
                      'tutorial-card', 'tutorial-button', 'tutorial-script',
                      'tutorial-renamed', 'tutorial-point', 'tutorial-daemon',
-                     'tutorial-tick'];
+                     'tutorial-tick', 'review-demo'];
   for (let pass = 0; pass < 2; pass++) {
     for (const nm of leftovers) {
       await retryingDelete(() => deleteFnByName(page, nm));
@@ -130,9 +130,10 @@ async function hardCleanup(page) {
   try {
     const branches = await api(page, 'GET', '/api/branches');
     for (const b of (Array.isArray(branches) ? branches : (branches.branches || []))) {
-      // tutorial-NN-xxxx = an isolation branch; tutorial-branch = the one
-      // lesson 08 forks by hand.
-      if (/^tutorial-(\d\d-|branch$)/.test(b.name || '')) {
+      // tutorial-NN-xxxx = an isolation branch (NN may carry a letter
+      // suffix — 08b); tutorial-branch / tutorial-release / tutorial-feature
+      // are the ones lessons 08 + 08b fork by hand.
+      if (/^tutorial-(\d\d[a-z]?-|branch$|release$|feature$)/.test(b.name || '')) {
         await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(b.name));
       }
     }

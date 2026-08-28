@@ -82,13 +82,30 @@ async function _tourDeleted(call) {
   } catch (_) { return false; }
 }
 
+// NEWEST FIRST, like the fn pass: a lesson that forks a branch OFF another
+// lesson branch (08b: tutorial-feature off tutorial-release) creates the
+// parent first, and the server refuses to delete a branch that still has
+// children — correctly. One reversed pass clears the normal case; whatever
+// still refuses goes round once more, after the rest unblocked it.
+// NOTE the server answers these refusals as HTTP 200 with `{ok:false}`, so
+// the body must be read — `Response.ok` alone counted them as deleted.
 async function _tourDeleteCreatedBranches(created) {
+  const del = async (c) => {
+    try {
+      const r = await authFetch(API.api_branches_ref(c.name), { method: 'DELETE' });
+      if (r?.ok === false) return false;
+      const body = await r.json().catch(() => null);
+      return body?.ok !== false;
+    } catch (_) { return false; }
+  };
+  const branches = (created || []).filter((c) => c.type === 'branch').reverse();
+  const retry = [];
+  for (const c of branches) {
+    if (!await del(c)) retry.push(c);
+  }
   const failed = [];
-  for (const c of (created || [])) {
-    if (c.type !== 'branch') continue;
-    const ok = await _tourDeleted(
-      () => authFetch(API.api_branches_ref(c.name), { method: 'DELETE' }));
-    if (!ok) failed.push(c);
+  for (const c of retry) {
+    if (!await del(c)) failed.push(c);
   }
   return failed;
 }

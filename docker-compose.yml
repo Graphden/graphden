@@ -157,6 +157,11 @@ services:
       # § 13). Unset → remote fetches go unauthenticated (a hub that
       # requires auth will 401 them).
       GRAPHDEN_REGISTRY_TOKEN: ${GRAPHDEN_REGISTRY_TOKEN:-}
+      # Hub sync (docs/DEPLOYMENT.md § Option 1a): the /api/sync/*
+      # push/pull surface + the branch popover's Hub section. Unset →
+      # the section stays hidden and sync answers unconfigured.
+      GRAPHDEN_HUB_URL: ${GRAPHDEN_HUB_URL:-}
+      GRAPHDEN_HUB_TOKEN: ${GRAPHDEN_HUB_TOKEN:-}
     ports:
       # GD_BIND — the OFFLINE / "internal requests only" preset
       # (docs/DEPLOYMENT.md § Local offline instance): GD_BIND=127.0.0.1

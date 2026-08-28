@@ -125,7 +125,7 @@
       "test assumes GRAPHDEN_HUB_URL is not set in the test environment")
   (testing "status body reports unconfigured and never carries a token"
     (let [body (run-fn :_sync-status-body {})]
-      (is (= false (:configured body)))
+      (is (false? (:configured body)))
       (is (nil? (:hub-url body)))
       (is (= #{:configured :hub-url} (set (keys body))))))
   (testing "push answers the 409 hub-not-configured envelope"

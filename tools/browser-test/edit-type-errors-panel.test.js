@@ -13,7 +13,7 @@
 
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, synthArgs, nodeApi,
-       deleteFnByName, waitFor, openOperate} = require('./edit-test-helpers');
+       deleteFnByName, waitFor} = require('./edit-test-helpers');
 
 const TEST_NAME = 'test-type-errors-panel';
 
@@ -75,9 +75,15 @@ async function typeErrorsPartial() {
       15000);
     assert(badgeSeen, 'type-error badge visible on the fn card root row');
 
-    // The Type-errors panel moved to the Operate surface (redesign 2026-08).
-    await openOperate(page);
-    // Sidebar section mounts the server partial with the fn's row.
+    // The Type-errors panel lives in the Build diagnostics drawer. Open its
+    // tab the way a reader does — opening the drawer is also what re-fetches
+    // the live panels (reloadDiagnosticsSections), so the row's presence is
+    // deterministic rather than riding the boot-mount fetch.
+    await page.waitForSelector('#gd-diag-nav button[data-section="type-errors"]',
+      {timeout: 15000});
+    await page.evaluate(() => {
+      document.querySelector('#gd-diag-nav button[data-section="type-errors"]').click();
+    });
     const panelRow = await waitFor(
       () => page.evaluate((name) => {
         const section = document.querySelector('.sidebar-type-errors');

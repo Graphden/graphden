@@ -97,10 +97,12 @@ drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
 
-Two lessons have no tour: **27** is about files on disk and `bb rebuild`,
-which the editor cannot show, and **11** is a route-wiring marathon that
-reads better as text than as thirty steps. Both sit in the chapter their
-subject belongs to, which is why the ▶ column is worth reading.
+Three lessons have no tour: **27** is about files on disk and
+`bb rebuild`, which the editor cannot show; **11** is a route-wiring
+marathon that reads better as text than as thirty steps; and **30** is
+about running a second, local instance — something one editor session
+cannot demonstrate. All three sit in the chapter their subject belongs
+to, which is why the ▶ column is worth reading.
 
 The organization tours drive surfaces not every session has, so they
 declare what they need (`:requires`) — a capability (`manage-users`,

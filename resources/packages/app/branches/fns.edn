@@ -3087,6 +3087,90 @@
           :attrs {:value {:class "branch-popover-create"}}
           :children [:_bp-create-row :_bp-create-adv]}}
 
+  ;; --- Hub sync section (lesson 30's push/pull as buttons) ---
+  ;; Rendered only when this instance is wired to a hub
+  ;; (GRAPHDEN_HUB_URL — the same server config the registry package's
+  ;; /api/sync/* routes read). The routes live in the OPTIONAL registry
+  ;; package, so editor-branches.js additionally removes the section
+  ;; when window.API has no api_sync_push (hub env set but registry
+  ;; dropped — a config contradiction, not a normal state). Hidden for
+  ;; read-only viewers via the same body.gd-no-write CSS as the create
+  ;; form.
+
+  {:name :_bp-hub-url
+   :description "GRAPHDEN_HUB_URL from the server environment — branch-local by :env descent (hub wiring is per-deployment runtime config)."
+   :parent :env
+   :args {:name {:value "GRAPHDEN_HUB_URL"}}}
+
+  {:name :_bp-hub-configured?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_bp-hub-url}}}}
+
+  {:name :_bp-hub-push-title
+   :parent :str
+   :args {:parts [{:value "Snapshot branch "}
+                  {:as :current-name}
+                  {:value " to the hub as an owner-protected push/"}
+                  {:as :current-name}
+                  {:value " branch"}]}}
+
+  {:name :_bp-hub-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-hub-head"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "branch-hub-title"}}
+                             :children [{:value "Hub"}]}}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "branch-hub-url"}}
+                             :children [:_bp-hub-url]}}]}}
+
+  {:name :_bp-hub-push-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:id "branch-hub-push"
+                                       :class "branch-popover-btn"}}
+                         :key {:value :title}
+                         :value :_bp-hub-push-title}}
+          :children [{:value "⇡ Push"}]}}
+
+  {:name :_bp-hub-pull-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "branch-hub-pull"
+                          :class "branch-popover-btn"
+                          :title "Fetch the hub's main as local branch hub/main — then diff + merge it here"}}
+          :children [{:value "⇣ Pull"}]}}
+
+  {:name :_bp-hub-actions-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-hub-actions"}}
+          :children [:_bp-hub-push-btn :_bp-hub-pull-btn]}}
+
+  {:name :_bp-hub-status-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:id "branch-hub-status"
+                          :class "branch-hub-status"
+                          :role "status"}}
+          :children {:value []}}}
+
+  {:name :_bp-hub-div-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-popover-hub"}}
+          :children [:_bp-hub-head :_bp-hub-actions-row :_bp-hub-status-div]}}
+
+  {:name :_bp-hub-div
+   :parent :if
+   :args {:test :_bp-hub-configured?
+          :then :_bp-hub-div-shown
+          :else :_bp-row-empty-placeholder}}
+
   {:name :_bp-error-div
    :parent :hiccup
    :args {:tag {:value "div"}
@@ -3095,11 +3179,11 @@
           :children {:value []}}}
 
   {:name :_partial-branch-popover-body
-   :description "Full hiccup for the popover body — list + create form + error slot. Pure-graph composition over the `:_bp-*` chain."
+   :description "Full hiccup for the popover body — list + create form + hub-sync section + error slot. Pure-graph composition over the `:_bp-*` chain."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {}}
-          :children [:_bp-list-div :_bp-create-div :_bp-error-div]
+          :children [:_bp-list-div :_bp-create-div :_bp-hub-div :_bp-error-div]
           :branches :_list-branches-rows
           :current-name :_partial-branch-popover-current-name}}
 

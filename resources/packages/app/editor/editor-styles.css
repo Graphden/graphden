@@ -915,6 +915,29 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: 3px;
 }
+/* Hub sync section — push/pull buttons the partial renders only when the
+   server is wired to a hub (GRAPHDEN_HUB_URL). Mutating, so it respects
+   gd-no-write like the create form. */
+.branch-popover-hub {
+  display: flex; flex-direction: column; gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.branch-hub-head {
+  display: flex; align-items: baseline; gap: 6px; min-width: 0;
+}
+.branch-hub-title { font-size: 11px; font-weight: 600; color: var(--fg); }
+.branch-hub-url {
+  font-size: 10px; color: var(--muted-fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.branch-hub-actions { display: flex; gap: 4px; }
+.branch-hub-actions button:disabled { opacity: 0.5; cursor: default; }
+.branch-hub-status { font-size: 10px; color: var(--muted-fg); }
+.branch-hub-status:empty { display: none; }
+.branch-hub-status-error { color: var(--error-fg); }
+
 .branch-popover-create input {
   flex: 1; font-size: 11px; padding: 4px 6px;
   border: 1px solid var(--fg); border-radius: 3px;
@@ -1666,6 +1689,7 @@ body.gd-no-write .ns-plus-btn,
 body.gd-no-write .ns-delete-btn,
 body.gd-no-write .fn-versions-restore,
 body.gd-no-write .branch-popover-create,
+body.gd-no-write .branch-popover-hub,
 body.gd-no-write .branch-row-merge,
 body.gd-no-write .branch-row-delete,
 body.gd-no-write #secret-add-btn,

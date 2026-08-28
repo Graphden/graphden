@@ -589,6 +589,83 @@ function wireBranchPopoverHandlers(popover, current) {
     });
   }
 
+  wireHubSyncSection(popover);
+}
+
+// Hub sync — the partial renders `.branch-popover-hub` only when the
+// server is wired to a hub (GRAPHDEN_HUB_URL). The /api/sync/* routes
+// live in the OPTIONAL registry package, so the section is removed when
+// window.API lacks them (hub env set but registry package dropped).
+// Push snapshots the CURRENT branch (the branch header scopes the POST)
+// onto the hub as push/<branch>; Pull lands the hub's main locally as
+// hub/main and refreshes the list so the new branch shows up.
+function wireHubSyncSection(popover) {
+  const section = popover.querySelector('.branch-popover-hub');
+  if (!section) return;
+  const api = (typeof window.API === 'object' && window.API) ? window.API : null;
+  if (!api || typeof api.api_sync_push === 'undefined') {
+    section.remove();
+    return;
+  }
+  const pushBtn = section.querySelector('#branch-hub-push');
+  const pullBtn = section.querySelector('#branch-hub-pull');
+  const setBusy = (busy) => {
+    [pushBtn, pullBtn].forEach((b) => { if (b) b.disabled = busy; });
+  };
+  const report = (text, isError) => {
+    const status = document.getElementById('branch-hub-status');
+    if (!status) return;
+    status.textContent = text;
+    status.classList.toggle('branch-hub-status-error', !!isError);
+  };
+  async function runSync(url) {
+    setBusy(true);
+    report('Syncing with the hub…', false);
+    try {
+      const resp = await window.authFetch(url, { method: 'POST' });
+      const data = await resp.json().catch(() => null);
+      if (!resp.ok || !data || data.ok === false) {
+        const reason = (data && (data.reason || data.error))
+          || ('HTTP ' + resp.status);
+        const detail = data?.hint ? ' — ' + data.hint : '';
+        report('Failed: ' + reason + detail, true);
+        return null;
+      }
+      return data;
+    } catch (err) {
+      report('Failed: ' + (err?.message || 'network error'), true);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (pushBtn) {
+    pushBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const d = await runSync(api.api_sync_push);
+      if (d) {
+        const n = (d['fn-ids'] || []).length;
+        report('Pushed → ' + (d.target || 'push branch') + ' (' + n
+          + ' fns). Review + merge on the hub.', false);
+      }
+    });
+  }
+  if (pullBtn) {
+    pullBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const d = await runSync(api.api_sync_pull);
+      if (d) {
+        // Refresh the list so hub/main appears, then restate the outcome
+        // (the reload swaps the status slot out with the rest of the body).
+        await openBranchPopover();
+        const status = document.getElementById('branch-hub-status');
+        if (status) {
+          status.textContent = 'Pulled → ' + (d.branch || 'hub/main')
+            + ' — Δ diff it against your branch, then ⇢ merge.';
+        }
+      }
+    });
+  }
 }
 
 const BRANCH_POLICY_OPTIONS = [

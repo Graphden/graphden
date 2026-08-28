@@ -1163,6 +1163,40 @@
                :body "Per-namespace capabilities, one table, no roles required — though Roles exist when you want to name a bundle of them. The written lesson 24 covers the org-management axis (manage-users, manage-grants …), which is separate from namespace capabilities. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
+            {:id "25"
+             :chapter "Your organization"
+             :requires "manage-roles"
+             :title "Roles"
+             :steps
+             [{:title "One bundle, several people"
+               :body "Lesson 24 covered grants — who may touch which namespace. This is the OTHER axis: who may administer the org. Those capabilities (manage-users, manage-grants, manage-roles, manage-apps, publish-packages) are bundled by a ROLE, so a policy lives in one row instead of being spread across three people."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open Roles"
+               :body "Account button (top right) → [[Organization]] → [[Roles]]. The panel is gated on manage-roles, which an org owner holds implicitly — that is what owning the org means."
+               :target "#auth-lock-btn, .auth-avatar"
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"roles\"]"]
+               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"roles\"]:not([hidden])"}}
+              {:title "Create one"
+               :body "Name it `support` and tick [[manage-users]], then [[Create]]. The checkboxes ARE the vocabulary — those five capabilities are the whole org-management axis, so there is no free-text field to get wrong."
+               :target "[data-roles-panel] form"
+               :check {:kind "manual"}}
+              {:title "Give it a member"
+               :body "The members cell is an editable list of usernames, prefilled with the current set. Type a member's username and submit. It is a SET, not an append: what you submit becomes the whole membership, so clearing a name removes that person from the role."
+               :target "[data-roles-panel]"
+               :check {:kind "manual"}}
+              {:title "What they can do now"
+               :body "That member's next request carries manage-users, so their account menu grows the Members panel — a surface that was not rendered for them a moment ago. The affordance and the permission are the same fact: nothing is hidden that would otherwise work."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "What a role is NOT"
+               :body "It does not grant namespace access — support with manage-users still cannot read acme.billing; that is a grant. It does not nest, and it means nothing in another org. Administering an org and reading its code are different powers on purpose."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Take it back"
+               :body "Delete the role with [[×]] on its row. The members keep their accounts, their org membership and every namespace grant they hold — only what the role conferred goes away. Click [[Finish]]."
+               :target "[data-roles-panel] .grant-delete"
+               :check {:kind "manual"}}]}
             {:id "26"
              :chapter "Your organization"
              :requires "manage-apps"
@@ -1254,40 +1288,6 @@
               {:title "That's distribution"
                :body "Publish freezes, install pins, fork copies. The written lessons 27 and 28 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click [[Finish]] to clean up."
                :target nil
-               :check {:kind "manual"}}]}
-            {:id "25"
-             :chapter "Your organization"
-             :requires "manage-roles"
-             :title "Roles"
-             :steps
-             [{:title "One bundle, several people"
-               :body "Lesson 24 covered grants — who may touch which namespace. This is the OTHER axis: who may administer the org. Those capabilities (manage-users, manage-grants, manage-roles, manage-apps, publish-packages) are bundled by a ROLE, so a policy lives in one row instead of being spread across three people."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Open Roles"
-               :body "Account button (top right) → [[Organization]] → [[Roles]]. The panel is gated on manage-roles, which an org owner holds implicitly — that is what owning the org means."
-               :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"roles\"]"]
-               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"roles\"]:not([hidden])"}}
-              {:title "Create one"
-               :body "Name it `support` and tick [[manage-users]], then [[Create]]. The checkboxes ARE the vocabulary — those five capabilities are the whole org-management axis, so there is no free-text field to get wrong."
-               :target "[data-roles-panel] form"
-               :check {:kind "manual"}}
-              {:title "Give it a member"
-               :body "The members cell is an editable list of usernames, prefilled with the current set. Type a member's username and submit. It is a SET, not an append: what you submit becomes the whole membership, so clearing a name removes that person from the role."
-               :target "[data-roles-panel]"
-               :check {:kind "manual"}}
-              {:title "What they can do now"
-               :body "That member's next request carries manage-users, so their account menu grows the Members panel — a surface that was not rendered for them a moment ago. The affordance and the permission are the same fact: nothing is hidden that would otherwise work."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "What a role is NOT"
-               :body "It does not grant namespace access — support with manage-users still cannot read acme.billing; that is a grant. It does not nest, and it means nothing in another org. Administering an org and reading its code are different powers on purpose."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Take it back"
-               :body "Delete the role with [[×]] on its row. The members keep their accounts, their org membership and every namespace grant they hold — only what the role conferred goes away. Click [[Finish]]."
-               :target "[data-roles-panel] .grant-delete"
                :check {:kind "manual"}}]}
             {:id "29"
              :chapter "Your organization"

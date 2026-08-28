@@ -561,6 +561,84 @@
 
 
 ;; ---------------------------------------------------------------------------
+;; Hub sync — the wire boundary of the editor's push/pull (the /api/sync/*
+;; routes; VERSIONING.md § Push branches). The hub coordinates are SERVER
+;; config (GRAPHDEN_HUB_URL / GRAPHDEN_HUB_TOKEN), never caller-supplied —
+;; a caller-chosen hub would receive this instance's hub bearer. The
+;; branch/target/guard/envelope logic is graph composition in fns.edn;
+;; these two adapters are only the HTTP dial (mirror-remote-package!'s
+;; shape: egress-guarded in restricted executions, errors ride as data).
+;; ---------------------------------------------------------------------------
+
+(defn- hub-auth-headers
+  []
+  (let [token (System/getenv "GRAPHDEN_HUB_TOKEN")]
+    (cond-> {} (seq (str token)) (assoc "Authorization" (str "Bearer " token)))))
+
+
+(defbase hub-fetch-bundle
+  "GET `hub-url`/api/export/graph for hub branch `branch` — the pull
+   half's read: the same wire bundle the CLI pull fetches. Bearer from
+   GRAPHDEN_HUB_TOKEN; wire-reader decode so `#graphden/ref` tagged
+   literals round-trip. Errors ride as data ({:error …}) so the route
+   maps them to response envelopes."
+  [hub-url branch]
+  (cr/record-effect! :network)
+  (cr/record-effect! :env)
+  (let [base (str/replace (str hub-url) #"/+$" "")
+        url (str base "/api/export/graph")
+        _ (when (some? cr/*allowed-effects*) (egress/check-target! url))
+        resp @(http-client/get url {:headers (cond-> (hub-auth-headers)
+                                               (seq (str branch))
+                                               (assoc "X-Graphden-Branch" (str branch)))
+                                    :as :text :timeout 120000})]
+    (cond
+      (:error resp)
+      {:error "hub-unreachable" :detail (str (:error resp))}
+
+      (not= 200 (:status resp))
+      {:error "hub-fetch-failed" :status (:status resp)}
+
+      :else
+      (let [bundle (try (edn/read-string {:readers wire/wire-readers} (:body resp))
+                        (catch Exception _ ::unreadable))]
+        (if (or (= ::unreadable bundle) (not (map? bundle)))
+          {:error "hub-bundle-unreadable"}
+          bundle)))))
+
+
+(defbase hub-push-bundle!
+  "POST `bundle`'s fns to `hub-url`/api/import/graph as branch `target`
+   (create+prune — the push branch IS the snapshot, owner-stamped on the
+   hub side by the import route). The bundle's :fns are already
+   wire-encoded (`:export-graph` ends at the encode boundary), so the
+   body is a plain `pr-str`. Returns the hub's parsed report, or
+   {:error …} as data."
+  [hub-url target bundle]
+  (cr/record-effect! :network)
+  (cr/record-effect! :env)
+  (let [base (str/replace (str hub-url) #"/+$" "")
+        url (str base "/api/import/graph?create=true&prune=true&target="
+                 (java.net.URLEncoder/encode (str target) "UTF-8"))
+        _ (when (some? cr/*allowed-effects*) (egress/check-target! url))
+        resp @(http-client/post url {:headers (assoc (hub-auth-headers)
+                                                     "Content-Type" "application/edn")
+                                     :body (pr-str {:fns (vec (:fns bundle))})
+                                     :as :text :timeout 300000})]
+    (cond
+      (:error resp)
+      {:error "hub-unreachable" :detail (str (:error resp))}
+
+      (not= 200 (:status resp))
+      {:error "hub-import-failed" :status (:status resp)
+       :detail (let [b (str (:body resp))] (subs b 0 (min 300 (count b))))}
+
+      :else
+      (or (try (json/parse-string (:body resp) true) (catch Exception _ nil))
+          {:error "hub-response-unreadable"}))))
+
+
+;; ---------------------------------------------------------------------------
 ;; Bundle import — POST /api/import/graph. The §3.3 atomic write core:
 ;; branch resolve/create, the branch-switched sync, the optional prune and
 ;; the TARGET branch's invalidation are one effect-ordered sequence (same
@@ -686,6 +764,10 @@
    :rewrite-refs-to-version rewrite-refs-to-version
    :package-upsert-pin package-upsert-pin
    :mirror-remote-package! mirror-remote-package!
+   ;; taint-propagate: both return caller-graph bundle content / the hub's
+   ;; report about it — content passthrough (SECRETS.md § T3).
+   :hub-fetch-bundle {:impl hub-fetch-bundle :taint-propagate? true}
+   :hub-push-bundle! {:impl hub-push-bundle! :taint-propagate? true}
    ;; taint-propagate: :skipped-owned returns the caller bundle's own
    ;; :name fields — content passthrough (SECRETS.md § T3).
    :import-bundle! {:impl import-bundle! :taint-propagate? true}})

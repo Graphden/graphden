@@ -2521,6 +2521,213 @@
    :parent :post
    :args {:path "/import/graph" :handler :_import-graph-handler}}
 
+  ;; ---------------------------------------------------------------------
+  ;; Hub sync — /api/sync/*: the editor half of the CLI push/pull flow
+  ;; (VERSIONING.md § Push branches; tutorial lesson 30). The hub
+  ;; coordinates are SERVER config (GRAPHDEN_HUB_URL + GRAPHDEN_HUB_TOKEN),
+  ;; never caller-supplied — a caller-chosen hub would receive this
+  ;; instance's hub bearer. Unconfigured ⇒ status {:configured false} and
+  ;; both mutations answer 409 hub-not-configured; the editor's branch
+  ;; popover reveals its Hub section only when status says configured.
+  ;; ---------------------------------------------------------------------
+
+  {:name :hub-fetch-bundle
+   :description "GET <hub-url>/api/export/graph for hub branch `branch` — the pull half's read (the same wire bundle the CLI pull fetches; #graphden/ref tags decoded). Bearer from GRAPHDEN_HUB_TOKEN. Errors ride as data ({:error \"hub-unreachable\"|\"hub-fetch-failed\"|\"hub-bundle-unreadable\" …})."
+   :args {:hub-url {:type :nullable-text :description "The hub's base URL (GRAPHDEN_HUB_URL)."}
+          :branch {:type :nullable-text :description "Hub branch to fetch; nil/blank rides the hub's default (main)."}}
+   :return-type :keyword-map
+   :effects #{:network :env}}
+
+  {:name :hub-push-bundle!
+   :description "POST `bundle`'s fns to <hub-url>/api/import/graph as branch `target` (create+prune — the push branch IS the snapshot, owner-stamped by the hub's import route). Bearer from GRAPHDEN_HUB_TOKEN. Returns the hub's parsed report, or {:error \"hub-unreachable\"|\"hub-import-failed\"|\"hub-response-unreadable\" …} as data."
+   :args {:hub-url {:type :nullable-text :description "The hub's base URL (GRAPHDEN_HUB_URL)."}
+          :target {:type :text :description "Hub branch name to (re)snapshot, e.g. push/main."}
+          :bundle {:type :full-graph-export-shape :description "The :export-graph bundle — its :fns are already wire-encoded."}}
+   :return-type :keyword-map
+   :effects #{:network :env}}
+
+  {:name :_sync-hub-url
+   :description "GRAPHDEN_HUB_URL from the server environment. Branch-local by :env descent — hub wiring is per-deployment runtime config."
+   :parent :env
+   :args {:name {:value "GRAPHDEN_HUB_URL"}}}
+
+  {:name :_sync-configured?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_sync-hub-url}}}}
+
+  {:name :_sync-not-configured?
+   :parent :not
+   :args {:value :_sync-configured?}}
+
+  ;; GET /api/sync/status — the editor's reveal probe. Never surfaces the
+  ;; token; nothing read off the request → :lambda-params [].
+  {:name :_sync-status-body
+   :parent :zipmap
+   :args {:keys [{:value :configured} {:value :hub-url}]
+          :vals [:_sync-configured? :_sync-hub-url]}}
+
+  {:name :_sync-status-handler
+   :lambda-params []
+   :description "Ring handler for GET /api/sync/status (auth-required) — {:configured :hub-url}."
+   :parent :json-handler
+   :args {:data :_sync-status-body}}
+
+  {:name :api-sync-status
+   :description "GET /api/sync/status — is this instance wired to a hub (GRAPHDEN_HUB_URL)? {:configured bool :hub-url text|nil}; the token is never surfaced. Auth-required. The editor's branch popover probes it to reveal the Hub section."
+   :parent :get-auth-required
+   :args {:path "/sync/status" :handler :_sync-status-handler}}
+
+  ;; POST /api/sync/push — snapshot the REQUEST's branch (the editor's
+  ;; branch header scopes it) onto the hub as push/<branch>.
+  {:name :_sync-target-param
+   :description "Optional ?target= override for the hub branch name; default push/<current branch>."
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "target"}}}
+
+  {:name :_sync-current-branch-where
+   :parent :assoc
+   :args {:map {:value {}} :key {:value :id} :value :current-branch-id}}
+
+  {:name :_sync-current-branch-name
+   :description "Name of the request's active branch — the row behind :current-branch-id."
+   :parent :get
+   :args {:coll {:parent :first
+                 :args {:coll {:parent :query-entities
+                               :args {:entity-type {:value "branch"}
+                                      :where :_sync-current-branch-where}}}}
+          :key {:value :name}
+          :default {:value "main"}}}
+
+  {:name :_sync-push-default-target
+   :parent :str
+   :args {:parts [{:value "push/"} :_sync-current-branch-name]}}
+
+  {:name :_sync-push-target
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_sync-target-param}}
+          :then :_sync-push-default-target
+          :else :_sync-target-param}}
+
+  {:name :_sync-push-bundle
+   :description "The request branch's export bundle — vault paths always stripped (a push never carries secrets; the hub side re-binds via the bundle's :secrets manifest)."
+   :parent :export-graph
+   :args {:include-secret-paths {:value ""}}}
+
+  {:name :_sync-push-sent
+   :description "The wire POST to the hub — referenced by both the failed? predicate and the ok envelope; the per-execution result cache makes that one POST, not two."
+   :parent :hub-push-bundle!
+   :args {:hub-url :_sync-hub-url
+          :target :_sync-push-target
+          :bundle :_sync-push-bundle}}
+
+  {:name :_sync-push-failed?
+   :parent :some?
+   :args {:value {:parent :get :args {:coll :_sync-push-sent :key {:value :error} :default nil}}}}
+
+  {:name :_sync-err-not-configured
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "hub-not-configured"
+                             :hint "set GRAPHDEN_HUB_URL (and GRAPHDEN_HUB_TOKEN) on this instance"
+                             :http-status 409}}}}
+
+  {:name :_sync-push-err
+   :description "502 envelope carrying the adapter's {:error …} data — the hub refused or was unreachable."
+   :parent :json-envelope-response
+   :args {:envelope {:parent :merge
+                     :args {:maps [{:value {:ok false :http-status 502}} :_sync-push-sent]}}}}
+
+  {:name :_sync-push-ok-body
+   :parent :assoc
+   :args {:map {:parent :merge
+                :args {:maps [:_sync-push-sent {:value {:ok true}}]}}
+          :key {:value :target}
+          :value :_sync-push-target}}
+
+  {:name :_sync-push-ok
+   :parent :json-handler
+   :args {:data :_sync-push-ok-body}}
+
+  {:name :_sync-push-result
+   :parent :cond
+   :args {:clauses [:_sync-not-configured? :_sync-err-not-configured
+                    :_sync-push-failed?    :_sync-push-err
+                    {:value true}          :_sync-push-ok]}}
+
+  {:name :_sync-push-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/sync/push (auth-required)."
+   :parent :_sync-push-result}
+
+  {:name :api-sync-push
+   :description "POST /api/sync/push[?target=push/x] — snapshot the request's branch and apply it to the configured hub as an owner-stamped push branch (create+prune), exactly the CLI `graphden.cli push`. 409 when no hub is configured, 502 when the hub refuses or is unreachable. Auth-required."
+   :parent :post
+   :args {:path "/sync/push" :handler :_sync-push-handler}}
+
+  ;; POST /api/sync/pull — land the hub's branch locally as hub/<source>.
+  {:name :_sync-source-param
+   :description "Optional ?source= hub branch to pull; default main."
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "source"}}}
+
+  {:name :_sync-pull-source
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_sync-source-param}}
+          :then {:value "main"}
+          :else :_sync-source-param}}
+
+  {:name :_sync-pull-target
+   :parent :str
+   :args {:parts [{:value "hub/"} :_sync-pull-source]}}
+
+  {:name :_sync-pull-fetched
+   :description "The hub bundle — referenced by the failed? predicate, the error envelope and the apply core; one fetch via the per-execution result cache."
+   :parent :hub-fetch-bundle
+   :args {:hub-url :_sync-hub-url :branch :_sync-pull-source}}
+
+  {:name :_sync-pull-failed?
+   :parent :some?
+   :args {:value {:parent :get :args {:coll :_sync-pull-fetched :key {:value :error} :default nil}}}}
+
+  {:name :_sync-pull-err
+   :parent :json-envelope-response
+   :args {:envelope {:parent :merge
+                     :args {:maps [{:value {:ok false :http-status 502}} :_sync-pull-fetched]}}}}
+
+  {:name :_sync-pull-applied
+   :description "The §3.3 write core — the same :import-bundle! the import route uses; hub/<source> is created on demand and pruned to the hub snapshot."
+   :parent :import-bundle!
+   :args {:branch-name :_sync-pull-target
+          :create? {:value true}
+          :prune? {:value true}
+          :fn-defs {:parent :get :args {:coll :_sync-pull-fetched :key {:value :fns} :default nil}}}}
+
+  {:name :_sync-pull-ok-body
+   :parent :assoc
+   :args {:map {:parent :merge
+                :args {:maps [:_sync-pull-applied {:value {:ok true}}]}}
+          :key {:value :branch}
+          :value :_sync-pull-target}}
+
+  {:name :_sync-pull-ok
+   :parent :json-handler
+   :args {:data :_sync-pull-ok-body}}
+
+  {:name :_sync-pull-result
+   :parent :cond
+   :args {:clauses [:_sync-not-configured? :_sync-err-not-configured
+                    :_sync-pull-failed?    :_sync-pull-err
+                    {:value true}          :_sync-pull-ok]}}
+
+  {:name :_sync-pull-handler
+   :lambda-params [:request]
+   :description "Ring handler for POST /api/sync/pull (auth-required)."
+   :parent :_sync-pull-result}
+
+  {:name :api-sync-pull
+   :description "POST /api/sync/pull[?source=main] — fetch the configured hub's branch and land it locally as hub/<source> (create+prune), exactly the CLI `graphden.cli pull`; merge it with the normal branch flow. 409 when no hub is configured, 502 when the hub is unreachable. Auth-required."
+   :parent :post
+   :args {:path "/sync/pull" :handler :_sync-pull-handler}}
+
   ;; Route-collection seam: this package's routes as a fall-through
   ;; `:router-or-nil`, installed into the JVM-wide route collection by the
   ;; `:registry/router-install` init-key at boot. `app` no longer lists these
@@ -2531,7 +2738,7 @@
   ;; `window.API` for the registry route). The `["/api" …]` nesting reproduces
   ;; reitit's prefix walk exactly as app's `:api-routes` did.
   {:name :_registry-api-routes
-   :description "The registry's `/api/*` endpoints, nested under the `/api` prefix (reitit walks the tree) — packages publish/list/fetch/install/update/fork/installed/uninstall + the panel-* variants + graph/namespace export."
+   :description "The registry's `/api/*` endpoints, nested under the `/api` prefix (reitit walks the tree) — packages publish/list/fetch/install/update/fork/installed/uninstall + the panel-* variants + graph/namespace export/import + hub sync (status/push/pull)."
    :parent :list
    :args {:items ["/api"
                   :api-packages-publish
@@ -2549,7 +2756,10 @@
                   :api-packages-panel-publish
                   :api-export-graph
                   :api-export-graph-rows
-                  :api-import-graph]}}
+                  :api-import-graph
+                  :api-sync-status
+                  :api-sync-push
+                  :api-sync-pull]}}
 
   {:name :_registry-routes
    :description "The registry package's full route list — the `/api/*` group plus the flat `/partials/packages-panel` + `/partials/packages-governance` leaves."
@@ -2572,6 +2782,6 @@
   ;; binding needed: registry's handlers query via `:query-entities` (ctx
   ;; storage), not the injected `:storage-query-call` free arg.
   {:name :_registry-ring-response
-   :description "Per-branch Ring handler for the registry's `/api/packages/*` + `/api/export/*` + `/partials/packages-panel` routes. Invokes `:registry-router` on the request; nil on no-match → the branch-router falls through to the main app handler. Free arg: `:request`."
+   :description "Per-branch Ring handler for the registry's `/api/packages/*` + `/api/export/*` + `/api/sync/*` + `/partials/packages-panel` routes. Invokes `:registry-router` on the request; nil on no-match → the branch-router falls through to the main app handler. Free arg: `:request`."
    :parent :router-result
    :args {:func :registry-router}}]}

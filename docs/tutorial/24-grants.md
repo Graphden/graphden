@@ -1,4 +1,4 @@
-# Lesson 17 — Grants: who may touch what
+# Lesson 24 — Grants: who may touch what
 
 **Goal**: by the end of this lesson you can read the **Grants**
 panel, add and revoke a grant, and predict which editor
@@ -64,7 +64,7 @@ Three enforcement layers read the same grant table:
   capability, `/api/execute` requires `execute`.
 
 The editor also *reads* the grant table indirectly: the
-`X-Graphden-Capabilities` header (lesson 16) that unlocks
+`X-Graphden-Capabilities` header (lesson 23) that unlocks
 tenant-mode UI is computed from these same rows.
 
 ## The panel
@@ -96,7 +96,7 @@ One special capability rides the same rows: `require-2fa`.
 Granted to a user (or, with subject-kind `org`, to a whole org)
 it doesn't *allow* anything — it *requires* the subject to enroll
 two-factor authentication before any other request passes
-([Lesson 19](19-signing-up-and-in.md) shows enrollment).
+([Lesson 32](32-signing-up-and-in.md) shows enrollment).
 
 Revoke is the row's `×` (confirm: *"Delete this grant?"*) —
 this one goes through the generic entity endpoint
@@ -121,7 +121,7 @@ A **role** is a named bundle of grants an org owner (or a
 `manage-roles` holder) defines once and assigns to members, so you
 don't re-issue the same capability set per person. It has its own
 **Roles** sidebar panel (`GET /partials/roles-admin`, gated on
-`manage-roles`), parallel to Grants. Lesson 16's "delegate a
+`manage-roles`), parallel to Grants. Lesson 23's "delegate a
 capability via a role" points here. (A full roles walk-through is
 still a planned lesson; for now, know the panel exists and is
 org-scoped like Grants.)
@@ -131,7 +131,7 @@ org-scoped like Grants.)
 (An org owner — or a `manage-grants` holder — on a tenancy-addon
 instance.)
 
-1. Add `carol` to your org `acme` (lesson 16).
+1. Add `carol` to your org `acme` (lesson 23).
 2. In **Grants**, grant `carol` / `bind-args` / `acme.settings`. As
    carol: editing a binding VALUE under `acme.settings` works;
    renaming the fn or changing its parent is denied — that needs
@@ -139,7 +139,7 @@ instance.)
 3. Replace it with `write` on `acme` — now structural edits pass
    anywhere under `acme`, including `acme.settings` (parent-path
    coverage).
-4. Remove carol (lesson 16) and watch her grant rows vanish with
+4. Remove carol (lesson 23) and watch her grant rows vanish with
    her — the cascade from the other side.
 
 ## What we glossed over
@@ -156,5 +156,5 @@ instance.)
 
 ## Next
 
-[Lesson 18 — Plans & tiers](18-plans-and-tiers.md): what the cloud
+[Lesson 33 — Plans & tiers](33-plans-and-tiers.md): what the cloud
 grants each account, and how an operator changes an org's tier.

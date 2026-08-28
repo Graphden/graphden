@@ -1,4 +1,4 @@
-// Lessons 03, 05, 06, 12, 13 — slots/bindings, types, HOFs, components, escape hatch
+// Lessons 03, 05, 06, 07, 08 — slots/bindings, types, HOFs, components, escape hatch
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -31,7 +31,7 @@ const {
   });
   // Lesson 05's "remove this binding" step fires a native confirm().
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06 / 12 / 13');
+  console.log('edit-tutorial-tour-structure — lessons 03 / 05 / 06 / 07 / 08');
   let failed = false;
   try {
     await hardCleanup(page);
@@ -167,10 +167,10 @@ const {
     await finishAndDelete(page);
     console.log('  lesson 06: walked + cleaned');
 
-    // ---------- Lesson 12 — components (free-arg chips + list append) ------
-    await page.goto(BASE + '/?tutorial=12');
+    // ---------- Lesson 07 — components (free-arg chips + list append) ------
+    await page.goto(BASE + '/?tutorial=07');
     await waitTourTitle(page, 'A page is a function', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 12 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 07 Next');
     await waitTourTitle(page, 'Find button');
     await filterAndSelect(page, 'button', 'button');
     await waitTourTitle(page, 'Make it yours', 150000);
@@ -218,12 +218,12 @@ const {
       'card renders with the button nested inside (got: '
       + JSON.stringify(ran.result) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 12: walked + cleaned');
+    console.log('  lesson 07: walked + cleaned');
 
-    // ---------- Lesson 13 — the escape hatch (code editor + rename) --------
-    await page.goto(BASE + '/?tutorial=13');
+    // ---------- Lesson 08 — the escape hatch (code editor + rename) --------
+    await page.goto(BASE + '/?tutorial=08');
     await waitTourTitle(page, 'When no component fits', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 13 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 08 Next');
     await waitTourTitle(page, 'Find wrap-custom-script');
     await filterAndSelect(page, 'custom-script', 'wrap-custom-script');
     await waitTourTitle(page, 'Extend it', 150000);
@@ -251,18 +251,18 @@ const {
       'the JS reached the rendered tag (got: '
       + JSON.stringify(scriptRan.result) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 13: walked + cleaned');
+    console.log('  lesson 08: walked + cleaned');
 
-    // ---------- Lesson 30 — recursion (a READING tour) ----------
+    // ---------- Lesson 10 — recursion (a READING tour) ----------
     // The only lesson that asks the reader to READ a fn rather than build
     // one: `:fix` needs ~7 fn-defs, which is a written lesson, not twenty
     // steps of clicking. What the tour must prove is that the fn it points
     // at is really there and really recursive — a renamed step or a
     // re-parented `:branch-chain` would leave the lesson describing a graph
     // that no longer exists.
-    await page.goto(BASE + '/?tutorial=30');
+    await page.goto(BASE + '/?tutorial=10');
     await waitTourTitle(page, 'Loops, where cycles are forbidden', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 30 opening Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 10 opening Next');
     await waitTourTitle(page, 'Find a real one', 30000);
     await filterAndSelect(page, 'branch-chain', 'branch-chain');
     await waitTourTitle(page, 'Its parent is :fix', 150000);
@@ -284,13 +284,13 @@ const {
       'and so is the arm that invokes :self — the recursion the lesson reads');
 
     for (let i = 0; i < 5; i++) {
-      assert(await clickTourAdvance(page, 'Next'), 'lesson 30 Next #' + (i + 1));
+      assert(await clickTourAdvance(page, 'Next'), 'lesson 10 Next #' + (i + 1));
     }
     await waitTourTitle(page, "That's recursion", 30000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 30 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 10 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 30000, polling: 200});
-    console.log('  lesson 30: walked (reading tour — :fix, its step, its :self arm)');
+    console.log('  lesson 10: walked (reading tour — :fix, its step, its :self arm)');
 
     console.log('PASS');
   } catch (err) {

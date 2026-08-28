@@ -1,4 +1,4 @@
-# Lesson 23 — Finding your way: the lens and the Inspector
+# Lesson 17 — Finding your way: the lens and the Inspector
 
 **Goal**: by the end of this lesson you can narrow the Explorer to
 one *kind* of entity with the lens chips, and read everything
@@ -29,17 +29,17 @@ Details worth knowing:
   a marker per kind (⚙, ▣, 🔒).
 - **services** and **apps** show a live count; the **apps** chip
   appears only when the deployment has app routing at all
-  (Lesson 20).
+  (Lesson 26).
 - Focusing **secrets** also reveals the **+ New secret** button
   (signed-in only) — creating secrets lives behind the lens that
-  shows them (Lesson 07).
+  shows them (Lesson 13).
 - The fn you currently have **selected** is never hidden, whatever
   the lens — if you can open it, it stays in the tree.
 - Your lens choice is a per-browser preference (like the workspace
-  scope from Lesson 22); it survives reload and affects nobody
+  scope from Lesson 18); it survives reload and affects nobody
   else.
 
-The lens composes with the workspace (Lesson 22): the workspace
+The lens composes with the workspace (Lesson 18): the workspace
 picks *which projects* you see, the lens picks *which kind of
 rows* within them.
 
@@ -55,9 +55,9 @@ the right-hand **Inspector** panel shows it. Four tabs:
   from (the provenance story from Lesson 03).
 - **Runs** — this fn's own execution history, live. There is no
   separate "Run page" — running is always the ▶ action on the
-  row or node, and its history lands here (Lesson 09).
+  row or node, and its history lands here (Lesson 12).
 - **Versions** — the fn's version timeline across branches
-  (Lesson 08).
+  (Lesson 19).
 
 The Inspector's head (name, namespace, description) renders
 instantly from what the editor already knows; all four tabs,
@@ -71,7 +71,7 @@ The Inspector is the "read" side of the editor: popovers are for
 ## Try it
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=23)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=17)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 

@@ -1,4 +1,4 @@
-# Lesson 09 — Executing a fn: free-arg form, history, cancel
+# Lesson 12 — Executing a fn: free-arg form, history, cancel
 
 **Goal**: by the end of this lesson you can click `▶` on any
 fn-card, supply its free arguments, inspect the result, replay
@@ -9,7 +9,7 @@ from history, and cancel a running execution.
 
 ## Two modes — one-shot vs supervised
 
-Lesson 10 introduces SERVICES — fns graphden keeps running
+Lesson 31 introduces SERVICES — fns graphden keeps running
 forever. This lesson is about the OTHER mode: one-shot
 execution. You click `▶`, the fn runs, you see the result, the
 runtime moves on. No supervision, no restart.
@@ -264,7 +264,7 @@ Two side effects of this:
 ## Try it (the persist + history loop)
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=09)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=12)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
@@ -335,7 +335,7 @@ Limits you may run into, each reported rather than silent:
 - If all captured values together exceed the total budget
   (16 MB), the oldest entries are dropped first and the
   bottom panel says `some values dropped`.
-- A fn that touches `:secret`-typed data (lesson 07) shows a
+- A fn that touches `:secret`-typed data (lesson 13) shows a
   red `secret` badge, no timings and **no value chip** — its
   value is never even read by the capture machinery, in
   either mode.
@@ -351,13 +351,13 @@ What the trace never contains:
 ## What we glossed over
 
 - **Branch-aware execution** — the active branch picks which
-  version of the fn-graph runs. Lesson 08 (already written)
+  version of the fn-graph runs. Lesson 19 (already written)
   covers branches.
 - **Service-mode execution** — fns marked as services run
-  forever, supervised by graphden. Lesson 10.
+  forever, supervised by graphden. Lesson 31.
 - **HOF call shape** — how internal refs get their free args
   bound at compile time vs call time. Lesson 06.
 
 ## Next
 
-Lesson 10 — Services ([already written](10-services.md))
+Lesson 31 — Services ([already written](31-services.md))

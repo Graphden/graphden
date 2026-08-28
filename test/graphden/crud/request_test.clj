@@ -89,7 +89,7 @@
     ;; the generic route: the tenancy Grants panel's × posts
     ;; `DELETE /api/entities/grant/:id`, the segment resolved to nil and the
     ;; handler answered 400 “Invalid request” — a dead button in a shipped
-    ;; panel, and the action tutorial lesson 17 tells the reader to perform.
+    ;; panel, and the action tutorial lesson 24 tells the reader to perform.
     (let [known #{:fn :ns :grant :org :app-route}]
       (is (= :grant (req/entity-type-from-string "grant" known)))
       (is (= :app-route (req/entity-type-from-string "app-route" known)))

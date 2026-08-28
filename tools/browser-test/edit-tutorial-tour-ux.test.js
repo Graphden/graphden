@@ -1,4 +1,4 @@
-// Lessons 09, 22, 23, 15, 27 — running fns, workspaces, the
+// Lessons 12, 18, 17, 09, 15 — running fns, workspaces, the
 // Explorer/Inspector view layer, in-graph state, and tracing a run.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
@@ -27,16 +27,16 @@ const {
     }
   });
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-ux — lessons 09 / 23 / 22 / 15 / 27');
+  console.log('edit-tutorial-tour-ux — lessons 12 / 17 / 18 / 09 / 15');
   let failed = false;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
-    // ---------- Lesson 09 — executing a fn ----------
-    await page.goto(BASE + '/?tutorial=09');
+    // ---------- Lesson 12 — executing a fn ----------
+    await page.goto(BASE + '/?tutorial=12');
     await waitTourTitle(page, 'Running is part of editing', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 09 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 12 Next');
     await waitTourTitle(page, 'Find str-len');
     await filterAndSelect(page, 'str-len', 'str-len');
     await waitTourTitle(page, 'Free args become the form', 150000);
@@ -69,17 +69,17 @@ const {
     });
     await page.click('.execute-popover.visible .execute-run-btn');
     await waitTourTitle(page, 'History is a graph read', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 09 history Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 12 history Next');
     await waitTourTitle(page, "That's the run loop", 150000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 09 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 12 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 30000, polling: 200});
-    console.log('  lesson 09: walked (nothing created)');
+    console.log('  lesson 12: walked (nothing created)');
 
-    // ---------- Lesson 23 — Explorer and Inspector ----------
-    await page.goto(BASE + '/?tutorial=23');
+    // ---------- Lesson 17 — Explorer and Inspector ----------
+    await page.goto(BASE + '/?tutorial=17');
     await waitTourTitle(page, 'Two panes, one graph', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 23 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 17 Next');
     await waitTourTitle(page, 'Narrow by kind');
     // The lens chips are the step's target; exercise one for real.
     await page.waitForSelector('.kind-toggle', {timeout: 30000});
@@ -92,13 +92,13 @@ const {
         .find((b) => /types/.test(b.textContent));
       if (t) t.click();
     });
-    assert(await clickTourButton(page, 'Next'), 'lesson 23 lens Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 17 lens Next');
     await waitTourTitle(page, 'Back to everything');
     await page.evaluate(() => {
       const all = document.querySelector('.kind-toggle.kind-all');
       if (all) all.click();
     });
-    assert(await clickTourButton(page, 'Next'), 'lesson 23 all-lens Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 17 all-lens Next');
     await waitTourTitle(page, 'Select something');
     await filterAndSelect(page, 'str-len', 'str-len');
     await waitTourTitle(page, "The Inspector's tabs", 150000);
@@ -107,32 +107,32 @@ const {
     assert(tabs.includes('Bindings') && tabs.includes('Runs'),
       'the Inspector shows its tabs (got ' + JSON.stringify(tabs) + ')');
     await waitTourTitle(page, "That's the view layer", 150000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 23 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 17 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 30000, polling: 200});
-    console.log('  lesson 23: walked (nothing created)');
+    console.log('  lesson 17: walked (nothing created)');
 
-    // ---------- Lesson 22 — workspaces ----------
-    await page.goto(BASE + '/?tutorial=22');
+    // ---------- Lesson 18 — workspaces ----------
+    await page.goto(BASE + '/?tutorial=18');
     await waitTourTitle(page, 'Your slice of a shared graph', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 22 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 18 Next');
     await waitTourTitle(page, 'Open the workspace chip');
     await page.waitForSelector('#gd-ws-chip', {timeout: 30000});
     await page.evaluate(() => document.getElementById('gd-ws-chip').click());
     await waitTourTitle(page, 'Pick a root', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 22 root Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 18 root Next');
     await waitTourTitle(page, 'And back');
-    assert(await clickTourButton(page, 'Next'), 'lesson 22 back Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 18 back Next');
     await waitTourTitle(page, "That's workspaces");
-    assert(await clickTourButton(page, 'Finish'), 'lesson 22 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 18 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 30000, polling: 200});
-    console.log('  lesson 22: walked (nothing created)');
+    console.log('  lesson 18: walked (nothing created)');
 
-    // ---------- Lesson 15 — in-graph state ----------
-    await page.goto(BASE + '/?tutorial=15');
+    // ---------- Lesson 09 — in-graph state ----------
+    await page.goto(BASE + '/?tutorial=09');
     await waitTourTitle(page, 'A graph can remember', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 09 Next');
     await waitTourTitle(page, 'Find cell');
     await filterAndSelect(page, 'cell', 'cell');
     await waitTourTitle(page, 'Make your own', 150000);
@@ -147,7 +147,7 @@ const {
     await bindFnRefPlaceholder(page, 'tutorial-cell');
     await waitTourTitle(page, 'Run it twice', 150000);
     // Writing to a cell is the :state effect, so Run is gated behind the
-    // acknowledgement checkbox — the same gate lesson 07 teaches.
+    // acknowledgement checkbox — the same gate lesson 13 teaches.
     await runWithEffectAck(page, 'tick');
     // The lesson's whole claim: the SECOND run sees the first one's value.
     // Read the result only once it has SETTLED — the host shows
@@ -174,12 +174,12 @@ const {
       'the cell kept its value between runs (' + JSON.stringify(before)
       + ' → ' + JSON.stringify(after) + ')');
     await finishAndDelete(page);
-    console.log('  lesson 15: walked + cleaned (state survived the second run)');
+    console.log('  lesson 09: walked + cleaned (state survived the second run)');
 
-    // ---------- Lesson 27 — tracing a run ----------
-    await page.goto(BASE + '/?tutorial=27');
+    // ---------- Lesson 15 — tracing a run ----------
+    await page.goto(BASE + '/?tutorial=15');
     await waitTourTitle(page, 'What actually ran?', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 27 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 15 Next');
     await waitTourTitle(page, 'Build something with a step in it');
     await filterAndSelect(page, 'const', 'const');
     await extendViaRowActions(page, 'tutorial-inner', 'const');
@@ -212,7 +212,7 @@ const {
     await page.evaluate(() => document.querySelector('.execute-show-path-btn').click());
     await waitTourTitle(page, "That's debugging in place", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 27: walked + cleaned (path drawn on canvas)');
+    console.log('  lesson 15: walked + cleaned (path drawn on canvas)');
 
     console.log('PASS');
   } catch (err) {

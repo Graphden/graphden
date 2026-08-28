@@ -1,4 +1,4 @@
-# Lesson 22 — Workspaces: scope the editor to your projects
+# Lesson 18 — Workspaces: scope the editor to your projects
 
 **Goal**: by the end of this lesson you can scope the Explorer to
 just the projects you're working in, hide namespaces you never
@@ -94,7 +94,7 @@ browser's local storage. Consequences worth knowing:
 ## Try it
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=22)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=18)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
@@ -111,7 +111,7 @@ browser's local storage. Consequences worth knowing:
 
 ## Next
 
-Lesson 23 — [Finding your way: the lens and the
-Inspector](23-explorer-and-inspector.md): the other half of not
+Lesson 17 — [Finding your way: the lens and the
+Inspector](17-explorer-and-inspector.md): the other half of not
 drowning in a big graph — filter by *kind*, and read everything
 about a selected fn in one panel.

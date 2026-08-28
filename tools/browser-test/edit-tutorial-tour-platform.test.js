@@ -1,4 +1,4 @@
-// Lessons 10, 14, 25 — services, package distribution, asset overrides.
+// Lessons 31, 28, 21 — services, package distribution, asset overrides.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -47,16 +47,16 @@ async function revertAssetViaApi(page, base) {
   });
   // Uninstall and revert both confirm natively.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-platform — lessons 10 / 14 / 25');
+  console.log('edit-tutorial-tour-platform — lessons 31 / 28 / 21');
   let failed = false;
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   try {
     await hardCleanup(page);
 
-    // ---------- Lesson 10 — services (the row, not a deploy) ----------
-    await page.goto(BASE + '/?tutorial=10');
+    // ---------- Lesson 31 — services (the row, not a deploy) ----------
+    await page.goto(BASE + '/?tutorial=31');
     await waitTourTitle(page, 'Fns that keep running', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 10 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 31 Next');
     await waitTourTitle(page, 'A thunk to run');
     await filterAndSelect(page, 'const', 'const');
     await extendViaRowActions(page, 'tutorial-tick', 'const');
@@ -117,9 +117,9 @@ async function revertAssetViaApi(page, base) {
       return (d.services || []).some((s) => s['fn-name'] === 'tutorial-daemon');
     });
     assert(created, 'the :service row exists after Create service');
-    assert(await clickTourButton(page, 'Next'), 'lesson 10 created Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 31 created Next');
     await waitTourTitle(page, 'What the row means', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 10 row-means Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 31 row-means Next');
     await waitTourTitle(page, 'Remove it');
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
@@ -133,15 +133,15 @@ async function revertAssetViaApi(page, base) {
       const d = await (await window.authFetch('/api/services')).json();
       return !(d.services || []).some((s) => s['fn-name'] === 'tutorial-daemon');
     }, null, {timeout: 20000, polling: 500});
-    assert(await clickTourButton(page, 'Next'), 'lesson 10 removed Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 31 removed Next');
     await waitTourTitle(page, "That's supervision", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 10: walked + cleaned (service row created, then deleted)');
+    console.log('  lesson 31: walked + cleaned (service row created, then deleted)');
 
-    // ---------- Lesson 14 — publish / install / uninstall ----------
-    await page.goto(BASE + '/?tutorial=14');
+    // ---------- Lesson 28 — publish / install / uninstall ----------
+    await page.goto(BASE + '/?tutorial=28');
     await waitTourTitle(page, 'Sharing more than one fn', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 14 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 28 Next');
     await waitTourTitle(page, 'A namespace to publish');
     await createRootNamespace(page, 'mycorp');
     await waitTourTitle(page, 'Put a function in it', 150000);
@@ -195,7 +195,7 @@ async function revertAssetViaApi(page, base) {
     });
     await page.waitForSelector('[data-packages-panel] .packages-uninstall', {timeout: 30000});
     await waitTourTitle(page, 'A pin, not a copy', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 14 pin Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 28 pin Next');
     await waitTourTitle(page, 'Uninstall');
     await page.evaluate(() => {
       document.querySelector('[data-packages-panel] .packages-uninstall').click();
@@ -205,12 +205,12 @@ async function revertAssetViaApi(page, base) {
       null, {timeout: 30000, polling: 300});
     await waitTourTitle(page, "That's distribution", 150000);
     await finishAndDelete(page);
-    console.log('  lesson 14: walked + cleaned (published, pinned, unpinned)');
+    console.log('  lesson 28: walked + cleaned (published, pinned, unpinned)');
 
-    // ---------- Lesson 25 — editing the editor's own assets ----------
-    await page.goto(BASE + '/?tutorial=25');
+    // ---------- Lesson 21 — editing the editor's own assets ----------
+    await page.goto(BASE + '/?tutorial=21');
     await waitTourTitle(page, 'The editor is served from the graph too', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 25 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 Next');
     await waitTourTitle(page, 'Open Assets');
     // Through the account menu, with the retry the nav's re-render needs —
     // the same helper five other lessons' walks use. The old one-shot
@@ -246,7 +246,7 @@ async function revertAssetViaApi(page, base) {
       return !href.includes(baked);
     });
     assert(rolled, 'the reloaded shell links the rolled ?v= (override in effect)');
-    assert(await clickTourButton(page, 'Next'), 'lesson 25 reload Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 reload Next');
     await waitTourTitle(page, 'See exactly what you changed', 150000);
     // After the reload the shell remounts: wait for the panel's rows, not
     // just the nav click, before hunting for the override row.
@@ -268,14 +268,14 @@ async function revertAssetViaApi(page, base) {
       const pane = document.querySelector('#gd-asset-editor .gd-asset-diff');
       return !!pane && pane.textContent.includes(marker);
     }, ASSET_MARKER, {timeout: 20000});
-    assert(await clickTourButton(page, 'Next'), 'lesson 25 diff Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 diff Next');
     await waitTourTitle(page, 'Put it back', 150000);
     await page.waitForSelector('#gd-asset-editor .gd-asset-revert-btn', {timeout: 20000});
     await page.evaluate(() => document.querySelector('#gd-asset-editor .gd-asset-revert-btn').click());
     await page.waitForFunction(() => !document.querySelector('.gd-asset-chip-override'),
       null, {timeout: 30000, polling: 300});
     await waitTourTitle(page, 'What this is for', 150000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 25 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 21 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 20000, polling: 200});
     // The lesson creates no graph entities, so there is no cleanup prompt —
@@ -286,7 +286,7 @@ async function revertAssetViaApi(page, base) {
       const href = document.querySelector('link[href*="editor.css"]').getAttribute('href');
       return {baked, href};
     });
-    console.log('  lesson 25: walked + reverted (' + overrideGone.href + ')');
+    console.log('  lesson 21: walked + reverted (' + overrideGone.href + ')');
 
     console.log('PASS');
   } catch (err) {

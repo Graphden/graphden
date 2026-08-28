@@ -43,7 +43,7 @@ async function hardCleanup(page) {
   // ordered pass clears the normal case; the second pass collects
   // whatever the first pass unblocked.
   // A service row pins its fn: `tutorial-daemon` refuses to delete while
-  // lesson 10's row still points at it, so the row goes first.
+  // lesson 31's row still points at it, so the row goes first.
   try {
     const svcs = await api(page, 'GET', '/api/services');
     for (const s of (svcs.services || [])) {
@@ -64,7 +64,7 @@ async function hardCleanup(page) {
       await retryingDelete(() => deleteFnByName(page, nm));
     }
   }
-  // Lesson 14's pin has to go before its namespaces: uninstall leaves the
+  // Lesson 28's pin has to go before its namespaces: uninstall leaves the
   // MATERIALISED `mycorp@1-0-0` copy behind by design, and deleting `greet`
   // by name (as this sweep once did) gutted that copy — the next install
   // then answered 404 "Entities not found" for a package that looked fine
@@ -130,9 +130,9 @@ async function hardCleanup(page) {
   try {
     const branches = await api(page, 'GET', '/api/branches');
     for (const b of (Array.isArray(branches) ? branches : (branches.branches || []))) {
-      // tutorial-NN-xxxx = an isolation branch (NN may carry a letter
-      // suffix — 08b); tutorial-branch / tutorial-release / tutorial-feature
-      // are the ones lessons 08 + 08b fork by hand.
+      // tutorial-NN-xxxx = an isolation branch; tutorial-branch /
+      // tutorial-release / tutorial-feature are the ones lessons 19 + 20
+      // fork by hand.
       if (/^tutorial-(\d\d[a-z]?-|branch$|release$|feature$)/.test(b.name || '')) {
         await api(page, 'DELETE', '/api/branches/' + encodeURIComponent(b.name));
       }
@@ -198,7 +198,7 @@ function tourProgress(page) {
 
 
 // Click a tour button and wait for the popover to ACTUALLY move on. The
-// header's step counter ("Lesson 31 · step 4/9") is the observable; a
+// header's step counter ("Lesson 25 · step 4/9") is the observable; a
 // finished lesson swaps the step popover for a centered dialog with no
 // counter, which counts as advancing too.
 //
@@ -390,7 +390,7 @@ async function removeUseSiteBinding(page, ownerText) {
 }
 
 
-// --- lesson 08 (branches) helpers -------------------------------------------
+// --- lesson 19 (branches) helpers -------------------------------------------
 
 // The tour popover repositions on a tick; clicking the chip the instant a
 // step renders can land on the popover instead. Wait until the chip is the
@@ -494,7 +494,7 @@ async function runViaRowActions(page, formValue) {
 }
 
 
-// --- lesson 26 (tests) helpers ----------------------------------------------
+// --- lesson 14 (tests) helpers ----------------------------------------------
 // Extracted from lesson 01's inline steps: the ns / fn / set-parent flows are
 // identical, only the names differ.
 
@@ -561,7 +561,7 @@ async function setParentViaStrip(page, parentName) {
 }
 
 
-// --- lesson 07 (effects) helper ---------------------------------------------
+// --- lesson 13 (effects) helper ---------------------------------------------
 // Run a fn whose effects force the acknowledgement checkbox first.
 async function runWithEffectAck(page, formValue) {
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
@@ -650,7 +650,7 @@ async function bindFnRefPlaceholder(page, fnName) {
 }
 
 
-// --- lesson 12 (components) helpers -----------------------------------------
+// --- lesson 07 (components) helpers -----------------------------------------
 // A component's inputs arrive as propagated FREE args. Since the
 // unified-arg-edges redesign they render as ordinary placeholder EDGES
 // from the card (lighter/dashed, `+` on the placeholder node) — the
@@ -798,7 +798,7 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
 // The account button is an AVATAR chip in accounts mode and a LOCK icon on a
 // token deployment — same menu, different trigger. A helper (or a lesson)
 // that names only the avatar silently excludes every self-hosted instance,
-// which is exactly where lesson 25 lives.
+// which is exactly where lesson 21 lives.
 async function openAccountMenu(page) {
   await page.waitForSelector('.auth-avatar, #auth-lock-btn', {timeout: 30000});
   await page.evaluate(() => {
@@ -878,7 +878,7 @@ async function openOperateSection(page, section) {
 }
 
 
-// Avatar → “Settings” — the account surface lessons 19 and 29 point at.
+// Avatar → “Settings” — the account surface lessons 32 and 16 point at.
 async function openAccountSettings(page) {
   await openAccountMenu(page);
   await page.evaluate(() => {

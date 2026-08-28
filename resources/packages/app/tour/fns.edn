@@ -12,7 +12,7 @@
 ;; (Basics → Composing → Running it → The editor); the picker emits a heading
 ;; whenever the chapter changes, so this vector's order IS the reading order.
 ;; The `:id` stays the WRITTEN lesson's number (docs/tutorial/NN-*.md) — it is
-;; the deep link (`?tutorial=12`), not a position.
+;; the deep link (`?tutorial=07`), not a position.
 ;;
 ;; Each step:
 ;;   :title / :body — popover copy. The body supports two inline marks
@@ -428,7 +428,7 @@
                :body "One slot type (:fn …) changes everything: the argument is passed unrun and the impl drives it. The written lesson 06 goes further — closure capture, lambda-params, and why a deeply nested callable can still see the request it was built under. Click [[Finish]] to clean up or keep tutorial-map."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "12"
+            {:id "07"
              :chapter "Composing"
              :title "Components"
              :steps
@@ -487,10 +487,10 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "That's a page, in pieces"
-               :body "Keep nesting — rows, forms, a nav-bar — and the outermost fn is the page. The written lesson 12 wires one to a route and adds click handlers. Click [[Finish]] to clean up or keep both."
+               :body "Keep nesting — rows, forms, a nav-bar — and the outermost fn is the page. The written lesson 07 wires one to a route and adds click handlers. Click [[Finish]] to clean up or keep both."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "13"
+            {:id "08"
              :chapter "Composing"
              :title "The escape hatch"
              :steps
@@ -524,10 +524,10 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
                :check {:kind "dom" :selector ".execute-result-repr .repr-source"}}
               {:title "Know what you gave up"
-               :body "Inside that string the graph sees nothing: no types, no effects, no references. That is the trade — full freedom, zero analysis — so keep the hatch small and the composition in fns. The written lesson 13 adds the per-click twin (:dispatch-custom) and the CSS variant. Click [[Finish]] to clean up or keep it."
+               :body "Inside that string the graph sees nothing: no types, no effects, no references. That is the trade — full freedom, zero analysis — so keep the hatch small and the composition in fns. The written lesson 08 adds the per-click twin (:dispatch-custom) and the CSS variant. Click [[Finish]] to clean up or keep it."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "15"
+            {:id "09"
              :chapter "Composing"
              :title "State: cells"
              :steps
@@ -566,7 +566,7 @@
                :check {:kind "fn-parent" :name "tutorial-bump" :parent "swap-conj"}
                :creates {:type "fn" :name "tutorial-bump"}}
               {:title "tutorial-bump is open"
-               :body "One [[+]] shows, on :a — WHICH cell to append to. What to append stays a free argument, so it gets asked for at run time (the form from lesson 09)."
+               :body "One [[+]] shows, on :a — WHICH cell to append to. What to append stays a free argument, so it gets asked for at run time (the form from lesson 12)."
                :target nil
                :check {:kind "selected" :name "tutorial-bump"}}
               {:title "Point it at your cell"
@@ -575,15 +575,15 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-cell\"]"]
                :check {:kind "bindings-count" :name "tutorial-bump" :count 1}}
               {:title "Run it twice"
-               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 07's gate). Tick the box, type `tick` in the field and [[Run]] — the result is a one-item list, shown as a single bulleted row: tick. Open [[Raw]] under it to see the plain JSON, [\"tick\"]. Now Run it a SECOND time the same way: two rows — [\"tick\" \"tick\"] in Raw. Nothing in the graph changed between the runs; the cell kept the value."
+               :body "[[⋯]] → [[▶ Run]]. Writing to a cell is the :state effect, so the Run pane asks you to acknowledge it first (lesson 13's gate). Tick the box, type `tick` in the field and [[Run]] — the result is a one-item list, shown as a single bulleted row: tick. Open [[Raw]] under it to see the plain JSON, [\"tick\"]. Now Run it a SECOND time the same way: two rows — [\"tick\" \"tick\"] in Raw. Nothing in the graph changed between the runs; the cell kept the value."
                :target "button.more-actions-trigger"
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "That's in-graph state"
-               :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 15 covers :swap vs :reset and cache patterns. Click [[Finish]] to clean up or keep both."
+               :body "A cell belongs to the compiled registry: any edit to its closure recompiles and resets it, and it is not shared across executor instances — which is exactly what makes it a cache and not a database. The written lesson 09 covers :swap vs :reset and cache patterns. Click [[Finish]] to clean up or keep both."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "30"
+            {:id "10"
              :chapter "Composing"
              :title "Recursion"
              :steps
@@ -616,10 +616,10 @@
                :target nil
                :check {:kind "manual"}}
               {:title "That's recursion"
-               :body "A step that receives :self, a base case that returns, a recursive arm that invokes. The written lesson 30 builds one from scratch — seven fn-defs that sum 1..n — and says when to reach for :reduce or a service instead. Click [[Finish]]."
+               :body "A step that receives :self, a base case that returns, a recursive arm that invokes. The written lesson 10 builds one from scratch — seven fn-defs that sum 1..n — and says when to reach for :reduce or a service instead. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "09"
+            {:id "12"
              :chapter "Running it"
              :title "Executing a fn"
              :steps
@@ -645,10 +645,10 @@
                :target ".execute-history-row"
                :check {:kind "manual"}}
               {:title "That's the run loop"
-               :body "Free args in, result out, history when you ask for it. The written lesson 09 adds cancellation, TTLs and the run-from-another-fn story. Click [[Finish]]."
+               :body "Free args in, result out, history when you ask for it. The written lesson 12 adds cancellation, TTLs and the run-from-another-fn story. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "07"
+            {:id "13"
              :chapter "Running it"
              :title "Effects"
              :steps
@@ -678,10 +678,10 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Secrets ride the same rails"
-               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane shows ●●●). Creating one needs vault access, so the written lesson 07 covers it end to end — the marker is the part to remember. Click [[Finish]]."
+               :body "A vault value is typed [:secret T]: the checker propagates that marker exactly like an effect, and the executor hides such values at sinks (the Run pane shows ●●●). Creating one needs vault access, so the written lesson 13 covers it end to end — the marker is the part to remember. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "26"
+            {:id "14"
              :chapter "Running it"
              :title "Tests"
              :steps
@@ -721,10 +721,10 @@
                :target "#gd-diag-nav button[data-section=\"tests\"]"
                :check {:kind "dom" :selector ".test-dot.test-passed"}}
               {:title "Tests are graph, too"
-               :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. The written lesson 26 covers statuses (including “stale by construction”), the tests lens and [[Run]]-all. Click [[Finish]] to clean up or keep it."
+               :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. The written lesson 14 covers statuses (including “stale by construction”), the tests lens and [[Run]]-all. Click [[Finish]] to clean up or keep it."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "27"
+            {:id "15"
              :chapter "Running it"
              :title "Tracing a run"
              :steps
@@ -769,10 +769,10 @@
                :target ".execute-show-path-btn"
                :check {:kind "dom" :selector ".path-view-panel"}}
               {:title "That's debugging in place"
-               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 27 adds the call-tree view and catching a live HTTP request. Click [[Finish]] to clean up or keep the two fns."
+               :body "No log statements, no rebuild: the run you just did carries its own map of what it touched. The written lesson 15 adds the call-tree view and catching a live HTTP request. Click [[Finish]] to clean up or keep the two fns."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "29"
+            {:id "16"
              :chapter "Running it"
              :title "When something breaks"
              :steps
@@ -812,10 +812,10 @@
                :target "#gd-diag-nav button[data-section=\"type-errors\"]"
                :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"type-errors\"]:not([hidden])"}}
               {:title "What each panel answers"
-               :body "Errors: what broke, and when. Type errors: what does not fit, right now, on this branch. Debug — the last tab in the bar — answers why (lesson 27), and Monitoring (account menu → [[Organization]]) answers how often. Click [[Finish]] — the tour offers to delete tutorial-bad-json."
+               :body "Errors: what broke, and when. Type errors: what does not fit, right now, on this branch. Debug — the last tab in the bar — answers why (lesson 15), and Monitoring (account menu → [[Organization]]) answers how often. Click [[Finish]] — the tour offers to delete tutorial-bad-json."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "23"
+            {:id "17"
              :chapter "The editor"
              :title "Explorer and Inspector"
              :steps
@@ -840,10 +840,10 @@
                :target ".gd-insp-tabs"
                :check {:kind "dom" :selector ".gd-insp-tab"}}
               {:title "That's the view layer"
-               :body "Lenses and tabs are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 23 covers the remaining chips and the Runs tab. Click [[Finish]]."
+               :body "Lenses and tabs are how you keep a big graph readable — none of it is stored in the graph itself. The written lesson 17 covers the remaining chips and the Runs tab. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "22"
+            {:id "18"
              :chapter "The editor"
              :title "Workspaces"
              :steps
@@ -866,10 +866,10 @@
                :targets ["#gd-ws-chip" "#gd-ws-pop"]
                :check {:kind "manual"}}
               {:title "That's workspaces"
-               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 22 adds per-fn hiding (⊘) and how workspaces interact with grants. Click [[Finish]]."
+               :body "Scope is a view, not a permission: everything stays reachable, you just stop looking at it. The written lesson 18 adds per-fn hiding (⊘) and how workspaces interact with grants. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "08"
+            {:id "19"
              :chapter "The editor"
              :title "Branches"
              ;; This lesson MANAGES branches itself (fork, edit, return to
@@ -934,13 +934,13 @@
                :target ".branch-diff-close"
                :check {:kind "dom-absent" :selector ".branch-diff-modal:not(.hidden)"}}
               {:title "That's branching"
-               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: 📤 propose, ✅ approve, ⚙ protect — the NEXT tour lesson (08b · Review) walks that whole cycle, refusal included. The written lesson 08 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
+               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: 📤 propose, ✅ approve, ⚙ protect — the NEXT tour lesson (20 · Review) walks that whole cycle, refusal included. The written lesson 19 adds protected branches and branch-local fns (runtime config that deliberately never merges). Click [[Finish]] to clean up (the branch goes too) or keep it."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "08b"
+            {:id "20"
              :chapter "The editor"
              :title "Review: propose and approve"
-             ;; Like lesson 08 this lesson MANAGES branches itself — a
+             ;; Like lesson 19 this lesson MANAGES branches itself — a
              ;; protected release branch plus a feature branch proposed
              ;; into it; a tour scratch branch would fork the story
              ;; mid-way. The protected branch is LESSON-owned (never
@@ -1012,10 +1012,10 @@
                :targets ["#branch-chip-btn" ".branch-popover"]
                :check {:kind "on-branch" :name "main"}}
               {:title "That's review"
-               :body "Refuse, propose, approve — with the rule on the target, exactly the pull-request shape. Editing a proposed branch dismisses its now-stale approvals (like GitHub dismissing stale reviews), every proposal carries a comment thread under its Δ diff, and ⚙ can also demand “push only via merge” (no direct writes at all). The written lesson 08 covers all of it. Click [[Finish]] to clean up — review-demo and both branches go."
+               :body "Refuse, propose, approve — with the rule on the target, exactly the pull-request shape. Editing a proposed branch dismisses its now-stale approvals (like GitHub dismissing stale reviews), every proposal carries a comment thread under its Δ diff, and ⚙ can also demand “push only via merge” (no direct writes at all). The written lesson 19 covers all of it. Click [[Finish]] to clean up — review-demo and both branches go."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "25"
+            {:id "21"
              :chapter "The editor"
              :requires "assets"
              :title "Editing the editor"
@@ -1050,10 +1050,10 @@
                :target ".gd-asset-revert-btn"
                :check {:kind "dom-absent" :selector ".gd-asset-chip-override"}}
               {:title "What this is for"
-               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 25 covers the ?v= hash and when NOT to override. Click [[Finish]]."
+               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. The written lesson 21 covers the ?v= hash and when NOT to override. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "28"
+            {:id "22"
              :chapter "The editor"
              :title "Version history"
              :steps
@@ -1096,10 +1096,10 @@
                :target nil
                :check {:kind "manual"}}
               {:title "That's the timeline"
-               :body "Edits append, restores append, deletes append a tombstone. The written lesson 28 covers the per-version run history and how this reads on a branch. Click [[Finish]]."
+               :body "Edits append, restores append, deletes append a tombstone. The written lesson 22 covers the per-version run history and how this reads on a branch. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "16"
+            {:id "23"
              :chapter "Your organization"
              :requires "manage-users"
              :title "Members"
@@ -1130,10 +1130,10 @@
                :target "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"
                :check {:kind "dom-absent" :selector "[data-users-panel] .grant-role-badge[title^=\"Invited\"]"}}
               {:title "That's membership"
-               :body "Invite by email, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 16 covers roles and the owner-only actions."
+               :body "Invite by email, remove by row, transfer ownership when you hand the org over. What a member may DO is the next lesson: capabilities are granted per namespace, not per person. The written lesson 23 covers roles and the owner-only actions."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "17"
+            {:id "24"
              :chapter "Your organization"
              :requires "manage-grants"
              :title "Grants"
@@ -1160,10 +1160,10 @@
                :target "[data-grants-panel] .grant-delete"
                :check {:kind "manual"}}
               {:title "That's authorization"
-               :body "Per-namespace capabilities, one table, no roles required — though Roles exist when you want to name a bundle of them. The written lesson 17 covers the org-management axis (manage-users, manage-grants …), which is separate from namespace capabilities. Click [[Finish]]."
+               :body "Per-namespace capabilities, one table, no roles required — though Roles exist when you want to name a bundle of them. The written lesson 24 covers the org-management axis (manage-users, manage-grants …), which is separate from namespace capabilities. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "20"
+            {:id "26"
              :chapter "Your organization"
              :requires "manage-apps"
              :title "Apps"
@@ -1202,10 +1202,10 @@
                :target "[data-apps-panel] form"
                :check {:kind "manual"}}
               {:title "That's publishing"
-               :body "Open the app's host in a new tab and your page is there — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request. The written lesson 20 covers custom domains and the request shape a handler receives. Click [[Finish]] to clean up or keep the app."
+               :body "Open the app's host in a new tab and your page is there — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request. The written lesson 26 covers custom domains and the request shape a handler receives. Click [[Finish]] to clean up or keep the app."
                :target "[data-apps-panel]"
                :check {:kind "manual"}}]}
-            {:id "14"
+            {:id "28"
              :chapter "Your organization"
              :requires "publish-packages"
              :title "Packages"
@@ -1252,16 +1252,16 @@
                :target "[data-packages-panel] .packages-uninstall"
                :check {:kind "dom-absent" :selector "[data-packages-panel] .packages-uninstall"}}
               {:title "That's distribution"
-               :body "Publish freezes, install pins, fork copies. The written lessons 11 and 14 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click [[Finish]] to clean up."
+               :body "Publish freezes, install pins, fork copies. The written lessons 27 and 28 cover the on-disk package format (package.edn / fns.edn / impls.clj, which is how the built-in packages are written) and the governance catalog in the Organization surface. Click [[Finish]] to clean up."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "31"
+            {:id "25"
              :chapter "Your organization"
              :requires "manage-roles"
              :title "Roles"
              :steps
              [{:title "One bundle, several people"
-               :body "Lesson 17 covered grants — who may touch which namespace. This is the OTHER axis: who may administer the org. Those capabilities (manage-users, manage-grants, manage-roles, manage-apps, publish-packages) are bundled by a ROLE, so a policy lives in one row instead of being spread across three people."
+               :body "Lesson 24 covered grants — who may touch which namespace. This is the OTHER axis: who may administer the org. Those capabilities (manage-users, manage-grants, manage-roles, manage-apps, publish-packages) are bundled by a ROLE, so a policy lives in one row instead of being spread across three people."
                :target nil
                :check {:kind "manual"}}
               {:title "Open Roles"
@@ -1289,13 +1289,13 @@
                :body "Delete the role with [[×]] on its row. The members keep their accounts, their org membership and every namespace grant they hold — only what the role conferred goes away. Click [[Finish]]."
                :target "[data-roles-panel] .grant-delete"
                :check {:kind "manual"}}]}
-            {:id "21"
+            {:id "29"
              :chapter "Your organization"
              :requires "org"
              :title "Across organizations"
              :steps
              [{:title "Where your editor lives"
-               :body "Your organization's editor has its own address — one subdomain per org. Apps live on a different domain entirely (lesson 20), so your public site never shares an origin with your editing session."
+               :body "Your organization's editor has its own address — one subdomain per org. Apps live on a different domain entirely (lesson 26), so your public site never shares an origin with your editing session."
                :target nil
                :check {:kind "manual"}}
               {:title "Read your own address"
@@ -1311,14 +1311,14 @@
                :target "#gd-ctxbar"
                :check {:kind "manual"}}
               {:title "How you join a second one"
-               :body "Not by signing up again — signup only ever makes a NEW org. Someone in the other org grants your account a capability there (lesson 17); membership is exactly “holds a grant in that org”, so the moment they do, that org appears for you."
+               :body "Not by signing up again — signup only ever makes a NEW org. Someone in the other org grants your account a capability there (lesson 24); membership is exactly “holds a grant in that org”, so the moment they do, that org appears for you."
                :target nil
                :check {:kind "manual"}}
               {:title "That's the map"
-               :body "Editors on one domain, one subdomain per org; apps on another, one subdomain per app; your own domain on top of an app when you want it. Nothing nested, nothing to configure. The written lesson 21 walks the same map from the landing inwards. Click [[Finish]]."
+               :body "Editors on one domain, one subdomain per org; apps on another, one subdomain per app; your own domain on top of an app when you want it. Nothing nested, nothing to configure. The written lesson 29 walks the same map from the landing inwards. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "10"
+            {:id "31"
              :chapter "Your organization"
              :requires "services"
              :title "Services"
@@ -1372,10 +1372,10 @@
                :target ".service-popover"
                :check {:kind "manual"}}
               {:title "That's supervision"
-               :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 10 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click [[Finish]] to clean up."
+               :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. The written lesson 31 builds a real one — a :future-parented thunk, then a scheduled job — and covers cardinality and the dedicated-tier isolation this runs under. Click [[Finish]] to clean up."
                :target nil
                :check {:kind "manual"}}]}
-            {:id "19"
+            {:id "32"
              :chapter "Your organization"
              :requires "org"
              :title "Your account"
@@ -1406,10 +1406,10 @@
                :target "#gd-acct-toks"
                :check {:kind "manual"}}
               {:title "Leaving"
-               :body "The account menu's [[Sign out]] ends this session; [[Sign out everywhere]] ends every session of this account on every device — the move to make if a laptop goes missing. The written lesson 19 covers signing up, email verification and password reset, which happen before you ever reach this editor. Click [[Finish]]."
+               :body "The account menu's [[Sign out]] ends this session; [[Sign out everywhere]] ends every session of this account on every device — the move to make if a laptop goes missing. The written lesson 32 covers signing up, email verification and password reset, which happen before you ever reach this editor. Click [[Finish]]."
                :target "#auth-lock-btn, .auth-avatar"
                :check {:kind "manual"}}]}
-            {:id "18"
+            {:id "33"
              :chapter "Your organization"
              :requires "org"
              :title "Plans and limits"
@@ -1432,7 +1432,7 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Reading your own tier"
-               :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 18 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click [[Finish]]."
+               :body "The plan travels with every response: /api/orgs/quota answers with the slug and the two counted ceilings, which is what the badge and this lesson both read. The written lesson 33 has the full table — anonymous, free, network, dedicated, suspended — and what each grants. Click [[Finish]]."
                :target nil
                :check {:kind "manual"}}]}]}}}
 

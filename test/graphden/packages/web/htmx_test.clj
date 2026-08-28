@@ -123,7 +123,7 @@
 
 
 ;; =============================================================================
-;; Lesson 24 pins — the tutorial's fn-defs, synced VERBATIM through the
+;; Lesson 11 pins — the tutorial's fn-defs, synced VERBATIM through the
 ;; real declarative sync and executed. If a vocabulary rename breaks
 ;; the lesson, this fails before the lesson goes stale.
 ;; =============================================================================

@@ -107,7 +107,7 @@ subtype (zero args match the slot's `{}`, `:text` ⊆ `:any`),
 so the bind passes.
 
 This is the structural reason the from-scratch service-eligible
-probe recipe in [lesson 10](10-services.md) works — bind a
+probe recipe in [lesson 31](31-services.md) works — bind a
 const-thunk to `:future.body`, the type-check accepts, the
 runtime `hof-wrap`s the ref as the daemon's callable. Without
 covariant return you'd need to box the thunk in a `:identity`-
@@ -240,13 +240,13 @@ in your base-fn impl and the dispatch picks the right behavior.
 
 - **Effects propagating through HOF boundaries** — `:effects`
   declared on the callable lift onto the HOF's effective effect
-  set. Lesson 07.
+  set. Lesson 13.
 - **The `:secret` type-marker** — how taint flows through HOF
-  refs without spilling. Lesson 07.
+  refs without spilling. Lesson 13.
 - **`hof-wrap` / `hof-lambda-params` source** — the actual
   Clojure code that implements the dispatch lives in
   `executor/compile/renames.clj` if you want to dig.
 
 ## Next
 
-[Lesson 07 — Effects and the `:secret` type-marker](07-effects-and-secrets.md)
+[Lesson 13 — Effects and the `:secret` type-marker](13-effects-and-secrets.md)

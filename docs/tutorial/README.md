@@ -21,10 +21,13 @@
 ## Lessons
 
 Read them top to bottom — the table is in **teaching order**, in the same
-five chapters the in-editor picker uses. The number in the first column is
-the lesson's **id, not its position**: it is the file name, the deep link
-(`?tutorial=13`), and the tour's `:id`, so it stays put when the order
-around it changes.
+five chapters the in-editor picker uses, and the numbering is
+**sequential in that order**: the number is the file name, the deep link
+(`?tutorial=13`), and the tour's `:id`. Inserting a lesson mid-sequence
+renumbers everything after it — that is a mechanical, repo-wide
+search-and-replace (ids appear only in file names, links, tour `:id`s and
+prose references), so keep the numbers honest rather than appending out
+of order.
 
 ### Basics
 
@@ -41,48 +44,48 @@ around it changes.
 | # | Lesson | Status |
 |---|---|---|
 | 06 | [Higher-order functions and `:fn`-typed slots](06-higher-order-functions.md) | ✅ written · ▶ interactive |
-| 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written · ▶ interactive |
-| 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
-| 15 | [State — cells, swap, and a graph-native cache](15-state-cells-and-caches.md) | ✅ written · ▶ interactive |
-| 30 | [Recursion: loops without cycles](30-recursion.md) | ✅ written · ▶ interactive |
-| 24 | [Live fragments: htmx from the graph](24-htmx-fragments.md) | ✅ written |
+| 07 | [Composing pages from components](07-components-and-pages.md) | ✅ written · ▶ interactive |
+| 08 | [The `:custom-script` escape hatch](08-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
+| 09 | [State — cells, swap, and a graph-native cache](09-state-cells-and-caches.md) | ✅ written · ▶ interactive |
+| 10 | [Recursion: loops without cycles](10-recursion.md) | ✅ written · ▶ interactive |
+| 11 | [Live fragments: htmx from the graph](11-htmx-fragments.md) | ✅ written |
 
 ### Running it
 
 | # | Lesson | Status |
 |---|---|---|
-| 09 | [Executing a fn — free-arg form, history, cancel](09-executing-a-fn.md) | ✅ written · ▶ interactive |
-| 07 | [Effects and the `:secret` type-marker](07-effects-and-secrets.md) | ✅ written · ▶ interactive |
-| 26 | [Tests — the `tests` namespace](26-tests.md) | ✅ written · ▶ interactive |
-| 27 | [Debugging: traces, the call tree, and catching a request](27-debugging-traces.md) | ✅ written · ▶ interactive |
-| 29 | [When something breaks: the two error panels](29-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
+| 12 | [Executing a fn — free-arg form, history, cancel](12-executing-a-fn.md) | ✅ written · ▶ interactive |
+| 13 | [Effects and the `:secret` type-marker](13-effects-and-secrets.md) | ✅ written · ▶ interactive |
+| 14 | [Tests — the `tests` namespace](14-tests.md) | ✅ written · ▶ interactive |
+| 15 | [Debugging: traces, the call tree, and catching a request](15-debugging-traces.md) | ✅ written · ▶ interactive |
+| 16 | [When something breaks: the two error panels](16-errors-and-diagnostics.md) | ✅ written · ▶ interactive |
 
 ### The editor
 
 | # | Lesson | Status |
 |---|---|---|
-| 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written · ▶ interactive |
-| 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |
-| 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written · ▶ interactive |
-| 08b | [Review — propose, approve, protected merge](08b-review.md) | ✅ written · ▶ interactive |
-| 25 | [Editing the editor: asset overrides](25-asset-overrides.md) | ✅ written · ▶ interactive |
-| 28 | [Version history: what changed, and going back](28-version-history.md) | ✅ written · ▶ interactive |
+| 17 | [Finding your way: the lens and the Inspector](17-explorer-and-inspector.md) | ✅ written · ▶ interactive |
+| 18 | [Workspaces — scope the editor to your projects](18-workspaces.md) | ✅ written · ▶ interactive |
+| 19 | [Branches — fork, edit, diff, merge](19-branches.md) | ✅ written · ▶ interactive |
+| 20 | [Review — propose, approve, protected merge](20-review.md) | ✅ written · ▶ interactive |
+| 21 | [Editing the editor: asset overrides](21-asset-overrides.md) | ✅ written · ▶ interactive |
+| 22 | [Version history: what changed, and going back](22-version-history.md) | ✅ written · ▶ interactive |
 
 ### Your organization
 
 | # | Lesson | Status |
 |---|---|---|
-| 16 | [Members — managing who is in your org](16-users-admin.md) | ✅ written · ▶ interactive |
-| 17 | [Grants — who may touch what](17-grants.md) | ✅ written · ▶ interactive |
-| 31 | [Roles — capabilities as a bundle](31-roles.md) | ✅ written · ▶ interactive |
-| 20 | [Apps — publishing a fn as a public site](20-apps.md) | ✅ written · ▶ interactive |
-| 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
-| 14 | [Distributing packages — publish, install, update, fork](14-distributing-packages.md) | ✅ written · ▶ interactive |
-| 21 | [Working across organizations](21-working-across-orgs.md) | ✅ written · ▶ interactive |
-| 32 | [Working offline: a local instance, git snapshots, push/pull](32-offline-and-push.md) | ✅ written |
-| 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written · ▶ interactive |
-| 19 | [Signing up & signing in: your account](19-signing-up-and-in.md) | ✅ written · ▶ interactive |
-| 18 | [Plans & tiers — what the cloud grants each account](18-plans-and-tiers.md) | ✅ written · ▶ interactive |
+| 23 | [Members — managing who is in your org](23-users-admin.md) | ✅ written · ▶ interactive |
+| 24 | [Grants — who may touch what](24-grants.md) | ✅ written · ▶ interactive |
+| 25 | [Roles — capabilities as a bundle](25-roles.md) | ✅ written · ▶ interactive |
+| 26 | [Apps — publishing a fn as a public site](26-apps.md) | ✅ written · ▶ interactive |
+| 27 | [Packages — namespaces, fns.edn, impls.clj, deps](27-packages.md) | ✅ written |
+| 28 | [Distributing packages — publish, install, update, fork](28-distributing-packages.md) | ✅ written · ▶ interactive |
+| 29 | [Working across organizations](29-working-across-orgs.md) | ✅ written · ▶ interactive |
+| 30 | [Working offline: a local instance, git snapshots, push/pull](30-offline-and-push.md) | ✅ written |
+| 31 | [Services — long-running fns supervised by graphden](31-services.md) | ✅ written · ▶ interactive |
+| 32 | [Signing up & signing in: your account](32-signing-up-and-in.md) | ✅ written · ▶ interactive |
+| 33 | [Plans & tiers — what the cloud grants each account](33-plans-and-tiers.md) | ✅ written · ▶ interactive |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for
@@ -94,8 +97,8 @@ drift-guarded by `tools/browser-test/edit-tutorial-tour.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
 sync when either changes.
 
-Two lessons have no tour: **11** is about files on disk and `bb rebuild`,
-which the editor cannot show, and **24** is a route-wiring marathon that
+Two lessons have no tour: **27** is about files on disk and `bb rebuild`,
+which the editor cannot show, and **11** is a route-wiring marathon that
 reads better as text than as thirty steps. Both sit in the chapter their
 subject belongs to, which is why the ▶ column is worth reading.
 
@@ -110,7 +113,7 @@ tenancy addon — the picker still lists the lesson, disabled, with the
 reason on the row.
 
 
-Lesson 25 is written **self-host-only** and its tour declares that
+Lesson 21 is written **self-host-only** and its tour declares that
 (`:requires "assets"`): the Assets panel is hidden under the cloud
 tenancy addon and its writes are platform-only, because an editable
 shared frontend would be a stored-XSS surface across tenants. On a
@@ -122,7 +125,8 @@ it's described, it stays ⏳ planned until the gap closes.
 
 ## End-to-end worked example
 
-Once you've worked through lessons 01–10,
+Once you've worked through the Basics and Composing chapters
+(lessons 01–11) plus Services (lesson 31),
 [**Building an API-poller**](../TUTORIAL_API_POLL.md) puts it all
 together: a scheduled service that calls an external HTTP API with a
 vault-backed bearer token and writes each result into your own Postgres

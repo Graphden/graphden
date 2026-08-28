@@ -1,4 +1,4 @@
-## Lesson 12 — Composing pages from components
+## Lesson 07 — Composing pages from components
 
 **Goal**: by the end of this lesson you can build a working
 HTML page — header, form, submit button, response panel —
@@ -129,7 +129,7 @@ pre-registers three handlers:
 |---|---|
 | `navigate` | Reads `data-href`, sets `window.location.href`. |
 | `submit-form` | Finds the nearest `<form>` ancestor, POSTs its fields, swaps the response into `data-target` (CSS selector) or back into the form. |
-| `custom` | Evaluates `data-custom-handler` as `(btn, event, host) => …` — the escape hatch (see Lesson 13). |
+| `custom` | Evaluates `data-custom-handler` as `(btn, event, host) => …` — the escape hatch (see Lesson 08). |
 
 Four convenience templates cover the common cases — each pre-
 wires the matching `data-action` so you only think about the
@@ -392,12 +392,12 @@ thanks partial swaps in.
 
 ## What's next
 
-Lessons 1–11 covered the graph model. Lesson 12 turns it on
+Lessons 1–11 covered the graph model. Lesson 07 turns it on
 itself: every element on a user-facing page is a fn-def, the
 dispatch is graph-visible, the response is a fn-def too. The
 escape hatch for the 20% of behaviour the components don't
 cover (a custom hover effect, a one-off computed style) is
-Lesson 13's `:custom-script` block.
+Lesson 08's `:custom-script` block.
 
 Multi-tenancy — multiple users hosting their own sites on
 one graphden instance, with their own deploys, secrets, and

@@ -1,4 +1,4 @@
-# Lesson 29 — When something breaks: the two error panels
+# Lesson 16 — When something breaks: the two error panels
 
 **Goal**: know where to look when a run fails and when an edit
 doesn't type-check — and know why those are two different lists.
@@ -8,7 +8,7 @@ runs) and **Type errors** tab (recorded diagnostics for this branch),
 runtime failure vs static diagnostic, error-tolerant writes.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=29)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=16)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
@@ -48,7 +48,7 @@ Malformed JSON.                     ← the error message
 Three things are worth knowing about that list:
 
 **It only holds runs you asked to keep.** A transient run — the plain
-▶ with "Save to history" unticked (lesson 09) — leaves no audit row, so
+▶ with "Save to history" unticked (lesson 12) — leaves no audit row, so
 a failure you did not persist never reaches this panel. Effectful runs
 persist by themselves; pure ones are yours to keep.
 
@@ -58,7 +58,7 @@ produced the failure.
 
 **The message is already safe to read.** Error text and data are
 redacted and scrubbed when the audit row is written, not when it is
-displayed — so a secret that flowed into an exception (lesson 07) is
+displayed — so a secret that flowed into an exception (lesson 13) is
 not sitting in this list waiting to be shown to a teammate.
 
 ## Type errors — what the checker recorded
@@ -96,9 +96,9 @@ either re-records or does not.
 Two more observability panels you have met:
 
 - **Debug** — the «catch next request» trap and the last captured
-  trace (lesson 27), the bar's last tab.
+  trace (lesson 15), the bar's last tab.
 - **Monitoring** — usage rollups: runs, failures and average duration
-  per fn (lesson 18 reads the same numbers for the plan's ceilings);
+  per fn (lesson 33 reads the same numbers for the plan's ceilings);
   it is an org-level report, so it lives on the account menu's
   **Organization** surface.
 
@@ -132,9 +132,9 @@ answers *why*. In that order, most of the time.
 
 ## Where this shows up next
 
-- **Tests** (lesson 26) — a failing test is a failed run like any
+- **Tests** (lesson 14) — a failing test is a failed run like any
   other, so it lands in Errors too, with its assertion message.
-- **Debugging** (lesson 27) — from a failed row, the next question is
+- **Debugging** (lesson 15) — from a failed row, the next question is
   usually "which node threw?", which is what the trace tree answers.
-- **Plans** (lesson 18) — the same audit rows feed the usage counters;
+- **Plans** (lesson 33) — the same audit rows feed the usage counters;
   a plan's retention is what decides how far back Errors can look.

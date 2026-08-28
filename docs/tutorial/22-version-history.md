@@ -1,4 +1,4 @@
-# Lesson 28 — Version history: what changed, and going back
+# Lesson 22 — Version history: what changed, and going back
 
 **Goal**: read a fn's version timeline across branches, and put an
 earlier version back — without leaving the editor, and without losing
@@ -9,13 +9,13 @@ the version you replaced.
 history.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=28)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=22)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
 ## Every edit writes a row
 
-Lesson 08 introduced branches; this is the other half of the same
+Lesson 19 introduced branches; this is the other half of the same
 machinery. A fn has **two planes**:
 
 - the **identity plane** — one row, created once: the fn's `id`, its
@@ -53,7 +53,7 @@ Each row carries:
   whose branch is not the current one).
 
 Click a row to expand it: the executions recorded against that exact
-version load underneath (lesson 09's history, sliced by version rather
+version load underneath (lesson 12's history, sliced by version rather
 than by fn). That is how you answer "did this break when I renamed it /
 changed its declared type?" — the runs sit on either side of the edit.
 
@@ -132,8 +132,8 @@ for as long as you can reach its id.
 
 ## Where this shows up next
 
-- **Branches** (lesson 08) — the same version rows, read through a
+- **Branches** (lesson 19) — the same version rows, read through a
   different branch chain. A merge picks version rows; a `:branch-local?`
   fn's rows deliberately do not travel.
-- **Debugging** (lesson 27) — a trace names the version it ran, so a
+- **Debugging** (lesson 15) — a trace names the version it ran, so a
   failed run points at the exact row in this popover.

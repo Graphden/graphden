@@ -204,7 +204,7 @@ Fn-types CAN also be NAMED via `:fn-type`:
 
 ## `[:secret T]` — the security marker
 
-Lesson 07 covers this in depth. Type-level marker that taints
+Lesson 13 covers this in depth. Type-level marker that taints
 values flowing through the slot:
 
 ```edn

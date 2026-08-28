@@ -1,4 +1,4 @@
-# Lesson 25 — Editing the editor: asset overrides
+# Lesson 21 — Editing the editor: asset overrides
 
 **Goal**: by the end of this lesson you can change the editor's
 own JavaScript and CSS from inside the editor, see the change

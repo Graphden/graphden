@@ -264,7 +264,7 @@ out.
   monotonicity rule.
 - **Type checking free args** — the executor validates each
   supplied value against the slot's declared type at call time.
-  Mismatch → `:execution-error/arg-type-mismatch`. Lesson 09.
+  Mismatch → `:execution-error/arg-type-mismatch`. Lesson 12.
 - **Closure-capture** — free args propagate through `:fn`-typed
   slots in a way that requires special handling. Lesson 06.
 

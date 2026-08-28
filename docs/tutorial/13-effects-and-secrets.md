@@ -1,4 +1,4 @@
-# Lesson 07 — Effects and the `:secret` type-marker
+# Lesson 13 — Effects and the `:secret` type-marker
 
 **Goal**: by the end of this lesson you understand how effects
 get declared and propagate, what `:expects-effects` is for, and
@@ -274,7 +274,7 @@ The graphden DB never holds the secret value. Only the path.
 ## Try it
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=07)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=13)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
@@ -337,4 +337,4 @@ The graphden DB never holds the secret value. Only the path.
 
 ## Next
 
-Lesson 08 — Branches ([already written](08-branches.md))
+Lesson 19 — Branches ([already written](19-branches.md))

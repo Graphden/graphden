@@ -1,4 +1,4 @@
-# Lesson 18 — Plans & tiers: what the cloud grants each account
+# Lesson 33 — Plans & tiers: what the cloud grants each account
 
 **Goal**: by the end of this lesson you can tell which tier an org
 is on, predict what its graphs may and may not do, read the quota
@@ -14,7 +14,7 @@ orgs.
 
 On the cloud, every org carries a `:plan` slug. A plan resolves to
 two things: the side **effects** its submitted graphs may use (from
-lesson 07) and its **quota** ceilings (fns, list items, outbound
+lesson 13) and its **quota** ceilings (fns, list items, outbound
 calls/min). That's the whole tier system — a tier is just a named
 bundle of "what effects" + "how much". The single source of truth is
 `graphden.tenancy.plan`; the human-readable table lives in
@@ -27,7 +27,7 @@ bundle of "what effects" + "how much". The single source of truth is
 | `anonymous` | ✗ | ✗ | 200 | 0 | locked demo, ephemeral, the fail-safe default |
 | `free` (registered) | ✓ metered | ✓ | 500 | 120 | a signed-up account |
 | `network` (paid) | ✓ | ✓ | 5,000 | 6,000 | higher ceilings |
-| `dedicated` (paid) | ✓ | ✓ | 5,000 | ∞ | its own pod + always-on services (lesson 10) |
+| `dedicated` (paid) | ✓ | ✓ | 5,000 | ∞ | its own pod + always-on services (lesson 31) |
 | `suspended` | ✗ | ✗ | 0 | 0 | operator freeze — no effects, no writes |
 
 The key line is `anonymous` → `free`. **Anonymous** is what a landing
@@ -36,13 +36,13 @@ reaped after a TTL — you can *try graphs* with nothing to lose. It is
 also the **fail-safe default**: an org with no slug resolves here, so
 a mis-provisioned account is locked, never accidentally opened.
 
-**Free (registered)** is what *signing up* gives you (lesson 16),
+**Free (registered)** is what *signing up* gives you (lesson 23),
 and it is genuinely useful: base effects PLUS metered `:network`. In
 practice that means you can build a personal Telegram bot, keep a few
 hundred records, and connect to **your own external database** — the
 external `:sql-query` / `:sql-exec` base-fns count as `network`, not
 `raw-sql` (arbitrary SQL on the *platform* DB stays forbidden for
-everyone; see lesson 07 + [SECURITY_MODEL.md](../SECURITY_MODEL.md)).
+everyone; see lesson 13 + [SECURITY_MODEL.md](../SECURITY_MODEL.md)).
 
 Outbound is bounded, not blocked: every external call goes through
 the SSRF egress guard (no internal / platform targets) and a
@@ -60,7 +60,7 @@ was registered, that's the fail-safe default telling you the org's
 
 ## Changing a tier (operator)
 
-`:org` is a tenant-forbidden entity (lesson 16), so tiers are an
+`:org` is a tenant-forbidden entity (lesson 23), so tiers are an
 **operator** activity. One platform-only route sets any org's plan:
 
 ```
@@ -95,7 +95,7 @@ demo](../PLANS.md).
 
 (Operator account on a tenancy-addon instance.)
 
-1. Sign up a new account (lesson 16) — its org lands on `free`.
+1. Sign up a new account (lesson 23) — its org lands on `free`.
    Confirm the quota display reads `free`.
 2. `POST /api/orgs/plan name=<that-org> plan=suspended`. As that
    account, try to run any fn — the effect gate now refuses even

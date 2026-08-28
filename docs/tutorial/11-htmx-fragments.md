@@ -1,4 +1,4 @@
-# Lesson 24 — Live fragments: htmx from the graph
+# Lesson 11 — Live fragments: htmx from the graph
 
 **Goal**: by the end of this lesson your page has a button that
 fetches a server-rendered fragment and swaps it into the page —
@@ -82,7 +82,7 @@ platform, hash-busted per deploy), so pages work with no CDN and
 no external dependency.
 
 Mount `:clock-page` and `:clock-fragment-route` the same way as
-any route (lesson 12: the `:all` items list locally, an app route
+any route (lesson 07: the `:all` items list locally, an app route
 on the cloud). Open `/clock`, press **Refresh** — the number
 changes on every click, straight from a fresh graph execution.
 
@@ -205,17 +205,17 @@ turns overload into a clean 503 + retry instead of resource
 exhaustion.
 
 Live demo: the contact-form demo page (`/demo/contact`, lesson
-12) now carries exactly this panel — a server clock streaming
+07) now carries exactly this panel — a server clock streaming
 over `/demo/contact/clock`.
 
 ## When to use which layer
 
 | Need | Take |
 |---|---|
-| Click → run a registered JS handler | `:dispatch-action` (lesson 12) |
+| Click → run a registered JS handler | `:dispatch-action` (lesson 07) |
 | Click/submit → fetch a **server** fragment | `web.htmx` + `:fragment-route` (this lesson) |
 | Server-pushed live panel (no polling) | `:sse-connect-attrs` + `:sse-fragment-route` (this lesson) |
-| One-off DOM behaviour no vocabulary covers | `:custom-script` (lesson 13) |
+| One-off DOM behaviour no vocabulary covers | `:custom-script` (lesson 08) |
 
 htmx fragments keep the behaviour server-side: the fragment is a
 graph fn you can inspect, type-check, branch and reuse — the same

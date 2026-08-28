@@ -1,4 +1,4 @@
-# Lesson 26 — Tests: the `tests` namespace
+# Lesson 14 — Tests: the `tests` namespace
 
 **Goal**: by the end of this lesson you can write tests for your
 fns — as ordinary fns in a `tests` namespace — run them, read their
@@ -37,7 +37,7 @@ executes it with no arguments. A test with unbound args shows up as
 ## Try it
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=26)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=14)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
@@ -96,7 +96,7 @@ exactly the affected tests.
 
 ## What we glossed over
 
-- Statuses are ordinary execution rows (Lesson 09's history) with
+- Statuses are ordinary execution rows (Lesson 12's history) with
   the standard retention sweep — an untouched suite fades to grey
   after a week; re-run to refresh.
 - The HTTP face (`POST /api/tests/run`, `GET /api/tests/status`) and

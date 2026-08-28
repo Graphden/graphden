@@ -1,4 +1,4 @@
-# Lesson 10 — Services: long-running fns supervised by graphden
+# Lesson 31 — Services: long-running fns supervised by graphden
 
 **Goal**: by the end of this lesson you can mark a fn as a
 service, see graphden start it automatically, run two versions
@@ -253,7 +253,7 @@ Worked example:
 ```
 
 Both `:http-server`, both branch-local (so they don't
-cross-merge — see lesson 08). Two `:service` rows:
+cross-merge — see lesson 19). Two `:service` rows:
 
 ```
 {:fn-id :prod-server  :branch-id main :enabled? true}
@@ -268,7 +268,7 @@ affects port 9001 without touching port 8080.
 ### Try it (per-branch edition)
 
 1. Pre-req: complete the per-branch web-server walk-through in
-   lesson 08. You should have `:dev-server` on `feat-dev-server`
+   lesson 19. You should have `:dev-server` on `feat-dev-server`
    parented from `:http-server` with `:port 9001`.
 2. Stay on `feat-dev-server`. Click `⚙` on `:dev-server`. The
    branch picker defaults to `feat-dev-server`. Hit
@@ -353,7 +353,7 @@ effect it *doesn't* grant — `:raw-sql` (the shared platform Postgres), or the
 host-level `:io` / `:env` — throws `:execution/forbidden-effect` in its own
 worker and fails to start, the same gate a one-shot execute runs under.
 (A one-shot ▶ run also passes the TYPE-error gate — a fn with recorded type
-diagnostics refuses to execute; see Lesson 09.)
+diagnostics refuses to execute; see Lesson 12.)
 
 ```bash
 # create — dedicated tier only; 403 :service/tier-required otherwise
@@ -395,4 +395,4 @@ see [docs/FLEET_DEPLOY.md § Dedicated tenant shard](../FLEET_DEPLOY.md).
 
 ## Next
 
-Lesson 11 — Packages ([already written](11-packages.md))
+Lesson 27 — Packages ([already written](27-packages.md))

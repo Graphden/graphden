@@ -1,4 +1,4 @@
-# Lesson 27 — Debugging: traces, the call tree, and catching a request
+# Lesson 15 — Debugging: traces, the call tree, and catching a request
 
 **Goal**: by the end of this lesson you can record what a run
 actually did — every fn it invoked, in call order, with per-node
@@ -25,12 +25,12 @@ sits paused holding threads.
 ## Try it — trace a run
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=27)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=15)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
 Take any composed fn of yours (something with a few refs — the
-`slugify` test subject from lesson 26, or any page fn):
+`slugify` test subject from lesson 14, or any page fn):
 
 1. Open its ▶ **Run** popover.
 2. Check **Trace path**. If you also want per-node return values,
@@ -62,7 +62,7 @@ a chip (`12ms` fresh call · `cache` memoised — the body didn't run ·
 
 ## Secrets never leak into a trace
 
-Traces obey the same `:secret` rules as results (lesson 07):
+Traces obey the same `:secret` rules as results (lesson 13):
 
 - a fn that touches secret-typed data records `secret` — its value
   is never read into the trace at all;

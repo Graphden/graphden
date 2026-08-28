@@ -157,7 +157,7 @@ appears in the index at the pinned dep set; reinstall reproduces exactly.
 > (memoize effective-ref-return across the boot check), NOT part of A2.
 >
 > A2 is currently REVERTED; A1 (install→Build chip) shipped without it. The
-> tutorial (lesson 14) documents publish via the `curl`/API for now and notes
+> tutorial (lesson 28) documents publish via the `curl`/API for now and notes
 > the in-editor publish affordance is planned — keep that until A2 lands.
 
 **Slice B — publish capability (tenancy). ✅ SHIPPED 2026-08-13.**

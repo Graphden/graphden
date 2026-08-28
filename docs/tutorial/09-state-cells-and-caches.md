@@ -1,4 +1,4 @@
-# Lesson 15 — State: cells, swap, and a graph-native cache
+# Lesson 09 — State: cells, swap, and a graph-native cache
 
 **Goal**: by the end of this lesson you can hold mutable state
 *inside the graph* — a counter, an accumulator, a cache — that
@@ -78,7 +78,7 @@ supplied per-swap.
 
 `:swap`'s `:func` slot is `[:fn {:current a} a]` — a 1-arg callable
 `a → a`. `:_bump-one` fits: it reads `:current` and returns a number
-of the same type. Now `▶ Run` (via `⋯`) on `:count-a-hit` (lesson 09) returns `1`,
+of the same type. Now `▶ Run` (via `⋯`) on `:count-a-hit` (lesson 12) returns `1`,
 then `2`, then `3` — it remembers.
 
 Swap `:cell` for `:atom` in `:hit-count` and it returns `1` every
@@ -137,7 +137,7 @@ on the current value and must not be lost — like the counter.
 
 ## The `:state` effect
 
-`:swap` and `:reset` carry the `:state` effect (lesson 07): they
+`:swap` and `:reset` carry the `:state` effect (lesson 13): they
 mutate shared state. It shows on the effect strip of anything built
 on them, so a reader can see at a glance that a fn writes state and
 isn't pure. `:deref` (a read) and `:cell`/`:atom` (allocation) don't.
@@ -145,7 +145,7 @@ isn't pure. `:deref` (a read) and `:cell`/`:atom` (allocation) don't.
 ## The one scope limit
 
 A `:cell` lives in **one executor process**. Run several pods behind
-a load balancer (lesson 10's cardinality, [SCALING.md](../SCALING.md))
+a load balancer (lesson 31's cardinality, [SCALING.md](../SCALING.md))
 and each has *its own* cell — a write on pod A is invisible to pod B.
 That's fine for a cache of identical, recomputable data (the worst
 case is a recompute on the other pod), but it is **not** shared
@@ -171,9 +171,9 @@ falls back to `:atom` behaviour — fresh each call.
 
 ## Next
 
-[Lesson 16 — Members: managing who is in your org](16-users-admin.md)
+[Lesson 23 — Members: managing who is in your org](23-users-admin.md)
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=15)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=09)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.

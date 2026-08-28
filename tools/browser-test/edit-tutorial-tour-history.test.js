@@ -1,4 +1,4 @@
-// Lessons 28 and 29 — version history, and the two error panels.
+// Lessons 22 and 16 — version history, and the two error panels.
 //
 // Both lessons are about surfaces that answer "what happened": the ⌛
 // popover (every version row of a fn, across branches, with restore) and
@@ -9,7 +9,7 @@
 // counted.
 //
 // Own file rather than an addition to an existing one: the runner caps a
-// file at five minutes, and lesson 28's history has to be BUILT (two edits
+// file at five minutes, and lesson 22's history has to be BUILT (two edits
 // before the popover shows anything) while 29 has to produce both a failed
 // run and a type error.
 //
@@ -124,16 +124,16 @@ async function openVersionHistory(page) {
     }
   });
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-history — lessons 28 / 29');
+  console.log('edit-tutorial-tour-history — lessons 22 / 16');
   let failed = false;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
-    // ---------- Lesson 28 — version history ----------
-    await page.goto(BASE + '/?tutorial=28');
+    // ---------- Lesson 22 — version history ----------
+    await page.goto(BASE + '/?tutorial=22');
     await waitTourTitle(page, 'Every edit writes a row', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 28 opening Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 opening Next');
 
     await waitTourTitle(page, 'Something to edit', 30000);
     await filterAndSelect(page, 'const', 'const');
@@ -141,10 +141,10 @@ async function openVersionHistory(page) {
     await waitTourTitle(page, 'Give it a description', 150000);
 
     await setDescription(page, 'first draft');
-    assert(await clickTourButton(page, 'Next'), 'lesson 28 first-edit Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 first-edit Next');
     await waitTourTitle(page, 'And another', 30000);
     await setDescription(page, 'second draft');
-    assert(await clickTourButton(page, 'Next'), 'lesson 28 second-edit Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 second-edit Next');
 
     await waitTourTitle(page, 'Open the history', 30000);
     await openVersionHistory(page);
@@ -172,7 +172,7 @@ async function openVersionHistory(page) {
       return (j.fns || []).some((f) => f.name === 'tutorial-versioned'
                                     && f.description === 'first draft');
     }, null, {timeout: 60000, polling: 500});
-    assert(await clickTourButton(page, 'Next'), 'lesson 28 restored Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 restored Next');
 
     await waitTourTitle(page, 'History is append-only', 30000);
     // Re-open the popover and let the NEW row land: the restore's write and
@@ -195,17 +195,17 @@ async function openVersionHistory(page) {
       'the restore APPENDED a version rather than removing any ('
       + before + ' → ' + after + ')');
 
-    assert(await clickTourButton(page, 'Next'), 'lesson 28 append-only Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 append-only Next');
     await waitTourTitle(page, 'What restore does not touch', 30000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 28 bindings Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 22 bindings Next');
     await waitTourTitle(page, "That's the timeline", 30000);
     await finishAndDelete(page);
-    console.log('  lesson 28: walked — two edits, restore, and the extra row it wrote');
+    console.log('  lesson 22: walked — two edits, restore, and the extra row it wrote');
 
-    // ---------- Lesson 29 — the two error panels ----------
-    await page.goto(BASE + '/?tutorial=29');
+    // ---------- Lesson 16 — the two error panels ----------
+    await page.goto(BASE + '/?tutorial=16');
     await waitTourTitle(page, 'Two kinds of wrong', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 29 opening Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 16 opening Next');
 
     await waitTourTitle(page, 'Something that fails', 30000);
     await filterAndSelect(page, 'parse-json', 'parse-json');
@@ -300,15 +300,15 @@ async function openVersionHistory(page) {
       'the failed run is listed by fn name (got: ' + errText.slice(0, 160) + ')');
     assert(/Malformed JSON/i.test(errText),
       '…with the error message it failed on');
-    assert(await clickTourButton(page, 'Next'), 'lesson 29 error-row Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 16 error-row Next');
 
     await waitTourTitle(page, 'Now a static mistake', 30000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 29 static Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 16 static Next');
     await waitTourTitle(page, 'Open Type errors', 30000);
     await openOperateSection(page, 'type-errors');
     await waitTourTitle(page, 'What each panel answers', 60000);
     await finishAndDelete(page);
-    console.log('  lesson 29: walked — a persisted failure in Errors, both panels opened');
+    console.log('  lesson 16: walked — a persisted failure in Errors, both panels opened');
 
     console.log('PASS');
   } catch (err) {

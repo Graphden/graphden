@@ -1,4 +1,4 @@
-# Lesson 08 — Branches: fork, edit, diff, merge
+# Lesson 19 — Branches: fork, edit, diff, merge
 
 **Goal**: by the end of this lesson you can fork the graph onto
 a feature branch, edit fn-defs without affecting `main`, see what
@@ -80,8 +80,8 @@ any time to re-open direct writes.
 
 > Prefer to be shown? The review cycle is its own guided in-editor
 > tour — protection, the 409 refusal, proposal and approval:
-> [open the demo with tour 08b running](https://app.graphden.dev/?demo=1&tutorial=08b)
-> (no sign-up), or pick lesson 08b in the editor's account menu.
+> [open the demo with tour 08b running](https://app.graphden.dev/?demo=1&tutorial=20)
+> (no sign-up), or pick lesson 20 in the editor's account menu.
 
 Beyond "who/how" you can require *review*: someone proposes a change,
 someone (with rights) approves it, then it merges. All in the branch
@@ -248,7 +248,7 @@ when propagation may happen at all.
 ## Try it (sticky-local edition)
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=08)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=19)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu.
 
@@ -268,7 +268,7 @@ when propagation may happen at all.
 ## What we glossed over
 
 - Per-branch services (running `:my-web-server` as a managed
-  service on dev while `:web-server` runs on main) — Lesson 10.
+  service on dev while `:web-server` runs on main) — Lesson 31.
 - How the resolver handles deep branch chains (B forked from A,
   C forked from B, merge edges everywhere) — see
   [docs/VERSIONING.md](../VERSIONING.md).
@@ -277,4 +277,4 @@ when propagation may happen at all.
 
 ## Next
 
-[Lesson 09 — Executing a fn](09-executing-a-fn.md)
+[Lesson 12 — Executing a fn](12-executing-a-fn.md)

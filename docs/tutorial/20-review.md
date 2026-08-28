@@ -1,4 +1,4 @@
-# Lesson 08b — Review: propose, approve, and the protected merge
+# Lesson 20 — Review: propose, approve, and the protected merge
 
 **Goal**: by the end of this lesson you can protect a branch with a
 required-approvals rule, watch it refuse an unreviewed merge, and walk
@@ -9,10 +9,10 @@ propose / ✅ approve cycle, stale-approval dismissal, self-approval,
 review comments, and why a merged branch is permanent.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=08b)
-> (no sign-up), or pick lesson 08b in the editor's account menu.
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=20)
+> (no sign-up), or pick lesson 20 in the editor's account menu.
 
-This lesson builds on [lesson 08](08-branches.md) — fork, edit, diff,
+This lesson builds on [lesson 19](19-branches.md) — fork, edit, diff,
 merge. Here the missing half: making a merge *conditional on review*.
 
 ## The rule lives on the target
@@ -25,7 +25,7 @@ works the same way, and the knobs sit in the branch popover's ⚙ menu
   (409, *"requires N approval(s)…"*) until the proposal has N valid
   approvals.
 - **Push only via merge** — no direct writes at all; the only way in
-  is a merge (lesson 08 covers this one).
+  is a merge (lesson 19 covers this one).
 - **Count the author's own approval** — on by default, so a solo user
   is never locked out; untick it for genuine four-eyes review.
 
@@ -77,6 +77,6 @@ one click short of `⇢`, so its cleanup can still remove both branches.
 
 ## Where this shows up next
 
-- [Lesson 08](08-branches.md) — protected branches ("push only via
+- [Lesson 19](19-branches.md) — protected branches ("push only via
   merge"), conflicts, and branch-local fns that never merge.
 - [VERSIONING.md](../VERSIONING.md) — the branch model underneath.

@@ -124,7 +124,7 @@ async function _tourFnIdByName(name) {
 }
 
 // NEWEST FIRST. A lesson that builds a chain creates the target before the fn
-// that points at it (lesson 15: the cell, then the swap that writes to it),
+// that points at it (lesson 09: the cell, then the swap that writes to it),
 // and the server refuses to delete a fn something still references — correctly.
 // Creation order therefore left the FIRST fn of every chain behind. Whatever
 // still refuses goes round once more, after the rest of the pass unblocked it.

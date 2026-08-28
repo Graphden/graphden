@@ -1,4 +1,4 @@
-# Lesson 20 — Apps: publishing a fn as a public site
+# Lesson 26 — Apps: publishing a fn as a public site
 
 **Goal**: by the end of this lesson you can take a fn that
 produces a web response and put it live on the public internet at
@@ -13,15 +13,15 @@ at it. You'll understand how a graphden *app* differs from the
 sandbox** your app runs in.
 
 This lesson assumes you can compose a fn that returns a web
-response — see [Lesson 12 (Composing pages from
-components)](12-components-and-pages.md), whose `:html-page` /
+response — see [Lesson 07 (Composing pages from
+components)](07-components-and-pages.md), whose `:html-page` /
 `:router` fns are exactly what an app serves.
 
 ## What an app is
 
 An app is nothing new — it's a fn you already know how to build,
 one whose return value is an HTTP response. The same
-`:html-page` you rendered in Lesson 12, or a `:router` that
+`:html-page` you rendered in Lesson 07, or a `:router` that
 dispatches on the request path, IS an app the moment you give it a
 public address. graphden runs it for you on each request; you
 never run a web server yourself.
@@ -46,7 +46,7 @@ link to the fn it serves.
 
 Apps also show up in the Explorer itself: a fn that serves an app
 carries a **▣** marker on its tree row, and the **apps** lens chip
-under the sidebar search (Lesson 23) narrows the tree to just
+under the sidebar search (Lesson 17) narrows the tree to just
 those fns — the chip shows a count and appears only when the
 deployment has app routing at all.
 
@@ -108,8 +108,8 @@ Your app runs **inside graphden's sandbox** (this is the
 handler executes effect-gated: it may read and compose graph data
 and reach the integrations your plan allows, but it cannot touch
 the server's files, environment, or spawn processes — the same
-effect gate you met in [Lesson 07 (Effects and
-secrets)](07-effects-and-secrets.md), now guarding the public
+effect gate you met in [Lesson 13 (Effects and
+secrets)](13-effects-and-secrets.md), now guarding the public
 entry point. It's also time-bounded, so a runaway handler can't
 wedge the platform.
 
@@ -134,7 +134,7 @@ at is untouched — you only removed the routing, not your code.
 - Deploying, re-pointing, and removing an app are all single
   actions with no build or restart.
 
-Next: [Lesson 21 — Working across
-organizations](21-working-across-orgs.md) covers the flip side of
+Next: [Lesson 29 — Working across
+organizations](29-working-across-orgs.md) covers the flip side of
 the same domain model: where *your editor* lives when you belong
 to more than one org.

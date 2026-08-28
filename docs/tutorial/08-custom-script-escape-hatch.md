@@ -1,4 +1,4 @@
-## Lesson 13 — The `:custom-script` escape hatch
+## Lesson 08 — The `:custom-script` escape hatch
 
 **Goal**: by the end of this lesson you can express interactive
 behaviour the platform components don't cover — a custom hover
@@ -12,7 +12,7 @@ modifying any Clojure code.
 
 ## When you'd reach for this
 
-Lesson 12 covered the 10 platform components and the two
+Lesson 07 covered the 10 platform components and the two
 built-in click handlers (`navigate`, `submit-form`). Real
 sites usually need a sliver of behaviour outside that scope —
 a tooltip on hover, a date-picker library, a confetti burst
@@ -109,7 +109,7 @@ button shipped on `/demo/contact`):
         :extras {:value {:type "button"}}}}
 ```
 
-`:custom-button` (in `web.components`, Lesson 12) is the
+`:custom-button` (in `web.components`, Lesson 07) is the
 convenience template — its `:body` slot is `:js-source`-typed,
 which gives you the code-editor widget (CodeMirror, JS-highlighted)
 instead of a single-line input.
@@ -196,7 +196,7 @@ the textarea fills.
 | Escape hatch | `:custom-script` / `:dispatch-custom` | 13 |
 | Distribution | publish, install, update, fork | 14 |
 
-Lesson 14 continues from packages (Lesson 11): once you've
+Lesson 28 continues from packages (Lesson 27): once you've
 authored a namespace, it shows how to publish it as a versioned
 artifact (the namespace's **⬆** action) and install / update /
 fork it across branches from the **packages** chip on the Build
@@ -206,5 +206,5 @@ Multi-tenancy (multiple users hosting their own sites on one
 graphden instance, each with their own deploys / secrets /
 auth-isolated routes) is a separate future phase. Today every
 fn-def in this graphden installation shares the same surface;
-Lesson 12 covers how to mount your own page routes alongside
-the editor's, Lesson 13 gives you the JS escape hatch.
+Lesson 07 covers how to mount your own page routes alongside
+the editor's, Lesson 08 gives you the JS escape hatch.

@@ -139,7 +139,7 @@
 (deftest chapters-are-contiguous-in-reading-order
   ;; The picker emits a heading whenever the chapter CHANGES, so a lesson
   ;; filed under an earlier chapter but placed later prints that heading a
-  ;; second time. That shipped once (lesson 25 sat after “Your organization”
+  ;; second time. That shipped once (lesson 21 sat after “Your organization”
   ;; carrying “The editor”).
   (let [order (map :chapter (lessons))
         runs (map first (partition-by identity order))]

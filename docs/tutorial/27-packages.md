@@ -1,4 +1,4 @@
-# Lesson 11 — Packages: namespaces, fns.edn, impls.clj, deps
+# Lesson 27 — Packages: namespaces, fns.edn, impls.clj, deps
 
 **Goal**: by the end of this lesson you can write your own
 package — namespaces, base-fns, and fn-defs — that loads
@@ -68,7 +68,7 @@ Two levels of grouping:
 | `:description` | Sidebar tooltip for the top-level namespace |
 | `:dependencies` | Package names (strings) this one needs. The loader topo-sorts so deps load first, and pulls them TRANSITIVELY |
 | `:modules` | Which subdirectories to load (strings). Order matters only if one module's `:namespace` aliases another's types |
-| `:services` | Optional — a package can declare a fn to keep running (the `app` package declares `:web-server` this way). See [Lesson 10](10-services.md) |
+| `:services` | Optional — a package can declare a fn to keep running (the `app` package declares `:web-server` this way). See [Lesson 31](31-services.md) |
 
 The loader fails fast on a missing dependency.
 
@@ -145,7 +145,7 @@ common mistake:
 Base-fns DECLARE the effect categories they touch — `:effects #{}`
 for a pure fn like the hash, `:effects #{:db}` for `:pg-query`.
 The type-checker propagates them transitively so editor effect
-strips show the full set. See [Lesson 07](07-effects-and-secrets.md).
+strips show the full set. See [Lesson 13](13-effects-and-secrets.md).
 
 ## Sync at startup
 
@@ -165,7 +165,7 @@ Because `registry` and `mcp` are OPTIONAL, dropping either from
 its packages affordances (the **packages** chip on the Build
 surface, the per-namespace **⬆** publish action, and the
 governance section on **Organization**), and `/mcp` 404s. (Full distribution flow —
-publish / install / update / fork — is [Lesson 14](14-distributing-packages.md).)
+publish / install / update / fork — is [Lesson 28](28-distributing-packages.md).)
 
 ## Try it
 
@@ -213,8 +213,8 @@ publish / install / update / fork — is [Lesson 14](14-distributing-packages.md
   `:other.ns/name` — or sync throws `:packages/ambiguous-ref`.
 - **Naming guidelines** — [docs/PACKAGES.md § Naming](../PACKAGES.md#naming-guidelines).
 - **Distributing a package as data** (not on disk) — publish it
-  into the graph and install it on a branch: [Lesson 14](14-distributing-packages.md).
+  into the graph and install it on a branch: [Lesson 28](28-distributing-packages.md).
 
 ## Next
 
-[Lesson 12 — Composing pages from components](12-components-and-pages.md).
+[Lesson 07 — Composing pages from components](07-components-and-pages.md).

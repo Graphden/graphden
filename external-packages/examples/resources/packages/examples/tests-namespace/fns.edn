@@ -13,7 +13,7 @@
 ;; and runs these through the real runner — discovery, pass, fail,
 ;; not-runnable, and the operands on `:error-data`. It is also the
 ;; smallest readable answer to "what does a test look like?", which is
-;; what docs/tutorial/26-tests.md asks a reader to build by hand.
+;; what docs/tutorial/14-tests.md asks a reader to build by hand.
 ;;
 ;; The namespace is `examples.tests`: discovery matches the SEGMENT
 ;; `tests`, so `examples.tests` counts and `examples.tests-namespace`

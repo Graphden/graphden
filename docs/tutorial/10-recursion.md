@@ -1,4 +1,4 @@
-# Lesson 30 — Recursion: loops without cycles
+# Lesson 10 — Recursion: loops without cycles
 
 **Goal**: write a fn that repeats itself in a graph where a fn is
 structurally forbidden from referring to itself.
@@ -7,7 +7,7 @@ structurally forbidden from referring to itself.
 `:input`, the base case, `:invoke`, `*max-recursion-depth*`.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
-> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=30)
+> [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=10)
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu. The tour READS a recursion that already exists in your
 > graph; the build-it-yourself version is below.
@@ -146,7 +146,7 @@ uses it for its own work.
 
 - **A sequence you already have** → `:map` / `:filter` / `:reduce`
   (lesson 06). They are clearer and the layout shows the shape.
-- **A long-lived loop with effects** → a service (lesson 10).
+- **A long-lived loop with effects** → a service (lesson 31).
   `:loop-until-interrupted` and `:schedule` exist for "keep doing this
   until stopped"; `:fix` is for computing a value.
 - **Unbounded input** → the depth bound is 1000 by default. A walk
@@ -157,7 +157,7 @@ uses it for its own work.
 
 1. Build the `:sum-to` chain above. Seven fn-defs; the fastest way is
    the editor's `+` on each slot, but pasting the block through the
-   MCP endpoint (lesson 11) is legitimate too.
+   MCP endpoint (lesson 27) is legitimate too.
 2. Run `:sum-to` with `n = 4`. Expect `10`.
 3. Break the base case deliberately: change `:_sum-done?` to compare
    against `-1` and run again with `n = 4`. The counter walks past
@@ -171,8 +171,8 @@ uses it for its own work.
 
 ## Where this shows up next
 
-- **Services** (lesson 10) — the other kind of repetition: effectful,
+- **Services** (lesson 31) — the other kind of repetition: effectful,
   supervised, and stopped by an interrupt rather than a base case.
-- **Tests** (lesson 26) — a recursive fn is worth an `:assert-eq`
+- **Tests** (lesson 14) — a recursive fn is worth an `:assert-eq`
   covering the base case AND one recursive step; those are the two
   places this shape goes wrong.

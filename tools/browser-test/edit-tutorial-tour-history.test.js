@@ -282,17 +282,18 @@ async function openVersionHistory(page) {
     let errText = '';
     for (let i = 0; i < 10; i++) {
       errText = await page.evaluate(() =>
-        document.querySelector('#gd-operate-panels > [data-section="errors"]')?.textContent || '');
+        document.querySelector('#gd-diag-panels > [data-section="errors"]')?.textContent || '');
       if (/tutorial-bad-json/.test(errText)) break;
+      // Collapse + re-open the drawer: opening is what re-fetches the
+      // live diagnostics panels (reloadDiagnosticsSections).
       await page.evaluate(() => {
-        document.querySelector('#gd-operate-nav button[data-section="errors"]')?.click();
-        document.querySelector('#gd-operate-nav button[data-section="tests"]')?.click();
-        document.querySelector('#gd-operate-nav button[data-section="errors"]')?.click();
+        document.querySelector('#gd-diag-nav button[data-section="errors"]')?.click();
+        document.querySelector('#gd-diag-nav button[data-section="errors"]')?.click();
       });
       // A poll INTERVAL, not a settle (no Escape in this loop): exit as
       // soon as the panel shows the row instead of always paying 1.5s.
       await waitUntil(page, () => /tutorial-bad-json/.test(
-        document.querySelector('#gd-operate-panels > [data-section="errors"]')?.textContent || ''),
+        document.querySelector('#gd-diag-panels > [data-section="errors"]')?.textContent || ''),
       null, 1500);
     }
     assert(/tutorial-bad-json/.test(errText),

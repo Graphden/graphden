@@ -82,7 +82,8 @@ per-branch routing) and auth-required. Core:
   namespaces stay visible even before their leaves lazy-load. Each
   test row carries a status dot: green passed, red failed, grey
   stale/not-run (primed from `/api/tests/status`).
-- **Operate → Tests panel** — summary line, Run-all button, per-test
+- **Diagnostics-drawer Tests panel** (the bar under the canvas) —
+  summary line, Run-all button, per-test
   rows with status + error. LIVE via SSE ping + re-fetch:
   `GET /partials/tests-stream` pushes a server-time PING on write
   wakes and a 30 s keepalive (`run-tests!` emits a `test:updated`

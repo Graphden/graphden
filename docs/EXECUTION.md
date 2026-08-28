@@ -509,7 +509,8 @@ doctrine — no stored field; restart disarms). Org-keyed sharding
 routes an org's requests to its own pod, so arming editor and
 captured request meet on one process by construction.
 
-Editor surface: **Operate → Debug** (`/partials/debug-catch` +
+Editor surface: the diagnostics drawer's **Debug** tab
+(`/partials/debug-catch` +
 `editor-debug.js`) — arm form (path prefix, capture-values behind
 the explicit confirm), armed status with Cancel, «open last captured
 trace».

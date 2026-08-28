@@ -7,10 +7,10 @@
 //   - the client status cache primed from GET /api/tests/status
 //     (accessors the sidebar reads sync'ly for the ✓/✗ dot + the
 //     `tests` lens chip count), and
-//   - the Operate → Tests section shell (server-rendered panel via
-//     GET /partials/tests, the editor-type-errors.js pattern) plus
-//     the Run-all action (POST /api/tests/run, then re-prime + swap
-//     a fresh panel).
+//   - the diagnostics-drawer Tests section shell (server-rendered
+//     panel via GET /partials/tests, the editor-type-errors.js
+//     pattern) plus the Run-all action (POST /api/tests/run, then
+//     re-prime + swap a fresh panel).
 //
 // Globals consumed: isAuthenticated, authFetch, window.API, htmx.
 
@@ -37,12 +37,24 @@ function getTestStatusCount() {
   return _testStatuses ? _testStatuses.size : null;
 }
 
+// Aggregate for the diagnostics-drawer bar badge: how many tests have a
+// recorded status, and how many of those failed. Null until the cache primes.
+function gdTestStatusSummary() {
+  if (!_testStatuses || _testStatuses.size === 0) return null;
+  let failed = 0;
+  _testStatuses.forEach((row) => { if (row.status === 'failed') failed += 1; });
+  return { total: _testStatuses.size, failed };
+}
+
 function loadTestStatuses() {
   if (!(window.API && API.api_tests_status)) return Promise.resolve(null);
   return authFetch(API.api_tests_status)
     .then((r) => (r.ok ? r.json() : []))
     .then((rows) => {
       _testStatuses = new Map((rows || []).map((row) => [row['fn-id'], row]));
+      // The drawer's tests badge reads this cache — recount on every prime
+      // (boot, graph refresh, post-run) so ✓/✗ tracks the latest runs.
+      if (typeof window.gdDiagUpdateBadges === 'function') window.gdDiagUpdateBadges();
       return _testStatuses;
     })
     .catch(() => null);
@@ -123,9 +135,9 @@ async function connectTestsStream(el) {
   }
 }
 
-// Operate → Tests section shell (mounted by editor-sidebar.js's
-// mountAdminSection; rebuilt on every Operate open via
-// reloadDynamicOpsSections). The stream does NOT open here: sections
+// Diagnostics-drawer Tests section shell (mounted by editor-sidebar.js's
+// mountAdminSection; rebuilt on every drawer open via
+// reloadDiagnosticsSections). The stream does NOT open here: sections
 // are pre-built hidden at editor boot, and an always-open SSE request
 // on every editor page would starve networkidle-style waiters (it
 // broke unrelated e2e specs' page.goto). ensureTestsStream opens it
@@ -138,7 +150,7 @@ function buildTestsSection() {
   el.className = 'ns-children';
   el.innerHTML = '<div class="loading">Loading…</div>';
   wrap.appendChild(el);
-  // Operate re-open rebuilds this shell while the Tests section may
+  // A drawer re-open rebuilds this shell while the Tests section may
   // already be the visible one — reconnect right away in that case.
   setTimeout(() => { if (el.isConnected && el.offsetParent !== null) ensureTestsStream(); }, 0);
   return wrap;

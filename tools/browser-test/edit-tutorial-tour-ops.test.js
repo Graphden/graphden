@@ -128,34 +128,36 @@ const {
     // The write itself triggers the auto-run — that IS the lesson's claim.
     await waitTourTitle(page, 'See it pass', 150000);
     // The step completes on the panel's green dot, so open the panel the
-    // way the lesson tells the reader to: Operate → Tests. Matching a button
-    // whose text is "tests" hit the sidebar's NAMESPACE row instead, and the
-    // step passed anyway only because the mounted-but-hidden panel still
-    // matched a `dom` check — until `dom` started meaning VISIBLE, which is
-    // what the reader experiences.
-    await page.evaluate(() => { window.location.hash = '@organization'; });
-    await page.waitForSelector('#gd-operate-nav button[data-section="tests"]',
+    // way the lesson tells the reader to: the diagnostics bar's Tests tab
+    // (the drawer under the canvas). Matching a button whose text is
+    // "tests" hit the sidebar's NAMESPACE row instead, and the step passed
+    // anyway only because the mounted-but-hidden panel still matched a
+    // `dom` check — until `dom` started meaning VISIBLE, which is what the
+    // reader experiences.
+    await page.waitForSelector('#gd-diag-nav button[data-section="tests"]',
                                {timeout: 30000});
-    // The nav re-renders as the surface opens, so a single click can land on
-    // a button whose handler is not bound yet — click until the panel is up.
     const testsPanelUp = () => page.evaluate(() => {
-      const el = document.querySelector('#gd-operate-panels > [data-section="tests"]');
+      const drawer = document.getElementById('gd-diag-drawer');
+      if (!drawer || drawer.getAttribute('data-open') !== '1') return false;
+      const el = document.querySelector('#gd-diag-panels > [data-section="tests"]');
       if (!el || el.hasAttribute('hidden')) return false;
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     });
     for (let attempt = 0; attempt < 10 && !(await testsPanelUp()); attempt++) {
       await page.evaluate(() => {
-        document.querySelector('#gd-operate-nav button[data-section="tests"]')?.click();
+        document.querySelector('#gd-diag-nav button[data-section="tests"]')?.click();
       });
       await waitUntil(page, () => {
-        const el = document.querySelector('#gd-operate-panels > [data-section="tests"]');
+        const drawer = document.getElementById('gd-diag-drawer');
+        if (!drawer || drawer.getAttribute('data-open') !== '1') return false;
+        const el = document.querySelector('#gd-diag-panels > [data-section="tests"]');
         if (!el || el.hasAttribute('hidden')) return false;
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       }, null, 1000);
     }
-    assert(await testsPanelUp(), 'Operate → Tests opened');
+    assert(await testsPanelUp(), 'diagnostics drawer → Tests opened');
     // Auto-run is asynchronous (the write returns first) — poll rather than
     // read once.
     // `pending` is a status too — poll until the run REACHES a terminal

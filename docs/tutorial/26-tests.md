@@ -7,7 +7,7 @@ them for you automatically.
 
 **Concepts introduced**: the `tests` namespace segment, `:assert`,
 `:assert-eq`, test statuses ("stale by construction"), the `tests`
-lens, the Operate → Tests panel, auto-run on writes.
+lens, the diagnostics bar's Tests panel, auto-run on writes.
 
 ## What a test is
 
@@ -64,10 +64,12 @@ Now the surfaces:
 - In the Explorer's filter bar click the **✓ tests** chip — the tree
   focuses on your tests, each with a status dot: **green** passed,
   **red** failed, **grey** not run since its last edit.
-- Open **Operate → Tests** (account menu → Organization) — the same
-  list with a summary line and a
-  **Run all tests** button. The panel is live: it re-renders on its
-  own as runs land — no refresh needed.
+- Click **Tests** in the diagnostics bar under the canvas — the
+  drawer opens with the same list, a summary line and a
+  **Run all tests** button, while the editor stays on screen. The
+  panel is live: it re-renders on its own as runs land — no refresh
+  needed. Clicking a test's name selects it on the canvas; the
+  drawer stays open.
 
 Break the test on purpose (change `:expected`) and watch the dot:
 right after the edit it turns grey — the status is keyed to the

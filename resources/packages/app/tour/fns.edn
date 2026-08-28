@@ -717,9 +717,8 @@
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "bindings-count" :name "two-plus-two" :count 2}}
               {:title "See it pass"
-               :body "Open [[Organization]] → [[Tests]]. Your test is listed with a green dot and the summary reads 1 passed — nobody pressed Run: the write itself triggered the auto-run."
-               :target nil
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"tests\"]"]
+               :body "Click [[Tests]] in the diagnostics bar under the canvas. Your test is listed with a green dot and the summary reads 1 passed — nobody pressed Run: the write itself triggered the auto-run."
+               :target "#gd-diag-nav button[data-section=\"tests\"]"
                :check {:kind "dom" :selector ".test-dot.test-passed"}}
               {:title "Tests are graph, too"
                :body "Because a test is an ordinary fn, everything you learned applies: it can be extended, its args can be free, and it lives on a branch like anything else. The written lesson 26 covers statuses (including “stale by construction”), the tests lens and [[Run]]-all. Click [[Finish]] to clean up or keep it."
@@ -797,10 +796,9 @@
                :targets ["button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
                :check {:kind "dom" :selector ".execute-result-host > *"}}
               {:title "Open Errors"
-               :body "Account button (top right) → [[Organization]] → [[Errors]]. The panel lists your org's failed runs from the last 7 days, newest first — the fn as a link, when it finished, and the message."
-               :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"errors\"]"]
-               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"errors\"]:not([hidden])"}}
+               :body "Click [[Errors]] in the diagnostics bar under the canvas — the drawer opens without leaving the editor. It lists your org's failed runs from the last 7 days, newest first — the fn as a link, when it finished, and the message. A fn link selects it on the canvas while the list stays open."
+               :target "#gd-diag-nav button[data-section=\"errors\"]"
+               :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"errors\"]:not([hidden])"}}
               {:title "Read the row"
                :body "Your run is at the top. Expand [[details]] — the error DATA is there too, carrying the typed :validation-error/malformed-json a client would have received. Both were scrubbed when the row was written, not when it was shown, so nothing secret is waiting here."
                :target ".error-log-list"
@@ -810,11 +808,11 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open Type errors"
-               :body "Same section list: click [[Type errors]]. Empty means nothing on this branch is mistyped right now — which is the normal state, and the reason this is a worklist rather than a wall."
-               :target "#gd-operate-nav button[data-section=\"type-errors\"]"
-               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"type-errors\"]:not([hidden])"}}
+               :body "Same bar: click [[Type errors]]. Empty means nothing on this branch is mistyped right now — which is the normal state, and the reason this is a worklist rather than a wall."
+               :target "#gd-diag-nav button[data-section=\"type-errors\"]"
+               :check {:kind "dom" :selector "#gd-diag-drawer[data-open=\"1\"] #gd-diag-panels > [data-section=\"type-errors\"]:not([hidden])"}}
               {:title "What each panel answers"
-               :body "Errors: what broke, and when. Type errors: what does not fit, right now, on this branch. Monitoring next to them answers how often, and Debug answers why (lesson 27). Click [[Finish]] — the tour offers to delete tutorial-bad-json."
+               :body "Errors: what broke, and when. Type errors: what does not fit, right now, on this branch. Debug — the last tab in the bar — answers why (lesson 27), and Monitoring (account menu → [[Organization]]) answers how often. Click [[Finish]] — the tour offers to delete tutorial-bad-json."
                :target nil
                :check {:kind "manual"}}]}
             {:id "23"

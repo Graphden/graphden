@@ -135,6 +135,10 @@
                   "packages/app/editor/editor-apps.js"
                   "packages/app/editor/editor-assets.js"
                   "packages/app/editor/editor-sidebar.js"
+                  ;; Diagnostics drawer (Build) — open/collapse lifecycle +
+                  ;; badge counts for the errors/type-errors/tests/debug
+                  ;; sections editor-sidebar.js mounts into it.
+                  "packages/app/editor/editor-diagnostics.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
                   "packages/app/editor/editor-render.js"
@@ -374,6 +378,24 @@
             [:aside {:id "gd-inspector" :aria-label "Inspector"}
              [:div {:class "gd-insp-empty"}
               "Select a node to inspect its bindings, types, effects, and this function\u2019s own run history."]]
+            ;; DIAGNOSTICS DRAWER \u2014 the code-facing live lists (Errors /
+            ;; Type errors / Tests / Debug) as a collapsible strip under the
+            ;; canvas. They used to live on the Organization surface, which
+            ;; hid the editor while you read them; here a fn link in a row
+            ;; navigates the canvas and the list STAYS open. The admin panels
+            ;; (grants, members, packages, monitoring, \u2026) remain on
+            ;; Organization. editor-sidebar.js mounts the section panes into
+            ;; #gd-diag-panels; editor-diagnostics.js owns open/collapse +
+            ;; the badge counts on the bar.
+            [:section {:id "gd-diag-drawer" :data-open "0" :aria-label "Diagnostics"}
+             [:div {:class "gd-diag-bar"}
+              [:nav {:id "gd-diag-nav" :aria-label "Diagnostics sections"}]
+              [:button {:id "gd-diag-toggle" :type "button" :class "gd-diag-toggle"
+                        :onclick "gdDiagToggle()"
+                        :aria-expanded "false" :aria-controls "gd-diag-panels"
+                        :aria-label "Toggle diagnostics drawer"
+                        :title "Toggle diagnostics drawer"} "\u25b4"]]
+             [:div {:id "gd-diag-panels" :class "gd-diag-pane" :hidden "hidden"}]]
             ;; Placeholder overlay for surfaces not yet rebuilt (Run / Review /
             ;; Operate / Workspaces / Settings). Hidden on the Build surface.
             [:div {:id "gd-surface-overlay" :hidden "hidden"}
@@ -384,8 +406,10 @@
                         :onclick "gdShellGoHome()"}
                "Back to Build"]]]
             ;; OPERATE surface — the ops/admin panels (packages, monitoring,
-            ;; errors, type-errors, grants, users, apps) mount here instead of
-            ;; crowding the explorer. Shown when the Operate rail button is
+            ;; grants, users, apps, assets) mount here instead of crowding
+            ;; the explorer. The code-facing diagnostics (errors,
+            ;; type-errors, tests, debug) moved to the Build-surface
+            ;; diagnostics drawer. Shown when the Operate rail button is
             ;; active; editor-sidebar.js renders panels into #gd-operate-panels.
             [:section {:id "gd-operate" :hidden "hidden" :aria-label "Organization"}
              [:div {:class "gd-operate-head"}
@@ -395,8 +419,8 @@
               ;; permissions) only holds when the tenancy addon is active. A
               ;; single-tenant self-hosted instance has no members/roles, so it
               ;; gets the operational-only wording — no over-promise.
-              [:p {:class "gd-solo-only"} "This instance's operations — packages, monitoring, apps and errors."]
-              [:p {:class "gd-tenancy-only"} "Your organization — members, roles and permissions, plus its packages, monitoring, apps and errors."]]
+              [:p {:class "gd-solo-only"} "This instance's operations — packages, monitoring, apps and assets. Live code diagnostics (errors, tests) sit in the drawer under the canvas."]
+              [:p {:class "gd-tenancy-only"} "Your organization — members, roles and permissions, plus its packages, monitoring and apps. Live code diagnostics (errors, tests) sit in the drawer under the canvas."]]
              [:div {:class "gd-op-body"}
               [:nav {:id "gd-operate-nav" :class "gd-op-nav" :aria-label "Organization sections"}]
               [:div {:id "gd-operate-panels" :class "gd-op-pane"}]]]

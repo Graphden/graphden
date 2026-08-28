@@ -113,30 +113,21 @@ function mountAdminSection(pane, nav, key, build) {
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
 }
 
-// The LIVE-diagnostics ops panels — type-errors + runtime errors — show state
-// that changes as the user edits, but their mounted node is cached (built once,
-// re-attached; htmx does NOT re-fire `hx-trigger="load"` on an already-processed
-// node). So a diagnostic recorded AFTER the panel's first load never appeared:
-// the type-errors panel sat empty while the fn card carried the ⚠ badge (the
-// badge is re-fetched per navigation, the cached panel was not). Re-fetch these
-// panels each time Operate is SHOWN — that is exactly when the user is looking
-// at them and wants current data. Rebuild the lazy-load child from the section's
-// builder (fresh, UNPROCESSED) and htmx.process it so the hx-get re-fires. The
-// static admin panels (grants / users / …) are untouched — their data doesn't
-// drift within a session. Exposed for editor-shell.js's gdRenderOperate.
-function reloadDynamicOpsSections() {
-  const host = document.getElementById('gd-operate-panels');
+// The LIVE-diagnostics panels — type-errors + runtime errors + tests + debug —
+// show state that changes as the user edits, but their mounted node is cached
+// (built once, re-attached; htmx does NOT re-fire `hx-trigger="load"` on an
+// already-processed node). So a diagnostic recorded AFTER the panel's first
+// load never appeared: the type-errors panel sat empty while the fn card
+// carried the ⚠ badge (the badge is re-fetched per navigation, the cached
+// panel was not). Re-fetch a live panel each time its surface is SHOWN — that
+// is exactly when the user is looking at it and wants current data. Rebuild
+// the lazy-load child from the section's builder (fresh, UNPROCESSED) and
+// htmx.process it so the hx-get re-fires. The static admin panels
+// (grants / users / …) are untouched — their data doesn't drift within a
+// session.
+function reloadLiveSections(hostId, builders) {
+  const host = document.getElementById(hostId);
   if (!host || !window.htmx || typeof window.htmx.process !== 'function') return;
-  const builders = {
-    'type-errors': typeof buildTypeErrorsSection === 'function' ? buildTypeErrorsSection : null,
-    errors: typeof buildErrorsSection === 'function' ? buildErrorsSection : null,
-    // Assets is live data too — override rows change as the user saves.
-    assets: typeof buildAssetsSection === 'function' ? buildAssetsSection : null,
-    // Tests drift as runs/auto-runs land — re-fetch on every Operate open.
-    tests: typeof buildTestsSection === 'function' ? buildTestsSection : null,
-    // Debug trap state is live (arms, fires, expires) — always re-fetch.
-    debug: typeof buildDebugSection === 'function' ? buildDebugSection : null,
-  };
   Object.keys(builders).forEach((key) => {
     const build = builders[key];
     if (!build) return;
@@ -151,7 +142,29 @@ function reloadDynamicOpsSections() {
     window.htmx.process(fresh);      // fires hx-trigger="load" → current diagnostics
   });
 }
+
+// Operate's only live panel left is Assets (override rows change as the user
+// saves) — the code diagnostics live in the Build drawer now. Exposed for
+// editor-shell.js's gdRenderOperate.
+function reloadDynamicOpsSections() {
+  reloadLiveSections('gd-operate-panels', {
+    assets: typeof buildAssetsSection === 'function' ? buildAssetsSection : null,
+  });
+}
 window.reloadDynamicOpsSections = reloadDynamicOpsSections;
+
+// The diagnostics-drawer sections — re-fetched each time the drawer OPENS
+// (editor-diagnostics.js). All four are live: diagnostics land as the user
+// edits, tests drift as runs/auto-runs land, the debug trap arms/fires/expires.
+function reloadDiagnosticsSections() {
+  reloadLiveSections('gd-diag-panels', {
+    'type-errors': typeof buildTypeErrorsSection === 'function' ? buildTypeErrorsSection : null,
+    errors: typeof buildErrorsSection === 'function' ? buildErrorsSection : null,
+    tests: typeof buildTestsSection === 'function' ? buildTestsSection : null,
+    debug: typeof buildDebugSection === 'function' ? buildDebugSection : null,
+  });
+}
+window.reloadDiagnosticsSections = reloadDiagnosticsSections;
 
 // Packages GOVERNANCE (packages spec §4) — the Organization surface's
 // read-mostly view: who may publish (a static capability note; the holders
@@ -1121,18 +1134,19 @@ function revealFnInTree(fnId) {
   }
 }
 
-// Mount the Operate / Platform panes: Grants, Members, Roles, Organizations,
-// Platform access, Packages, Monitoring, Apps, Errors, Type errors, Tests,
-// Debug, Assets. Each builder is a global from its own module and each
-// returns null when it doesn't apply, so a section opts out by being absent
-// rather than by being listed somewhere.
+// Mount the Operate / Platform / Diagnostics panes: Grants, Members, Roles,
+// Organizations, Platform access, Packages, Monitoring, Apps, Assets, plus
+// the code diagnostics (Errors, Type errors, Tests, Debug). Each builder is
+// a global from its own module and each returns null when it doesn't apply,
+// so a section opts out by being absent rather than by being listed
+// somewhere.
 //
-// Redesign 2026-08: these mount into the OPERATE surface
-// (#gd-operate-panels), not the explorer, so the sidebar stays a clean
-// namespace browser — `fallbackList` is used only when the operate pane
-// isn't on the page. Cross-org / platform panels go to the separate
-// PLATFORM surface; everything else (org RBAC + the org's operational
-// panels) to Organization.
+// Redesign 2026-08: these mount into surfaces, not the explorer, so the
+// sidebar stays a clean namespace browser — `fallbackList` is used only when
+// the operate pane isn't on the page. Cross-org / platform panels go to the
+// PLATFORM surface; the code diagnostics go to the Build-surface DIAGNOSTICS
+// drawer (#gd-diag-panels — so a fn link keeps the editor on screen);
+// everything else (org RBAC + the org's operational panels) to Organization.
 //
 // Lifted out of `updateEntityList`, which had ninety lines of this in the
 // middle of building the namespace tree — two surfaces, one function.
@@ -1142,10 +1156,17 @@ function mountOpsSections(fallbackList, searchMode) {
   const opsNav = document.getElementById('gd-operate-nav');
   const platPane = document.getElementById('gd-platform-panels');
   const platNav = document.getElementById('gd-platform-nav');
+  const diagPane = document.getElementById('gd-diag-panels');
+  const diagNav = document.getElementById('gd-diag-nav');
   const opsHost = opsPane || fallbackList;
   const opsNavHost = opsPane ? opsNav : null;
   const platHost = platPane || opsHost;
   const platNavHost = platPane ? platNav : opsNavHost;
+  // Code diagnostics (errors / type-errors / tests / debug) → the Build
+  // drawer, so a fn link in a row navigates the canvas without a surface
+  // switch; Operate keeps the admin panels.
+  const diagHost = diagPane || opsHost;
+  const diagNavHost = diagPane ? diagNav : opsNavHost;
   if (opsHost !== fallbackList) {
     opsPane.innerHTML = '';
     if (opsNavHost) opsNavHost.innerHTML = '';
@@ -1153,6 +1174,10 @@ function mountOpsSections(fallbackList, searchMode) {
   if (platHost !== opsHost && platHost !== fallbackList) {
     platPane.innerHTML = '';
     if (platNavHost && platNavHost !== opsNavHost) platNavHost.innerHTML = '';
+  }
+  if (diagHost !== opsHost && diagHost !== fallbackList) {
+    diagPane.innerHTML = '';
+    if (diagNavHost && diagNavHost !== opsNavHost) diagNavHost.innerHTML = '';
   }
   if (typeof buildGrantsAdminSection === 'function') {
     mountAdminSection(opsHost, opsNavHost, 'grants', buildGrantsAdminSection);
@@ -1183,17 +1208,17 @@ function mountOpsSections(fallbackList, searchMode) {
     mountAdminSection(opsHost, opsNavHost, 'apps', buildAppsSection);
   }
   if (typeof buildErrorsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'errors', buildErrorsSection);
+    mountAdminSection(diagHost, diagNavHost, 'errors', buildErrorsSection);
   }
   if (typeof buildTypeErrorsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'type-errors', buildTypeErrorsSection);
+    mountAdminSection(diagHost, diagNavHost, 'type-errors', buildTypeErrorsSection);
   }
   if (typeof buildTestsSection === 'function') {
-    mountAdminSection(opsHost, opsNavHost, 'tests', buildTestsSection);
+    mountAdminSection(diagHost, diagNavHost, 'tests', buildTestsSection);
   }
   if (typeof buildDebugSection === 'function') {
     // «Catch next request» trap + last-captured trace (editor-debug.js).
-    mountAdminSection(opsHost, opsNavHost, 'debug', buildDebugSection);
+    mountAdminSection(diagHost, diagNavHost, 'debug', buildDebugSection);
   }
   if (typeof buildAssetsSection === 'function') {
     // Frontend-asset overrides — self-host only (the builder returns null
@@ -1218,6 +1243,11 @@ function mountOpsSections(fallbackList, searchMode) {
   }
   if (platNavHost && platNavHost !== opsNavHost && platNavHost.firstElementChild) {
     activateOpSection(platNavHost, platHost, activeOrFirst(platNavHost, platHost));
+  }
+  if (diagNavHost && diagNavHost !== opsNavHost && diagNavHost.firstElementChild) {
+    activateOpSection(diagNavHost, diagHost, activeOrFirst(diagNavHost, diagHost));
+    // Bar badges read the mounted panels — refresh after every (re)mount.
+    if (typeof window.gdDiagUpdateBadges === 'function') window.gdDiagUpdateBadges();
   }
 }
 

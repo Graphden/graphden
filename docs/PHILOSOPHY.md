@@ -1132,8 +1132,9 @@ reassembles into the call TREE. `GET /partials/execute-trace` renders
 it server-side; `editor-trace-view.js` steps through it (row click /
 ◀ ▶ / arrow keys) with canvas highlight — "пошагово проследить" over
 the record, deterministic and pause-free. The companion entry point
-is the **catch-next-request trap** (`crud.debug-capture`, Operate →
-Debug): a one-shot, TTL-bounded, org+branch-scoped arm that runs the
+is the **catch-next-request trap** (`crud.debug-capture`, the
+diagnostics drawer's Debug tab): a one-shot, TTL-bounded,
+org+branch-scoped arm that runs the
 next matching HTTP request through the same trace machinery and
 persists it as a standard `:fn-execution` row — no new entity, no new
 viewer (docs/EXECUTION.md § Debug). A LIVE pausing stepper was

@@ -1,4 +1,4 @@
-// Editor — Operate → Debug: the «catch next request» trap
+// Editor — diagnostics drawer → Debug: the «catch next request» trap
 // (crud.debug-capture; POST /api/debug/catch family).
 //
 // Server owns the panel markup (`GET /partials/debug-catch`: status

@@ -286,7 +286,7 @@ function _tourUnderSheet(selector) {
 // contents ARE the step's subject. Returns a DOMRect or null.
 function _tourPanelOf(target) {
   if (!target) return null;
-  const panel = target.closest('#side-menu, #gd-operate-panels, #gd-shell-surface, #gd-inspector');
+  const panel = target.closest('#side-menu, #gd-operate-panels, #gd-shell-surface, #gd-inspector, #gd-diag-drawer');
   if (!panel) return null;
   const r = panel.getBoundingClientRect();
   // Only worth avoiding if it is actually a panel-sized region on screen.

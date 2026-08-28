@@ -7,7 +7,8 @@ to your app the same way.
 
 **Concepts introduced**: the path trace (`Trace path` /
 `+ capture values`), the **path** canvas highlight, the **tree**
-step-through view, the Operate → Debug «catch next request» trap,
+step-through view, the diagnostics bar's Debug «catch next request»
+trap,
 secret redaction in traces.
 
 ## Why a record, not breakpoints
@@ -78,8 +79,8 @@ Traces of manual runs cover fns you can call from the Run pane.
 For a **web handler** you usually want the real thing: the actual
 HTTP request, with its params and headers. That's the trap:
 
-1. Open **Operate → Debug** (account menu → Organization, or the
-   `@organization` hash).
+1. Open **Debug** — the last tab in the diagnostics bar under the
+   canvas.
 2. Optionally type a path prefix (e.g. `/shop`) — empty catches the
    next request to any app path (the editor's own `/api/…` and
    `/partials/…` traffic is excluded so it can't eat the trap).

@@ -82,9 +82,10 @@
         && typeof updateEntityList === 'function' && typeof graphData !== 'undefined' && graphData) {
       updateEntityList(graphData);
     }
-    // Live-diagnostics panels (type-errors / errors) are cached once mounted, so
-    // re-fetch them each time Operate opens — that is when the user is viewing
-    // them and they must reflect edits made since the last open.
+    // Live panels (Assets today — the code diagnostics live in the Build
+    // drawer now) are cached once mounted, so re-fetch them each time
+    // Operate opens — that is when the user is viewing them and they must
+    // reflect edits made since the last open.
     if (typeof window.reloadDynamicOpsSections === 'function') window.reloadDynamicOpsSections();
   }
 

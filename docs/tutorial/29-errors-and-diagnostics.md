@@ -3,9 +3,9 @@
 **Goal**: know where to look when a run fails and when an edit
 doesn't type-check — and know why those are two different lists.
 
-**Concepts**: Operate → **Errors** (recent failed runs), Operate →
-**Type errors** (recorded diagnostics for this branch), runtime failure
-vs static diagnostic, error-tolerant writes.
+**Concepts**: the diagnostics bar's **Errors** tab (recent failed
+runs) and **Type errors** tab (recorded diagnostics for this branch),
+runtime failure vs static diagnostic, error-tolerant writes.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
 > [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=29)
@@ -28,13 +28,14 @@ the graph, and the diagnostic rides alongside it (lesson 05 — "a
 diagnostic, not a wall"). A failed run is the opposite: nothing was
 written, something was attempted and threw.
 
-Both live under the account menu → **Organization** (on a self-hosted
-instance it is the operations surface), in the section list on the
-left.
+Both live in the **diagnostics bar** under the canvas — a collapsible
+drawer whose tabs (Errors, Type errors, Tests, Debug) open without
+leaving the editor, so a fn link in a row selects it on the canvas
+while the list stays open.
 
 ## Errors — the last things that failed
 
-`Operate → Errors` lists your org's recent failed executions, newest
+The **Errors** tab lists your org's recent failed executions, newest
 first. Each row is:
 
 ```
@@ -62,7 +63,7 @@ not sitting in this list waiting to be shown to a teammate.
 
 ## Type errors — what the checker recorded
 
-`Operate → Type errors` lists the diagnostics recorded for the branch
+The **Type errors** tab lists the diagnostics recorded for the branch
 you are on. One row per diagnostic:
 
 ```
@@ -92,12 +93,14 @@ either re-records or does not.
 
 ## The two panels next door
 
-The same section list holds two more observability panels you have met:
+Two more observability panels you have met:
 
-- **Monitoring** — usage rollups: runs, failures and average duration
-  per fn (lesson 18 reads the same numbers for the plan's ceilings).
 - **Debug** — the «catch next request» trap and the last captured
-  trace (lesson 27).
+  trace (lesson 27), the bar's last tab.
+- **Monitoring** — usage rollups: runs, failures and average duration
+  per fn (lesson 18 reads the same numbers for the plan's ceilings);
+  it is an org-level report, so it lives on the account menu's
+  **Organization** surface.
 
 Errors answers *what broke*, Monitoring answers *how often*, Debug
 answers *why*. In that order, most of the time.
@@ -115,14 +118,14 @@ answers *why*. In that order, most of the time.
 2. Run it (⋯ → ▶) with `string` = `not json at all`, and **tick “Save
    to history”** before pressing Run. The result pane shows
    `Malformed JSON.`
-3. Open the account menu → **Organization** → **Errors**. Your run is
-   the top row. Expand `details` — the error data carries the typed
+3. Click **Errors** in the diagnostics bar under the canvas. Your run
+   is the top row. Expand `details` — the error data carries the typed
    `:validation-error/malformed-json`, which is what a client would
    have seen.
 4. Now make a static mistake. Extend `:http-server` and bind its
    `port` to the literal `"oops"` (a string). The write SUCCEEDS, with
    a warning, and the card grows a red type-error badge.
-5. Open **Type errors** in the same section list. There is your row,
+5. Open **Type errors** in the same bar. There is your row,
    with the expected refinement and the actual `:text`.
 6. Fix the binding — bind `8080` instead — and reload the panel. The
    row is gone; you did not have to dismiss it.

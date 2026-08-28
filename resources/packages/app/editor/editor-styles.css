@@ -5277,6 +5277,12 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .gd-pop .packages-version-input { width: 44px; font-size: 10px; padding: 0 2px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
 .gd-pop .packages-update-btn { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 2px; line-height: 1; }
 .gd-pop .packages-update-btn:hover { color: var(--accent); }
+/* Remote-registry install form — pull a published package from another
+   graphden (cross-install), below the local browse table. */
+.gd-pop .packages-remote-note { padding: 6px 4px 2px; font-size: 10px; color: var(--muted-fg); }
+.gd-pop .packages-remote-form { display: flex; gap: 3px; align-items: center; padding: 2px 4px 6px; flex-wrap: wrap; }
+.gd-pop .packages-remote-input { flex: 1; min-width: 90px; font-size: 10px; padding: 2px 4px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.gd-pop .packages-remote-version { flex: 0 0 56px; min-width: 56px; }
 /* Fork button (browse row) + transient fork notice. */
 .gd-pop .packages-fork-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--muted-fg); cursor: pointer; font-size: 10px; margin-left: 3px; padding: 1px 6px; }
 .gd-pop .packages-fork-btn:hover { background: var(--hover-bg); color: var(--fg); }

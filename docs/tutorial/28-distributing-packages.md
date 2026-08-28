@@ -207,6 +207,18 @@ on Organization; acting on it happens on the Build packages chip.
    their visibility; the install audit shows a row per pin
    (re-install first if you removed the pin in step 6).
 
+## Installing from ANOTHER graphden's registry
+
+The browse `<details>` has one more affordance under the local table:
+a small form — **registry URL / package name / version** — that pulls
+a published package from a *different* graphden (say, `graphden.dev`
+into your self-hosted install). Behind the scenes the version is
+**mirrored** into your local registry first (an immutable local copy,
+never re-published as public), then installed exactly as above —
+reference, pin, secrets manifest and all. If the remote registry
+requires auth, the server presents its `GRAPHDEN_REGISTRY_TOKEN`; the
+browser never handles that credential.
+
 ## Beyond the registry — an external package from its own git repo
 
 Everything above lives **inside one graphden install**: the registry

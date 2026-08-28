@@ -11,7 +11,8 @@
     [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
-    [graphden.versioning.storage.core :as vcore]))
+    [graphden.versioning.storage.core :as vcore]
+    [org.httpkit.server :as http-kit]))
 
 
 (def ^:dynamic *bootstrap* nil)
@@ -560,6 +561,48 @@
           "installed row carries the × uninstall control")
       (is (seq (sp/query-entities (storage) :package-install {:package-name "panel.inst"}))
           "a :package-install pin was written on the branch"))))
+
+
+(deftest panel-install-pulls-from-a-remote-registry
+  ;; The remote-install form: form-encoded {source, name, version} → the SAME
+  ;; panel-install route mirrors the version from the remote registry
+  ;; (mirror-remote-package! inside the install worklist), then materializes
+  ;; + pins it locally and returns the refreshed panel.
+  (let [remote-row {:name "remote.pkg" :version "1.0.0" :ns-root "remotepkg.demo"
+                    :fns [{:name :remote-greeting :namespace "remotepkg.demo"
+                           :parent :const :args {:value "hi from remote"}}]
+                    :dependencies [:const] :package-dependencies []
+                    :content-hash "rh"}
+        handler (fn [req]
+                  (condp = (:uri req)
+                    "/api/packages"
+                    {:status 200 :headers {"Content-Type" "application/json"}
+                     :body (json/generate-string
+                             {:packages [{:name "remote.pkg" :version "1.0.0"}]})}
+                    "/api/packages/remote.pkg/1.0.0"
+                    {:status 200 :headers {"Content-Type" "application/edn"}
+                     :body (pr-str remote-row)}
+                    {:status 404 :body "no"}))
+        stop (http-kit/run-server handler {:port 0})
+        port (:local-port (meta stop))
+        base (java.net.URLEncoder/encode (str "http://127.0.0.1:" port) "UTF-8")]
+    (try
+      (let [resp (setup/via-graph *bootstrap* :_pkg-install-panel-handler
+                                  {:request-method :post
+                                   :query-params {}
+                                   :headers {"content-type" "application/x-www-form-urlencoded"}
+                                   :body (str "source=" base
+                                              "&name=remote.pkg&version=1.0.0")})]
+        (is (= 200 (:status resp)))
+        (is (re-find #"remote\.pkg" (:body resp))
+            "the refreshed panel lists the mirrored package")
+        (is (seq (sp/query-entities (storage) :package-version {:name "remote.pkg"}))
+            "the version row was mirrored into the local registry")
+        (is (seq (sp/query-entities (storage) :fn {:name "remote-greeting"}))
+            "the fn materialized under the versioned ns")
+        (is (seq (sp/query-entities (storage) :package-install {:package-name "remote.pkg"}))
+            "a :package-install pin was written"))
+      (finally (stop)))))
 
 
 (deftest panel-update-handler-updates-and-refreshes-panel

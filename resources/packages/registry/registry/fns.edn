@@ -1811,11 +1811,55 @@
    :args {:test :_pkg-avail-is-empty :then :_pkg-avail-empty-notice :else :_pkg-avail-table}}
   {:name :_pkg-avail-summary
    :parent :hiccup :args {:tag {:value "summary"} :children [{:value "+ Install a package"}]}}
+
+  ;; --- Install from a REMOTE registry (cross-install pull, § 13) ---
+  ;; Posts urlencoded {source, name, version} to the SAME panel-install
+  ;; route (the handler reads form body ∪ query). The remote bearer is
+  ;; the server's GRAPHDEN_REGISTRY_TOKEN — never a browser-supplied one.
+  {:name :_pkg-remote-note
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-remote-note"}}
+          :children [{:value "…or pull one from another graphden's registry (uses this server's GRAPHDEN_REGISTRY_TOKEN for private registries):"}]}}
+  {:name :_pkg-remote-source-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "source" :class "packages-remote-input"
+                          :placeholder "https://graphden.dev"
+                          :title "Remote registry base URL"}}}}
+  {:name :_pkg-remote-name-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "name" :class "packages-remote-input"
+                          :placeholder "package name (e.g. acme.utils)"
+                          :title "Published package name on the remote"}}}}
+  {:name :_pkg-remote-version-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "version" :class "packages-remote-input packages-remote-version"
+                          :placeholder "latest"
+                          :title "Version — exact, latest, or a semver constraint"}}}}
+  {:name :_pkg-remote-install-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "submit" :class "packages-update-btn"
+                          :title "Mirror the version from the remote registry and install it here"}}
+          :children [{:value "Install"}]}}
+  {:name :_pkg-remote-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "packages-remote-form"
+                          :hx-post "/api/packages/panel-install"
+                          :hx-target "closest [data-packages-panel]"
+                          :hx-swap "outerHTML"}}
+          :children [:_pkg-remote-source-input :_pkg-remote-name-input
+                     :_pkg-remote-version-input :_pkg-remote-install-btn]}}
+
   {:name :_pkg-avail-details
    :parent :hiccup
    :args {:tag {:value "details"}
           :attrs {:value {:class "packages-available"}}
-          :children [:_pkg-avail-summary :_pkg-avail-body]}}
+          :children [:_pkg-avail-summary :_pkg-avail-body :_pkg-remote-note :_pkg-remote-form]}}
 
   ;; Stable [data-packages-panel] root — the hx-target every panel mutation
   ;; (uninstall / install / update / fork) swaps with hx-swap="outerHTML", so
@@ -2055,23 +2099,46 @@
    :args {:path "/packages/uninstall" :handler :_uninstall-handler}}
 
   ;; ---------------------------------------------------------------------
-  ;; POST /api/packages/panel-install?name=<pkg>&version=<v> — the panel's
-  ;; HTML-returning counterpart to the JSON /packages/install: install by
-  ;; reference, then return the REFRESHED panel (HTMX swaps [data-packages-panel]
-  ;; via hx-swap="outerHTML"). `:do` forces install-before-render so the pin
-  ;; shows in the installed table. Name+version ride as query params.
-  ;; Auth-required.
+  ;; POST /api/packages/panel-install?name=<pkg>&version=<v>[&source=<url>]
+  ;; — the panel's HTML-returning counterpart to the JSON /packages/install:
+  ;; install by reference, then return the REFRESHED panel (HTMX swaps
+  ;; [data-packages-panel] via hx-swap="outerHTML"). `:do` forces
+  ;; install-before-render so the pin shows in the installed table.
+  ;; Name+version+source ride as query params (the per-row buttons) OR as
+  ;; the urlencoded form body (the remote-install form) — query wins.
+  ;; A non-blank `source` makes a locally-unknown version MIRROR from that
+  ;; remote registry first (cross-install pull, PACKAGE_DISTRIBUTION § 13;
+  ;; bearer = this server's GRAPHDEN_REGISTRY_TOKEN). Auth-required.
   ;; ---------------------------------------------------------------------
+  {:name :_pkg-install-form
+   :description "Optional urlencoded form body — the remote-install form posts fields; the per-row buttons keep query-string URLs (empty map then)."
+   :parent :parse-form-body-kw}
   {:name :_pkg-install-name-raw
-   :parent :query-param :args {:request {:as :request} :param-name {:value "name"}}}
+   :parent :coalesce
+   :args {:value {:parent :query-param :args {:request {:as :request} :param-name {:value "name"}}}
+          :default {:parent :get :args {:coll :_pkg-install-form :key {:value :name} :default {:value ""}}}}}
   {:name :_pkg-install-name
    :parent :to-str :args {:value :_pkg-install-name-raw}}
   {:name :_pkg-install-version-raw
-   :parent :query-param :args {:request {:as :request} :param-name {:value "version"}}}
+   :parent :coalesce
+   :args {:value {:parent :query-param :args {:request {:as :request} :param-name {:value "version"}}}
+          :default {:parent :get :args {:coll :_pkg-install-form :key {:value :version} :default {:value ""}}}}}
   {:name :_pkg-install-version
    :parent :to-str :args {:value :_pkg-install-version-raw}}
+  {:name :_pkg-install-source-raw
+   :parent :coalesce
+   :args {:value {:parent :query-param :args {:request {:as :request} :param-name {:value "source"}}}
+          :default {:parent :get :args {:coll :_pkg-install-form :key {:value :source} :default nil}}}}
+  {:name :_pkg-install-source
+   :description "nil for a local-only install — an empty form field must not become a remote base URL."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_pkg-install-source-raw}}
+          :then {:value nil}
+          :else :_pkg-install-source-raw}}
   {:name :_pkg-install-do
-   :parent :install-package :args {:pkg-name :_pkg-install-name :pkg-version :_pkg-install-version}}
+   :parent :install-package
+   :args {:pkg-name :_pkg-install-name :pkg-version :_pkg-install-version
+          :source :_pkg-install-source}}
   ;; Secrets the installed version needs defined → a transient notice
   ;; above the refreshed panel, so "this package expects secrets you
   ;; must create" is never silent. Deliberately reads the version ROW's

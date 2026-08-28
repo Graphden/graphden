@@ -355,6 +355,14 @@ The read-only, one-org shape is deliberate:
   (`GRAPHDEN_EXECUTOR_BRANCH`, default main). Serving several branches on one
   BYO executor means several RemoteStorages — out of scope for the single-org
   serve case.
+- **Org-granular, not service-granular.** The byo flip moves the WHOLE
+  org's execution to the customer's executor — "this one service on my
+  hardware, the rest hosted" is not a supported mix, because the org is
+  the only closed dependency boundary (§ The one idea) and a per-service
+  split would need cross-boundary ref tracking. The supported shape for
+  a mixed workload is a SECOND org for the self-run part: accounts can
+  belong to several orgs, the app in question moves there, and that org
+  flips `byo` while the original stays hosted.
 - **The fleet per-org quota doesn't apply.** It counts `:fn-execution` rows,
   which a BYO executor doesn't persist, so the count is always 0. That's
   intended — a BYO customer runs their own compute on their own hardware, so

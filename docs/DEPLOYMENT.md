@@ -117,6 +117,22 @@ GD_BIND=127.0.0.1 docker compose up -d
 - **Pull the hub's main** into a local `hub/main` branch with
   `clojure -M -m graphden.cli pull …`, then merge it locally (editor
   branch popover or `POST /api/branches/main/merge`).
+- **Or push/pull from the editor.** Start the local instance with the
+  hub wired in the environment —
+
+  ```bash
+  GRAPHDEN_HUB_URL=https://your-hub \
+  GRAPHDEN_HUB_TOKEN=$HUB_TOKEN \
+  GD_BIND=127.0.0.1 docker compose up -d
+  ```
+
+  — and the branch popover grows a **Hub** section: **⇡ Push** snapshots
+  the branch you are on to the hub as `push/<branch>`, **⇣ Pull** lands
+  the hub's main locally as `hub/main`; both are exactly the CLI flow
+  above (`POST /api/sync/push` / `POST /api/sync/pull`, served by the
+  optional `registry` package). The hub token stays server-side — the
+  browser never sees it, and the hub URL is server config, never
+  caller-supplied.
 - **`:service` rows never travel** in bundles: your local cron/web-server
   services stay local, the hub's stay on the hub.
 
@@ -180,6 +196,8 @@ helm install fleet deploy/helm/graphden \
 | `VAULT_TOKEN` | *(empty)* | OpenBao / Vault token |
 | `AUTH_TOKEN` | *(empty)* | Single-token auth secret — **empty = auth OFF, instance fully open** (see [Authentication](#authentication)) |
 | `GRAPHDEN_REGISTRY_TOKEN` | *(empty)* | Bearer used when pulling a package from a REMOTE registry (`POST /api/packages/install` with `source` — [PACKAGE_DISTRIBUTION § 13](PACKAGE_DISTRIBUTION.md#13-self-hosted-install-by-package-type)). Empty ⇒ remote fetches go unauthenticated |
+| `GRAPHDEN_HUB_URL` | *(empty)* | Base URL of the hub this instance pushes to / pulls from (the [Option 1a](#option-1a-local-offline-instance-partially-local-workflow) workflow). Set ⇒ the branch popover shows a **Hub** section with Push/Pull buttons and `/api/sync/*` answers; unset ⇒ `/api/sync/status` reports unconfigured and push/pull 409. Server config only — the hub is never caller-supplied |
+| `GRAPHDEN_HUB_TOKEN` | *(empty)* | Bearer this instance presents to the hub for `/api/sync/*` push/pull (mint it on the hub: `/api/my-tokens` on a cloud org, or its `AUTH_TOKEN` on a bare self-hosted hub). Never surfaced to browsers |
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |

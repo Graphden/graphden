@@ -82,6 +82,18 @@ UI counterpart to the operator routes above, and the place where
 platform capabilities (like `:view-all-stats`) are handed to
 delegates.
 
+## Run your own executor (BYO)
+
+Paid tiers (`network` / `dedicated`) can also opt out of executing on
+the cloud entirely: the org's graph stays on the hub (editing,
+branches, review — everything you've learned), while a **bring-your-own
+executor** on the customer's hardware runs the org's app. The flip is
+per-ORG and operator-side; the customer's half is one container with a
+minted API token. If you want one app self-run and the rest hosted,
+that app gets its own org (you can belong to several — lesson 29) and
+only that org flips. The full recipe — both halves, verification,
+troubleshooting — is [BYO_RUNBOOK.md](../BYO_RUNBOOK.md).
+
 ## Handing out a demo
 
 A landing page mints an anonymous org for a visitor through the

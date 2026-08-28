@@ -14,6 +14,11 @@ bootstraps the org's graph over HTTP (`GET /api/export/graph-rows`), compiles
 it in memory, serves the org's app handler, and stays fresh over the hub's
 SSE relay. It never writes: authoring stays in the hub editor.
 
+The flip is **org-granular**: it moves ALL of the org's execution, not one
+service. A customer who wants "this one app on my hardware, the rest hosted"
+gets a SECOND org for the self-run app (accounts can belong to several orgs)
+and flips only that one — see [SCALING.md § Boundaries](SCALING.md).
+
 ## Hub operator's half
 
 Prerequisites: the tenancy addon is enabled (multi-tenant cloud), and the

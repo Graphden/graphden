@@ -219,6 +219,12 @@ applying as usual. The convention rests on machinery, not new entities:
   deletions travel);
 - the reverse direction lands the hub's main locally as `hub/main`
   (`graphden.cli pull`), merged with the same local merge flow;
+- the same flow is served in-editor: with `GRAPHDEN_HUB_URL` +
+  `GRAPHDEN_HUB_TOKEN` set on the local instance, the branch popover's
+  **Hub** section drives `POST /api/sync/push` / `POST /api/sync/pull`
+  (registry package; `GET /api/sync/status` is the reveal probe). The
+  hub coordinates are server config only — never caller-supplied, so
+  the instance's hub bearer can't be pointed at an attacker's host;
 - `branch-local?` fns (ports, cron, vault paths) never propagate through
   the merge, so local runtime wiring can't leak into the hub's main —
   exactly the same guarantee in-instance branches already have.

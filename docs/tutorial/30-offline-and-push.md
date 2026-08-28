@@ -8,8 +8,10 @@ normal diff → merge flow.
 
 **Concepts introduced**: the **local offline instance** (`GD_BIND`),
 **graph snapshots in git** (`bb graph-export` / `bb graph-import`),
-**push branches** (`push/<name>`), **pull** (`hub/main`), and what does
-NOT travel (`:service` rows, `branch-local?` runtime config).
+**push branches** (`push/<name>`), **pull** (`hub/main`), the editor's
+**Hub section** (`GRAPHDEN_HUB_URL` + `GRAPHDEN_HUB_TOKEN` → one-click
+push/pull), and what does NOT travel (`:service` rows, `branch-local?`
+runtime config).
 
 ## When you want this
 
@@ -101,6 +103,32 @@ into your local main from the branch popover (or
 sides changed the same fn since the last sync, you get the standard
 conflict modal — pick per entity, retry.
 
+## 5. Push and pull from the editor instead
+
+The CLI above needs nothing but the two instances. But if you wire the
+hub into the local instance's environment at start —
+
+```bash
+GRAPHDEN_HUB_URL=https://hub.example.com \
+GRAPHDEN_HUB_TOKEN=$HUB_TOKEN \
+GD_BIND=127.0.0.1 docker compose up -d
+```
+
+— the branch popover grows a **Hub** section showing the hub's address
+with two buttons:
+
+- **⇡ Push** snapshots the branch you are currently on to the hub as
+  `push/<branch>` — the same owner-protected review branch §3 creates;
+- **⇣ Pull** lands the hub's main locally as `hub/main` and refreshes
+  the branch list, so the next click is the **Δ diff** / **⇢ merge**
+  you already know.
+
+The token stays on the server (the browser never sees it), and the hub
+address is server configuration — the editor can't point your bearer at
+some other host. Where do you get `$HUB_TOKEN`? It's a token the HUB
+accepts: on a cloud org mint one in Settings → Account → API tokens; on
+a team's self-hosted hub use its `AUTH_TOKEN`.
+
 ## What does NOT travel — and why that's right
 
 - **`:service` rows** (your local cron jobs, web servers) never ride a
@@ -122,4 +150,6 @@ conflict modal — pick per entity, retry.
   `push/<name>` branch; review + merge are the normal branch flow.
 - `cli pull` fetches the hub's main as `hub/main`; merging it locally is
   the normal merge flow.
+- With `GRAPHDEN_HUB_URL` + `GRAPHDEN_HUB_TOKEN` set, the branch
+  popover's **Hub** section does both with one click (⇡ Push / ⇣ Pull).
 - Services and runtime config don't leak in either direction.

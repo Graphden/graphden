@@ -1,8 +1,14 @@
-(ns graphden.crud.fn-execution.free-arg-cache-test
+(ns ^:serial graphden.crud.fn-execution.free-arg-cache-test
   "Unit tests for the free-arg-slot-map memo. Pure — no storage, no
    container. The end-to-end 'is it actually faster + still correct on
    the real graph' check is done live in the REPL window (see
-   docs/adr/ADR-free-arg-slot-map-perf.md § Verification)."
+   docs/adr/ADR-free-arg-slot-map-perf.md § Verification).
+
+   ^:serial: the memo is ONE process-wide ConcurrentHashMap and several
+   other test NSes clear it as a side effect (context invalidation,
+   entity writes). Under the parallel pool such a clear can land between
+   this file's insert and its repeat-is-a-hit assertion — seen as the
+   2026-08-28 main-CI seed flake (expected 4 computes, got 5)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.fn-execution.free-arg-cache :as fac]))

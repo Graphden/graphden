@@ -64,6 +64,7 @@ around it changes.
 | 23 | [Finding your way: the lens and the Inspector](23-explorer-and-inspector.md) | ✅ written · ▶ interactive |
 | 22 | [Workspaces — scope the editor to your projects](22-workspaces.md) | ✅ written · ▶ interactive |
 | 08 | [Branches — fork, edit, diff, merge](08-branches.md) | ✅ written · ▶ interactive |
+| 08b | [Review — propose, approve, protected merge](08b-review.md) | ✅ written · ▶ interactive |
 | 25 | [Editing the editor: asset overrides](25-asset-overrides.md) | ✅ written · ▶ interactive |
 | 28 | [Version history: what changed, and going back](28-version-history.md) | ✅ written · ▶ interactive |
 

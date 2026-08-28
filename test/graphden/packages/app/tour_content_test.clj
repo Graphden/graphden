@@ -222,7 +222,7 @@
   "Lesson ids with a file in `docs/tutorial/` (`NN-slug.md`)."
   []
   (into #{}
-        (keep #(second (re-matches #"(\d{2})-.*\.md" (java.io.File/.getName %))))
+        (keep #(second (re-matches #"(\d{2}[a-z]?)-.*\.md" (java.io.File/.getName %))))
         (file-seq (io/file "docs/tutorial"))))
 
 
@@ -231,7 +231,7 @@
   []
   (into {}
         (map (fn [[_ id status]] [id status]))
-        (re-seq #"(?m)^\|\s*(\d{2})\s*\|[^|]*\|\s*([^|]*?)\s*\|"
+        (re-seq #"(?m)^\|\s*(\d{2}[a-z]?)\s*\|[^|]*\|\s*([^|]*?)\s*\|"
                 (slurp (io/file "docs/tutorial/README.md")))))
 
 

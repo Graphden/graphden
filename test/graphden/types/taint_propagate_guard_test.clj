@@ -72,7 +72,7 @@
     :free-arg-slot-map :free-memory :future :get :get-entity
     :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
-    :http-request :http-server :http-stop :if :into
+    :http-request :http-server :http-stop :hub-fetch-bundle :hub-push-bundle! :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
     :json-to-type :jvm-uptime-ms :keys
     :keyword-to-str :list :list-all-graph-entities :log-warn
@@ -147,7 +147,8 @@
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :eq :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
     :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
-    :gte :group-by :hiccup :if :into :invoke :is-a? :keys :keyword-to-str :list :lt :lte
+    :gte :group-by :hiccup :hub-fetch-bundle :hub-push-bundle! :if :into :invoke :is-a? :keys
+    :keyword-to-str :list :lt :lte
     :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
     :import-bundle! :list-branch-comments :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid :platform-owned-def-names

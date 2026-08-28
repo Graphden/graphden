@@ -151,7 +151,7 @@ form serialization is unchanged.
 
 The smallest version needs no page at all. Select
 `:wrap-custom-script`, ⋯ → "Extend", name the child — its card
-shows one chip, `?body`. Click it, "Bind literal", and the value
+shows one dashed `body` edge. Click its `+`, "Bind literal", and the value
 form opens a **code editor** (syntax highlighting, bracket
 matching) rather than a text box: the slot's type is
 `:js-source`, and the form picks its widget from the type like

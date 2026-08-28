@@ -514,7 +514,7 @@
                :target nil
                :check {:kind "selected" :name "tutorial-script"}}
               {:title "Write some JavaScript"
-               :body "Click ?body, choose [[Bind literal]]. The value form opens a real code editor — syntax highlighting, bracket matching. Type exactly `document.title = 'Graphden';` — then [[Save]]."
+               :body "Click the [[+]] on the body edge, choose [[Bind literal]]. The value form opens a real code editor — syntax highlighting, bracket matching. Type exactly `document.title = 'Graphden';` — then [[Save]]."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-bound" :name "tutorial-script" :slot "content"}}

@@ -7,8 +7,8 @@ leaving slots intentionally unbound.
 
 **Concepts introduced**: `free argument`, `bound vs free slot`,
 `free-arg propagation`, `template fn-def`, `:as` rename, free-arg
-**placeholder nodes** on the canvas + the optional / HOF-captured /
-deep-free bottom-of-card strips.
+**placeholder edges** on the canvas + the deep-free `⇣`
+bottom-of-card strip.
 
 ## What "free" means
 
@@ -154,17 +154,16 @@ The run form mirrors them: open the row's `⋯` popover and click
 fn with **no** free args (every slot bound) shows *"No free
 arguments — click Run to invoke"* instead of a form.
 
-Three thinner, informational **strips** sit at the BOTTOM of the
-card for the args that AREN'T required-and-unbound — they're read-only,
-surfaced from the storage chain:
+One thinner, informational **strip** can sit at the BOTTOM of the
+card — read-only, surfaced from the storage chain:
 
-- **`?name`** — *optional* args left unset (they carry a default, so
-  they're a nicety, not part of the interface). Hover shows the
-  declared type and which ancestor introduced the slot.
-- **`λname`** — args *captured through a HOF* subtree (e.g. `:request`
-  on a Ring-handler subtree — see lesson 06).
 - **`⇣name`** — *deep-free* args this fn accepts on the caller's
-  behalf whose actual use-sites live deeper in the chain.
+  behalf whose actual use-sites live deeper in the chain. Without
+  it the card shows only the outgoing edge, and nothing on the
+  card itself says "I take this name".
+
+Optional and HOF-captured args need no strip of their own — they
+are the dimmed and λ-ghost edges you just met above.
 
 ## Free args + HOF
 

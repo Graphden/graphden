@@ -53,8 +53,8 @@ valid.
 3. Click `Run`. Result `11` appears.
 
 If you create a tutorial fn-def with multiple free args, the
-form lists them all. The card's free-arg strip at the bottom
-mirrors the form so you can see what's needed at a glance.
+form lists them all. The placeholder `+` edges on the card
+mirror the form so you can see what's needed at a glance.
 
 ## Typed result representations
 

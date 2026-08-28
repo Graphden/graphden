@@ -2603,10 +2603,16 @@
    :args {:parts [{:value "push/"} :_sync-current-branch-name]}}
 
   {:name :_sync-push-target
-   :parent :if
-   :args {:test {:parent :empty? :args {:coll :_sync-target-param}}
-          :then :_sync-push-default-target
-          :else :_sync-target-param}}
+   ;; :coalesce is the null-eliminator: the :if's else-branch is the
+   ;; nullable query param (non-nil at runtime — the test guards it —
+   ;; but the checker can't see through :empty?), and :hub-push-bundle!
+   ;; requires :text.
+   :parent :coalesce
+   :args {:value {:parent :if
+                  :args {:test {:parent :empty? :args {:coll :_sync-target-param}}
+                         :then :_sync-push-default-target
+                         :else :_sync-target-param}}
+          :default :_sync-push-default-target}}
 
   {:name :_sync-push-bundle
    :description "The request branch's export bundle — vault paths always stripped (a push never carries secrets; the hub side re-binds via the bundle's :secrets manifest)."

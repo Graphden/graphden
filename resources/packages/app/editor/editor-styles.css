@@ -1322,7 +1322,11 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   color: var(--fg);
 }
 .ns-header:hover .ns-row-actions .create-btn-inline,
-.entity-item:hover .ns-row-actions .create-btn-inline { opacity: 1; }
+.entity-item:hover .ns-row-actions .create-btn-inline,
+/* :focus-within — a keyboard user reaches these buttons by tabbing INTO the
+   row, and an invisible-but-focusable control is worse than no control. */
+.ns-header:focus-within .ns-row-actions .create-btn-inline,
+.entity-item:focus-within .ns-row-actions .create-btn-inline { opacity: 1; }
 .create-btn-inline:hover { background: var(--fg); color: var(--bg); }
 /* The personal "hide from my view" (⊘) ns action — a text glyph, not an SVG,
    so size it to sit in the same 15×15 frame as the ✎/+ icons. */
@@ -1646,7 +1650,12 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 }
 .ns-header:hover .description-badge,
 .entity-item:hover .description-badge,
-.entity-item:hover .open-in-new-tab.sidebar-action {
+.entity-item:hover .open-in-new-tab.sidebar-action,
+/* Same reasoning as the row buttons above: reachable by keyboard means
+   visible when the keyboard is there. */
+.ns-header:focus-within .description-badge,
+.entity-item:focus-within .description-badge,
+.entity-item:focus-within .open-in-new-tab.sidebar-action {
   opacity: 0.85;
 }
 .ns-header .description-badge:hover,
@@ -6974,6 +6983,21 @@ body.gd-no-write .branch-comment-form { display: none; }
 .placeholder-binder:focus-visible {
   outline: 2px solid var(--gd-flow);
   outline-offset: 1px;
+}
+
+/* =========================================================================
+ * EXPLORER TREE — keyboard focus (editor-tree-keys.js)
+ *
+ * The tree is a roving-tabindex widget: one row is tabbable, arrows move
+ * between rows. That makes the focus ring the ONLY indication of where the
+ * user is, so it is drawn on the row itself rather than relying on the
+ * `.selected` background (which means something else — the fn open on the
+ * canvas).
+ * ========================================================================= */
+#entity-list [role="treeitem"]:focus-visible {
+  outline: 2px solid var(--gd-flow);
+  outline-offset: -2px;
+  border-radius: 3px;
 }
 
 /* =========================================================================

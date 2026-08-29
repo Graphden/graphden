@@ -331,26 +331,66 @@
     if (fn.description) head += '<p class="gd-insp-desc">' + esc(fn.description) + '</p>';
     head += '</div>';
 
-    const tabbar = '<div class="gd-insp-tabs" role="tablist">'
+    // Full ARIA tab pattern: `id` + `aria-controls` tie each tab to the ONE
+    // panel below (all four tabs render into the same `#gd-insp-tabbody`),
+    // and roving tabindex means Tab enters the strip once while ← → move
+    // between tabs — pressing Tab four times to reach the last tab is the
+    // thing the pattern exists to avoid.
+    const tabbar = '<div class="gd-insp-tabs" role="tablist" aria-label="Inspector sections">'
       + INSP_TABS.map((t) => '<button type="button" class="gd-insp-tab'
-          + (t.id === inspTab ? ' active' : '') + '" role="tab" aria-selected="'
-          + (t.id === inspTab) + '" data-insp-tab="' + t.id + '">'
+          + (t.id === inspTab ? ' active' : '') + '" role="tab" id="gd-insp-tab-' + t.id
+          + '" aria-controls="gd-insp-tabbody" aria-selected="'
+          + (t.id === inspTab) + '" tabindex="' + (t.id === inspTab ? '0' : '-1')
+          + '" data-insp-tab="' + t.id + '">'
           + t.label + '</button>').join('')
       + '</div>';
 
-    el.innerHTML = head + tabbar + '<div id="gd-insp-tabbody" class="gd-insp-scroll"></div>';
-    el.querySelectorAll('.gd-insp-tab').forEach((b) => {
-      b.addEventListener('click', () => {
-        if (inspTab === b.dataset.inspTab) return;
-        inspTab = b.dataset.inspTab;
-        el.querySelectorAll('.gd-insp-tab').forEach((x) => {
-          const on = x.dataset.inspTab === inspTab;
-          x.classList.toggle('active', on);
-          x.setAttribute('aria-selected', String(on));
-        });
+    el.innerHTML = head + tabbar
+      + '<div id="gd-insp-tabbody" class="gd-insp-scroll" role="tabpanel"'
+      + ' aria-labelledby="gd-insp-tab-' + inspTab + '" tabindex="0"></div>';
+
+    const selectTab = (id, moveFocus) => {
+      if (inspTab !== id) {
+        inspTab = id;
         renderInspTab(fnId, fn);
+      }
+      let focusTarget = null;
+      el.querySelectorAll('.gd-insp-tab').forEach((x) => {
+        const on = x.dataset.inspTab === inspTab;
+        x.classList.toggle('active', on);
+        x.setAttribute('aria-selected', String(on));
+        x.setAttribute('tabindex', on ? '0' : '-1');
+        if (on) focusTarget = x;
       });
+      const body = el.querySelector('#gd-insp-tabbody');
+      if (body) body.setAttribute('aria-labelledby', 'gd-insp-tab-' + inspTab);
+      if (moveFocus && focusTarget) focusSafely(focusTarget);
+    };
+
+    el.querySelectorAll('.gd-insp-tab').forEach((b) => {
+      b.addEventListener('click', () => selectTab(b.dataset.inspTab, false));
     });
+
+    const tablist = el.querySelector('.gd-insp-tabs');
+    if (tablist) {
+      tablist.addEventListener('keydown', (e) => {
+        const ids = INSP_TABS.map((t) => t.id);
+        const at = ids.indexOf(inspTab);
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          selectTab(ids[(at + 1) % ids.length], true);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          selectTab(ids[(at - 1 + ids.length) % ids.length], true);
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          selectTab(ids[0], true);
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          selectTab(ids[ids.length - 1], true);
+        }
+      });
+    }
     renderInspTab(fnId, fn);
 
     // On narrow viewports the inspector is a bottom sheet — reveal it on

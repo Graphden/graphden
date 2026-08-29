@@ -352,7 +352,10 @@
   ;; The unrestricted platform / self-host ctx is NOT gated, so an offline
   ;; localhost hub still resolves (that's the whole point of push/pull).
   (testing "restricted ctx blocks a link-local source (cloud-metadata probe)"
-    (binding [cr/*allowed-effects* #{:network}]
+    ;; :env allowed too — the resolve defbase records :env for the
+    ;; GRAPHDEN_REGISTRY_TOKEN read BEFORE the egress guard runs (the
+    ;; same set the concrete-mirror case below binds).
+    (binding [cr/*allowed-effects* #{:network :env}]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo #"(?i)egress"
             (registry-resolve-remote-version

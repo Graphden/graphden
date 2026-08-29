@@ -516,10 +516,19 @@ function buildNsTree(data) {
 /**
  * Render a namespace tree node recursively into the container.
  */
-function buildFnItem(fn) {
+// `level` is the ARIA depth (1-based). The tree is rendered FLAT — a
+// namespace header and its `.ns-children` are siblings, not parent and
+// child — so depth cannot be inferred from the DOM and has to be stated.
+function buildFnItem(fn, level = 1) {
   const item = document.createElement('div');
   item.className = 'entity-item';
   if (fn.id === selectedFnId) item.className += ' selected';
+  item.setAttribute('role', 'treeitem');
+  item.setAttribute('aria-level', String(level));
+  item.setAttribute('aria-selected', fn.id === selectedFnId ? 'true' : 'false');
+  // Roving tabindex: exactly one node in the tree is tabbable at a time,
+  // and editor-tree-keys.js decides which.
+  item.setAttribute('tabindex', '-1');
   const isSecret = typeof isSecretFn === 'function' && isSecretFn(fn);
   if (isSecret) item.className += ' entity-secret';
   item.dataset.fnId = fn.id;
@@ -669,6 +678,10 @@ function renderNsNode(container, name, node, path, searchMode) {
   const nodeVisible = nodeShouldShow(node, searchMode);
   header._treeNode = node;
   header.hidden = !nodeVisible;
+  header.setAttribute('role', 'treeitem');
+  header.setAttribute('aria-level', String(path ? path.split('.').length + 1 : 1));
+  header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+  header.setAttribute('tabindex', '-1');
 
   const arrow = document.createElement('span');
   arrow.className = 'ns-arrow' + (isCollapsed ? ' collapsed' : '');
@@ -734,6 +747,11 @@ function renderNsNode(container, name, node, path, searchMode) {
       if (cg) cg.remove();
       arrow.classList.add('collapsed');
       arrow.textContent = '▶';
+      // The arrow is the sighted cue; aria-expanded is the other half of it.
+      // Setting it only at build time (as this did) leaves a screen reader —
+      // and the keyboard navigation, which reads this attribute to decide
+      // what Left/Right mean — describing the opposite of what is on screen.
+      header.setAttribute('aria-expanded', 'false');
     } else {
       // Expand: build ONLY this subtree + insert after the header. The built
       // rows/namespaces set their own `hidden` overlay, so no global resync is
@@ -741,6 +759,7 @@ function renderNsNode(container, name, node, path, searchMode) {
       expandedNamespaces.add(nsPath);
       arrow.classList.remove('collapsed');
       arrow.textContent = '▼';
+      header.setAttribute('aria-expanded', 'true');
       // Fresh node (current `.fns`), never the one captured when this header
       // was built — see refreshLoadedNamespace / treeNodeAt.
       header.after(buildNsChildGroup(treeNodeAt(nsPath) || node, nsPath, searchMode));
@@ -799,7 +818,7 @@ function buildNsChildGroup(node, nsPath, searchMode) {
     const publicFns = searchMode ? sortedFns : sortedFns.filter(f => !isInternal(f));
     const internalFns = searchMode ? [] : sortedFns.filter(isInternal);
     for (const fn of publicFns) {
-      const el = buildFnItem(fn);
+      const el = buildFnItem(fn, nsPath.split('.').length + 1);
       el.hidden = !fnKindVisible(fn);
       childGroup.appendChild(el);
     }
@@ -816,7 +835,7 @@ function buildNsChildGroup(node, nsPath, searchMode) {
       holder.className = 'ns-internal-group';
       holder.hidden = !open;
       for (const fn of internalFns) {
-        const el = buildFnItem(fn);
+        const el = buildFnItem(fn, nsPath.split('.').length + 2);
         el.hidden = !fnKindVisible(fn);
         holder.appendChild(el);
       }
@@ -1100,6 +1119,10 @@ function renderRootNode(list, rootFns, searchMode) {
   const isOpen = searchMode || expandedNamespaces.has(groupPath);
   const header = document.createElement('div');
   header.className = 'ns-header ns-header-pseudo';
+  header.setAttribute('role', 'treeitem');
+  header.setAttribute('aria-level', '1');
+  header.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  header.setAttribute('tabindex', '-1');
   const arrow = document.createElement('span');
   arrow.className = 'ns-arrow' + (isOpen ? '' : ' collapsed');
   arrow.textContent = isOpen ? '▼' : '▶';
@@ -1149,7 +1172,7 @@ function renderRootNode(list, rootFns, searchMode) {
           .catch((err) => { console.error('loadNamespaceFns(root) failed', err); });
       }
     } else {
-      for (const fn of visible) childGroup.appendChild(buildFnItem(fn));
+      for (const fn of visible) childGroup.appendChild(buildFnItem(fn, 2));
     }
     list.appendChild(childGroup);
   }
@@ -1373,7 +1396,7 @@ function updateEntityList(data) {
       lbl.textContent = 'Exact match';
       sec.appendChild(lbl);
       for (const fn of exact.slice(0, 5)) {
-        const el = buildFnItem(fn);
+        const el = buildFnItem(fn, 1);
         // Same lens overlay as the tree rows — an exact-match row that
         // ignored the lens read as "visible" to the tour's lens-clear
         // probe and broke the lesson-05 e2e (all=false).

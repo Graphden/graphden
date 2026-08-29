@@ -199,10 +199,12 @@ function _tourRenderStep() {
 
   const title = document.createElement('div');
   title.className = 'gd-tour-title';
+  title.id = 'gd-tour-title';
   title.textContent = step.title || '';
 
   const body = document.createElement('div');
   body.className = 'gd-tour-body';
+  body.id = 'gd-tour-body';
   _tourRenderBody(body, step.body);
 
   const foot = document.createElement('div');
@@ -241,6 +243,17 @@ function _tourRenderStep() {
   _tourState._shownAt = (typeof performance !== 'undefined' && performance.now)
                         ? performance.now() : Date.now();
   _tourPosition();
+
+  // The popup is rebuilt from scratch on every step (replaceChildren above),
+  // so without this a screen-reader user gets no signal that the step
+  // changed — the text simply differs the next time they happen to look.
+  // Name the dialog by its own title/body, then say the step out loud.
+  pop.setAttribute('aria-labelledby', 'gd-tour-title');
+  pop.setAttribute('aria-describedby', 'gd-tour-body');
+  if (typeof window.gdAnnounce === 'function') {
+    window.gdAnnounce((step.title ? step.title + '. ' : '')
+                      + (body.textContent || '').trim());
+  }
 }
 
 // A phone has no room BESIDE anything. The 360px popover on a 390px screen

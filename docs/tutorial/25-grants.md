@@ -64,7 +64,7 @@ Three enforcement layers read the same grant table:
   capability, `/api/execute` requires `execute`.
 
 The editor also *reads* the grant table indirectly: the
-`X-Graphden-Capabilities` header (lesson 24) that unlocks
+`X-Graphden-Capabilities` header (Lesson 24) that unlocks
 tenant-mode UI is computed from these same rows.
 
 ## The panel
@@ -96,7 +96,7 @@ One special capability rides the same rows: `require-2fa`.
 Granted to a user (or, with subject-kind `org`, to a whole org)
 it doesn't *allow* anything — it *requires* the subject to enroll
 two-factor authentication before any other request passes
-([lesson 33](33-signing-up-and-in.md) shows enrollment).
+([Lesson 33](33-signing-up-and-in.md) shows enrollment).
 
 Revoke is the row's `×` (confirm: *"Delete this grant?"*) —
 this one goes through the generic entity endpoint
@@ -131,7 +131,7 @@ org-scoped like Grants.)
 (An org owner — or a `manage-grants` holder — on a tenancy-addon
 instance.)
 
-1. Add `carol` to your org `acme` (lesson 24).
+1. Add `carol` to your org `acme` (Lesson 24).
 2. In **Grants**, grant `carol` / `bind-args` / `acme.settings`. As
    carol: editing a binding VALUE under `acme.settings` works;
    renaming the fn or changing its parent is denied — that needs
@@ -139,7 +139,7 @@ instance.)
 3. Replace it with `write` on `acme` — now structural edits pass
    anywhere under `acme`, including `acme.settings` (parent-path
    coverage).
-4. Remove carol (lesson 24) and watch her grant rows vanish with
+4. Remove carol (Lesson 24) and watch her grant rows vanish with
    her — the cascade from the other side.
 
 ## What we glossed over

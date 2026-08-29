@@ -81,7 +81,7 @@ redirects here). It holds:
 - **Two-factor authentication** — enable TOTP: add the secret to
   any authenticator app, confirm with a 6-digit code, and from
   then on password sign-ins ask for the code. (An org can also
-  *require* 2FA — [lesson 25](25-grants.md) shows the
+  *require* 2FA — [Lesson 25](25-grants.md) shows the
   `require-2fa` capability.)
 - **API tokens** — long-lived scoped keys for MCP/API clients
   (the section appears on cloud/tenancy deployments).
@@ -126,4 +126,4 @@ On a cloud instance:
 
 That's the whole account lifecycle. Managing *other* people in
 your org — adding members by email, granting them narrower
-capabilities — is [lesson 24](24-users-admin.md) onward.
+capabilities — is [Lesson 24](24-users-admin.md) onward.

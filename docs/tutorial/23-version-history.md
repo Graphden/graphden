@@ -132,7 +132,7 @@ for as long as you can reach its id.
 
 ## Where this shows up next
 
-- **Branches** (lesson 20) — the same version rows, read through a
+- **Branches** (Lesson 20) — the same version rows, read through a
   different branch chain. A merge picks version rows; a `:branch-local?`
   fn's rows deliberately do not travel.
 - **Debugging** (lesson 15) — a trace names the version it ran, so a

@@ -196,7 +196,7 @@ the textarea fills.
 | Escape hatch | `:custom-script` / `:dispatch-custom` | 13 |
 | Distribution | publish, install, update, fork | 14 |
 
-Lesson 29 continues from packages (lesson 28): once you've
+Lesson 29 continues from packages (Lesson 28): once you've
 authored a namespace, it shows how to publish it as a versioned
 artifact (the namespace's **⬆** action) and install / update /
 fork it across branches from the **packages** chip on the Build

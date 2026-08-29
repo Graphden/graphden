@@ -178,7 +178,7 @@ violations still reject the save outright.)
   those flow differently. Lesson 06.
 - **Per-branch evolution of bindings** — how a binding's
   `value` lives on a `binding-version` row scoped to a branch.
-  lesson 20 (already written).
+  Lesson 20 (already written).
 
 ## Next
 

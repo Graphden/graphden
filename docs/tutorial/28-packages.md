@@ -68,7 +68,7 @@ Two levels of grouping:
 | `:description` | Sidebar tooltip for the top-level namespace |
 | `:dependencies` | Package names (strings) this one needs. The loader topo-sorts so deps load first, and pulls them TRANSITIVELY |
 | `:modules` | Which subdirectories to load (strings). Order matters only if one module's `:namespace` aliases another's types |
-| `:services` | Optional — a package can declare a fn to keep running (the `app` package declares `:web-server` this way). See [lesson 32](32-services.md) |
+| `:services` | Optional — a package can declare a fn to keep running (the `app` package declares `:web-server` this way). See [Lesson 32](32-services.md) |
 
 The loader fails fast on a missing dependency.
 
@@ -165,7 +165,7 @@ Because `registry` and `mcp` are OPTIONAL, dropping either from
 its packages affordances (the **packages** chip on the Build
 surface, the per-namespace **⬆** publish action, and the
 governance section on **Organization**), and `/mcp` 404s. (Full distribution flow —
-publish / install / update / fork — is [lesson 29](29-distributing-packages.md).)
+publish / install / update / fork — is [Lesson 29](29-distributing-packages.md).)
 
 ## Try it
 
@@ -213,7 +213,7 @@ publish / install / update / fork — is [lesson 29](29-distributing-packages.md
   `:other.ns/name` — or sync throws `:packages/ambiguous-ref`.
 - **Naming guidelines** — [docs/PACKAGES.md § Naming](../PACKAGES.md#naming-guidelines).
 - **Distributing a package as data** (not on disk) — publish it
-  into the graph and install it on a branch: [lesson 29](29-distributing-packages.md).
+  into the graph and install it on a branch: [Lesson 29](29-distributing-packages.md).
 
 ## Next
 

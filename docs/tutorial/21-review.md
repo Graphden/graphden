@@ -10,9 +10,9 @@ review comments, and why a merged branch is permanent.
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
 > [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=21)
-> (no sign-up), or pick lesson 21 in the editor's account menu.
+> (no sign-up), or pick Lesson 21 in the editor's account menu.
 
-This lesson builds on [lesson 20](20-branches.md) — fork, edit, diff,
+This lesson builds on [Lesson 20](20-branches.md) — fork, edit, diff,
 merge. Here the missing half: making a merge *conditional on review*.
 
 ## The rule lives on the target
@@ -77,6 +77,6 @@ one click short of `⇢`, so its cleanup can still remove both branches.
 
 ## Where this shows up next
 
-- [lesson 20](20-branches.md) — protected branches ("push only via
+- [Lesson 20](20-branches.md) — protected branches ("push only via
   merge"), conflicts, and branch-local fns that never merge.
 - [VERSIONING.md](../VERSIONING.md) — the branch model underneath.

@@ -164,6 +164,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/PERF_BUDGETS.md](docs/PERF_BUDGETS.md) | The perf regression gate — budgets structural COUNTS (full-clears, SQL round trips), not timings; `bb perf` / `perf/budgets.edn` | Before adding any perf assertion, or when `bb perf` fails |
 | [docs/PERF_NOTES.md](docs/PERF_NOTES.md) | Executor hot-path investigation — two failed point-fixes, real-fix sketch held in reserve | Before allocating perf work — re-benchmark first |
 | [docs/LAYOUT.md](docs/LAYOUT.md) | Graph-editor layout pipeline (Stages 1–7) | When touching layout impl or editor frontend |
+| [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md) | The a11y contract — the focus/announce/shortcut primitives, the rules a new dialog or key binding must follow, and the two deliberate exceptions | Before adding a dialog, a keyboard shortcut, or anything that changes how a surface is announced |
 | [docs/EDITOR_MODULES.md](docs/EDITOR_MODULES.md) | Per-module map of the editor frontend + JS load order | Before touching any `editor-*.js` / `web/runtime/*.js` |
 | [docs/EDITOR_ROW_ACTIONS.md](docs/EDITOR_ROW_ACTIONS.md) | As-shipped row-actions partial contract (4 contexts, query-param matrix) + why the other popovers stay JS | When extending the row-actions partial or considering another popover migration |
 | [docs/PARTIALS.md](docs/PARTIALS.md) | Graph-native HTML partials at `GET /partials/*` — HTMX wiring, recipe, gotchas | When wiring a new server-rendered popover/panel |
@@ -544,6 +545,12 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 - Internal namespaces: `core.clj`, `util.clj`, `constraints.clj`, etc.
 - Error types use canonical `:type` keywords (see [docs/ERROR_CODES.md](docs/ERROR_CODES.md))
 - Dynamic vars for configuration: `*query-timeout-ms*`, `*max-graph-iterations*`
+- **New dialog, popover, or keyboard shortcut?** Go through the shared
+  primitives, not a fresh listener: dialogs use `installPopoverDismiss`
+  (`trapFocus` / `getReturnFocus`) plus `focusIntoDialog` / `returnFocusTo`;
+  shortcuts are declared in `editor-shortcuts.js`, which is what the `Space`
+  menu and the `?` cheatsheet render from — a binding declared anywhere else
+  is undiscoverable. See [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md).
 - **Before modifying any `resources/packages/**/impls.clj`** — load
   the `graphden-packages-quality` skill. It catches not just
   oversized `defbase` bodies but also the bigger pitfall: private

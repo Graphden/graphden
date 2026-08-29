@@ -24,7 +24,7 @@ https://<org>.graphden.dev
 ```
 
 So the `acme` org edits at `acme.graphden.dev`. That's the URL you
-sign in at and work from. It's the mirror image of lesson 27: the
+sign in at and work from. It's the mirror image of Lesson 27: the
 `graphden.dev` zone is for **editors** (one subdomain per org),
 `graphden.app` is for **apps** — kept apart so your public app code
 never shares an origin with your editor session.
@@ -38,7 +38,7 @@ If you don't yet know your org's subdomain — a brand-new visitor —
 start at the apex, `graphden.dev` (the landing), and use its
 **Sign in**. Once you authenticate, graphden knows which org(s)
 you belong to and sends you to your `<org>.graphden.dev`. Signing
-up for a new org ([lesson 33](33-signing-up-and-in.md)) lands you
+up for a new org ([Lesson 33](33-signing-up-and-in.md)) lands you
 in that org's editor the same way.
 
 ## Per-origin sessions
@@ -68,7 +68,7 @@ A single-org member sees no chip — there's nothing to switch
 between.
 
 > How do you *become* a member of a second org? Not by signing up
-> again (signup only ever makes a *new* org — lesson 33). Someone
+> again (signup only ever makes a *new* org — Lesson 33). Someone
 > in the other org grants your account a capability in it
 > ([lesson 25 — Grants](25-grants.md)); membership is exactly
 > "holds a grant in that org," so the moment you're granted
@@ -80,7 +80,7 @@ between.
 |---|---|
 | `graphden.dev` | the landing + first-time sign-in |
 | `<org>.graphden.dev` | that org's editor + login |
-| `<label>.graphden.app` | one of the org's apps ([lesson 27](27-apps.md)) |
+| `<label>.graphden.app` | one of the org's apps ([Lesson 27](27-apps.md)) |
 | your own domain | a custom domain pointed at an app |
 
 Two `graphden`-owned domains, each a single flat level — editors on
@@ -100,5 +100,5 @@ app never needs any DNS change on graphden's side.
 - Editors on `graphden.dev`, apps on `graphden.app` — kept apart on
   purpose.
 
-This closes the domain model: [lesson 27](27-apps.md) put your fns
+This closes the domain model: [Lesson 27](27-apps.md) put your fns
 on the web as apps; this lesson placed *you* — the editor — on it.

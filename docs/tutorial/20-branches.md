@@ -268,7 +268,7 @@ when propagation may happen at all.
 ## What we glossed over
 
 - Per-branch services (running `:my-web-server` as a managed
-  service on dev while `:web-server` runs on main) — lesson 32.
+  service on dev while `:web-server` runs on main) — Lesson 32.
 - How the resolver handles deep branch chains (B forked from A,
   C forked from B, merge edges everywhere) — see
   [docs/VERSIONING.md](../VERSIONING.md).

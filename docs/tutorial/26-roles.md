@@ -16,7 +16,7 @@ the Roles panel, why a role is not a namespace grant.
 Lesson 25 drew the line and this lesson picks up the other side of it.
 There are **two independent axes** of permission:
 
-| | **Namespace grants** (lesson 25) | **Org-management capabilities** |
+| | **Namespace grants** (Lesson 25) | **Org-management capabilities** |
 |---|---|---|
 | Answer | may this person touch `acme.billing`? | may this person administer the org? |
 | Values | `read`, `write`, `execute`, `admin`, `bind-args`, `append-list`, `view-impl` | `manage-users`, `manage-grants`, `manage-roles`, `manage-apps`, `publish-packages` |
@@ -69,7 +69,7 @@ once, and let the places that need it point at the name.
 
 - **It does not grant namespace access.** A `support` role with
   `manage-users` lets alice invite people; it does not let her read
-  `acme.billing`. That is a grant (lesson 25), and it stays separate on
+  `acme.billing`. That is a grant (Lesson 25), and it stays separate on
   purpose — administering an org and reading its code are different
   powers, and plenty of people should have exactly one of them.
 - **It does not nest.** A role holds capabilities, not other roles.
@@ -113,6 +113,6 @@ tenancy addon.)
 
 - **Members** (lesson 24) — who is in the org at all; a role only
   matters for someone already in it.
-- **Grants** (lesson 25) — the other axis, per namespace.
+- **Grants** (Lesson 25) — the other axis, per namespace.
 - **Across organizations** (lesson 30) — roles do not travel; each org
   answers for itself.

@@ -12,7 +12,7 @@ entities, the owner's special position, ownership transfer.
 
 ## Membership is grants
 
-Under the accounts model ([lesson 33](33-signing-up-and-in.md)),
+Under the accounts model ([Lesson 33](33-signing-up-and-in.md)),
 people *sign themselves up* — there is no admin-creates-user flow
 and no per-org password store. What an org controls is
 **membership**, and membership is simply *grants*: an account is
@@ -56,7 +56,7 @@ the browser.
 
 Under the table: one email field and **+ Add member**. The person
 must already have an account with that *verified* email (they
-sign up themselves at `/login` — [lesson 33](33-signing-up-and-in.md));
+sign up themselves at `/login` — [Lesson 33](33-signing-up-and-in.md));
 submitting grants them `write` in your org. Refine what they may
 actually do in the **Grants** panel (next lesson) — membership
 gets them in the door, grants decide the rooms.
@@ -77,7 +77,7 @@ is no revoke — ownership only moves.
 
 Adding and removing members requires the `manage-users`
 org-management capability — held implicitly by the **owner**, or
-delegated via a role ([lesson 25](25-grants.md)). Everyone else
+delegated via a role ([Lesson 25](25-grants.md)). Everyone else
 sees the panel read-only at best: the underlying entities
 (`:account`, `:grant`, `:org`) are guarded server-side, so the
 affordances are just UX — the enforcement is in storage.
@@ -98,7 +98,7 @@ affordances are just UX — the enforcement is in storage.
 ## What we glossed over
 
 - **Where accounts come from** — self-serve signup, social
-  sign-in, verification ([lesson 33](33-signing-up-and-in.md)).
+  sign-in, verification ([Lesson 33](33-signing-up-and-in.md)).
 - **Delegating member management** — a role carrying
   `manage-users` (next lesson).
 - **Personal namespaces** — every member implicitly owns

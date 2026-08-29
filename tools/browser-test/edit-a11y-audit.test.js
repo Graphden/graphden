@@ -65,6 +65,10 @@ const AUDIT = () => {
   //    screen reader skips it, Tab still lands on it, and the user is
   //    stranded on a control that does not exist as far as they are told.
   for (const hidden of document.querySelectorAll('[aria-hidden="true"]')) {
+    // `inert` already removes the subtree from the focus order, so
+    // aria-hidden over it is consistent, not a trap — that pairing is
+    // exactly how a modal hides the page behind it.
+    if (hidden.hasAttribute('inert') || hidden.closest('[inert]')) continue;
     const focusable = hidden.querySelectorAll(
       'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])');
     for (const f of focusable) {
@@ -171,6 +175,34 @@ const CONTRAST = () => {
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(() => graphReady() && !graph.animating,
                                null, {timeout: 20000, polling: 100});
+
+    // ── State 0: the rules can still fail ───────────────────────────────
+    //
+    // A sweep like this is worthless the moment a selector stops matching:
+    // it goes green and stays green. So inject one defect of each class and
+    // require the rules to report all of them, before trusting a clean run.
+    const caught = await page.evaluate((auditSrc) => {
+      const audit = new Function('return (' + auditSrc + ')')();
+      const probes = document.createElement('div');
+      probes.id = 'audit-self-check';
+      probes.innerHTML =
+        '<button id="p-noname"></button>'
+        + '<div role="dialog" id="p-nodialogname">x</div>'
+        + '<div aria-hidden="true" id="p-hiddenfocus"><button>real</button></div>'
+        + '<input id="p-nolabel" type="text">'
+        + '<img id="p-noalt" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">'
+        + '<span id="p-dup"></span><span id="p-dup"></span>';
+      document.body.appendChild(probes);
+      const found = audit();
+      probes.remove();
+      return found;
+    }, AUDIT.toString());
+
+    for (const rule of ['control-has-name', 'dialog-has-name', 'aria-hidden-focus',
+                        'field-has-label', 'img-has-alt', 'duplicate-id']) {
+      assert(caught.some((p) => p.startsWith(rule)),
+             'the ' + rule + ' rule still fires on a planted defect');
+    }
 
     // ── State 1: the shell with a graph loaded ───────────────────────────
     const shell = await page.evaluate(AUDIT);

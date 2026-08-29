@@ -377,7 +377,7 @@ const {
     await page.waitForSelector('.gd-tour-lesson-list', {timeout: 20000});
     const locked = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
-      const row = Array.from(list.children).find((c) => /^23 ·/.test(c.textContent.trim()));
+      const row = Array.from(list.children).find((c) => /^24 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(), disabled: row.disabled === true,
                     chapter: !!Array.from(list.children).find(
                       (c) => c.className.includes('gd-tour-chapter')
@@ -395,7 +395,7 @@ const {
     // words, not as a capability name.
     const orgLocked = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
-      const row = Array.from(list.children).find((c) => /^29 ·/.test(c.textContent.trim()));
+      const row = Array.from(list.children).find((c) => /^30 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
     });
     assert(orgLocked, 'lesson 30 is listed');
@@ -408,7 +408,7 @@ const {
     // lesson from the only sessions that can run it.
     const assetsLesson = await page.evaluate(() => {
       const list = document.querySelector('.gd-tour-lesson-list');
-      const row = Array.from(list.children).find((c) => /^21 ·/.test(c.textContent.trim()));
+      const row = Array.from(list.children).find((c) => /^22 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
     });
     assert(assetsLesson, 'lesson 22 is listed');
@@ -466,7 +466,7 @@ const {
     assert(cat.fitsViewport, 'the catalogue fits the window');
     assert(cat.listScrolls, 'and the LIST scrolls rather than squeezing its rows');
     assert(cat.cancelReachable, 'Cancel stays reachable at any scroll position');
-    assert(cat.filtered.length === 1 && /^19 · Branches/.test(cat.filtered[0]),
+    assert(cat.filtered.length === 1 && /^20 · Branches/.test(cat.filtered[0]),
       'the filter narrows to one lesson (got: ' + JSON.stringify(cat.filtered) + ')');
     assert(cat.doneMarked, 'a finished lesson is marked done');
     assert(cat.chapters.length === new Set(cat.chapters).size,

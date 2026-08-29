@@ -41,7 +41,7 @@
    strokes forming λ + three node discs), teal via `.brand svg{color}` +
    currentColor. Replaces the old serif-λ-on-blue-disc so the auth surface
    reads as the same product as the editor."
-  (str "<svg viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'>"
+  (str "<svg aria-hidden='true' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'>"
        "<g stroke='currentColor' stroke-width='3' stroke-linecap='round'>"
        "<line x1='9' y1='6' x2='25' y2='26'/><line x1='17' y1='16' x2='8' y2='26'/></g>"
        "<g fill='currentColor'>"
@@ -54,10 +54,10 @@
   (str "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
        "<title>" title " — Graphden</title><style>" @brand-css "</style></head>"
-       "<body><div class='wrap'>"
+       "<body><main class='wrap'>"
        "<div class='brand'>" lambda-svg "<b>Graphden</b></div>"
        body
-       "</div></body></html>"))
+       "</main></body></html>"))
 
 
 ;; Provider marks so GitHub/Google read as branded buttons alongside the
@@ -136,14 +136,14 @@
       "<button id='t-up' onclick='mode(true)'>Create account</button></div>"
       "<h1 id='hd'>Welcome back</h1><p class='sub' id='sb'>Sign in to your Graphden account.</p>"
       "<form id='f' onsubmit='return submitForm(event)'>"
-      "<label>Email</label><input type='email' id='email' required autocomplete='email'>"
-      "<label>Password</label><input type='password' id='password' required autocomplete='current-password'>"
-      "<div id='totp-wrap' style='display:none'><label>Authentication code</label>"
+      "<label for='email'>Email</label><input type='email' id='email' required autocomplete='email'>"
+      "<label for='password'>Password</label><input type='password' id='password' required autocomplete='current-password'>"
+      "<div id='totp-wrap' style='display:none'><label for='code'>Authentication code</label>"
       "<input type='text' id='code' inputmode='numeric' autocomplete='one-time-code' placeholder='123456'></div>"
       "<button class='btn-primary' id='go' type='submit'>Sign in</button>"
-      "<div class='msg' id='msg'></div>"
-      "<p style='margin:10px 0 0;font-size:13px;text-align:center'>"
-      "<a href='#' id='forgot' onclick='return forgot()'>Forgot password?</a></p></form>"
+      "<div class='msg' id='msg' role='alert'></div>"
+      "<p style='margin:10px 0 0;font-size:0.8125rem;text-align:center'>"
+      "<button type='button' class='linklike' id='forgot' onclick='forgot()'>Forgot password?</button></p></form>"
       (social-buttons enabled-providers telegram)
       "</div>"
       "<script>" @login-js "</script>")))
@@ -255,8 +255,8 @@
       "<h1>Choose a new password</h1>"
       "<p class='sub'>After resetting you'll be signed out everywhere.</p>"
       "<form onsubmit='return doReset(event)'>"
-      "<label>New password</label>"
+      "<label for='password'>New password</label>"
       "<input type='password' id='password' required minlength='8' autocomplete='new-password'>"
       "<button class='btn-primary' type='submit'>Set password</button>"
-      "<div class='msg' id='msg'></div></form></div>"
+      "<div class='msg' id='msg' role='alert'></div></form></div>"
       "<script>" @reset-js "</script>")))

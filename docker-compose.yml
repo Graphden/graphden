@@ -162,6 +162,12 @@ services:
       # the section stays hidden and sync answers unconfigured.
       GRAPHDEN_HUB_URL: ${GRAPHDEN_HUB_URL:-}
       GRAPHDEN_HUB_TOKEN: ${GRAPHDEN_HUB_TOKEN:-}
+      # Feedback (docs/MONITORING.md § 4): where this instance's editor
+      # sends "Report a problem" (blank → the official intake; the literal
+      # `off` hides the affordance), and whether THIS instance accepts reports on
+      # POST /api/feedback (non-blank arms the intake).
+      GRAPHDEN_FEEDBACK_URL: ${GRAPHDEN_FEEDBACK_URL:-}
+      GRAPHDEN_FEEDBACK_INTAKE: ${GRAPHDEN_FEEDBACK_INTAKE:-}
     ports:
       # GD_BIND — the OFFLINE / "internal requests only" preset
       # (docs/DEPLOYMENT.md § Local offline instance): GD_BIND=127.0.0.1

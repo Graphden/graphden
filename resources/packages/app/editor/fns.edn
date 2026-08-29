@@ -49,6 +49,11 @@
                   "packages/web/runtime/graphden-popover.js"
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
+                  ;; Feedback ("Report a problem") — early so its uncaught-
+                  ;; error ring buffer sees everything after boot; the shell
+                  ;; menu (editor-auth.js) and the Errors panel call its
+                  ;; window.openFeedbackForm at click time.
+                  "packages/app/editor/editor-feedback.js"
                   "packages/app/editor/editor-auth.js"
                   "packages/app/editor/editor-org-switcher.js"
                   "packages/app/editor/editor-branches.js"

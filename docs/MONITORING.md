@@ -118,3 +118,44 @@ pure (`graphden.monitoring.alerts`, unit-tested); the scheduler
 The alerter is off only when **no** channel is configured. Tune the
 thresholds via the `:exec/alert-scheduler` `:config` map if the defaults
 don't fit your traffic.
+
+## 4. User feedback intake
+
+The editor carries a **Report a problem** form (shell menu, plus a
+footer button on the Errors panel that pre-checks the error-log
+attachment). It is how a user on ANY instance — local, self-hosted,
+cloud — files a bug/idea/question without needing an account anywhere.
+
+The flow deliberately does not depend on the local backend being
+healthy: the browser POSTs **directly** to the intake URL (cross-origin
+— the intake answers with `Access-Control-Allow-Origin: *`; the body
+goes as `text/plain` so the POST stays a CORS simple request, no
+preflight). When even that fails (offline), the form degrades to a
+"download the report JSON + open a GitHub issue" fallback.
+
+Everything attached is opt-in-by-checkbox and shown before sending:
+build hashes + browser/env info, the client-side uncaught-JS-error ring
+buffer, optionally the current location (instance URL, branch, open fn)
+and the already-redacted error-log text. Nothing is sent without an
+explicit submit.
+
+Two env vars (see [DEPLOYMENT § Environment Variables](DEPLOYMENT.md#environment-variables)):
+
+| env | default | meaning |
+|-----|---------|---------|
+| `GRAPHDEN_FEEDBACK_URL` | *(blank ⇒ official intake)* | What `GET /api/feedback/config` announces to this instance's editor. The literal `off` ⇒ the feedback affordance is hidden |
+| `GRAPHDEN_FEEDBACK_INTAKE` | *(empty)* | Non-blank ⇒ THIS instance is an intake: open `POST /api/feedback` accepts reports |
+
+The intake itself is pure graph (`app.feedback`, no new core entity
+type): reports land in a plain `feedback_reports` SQL table on the
+intake's own Postgres (created idempotently on first report), and each
+accepted report pings the operator through the alerter's Telegram pair
+(§ 3b) when configured. Abuse posture for an open write route: unarmed
+by default, hard size caps per stored field, a honeypot field (filled ⇒
+pretend success, store nothing), and fixed-window caps counted off the
+table itself (200/hour globally, 20/hour per client IP). Report text is
+attacker-controlled input — any triage surface must render it as TEXT.
+
+Triage is dogfooded: on the intake instance, query `feedback_reports`
+from the editor (a `:pg-query` fn) or psql; the `status` column
+(`new` → whatever workflow you like) is yours to update.

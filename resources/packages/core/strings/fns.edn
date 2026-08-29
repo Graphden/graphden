@@ -23,6 +23,12 @@
    :args {:string {:type :text :description "String to measure."}}
    :return-type :non-negative-int}
 
+  {:name :str-clip
+   :description "String truncated to at most `:limit` characters — `(subs s 0 (min (count s) limit))`. The size-cap primitive for storing or forwarding untrusted text; unlike bare `:subs` it never throws on a short input."
+   :args {:string {:type :text :description "String to clip."}
+          :limit {:type :non-negative-int :description "Maximum length in characters."}}
+   :return-type :text}
+
   {:name :byte-len
    :description "UTF-8 byte length of a string (`String.getBytes(\"UTF-8\").length`). Distinct from :str-len — use for byte-sized budgets (e.g. jsonb payload caps), which :str-len (UTF-16 code units) under-counts for non-ASCII text."
    :args {:string {:type :text :description "String to measure."}}

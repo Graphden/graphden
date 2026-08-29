@@ -559,6 +559,20 @@
    :parent :post-route
    :args {:path "/tour/progress" :handler :tour-progress-handler}}
 
+  ;; --- /api/feedback — the feedback intake + its config probe ---
+
+  {:name :api-feedback
+   :description "POST /api/feedback — one user feedback report from ANY graphden instance's editor (cross-origin; the response carries Access-Control-Allow-Origin). Open route: reporting must not require an account HERE. Unarmed unless GRAPHDEN_FEEDBACK_INTAKE is set — see app.feedback."
+   :parent :post-route
+   :args {:path "/feedback" :handler :feedback-handler}
+   :expects-effects #{:io :db :env :network :raw-sql}}
+
+  {:name :api-feedback-config
+   :description "GET /api/feedback/config — `{url}` the local editor's report form POSTs to (env override / official default / empty = hidden). Open route: the form must work for anonymous and demo sessions."
+   :parent :get-route
+   :args {:path "/feedback/config" :handler :feedback-config-handler}
+   :expects-effects #{:env}}
+
   ;; --- /api/value-form — type-aware editor form for a binding/slot ---
 
   {:name :api-value-form
@@ -835,6 +849,8 @@
                   :api-value-form
                   :api-tour
                   :api-tour-progress
+                  :api-feedback
+                  :api-feedback-config
                   :api-execute
                   :api-execution-by-id
                   :api-execution-cancel

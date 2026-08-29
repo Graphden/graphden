@@ -104,6 +104,10 @@
   (count string))
 
 
+(defbase str-clip-fn [string limit]
+  (subs string 0 (min (count string) limit)))
+
+
 (defbase byte-len-fn [string]
   ;; UTF-8 byte length — distinct from :str-len (UTF-16 code units) for
   ;; enforcing byte-sized budgets (jsonb payload caps).
@@ -296,6 +300,7 @@
   {:str                {:impl str-fn                :taint-propagate? true}
    :subs               {:impl subs-fn               :taint-propagate? true}
    :str-len            {:impl str-len-fn            :taint-propagate? true}
+   :str-clip           {:impl str-clip-fn           :taint-propagate? true}
    :byte-len           {:impl byte-len-fn           :taint-propagate? true}
    :str-upper          {:impl str-upper-fn          :taint-propagate? true}
    :str-lower          {:impl str-lower-fn          :taint-propagate? true}

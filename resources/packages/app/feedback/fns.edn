@@ -1,0 +1,355 @@
+;; app.feedback — the feedback-intake endpoint (POST /api/feedback) plus
+;; the tiny config probe (GET /api/feedback/config) the editor's
+;; "Report a problem" form reads.
+;;
+;; Two very different deployments consume this namespace:
+;;
+;;   * EVERY instance serves /api/feedback/config — it just tells the
+;;     local editor where reports should be POSTed
+;;     (GRAPHDEN_FEEDBACK_URL: blank ⇒ the official intake, the
+;;     literal `off` ⇒ the feedback button is hidden).
+;;   * ONE instance — the official intake (graphden.dev) — additionally
+;;     sets GRAPHDEN_FEEDBACK_INTAKE=1, which arms POST /api/feedback:
+;;     reports land in a plain `feedback_reports` SQL table (via
+;;     :pg-execute against the instance's own datasource — deliberately
+;;     NOT a new core entity type) and each accepted report pings the
+;;     operator through the alerter's Telegram pair when configured.
+;;
+;; The POST route is OPEN by design: the whole point is that a user on
+;; any instance (local, self-host, cloud) can report without holding an
+;; account here. The browser posts CROSS-ORIGIN, so the response carries
+;; `Access-Control-Allow-Origin: *`; the client sends the JSON body as
+;; `text/plain` to stay a CORS "simple request" (no preflight — there is
+;; no OPTIONS route machinery), which is why parsing below reads the raw
+;; body instead of :parse-json-body (that helper requires an
+;; application/json content-type).
+;;
+;; Abuse posture for an open write route: unarmed by default (intake env
+;; unset ⇒ every branch answers {ok:false, error:"disabled"} and touches
+;; no storage); hard size caps on every stored field; a honeypot field
+;; (`website`) that bots fill and humans never see (filled ⇒ pretend
+;; success, store nothing); and two fixed-window caps counted off the
+;; table itself — global per hour and per client IP per hour. The
+;; report text is stored verbatim and must be rendered as TEXT by any
+;; future triage surface (a report is attacker-controlled input).
+{:namespace "app.feedback"
+ :description "Feedback intake: open POST /api/feedback (env-armed, size-capped, honeypot + rate caps, SQL storage + Telegram ping) and the GET /api/feedback/config probe the editor's report form reads."
+ :fns
+ [;; --- config probe --------------------------------------------------
+
+  {:name :_fb-url-env
+   :parent :env
+   :args {:name {:value "GRAPHDEN_FEEDBACK_URL"}}}
+
+  {:name :_fb-config-url
+   :description "Effective intake URL for THIS instance's editor: blank env (unset OR empty — docker-compose's `${VAR:-}` passthrough makes the two indistinguishable) ⇒ the official intake; the literal `off` ⇒ empty, which hides the feedback affordance (air-gapped installs); anything else ⇒ the operator's own intake."
+   :parent :cond
+   :args {:clauses [{:parent :blank?
+                     :args {:string {:parent :to-str :args {:value :_fb-url-env}}}}
+                    {:value "https://graphden.dev/api/feedback"}
+                    {:parent :eq :args {:values [:_fb-url-env {:value "off"}]}}
+                    {:value ""}
+                    {:value true}
+                    :_fb-url-env]}}
+
+  {:name :_fb-config-json
+   :parent :to-json-string
+   :args {:data {:parent :zipmap
+                 :args {:keys [{:value :url}]
+                        :vals [:_fb-config-url]}}}}
+
+  {:name :feedback-config-handler
+   :description "GET /api/feedback/config handler — `{url: <intake URL>}` for the editor's report form. Open route: the URL is not sensitive and the form must work for anonymous/demo sessions too."
+   :parent :json-ok-response
+   :args {:body :_fb-config-json}}
+
+  ;; --- intake: env gate ---------------------------------------------
+
+  {:name :_fb-intake-enabled?
+   :description "True only on the instance armed as the official intake (GRAPHDEN_FEEDBACK_INTAKE non-blank). Everywhere else the POST answers disabled and never touches storage."
+   :parent :non-blank?
+   :args {:string {:parent :to-str
+                   :args {:value {:parent :env
+                                  :args {:name {:value "GRAPHDEN_FEEDBACK_INTAKE"}}}}}}}
+
+  ;; --- intake: body parse (content-type-agnostic) --------------------
+
+  {:name :_fb-body-raw
+   :parent :get
+   :args {:coll {:as :request} :key {:value :body} :default nil}}
+
+  {:name :_fb-parse-attempt
+   :parent :parse-json
+   :args {:string {:parent :to-str :args {:value :_fb-body-raw}}
+          :keywordize {:value true}}}
+
+  {:name :_fb-nil-catch
+   :description "Shared `:try` on-throw handler that swallows the exception: `:ex-data` of a non-ex-info exception (JSON parse failure, Telegram I/O error) is nil, which is exactly the 'treat as absent' answer both call sites want."
+   :parent :ex-data
+   :args {:ex {:as :exception}}}
+
+  {:name :_fb-body
+   :description "Parsed report body, or nil when the body is missing / not JSON. Bots and stale clients must degrade to a polite {ok:false}, never a 500."
+   :parent :try
+   :args {:body :_fb-parse-attempt
+          :on-throw :_fb-nil-catch}}
+
+  ;; --- intake: fields (validated + clipped) --------------------------
+
+  {:name :_fb-category-raw
+   :parent :to-str
+   :args {:value {:parent :get
+                  :args {:coll :_fb-body
+                         :key {:value :category}
+                         :default {:value "bug"}}}}}
+
+  {:name :_fb-category
+   :description "Report category, forced into the known set — an open route never stores a caller-invented label. An `:eq` ladder rather than `:case`: a literal `:case` clauses-map keywordizes its keys on the JSONB roundtrip and stops matching caller-supplied STRINGS, and `:str-to-keyword` on attacker input would intern unbounded keywords."
+   :parent :cond
+   :args {:clauses [{:parent :eq :args {:values [:_fb-category-raw {:value "idea"}]}}
+                    {:value "idea"}
+                    {:parent :eq :args {:values [:_fb-category-raw {:value "question"}]}}
+                    {:value "question"}
+                    {:value true}
+                    {:value "bug"}]}}
+
+  {:name :_fb-text
+   :parent :str-clip
+   :args {:string {:parent :str-trim
+                   :args {:string {:parent :to-str
+                                   :args {:value {:parent :get
+                                                  :args {:coll :_fb-body
+                                                         :key {:value :text}
+                                                         :default {:value ""}}}}}}}
+          :limit 10000}}
+
+  {:name :_fb-email
+   :parent :str-clip
+   :args {:string {:parent :str-trim
+                   :args {:string {:parent :to-str
+                                   :args {:value {:parent :get
+                                                  :args {:coll :_fb-body
+                                                         :key {:value :email}
+                                                         :default {:value ""}}}}}}}
+          :limit 200}}
+
+  {:name :_fb-context-json
+   :description "The client's structured context blob (versions, UA, console errors …) re-serialized server-side and clipped — stored as text, never trusted as structure."
+   :parent :str-clip
+   :args {:string {:parent :to-json-string
+                   :args {:data {:parent :get
+                                 :args {:coll :_fb-body
+                                        :key {:value :context}
+                                        :default nil}}}}
+          :limit 32768}}
+
+  {:name :_fb-honeypot?
+   :description "True when the hidden `website` form field arrived non-empty — a bot filled it. The response then pretends success while storing nothing."
+   :parent :non-blank?
+   :args {:string {:parent :to-str
+                   :args {:value {:parent :get
+                                  :args {:coll :_fb-body
+                                         :key {:value :website}
+                                         :default {:value ""}}}}}}}
+
+  ;; --- intake: client IP (for the per-IP cap) ------------------------
+
+  {:name :_fb-xff
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :headers} {:value "x-forwarded-for"}]
+          :default {:value ""}}}
+
+  {:name :_fb-xff-first
+   :parent :first
+   :args {:coll {:parent :str-split
+                 :args {:string :_fb-xff :separator {:value ","}}}}}
+
+  {:name :_fb-xff-hop
+   :description "First X-Forwarded-For hop, trimmed; empty when the header is absent."
+   :parent :str-trim
+   :args {:string {:parent :coalesce
+                   :args {:value :_fb-xff-first :default {:value ""}}}}}
+
+  {:name :_fb-ip
+   :description "Best-effort client address for the per-IP cap: the first X-Forwarded-For hop (the official intake sits behind a TLS edge that sets it). `:ring-request-shape` carries no remote-addr, so proxyless callers all land in one shared \"\" bucket — which only TIGHTENS the cap; and the hop is spoofable anyway, which is why the GLOBAL hourly cap, not this one, is the real backstop."
+   :parent :str-clip
+   :args {:string {:parent :if
+                   :args {:test {:parent :non-blank? :args {:string :_fb-xff}}
+                          :then :_fb-xff-hop
+                          :else {:value ""}}}
+          :limit 64}}
+
+  ;; --- intake: storage ----------------------------------------------
+
+  {:name :_fb-ensure-table
+   :description "Idempotent DDL run before any read/write — the table appears on the intake's first ever report. A dedicated SQL table, NOT a new core entity type: reports are operator inbox rows, not graph data, and every other deployment should carry zero schema for this."
+   :parent :pg-execute
+   :args {:hsql {:value {:create-table [:feedback_reports :if-not-exists]
+                         :with-columns [[:id :bigserial [:primary-key]]
+                                        [:created_at :timestamptz]
+                                        [:category :text]
+                                        [:body :text]
+                                        [:email :text]
+                                        [:context :text]
+                                        [:ip :text]
+                                        [:status :text]]}}}}
+
+  {:name :_fb-count-row
+   :parent :first
+   :args {:coll {:as :rows}}}
+
+  {:name :_fb-count-n
+   :description "Unwrap `[{:n N}]` from a count query. Free arg `:rows` (via :_fb-count-row) binds per call site."
+   :parent :coalesce
+   :args {:value {:parent :get
+                  :args {:coll :_fb-count-row
+                         :key {:value :n}
+                         :default nil}}
+          :default {:value 0}}}
+
+  {:name :_fb-recent-total
+   :parent :_fb-count-n
+   :args {:rows {:parent :pg-query
+                 :args {:hsql {:value {:select [[[:count :*] :n]]
+                                       :from :feedback_reports
+                                       :where [:> :created_at [:raw "now() - interval '1 hour'"]]}}}}}}
+
+  {:name :_fb-recent-by-ip
+   :parent :_fb-count-n
+   :args {:rows {:parent :pg-query
+                 :args {:hsql {:parent :assoc
+                               :args {:map {:value {:select [[[:count :*] :n]]
+                                                    :from :feedback_reports}}
+                                      :key {:value :where}
+                                      :value {:parent :conj
+                                              :args {:coll {:value [:and [:> :created_at [:raw "now() - interval '1 hour'"]]]}
+                                                     :item {:parent :conj
+                                                            :args {:coll {:value [:= :ip]}
+                                                                   :item :_fb-ip}}}}}}}}}}
+
+  {:name :_fb-rate-limited?
+   :description "Fixed-window caps counted off the table itself: 200 reports/hour globally, 20/hour per client IP. Feedback is human-paced — a legitimate deployment never grazes these."
+   :parent :or
+   :args {:values [{:parent :gte :args {:nums [:_fb-recent-total {:value 200}]}}
+                   {:parent :gte :args {:nums [:_fb-recent-by-ip {:value 20}]}}]}}
+
+  {:name :_fb-insert
+   :parent :pg-execute
+   :args {:hsql {:parent :assoc
+                 :args {:map {:value {:insert-into :feedback_reports}}
+                        :key {:value :values}
+                        :value {:parent :list
+                                :args {:items [{:parent :zipmap
+                                                :args {:keys [{:value :created_at}
+                                                              {:value :category}
+                                                              {:value :body}
+                                                              {:value :email}
+                                                              {:value :context}
+                                                              {:value :ip}
+                                                              {:value :status}]
+                                                       :vals [{:value [:raw "now()"]}
+                                                              :_fb-category
+                                                              :_fb-text
+                                                              :_fb-email
+                                                              :_fb-context-json
+                                                              :_fb-ip
+                                                              {:value "new"}]}}]}}}}}}
+
+  ;; --- intake: Telegram ping ----------------------------------------
+
+  {:name :_fb-tg-token
+   :parent :env
+   :args {:name {:value "GRAPHDEN_ALERT_TELEGRAM_TOKEN"}}}
+
+  {:name :_fb-tg-chat
+   :parent :env
+   :args {:name {:value "GRAPHDEN_ALERT_TELEGRAM_CHAT"}}}
+
+  {:name :_fb-tg-configured?
+   :description "Reuses the alerter's Telegram pair (docs/MONITORING.md § 3b) — the intake operator already has this channel; no new config."
+   :parent :and
+   :args {:values [{:parent :non-blank? :args {:string {:parent :to-str :args {:value :_fb-tg-token}}}}
+                   {:parent :non-blank? :args {:string {:parent :to-str :args {:value :_fb-tg-chat}}}}]}}
+
+  {:name :_fb-tg-send
+   :parent :http-post
+   :args {:url {:parent :ensure-url
+                :args {:value {:parent :str
+                               :args {:parts [{:value "https://api.telegram.org/bot"}
+                                              :_fb-tg-token
+                                              {:value "/sendMessage"}]}}}}
+          :headers {:value {"Content-Type" "application/json"}}
+          :body {:parent :to-json-string
+                 :args {:data {:parent :zipmap
+                               :args {:keys [{:value :chat_id}
+                                             {:value :text}]
+                                      :vals [:_fb-tg-chat
+                                             {:parent :str
+                                              :args {:parts [{:value "📮 Feedback ("}
+                                                             :_fb-category
+                                                             {:value "): "}
+                                                             {:parent :str-clip
+                                                              :args {:string :_fb-text
+                                                                     :limit 500}}]}}]}}}}}}
+
+  {:name :_fb-notify
+   :description "Best-effort operator ping — a Telegram outage must never fail the report, hence the `:try` swallow; unconfigured pair skips the call entirely."
+   :parent :if
+   :args {:test :_fb-tg-configured?
+          :then {:parent :try
+                 :args {:body :_fb-tg-send
+                        :on-throw :_fb-nil-catch}}
+          :else nil}}
+
+  ;; --- intake: the decision ladder -----------------------------------
+
+  {:name :_fb-stored
+   :description "The accept path: insert, best-effort ping, answer ok. `:do` sequences the effects; the literal map is the answer."
+   :parent :do
+   :args {:steps [:_fb-insert
+                  :_fb-notify
+                  {:value {:ok true}}]}}
+
+  {:name :_fb-guarded
+   :parent :if
+   :args {:test :_fb-rate-limited?
+          :then {:value {:ok false :error "rate-limited"}}
+          :else :_fb-stored}}
+
+  {:name :_fb-after-ensure
+   :description "DDL precedes the rate-cap counts — both read the table, which must exist by the time the very first report counts against an empty window."
+   :parent :do
+   :args {:steps [:_fb-ensure-table
+                  :_fb-guarded]}}
+
+  {:name :_fb-result
+   :description "The whole intake as one decision ladder. Order matters: the honeypot check precedes validation so a bot filling every field still gets its fake success; the blank-text check subsumes the nil-body (non-JSON) case."
+   :parent :cond
+   :args {:clauses [{:parent :not :args {:value :_fb-intake-enabled?}}
+                    {:value {:ok false :error "disabled"}}
+                    :_fb-honeypot?
+                    {:value {:ok true}}
+                    {:parent :blank? :args {:string :_fb-text}}
+                    {:value {:ok false :error "empty-text"}}
+                    {:value true}
+                    :_fb-after-ensure]}}
+
+  {:name :_fb-result-json
+   :parent :to-json-string
+   :args {:data :_fb-result}}
+
+  ;; --- intake: CORS-carrying response --------------------------------
+
+  {:name :_fb-cors-json-content-type
+   :description "Content-type axis for the intake response: JSON + `Access-Control-Allow-Origin: *` (the form posts from ANY instance's origin) + no-store. The wildcard is safe — the route is open, unauthenticated, and the response carries nothing private."
+   :parent :ring-response
+   :args {:headers {"Content-Type" "application/json; charset=utf-8"
+                    "Access-Control-Allow-Origin" "*"
+                    "Cache-Control" "no-store"}}}
+
+  {:name :feedback-handler
+   :lambda-params [:request]
+   :description "POST /api/feedback handler — accepts one feedback report `{category, text, email?, context?, website?}` (JSON, possibly sent as text/plain for CORS-simple-request reasons) and answers `{ok, error?}` with CORS headers. Armed only where GRAPHDEN_FEEDBACK_INTAKE is set; disabled instances answer `{ok:false, error:\"disabled\"}` and touch nothing."
+   :parents [:_fb-cors-json-content-type :ok-response]
+   :args {:body :_fb-result-json}}]}

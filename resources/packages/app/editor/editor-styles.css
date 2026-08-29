@@ -6845,3 +6845,66 @@ body.gd-tour-sheet-open #side-menu {
   border: 0; border-radius: 3px; padding: 4px 10px; font-size: 12px; cursor: pointer;
 }
 body.gd-no-write .branch-comment-form { display: none; }
+
+/* Feedback ("Report a problem") — full-viewport backdrop + centred card
+   (editor-feedback.js). Same modal conventions as .merge-conflicts-modal:
+   z-index 500 layer, token backdrop, --bg card. */
+#feedback-backdrop {
+  position: fixed; inset: 0; z-index: 500;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--modal-backdrop-bg);
+}
+.feedback-popover {
+  position: relative;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--fg); border-radius: 3px;
+  padding: 12px 16px;
+  width: 440px; max-width: 92vw;
+  max-height: 85vh; overflow-y: auto;
+  box-shadow: var(--shadow-md);
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 12px; line-height: 1.4;
+}
+.feedback-title {
+  font-size: 14px; font-weight: 600;
+  border-bottom: 1px solid var(--border); padding-bottom: 6px;
+}
+.feedback-row { display: flex; flex-direction: column; gap: 3px; }
+.feedback-row > span { font-size: 11px; color: var(--muted-fg); }
+.feedback-row select,
+.feedback-row input,
+.feedback-row textarea {
+  font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--input-border); border-radius: 3px;
+  padding: 4px 6px;
+}
+.feedback-row textarea { resize: vertical; }
+/* Honeypot — removed from layout AND from assistive tech; only bots see it. */
+.feedback-honeypot { display: none; }
+.feedback-attach { display: flex; flex-direction: column; gap: 2px; }
+.feedback-attach-title { font-size: 11px; color: var(--muted-fg); }
+.feedback-check { font-size: 11px; display: flex; align-items: center; gap: 4px; }
+.feedback-actions { display: flex; gap: 8px; margin-top: 2px; }
+.feedback-send {
+  background: var(--accent); color: var(--on-accent);
+  border: 0; border-radius: 3px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+.feedback-send:disabled { opacity: 0.6; cursor: default; }
+.feedback-cancel {
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--input-border); border-radius: 3px;
+  padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+.feedback-status { font-size: 11px; color: var(--muted-fg); min-height: 14px; }
+.feedback-status a { color: var(--accent); }
+
+/* Errors panel footer — the "report these failures" entry point
+   (editor-errors.js). Quiet text-button, muted → fg on hover like the
+   other footer strips. */
+.errors-report-btn {
+  margin-top: 6px;
+  background: none; border: 0; padding: 0;
+  font-size: 11px; color: var(--muted-fg);
+  cursor: pointer; text-align: left;
+}
+.errors-report-btn:hover { color: var(--fg); }

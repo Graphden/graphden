@@ -502,6 +502,14 @@ function openShellMenu() {
   // shows only where supporting is the ask: self-host installs. Cloud plans
   // already pay — `gd-tenancy` on body marks those deployments.
   divider();
+  // Feedback — present unless the operator explicitly disabled it
+  // (GRAPHDEN_FEEDBACK_URL=off → editor-feedback.js hides the affordance).
+  if (typeof window.feedbackEnabled !== 'function' || window.feedbackEnabled()) {
+    item('Report a problem', () => {
+      closeAuthPopover();
+      if (typeof window.openFeedbackForm === 'function') window.openFeedbackForm();
+    });
+  }
   if (!document.body.classList.contains('gd-tenancy')) {
     const support = document.createElement('a');
     support.className = 'auth-menu-item auth-menu-support';

@@ -234,6 +234,20 @@
           :refine-name {:value :positive-int}
           :constraint [:> 0]}}
 
+  {:name :ensure-url
+   :description "Validate that `:value` matches the `:url` refinement (`^https?://`); return as `:url`. Throws `refinement/violated` otherwise. The narrower for graph-built URLs (string concatenation types as `:text` — this is the explicit point it re-earns `:url`)."
+   :parent :_refinement-narrow
+   :return-type :url
+   ;; `:value` is pinned WIDE (`:text`) explicitly: without the pin the
+   ;; checker back-propagates the declared `:url` return through the
+   ;; `:if` then-branch onto the input slot — and a narrower whose input
+   ;; must already be `:url` narrows nothing.
+   :args {:value {:as :value :type :text}
+          :test {:parent :re-find?
+                 :args {:string {:as :value} :pattern {:value "^https?://"}}}
+          :refine-name {:value :url}
+          :constraint [:matches "^https?://"]}}
+
   {:name :ensure-non-empty-text
    :description "Validate that `:value` is a non-empty `:text`; return as `:non-empty-text`. Throws `refinement/violated` otherwise."
    :parent :_refinement-narrow

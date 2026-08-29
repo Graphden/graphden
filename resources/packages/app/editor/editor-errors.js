@@ -12,7 +12,7 @@
 // editor-grants-admin.js; the caller (editor-sidebar.js mountAdminSection) runs
 // htmx.process after appending, so the hx-get on a CONNECTED node fires.
 //
-// Globals consumed: isAuthenticated, htmx.
+// Globals consumed: isAuthenticated, htmx, openFeedbackForm (editor-feedback.js).
 
 function buildErrorsSection() {
   if (!isAuthenticated()) return null;
@@ -22,5 +22,18 @@ function buildErrorsSection() {
     + '<div class="ns-children" hx-get="/partials/error-log" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';
+  // Footer affordance: report these failures upstream. Opens the feedback
+  // form with the error-log attachment pre-checked (editor-feedback.js).
+  if (typeof window.feedbackEnabled !== 'function' || window.feedbackEnabled()) {
+    const report = document.createElement('button');
+    report.className = 'errors-report-btn';
+    report.textContent = 'Report a problem…';
+    report.addEventListener('click', () => {
+      if (typeof window.openFeedbackForm === 'function') {
+        window.openFeedbackForm({ includeErrorLog: true });
+      }
+    });
+    wrap.appendChild(report);
+  }
   return wrap;
 }

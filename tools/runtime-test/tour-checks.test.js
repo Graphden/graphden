@@ -195,7 +195,7 @@ test('dom / dom-absent are each other\'s inverse', () => {
 
 test('dom means VISIBLE — a mounted-but-hidden surface is not "open"', () => {
   // The editor keeps the Organization panels mounted from boot. Matching on
-  // presence alone completed lesson 23's "open the Organization surface"
+  // presence alone completed lesson 24's "open the Organization surface"
   // before the reader touched anything, and the tour walked on without them.
   const hidden = { dom: { '#gd-operate-nav button': 'hidden' } };
   assert(checkIn(hidden, { kind: 'dom', selector: '#gd-operate-nav button' }) === false,

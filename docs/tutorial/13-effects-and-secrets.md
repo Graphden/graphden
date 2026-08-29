@@ -337,4 +337,4 @@ The graphden DB never holds the secret value. Only the path.
 
 ## Next
 
-Lesson 19 — Branches ([already written](19-branches.md))
+Lesson 20 — Branches ([already written](20-branches.md))

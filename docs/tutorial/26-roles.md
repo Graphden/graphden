@@ -1,4 +1,4 @@
-# Lesson 25 — Roles: capabilities as a bundle
+# Lesson 26 — Roles: capabilities as a bundle
 
 **Goal**: define a role once, hand it to several people, and change
 what all of them can do by editing one row.
@@ -13,10 +13,10 @@ the Roles panel, why a role is not a namespace grant.
 
 ## The axis this lives on
 
-Lesson 24 drew the line and this lesson picks up the other side of it.
+Lesson 25 drew the line and this lesson picks up the other side of it.
 There are **two independent axes** of permission:
 
-| | **Namespace grants** (lesson 24) | **Org-management capabilities** |
+| | **Namespace grants** (lesson 25) | **Org-management capabilities** |
 |---|---|---|
 | Answer | may this person touch `acme.billing`? | may this person administer the org? |
 | Values | `read`, `write`, `execute`, `admin`, `bind-args`, `append-list`, `view-impl` | `manage-users`, `manage-grants`, `manage-roles`, `manage-apps`, `publish-packages` |
@@ -62,19 +62,19 @@ tightening the policy means finding all three.
 With a role, the answer is one row, and changing it changes everyone's
 effective capabilities at once — the next request each of them makes
 already reflects it. This is the same argument lesson 02 makes about
-`parent-ids` and lesson 28 makes about packages: name the shared thing
+`parent-ids` and lesson 29 makes about packages: name the shared thing
 once, and let the places that need it point at the name.
 
 ## What a role does not do
 
 - **It does not grant namespace access.** A `support` role with
   `manage-users` lets alice invite people; it does not let her read
-  `acme.billing`. That is a grant (lesson 24), and it stays separate on
+  `acme.billing`. That is a grant (lesson 25), and it stays separate on
   purpose — administering an org and reading its code are different
   powers, and plenty of people should have exactly one of them.
 - **It does not nest.** A role holds capabilities, not other roles.
 - **It is org-scoped.** A role in `acme` means nothing in `globex`,
-  even for the same account (lesson 29).
+  even for the same account (lesson 30).
 
 ## Reading the effective answer
 
@@ -98,7 +98,7 @@ tenancy addon.)
 1. Account menu → **Organization** → **Roles**.
 2. Create a role: name `support`, tick `manage-users`, Create. The row
    appears with an empty member list.
-3. Invite a second person if you have not already (lesson 23), then
+3. Invite a second person if you have not already (lesson 24), then
    type their username into the role's member box and submit. The row
    now names them.
 4. Sign in as that person (or ask them to reload): their account menu
@@ -111,8 +111,8 @@ tenancy addon.)
 
 ## Where this shows up next
 
-- **Members** (lesson 23) — who is in the org at all; a role only
+- **Members** (lesson 24) — who is in the org at all; a role only
   matters for someone already in it.
-- **Grants** (lesson 24) — the other axis, per namespace.
-- **Across organizations** (lesson 29) — roles do not travel; each org
+- **Grants** (lesson 25) — the other axis, per namespace.
+- **Across organizations** (lesson 30) — roles do not travel; each org
   answers for itself.

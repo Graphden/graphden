@@ -3115,7 +3115,7 @@
           :attrs {:value {:class "branch-popover-create"}}
           :children [:_bp-create-row :_bp-create-adv]}}
 
-  ;; --- Hub sync section (lesson 30's push/pull as buttons) ---
+  ;; --- Hub sync section (lesson 31's push/pull as buttons) ---
   ;; Rendered only when this instance is wired to a hub
   ;; (GRAPHDEN_HUB_URL — the same server config the registry package's
   ;; /api/sync/* routes read). The routes live in the OPTIONAL registry

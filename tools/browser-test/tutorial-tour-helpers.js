@@ -43,7 +43,7 @@ async function hardCleanup(page) {
   // ordered pass clears the normal case; the second pass collects
   // whatever the first pass unblocked.
   // A service row pins its fn: `tutorial-daemon` refuses to delete while
-  // lesson 31's row still points at it, so the row goes first.
+  // lesson 32's row still points at it, so the row goes first.
   try {
     const svcs = await api(page, 'GET', '/api/services');
     for (const s of (svcs.services || [])) {
@@ -64,7 +64,7 @@ async function hardCleanup(page) {
       await retryingDelete(() => deleteFnByName(page, nm));
     }
   }
-  // Lesson 28's pin has to go before its namespaces: uninstall leaves the
+  // lesson 29's pin has to go before its namespaces: uninstall leaves the
   // MATERIALISED `mycorp@1-0-0` copy behind by design, and deleting `greet`
   // by name (as this sweep once did) gutted that copy — the next install
   // then answered 404 "Entities not found" for a package that looked fine
@@ -198,7 +198,7 @@ function tourProgress(page) {
 
 
 // Click a tour button and wait for the popover to ACTUALLY move on. The
-// header's step counter ("Lesson 25 · step 4/9") is the observable; a
+// header's step counter ("lesson 26 · step 4/9") is the observable; a
 // finished lesson swaps the step popover for a centered dialog with no
 // counter, which counts as advancing too.
 //
@@ -390,7 +390,7 @@ async function removeUseSiteBinding(page, ownerText) {
 }
 
 
-// --- lesson 19 (branches) helpers -------------------------------------------
+// --- lesson 20 (branches) helpers -------------------------------------------
 
 // The tour popover repositions on a tick; clicking the chip the instant a
 // step renders can land on the popover instead. Wait until the chip is the
@@ -798,7 +798,7 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
 // The account button is an AVATAR chip in accounts mode and a LOCK icon on a
 // token deployment — same menu, different trigger. A helper (or a lesson)
 // that names only the avatar silently excludes every self-hosted instance,
-// which is exactly where lesson 21 lives.
+// which is exactly where lesson 22 lives.
 async function openAccountMenu(page) {
   await page.waitForSelector('.auth-avatar, #auth-lock-btn', {timeout: 30000});
   await page.evaluate(() => {

@@ -29,17 +29,17 @@ Details worth knowing:
   a marker per kind (⚙, ▣, 🔒).
 - **services** and **apps** show a live count; the **apps** chip
   appears only when the deployment has app routing at all
-  (Lesson 26).
+  (lesson 27).
 - Focusing **secrets** also reveals the **+ New secret** button
   (signed-in only) — creating secrets lives behind the lens that
   shows them (Lesson 13).
 - The fn you currently have **selected** is never hidden, whatever
   the lens — if you can open it, it stays in the tree.
 - Your lens choice is a per-browser preference (like the workspace
-  scope from Lesson 18); it survives reload and affects nobody
+  scope from lesson 19); it survives reload and affects nobody
   else.
 
-The lens composes with the workspace (Lesson 18): the workspace
+The lens composes with the workspace (lesson 19): the workspace
 picks *which projects* you see, the lens picks *which kind of
 rows* within them.
 
@@ -57,7 +57,7 @@ the right-hand **Inspector** panel shows it. Four tabs:
   separate "Run page" — running is always the ▶ action on the
   row or node, and its history lands here (Lesson 12).
 - **Versions** — the fn's version timeline across branches
-  (Lesson 19).
+  (lesson 20).
 
 The Inspector's head (name, namespace, description) renders
 instantly from what the editor already knows; all four tabs,

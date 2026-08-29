@@ -147,9 +147,9 @@ async function finishTour(page, label) {
 // --- the walks ---------------------------------------------------------------
 
 async function lesson16(page) {
-  await page.goto(BASE + '/?tutorial=23');
+  await page.goto(BASE + '/?tutorial=24');
   await waitTourTitle(page, 'An organization is people', 150000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 23 opening Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 24 opening Next');
 
   // Step: open the Organization surface. It must NOT complete on the mounted
   // -but-hidden panels — that is exactly what a `dom` check used to do here.
@@ -166,7 +166,7 @@ async function lesson16(page) {
   });
   assert(invited && invited.includes(INVITEE),
          'the invited row names the address (got: ' + invited + ')');
-  assert(await clickTourButton(page, 'Next'), 'lesson 23 invite-explained Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 24 invite-explained Next');
 
   await waitTourTitle(page, 'Take it back', 30000);
   await page.evaluate(() => {
@@ -174,15 +174,15 @@ async function lesson16(page) {
     badge.closest('tr').querySelector('.grant-delete').click();
   });
   await waitTourTitle(page, "That's membership", 60000);
-  await finishTour(page, 'lesson 23');
-  console.log('  lesson 23: walked — invited, read the row, revoked');
+  await finishTour(page, 'lesson 24');
+  console.log('  lesson 24: walked — invited, read the row, revoked');
 }
 
 
 async function lesson17(page) {
-  await page.goto(BASE + '/?tutorial=24');
+  await page.goto(BASE + '/?tutorial=25');
   await waitTourTitle(page, 'Membership is the door, grants are the rooms', 150000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 24 opening Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 25 opening Next');
 
   await waitTourTitle(page, 'Open Grants', 30000);
   await openOperateSection(page, 'grants');
@@ -197,10 +197,10 @@ async function lesson17(page) {
     return Array.from(document.querySelectorAll('[data-grants-panel] tbody tr'))
       .some((tr) => tr.textContent.includes(ns));
   }, GRANT_NS, {timeout: 30000, polling: 300});
-  assert(await clickTourButton(page, 'Next'), 'lesson 24 granted Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 25 granted Next');
 
   await waitTourTitle(page, 'Read the row you just wrote', 30000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 24 read-row Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 25 read-row Next');
 
   await waitTourTitle(page, 'Revoke it', 30000);
   await page.evaluate((ns) => {
@@ -212,18 +212,18 @@ async function lesson17(page) {
     return !Array.from(document.querySelectorAll('[data-grants-panel] tbody tr'))
       .some((tr) => tr.textContent.includes(ns));
   }, GRANT_NS, {timeout: 30000, polling: 300});
-  assert(await clickTourButton(page, 'Next'), 'lesson 24 revoked Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 25 revoked Next');
 
   await waitTourTitle(page, "That's authorization", 30000);
-  await finishTour(page, 'lesson 24');
-  console.log('  lesson 24: walked — granted a namespace, read it, revoked it');
+  await finishTour(page, 'lesson 25');
+  console.log('  lesson 25: walked — granted a namespace, read it, revoked it');
 }
 
 
 async function lesson20(page) {
-  await page.goto(BASE + '/?tutorial=26');
+  await page.goto(BASE + '/?tutorial=27');
   await waitTourTitle(page, 'Serving the graph to the public', 150000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 26 opening Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 27 opening Next');
 
   await waitTourTitle(page, 'Something to serve', 30000);
   await filterAndSelect(page, 'const', 'const');
@@ -255,11 +255,11 @@ async function lesson20(page) {
   }, APP_LABEL);
   assert(serves && serves.includes(PAGE_FN),
          'the app row names the fn it serves (got: ' + serves + ')');
-  assert(await clickTourButton(page, 'Next'), 'lesson 26 published Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 27 published Next');
 
   await waitTourTitle(page, "That's publishing", 30000);
-  await finishTour(page, 'lesson 26');
-  console.log('  lesson 26: walked — extended :const, bound a response, published an app');
+  await finishTour(page, 'lesson 27');
+  console.log('  lesson 27: walked — extended :const, bound a response, published an app');
 }
 
 
@@ -267,19 +267,19 @@ async function lesson20(page) {
 // navigation each one opens plus its Next chain. Asserting the surface opened
 // is what makes them more than a click-through.
 async function lesson21(page) {
-  await page.goto(BASE + '/?tutorial=29');
+  await page.goto(BASE + '/?tutorial=30');
   await waitTourTitle(page, 'Where your editor lives', 150000);
-  await nextTimes(page, 5, 'lesson 29');
+  await nextTimes(page, 5, 'lesson 30');
   await waitTourTitle(page, "That's the map", 30000);
-  await finishTour(page, 'lesson 29');
-  console.log('  lesson 29: walked (all-manual by design — a one-org account has no switcher)');
+  await finishTour(page, 'lesson 30');
+  console.log('  lesson 30: walked (all-manual by design — a one-org account has no switcher)');
 }
 
 
 async function lesson19(page) {
-  await page.goto(BASE + '/?tutorial=32');
+  await page.goto(BASE + '/?tutorial=33');
   await waitTourTitle(page, 'The account is you, the org is the workspace', 150000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 32 opening Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 33 opening Next');
   await waitTourTitle(page, 'Open Settings', 30000);
   await openAccountSettings(page);
   await waitTourTitle(page, 'How you sign in', 60000);
@@ -291,32 +291,32 @@ async function lesson19(page) {
   assert(surfaces.idents && surfaces.tfa && surfaces.tokens,
          'Settings shows identities, 2FA and tokens — the three the lesson points at'
          + ' (got: ' + JSON.stringify(surfaces) + ')');
-  await nextTimes(page, 4, 'lesson 32');
+  await nextTimes(page, 4, 'lesson 33');
   await waitTourTitle(page, 'Leaving', 30000);
-  await finishTour(page, 'lesson 32');
-  console.log('  lesson 32: walked — Settings, identities, 2FA, tokens');
+  await finishTour(page, 'lesson 33');
+  console.log('  lesson 33: walked — Settings, identities, 2FA, tokens');
 }
 
 
 async function lesson18(page) {
-  await page.goto(BASE + '/?tutorial=33');
+  await page.goto(BASE + '/?tutorial=34');
   await waitTourTitle(page, 'What a plan actually decides', 150000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 33 opening Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 34 opening Next');
   await waitTourTitle(page, 'Where usage shows', 30000);
   await openOperateSection(page, 'stats');
   await waitTourTitle(page, 'The fn ceiling', 60000);
   // Two more prose steps, then the last one's button is Finish, not Next.
-  await nextTimes(page, 2, 'lesson 33');
+  await nextTimes(page, 2, 'lesson 34');
   await waitTourTitle(page, 'Reading your own tier', 30000);
-  await finishTour(page, 'lesson 33');
-  console.log('  lesson 33: walked — usage panel, ceiling, tier');
+  await finishTour(page, 'lesson 34');
+  console.log('  lesson 34: walked — usage panel, ceiling, tier');
 }
 
 
 async function lesson31(page) {
-  await page.goto(BASE + '/?tutorial=25');
+  await page.goto(BASE + '/?tutorial=26');
   await waitTourTitle(page, 'One bundle, several people', 150000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 25 opening Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 26 opening Next');
 
   await waitTourTitle(page, 'Open Roles', 30000);
   await openOperateSection(page, 'roles');
@@ -348,7 +348,7 @@ async function lesson31(page) {
   }, ROLE_NAME);
   assert(row && /manage-users/.test(row),
          'the role row carries the capability that was ticked (got: ' + row + ')');
-  assert(await clickTourButton(page, 'Next'), 'lesson 25 created Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 26 created Next');
 
   await waitTourTitle(page, 'Give it a member', 30000);
   // Membership is a SET: submitting the field replaces the whole list. Put
@@ -367,12 +367,12 @@ async function lesson31(page) {
     document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
     .some((b) => b.textContent.trim() === 'Next'),
   null, {timeout: 30000, polling: 100});
-  assert(await clickTourAdvance(page, 'Next'), 'lesson 25 member Next');
+  assert(await clickTourAdvance(page, 'Next'), 'lesson 26 member Next');
 
   await waitTourTitle(page, 'What they can do now', 30000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 25 effect Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 26 effect Next');
   await waitTourTitle(page, 'What a role is NOT', 30000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 25 not-a-grant Next');
+  assert(await clickTourButton(page, 'Next'), 'lesson 26 not-a-grant Next');
 
   await waitTourTitle(page, 'Take it back', 30000);
   await page.evaluate((role) => {
@@ -384,8 +384,8 @@ async function lesson31(page) {
     const panel = document.querySelector('[data-roles-panel]');
     return panel && !panel.textContent.includes(role);
   }, ROLE_NAME, {timeout: 30000, polling: 300});
-  await finishTour(page, 'lesson 25');
-  console.log('  lesson 25: walked — created a role, set its members, deleted it');
+  await finishTour(page, 'lesson 26');
+  console.log('  lesson 26: walked — created a role, set its members, deleted it');
 }
 
 
@@ -424,7 +424,7 @@ async function cleanup(page) {
       const grants = await fetch('/partials/grants-admin').then((r) => r.text()).catch(() => '');
       const m = grants.match(new RegExp('hx-delete="(/api/entities/grant/[^"]+)"[^>]*>[^<]*</button>\\\\s*</td>\\\\s*</tr>'));
       if (grants.includes(ns) && m) await fetch(m[1], {method: 'DELETE'}).catch(() => {});
-      // The fn lesson 26 created, if its own cleanup did not run.
+      // The fn lesson 27 created, if its own cleanup did not run.
       const found = await fetch('/api/graph/entities?scope=search&q=' + fn)
         .then((r) => r.json()).catch(() => ({}));
       for (const f of (found.fns || [])) {

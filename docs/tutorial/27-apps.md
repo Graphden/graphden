@@ -1,4 +1,4 @@
-# Lesson 26 — Apps: publishing a fn as a public site
+# Lesson 27 — Apps: publishing a fn as a public site
 
 **Goal**: by the end of this lesson you can take a fn that
 produces a web response and put it live on the public internet at
@@ -134,7 +134,7 @@ at is untouched — you only removed the routing, not your code.
 - Deploying, re-pointing, and removing an app are all single
   actions with no build or restart.
 
-Next: [Lesson 29 — Working across
-organizations](29-working-across-orgs.md) covers the flip side of
+Next: [lesson 30 — Working across
+organizations](30-working-across-orgs.md) covers the flip side of
 the same domain model: where *your editor* lives when you belong
 to more than one org.

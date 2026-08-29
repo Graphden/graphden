@@ -1,4 +1,4 @@
-# Lesson 30 — Working offline: a local instance, git snapshots, push/pull
+# Lesson 31 — Working offline: a local instance, git snapshots, push/pull
 
 **Goal**: by the end of this lesson you can run a Graphden instance on
 your own machine, work in it with no network, keep git snapshots of your
@@ -62,7 +62,7 @@ bb graph-import ../my-graph --url http://localhost:9002 --token $AUTH_TOKEN \
 
 Imports always land on a NAMED branch — never main — so the way from a
 git snapshot into main is the merge flow you know from
-[lesson 19](19-branches.md).
+[lesson 20](20-branches.md).
 
 ## 3. Push your work to the hub
 
@@ -79,7 +79,7 @@ On the hub this creates (or re-snapshots) the branch `push/my-feature`:
 
 - you are stamped as its **owner** and it gets the `owner`
   **write-policy** — only you can update it
-  ([lesson 19](19-branches.md) § protected branches);
+  ([lesson 20](20-branches.md) § protected branches);
 - a re-push is a fresh snapshot — fns you deleted locally are pruned;
 - platform fns are never overwritten (they come back in the report as
   `skipped-owned`), and an fn you created locally is **adopted** onto
@@ -135,7 +135,7 @@ a team's self-hosted hub use its `AUTH_TOKEN`.
   bundle. Your local wiring stays local; the hub's stays on the hub.
 - **`branch-local?` fns** (ports, schedules, vault paths) import fine
   but never PROPAGATE through a merge into main — the same guarantee
-  in-instance branches give ([lesson 19](19-branches.md)).
+  in-instance branches give ([lesson 20](20-branches.md)).
 - **Secrets**: vault paths are stripped from exports by default; the
   bundle carries a manifest of which args need re-binding on the other
   side ([lesson 13](13-effects-and-secrets.md)).

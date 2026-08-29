@@ -9,7 +9,7 @@ from history, and cancel a running execution.
 
 ## Two modes — one-shot vs supervised
 
-Lesson 31 introduces SERVICES — fns graphden keeps running
+Lesson 32 introduces SERVICES — fns graphden keeps running
 forever. This lesson is about the OTHER mode: one-shot
 execution. You click `▶`, the fn runs, you see the result, the
 runtime moves on. No supervision, no restart.
@@ -351,13 +351,13 @@ What the trace never contains:
 ## What we glossed over
 
 - **Branch-aware execution** — the active branch picks which
-  version of the fn-graph runs. Lesson 19 (already written)
+  version of the fn-graph runs. Lesson 20 (already written)
   covers branches.
 - **Service-mode execution** — fns marked as services run
-  forever, supervised by graphden. Lesson 31.
+  forever, supervised by graphden. Lesson 32.
 - **HOF call shape** — how internal refs get their free args
   bound at compile time vs call time. Lesson 06.
 
 ## Next
 
-Lesson 31 — Services ([already written](31-services.md))
+Lesson 32 — Services ([already written](32-services.md))

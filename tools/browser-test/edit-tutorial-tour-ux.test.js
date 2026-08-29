@@ -112,22 +112,22 @@ const {
       null, {timeout: 30000, polling: 200});
     console.log('  lesson 17: walked (nothing created)');
 
-    // ---------- Lesson 18 — workspaces ----------
-    await page.goto(BASE + '/?tutorial=18');
+    // ---------- lesson 19 — workspaces ----------
+    await page.goto(BASE + '/?tutorial=19');
     await waitTourTitle(page, 'Your slice of a shared graph', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 18 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 19 Next');
     await waitTourTitle(page, 'Open the workspace chip');
     await page.waitForSelector('#gd-ws-chip', {timeout: 30000});
     await page.evaluate(() => document.getElementById('gd-ws-chip').click());
     await waitTourTitle(page, 'Pick a root', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 18 root Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 19 root Next');
     await waitTourTitle(page, 'And back');
-    assert(await clickTourButton(page, 'Next'), 'lesson 18 back Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 19 back Next');
     await waitTourTitle(page, "That's workspaces");
-    assert(await clickTourButton(page, 'Finish'), 'lesson 18 Finish');
+    assert(await clickTourButton(page, 'Finish'), 'lesson 19 Finish');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 30000, polling: 200});
-    console.log('  lesson 18: walked (nothing created)');
+    console.log('  lesson 19: walked (nothing created)');
 
     // ---------- Lesson 09 — in-graph state ----------
     await page.goto(BASE + '/?tutorial=09');

@@ -824,7 +824,7 @@
   ;; scripts on the EDITOR origin with the viewer's session in scope —
   ;; the same stored-XSS class the `:resource-override` "cloud writes
   ;; are system-only" rule and the apps-domain split exist to prevent
-  ;; (docs/tutorial/26-apps.md). The cloud path is a future
+  ;; (docs/tutorial/27-apps.md). The cloud path is a future
   ;; apps-domain preview owned by the tenancy addon.
   ;;
   ;; The component renders through the STANDARD execute pipeline

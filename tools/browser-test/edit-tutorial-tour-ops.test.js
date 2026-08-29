@@ -34,10 +34,10 @@ const {
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
-    // ---------- Lesson 19 — branches (fork, edit, come back) ----------
-    await page.goto(BASE + '/?tutorial=19');
+    // ---------- lesson 20 — branches (fork, edit, come back) ----------
+    await page.goto(BASE + '/?tutorial=20');
     await waitTourTitle(page, 'Branches are views, not copies', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 19 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 20 Next');
     await waitTourTitle(page, 'Find str-upper');
     await filterAndSelect(page, 'str-upper', 'str-upper');
     await waitTourTitle(page, 'Extend it', 150000);
@@ -60,7 +60,7 @@ const {
     });
     assert(mainValue.includes('main version'),
       'main still reads "main version" after the branch edit');
-    assert(await clickTourButton(page, 'Next'), 'lesson 19 back-on-main Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 20 back-on-main Next');
     await waitTourTitle(page, 'Open the diff', 150000);
     // Δ on the tutorial-branch row → diff modal with the fn's changed row.
     await waitClickable(page, '#branch-chip-btn');
@@ -90,12 +90,12 @@ const {
       .map((b) => b.name);
     assert(!names.includes('tutorial-branch'),
       'tour cleanup deleted the lesson branch');
-    console.log('  lesson 19: walked + cleaned (branch too, diff opened)');
+    console.log('  lesson 20: walked + cleaned (branch too, diff opened)');
 
-    // ---------- Lesson 20 — review: refusal → propose → approve → land ----------
-    await page.goto(BASE + '/?tutorial=20');
+    // ---------- lesson 21 — review: refusal → propose → approve → land ----------
+    await page.goto(BASE + '/?tutorial=21');
     await waitTourTitle(page, "Review is the target's policy", 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 20 Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 Next');
     await waitTourTitle(page, 'Something to change');
     await filterAndSelect(page, 'const', 'const');
     await extendViaRowActions(page, 'review-demo', 'const');
@@ -165,7 +165,7 @@ const {
       '.branch-row-approve[data-approve-branch="tutorial-feature"]').click());
     await page.waitForSelector('.branch-appr-count.ok', {timeout: 30000});
     await waitTourTitle(page, 'Ready to land — and why we stop', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 20 ready-to-land Next');
+    assert(await clickTourButton(page, 'Next'), 'lesson 21 ready-to-land Next');
     await waitTourTitle(page, 'Back to main', 150000);
     await switchBranchViaChip(page, 'main');
     await waitTourTitle(page, "That's review", 150000);
@@ -176,7 +176,7 @@ const {
     assert(!reviewNames.includes('tutorial-release')
            && !reviewNames.includes('tutorial-feature'),
       'tour cleanup deleted both review branches');
-    console.log('  lesson 20: walked + cleaned (refused → proposed → approved; branches cleaned)');
+    console.log('  lesson 21: walked + cleaned (refused → proposed → approved; branches cleaned)');
 
     // ---------- Lesson 13 — effects (chip, ack gate, run) ----------
     await page.goto(BASE + '/?tutorial=13');
@@ -384,7 +384,7 @@ const {
                           && c.textContent.trim() === 'Your organization')}
                  : null;
     });
-    assert(locked, 'lesson 23 is listed in the picker');
+    assert(locked, 'lesson 24 is listed in the picker');
     assert(locked.chapter, 'its chapter heading is rendered');
     assert(locked.disabled, 'it is disabled where the capability is missing');
     assert(/needs manage-users/.test(locked.text),
@@ -398,12 +398,12 @@ const {
       const row = Array.from(list.children).find((c) => /^29 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
     });
-    assert(orgLocked, 'lesson 29 is listed');
+    assert(orgLocked, 'lesson 30 is listed');
     assert(orgLocked.disabled, 'it is disabled without organizations');
     assert(/needs an organization/.test(orgLocked.text),
       'the row names the CONDITION, not a capability (got: ' + orgLocked.text + ')');
     // The mirror case: a condition that HOLDS here. This stack is
-    // single-tenant, so the Assets panel exists and lesson 21 must be
+    // single-tenant, so the Assets panel exists and lesson 22 must be
     // OFFERED, not locked — an inverted `assets` signal would hide the
     // lesson from the only sessions that can run it.
     const assetsLesson = await page.evaluate(() => {
@@ -411,9 +411,9 @@ const {
       const row = Array.from(list.children).find((c) => /^21 ·/.test(c.textContent.trim()));
       return row ? {text: row.textContent.trim(), disabled: row.disabled === true} : null;
     });
-    assert(assetsLesson, 'lesson 21 is listed');
+    assert(assetsLesson, 'lesson 22 is listed');
     assert(!assetsLesson.disabled,
-      'lesson 21 is offered on a single-tenant stack (got: ' + assetsLesson.text + ')');
+      'lesson 22 is offered on a single-tenant stack (got: ' + assetsLesson.text + ')');
     console.log('  picker: org lessons locked, the assets lesson offered');
 
     // ---------- The catalogue as a catalogue ----------
@@ -483,8 +483,8 @@ const {
     // Escape, so "dismissed the panel" must not read as "quit the lesson".
     // It regressed once already: the Packages panel closes through the shared
     // popover helper and was missing from the tour's list of dismissible
-    // surfaces, so closing it killed lesson 28 mid-walk.
-    await page.goto(BASE + '/?tutorial=28');
+    // surfaces, so closing it killed lesson 29 mid-walk.
+    await page.goto(BASE + '/?tutorial=29');
     await waitTourTitle(page, 'Sharing more than one fn', 150000);
     await page.waitForSelector('#gd-pkg-chip', {timeout: 30000});
     await page.evaluate(() => document.getElementById('gd-pkg-chip').click());

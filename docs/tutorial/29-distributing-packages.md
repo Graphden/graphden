@@ -1,4 +1,4 @@
-# Lesson 28 — Distributing packages: publish, install, update, fork
+# Lesson 29 — Distributing packages: publish, install, update, fork
 
 **Goal**: by the end of this lesson you can publish a namespace
 as an immutable package version, then browse the registry and
@@ -20,7 +20,7 @@ registry — an **external package pulled by git coord**
 
 ## Authoring vs distributing
 
-Lesson 27 was about **authoring** a package — the `fns.edn` /
+Lesson 28 was about **authoring** a package — the `fns.edn` /
 `impls.clj` / `package.edn` files on disk that load at startup.
 This lesson is about **distributing** one: taking a namespace
 that already lives in the graph and turning it into a versioned,
@@ -29,7 +29,7 @@ can pull in.
 
 Two different things share the word "package":
 
-| On disk (Lesson 27) | In the registry (this lesson) |
+| On disk (lesson 28) | In the registry (this lesson) |
 |---|---|
 | A directory loaded at boot | A `:package-version` row: an immutable snapshot of a namespace's fn-defs |
 | One copy, shared by the whole install | Named + semver-versioned; many versions coexist |
@@ -39,7 +39,7 @@ Two different things share the word "package":
 
 Publishing exports the fn-def subtree rooted at a namespace and
 stores it as a `:package-version`. Using the `mycorp.hello`
-package from Lesson 27:
+package from lesson 28:
 
 ```bash
 curl -X POST http://localhost:9002/api/packages/publish \
@@ -263,7 +263,7 @@ around within it. There's a second, complementary axis of distribution
 — an **external package that lives in its own git repository** and is
 pulled onto the classpath as a Clojure dependency. This is how a
 **Type-2** package (one that ships its own base-fn *impls*, not just
-fn-defs — Lesson 27) reaches a graphden it wasn't authored in.
+fn-defs — lesson 28) reaches a graphden it wasn't authored in.
 
 The moving parts, with the worked example `mathx` (a tiny package whose
 whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
@@ -271,7 +271,7 @@ whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
 1. **The package is its own repo.** `graphden/graphden-mathx` is a
    normal Clojure project — a `deps.edn` and a `packages/mathx/`
    resource tree (`package.edn` + `ops/fns.edn` + `ops/impls.clj`),
-   exactly the on-disk shape from Lesson 27, just outside the main tree.
+   exactly the on-disk shape from lesson 28, just outside the main tree.
 
 2. **The consuming graphden lists it by git coord** — in `deps.edn`
    (so it's on the classpath) and in `resources/executor-packages.edn`,

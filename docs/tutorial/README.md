@@ -65,31 +65,32 @@ of order.
 | # | Lesson | Status |
 |---|---|---|
 | 17 | [Finding your way: the lens and the Inspector](17-explorer-and-inspector.md) | ✅ written · ▶ interactive |
-| 18 | [Workspaces — scope the editor to your projects](18-workspaces.md) | ✅ written · ▶ interactive |
-| 19 | [Branches — fork, edit, diff, merge](19-branches.md) | ✅ written · ▶ interactive |
-| 20 | [Review — propose, approve, protected merge](20-review.md) | ✅ written · ▶ interactive |
-| 21 | [Editing the editor: asset overrides](21-asset-overrides.md) | ✅ written · ▶ interactive |
-| 22 | [Version history: what changed, and going back](22-version-history.md) | ✅ written · ▶ interactive |
+| 18 | [Working without the mouse — keyboard & accessibility](18-keyboard-and-accessibility.md) | ✅ written |
+| 19 | [Workspaces — scope the editor to your projects](19-workspaces.md) | ✅ written · ▶ interactive |
+| 20 | [Branches — fork, edit, diff, merge](20-branches.md) | ✅ written · ▶ interactive |
+| 21 | [Review — propose, approve, protected merge](21-review.md) | ✅ written · ▶ interactive |
+| 22 | [Editing the editor: asset overrides](22-asset-overrides.md) | ✅ written · ▶ interactive |
+| 23 | [Version history: what changed, and going back](23-version-history.md) | ✅ written · ▶ interactive |
 
 ### Your organization
 
 | # | Lesson | Status |
 |---|---|---|
-| 23 | [Members — managing who is in your org](23-users-admin.md) | ✅ written · ▶ interactive |
-| 24 | [Grants — who may touch what](24-grants.md) | ✅ written · ▶ interactive |
-| 25 | [Roles — capabilities as a bundle](25-roles.md) | ✅ written · ▶ interactive |
-| 26 | [Apps — publishing a fn as a public site](26-apps.md) | ✅ written · ▶ interactive |
-| 27 | [Packages — namespaces, fns.edn, impls.clj, deps](27-packages.md) | ✅ written |
-| 28 | [Distributing packages — publish, install, update, fork](28-distributing-packages.md) | ✅ written · ▶ interactive |
-| 29 | [Working across organizations](29-working-across-orgs.md) | ✅ written · ▶ interactive |
-| 30 | [Working offline: a local instance, git snapshots, push/pull](30-offline-and-push.md) | ✅ written |
-| 31 | [Services — long-running fns supervised by graphden](31-services.md) | ✅ written · ▶ interactive |
-| 32 | [Signing up & signing in: your account](32-signing-up-and-in.md) | ✅ written · ▶ interactive |
-| 33 | [Plans & tiers — what the cloud grants each account](33-plans-and-tiers.md) | ✅ written · ▶ interactive |
+| 24 | [Members — managing who is in your org](24-users-admin.md) | ✅ written · ▶ interactive |
+| 25 | [Grants — who may touch what](25-grants.md) | ✅ written · ▶ interactive |
+| 26 | [Roles — capabilities as a bundle](26-roles.md) | ✅ written · ▶ interactive |
+| 27 | [Apps — publishing a fn as a public site](27-apps.md) | ✅ written · ▶ interactive |
+| 28 | [Packages — namespaces, fns.edn, impls.clj, deps](28-packages.md) | ✅ written |
+| 29 | [Distributing packages — publish, install, update, fork](29-distributing-packages.md) | ✅ written · ▶ interactive |
+| 30 | [Working across organizations](30-working-across-orgs.md) | ✅ written · ▶ interactive |
+| 31 | [Working offline: a local instance, git snapshots, push/pull](31-offline-and-push.md) | ✅ written |
+| 32 | [Services — long-running fns supervised by graphden](32-services.md) | ✅ written · ▶ interactive |
+| 33 | [Signing up & signing in: your account](33-signing-up-and-in.md) | ✅ written · ▶ interactive |
+| 34 | [Plans & tiers — what the cloud grants each account](34-plans-and-tiers.md) | ✅ written · ▶ interactive |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for
-lesson 01), or pick “Interactive tutorial” in the account-chip menu —
+Lesson 01), or pick “Interactive tutorial” in the account-chip menu —
 in an organization workspace the lesson runs on its own `tutorial-NN-*`
 branch, and ending it offers branch deletion = full rollback. The tour's
 step scripts live in the graph (`app.tour/_tour-lessons`) and are
@@ -115,7 +116,7 @@ tenancy addon — the picker still lists the lesson, disabled, with the
 reason on the row.
 
 
-Lesson 21 is written **self-host-only** and its tour declares that
+Lesson 22 is written **self-host-only** and its tour declares that
 (`:requires "assets"`): the Assets panel is hidden under the cloud
 tenancy addon and its writes are platform-only, because an editable
 shared frontend would be a stored-XSS surface across tenants. On a
@@ -128,7 +129,7 @@ it's described, it stays ⏳ planned until the gap closes.
 ## End-to-end worked example
 
 Once you've worked through the Basics and Composing chapters
-(lessons 01–11) plus Services (lesson 31),
+(lessons 01–11) plus Services (lesson 32),
 [**Building an API-poller**](../TUTORIAL_API_POLL.md) puts it all
 together: a scheduled service that calls an external HTTP API with a
 vault-backed bearer token and writes each result into your own Postgres

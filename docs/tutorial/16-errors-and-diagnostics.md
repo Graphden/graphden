@@ -98,7 +98,7 @@ Two more observability panels you have met:
 - **Debug** — the «catch next request» trap and the last captured
   trace (lesson 15), the bar's last tab.
 - **Monitoring** — usage rollups: runs, failures and average duration
-  per fn (lesson 33 reads the same numbers for the plan's ceilings);
+  per fn (lesson 34 reads the same numbers for the plan's ceilings);
   it is an org-level report, so it lives on the account menu's
   **Organization** surface.
 
@@ -136,5 +136,5 @@ answers *why*. In that order, most of the time.
   other, so it lands in Errors too, with its assertion message.
 - **Debugging** (lesson 15) — from a failed row, the next question is
   usually "which node threw?", which is what the trace tree answers.
-- **Plans** (lesson 33) — the same audit rows feed the usage counters;
+- **Plans** (lesson 34) — the same audit rows feed the usage counters;
   a plan's retention is what decides how far back Errors can look.

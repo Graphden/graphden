@@ -714,7 +714,7 @@ async function _tourEnd() {
       primary: [_tourCopy('branch-confirm', 'Delete branch & return'), async () => {
         let ok = true;
         try {
-          // Children first — a fork the lesson itself made (lesson 19) would
+          // Children first — a fork the lesson itself made (lesson 20) would
           // otherwise block its parent's delete.
           await _tourDeleteCreatedBranches(created);
           // Namespaces are IDENTITY rows with no branch scope — deleting
@@ -838,7 +838,7 @@ function _tourTeardown() {
 // default action, so the call means exactly that and nothing else). The old
 // rule was a LIST of dismissible selectors, and a list of other people's
 // surfaces goes stale: the Packages panel shipped through the shared popover
-// helper, was never added, and closing it killed the tour mid-lesson 28.
+// helper, was never added, and closing it killed the tour mid-lesson 29.
 //
 // The list survives as a belt for surfaces that close WITHOUT a keydown
 // handler of their own (a menu that closes on blur, an inline input).
@@ -968,7 +968,7 @@ async function startTutorialIsolated(lessonId) {
   const canBranch = window.API && API.api_branches
     && typeof switchToBranch === 'function';
   const onMain = canBranch && !_tourCurrentBranch();
-  // A lesson that MANAGES branches itself (lesson 19) opts out of the
+  // A lesson that MANAGES branches itself (lesson 20) opts out of the
   // scratch-branch isolation — double-wrapping broke its own "main
   // never saw it" beat and leaked the scratch branch.
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);

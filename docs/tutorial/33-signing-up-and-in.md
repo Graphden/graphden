@@ -1,12 +1,12 @@
-# Lesson 32 — Signing up & signing in: your account
+# Lesson 33 — Signing up & signing in: your account
 
 **Goal**: by the end of this lesson you can create an account on a
 graphden cloud, sign back into it (by password or a social
 provider), verify your email, protect the account with two-factor
 authentication — and you'll understand how the same login surface
 behaves on a self-hosted instance. This is the on-ramp to the
-operator lessons that follow ([16 Members](23-users-admin.md),
-[17 Grants](24-grants.md), [18 Plans](33-plans-and-tiers.md)).
+operator lessons that follow ([16 Members](24-users-admin.md),
+[17 Grants](25-grants.md), [18 Plans](34-plans-and-tiers.md)).
 
 **Concepts introduced**: the `/login` page, accounts and sign-in
 *identities* (one account, many ways in), email verification,
@@ -81,7 +81,7 @@ redirects here). It holds:
 - **Two-factor authentication** — enable TOTP: add the secret to
   any authenticator app, confirm with a 6-digit code, and from
   then on password sign-ins ask for the code. (An org can also
-  *require* 2FA — [Lesson 24](24-grants.md) shows the
+  *require* 2FA — [lesson 25](25-grants.md) shows the
   `require-2fa` capability.)
 - **API tokens** — long-lived scoped keys for MCP/API clients
   (the section appears on cloud/tenancy deployments).
@@ -126,4 +126,4 @@ On a cloud instance:
 
 That's the whole account lifecycle. Managing *other* people in
 your org — adding members by email, granting them narrower
-capabilities — is [Lesson 23](23-users-admin.md) onward.
+capabilities — is [lesson 24](24-users-admin.md) onward.

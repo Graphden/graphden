@@ -96,7 +96,7 @@ function openFnPicker(opts) {
   // a callable slot classified compatible on open, then fell into
   // "Other" with a false ":text is not a subtype of [:fn …]" as soon
   // as the reader typed its name (tutorial finding 2026-08-26,
-  // lesson 31).
+  // lesson 32).
   const serverCompat = new Set();
 
   // Map a fn row to a picker candidate. Compatibility check: clientSubtype

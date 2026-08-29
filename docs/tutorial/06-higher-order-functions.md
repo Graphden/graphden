@@ -107,7 +107,7 @@ subtype (zero args match the slot's `{}`, `:text` ⊆ `:any`),
 so the bind passes.
 
 This is the structural reason the from-scratch service-eligible
-probe recipe in [lesson 31](31-services.md) works — bind a
+probe recipe in [lesson 32](32-services.md) works — bind a
 const-thunk to `:future.body`, the type-check accepts, the
 runtime `hof-wrap`s the ref as the daemon's callable. Without
 covariant return you'd need to box the thunk in a `:identity`-

@@ -1,4 +1,4 @@
-# Lesson 33 — Plans & tiers: what the cloud grants each account
+# Lesson 34 — Plans & tiers: what the cloud grants each account
 
 **Goal**: by the end of this lesson you can tell which tier an org
 is on, predict what its graphs may and may not do, read the quota
@@ -14,7 +14,7 @@ orgs.
 
 On the cloud, every org carries a `:plan` slug. A plan resolves to
 two things: the side **effects** its submitted graphs may use (from
-lesson 13) and its **quota** ceilings (fns, list items, outbound
+Lesson 13) and its **quota** ceilings (fns, list items, outbound
 calls/min). That's the whole tier system — a tier is just a named
 bundle of "what effects" + "how much". The single source of truth is
 `graphden.tenancy.plan`; the human-readable table lives in
@@ -27,7 +27,7 @@ bundle of "what effects" + "how much". The single source of truth is
 | `anonymous` | ✗ | ✗ | 200 | 0 | locked demo, ephemeral, the fail-safe default |
 | `free` (registered) | ✓ metered | ✓ | 500 | 120 | a signed-up account |
 | `network` (paid) | ✓ | ✓ | 5,000 | 6,000 | higher ceilings |
-| `dedicated` (paid) | ✓ | ✓ | 5,000 | ∞ | its own pod + always-on services (lesson 31) |
+| `dedicated` (paid) | ✓ | ✓ | 5,000 | ∞ | its own pod + always-on services (lesson 32) |
 | `suspended` | ✗ | ✗ | 0 | 0 | operator freeze — no effects, no writes |
 
 The key line is `anonymous` → `free`. **Anonymous** is what a landing
@@ -36,7 +36,7 @@ reaped after a TTL — you can *try graphs* with nothing to lose. It is
 also the **fail-safe default**: an org with no slug resolves here, so
 a mis-provisioned account is locked, never accidentally opened.
 
-**Free (registered)** is what *signing up* gives you (lesson 23),
+**Free (registered)** is what *signing up* gives you (lesson 24),
 and it is genuinely useful: base effects PLUS metered `:network`. In
 practice that means you can build a personal Telegram bot, keep a few
 hundred records, and connect to **your own external database** — the
@@ -60,7 +60,7 @@ was registered, that's the fail-safe default telling you the org's
 
 ## Changing a tier (operator)
 
-`:org` is a tenant-forbidden entity (lesson 23), so tiers are an
+`:org` is a tenant-forbidden entity (lesson 24), so tiers are an
 **operator** activity. One platform-only route sets any org's plan:
 
 ```
@@ -90,7 +90,7 @@ branches, review — everything you've learned), while a **bring-your-own
 executor** on the customer's hardware runs the org's app. The flip is
 per-ORG and operator-side; the customer's half is one container with a
 minted API token. If you want one app self-run and the rest hosted,
-that app gets its own org (you can belong to several — lesson 29) and
+that app gets its own org (you can belong to several — lesson 30) and
 only that org flips. As the org's owner you can watch it from
 **Organization → Executor**: the current mode, whether your executor is
 connected to the hub right now, and a ready-to-run snippet with your org
@@ -110,7 +110,7 @@ demo](../PLANS.md).
 
 (Operator account on a tenancy-addon instance.)
 
-1. Sign up a new account (lesson 23) — its org lands on `free`.
+1. Sign up a new account (lesson 24) — its org lands on `free`.
    Confirm the quota display reads `free`.
 2. `POST /api/orgs/plan name=<that-org> plan=suspended`. As that
    account, try to run any fn — the effect gate now refuses even

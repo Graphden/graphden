@@ -285,9 +285,21 @@ function installCanvasKeys() {
   });
 
   // Keep the tab stop alive across re-renders.
-  const layer = document.getElementById('graph-layer') || surface;
-  new MutationObserver(() => refreshCanvasTabStop())
-    .observe(layer, {childList: true, subtree: false});
+  //
+  // Observe the SURFACE with subtree, not `#graph-layer` directly: the layer
+  // is created on the first render, i.e. after this module installs, so a
+  // reference taken here would be null and the overlays (its children) would
+  // never be seen. Coalesced to one pass per frame — a render mutates the
+  // layer many times and re-stamping tabindex on each is pointless work.
+  let pending = false;
+  new MutationObserver(() => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      refreshCanvasTabStop();
+    });
+  }).observe(surface, {childList: true, subtree: true});
 
   if (typeof registerShortcut === 'function') {
     registerShortcut({

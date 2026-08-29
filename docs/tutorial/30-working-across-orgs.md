@@ -1,9 +1,9 @@
-# Lesson 29 — Working across organizations
+# Lesson 30 — Working across organizations
 
 **Goal**: by the end of this lesson you'll know where *your
 editor* lives on a graphden cloud, how to belong to more than one
 organization, and how to move between them. It's the companion to
-[Lesson 26 (Apps)](26-apps.md): apps live on `graphden.app`, and
+[lesson 27 (Apps)](27-apps.md): apps live on `graphden.app`, and
 this lesson is about the *other* domain — where you sign in and
 edit.
 
@@ -11,8 +11,8 @@ edit.
 (`<org>.graphden.dev`), **per-origin sessions**, the **org
 switcher**, and how the apex landing routes a first-time sign-in.
 
-This follows on from [Lesson 32 (Signing up & signing
-in)](32-signing-up-and-in.md) — you have an account and an org.
+This follows on from [lesson 33 (Signing up & signing
+in)](33-signing-up-and-in.md) — you have an account and an org.
 
 ## Your org has its own editor address
 
@@ -24,7 +24,7 @@ https://<org>.graphden.dev
 ```
 
 So the `acme` org edits at `acme.graphden.dev`. That's the URL you
-sign in at and work from. It's the mirror image of Lesson 26: the
+sign in at and work from. It's the mirror image of lesson 27: the
 `graphden.dev` zone is for **editors** (one subdomain per org),
 `graphden.app` is for **apps** — kept apart so your public app code
 never shares an origin with your editor session.
@@ -38,7 +38,7 @@ If you don't yet know your org's subdomain — a brand-new visitor —
 start at the apex, `graphden.dev` (the landing), and use its
 **Sign in**. Once you authenticate, graphden knows which org(s)
 you belong to and sends you to your `<org>.graphden.dev`. Signing
-up for a new org ([Lesson 32](32-signing-up-and-in.md)) lands you
+up for a new org ([lesson 33](33-signing-up-and-in.md)) lands you
 in that org's editor the same way.
 
 ## Per-origin sessions
@@ -68,9 +68,9 @@ A single-org member sees no chip — there's nothing to switch
 between.
 
 > How do you *become* a member of a second org? Not by signing up
-> again (signup only ever makes a *new* org — Lesson 32). Someone
+> again (signup only ever makes a *new* org — lesson 33). Someone
 > in the other org grants your account a capability in it
-> ([Lesson 24 — Grants](24-grants.md)); membership is exactly
+> ([lesson 25 — Grants](25-grants.md)); membership is exactly
 > "holds a grant in that org," so the moment you're granted
 > something there, it appears in your switcher.
 
@@ -80,7 +80,7 @@ between.
 |---|---|
 | `graphden.dev` | the landing + first-time sign-in |
 | `<org>.graphden.dev` | that org's editor + login |
-| `<label>.graphden.app` | one of the org's apps ([Lesson 26](26-apps.md)) |
+| `<label>.graphden.app` | one of the org's apps ([lesson 27](27-apps.md)) |
 | your own domain | a custom domain pointed at an app |
 
 Two `graphden`-owned domains, each a single flat level — editors on
@@ -100,5 +100,5 @@ app never needs any DNS change on graphden's side.
 - Editors on `graphden.dev`, apps on `graphden.app` — kept apart on
   purpose.
 
-This closes the domain model: [Lesson 26](26-apps.md) put your fns
+This closes the domain model: [lesson 27](27-apps.md) put your fns
 on the web as apps; this lesson placed *you* — the editor — on it.

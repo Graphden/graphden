@@ -145,7 +145,7 @@ isn't pure. `:deref` (a read) and `:cell`/`:atom` (allocation) don't.
 ## The one scope limit
 
 A `:cell` lives in **one executor process**. Run several pods behind
-a load balancer (lesson 31's cardinality, [SCALING.md](../SCALING.md))
+a load balancer (lesson 32's cardinality, [SCALING.md](../SCALING.md))
 and each has *its own* cell — a write on pod A is invisible to pod B.
 That's fine for a cache of identical, recomputable data (the worst
 case is a recompute on the other pod), but it is **not** shared
@@ -171,7 +171,7 @@ falls back to `:atom` behaviour — fresh each call.
 
 ## Next
 
-[Lesson 23 — Members: managing who is in your org](23-users-admin.md)
+[lesson 24 — Members: managing who is in your org](24-users-admin.md)
 
 > Prefer to be shown? This lesson exists as a guided in-editor tour:
 > [open the demo with the tour running](https://app.graphden.dev/?demo=1&tutorial=09)

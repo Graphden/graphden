@@ -2614,7 +2614,7 @@
 
   ;; ---------------------------------------------------------------------
   ;; Hub sync — /api/sync/*: the editor half of the CLI push/pull flow
-  ;; (VERSIONING.md § Push branches; tutorial lesson 30). The hub
+  ;; (VERSIONING.md § Push branches; tutorial lesson 31). The hub
   ;; coordinates are SERVER config (GRAPHDEN_HUB_URL + GRAPHDEN_HUB_TOKEN),
   ;; never caller-supplied — a caller-chosen hub would receive this
   ;; instance's hub bearer. Unconfigured ⇒ status {:configured false} and

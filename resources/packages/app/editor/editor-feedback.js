@@ -25,7 +25,7 @@
 // Baked twin of the server-side default in app/feedback/fns.edn
 // (:_fb-config-url) — used only when the local config probe is
 // unreachable, i.e. the dead-backend case the form exists for.
-const FEEDBACK_DEFAULT_URL = 'https://graphden.dev/api/feedback';
+const FEEDBACK_DEFAULT_URL = 'https://app.graphden.dev/api/feedback';
 const FEEDBACK_GITHUB_ISSUES = 'https://github.com/Graphden/graphden/issues';
 
 // ============================================================================

@@ -46,7 +46,7 @@
    :parent :cond
    :args {:clauses [{:parent :blank?
                      :args {:string {:parent :to-str :args {:value :_fb-url-env}}}}
-                    {:value "https://graphden.dev/api/feedback"}
+                    {:value "https://app.graphden.dev/api/feedback"}
                     {:parent :eq :args {:values [:_fb-url-env {:value "off"}]}}
                     {:value ""}
                     {:value true}

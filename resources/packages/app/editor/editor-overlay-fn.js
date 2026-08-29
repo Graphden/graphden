@@ -254,6 +254,12 @@ function createFnOverlay(node, container) {
   overlay.dataset.originalFnId = originalFnId;
   overlay.dataset.nodeId = nodeId;
   overlay.style.cursor = 'default';
+  // The card's accessible name. Without it the group announces as unnamed and
+  // the canvas reads as a pile of anonymous containers.
+  const cardName = ownFn?.name
+    ? (typeof getQualifiedFnName === 'function' ? getQualifiedFnName(ownFn) : ownFn.name)
+    : 'anonymous function';
+  overlay.setAttribute('aria-label', cardName);
 
   // Click the card BODY (not a button / inline editor) to inspect THIS node's
   // fn in the right panel — the standard "select a node → see its details"

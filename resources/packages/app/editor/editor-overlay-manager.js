@@ -92,6 +92,12 @@ function createOverlay(nodeId, options = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'node-overlay';
   overlay.dataset.nodeId = nodeId;
+  // Focusable, but not in the tab order: editor-canvas-keys.js runs a roving
+  // tabindex over the canvas, so Tab enters the graph once and the arrow keys
+  // move between nodes from there. A card is a group of controls, not a
+  // control, hence role=group rather than button.
+  overlay.setAttribute('tabindex', '-1');
+  overlay.setAttribute('role', 'group');
   _overlaysByNodeId.set(nodeId, overlay);
   Object.assign(overlay.style, {
     position: 'absolute',

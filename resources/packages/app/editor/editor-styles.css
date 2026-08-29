@@ -7067,6 +7067,19 @@ body.gd-no-write .branch-comment-form { display: none; }
 .gd-cheatsheet-group dd { margin: 0; color: var(--fg); }
 
 /* =========================================================================
+ * GRAPH CANVAS — keyboard focus (editor-canvas-keys.js)
+ *
+ * The canvas is a roving-tabindex widget like the tree: one card is
+ * tabbable, arrows walk the edges. The ring has to read against both the
+ * card's own border and the dotted canvas behind it, so it sits OUTSIDE the
+ * card rather than inset.
+ * ========================================================================= */
+.node-overlay:focus-visible {
+  outline: 2px solid var(--gd-flow);
+  outline-offset: 2px;
+}
+
+/* =========================================================================
  * REDUCED MOTION (WCAG 2.3.3 Animation from Interactions)
  *
  * Must stay the LAST block in the file: it overrides earlier rules at

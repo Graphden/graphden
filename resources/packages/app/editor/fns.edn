@@ -128,6 +128,9 @@
                   "packages/app/editor/editor-overlay-fn.js"
                   "packages/app/editor/editor-overlay-strips.js"
                   "packages/app/editor/editor-overlay-manager.js"
+                  ;; Keyboard navigation over the node overlays —
+                  ;; delegated, so it survives every re-render.
+                  "packages/app/editor/editor-canvas-keys.js"
                   "packages/app/editor/editor-secrets.js"
                   "packages/app/editor/editor-grants-admin.js"
                   "packages/app/editor/editor-users-admin.js"

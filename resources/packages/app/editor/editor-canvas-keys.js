@@ -216,8 +216,13 @@ function onCanvasKeydown(e) {
   if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
   const nodeId = nodeIdOf(e.target);
   if (!nodeId) return;
-  // Let controls inside the card keep their own keys.
-  if (e.target.closest('button, a[href], input, select, textarea, [contenteditable="true"]')) return;
+  // Only when the CARD ITSELF has focus, not something inside it. A card
+  // hosts the ⋯ trigger, its description tooltip and the row-action popover,
+  // and those own Escape and Enter for their own purposes — claiming the key
+  // from anywhere in the subtree stole Escape from whatever was open inside.
+  // (The landing gate caught this: the tour-history e2e closes a pinned
+  // description tooltip with Escape and then could not reopen it.)
+  if (!e.target.classList || !e.target.classList.contains('node-overlay')) return;
 
   switch (e.key) {
     case 'ArrowRight': case 'l':

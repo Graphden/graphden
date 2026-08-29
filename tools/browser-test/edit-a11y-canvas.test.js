@@ -173,6 +173,36 @@ const PROBE_FN = 'web-server';
     assert(inspector.hasTitle && inspector.activeCard,
            'Enter opens the focused card in the inspector (fn ' + opened + ')');
 
+    // ===================================================================
+    // Phase F — the canvas keys do NOT reach inside a card.
+    // ===================================================================
+    // A card hosts the ⋯ trigger, its description tooltip and the row-action
+    // popover. Those own Escape and Enter for their own purposes, so the
+    // canvas must only claim a key when the CARD ITSELF has focus. The first
+    // implementation claimed it anywhere in the subtree and marked it
+    // consumed, which stole Escape from a popover open inside the card —
+    // the landing gate found it via the tour-history suite, several tests
+    // away from anything about the canvas.
+    const notStolen = await page.evaluate(() => {
+      const card = document.querySelector('.node-overlay');
+      const inner = card.querySelector('button, [tabindex], span');
+      if (!inner) return {skip: true};
+      // Pretend a control inside the card has focus and fire Escape at it.
+      let seenByOthers = false;
+      const probe = (e) => { if (e.key === 'Escape') seenByOthers = !e.defaultPrevented; };
+      document.addEventListener('keydown', probe);
+      inner.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true}));
+      document.removeEventListener('keydown', probe);
+      return {skip: false, seenByOthers};
+    });
+    if (notStolen.skip) {
+      console.log('  – key-scope probe skipped: no inner element');
+    } else {
+      assert(notStolen.seenByOthers,
+             'Escape aimed at a control INSIDE a card still reaches the handlers '
+             + 'that own it — the canvas must not consume it');
+    }
+
     assert(pageErrors.length === 0, 'no page errors: ' + JSON.stringify(pageErrors));
     console.log('a11y-canvas — PASS');
   } finally {

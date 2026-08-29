@@ -98,6 +98,9 @@
     :request-capabilities
     :render-hiccup :render-value-repr :repeat :reset :resolve-branch-ref :resolve-fn
     :resolve-fn-version-id :resolve-form :resolve-package-version
+    ;; :resolve-remote-version returns a server-picked version string off
+    ;; the remote list — no caller content flows into the return.
+    :resolve-remote-version
     :resolve-type-fn-id :response-immutable? :rest :reverse
     :rewrite-refs-to-version
     :rich-type-of-name :ring-create-default-handler :ring-handler
@@ -122,7 +125,7 @@
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
     :platform-owned-def-names
     :thread-count
-    :throw :throwable-class-name :throwable-message :to-json-string
+    :throw :throwable-class-name :throwable-message :to-json-pretty :to-json-string
     :to-set :to-str :total-memory :transduce :try :try-apply-create
     ;; :try-apply-seq-move returns only row ids + positions (never the
     ;; item's content) — no taint to propagate, like seq-update.
@@ -159,7 +162,7 @@
     :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
     :str-upper :sub :subs :tabulate-records :take :throw :throwable-class-name :throwable-message
-    :to-json-string :to-str :transduce :try :update-in :update-keys :update-vals
+    :to-json-pretty :to-json-string :to-str :transduce :try :update-in :update-keys :update-vals
     :url-decode :vals :vec :zero? :zipmap})
 
 

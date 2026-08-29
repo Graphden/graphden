@@ -126,8 +126,9 @@
 
 (defn org-summary
   "One-row rollup for `org` over the trailing `days` (default 7): total runs,
-   failed, and the run-weighted average duration (ms). Counts + durations
-   only — privacy-safe. Zeros when no rows / no pool."
+   failed, and the summed duration (ms). The run-weighted `:avg-ms` is graph
+   composition (`:_pstats-summary-avg`) — this returns raw sums only.
+   Counts + durations only — privacy-safe. Zeros when no rows / no pool."
   [pool org days]
   (let [r (when pool
             (jdbc/execute-one!
@@ -144,7 +145,7 @@
         dur (long (or (:duration_ms_sum r) 0))]
     {:runs runs
      :failed (long (or (:failed r) 0))
-     :avg-ms (if (pos? runs) (quot dur runs) 0)}))
+     :duration-ms-sum dur}))
 
 
 (defn- with-runs-pct
@@ -161,7 +162,7 @@
 
 (defn org-daily
   "Per-DAY series for `org` over the trailing `days` (default 7), oldest
-   first: `[{:day \"YYYY-MM-DD\" :runs :failed :avg-ms :runs-pct} …]`. Days
+   first: `[{:day \"YYYY-MM-DD\" :runs :failed :duration-ms-sum :runs-pct} …]`. Days
    with no runs are omitted (the panel renders the gap). Counts + durations
    only; `:runs-pct` is the share of the window's busiest day (CSS bars)."
   [pool org days]
@@ -173,7 +174,7 @@
                 {:day (some-> (:day r) str)
                  :runs runs
                  :failed (long (or (:failed r) 0))
-                 :avg-ms (if (pos? runs) (quot dur runs) 0)}))
+                 :duration-ms-sum dur}))
             (jdbc/execute!
               pool
               [(str "SELECT to_char(date_trunc('day', bucket_start), 'YYYY-MM-DD') AS day,"
@@ -189,8 +190,9 @@
 
 
 (defn org-fn-stats-named
-  "Like `org-stats` but joins the fn's display name and shapes `:avg-ms`, for
-   the editor's top-fns table: `[{:fn-id :fn-name :runs :failed :avg-ms} …]`,
+  "Like `org-stats` but joins the fn's display name, for the editor's
+   top-fns table: `[{:fn-id :fn-name :runs :failed :duration-ms-sum :runs-pct} …]`
+   (`:avg-ms` is graph composition),
    busiest first, capped at `limit`. A since-deleted fn falls back to its id."
   [pool org days limit]
   (when pool
@@ -202,7 +204,7 @@
                  :fn-name (or (:fn_name r) (some-> (:fn_id r) str))
                  :runs runs
                  :failed (long (or (:failed r) 0))
-                 :avg-ms (if (pos? runs) (quot dur runs) 0)}))
+                 :duration-ms-sum dur}))
             (jdbc/execute!
               pool
               [(str "SELECT s.fn_id,"
@@ -220,8 +222,9 @@
 
 
 (defn org-all-stats
-  "Per-ORG rollup over the trailing `days` — `[{:org :runs :failed :avg-ms
-   :runs-pct} …]`, busiest first, capped at `limit`. The OPERATOR's
+  "Per-ORG rollup over the trailing `days` — `[{:org :runs :failed
+   :duration-ms-sum :runs-pct} …]` (`:avg-ms` is graph composition), busiest
+   first, capped at `limit`. The OPERATOR's
    cross-org view (counts + durations only; no private data). Callers are
    responsible for restricting it to the platform context — see the
    `:usage-all-org-stats` base-fn."
@@ -234,7 +237,7 @@
                 {:org (:org_id r)
                  :runs runs
                  :failed (long (or (:failed r) 0))
-                 :avg-ms (if (pos? runs) (quot dur runs) 0)}))
+                 :duration-ms-sum dur}))
             (jdbc/execute!
               pool
               [(str "SELECT org_id,"

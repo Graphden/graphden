@@ -36,6 +36,14 @@
   (json/generate-string data))
 
 
+(defbase to-json-pretty [data]
+  ;; Sibling of :to-json-string rather than an optional :pretty slot on
+  ;; it: retrofitting a slot onto a 47-consumer base-fn changes every
+  ;; callable consumer's free-arg surface (hof-lambda-params ambiguity)
+  ;; — locality of changes wins over multi-arity here.
+  (json/generate-string data {:pretty true}))
+
+
 (defbase parse-json
   "Parse a JSON string into a data structure. Malformed input surfaces
    as a typed `:validation-error/malformed-json` (→ 400) rather than a
@@ -324,6 +332,7 @@
 ;; oracles), so the propagator is mandatory here.
 (def impls
   {:to-json-string {:impl to-json-string :taint-propagate? true}
+   :to-json-pretty {:impl to-json-pretty :taint-propagate? true}
    :parse-json {:impl parse-json :taint-propagate? true}
    :parse-edn {:impl parse-edn :taint-propagate? true}
    :system-property system-property-fn

@@ -636,19 +636,14 @@
 
 
 (defbase list-branch-comments
-  "Comments on proposal branch `source-branch-id`, oldest first —
-   `[{:id :author-id :body :created-at} …]` (ids/timestamps stringified
-   for the JSON wire)."
+  "RAW `:branch-comment` rows for proposal branch `source-branch-id` —
+   one query, unsorted and unshaped. Ordering and the wire reshape
+   (key subset + id/timestamp stringification) are graph composition
+   (`:_branch-comments-shaped` in fns.edn)."
   [source-branch-id]
   (cr/record-effect! :db)
-  (->> (sp/query-entities (branches/base-storage ctx) :branch-comment
-                          {:source-branch-id source-branch-id})
-       (sort-by :created-at)
-       (mapv (fn [c]
-               {:id (str (:id c))
-                :author-id (:author-id c)
-                :body (:body c)
-                :created-at (str (:created-at c))}))))
+  (sp/query-entities (branches/base-storage ctx) :branch-comment
+                     {:source-branch-id source-branch-id}))
 
 
 (defbase delete-branch-comment!

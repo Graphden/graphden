@@ -332,8 +332,19 @@
    :parent :get :args {:coll :_pstats-summary :key {:value :runs} :default {:value 0}}}
   {:name :_pstats-summary-failed
    :parent :get :args {:coll :_pstats-summary :key {:value :failed} :default {:value 0}}}
+  ;; Run-weighted average derived HERE (the `:_ufs-avg` pattern) — the
+  ;; base-fn returns raw `:duration-ms-sum` only.
+  {:name :_pstats-summary-sum
+   :parent :get :args {:coll :_pstats-summary :key {:value :duration-ms-sum} :default {:value 0}}}
+  {:name :_pstats-summary-has-runs?
+   :parent :gt :args {:nums [:_pstats-summary-runs {:value 0}]}}
+  {:name :_pstats-summary-avg-raw
+   :parent :quot :args {:dividend :_pstats-summary-sum :divisor :_pstats-summary-runs}}
   {:name :_pstats-summary-avg
-   :parent :get :args {:coll :_pstats-summary :key {:value :avg-ms} :default {:value 0}}}
+   :parent :if
+   :args {:test :_pstats-summary-has-runs?
+          :then :_pstats-summary-avg-raw
+          :else {:value 0}}}
 
   {:name :_pstats-headline-text
    :description "`<N>d: N runs · M failed · avg K ms` — the panel headline, window included."
@@ -417,8 +428,17 @@
    :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
   {:name :_pstats-day-failed
    :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-day-sum
+   :parent :get :args {:coll {:as :item} :key {:value :duration-ms-sum} :default {:value 0}}}
+  {:name :_pstats-day-has-runs?
+   :parent :gt :args {:nums [:_pstats-day-runs {:value 0}]}}
+  {:name :_pstats-day-avg-raw
+   :parent :quot :args {:dividend :_pstats-day-sum :divisor :_pstats-day-runs}}
   {:name :_pstats-day-avg
-   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+   :parent :if
+   :args {:test :_pstats-day-has-runs?
+          :then :_pstats-day-avg-raw
+          :else {:value 0}}}
 
   {:name :_pstats-day-label-cell
    :parent :hiccup
@@ -435,7 +455,7 @@
   {:name :_pstats-day-avg-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [:_pstats-day-avg]}}
+          :children [{:parent :to-str :args {:value :_pstats-day-avg}}]}}
 
   ;; CSS bar — width % comes server-computed (`:runs-pct`, share of the
   ;; window max) so the graph does no cross-row arithmetic.
@@ -498,8 +518,17 @@
    :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
   {:name :_pstats-fn-failed
    :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-fn-sum
+   :parent :get :args {:coll {:as :item} :key {:value :duration-ms-sum} :default {:value 0}}}
+  {:name :_pstats-fn-has-runs?
+   :parent :gt :args {:nums [:_pstats-fn-runs {:value 0}]}}
+  {:name :_pstats-fn-avg-raw
+   :parent :quot :args {:dividend :_pstats-fn-sum :divisor :_pstats-fn-runs}}
   {:name :_pstats-fn-avg
-   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+   :parent :if
+   :args {:test :_pstats-fn-has-runs?
+          :then :_pstats-fn-avg-raw
+          :else {:value 0}}}
 
   {:name :_pstats-fn-href
    :parent :str :args {:parts [{:value "#"} :_pstats-fn-name]}}
@@ -525,7 +554,7 @@
   {:name :_pstats-fn-avg-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [:_pstats-fn-avg]}}
+          :children [{:parent :to-str :args {:value :_pstats-fn-avg}}]}}
 
   {:name :_pstats-fn-pct
    :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
@@ -587,8 +616,17 @@
    :parent :get :args {:coll {:as :item} :key {:value :runs} :default {:value 0}}}
   {:name :_pstats-org-failed
    :parent :get :args {:coll {:as :item} :key {:value :failed} :default {:value 0}}}
+  {:name :_pstats-org-sum
+   :parent :get :args {:coll {:as :item} :key {:value :duration-ms-sum} :default {:value 0}}}
+  {:name :_pstats-org-has-runs?
+   :parent :gt :args {:nums [:_pstats-org-runs {:value 0}]}}
+  {:name :_pstats-org-avg-raw
+   :parent :quot :args {:dividend :_pstats-org-sum :divisor :_pstats-org-runs}}
   {:name :_pstats-org-avg
-   :parent :get :args {:coll {:as :item} :key {:value :avg-ms} :default {:value 0}}}
+   :parent :if
+   :args {:test :_pstats-org-has-runs?
+          :then :_pstats-org-avg-raw
+          :else {:value 0}}}
   {:name :_pstats-org-pct
    :parent :get :args {:coll {:as :item} :key {:value :runs-pct} :default {:value 0}}}
 
@@ -624,7 +662,7 @@
   {:name :_pstats-org-avg-cell
    :parent :hiccup
    :args {:tag {:value "td"} :attrs {:value {:class "stats-num"}}
-          :children [:_pstats-org-avg]}}
+          :children [{:parent :to-str :args {:value :_pstats-org-avg}}]}}
 
   {:name :_pstats-org-row
    :parent :hiccup

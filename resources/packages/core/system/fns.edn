@@ -85,6 +85,11 @@
    :args {:data {:type :jsonb :description "Any JSON-encodable value."}}
    :return-type :text}
 
+  {:name :to-json-pretty
+   :description "Serialize a Clojure value to a pretty-printed (indented) JSON string. Sibling of :to-json-string — a separate atom rather than an optional flag slot, so existing consumers' free-arg surface stays untouched."
+   :args {:data {:type :jsonb :description "Any JSON-encodable value."}}
+   :return-type :text}
+
   {:name :parse-json
    :description "Parse a JSON string into a Clojure value."
    :args {:string {:type :text :description "JSON text to parse."}

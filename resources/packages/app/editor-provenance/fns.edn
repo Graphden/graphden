@@ -283,7 +283,7 @@
    :parent :get
    :args {:coll :_provenance :key {:value :inheritance-chain} :default []}}
 
-  ;; Per-tier helper: given a `{:key :label :type :source}` map (the
+  ;; Per-tier helper: given a `{:key :type :source}` map (the
   ;; `:as :tier` rename) and the wrapping list-context, build one row.
   ;; Hidden via `<span hidden=1>` when `:type` is nil (tier doesn't
   ;; apply at this slot).
@@ -300,9 +300,23 @@
    :parent :to-str
    :args {:value :_provenance-tier-type-raw}}
 
+  ;; The user-facing tier prose lives HERE (the `:_rtr-narratives`
+  ;; pattern) — the src payload carries only the structural `:key`.
+  ;; (editor-literal-types.js builds its own client-side tiers with its
+  ;; own copies of these strings — a separate surface, not this payload.)
+  {:name :_provenance-tier-labels
+   :description "Tier key → user-facing label for the type-resolution rows."
+   :parent :const
+   :args {:value {:override "Binding type-override"
+                  :unified "Backward-unified return type"
+                  :ref-return "Bound fn return type"
+                  :slot "Slot declaration"}}}
+
   {:name :_provenance-tier-label
    :parent :get
-   :args {:coll {:as :item} :key {:value :label} :default ""}}
+   :args {:coll :_provenance-tier-labels
+          :key {:parent :get :args {:coll {:as :item} :key {:value :key} :default nil}}
+          :default ""}}
 
   {:name :_provenance-tier-source
    :parent :get

@@ -766,29 +766,29 @@
   ;; (tenant → own workspace; public → platform), so they are privacy-safe by
   ;; construction (args/results/errors never enter that table).
   {:name :usage-org-summary
-   :description "Headline rollup for the current org over the trailing `:days` — `{:runs :failed :avg-ms}` (run-weighted average duration). Counts + durations only."
+   :description "Headline rollup for the current org over the trailing `:days` — `{:runs :failed :duration-ms-sum}` (raw sums; the run-weighted `:avg-ms` is graph composition, same `:quot`-behind-`:if` pattern as `:usage-fn-stats`). Counts + durations only."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
-   :return-type {:runs :int :failed :int :avg-ms :int}
+   :return-type {:runs :int :failed :int :duration-ms-sum :int}
    :effects #{:db}}
 
   {:name :usage-org-daily
-   :description "Per-day series for the current org over the trailing `:days`, oldest first — `[{:day :runs :failed :avg-ms :runs-pct} …]` (`:runs-pct` = share of the window's busiest day, 0-100 — feeds the panel's CSS bars); days with no runs are omitted."
+   :description "Per-day series for the current org over the trailing `:days`, oldest first — `[{:day :runs :failed :duration-ms-sum :runs-pct} …]` (`:runs-pct` = share of the window's busiest day, 0-100 — feeds the panel's CSS bars; `:avg-ms` is graph composition); days with no runs are omitted."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
-   :return-type [:list {:day :text :runs :int :failed :int :avg-ms :int :runs-pct :int}]
+   :return-type [:list {:day :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]
    :effects #{:db}}
 
   {:name :usage-org-fn-stats
-   :description "Busiest fns for the current org over the trailing `:days`, fn name joined for display — `[{:fn-id :fn-name :runs :failed :avg-ms :runs-pct} …]`, busiest first, capped at `:limit`. A since-deleted fn shows its id."
+   :description "Busiest fns for the current org over the trailing `:days`, fn name joined for display — `[{:fn-id :fn-name :runs :failed :duration-ms-sum :runs-pct} …]`, busiest first, capped at `:limit` (`:avg-ms` is graph composition). A since-deleted fn shows its id."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
           :limit {:type :int :description "Row cap (e.g. 20)."}}
-   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :avg-ms :int :runs-pct :int}]
+   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]
    :effects #{:db}}
 
   {:name :usage-all-org-stats
-   :description "OPERATOR-only cross-org rollup over the trailing `:days` — `[{:org :runs :failed :avg-ms :runs-pct} …]`, busiest first, capped at `:limit`. Impl-side guard: any TENANT context gets `[]` (only the platform context — no org bound, or the platform org itself — sees cross-org counts); counts + durations only, no private data."
+   :description "OPERATOR-only cross-org rollup over the trailing `:days` — `[{:org :runs :failed :duration-ms-sum :runs-pct} …]`, busiest first, capped at `:limit` (`:avg-ms` is graph composition). Impl-side guard: any TENANT context gets `[]` (only the platform context — no org bound, or the platform org itself — sees cross-org counts); counts + durations only, no private data."
    :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
           :limit {:type :int :description "Row cap (e.g. 20)."}}
-   :return-type [:list {:org :text :runs :int :failed :int :avg-ms :int :runs-pct :int}]
+   :return-type [:list {:org :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]
    :effects #{:db}}
 
   {:name :cancel-execution!
@@ -3027,13 +3027,24 @@
   {:name :_ptrace-r-name
    :parent :get
    :args {:coll {:as :item} :key {:value :fn-name} :default {:value "?"}}}
+  ;; Indent policy — 14px per depth level, capped at 12 levels. Was baked
+  ;; into the src payload as `:indent-px`; the payload now carries the raw
+  ;; `:depth` fact and the scaling is graph-tunable.
+  {:name :_ptrace-r-depth
+   :parent :get
+   :args {:coll {:as :item} :key {:value :depth} :default {:value 0}}}
+  {:name :_ptrace-r-depth-capped
+   :parent :if
+   :args {:test {:parent :gt :args {:nums [:_ptrace-r-depth {:value 12}]}}
+          :then {:value 12}
+          :else :_ptrace-r-depth}}
+  {:name :_ptrace-r-indent-px
+   :parent :mul
+   :args {:nums [{:value 14} :_ptrace-r-depth-capped]}}
   {:name :_ptrace-r-style
    :parent :str
    :args {:parts [{:value "padding-left:"}
-                  {:parent :to-str
-                   :args {:value {:parent :get
-                                  :args {:coll {:as :item} :key {:value :indent-px}
-                                         :default {:value 0}}}}}
+                  {:parent :to-str :args {:value :_ptrace-r-indent-px}}
                   {:value "px"}]}}
   {:name :_ptrace-r-attrs
    :description "Row attrs — class + data-seq/data-fn-id (the JS step/highlight hooks) + the depth indent."
@@ -3048,20 +3059,54 @@
           :key {:value :style}
           :value :_ptrace-r-style}}
 
+  ;; Chip policy — kind + label derived from the raw status facts
+  ;; (`:hidden` / `:cache-hit?` / `:duration-ms`). Was a Clojure cond in
+  ;; the src payload builder; now graph, same shape the execute-history
+  ;; partial's status→text dispatch uses.
+  {:name :_ptrace-r-hidden
+   :parent :get
+   :args {:coll {:as :item} :key {:value :hidden} :default {:value nil}}}
+  {:name :_ptrace-r-hidden-unknown?
+   :parent :equal?
+   :args {:a :_ptrace-r-hidden :b {:value "unknown-type"}}}
+  {:name :_ptrace-r-cache-hit?
+   :parent :get
+   :args {:coll {:as :item} :key {:value :cache-hit?} :default {:value false}}}
+  {:name :_ptrace-r-chip-kind
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_ptrace-r-hidden}}
+          :then {:parent :if :args {:test :_ptrace-r-hidden-unknown?
+                                    :then {:value "unknown"}
+                                    :else {:value "secret"}}}
+          :else {:parent :if :args {:test :_ptrace-r-cache-hit?
+                                    :then {:value "cache"}
+                                    :else {:value "time"}}}}}
+  {:name :_ptrace-r-duration-label
+   :parent :str
+   :args {:parts [{:parent :to-str
+                   :args {:value {:parent :get
+                                  :args {:coll {:as :item} :key {:value :duration-ms}
+                                         :default {:value 0}}}}}
+                  {:value "ms"}]}}
+  {:name :_ptrace-r-chip-label
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_ptrace-r-hidden}}
+          :then {:parent :if :args {:test :_ptrace-r-hidden-unknown?
+                                    :then {:value "unknown type"}
+                                    :else {:value "secret"}}}
+          :else {:parent :if :args {:test :_ptrace-r-cache-hit?
+                                    :then {:value "cache"}
+                                    :else :_ptrace-r-duration-label}}}}
   {:name :_ptrace-r-chip-cls
    :parent :str
    :args {:parts [{:value "trace-chip trace-chip-"}
-                  {:parent :get
-                   :args {:coll {:as :item} :key {:value :chip-kind}
-                          :default {:value "time"}}}]}}
+                  :_ptrace-r-chip-kind]}}
   {:name :_ptrace-r-chip
    :parent :hiccup
    :args {:tag {:value "span"}
           :attrs {:parent :zipmap
                   :args {:keys [{:value :class}] :vals [:_ptrace-r-chip-cls]}}
-          :children [{:parent :get
-                      :args {:coll {:as :item} :key {:value :chip}
-                             :default {:value ""}}}]}}
+          :children [:_ptrace-r-chip-label]}}
 
   {:name :_ptrace-r-derived
    :description "«derived from secret» marker — nil child renders nothing."
@@ -3074,13 +3119,21 @@
                         :children ["derived from secret"]}}
           :else {:value nil}}}
 
-  {:name :_ptrace-r-value-str
+  ;; Value viewer — the payload carries the RAW captured `:value` plus a
+  ;; `:has-value?` flag (a captured nil is meaningful — renders `null` —
+  ;; and a bare nil-check couldn't tell it from absent). Pretty-printing
+  ;; is graph-visible via the `:to-json-pretty` sibling atom.
+  {:name :_ptrace-r-has-value?
    :parent :get
-   :args {:coll {:as :item} :key {:value :value-str} :default {:value nil}}}
+   :args {:coll {:as :item} :key {:value :has-value?} :default {:value false}}}
+  {:name :_ptrace-r-value-str
+   :parent :to-json-pretty
+   :args {:data {:parent :get
+                 :args {:coll {:as :item} :key {:value :value} :default {:value nil}}}}}
   {:name :_ptrace-r-value
    :description "Collapsed captured-value viewer; absent value renders nothing."
    :parent :if
-   :args {:test {:parent :some? :args {:value :_ptrace-r-value-str}}
+   :args {:test :_ptrace-r-has-value?
           :then {:parent :hiccup
                  :args {:tag {:value "details"}
                         :attrs {:value {:class "trace-value"}}

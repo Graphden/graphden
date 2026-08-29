@@ -1107,7 +1107,7 @@
    :effects #{:db}}
 
   {:name :list-branch-comments
-   :description "Comments on proposal `source-branch-id`, oldest first — `[{:id :author-id :body :created-at} …]` (wire-safe strings)."
+   :description "RAW :branch-comment rows for proposal `source-branch-id` — one query, unsorted. The wire reshape (oldest-first, key subset, stringified id/timestamp) is graph composition — `:_branch-comments-shaped`."
    :args {:source-branch-id {:type :uuid :description "The proposal (source) branch."}}
    :return-type [:list :keyword-map]
    :effects #{:db}}
@@ -1512,10 +1512,38 @@
    :parent :list-branch-comments
    :args {:source-branch-id :_branch-approve-src-id}}
 
+  ;; Wire reshape of the raw comment rows — was fused into the impl
+  ;; (sort-by + mapv + stringify); now graph so the response shape is
+  ;; visible and extensible without a Clojure edit. `:literal? true` on
+  ;; the keyword literals: `:body` collides with an fn-def name.
+
+  {:name :_branch-comment-created-at
+   :description "Per-row :created-at (Instant) — the :sort-by key callable (natural order = oldest first)."
+   :parent :get
+   :args {:coll {:as :item} :key {:value :created-at :literal? true} :default nil}}
+
+  {:name :_branch-comment-row-shaped
+   :description "HOF callback per raw row — the wire shape `{:id :author-id :body :created-at}`, id/timestamp stringified."
+   :parent :zipmap
+   :args {:keys [{:value :id :literal? true} {:value :author-id :literal? true}
+                 {:value :body :literal? true} {:value :created-at :literal? true}]
+          :vals [{:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :id :literal? true} :default nil}}}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :author-id :literal? true} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :body :literal? true} :default nil}}
+                 {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :created-at :literal? true} :default nil}}}}]}}
+
+  {:name :_branch-comments-shaped
+   :description "Oldest-first wire rows — `:sort-by` the raw rows by :created-at, then the per-row reshape."
+   :parent :map
+   :args {:func :_branch-comment-row-shaped
+          :coll {:parent :sort-by
+                 :args {:key-fn :_branch-comment-created-at
+                        :coll :_branch-comments-list}}}}
+
   {:name :_branch-comments-list-apply
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :comments}]
-          :vals [{:value true} :_branch-comments-list]}}
+          :vals [{:value true} :_branch-comments-shaped]}}
 
   {:name :_branch-comments-list-data
    :parent :cond

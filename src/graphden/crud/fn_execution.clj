@@ -29,7 +29,6 @@
    (read-only DB navigation) live in `.lookup`; row writes + future
    plumbing + size caps live in `.persist`."
   (:require
-    [cheshire.core :as json]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
@@ -401,10 +400,6 @@
 ;; GET /partials/execute-trace — display rows of a persisted trace
 ;; =============================================================================
 
-(def ^:private trace-indent-px 14)
-(def ^:private trace-max-indent-depth 12)
-
-
 (defn- trace-tree-order
   "Depth-first ordering of re-redacted trace `entries` with a `:depth`
    assigned to each. Tree-linked entries (`:seq` present) nest via
@@ -433,31 +428,25 @@
             (map #(assoc % :depth 0) linkless))))
 
 
-(defn- trace-display-row
-  "One depth-annotated entry → the display-ready row the partial
-   renders: name, indent, a single status chip, and the (already
-   redaction-filtered) captured value pretty-printed."
+(defn- trace-entry-row
+  "One depth-annotated entry → the FACT row the /partials/execute-trace
+   graph chain renders from: ids + joined name + the raw status fields.
+   All DISPLAY policy — chip kind/label, indent scaling, value
+   pretty-printing — is graph composition (`:_ptrace-r-*` in
+   app/execution/fns.edn). `:has-value?` marks a PRESENT capture (a
+   captured nil is meaningful and must render as `null`, which a bare
+   nil-check graph-side could not tell from absent)."
   [names e]
-  (let [hidden (:hidden e)
-        chip-kind (cond
-                    hidden (if (= "unknown-type" (name hidden)) "unknown" "secret")
-                    (:cache-hit? e) "cache"
-                    :else "time")
-        fn-id (str (:fn-id e))]
+  (let [fn-id (str (:fn-id e))]
     (cond-> {:seq (:seq e)
              :fn-id fn-id
              :fn-name (or (get names fn-id) (str (subs fn-id 0 8) "…"))
-             :indent-px (* trace-indent-px
-                           (min (long (:depth e)) trace-max-indent-depth))
-             :chip (case chip-kind
-                     "secret" "secret"
-                     "unknown" "unknown type"
-                     "cache" "cache"
-                     (str (or (:duration-ms e) 0) "ms"))
-             :chip-kind chip-kind}
+             :depth (long (:depth e))
+             :cache-hit? (boolean (:cache-hit? e))
+             :duration-ms (or (:duration-ms e) 0)}
+      (:hidden e) (assoc :hidden (name (:hidden e)))
       (:value-hidden e) (assoc :derived? true)
-      (contains? e :value)
-      (assoc :value-str (json/generate-string (:value e) {:pretty true}))
+      (contains? e :value) (assoc :has-value? true :value (:value e))
       (:value-truncated? e) (assoc :value-truncated? true))))
 
 
@@ -477,13 +466,14 @@
 
 
 (defn trace-display-rows
-  "Display payload for one persisted execution's `:path-trace`, shaped
-   for the `/partials/execute-trace` hiccup: `{:found? bool :rows […]
-   :truncated? :values-dropped?}`. Entries pass READ-time re-redaction
-   first (`persist/re-redact-path-trace`), then reassemble into the
+  "Fact payload for one persisted execution's `:path-trace` —
+   `{:found? bool :rows […] :truncated? :values-dropped?}`, rows per
+   `trace-entry-row`. Entries pass READ-time re-redaction first
+   (`persist/re-redact-path-trace`), then reassemble into the
    depth-first call tree (`:seq`/`:parent-seq`), then join fn names.
-   The tree walk + name join is one cohesive read-shaping algorithm —
-   the graph layer renders the rows, it doesn't rebuild trees."
+   The tree walk + name join is one cohesive read-shaping algorithm;
+   the DISPLAY policy (chips, indent, pretty-print) lives in the
+   `/partials/execute-trace` graph chain."
   [ctx execution-id]
   (let [storage (request/require-storage ctx)
         row (when execution-id
@@ -494,7 +484,7 @@
       {:found? false :rows []}
       (let [names (trace-fn-names storage entries)]
         (cond-> {:found? true
-                 :rows (mapv #(trace-display-row names %)
+                 :rows (mapv #(trace-entry-row names %)
                              (trace-tree-order entries))}
           (:path-truncated? pt) (assoc :truncated? true)
           (:values-dropped? pt) (assoc :values-dropped? true))))))

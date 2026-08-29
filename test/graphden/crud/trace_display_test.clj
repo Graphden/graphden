@@ -2,14 +2,16 @@
   "Pure unit tests for the trace display shaping behind
    `/partials/execute-trace` (`fn-execution/trace-display-rows`'s
    private halves): the depth-first tree reassembly from
-   `:seq`/`:parent-seq` and the per-row chip/value shaping."
+   `:seq`/`:parent-seq` and the per-row FACT projection (the display
+   policy — chips, indent, pretty-print — is graph composition in
+   `app/execution/fns.edn`'s `:_ptrace-r-*` chain)."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.fn-execution :as fn-exec]))
 
 
 (def ^:private tree-order #'fn-exec/trace-tree-order)
-(def ^:private display-row #'fn-exec/trace-display-row)
+(def ^:private entry-row #'fn-exec/trace-entry-row)
 
 
 (deftest tree-order-reassembles-depth-first-test
@@ -44,34 +46,37 @@
       (is (every? #(zero? (:depth %)) ordered)))))
 
 
-(deftest display-row-chips-test
+(deftest entry-row-facts-test
   (let [id (str (random-uuid))
         base {:seq 0 :depth 0 :fn-id id}]
-    (testing "fresh call → duration chip; name joined"
-      (let [row (display-row {id "my-fn"}
-                             (assoc base :cache-hit? false :duration-ms 12))]
+    (testing "fresh call → raw status facts; name joined"
+      (let [row (entry-row {id "my-fn"}
+                           (assoc base :cache-hit? false :duration-ms 12))]
         (is (= "my-fn" (:fn-name row)))
-        (is (= "12ms" (:chip row)))
-        (is (= "time" (:chip-kind row)))))
-    (testing "cache hit / secret / unknown-type chips"
-      (is (= ["cache" "cache"]
-             ((juxt :chip :chip-kind)
-              (display-row {} (assoc base :cache-hit? true)))))
-      (is (= ["secret" "secret"]
-             ((juxt :chip :chip-kind)
-              ;; jsonb roundtrip: :hidden comes back as a STRING
-              (display-row {} (assoc base :hidden "secret")))))
-      (is (= ["unknown type" "unknown"]
-             ((juxt :chip :chip-kind)
-              (display-row {} (assoc base :hidden "unknown-type"))))))
+        (is (= 12 (:duration-ms row)))
+        (is (false? (:cache-hit? row)))
+        (is (not (contains? row :hidden)))))
+    (testing "hidden / cache-hit facts pass through raw (chip policy is graph)"
+      (is (true? (:cache-hit? (entry-row {} (assoc base :cache-hit? true)))))
+      ;; jsonb roundtrip: :hidden may arrive keyword OR string — always a
+      ;; string on the way out.
+      (is (= "secret" (:hidden (entry-row {} (assoc base :hidden "secret")))))
+      (is (= "unknown-type" (:hidden (entry-row {} (assoc base :hidden :unknown-type))))))
     (testing "unnamed id falls back to the short form"
       (is (= (str (subs id 0 8) "…")
-             (:fn-name (display-row {} (assoc base :cache-hit? true))))))
-    (testing "value pretty-printed; derived marker rides through"
-      (let [row (display-row {} (assoc base :cache-hit? false :duration-ms 1
-                                       :value {:a 1} :value-hidden "secret-derived"))]
+             (:fn-name (entry-row {} (assoc base :cache-hit? true))))))
+    (testing "captured value rides RAW with the presence flag; derived marker too"
+      (let [row (entry-row {} (assoc base :cache-hit? false :duration-ms 1
+                                     :value {:a 1} :value-hidden "secret-derived"))]
         (is (true? (:derived? row)))
-        (is (string? (:value-str row)))))
-    (testing "depth indents, capped"
-      (is (= 28 (:indent-px (display-row {} (assoc base :depth 2 :cache-hit? true)))))
-      (is (= (* 14 12) (:indent-px (display-row {} (assoc base :depth 40 :cache-hit? true))))))))
+        (is (true? (:has-value? row)))
+        (is (= {:a 1} (:value row))))
+      (testing "a captured nil is PRESENT (renders as null graph-side)"
+        (let [row (entry-row {} (assoc base :cache-hit? true :value nil))]
+          (is (true? (:has-value? row)))
+          (is (nil? (:value row)))))
+      (testing "no capture → no flag"
+        (is (not (contains? (entry-row {} (assoc base :cache-hit? true))
+                            :has-value?)))))
+    (testing "depth passes through uncapped (indent scaling is graph)"
+      (is (= 40 (:depth (entry-row {} (assoc base :depth 40 :cache-hit? true))))))))

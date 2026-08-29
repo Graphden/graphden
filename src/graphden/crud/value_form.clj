@@ -370,19 +370,22 @@
                   ref-fn       (when ref-fid (sp/read-entity storage :fn ref-fid))
                   declaring    (when chain-info
                                  (find-slot-declaring-fn storage chain-info slot-id))
-                  tiers        [{:key :override :label "Binding type-override"
+                  ;; Structural keys only — the user-facing tier prose
+                  ;; lives graph-side (`:_provenance-tier-labels` in
+                  ;; app/editor-provenance).
+                  tiers        [{:key :override
                                  :type (type-of-fn-id storage override-fid)
                                  :source (when (and override-fid (:name own-fn))
                                            {:fn-name (:name own-fn) :fn-id fn-id})}
-                                {:key :unified :label "Backward-unified return type"
+                                {:key :unified
                                  :type unified
                                  :source (when (and (some? unified) (:name own-fn))
                                            {:fn-name (:name own-fn) :fn-id fn-id})}
-                                {:key :ref-return :label "Bound fn return type"
+                                {:key :ref-return
                                  :type (type-of-fn-id storage (:return-type-fn-id ref-fn))
                                  :source (when (:name ref-fn)
                                            {:fn-name (:name ref-fn) :fn-id ref-fid})}
-                                {:key :slot :label "Slot declaration"
+                                {:key :slot
                                  :type (type-of-fn-id storage (:type-fn-id slot))
                                  :source declaring}]
                   winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)

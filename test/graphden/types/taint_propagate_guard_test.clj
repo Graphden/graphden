@@ -115,7 +115,7 @@
     ;; return value — no taint to propagate (same as :http-server).
     :sse-stream
     :sql-query :storage-query-identities :str :str-contains? :str-join
-    :str-len :str-lower :str-replace :str-split :str-starts-with?
+    :str-clip :str-len :str-lower :str-replace :str-split :str-starts-with?
     :str-to-keyword :str-to-uuid :str-trim :str-upper
     :stringify-response-headers :strip-hidden-impl :strip-secret-paths
     :sub :subs :subtype? :svg-polyline-points :tabulate-records
@@ -155,7 +155,7 @@
     :position-in :postwalk :pr-str
     :quot :range
     :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :select-keys :digest-hex
-    :slurp :some :some? :sort :sort-by :str :str-contains? :str-join :str-len :str-lower
+    :slurp :some :some? :sort :sort-by :str :str-clip :str-contains? :str-join :str-len :str-lower
     :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
     :str-upper :sub :subs :tabulate-records :take :throw :throwable-class-name :throwable-message

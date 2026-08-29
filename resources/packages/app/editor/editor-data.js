@@ -111,7 +111,7 @@ function clientSubtype(sub, sup) {
 // Plus shared maps:
 //   fnMap, nsMap, nsPathMap
 //   fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn, nsTypeErrors,
-//   nsTypeCounts
+//   nsTypeCounts, nsFnCounts
 function buildLookups(data) {
   const fnMap = new Map();
   const slotMap = new Map();
@@ -209,6 +209,9 @@ function buildLookups(data) {
   // `:type-count`. Lets the types lens keep a not-yet-loaded namespace
   // visible (its leaves only exist client-side after an expand).
   const nsTypeCounts   = new Map();
+  // Same for plain fns (`:fn-count` — named, not a type-row, not
+  // secret-shaped): the fn lens's unloaded-namespace signal.
+  const nsFnCounts     = new Map();
   const bump = (m, k) => { if (k) m.set(k, (m.get(k) || 0) + 1); };
 
   (data.fns || []).forEach(f => {
@@ -221,6 +224,7 @@ function buildLookups(data) {
     if (c.count) nsHasChildFn.set(c['namespace-id'], c.count);
     if (c['type-error-count']) nsTypeErrors.set(c['namespace-id'], c['type-error-count']);
     if (c['type-count']) nsTypeCounts.set(c['namespace-id'], c['type-count']);
+    if (c['fn-count']) nsFnCounts.set(c['namespace-id'], c['fn-count']);
   });
   (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
 
@@ -233,7 +237,7 @@ function buildLookups(data) {
            bindingMap, bindingsByFn, bindingByFnSlot, itemsByBinding, itemByItemId,
            nsMap, nsPathMap,
            fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn,
-           nsTypeErrors, nsTypeCounts,
+           nsTypeErrors, nsTypeCounts, nsFnCounts,
            inheritanceLevelsCache };
 }
 

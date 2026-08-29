@@ -182,6 +182,26 @@ function getAllServiceFnIdCount() {
 }
 
 
+// Namespace-ids holding at least one service-backed fn — from the
+// enriched rows' `namespace-id` (joined server-side off the fn table).
+// The services LENS uses this to keep a not-yet-loaded namespace
+// visible: the service fn's row only reaches fnMap after an expand,
+// but its namespace is knowable from this cache alone. Identity-keyed
+// memo like serviceIndex; empty set while unprimed.
+let _svcNsIds = null;
+let _svcNsIdsSrc = null;
+function serviceNsIds() {
+  if (_svcNsIdsSrc !== servicesCache) {
+    _svcNsIds = new Set();
+    for (const s of (servicesCache?.services || [])) {
+      if (s['namespace-id']) _svcNsIds.add(s['namespace-id']);
+    }
+    _svcNsIdsSrc = servicesCache;
+  }
+  return _svcNsIds;
+}
+
+
 // Render-state classifier used by the badge. Returns one of:
 //   'running'  — stopper-set + no give-up
 //   'failed'   — start-failed-at recorded

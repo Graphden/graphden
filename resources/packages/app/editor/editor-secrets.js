@@ -128,6 +128,20 @@ async function loadSecrets() {
 // ARE graph partials (static markup) — see `openCreateSecretForm` /
 // `openRotateSecretForm`.
 
+// Namespace-ids holding at least one secret — from the /api/secrets
+// rows' `namespace-id`. The secrets LENS uses this to keep a
+// not-yet-loaded namespace visible: the secret's fn row only reaches
+// fnMap after an expand, but its namespace is knowable from the list
+// alone. Cheap enough to rebuild per call (secrets lists are small).
+function secretNsIds() {
+  const ids = new Set();
+  for (const s of _secretsList) {
+    if (s['namespace-id']) ids.add(s['namespace-id']);
+  }
+  return ids;
+}
+
+
 // Map a secret fn-id to its /api/secrets record (name + path). Falls back
 // to a path-less stub when the list isn't primed yet.
 function secretRecordForFn(fnId) {

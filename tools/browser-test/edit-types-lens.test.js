@@ -1,21 +1,23 @@
-// Types-lens visibility e2e — sidebar kind filter, `types` chip.
+// Lens visibility e2e — sidebar kind filter chips vs LAZY-loaded tree.
 //
-// Regression guard for the "types lens shows only (primitives)" bug:
-// namespace leaves lazy-load on expand, and under an active lens
-// nodeShouldShow hides unloaded namespaces — so before the per-ns
-// `:type-count` landed in the `:tree` counts payload, every
-// type-bearing namespace (web.ring-adapter, core.refinements, …)
-// vanished from the types lens until manually expanded once.
+// Regression guard for the "lens shows only what happened to be
+// loaded" bug family: namespace leaves lazy-load on expand, and under
+// an active lens nodeShouldShow hides unloaded namespaces — so before
+// the per-ns kind signals (`:type-count` / `:fn-count` in the `:tree`
+// counts payload, `namespace-id` on /api/services rows), the types
+// lens showed only the (primitives) bucket, the services lens showed
+// an empty tree under a chip that said "1", and the fn lens hid every
+// never-expanded namespace. secrets/apps ride the same generalized
+// nsHoldsLensKind path the services phase proves (their signals are
+// Set-of-namespace-ids built from their list payloads too).
 //
-// Verifies:
-//   • With the `types` lens active and NOTHING expanded, at least one
-//     real (non-primitives) namespace header stays visible.
-//   • The lens is still a filter: a namespace with zero type-rows is
-//     hidden.
-//   • Expanding web.ring-adapter under the lens lazy-loads its leaves
-//     and shows ONLY its type-rows (ring-request-shape /
-//     security-headers-shape); composed fn-defs stay hidden.
-//   • The "nothing matches" hint does not show.
+// Verifies, with NOTHING expanded:
+//   • types: type-bearing namespaces visible; expanding
+//     web.ring-adapter shows ONLY its type-rows; type-less namespaces
+//     stay hidden; no "nothing matches" hint.
+//   • fn: core/storage (never expanded, plain-fn-bearing) visible.
+//   • services: the namespace of the web-server service fn is visible
+//     and the "nothing matches" hint does not show.
 //
 // Run from this directory:  node edit-types-lens.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -102,6 +104,43 @@ const {assert, newContext} = require('./edit-test-helpers');
     });
     assert(branchRouter === true || branchRouter === 'absent',
            'web.branch-router (no type-rows) is not surfaced by the lens: ' + branchRouter);
+
+    // Phase D: fn lens — never-expanded plain-fn namespaces stay visible
+    // (before `:fn-count` they were hidden until manually expanded).
+    const switchLens = async (kind) => {
+      await page.click('#kind-filters [data-kind="all"]');
+      await page.click(`#kind-filters [data-kind="${kind}"]`);
+    };
+    await switchLens('fn');
+    await page.waitForFunction(() => {
+      const vis = [...document.querySelectorAll('.ns-header[data-ns-path]')]
+        .filter((h) => !h.hidden).map((h) => h.dataset.nsPath);
+      return vis.includes('core') && vis.includes('storage');
+    }, null, {timeout: 15000});
+    console.log('  ✓ fn lens: core + storage visible unexpanded');
+
+    // Phase E: services lens — the namespace holding the web-server
+    // service fn is knowable from /api/services rows' namespace-id.
+    await switchLens('services');
+    // `app` shows because its DESCENDANT app.server holds the service
+    // (child headers only render after the parent expands).
+    await page.waitForFunction(() => {
+      const vis = [...document.querySelectorAll('.ns-header[data-ns-path]')]
+        .filter((h) => !h.hidden).map((h) => h.dataset.nsPath);
+      return vis.includes('app');
+    }, null, {timeout: 15000});
+    await expand('app');
+    await page.waitForFunction(() => {
+      const vis = [...document.querySelectorAll('.ns-header[data-ns-path]')]
+        .filter((h) => !h.hidden).map((h) => h.dataset.nsPath);
+      return vis.includes('app.server');
+    }, null, {timeout: 15000});
+    const svcHint = await page.evaluate(() => {
+      const el = document.querySelector('.lens-empty-hint');
+      return el ? !el.hidden : false;
+    });
+    assert(!svcHint, 'services lens: no "nothing matches" hint while app.server is visible');
+    console.log('  ✓ services lens: app.server visible unexpanded, no lying hint');
 
     console.log('PASS');
     await browser.close();

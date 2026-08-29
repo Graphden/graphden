@@ -86,6 +86,19 @@ function getAppRouteCount() {
   return Array.isArray(appRoutesCache) ? appRoutesCache.length : null;
 }
 
+// Namespace-ids holding at least one app-route handler fn — from the
+// rows' `handler-namespace-id` (the tenancy addon joins it off the
+// handler fn row). The apps LENS uses this to keep a not-yet-loaded
+// namespace visible. Empty on addon versions predating the field —
+// the lens then simply stays load-dependent for apps (graceful).
+function appRouteNsIds() {
+  const ids = new Set();
+  for (const a of (Array.isArray(appRoutesCache) ? appRoutesCache : [])) {
+    if (a['handler-namespace-id']) ids.add(a['handler-namespace-id']);
+  }
+  return ids;
+}
+
 // The app label an :app-route serves under (the `<label>.<apps-domain>`
 // subdomain). The apps-domain isn't exposed client-side, so the marker
 // tooltip shows the bare label — unambiguous, and the Apps panel renders

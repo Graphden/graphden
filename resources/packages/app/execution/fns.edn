@@ -1168,6 +1168,30 @@
    :args {:to {:value {}}
           :from :_list-services-fn-id-name-pairs}}
 
+  ;; --- {fn-id → namespace-id} twin index. Same `:_list-services-fn-rows`
+  ;; source (no extra query); joins `:namespace-id` onto each service row
+  ;; so the sidebar's services LENS can keep a not-yet-loaded namespace
+  ;; visible (the service fn's row only exists client-side after an
+  ;; expand — the lens needs its namespace without one).
+
+  {:name :_list-services-fn-id-ns-pair
+   :description "HOF callback per fn-row — emit a `[:id :namespace-id]` 2-vec so `:into {}` folds the sequence into a `{id → namespace-id}` index."
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :namespace-id} :default nil}}]}}
+
+  {:name :_list-services-fn-id-ns-pairs
+   :description "Stage 2c — map the per-fn `[:id :namespace-id]` builder over every fn row."
+   :parent :map
+   :args {:func :_list-services-fn-id-ns-pair
+          :coll :_list-services-fn-rows}}
+
+  {:name :_list-services-fn-namespaces
+   :description "Stage 2d — build `{fn-id → namespace-id}` index over the SAME `:fn` rows Stage 2 reads (no extra query)."
+   :parent :into
+   :args {:to {:value {}}
+          :from :_list-services-fn-id-ns-pairs}}
+
   ;; --- :running-entry atomic primitive ----------------------------
   ;; Single library call — atom-deref + key lookup on `@recon/running`.
   ;; The downstream reshape lives in `:enrich-running` graph fn-def
@@ -1258,13 +1282,17 @@
           :coll {:as :rows}}}
 
   {:name :_list-services-row-shape
-   :description "Single-row reshape — `(fn [s] {:id (:id s) :fn-id (:fn-id s) :fn-name (get names (:fn-id s)) :enabled? (:enabled? s) :restart-policy (:restart-policy s) :cardinality (:cardinality s) :branch-id (:branch-id s) :running (enrich-running (:id s))})`. The HOF callback of `:_list-services-enriched`; `:names` is captured from the outer fn-def's free args. `:branch-id` and `:cardinality` are both nullable (legacy rows pre-date each field); the editor service popover uses `:branch-id` to pre-fill the branch picker. A nil `:cardinality` reads as `:singleton` — see `schema/services/schema.clj`."
+   :description "Single-row reshape — `(fn [s] {:id (:id s) :fn-id (:fn-id s) :fn-name (get names (:fn-id s)) :namespace-id (get nss (:fn-id s)) :enabled? (:enabled? s) :restart-policy (:restart-policy s) :cardinality (:cardinality s) :branch-id (:branch-id s) :running (enrich-running (:id s))})`. The HOF callback of `:_list-services-enriched`; `:names` / `:nss` are captured from the outer fn-def's free args. `:namespace-id` is the SERVICE FN's namespace — the sidebar's services lens keeps a not-yet-loaded namespace visible by it. `:branch-id` and `:cardinality` are both nullable (legacy rows pre-date each field); the editor service popover uses `:branch-id` to pre-fill the branch picker. A nil `:cardinality` reads as `:singleton` — see `schema/services/schema.clj`."
    :parent :zipmap
-   :args {:keys [:id :fn-id :fn-name :enabled? :restart-policy :cardinality :branch-id :running]
+   :args {:keys [:id :fn-id :fn-name :namespace-id :enabled? :restart-policy :cardinality :branch-id :running]
           :vals [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
                  {:parent :get
                   :args {:coll {:as :names}
+                         :key {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+                         :default nil}}
+                 {:parent :get
+                  :args {:coll {:as :nss}
                          :key {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
                          :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :enabled?} :default nil}}
@@ -1287,7 +1315,8 @@
    :args {:enriched :_list-services-enriched
           ;; Sub-results fed into the enrichment.
           :rows :_list-services-rows
-          :names :_list-services-fn-names}}
+          :names :_list-services-fn-names
+          :nss :_list-services-fn-namespaces}}
 
   {:name :list-services-handler
    :lambda-params []
@@ -1298,8 +1327,8 @@
   ;; ---------------------------------------------------------------------
   ;; GET /partials/service-popover?fn-id=X — service settings popover
   ;; body. Reuses `:_list-services-enriched` (provides the per-row
-  ;; `{:id :fn-id :fn-name :enabled? :restart-policy :cardinality
-  ;; :branch-id :running}` shape the popover renderer expects). The fn-name for
+  ;; `{:id :fn-id :fn-name :namespace-id :enabled? :restart-policy
+  ;; :cardinality :branch-id :running}` shape the popover renderer expects). The fn-name for
   ;; the popover title comes from the SAME `:_list-services-fn-names`
   ;; index that drives `:fn-name` on enriched services — covers ANY
   ;; fn (not just service-owners) because the index is built over the
@@ -1326,7 +1355,8 @@
    :description "Enriched services list — same shape `:_list-services-data` uses, but referenced standalone here so the popover only pays for the join it actually needs."
    :parent :_list-services-enriched
    :args {:rows :_list-services-rows
-          :names :_list-services-fn-names}}
+          :names :_list-services-fn-names
+          :nss :_list-services-fn-namespaces}}
 
   ;; =====================================================================
   ;; Execute-result body chain (`:_er-*`). The previous

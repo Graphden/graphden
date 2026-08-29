@@ -284,6 +284,38 @@ function fnKindVisible(fn) {
   return false;
 }
 
+// Does the namespace `nsId` hold at least one row of `kind`, WITHOUT
+// its leaves being loaded? Namespace leaves lazy-load on expand, so an
+// active lens can't classify unloaded rows — these per-kind signals
+// stand in:
+//   fn / types — the `:tree` counts payload (nsFnCounts / nsTypeCounts)
+//   services   — /api/services rows' `namespace-id` (serviceNsIds)
+//   apps       — /api/orgs/apps rows' `handler-namespace-id` (appRouteNsIds)
+//   secrets    — /api/secrets rows' `namespace-id` (secretNsIds)
+// `tests` is absent on purpose — test-ness is a namespace-PATH property
+// with its own rule in nodeShouldShow. `nsId === undefined` → false;
+// null is the (primitives) bucket and is a valid key.
+function nsHoldsLensKind(kind, nsId, nsPath) {
+  if (nsId === undefined) return false;
+  switch (kind) {
+    case 'types':
+      return (lookups?.nsTypeCounts?.get(nsId) || 0) > 0;
+    case 'fn':
+      // Loaded test-ns rows classify as the `tests` kind, not `fn` —
+      // keep the fn lens from surfacing (then re-hiding) test namespaces.
+      if (nsPath && typeof isTestNsPath === 'function' && isTestNsPath(nsPath)) return false;
+      return (lookups?.nsFnCounts?.get(nsId) || 0) > 0;
+    case 'services':
+      return typeof serviceNsIds === 'function' && serviceNsIds().has(nsId);
+    case 'apps':
+      return typeof appRouteNsIds === 'function' && appRouteNsIds().has(nsId);
+    case 'secrets':
+      return typeof secretNsIds === 'function' && secretNsIds().has(nsId);
+    default:
+      return false;
+  }
+}
+
 function nodeHasActiveCreate(node) {
   if (node.nsId && typeof window.hasActiveCreateIn === 'function'
       && window.hasActiveCreateIn(node.nsId)) return true;
@@ -337,13 +369,12 @@ function nodeShouldShow(node, searchMode) {
       && typeof isTestNsPath === 'function' && isTestNsPath(node.path)) {
     return true;
   }
-  // Same exception for the types lens: type-ness of an UNLOADED namespace
-  // is knowable from the `:tree` counts payload (`:type-count` →
-  // nsTypeCounts) — without this, the lens shows only the (primitives)
-  // bucket until every type-bearing namespace was expanded once.
-  if (lensKinds.has('types') && node.nsId
-      && (lookups?.nsTypeCounts?.get(node.nsId) || 0) > 0) {
-    return true;
+  // Same exception for every other kind: kind-presence of an UNLOADED
+  // namespace is knowable without its leaves (see nsHoldsLensKind) —
+  // without this, each lens showed only rows that happened to be loaded
+  // (the types lens famously showed just the (primitives) bucket).
+  for (const k of lensKinds) {
+    if (nsHoldsLensKind(k, node.nsId, node.path)) return true;
   }
   if (lensKinds.size > 0) return false;
   // Genuinely empty (nothing loaded here) → keep visible: this covers both
@@ -939,12 +970,18 @@ function applyLensVisibility() {
       if (matches) break;
     }
   }
-  // The types lens can match through UNLOADED namespaces (the `:type-count`
-  // exception in nodeShouldShow) — count those too, else the hint claims
-  // "nothing matches" over a tree of visible type-bearing namespaces.
-  if (!matches && lensSet.has('types') && lookups?.nsTypeCounts) {
-    for (const n of lookups.nsTypeCounts.values()) {
-      if (n > 0) { matches++; break; }
+  // Every lens can match through UNLOADED namespaces (the
+  // nsHoldsLensKind exception in nodeShouldShow) — count those too,
+  // else the hint claims "nothing matches" over a tree of visible
+  // kind-bearing namespaces (or "No secrets yet" over real secrets).
+  if (!matches && lensSet.size > 0 && lookups?.nsMap) {
+    const nsIds = [null, ...lookups.nsMap.keys()];
+    for (const k of lensSet) {
+      if (matches) break;
+      for (const nsId of nsIds) {
+        const path = nsId ? (lookups.nsPathMap?.get(nsId) || null) : null;
+        if (nsHoldsLensKind(k, nsId, path)) { matches++; break; }
+      }
     }
   }
   if (lensSet.size > 0 && matches === 0) {
@@ -1052,10 +1089,12 @@ function renderRootNode(list, rootFns, searchMode) {
   // when it holds anything (loaded-visible, or count says so while unloaded).
   if (searchMode) { if (visible.length === 0) return; }
   else if (visible.length === 0 && !(rootCount > 0 && !loaded)) return;
-  // The primitives bucket is ALL type-rows — under an active lens that excludes
-  // `types` it holds no match, so hide it instead of an unopenable "(primitives)
-  // N" (mirrors the namespace focus-prune above). A `types`/All lens keeps it.
-  else if (visible.length === 0 && lensKinds.size > 0 && !lensKinds.has('types')) return;
+  // Under an active lens, keep the bucket only when the null-keyed kind
+  // signals say something inside matches (its rows are MOSTLY type-rows,
+  // plus the odd top-level fn) — else hide it instead of an unopenable
+  // "(primitives) N" (mirrors the namespace focus-prune above).
+  else if (visible.length === 0 && lensKinds.size > 0
+           && ![...lensKinds].some((k) => nsHoldsLensKind(k, null, null))) return;
 
   const groupPath = '__root__';
   const isOpen = searchMode || expandedNamespaces.has(groupPath);

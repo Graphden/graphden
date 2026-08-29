@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [graphden.crud.request :as request]
+    [graphden.crud.secret-shape :as secret-shape]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.owned :as owned]
@@ -273,12 +274,19 @@
    load lazily via `:namespace`. This is the O(namespaces) replacement
    for the O(all-fns) `:index` pull that the editor fetched on every
    init AND every post-mutation refresh. Each count row additively
-   carries `:type-error-count` (recorded diagnostics on fns of that
-   namespace, current branch) when >0 — the sidebar's per-namespace
-   warning chip — and `:type-count` (NAMED type-rows, roles per
-   `types-api/type-lens-roles`) when >0, so the types lens can keep a
+   carries (when >0):
+   - `:type-error-count` — recorded diagnostics on fns of that
+     namespace, current branch; the sidebar's per-namespace warning chip.
+   - `:type-count` — NAMED type-rows (roles per
+     `types-api/type-lens-roles`).
+   - `:fn-count` — NAMED plain fns: not a type-row, not secret-shaped
+     (parents = exactly a `:secret-shape`-tagged base-fn; those are the
+     secrets lens's kind, resolved in-memory via the registry tag).
+   The kind counts let the sidebar's fn/types lenses keep a
    not-yet-loaded namespace visible instead of silently hiding every
-   namespace whose leaves were never fetched."
+   namespace whose leaves were never fetched. (A service-backed or
+   app-routed fn still counts here — the server doesn't classify those
+   kinds; the rare namespace holding ONLY such fns over-shows.)"
   [{:keys [base diag-counts namespaces roled-fns]}]
   (let [ns-of-fn (when (seq @diag-counts)
                    (into {} (map (juxt :id :namespace-id)) (:fns base)))
@@ -295,15 +303,28 @@
                            (update m (get ns-of-fn fid) (fnil + 0) n)
                            m))
                        {} @diag-counts)
+        ;; Secret-leaf ids resolved WITHOUT a query: registry tag → base-fn
+        ;; NAMES (globally unique for base-fns) → id match over the
+        ;; in-memory graph. Empty when web.vault isn't loaded.
+        secret-leaf-ids (let [names (into #{} (map name)
+                                          (registry/fn-names-with-tag :secret-shape))]
+                          (into #{}
+                                (comp (filter (comp names str :name)) (map :id))
+                                (:fns base)))
+        secret-shaped? (fn [f] (boolean (some #(secret-shape/secret-fn? f %) secret-leaf-ids)))
         counts (->> @roled-fns
                     (filter :name)
                     (group-by :namespace-id)
                     (mapv (fn [[nid fns]]
                             (let [errs (get ns-err nid 0)
-                                  types (count (filter (comp types-api/type-lens-roles :role) fns))]
+                                  types (count (filter (comp types-api/type-lens-roles :role) fns))
+                                  plain (count (remove #(or (types-api/type-lens-roles (:role %))
+                                                            (secret-shaped? %))
+                                                       fns))]
                               (cond-> {:namespace-id nid :count (count fns)}
                                 (pos? errs) (assoc :type-error-count errs)
-                                (pos? types) (assoc :type-count types))))))
+                                (pos? types) (assoc :type-count types)
+                                (pos? plain) (assoc :fn-count plain))))))
         ;; Namespaces whose only diagnosed fns are anonymous still
         ;; get a chip row (count 0 reads falsy client-side).
         covered (into #{} (map :namespace-id) counts)

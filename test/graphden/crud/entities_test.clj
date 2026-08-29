@@ -413,7 +413,15 @@
             (is (= 1 (get types-by ns-b))
                 "b1 counts; the composed beta-composed does NOT")
             (is (pos? (get types-by nil))
-                "the primitives bucket reports its seeded type-rows"))))
+                "the primitives bucket reports its seeded type-rows")
+            ;; :fn-count — the fn-lens payload: named non-type rows.
+            (let [fns-by (into {} (map (juxt :namespace-id :fn-count)) (:counts dump))]
+              (is (nil? (get fns-by ns-a))
+                  "every ns-a row is type-shaped — the zero :fn-count key is omitted")
+              (is (= 1 (get fns-by ns-b))
+                  "the composed beta-composed is the one plain fn in ns-b")
+              (is (pos? (get fns-by nil))
+                  "child-of-a1 (composed) counts in the root bucket")))))
       (testing "scope :namespace — one namespace's light named fns"
         (let [dump (entities/list-all-graph-entities c :namespace nil ns-a nil)
               ids  (into #{} (map :id) (:fns dump))

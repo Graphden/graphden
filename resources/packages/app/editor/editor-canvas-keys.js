@@ -25,6 +25,7 @@
 
 const CANVAS_STEP_PX = 90;      // pan per arrow press at the canvas level
 const NODE_MARGIN_PX = 40;      // keep this much clearance when panning to a node
+const NUDGE_STEP = 20;          // graph units per Shift+arrow
 
 function canvasSurface() {
   return document.getElementById('graph-container');
@@ -210,6 +211,110 @@ function activateNode(nodeId) {
   el.click();
 }
 
+
+
+/**
+ * Move a node by (dx, dy) graph units — the keyboard twin of a drag.
+ *
+ * Marks it user-moved exactly as editor-drag.js does, so a later relayout
+ * leaves it where the user put it.
+ */
+function nudgeNode(nodeId, dx, dy) {
+  const node = gv.node(nodeId);
+  if (!node) return;
+  userMovedNodes.add(nodeId);
+  const pos = node.position();
+  node.position({x: pos.x + dx, y: pos.y + dy});
+  updateOverlayPositions();
+  ensureNodeVisible(nodeId);
+  if (typeof window.gdAnnounce === 'function') {
+    const dir = dx < 0 ? 'left' : dx > 0 ? 'right' : dy < 0 ? 'up' : 'down';
+    window.gdAnnounce('Moved ' + dir);
+  }
+}
+
+// ── Rows inside a card ──────────────────────────────────────────────────────
+//
+// A card is not a single thing: it is the fn's own row plus one per ancestor
+// or argument, each with its own actions. Arrow keys at the CARD level move
+// between cards, so stepping INTO a card is a separate move — Enter — after
+// which ↑↓ walk its rows and Escape comes back out. Same two-level shape the
+// Explorer tree uses, for the same reason: a flat list of every row on the
+// canvas would be unusable.
+
+const ROW_SELECTOR = '.ancestor-line, .arg-overlay-row';
+
+function rowsOf(card) {
+  return Array.from(card.querySelectorAll(ROW_SELECTOR))
+    .filter((el) => el.offsetParent !== null);
+}
+
+/** Enter the card: focus its first row, or fall back to the card itself. */
+function enterCard(card) {
+  const rows = rowsOf(card);
+  if (rows.length === 0) return false;
+  focusRow(rows[0], card);
+  return true;
+}
+
+function focusRow(row, card) {
+  for (const r of rowsOf(card)) r.setAttribute('tabindex', '-1');
+  row.setAttribute('tabindex', '0');
+  focusSafely(row);
+  if (typeof window.gdAnnounce === 'function') {
+    window.gdAnnounce((row.textContent || '').trim().slice(0, 80));
+  }
+}
+
+function onRowKeydown(e) {
+  const row = e.target.closest?.(ROW_SELECTOR);
+  if (!row) return;
+  const card = row.closest('.node-overlay');
+  if (!card) return;
+  // Only when the ROW ITSELF has focus — the same rule the card level
+  // follows, and for the same reason: a row hosts controls and popovers
+  // that own Escape and Enter, and consuming the key from anywhere in its
+  // subtree steals it from them. (The canvas regression test fires Escape
+  // at an element inside a card and requires it to arrive unconsumed; this
+  // handler failed it the moment it was added.)
+  if (e.target !== row) return;
+
+  const rows = rowsOf(card);
+  const idx = rows.indexOf(row);
+  if (idx < 0) return;
+
+  switch (e.key) {
+    case 'ArrowDown': case 'j':
+      e.preventDefault();
+      focusRow(rows[Math.min(idx + 1, rows.length - 1)], card);
+      break;
+    case 'ArrowUp': case 'k':
+      e.preventDefault();
+      focusRow(rows[Math.max(idx - 1, 0)], card);
+      break;
+    case 'Escape':
+      // Back out to the card; a second Escape leaves for the canvas.
+      e.preventDefault();
+      focusSafely(card);
+      break;
+    case 'Enter':
+      e.preventDefault();
+      row.click();
+      break;
+    case '.': case 'm': {
+      // The row's own actions — the ⋯ trigger, which is what the mouse
+      // reveals on hover.
+      e.preventDefault();
+      const trigger = row.querySelector('.more-actions-trigger')
+        || card.querySelector('.more-actions-trigger');
+      if (trigger) trigger.click();
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 // ── Key handling ────────────────────────────────────────────────────────────
 
 function onCanvasKeydown(e) {
@@ -223,6 +328,19 @@ function onCanvasKeydown(e) {
   // (The landing gate caught this: the tour-history e2e closes a pinned
   // description tooltip with Escape and then could not reopen it.)
   if (!e.target.classList || !e.target.classList.contains('node-overlay')) return;
+
+  // Shift+arrows MOVE the node rather than moving between nodes — the
+  // keyboard equivalent of dragging it, in grid-sized steps.
+  if (e.shiftKey && e.key.startsWith('Arrow')) {
+    const step = NUDGE_STEP;
+    const d = {ArrowLeft: [-step, 0], ArrowRight: [step, 0],
+               ArrowUp: [0, -step], ArrowDown: [0, step]}[e.key];
+    if (d) {
+      e.preventDefault();
+      nudgeNode(nodeId, d[0], d[1]);
+      return;
+    }
+  }
 
   switch (e.key) {
     case 'ArrowRight': case 'l':
@@ -239,7 +357,11 @@ function onCanvasKeydown(e) {
       break;
     case 'Enter':
       e.preventDefault();
+      // Select it in the inspector AND step into its rows: the two are one
+      // gesture with a mouse (you click the card you want to read), so
+      // making them one keystroke keeps the models matched.
       activateNode(nodeId);
+      enterCard(e.target);
       break;
     case 'Escape':
       // Step out to the canvas itself: further arrows pan instead of moving
@@ -283,6 +405,7 @@ function installCanvasKeys() {
 
   // Delegated — overlays are rebuilt on every render.
   surface.addEventListener('keydown', onCanvasKeydown);
+  surface.addEventListener('keydown', onRowKeydown);
   surface.addEventListener('keydown', onSurfaceKeydown);
   surface.addEventListener('focusin', (e) => {
     const id = nodeIdOf(e.target);

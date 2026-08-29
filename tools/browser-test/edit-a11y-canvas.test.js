@@ -185,7 +185,12 @@ const PROBE_FN = 'web-server';
     // away from anything about the canvas.
     const notStolen = await page.evaluate(() => {
       const card = document.querySelector('.node-overlay');
-      const inner = card.querySelector('button, [tabindex], span');
+      // A CONTROL inside the card — explicitly not the card and not one of
+      // its rows, both of which legitimately own these keys once focused
+      // (and both carry a tabindex after Enter has stepped in).
+      const inner = [...card.querySelectorAll('button, a[href], span')]
+        .find((el) => !el.classList.contains('node-overlay')
+                   && !el.matches('.ancestor-line, .arg-overlay-row'));
       if (!inner) return {skip: true};
       // Pretend a control inside the card has focus and fire Escape at it.
       let seenByOthers = false;
@@ -202,6 +207,65 @@ const PROBE_FN = 'web-server';
              'Escape aimed at a control INSIDE a card still reaches the handlers '
              + 'that own it — the canvas must not consume it');
     }
+
+    // ===================================================================
+    // Phase G — two levels: cards, then the rows inside one.
+    // ===================================================================
+    // A card is not one thing: it is the fn's row plus one per ancestor or
+    // argument. Arrows at the card level move BETWEEN cards, so stepping
+    // into a card has to be its own move — otherwise a flat walk of every
+    // row on the canvas is the only option, and that is unusable.
+    const cardId = await page.evaluate(() => {
+      const card = [...document.querySelectorAll('.node-overlay')]
+        .find((c) => c.dataset.originalFnId);
+      card.focus();
+      return card.dataset.nodeId;
+    });
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(700);
+    const inRows = await page.evaluate((id) => {
+      const a = document.activeElement;
+      return {
+        isRow: !!a.closest?.('.ancestor-line, .arg-overlay-row'),
+        inSameCard: a.closest('.node-overlay')?.dataset.nodeId === id,
+      };
+    }, cardId);
+    assert(inRows.isRow && inRows.inSameCard, 'Enter steps into the card\'s rows');
+
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(300);
+    const movedRow = await page.evaluate((id) => ({
+      isRow: !!document.activeElement.closest('.ancestor-line, .arg-overlay-row'),
+      inSameCard: document.activeElement.closest('.node-overlay')?.dataset.nodeId === id,
+    }), cardId);
+    assert(movedRow.isRow && movedRow.inSameCard,
+           'arrows walk the rows WITHIN the card, not off to another one');
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    const backOnCard = await page.evaluate(
+      () => document.activeElement?.classList?.contains('node-overlay'));
+    assert(backOnCard, 'Escape backs out to the card');
+
+    // ===================================================================
+    // Phase H — Shift+arrows move the node itself.
+    // ===================================================================
+    const before = await page.evaluate((id) => gv.node(id).position(), cardId);
+    await page.keyboard.down('Shift');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.up('Shift');
+    await page.waitForTimeout(400);
+    const after = await page.evaluate((id) => ({
+      pos: gv.node(id).position(),
+      // Marked user-moved exactly as a drag would, so a relayout leaves it
+      // where the user put it.
+      marked: userMovedNodes.has(id),
+      said: document.getElementById('gd-a11y-announcer')?.textContent || '',
+    }), cardId);
+    assert(after.pos.x > before.x,
+           'Shift+Right moves the node (' + before.x + ' → ' + after.pos.x + ')');
+    assert(after.marked, 'and marks it user-moved, as a drag does');
+    assert(/moved/i.test(after.said), 'and says so: "' + after.said + '"');
 
     assert(pageErrors.length === 0, 'no page errors: ' + JSON.stringify(pageErrors));
     console.log('a11y-canvas — PASS');

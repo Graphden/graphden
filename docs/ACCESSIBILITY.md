@@ -62,7 +62,8 @@ busy spinner only slows down because it IS the progress signal.
 | Surface | Pattern | Module |
 |---------|---------|--------|
 | Explorer tree | ARIA tree — arrows, Right/Left expand/collapse, Enter opens, roving tabindex | `editor-tree-keys.js` |
-| Graph canvas | Roving tabindex; arrows/hjkl follow EDGES (→ argument, ← consumer) | `editor-canvas-keys.js` |
+| Graph canvas | Roving tabindex; arrows/hjkl follow EDGES (→ argument, ← consumer). Two levels: `Enter` steps INTO a card's rows, `Escape` backs out; `Shift`+arrows move the node itself | `editor-canvas-keys.js` |
+| Pickers (fn, namespace) | Combobox — focus stays in the filter field, `aria-activedescendant` names the highlighted row | `editor-fn-picker.js`, `editor-namespace-picker.js` |
 | Inspector tabs | ARIA tabs — `aria-controls`, one tabpanel, ← → Home End | `editor-shell.js` |
 | Dialogs | Focus enters, Tab is trapped, Escape returns it | `graphden-popover.js` + each dialog |
 | Shortcuts | Registry + `Space` leader + `?` cheatsheet | `editor-shortcuts.js` |
@@ -86,6 +87,14 @@ restore it afterwards. The tree's restore is guarded: it only reclaims
 focus if focus was inside the tree beforehand, because plenty of rebuilds
 are not user-initiated and grabbing focus then drags the keyboard away from
 wherever the user actually was.
+
+**A key handler must not reach into a subtree it does not own.** Both the
+card level and the row level claim Escape and Enter — but only when the
+card, or the row, ITSELF has focus. Claiming from anywhere in the subtree
+steals the key from the popovers and controls living inside, and the
+symptom shows up somewhere unrelated (the first time, in a tutorial test
+about version history). `edit-a11y-canvas.test.js` fires Escape at a
+control inside a card and requires it to arrive unconsumed.
 
 **The canvas has no scroll box.** `#graph-layer` is positioned by a single
 CSS transform, so `scrollIntoView` does nothing there. Bringing a node on

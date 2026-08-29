@@ -72,10 +72,22 @@ function openNamespacePicker(opts) {
   search.type = 'text';
   search.className = 'fn-picker-search';
   search.placeholder = 'Filter namespaces…';
+  // Same combobox shape as the fn-picker: focus stays in the field, ↑↓
+  // move a highlight in the list, and aria-activedescendant is what makes
+  // a screen reader read the highlighted row out. This picker carried no
+  // roles at all, so the arrows were silent.
+  search.setAttribute('aria-label', 'Filter namespaces');
+  search.setAttribute('role', 'combobox');
+  search.setAttribute('aria-expanded', 'true');
+  search.setAttribute('aria-autocomplete', 'list');
+  search.setAttribute('aria-controls', 'ns-picker-list');
   el.appendChild(search);
 
   const list = document.createElement('div');
   list.className = 'fn-picker-list';
+  list.id = 'ns-picker-list';
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-label', 'Namespaces');
   el.appendChild(list);
 
   let activeIdx = 0;
@@ -97,6 +109,10 @@ function openNamespacePicker(opts) {
     filtered.forEach((c, i) => {
       const row = document.createElement('div');
       row.className = 'fn-picker-row' + (i === activeIdx ? ' fn-picker-row-active' : '');
+      row.id = 'ns-picker-opt-' + i;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', i === activeIdx ? 'true' : 'false');
+      if (i === activeIdx) search.setAttribute('aria-activedescendant', row.id);
       const nm = document.createElement('span');
       nm.className = 'fn-picker-row-name';
       nm.textContent = c.path;
@@ -104,8 +120,13 @@ function openNamespacePicker(opts) {
       row.addEventListener('mouseenter', () => {
         activeIdx = i;
         list.querySelectorAll('.fn-picker-row-active')
-            .forEach(r => r.classList.remove('fn-picker-row-active'));
+            .forEach(r => {
+              r.classList.remove('fn-picker-row-active');
+              r.setAttribute('aria-selected', 'false');
+            });
         row.classList.add('fn-picker-row-active');
+        row.setAttribute('aria-selected', 'true');
+        search.setAttribute('aria-activedescendant', row.id);
       });
       row.addEventListener('click', () => {
         closeNamespacePicker();

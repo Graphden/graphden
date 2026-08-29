@@ -51,8 +51,11 @@ canvas. Now the arrows follow the **wiring**, not the screen:
 | `→` or `l` | into an argument — the thing this function is built from |
 | `←` or `h` | back to the consumer — the function that uses this one |
 | `↑` `↓` or `k` `j` | between arguments of the same consumer |
-| `Enter` | open this card in the inspector |
-| `Escape` | step out to the canvas; arrows then pan the view |
+| `Enter` | open this card in the inspector, and step into its rows |
+| `↑` `↓` (inside a card) | between the card's rows — its ancestors and arguments |
+| `.` or `m` (on a row) | that row's actions, the ⋯ menu |
+| `Escape` | back out — first to the card, then to the canvas |
+| `Shift`+arrows | move the card itself, in grid steps |
 
 This is worth pausing on. `→` does not mean "the card drawn to the
 right" — it means "an argument of this function". You are walking the

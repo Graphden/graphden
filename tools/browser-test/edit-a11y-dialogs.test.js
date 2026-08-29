@@ -195,6 +195,61 @@ const ACTIVE = () => {
              'Escape that closes a dialog is marked consumed (preventDefault) for the tour');
     }
 
+    // ===================================================================
+    // Phase E — the pickers are comboboxes, and say which row is active.
+    // ===================================================================
+    // Focus stays in the filter field while ↑↓ move a highlight in the list.
+    // Without combobox + aria-activedescendant the arrows are SILENT to a
+    // screen reader: the rows carried role=option all along, but nothing
+    // told the user which one was current.
+    const combo = await page.evaluate(() => {
+      const anchor = document.querySelector('.placeholder-binder, .node-overlay button');
+      if (!anchor) return {skip: true};
+      openFnPicker({anchorEl: anchor, onPick: () => {}, onCancel: () => {}});
+      const search = document.querySelector('.fn-picker-search');
+      // The picker focuses its field on a timeout; the arrow below has to
+      // arrive after that or it goes nowhere.
+      search?.focus();
+      const lists = [...document.querySelectorAll('.fn-picker-popover [role="listbox"]')];
+      const active = search?.getAttribute('aria-activedescendant');
+      return {
+        skip: false,
+        role: search?.getAttribute('role'),
+        controls: search?.getAttribute('aria-controls'),
+        listboxes: lists.length,
+        activeId: active,
+        activeExists: !!(active && document.getElementById(active)),
+        activeIsSelected: !!(active
+          && document.getElementById(active)?.getAttribute('aria-selected') === 'true'),
+      };
+    });
+    if (combo.skip) {
+      console.log('  – combobox probe skipped: no anchor');
+    } else {
+      assert(combo.role === 'combobox', 'the filter field is a combobox, got ' + combo.role);
+      assert(combo.listboxes >= 1, 'its rows live in a listbox, got ' + combo.listboxes);
+      assert(combo.controls && combo.controls.length > 0, 'it points at the list it controls');
+      assert(combo.activeExists,
+             'aria-activedescendant names a real row (' + combo.activeId + ')');
+      assert(combo.activeIsSelected, 'and that row is the selected one');
+
+      // Arrowing must move the pointer, not just the highlight class.
+      await page.waitForFunction(
+        () => document.activeElement?.classList?.contains('fn-picker-search'),
+        null, {timeout: 5000, polling: 100});
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(300);
+      const moved = await page.evaluate((was) => {
+        const search = document.querySelector('.fn-picker-search');
+        const now = search?.getAttribute('aria-activedescendant');
+        return {now, changed: now !== was,
+                selected: document.getElementById(now)?.getAttribute('aria-selected') === 'true'};
+      }, combo.activeId);
+      assert(moved.changed, 'ArrowDown moves aria-activedescendant (' + moved.now + ')');
+      assert(moved.selected, 'and the newly pointed-at row reports itself selected');
+      await page.keyboard.press('Escape');
+    }
+
     assert(pageErrors.length === 0, 'no page errors: ' + JSON.stringify(pageErrors));
     console.log('a11y-dialogs — PASS');
   } finally {

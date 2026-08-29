@@ -212,6 +212,14 @@ function openFnPicker(opts) {
   search.className = 'fn-picker-search';
   search.placeholder = 'Filter fns…';
   search.setAttribute('aria-label', 'Filter functions in picker');
+  // Combobox: focus stays here while ↑↓ move the highlight in the lists
+  // below. `aria-activedescendant` is what makes a screen reader read out
+  // the highlighted row — without it the arrows are silent, which is the
+  // whole point of the pattern.
+  search.setAttribute('role', 'combobox');
+  search.setAttribute('aria-expanded', 'true');
+  search.setAttribute('aria-autocomplete', 'list');
+  search.setAttribute('aria-controls', 'fn-picker-list-compat fn-picker-list-other');
   el.appendChild(search);
 
   // Two list containers — compatible first, "Other" as a collapsible
@@ -226,6 +234,9 @@ function openFnPicker(opts) {
   compatHeader.className = 'fn-picker-section-header';
   const compatList = document.createElement('div');
   compatList.className = 'fn-picker-list';
+  compatList.id = 'fn-picker-list-compat';
+  compatList.setAttribute('role', 'listbox');
+  compatList.setAttribute('aria-label', 'Compatible functions');
   sections.appendChild(compatHeader);
   sections.appendChild(compatList);
 
@@ -237,6 +248,9 @@ function openFnPicker(opts) {
   let otherExpanded = !expected;
   const otherList = document.createElement('div');
   otherList.className = 'fn-picker-list fn-picker-list-other';
+  otherList.id = 'fn-picker-list-other';
+  otherList.setAttribute('role', 'listbox');
+  otherList.setAttribute('aria-label', 'Other functions');
   otherHeader.addEventListener('click', () => {
     otherExpanded = !otherExpanded;
     render();
@@ -356,7 +370,9 @@ function openFnPicker(opts) {
       + (section === 'incompat' ? ' fn-picker-row-incompat' : '')
       + (section === 'compat' ? ' fn-picker-row-compat' : '');
     row.setAttribute('role', 'option');
+    row.id = 'fn-picker-opt-' + idx;
     row.setAttribute('aria-selected', idx === activeIdx ? 'true' : 'false');
+    if (idx === activeIdx) search.setAttribute('aria-activedescendant', row.id);
     // Stable hook for the tutorial spotlight (and tests): which fn this row is.
     row.dataset.fnName = c.qualified;
 
@@ -411,6 +427,7 @@ function openFnPicker(opts) {
               });
       row.classList.add('fn-picker-row-active');
       row.setAttribute('aria-selected', 'true');
+      search.setAttribute('aria-activedescendant', row.id);
     });
     row.addEventListener('click', () => {
       if (section === 'incompat') {

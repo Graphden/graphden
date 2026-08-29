@@ -50,6 +50,10 @@
                   ;; `gv` — the graph-view seam every module downstream reads.
                   "packages/app/editor/editor-graph-view.js"
                   "packages/web/runtime/graphden-popover.js"
+                  ;; Keyboard: the shortcut registry + Space leader. After
+                  ;; graphden-popover.js (it uses the focus primitives),
+                  ;; before the modules that register their own bindings.
+                  "packages/app/editor/editor-shortcuts.js"
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
                   ;; Feedback ("Report a problem") — early so its uncaught-
